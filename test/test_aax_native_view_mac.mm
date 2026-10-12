@@ -16,7 +16,9 @@ using namespace pulp::format::aax;
 @interface PulpAaxFlippedParent : NSView
 @end
 @implementation PulpAaxFlippedParent
-- (BOOL)isFlipped { return YES; }
+- (BOOL)isFlipped {
+    return YES;
+}
 @end
 
 namespace {
@@ -28,13 +30,17 @@ struct Fixture {
         const NSRect pr = NSMakeRect(0, 0, parent_size.width, parent_size.height);
         parent = flipped ? [[PulpAaxFlippedParent alloc] initWithFrame:pr]
                          : [[NSView alloc] initWithFrame:pr];
-        child = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, child_size.width,
-                                                         child_size.height)];
+        child =
+            [[NSView alloc] initWithFrame:NSMakeRect(0, 0, child_size.width, child_size.height)];
         child.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         [parent addSubview:child];
     }
-    void* p() const { return (__bridge void*)parent; }
-    void* c() const { return (__bridge void*)child; }
+    void* p() const {
+        return (__bridge void*)parent;
+    }
+    void* c() const {
+        return (__bridge void*)child;
+    }
 };
 
 } // namespace

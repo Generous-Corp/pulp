@@ -24,14 +24,14 @@ struct AaxNativeRect {
 /// Everything the host-frame receipt needs in one read: the parent the host
 /// handed down, the child Pulp attached, and the window both sit in.
 struct AaxNativeGeometry {
-    bool valid = false;            ///< both views were non-null
-    bool has_window = false;       ///< parent sits in a window
-    bool parent_flipped = false;   ///< parent's y axis grows downward
-    AaxNativeRect parent_frame;    ///< parent frame in its superview
-    AaxNativeRect parent_bounds;   ///< parent's own coordinate space
-    AaxNativeRect child_frame;     ///< child frame inside the parent
-    AaxNativeRect window_frame;    ///< window frame on screen (logical points)
-    float backing_scale = 1.0f;    ///< window (or main screen) backing scale
+    bool valid = false;          ///< both views were non-null
+    bool has_window = false;     ///< parent sits in a window
+    bool parent_flipped = false; ///< parent's y axis grows downward
+    AaxNativeRect parent_frame;  ///< parent frame in its superview
+    AaxNativeRect parent_bounds; ///< parent's own coordinate space
+    AaxNativeRect child_frame;   ///< child frame inside the parent
+    AaxNativeRect window_frame;  ///< window frame on screen (logical points)
+    float backing_scale = 1.0f;  ///< window (or main screen) backing scale
 };
 
 /// The y origin that puts a child of `child_height` at the TOP of a parent of
@@ -39,9 +39,9 @@ struct AaxNativeGeometry {
 /// is the bottom-left corner; a host parent larger than the child then shows
 /// the editor in its lower-left corner. A flipped parent already has (0,0) at
 /// the top-left.
-constexpr float aax_child_top_left_y(float parent_height, float child_height,
-                                     bool parent_flipped) {
-    if (parent_flipped) return 0.0f;
+constexpr float aax_child_top_left_y(float parent_height, float child_height, bool parent_flipped) {
+    if (parent_flipped)
+        return 0.0f;
     const float y = parent_height - child_height;
     return y > 0.0f ? y : 0.0f;
 }
@@ -52,7 +52,9 @@ constexpr float aax_child_top_left_y(float parent_height, float child_height,
 #if defined(__APPLE__)
 float aax_display_scale(void* native_parent) noexcept;
 #else
-inline float aax_display_scale(void*) noexcept { return 1.0f; }
+inline float aax_display_scale(void*) noexcept {
+    return 1.0f;
+}
 #endif
 
 #if defined(__APPLE__)
@@ -80,7 +82,9 @@ void aax_fill_parent(void* native_parent, void* native_child) noexcept;
 /// parent and child agree.
 void aax_set_child_tracks_parent(void* native_child, bool tracks) noexcept;
 #else
-inline AaxNativeGeometry aax_native_geometry(void*, void*) noexcept { return {}; }
+inline AaxNativeGeometry aax_native_geometry(void*, void*) noexcept {
+    return {};
+}
 inline void aax_place_child_top_left(void*, void*) noexcept {}
 inline void aax_fill_parent(void*, void*) noexcept {}
 inline void aax_set_child_tracks_parent(void*, bool) noexcept {}
@@ -91,16 +95,14 @@ inline std::string aax_describe_geometry(const AaxNativeGeometry& g) {
     auto rect = [](const AaxNativeRect& r) {
         return std::to_string(static_cast<int>(r.width)) + "x" +
                std::to_string(static_cast<int>(r.height)) + "@" +
-               std::to_string(static_cast<int>(r.x)) + "," +
-               std::to_string(static_cast<int>(r.y));
+               std::to_string(static_cast<int>(r.x)) + "," + std::to_string(static_cast<int>(r.y));
     };
-    if (!g.valid) return "invalid";
-    return "parent=" + rect(g.parent_frame) +
-           " parent_bounds=" + rect(g.parent_bounds) +
+    if (!g.valid)
+        return "invalid";
+    return "parent=" + rect(g.parent_frame) + " parent_bounds=" + rect(g.parent_bounds) +
            " child=" + rect(g.child_frame) +
            " window=" + (g.has_window ? rect(g.window_frame) : std::string("none")) +
-           " scale=" + std::to_string(g.backing_scale) +
-           (g.parent_flipped ? " flipped" : "");
+           " scale=" + std::to_string(g.backing_scale) + (g.parent_flipped ? " flipped" : "");
 }
 
 } // namespace pulp::format::aax

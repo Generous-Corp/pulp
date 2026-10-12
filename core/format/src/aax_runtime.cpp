@@ -633,7 +633,8 @@ public:
 
     void bind_algorithm(InstanceState& instance) {
         std::lock_guard<std::mutex> lock(binding_mutex());
-        if (algorithm_ == &instance) return;
+        if (algorithm_ == &instance)
+            return;
         if (algorithm_) {
             runtime::log_info("AAX editor: a second algorithm instance registered; "
                               "the editor stays with the first");
@@ -652,7 +653,8 @@ public:
     void on_algorithm_destroyed(InstanceState& instance) {
         {
             std::lock_guard<std::mutex> lock(binding_mutex());
-            if (algorithm_ != &instance) return;
+            if (algorithm_ != &instance)
+                return;
         }
         if (editor_ && editor_->bound) {
             if (editor_invalidation_) {
@@ -774,17 +776,17 @@ public:
     /// so playback is proven by value updates that arrive with no
     /// touch/release around them. Dense after the first writes so a lane
     /// cannot flood the log.
-    void log_host_value_update(AAX_CParamID parameter_id, double value,
-                               AAX_EUpdateSource source) {
+    void log_host_value_update(AAX_CParamID parameter_id, double value, AAX_EUpdateSource source) {
         constexpr uint32_t kDenseWrites = 64;
         constexpr uint32_t kSparseEvery = 64;
         const auto index = static_cast<std::size_t>(source) < host_update_counts_.size()
-            ? static_cast<std::size_t>(source) : host_update_counts_.size() - 1;
+                               ? static_cast<std::size_t>(source)
+                               : host_update_counts_.size() - 1;
         const uint32_t n = ++host_update_counts_[index];
-        if (n > kDenseWrites && (n % kSparseEvery) != 0) return;
+        if (n > kDenseWrites && (n % kSparseEvery) != 0)
+            return;
         runtime::log_info("AAX host: value update #{} {}={:.4f} source={}", n,
-                          parameter_id ? parameter_id : "?", value,
-                          static_cast<int>(source));
+                          parameter_id ? parameter_id : "?", value, static_cast<int>(source));
     }
 
     AAX_Result GenerateCoefficients() override {
@@ -860,62 +862,63 @@ public:
     }
 
 private:
-    /// The editor's Processor and store. Bound to the algorithm instance's
-    /// pair when one exists (see bind_algorithm); otherwise a model-side pair
-    /// owned here, so an editor opened before any instance still works. The
-    /// parameter manager stays the value authority either way; the store is a
-    /// mirror kept in sync both ways.
-    struct EditorBinding {
-        // Declaration order is destruction order reversed, and every line below
-        // depends on it.
-        //
-        // The owned store is declared before the owned Processor so it is
-        // destroyed after it. `Processor::state()` dereferences a pointer to
-        // that store, and a Processor may read it from its destructor or from a
-        // worker thread that destructor is about to join. Reversing these two
-        // lines hands that thread a freed store. Every other adapter declares
-        // the pair this way.
-        //
-        // The router sits between them for the same reason one step further
-        // out: a parameter write from `~Processor` reaches the store's gesture
-        // callbacks, which route through the router.
-        //
-        // The listener token is last so it is destroyed first, unsubscribing
-        // from the store before anything the callback touches goes away.
-        std::unique_ptr<state::StateStore> owned_store;
-        std::unique_ptr<GestureRouter> gestures;
-        std::unique_ptr<ParameterMirror> mirror;
-        std::unique_ptr<Processor> owned_processor;
-        state::StateStore* store = nullptr;  ///< owned_store or the instance's
-        Processor* processor = nullptr;      ///< owned_processor or the instance's
-        bool bound = false;                  ///< true when on the instance's pair
-        state::ListenerToken value_listener;
-    };
+  /// The editor's Processor and store. Bound to the algorithm instance's
+  /// pair when one exists (see bind_algorithm); otherwise a model-side pair
+  /// owned here, so an editor opened before any instance still works. The
+  /// parameter manager stays the value authority either way; the store is a
+  /// mirror kept in sync both ways.
+  struct EditorBinding {
+      // Declaration order is destruction order reversed, and every line below
+      // depends on it.
+      //
+      // The owned store is declared before the owned Processor so it is
+      // destroyed after it. `Processor::state()` dereferences a pointer to
+      // that store, and a Processor may read it from its destructor or from a
+      // worker thread that destructor is about to join. Reversing these two
+      // lines hands that thread a freed store. Every other adapter declares
+      // the pair this way.
+      //
+      // The router sits between them for the same reason one step further
+      // out: a parameter write from `~Processor` reaches the store's gesture
+      // callbacks, which route through the router.
+      //
+      // The listener token is last so it is destroyed first, unsubscribing
+      // from the store before anything the callback touches goes away.
+      std::unique_ptr<state::StateStore> owned_store;
+      std::unique_ptr<GestureRouter> gestures;
+      std::unique_ptr<ParameterMirror> mirror;
+      std::unique_ptr<Processor> owned_processor;
+      state::StateStore* store = nullptr; ///< owned_store or the instance's
+      Processor* processor = nullptr;     ///< owned_processor or the instance's
+      bool bound = false;                 ///< true when on the instance's pair
+      state::ListenerToken value_listener;
+  };
 
     // Members are destroyed in reverse declaration order, and declaration order
     // is the only thing holding the lifetimes above together. Fail the build
     // rather than the teardown if someone reorders them.
-    static_assert(offsetof(EditorBinding, owned_store) < offsetof(EditorBinding, owned_processor),
-                  "EditorBinding::owned_store must be declared before ::owned_processor so "
-                  "the store outlives the Processor that points at it");
-    static_assert(offsetof(EditorBinding, gestures) < offsetof(EditorBinding, owned_processor),
-                  "EditorBinding::gestures must be declared before ::owned_processor: a "
-                  "parameter write from ~Processor routes through the gesture "
-                  "callbacks");
-    static_assert(offsetof(EditorBinding, value_listener) > offsetof(EditorBinding, owned_processor),
-                  "EditorBinding::value_listener must be declared last so it is "
-                  "destroyed first, unsubscribing from the store before the "
-                  "mirror and Processor the callback touches go away");
+  static_assert(offsetof(EditorBinding, owned_store) < offsetof(EditorBinding, owned_processor),
+                "EditorBinding::owned_store must be declared before ::owned_processor so "
+                "the store outlives the Processor that points at it");
+  static_assert(offsetof(EditorBinding, gestures) < offsetof(EditorBinding, owned_processor),
+                "EditorBinding::gestures must be declared before ::owned_processor: a "
+                "parameter write from ~Processor routes through the gesture "
+                "callbacks");
+  static_assert(offsetof(EditorBinding, value_listener) > offsetof(EditorBinding, owned_processor),
+                "EditorBinding::value_listener must be declared last so it is "
+                "destroyed first, unsubscribing from the store before the "
+                "mirror and Processor the callback touches go away");
 
-    /// Forget the editor pair. A bound store belongs to the instance and keeps
-    /// living, so the callbacks that capture `this` are removed from it first.
-    void drop_editor_binding() {
-        if (!editor_) return;
-        if (editor_->bound && editor_->store) {
-            editor_->store->set_gesture_callbacks({}, {});
-        }
-        editor_.reset();
-    }
+  /// Forget the editor pair. A bound store belongs to the instance and keeps
+  /// living, so the callbacks that capture `this` are removed from it first.
+  void drop_editor_binding() {
+      if (!editor_)
+          return;
+      if (editor_->bound && editor_->store) {
+          editor_->store->set_gesture_callbacks({}, {});
+      }
+      editor_.reset();
+  }
 
     void ensure_editor_model() {
         if (editor_ || editor_init_failed_ || !init_error_.empty() || !config_.factory) {
@@ -969,14 +972,17 @@ private:
             },
             [this](const char* aax_id) {
                 const auto result = ReleaseParameter(aax_id);
-                runtime::log_info("AAX host: release {} -> {}", aax_id, static_cast<int32_t>(result));
+                runtime::log_info("AAX host: release {} -> {}", aax_id,
+                                  static_cast<int32_t>(result));
             });
         model->store->set_gesture_callbacks(
             [this](state::ParamID id) {
-                if (editor_) editor_->gestures->begin(id);
+                if (editor_)
+                    editor_->gestures->begin(id);
             },
             [this](state::ParamID id) {
-                if (editor_) editor_->gestures->end(id);
+                if (editor_)
+                    editor_->gestures->end(id);
             });
 
         // Editor edit → AAX parameter. Avid's contract is that a GUI updates
@@ -1004,7 +1010,8 @@ private:
             });
         model->value_listener = model->store->add_listener(
             [this](state::ParamID id, float value) {
-                if (editor_) editor_->mirror->on_store_value_changed(id, value);
+                if (editor_)
+                    editor_->mirror->on_store_value_changed(id, value);
             },
             state::ListenerThread::Main);
 
@@ -1030,9 +1037,9 @@ private:
     std::string init_error_;
     std::unique_ptr<EditorBinding> editor_;
     bool editor_init_failed_ = false;
-    InstanceState* algorithm_ = nullptr;        ///< under binding_mutex()
+    InstanceState* algorithm_ = nullptr;           ///< under binding_mutex()
     std::array<uint32_t, 8> host_update_counts_{}; ///< per AAX_EUpdateSource
-    std::function<void()> editor_invalidation_; ///< EditorHost hook
+    std::function<void()> editor_invalidation_;    ///< EditorHost hook
 
     friend void on_algorithm_instance_destroyed(EffectParameters&, InstanceState&);
 };
@@ -1307,10 +1314,8 @@ AAX_Result add_component_ports(AAX_IComponentDescriptor* component,
 }
 
 AAX_Result add_component_process(AAX_IComponentDescriptor* component,
-                                 const PluginDefinition& definition,
-                                 const ComponentLayout& layout,
-                                 bool has_client_gui)
-{
+                                 const PluginDefinition& definition, const ComponentLayout& layout,
+                                 bool has_client_gui) {
     auto* properties = component->NewPropertyMap();
     if (!properties) {
         return AAX_ERROR_UNIMPLEMENTED;
@@ -1345,14 +1350,15 @@ AAX_Result add_component_process(AAX_IComponentDescriptor* component,
     // custom-editor components need the data model and process proc on the
     // same host location; omitting this leaves host placement ambiguous and
     // can make editor attach/resize behavior host-version dependent.
-    if (auto result = add(AAX_eProperty_Constraint_Location,
-                          AAX_eConstraintLocationMask_DataModel);
-        result != AAX_SUCCESS) return result;
+    if (auto result = add(AAX_eProperty_Constraint_Location, AAX_eConstraintLocationMask_DataModel);
+        result != AAX_SUCCESS)
+        return result;
     // AAX's UsesClientGUI flag belongs to the component property map.  Keep
     // it explicit for both lanes so a GUI build cannot be mistaken for a
     // host-generated parameter strip (and vice versa).
     if (auto result = add(AAX_eProperty_UsesClientGUI, has_client_gui ? 0 : 1);
-        result != AAX_SUCCESS) return result;
+        result != AAX_SUCCESS)
+        return result;
     if (definition.supports_sidechain) {
         if (auto result = add(AAX_eProperty_SupportsSideChainInput, 1); result != AAX_SUCCESS) return result;
         if (auto result = add(AAX_eProperty_SideChainStemFormat,
@@ -1374,11 +1380,14 @@ IACFUnknown* create_effect_parameters(const EntryConfig& config) {
 
 namespace testing {
 
-std::size_t private_data_block_size() { return sizeof(PrivateDataBlock); }
+std::size_t private_data_block_size() {
+    return sizeof(PrivateDataBlock);
+}
 
 AAX_Result reset_private_data(IACFUnknown* model, void* block, std::size_t size) {
     auto* parameters = static_cast<EffectParameters*>(model);
-    if (!parameters) return AAX_ERROR_NULL_OBJECT;
+    if (!parameters)
+        return AAX_ERROR_NULL_OBJECT;
     return parameters->ResetFieldData(kPrivateDataField, block, static_cast<uint32_t>(size));
 }
 
@@ -1390,13 +1399,15 @@ int32_t instance_init_for_test(void* block, AAX_EComponentInstanceInitAction act
 
 Processor* algorithm_processor(void* block) {
     auto* data = static_cast<PrivateDataBlock*>(block);
-    if (!data || data->magic != PrivateDataBlock::kMagic || !data->instance) return nullptr;
+    if (!data || data->magic != PrivateDataBlock::kMagic || !data->instance)
+        return nullptr;
     return data->instance->processor.get();
 }
 
 state::StateStore* algorithm_store(void* block) {
     auto* data = static_cast<PrivateDataBlock*>(block);
-    if (!data || data->magic != PrivateDataBlock::kMagic || !data->instance) return nullptr;
+    if (!data || data->magic != PrivateDataBlock::kMagic || !data->instance)
+        return nullptr;
     return &data->instance->store;
 }
 
@@ -1504,8 +1515,7 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
         // process property map below.
         if (!create_gui_proc) {
             if (auto status = effect_properties->AddProperty(AAX_eProperty_UsesClientGUI, 1);
-                status != AAX_SUCCESS)
-            {
+                status != AAX_SUCCESS) {
                 return status;
             }
         }

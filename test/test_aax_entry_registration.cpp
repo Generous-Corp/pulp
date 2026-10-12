@@ -71,11 +71,11 @@ std::unique_ptr<pulp::format::Processor> make_gain() {
 /// none of them are what this suite is about.
 class FakePropertyMap final : public AAX_IPropertyMap {
 public:
-    std::vector<std::pair<AAX_EProperty, AAX_CPropertyValue>> properties;
-    AAX_Result AddProperty(AAX_EProperty property, AAX_CPropertyValue value) override {
-        properties.emplace_back(property, value);
-        return AAX_SUCCESS;
-    }
+  std::vector<std::pair<AAX_EProperty, AAX_CPropertyValue>> properties;
+  AAX_Result AddProperty(AAX_EProperty property, AAX_CPropertyValue value) override {
+      properties.emplace_back(property, value);
+      return AAX_SUCCESS;
+  }
     AAX_Result AddPointerProperty(AAX_EProperty, const void*) override { return AAX_SUCCESS; }
     AAX_Result AddPointerProperty(AAX_EProperty, const char*) override { return AAX_SUCCESS; }
     AAX_Result AddPropertyWithIDArray(AAX_EProperty, const AAX_SPlugInIdentifierTriad*, uint32_t) override {
@@ -92,9 +92,11 @@ public:
 
 class FakeComponentDescriptor final : public AAX_IComponentDescriptor {
 public:
-    mutable std::vector<std::unique_ptr<FakePropertyMap>> maps_;
-    FakePropertyMap* process_properties = nullptr;
-    AAX_Result Clear() override { return AAX_SUCCESS; }
+  mutable std::vector<std::unique_ptr<FakePropertyMap>> maps_;
+  FakePropertyMap* process_properties = nullptr;
+  AAX_Result Clear() override {
+      return AAX_SUCCESS;
+  }
     AAX_IPropertyMap* NewPropertyMap() const override {
         maps_.push_back(std::make_unique<FakePropertyMap>());
         return maps_.back().get();
@@ -115,8 +117,9 @@ public:
     AAX_Result AddMIDINode(AAX_CFieldIndex, AAX_EMIDINodeType, const char[], uint32_t) override {
         return AAX_SUCCESS;
     }
-    AAX_Result AddProcessProc_Native(AAX_CProcessProc, AAX_IPropertyMap* properties, AAX_CInstanceInitProc,
-                                     AAX_CBackgroundProc, AAX_CSelector*) override {
+    AAX_Result AddProcessProc_Native(AAX_CProcessProc, AAX_IPropertyMap* properties,
+                                     AAX_CInstanceInitProc, AAX_CBackgroundProc,
+                                     AAX_CSelector*) override {
         process_properties = static_cast<FakePropertyMap*>(properties);
         return AAX_SUCCESS;
     }
@@ -230,7 +233,8 @@ TEST_CASE("PULP_AAX_PLUGIN_WITH_GUI registers the custom editor", "[aax][entry]"
     REQUIRE(collection.descriptor.registered_parameters());
 }
 
-TEST_CASE("AAX component properties identify the GUI lane and data-model placement", "[aax][entry]") {
+TEST_CASE("AAX component properties identify the GUI lane and data-model placement",
+          "[aax][entry]") {
     FakeCollection strip;
     REQUIRE(default_entry::GetEffectDescriptions(&strip) == AAX_SUCCESS);
     REQUIRE(strip.descriptor.components_.size() == 1);
@@ -243,15 +247,15 @@ TEST_CASE("AAX component properties identify the GUI lane and data-model placeme
         return it->second;
     };
     REQUIRE(property_value(strip_props, AAX_eProperty_UsesClientGUI) == 1);
-    REQUIRE(property_value(strip_props, AAX_eProperty_Constraint_Location)
-            == AAX_eConstraintLocationMask_DataModel);
+    REQUIRE(property_value(strip_props, AAX_eProperty_Constraint_Location) ==
+            AAX_eConstraintLocationMask_DataModel);
 
     FakeCollection gui;
     REQUIRE(gui_entry::GetEffectDescriptions(&gui) == AAX_SUCCESS);
     const auto& gui_props = gui.descriptor.components_.front()->process_properties->properties;
     REQUIRE(property_value(gui_props, AAX_eProperty_UsesClientGUI) == 0);
-    REQUIRE(property_value(gui_props, AAX_eProperty_Constraint_Location)
-            == AAX_eConstraintLocationMask_DataModel);
+    REQUIRE(property_value(gui_props, AAX_eProperty_Constraint_Location) ==
+            AAX_eConstraintLocationMask_DataModel);
 }
 
 TEST_CASE("AAX host-generated GUI request is only set for the strip lane", "[aax][entry]") {
@@ -259,22 +263,20 @@ TEST_CASE("AAX host-generated GUI request is only set for the strip lane", "[aax
     REQUIRE(default_entry::GetEffectDescriptions(&strip) == AAX_SUCCESS);
     REQUIRE(strip.descriptor.effect_properties != nullptr);
     REQUIRE(strip.descriptor.effect_properties->properties.size() == 3);
-    const auto strip_gui = std::find_if(strip.descriptor.effect_properties->properties.begin(),
-                                        strip.descriptor.effect_properties->properties.end(),
-                                        [](const auto& item) {
-                                            return item.first == AAX_eProperty_UsesClientGUI;
-                                        });
+    const auto strip_gui =
+        std::find_if(strip.descriptor.effect_properties->properties.begin(),
+                     strip.descriptor.effect_properties->properties.end(),
+                     [](const auto& item) { return item.first == AAX_eProperty_UsesClientGUI; });
     REQUIRE(strip_gui != strip.descriptor.effect_properties->properties.end());
     REQUIRE(strip_gui->second == 1);
 
     FakeCollection gui;
     REQUIRE(gui_entry::GetEffectDescriptions(&gui) == AAX_SUCCESS);
     REQUIRE(gui.descriptor.effect_properties != nullptr);
-    const auto gui_host_request = std::find_if(gui.descriptor.effect_properties->properties.begin(),
-                                               gui.descriptor.effect_properties->properties.end(),
-                                               [](const auto& item) {
-                                                   return item.first == AAX_eProperty_UsesClientGUI;
-                                               });
+    const auto gui_host_request =
+        std::find_if(gui.descriptor.effect_properties->properties.begin(),
+                     gui.descriptor.effect_properties->properties.end(),
+                     [](const auto& item) { return item.first == AAX_eProperty_UsesClientGUI; });
     REQUIRE(gui_host_request == gui.descriptor.effect_properties->properties.end());
 }
 
@@ -311,8 +313,16 @@ struct ModelHandle {
         host = pulp::format::aax::testing::editor_host(unknown);
         REQUIRE(host != nullptr);
     }
-    ~ModelHandle() { if (unknown) unknown->Release(); }
-    void release() { if (unknown) unknown->Release(); unknown = nullptr; host = nullptr; }
+    ~ModelHandle() {
+        if (unknown)
+            unknown->Release();
+    }
+    void release() {
+        if (unknown)
+            unknown->Release();
+        unknown = nullptr;
+        host = nullptr;
+    }
 };
 
 pulp::format::aax::EntryConfig binding_config() {
@@ -338,7 +348,8 @@ TEST_CASE("AAX editor binds to the processor that renders audio", "[aax][entry][
     CHECK(algorithm_store(block.data())->get_value(1) == 6.0f);
 
     // A host reset re-prepares in place: the editor's Processor survives.
-    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_ResetInstance) == 0);
+    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_ResetInstance) ==
+            0);
     CHECK(algorithm_processor(block.data()) == audio_owner);
     CHECK(model.host->editor_processor() == audio_owner);
 
@@ -349,7 +360,8 @@ TEST_CASE("AAX editor binds to the processor that renders audio", "[aax][entry][
         invalidated = true;
         seen_at_invalidation = algorithm_processor(block.data());
     });
-    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
+    REQUIRE(instance_init_for_test(block.data(),
+                                   AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
     CHECK(invalidated);
     CHECK(seen_at_invalidation == audio_owner);
     CHECK(algorithm_processor(block.data()) == nullptr);
@@ -378,8 +390,9 @@ TEST_CASE("AAX editor opened before any algorithm instance keeps its fallback",
 
     bool invalidated = false;
     model.host->set_editor_invalidation_handler([&] { invalidated = true; });
-    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
-    CHECK_FALSE(invalidated);  // the fallback was never bound to the instance
+    REQUIRE(instance_init_for_test(block.data(),
+                                   AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
+    CHECK_FALSE(invalidated); // the fallback was never bound to the instance
     CHECK(model.host->editor_processor() == fallback);
 }
 
@@ -399,6 +412,7 @@ TEST_CASE("AAX model destroyed before its algorithm instance leaves the instance
     algorithm_store(block.data())->set_value(1, -3.0f);
     CHECK(algorithm_store(block.data())->get_value(1) == -3.0f);
     // ...and the instance tears down on its own.
-    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
+    REQUIRE(instance_init_for_test(block.data(),
+                                   AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
     CHECK(algorithm_processor(block.data()) == nullptr);
 }

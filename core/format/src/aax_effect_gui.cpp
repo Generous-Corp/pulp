@@ -56,23 +56,24 @@ constexpr int32_t kHostableContainerType =
 
 class PulpAaxEffectGUI final : public AAX_CEffectGUI {
 public:
-    PulpAaxEffectGUI()
+  PulpAaxEffectGUI()
 #if defined(__APPLE__)
-        : geometry_report_alive_(std::make_shared<std::atomic<bool>>(true)),
+      : geometry_report_alive_(std::make_shared<std::atomic<bool>>(true)),
 #else
-        :
+      :
 #endif
-          aax_scale_(aax_display_scale(nullptr)) {}
+        aax_scale_(aax_display_scale(nullptr)) {
+  }
 
-    ~PulpAaxEffectGUI() override {
+  ~PulpAaxEffectGUI() override {
 #if defined(__APPLE__)
-        geometry_report_alive_->store(false, std::memory_order_release);
+      geometry_report_alive_->store(false, std::memory_order_release);
 #endif
-        // The SDK calls DeleteViewContainer from SetViewContainer(null), but a
-        // host that drops the GUI without that call would otherwise leak the
-        // bridge and strand Processor::on_view_closed.
-        teardown();
-    }
+      // The SDK calls DeleteViewContainer from SetViewContainer(null), but a
+      // host that drops the GUI without that call would otherwise leak the
+      // bridge and strand Processor::on_view_closed.
+      teardown();
+  }
 
 private:
     // ── AAX_CEffectGUI pure virtual interface ──────────────────────────────
@@ -211,14 +212,13 @@ private:
                 }
                 const bool accepted = detail::negotiate_preferred_size(
                     *bridge_ptr, w, h,
-                    [this](uint32_t requested_width,
-                           uint32_t requested_height) -> bool {
+                    [this](uint32_t requested_width, uint32_t requested_height) -> bool {
                         return publish_view_size(requested_width, requested_height,
                                                  "editor request") == AAX_SUCCESS;
                     });
-                if (!accepted || !host_) return false;
-                commit_editor_requested_viewport(
-                    *host_, bridge_ptr->size_hints(), w, h);
+                if (!accepted || !host_)
+                    return false;
+                commit_editor_requested_viewport(*host_, bridge_ptr->size_hints(), w, h);
                 return true;
             },
             [this, bridge_ptr]() noexcept {
@@ -235,10 +235,9 @@ private:
         if (should_pin_design_viewport(hints)) {
             host_->set_design_viewport_top_align(true);
         }
-        runtime::log_info(
-            "AAX editor: viewport preferred={}x{} design={}x{} pin={} aspect={}",
-            plan.width, plan.height, plan.design_width, plan.design_height,
-            plan.pin_viewport, plan.aspect_ratio);
+        runtime::log_info("AAX editor: viewport preferred={}x{} design={}x{} pin={} aspect={}",
+                          plan.width, plan.height, plan.design_width, plan.design_height,
+                          plan.pin_viewport, plan.aspect_ratio);
 
         // The host sizes its parent from GetViewSize; the child is seeded at
         // the same preferred size so the first frame, the native child, and
@@ -264,20 +263,22 @@ private:
     /// `PluginViewHost::attach_to_parent` only adds the child at origin (0,0),
     /// which in AppKit's upward-growing view space is the parent's BOTTOM-LEFT
     /// corner; a parent larger than the child then shows the editor in its
-    /// lower-left with the rest of the pane empty. JUCE's AAX wrapper places
-    /// its content at the top-left and re-asserts its own size whenever the
-    /// parent changes; this does the same, once, and records every frame it
-    /// saw so the host receipt shows what Pro Tools requested and accepted.
+    /// lower-left with the rest of the pane empty. The established AAX
+    /// editor contract is to place content at the top-left and re-assert the
+    /// plug-in's own size when the parent changes; this does that, once, and
+    /// records every frame it saw so the host receipt shows what Pro Tools
+    /// requested and accepted.
     /// Should the host keep an off-size parent anyway, the child fills it and
     /// the pinned design viewport letterboxes the content — a whole,
     /// proportional editor rather than a clipped corner.
     void reconcile_native_parent(void* parent, const EditorSizePlan& plan) {
-        if (!host_) return;
+        if (!host_)
+            return;
         void* child = host_->native_handle();
         auto geometry = aax_native_geometry(parent, child);
-        runtime::log_info("AAX editor: attach geometry {}",
-                          aax_describe_geometry(geometry));
-        if (!geometry.valid) return;
+        runtime::log_info("AAX editor: attach geometry {}", aax_describe_geometry(geometry));
+        if (!geometry.valid)
+            return;
 
         aax_place_child_top_left(parent, child);
 
@@ -290,13 +291,12 @@ private:
             // synchronously and from 0x0. The child must not follow that
             // delta (see aax_set_child_tracks_parent); it is re-fitted below.
             aax_set_child_tracks_parent(child, false);
-            const AAX_Result result = publish_view_size(plan.width, plan.height,
-                                                        "host parent mismatch");
-            runtime::log_info(
-                "AAX editor: host parent {}x{} != preferred {}x{}; SetViewSize -> {}",
-                static_cast<int>(geometry.parent_bounds.width),
-                static_cast<int>(geometry.parent_bounds.height),
-                plan.width, plan.height, static_cast<int32_t>(result));
+            const AAX_Result result =
+                publish_view_size(plan.width, plan.height, "host parent mismatch");
+            runtime::log_info("AAX editor: host parent {}x{} != preferred {}x{}; SetViewSize -> {}",
+                              static_cast<int>(geometry.parent_bounds.width),
+                              static_cast<int>(geometry.parent_bounds.height), plan.width,
+                              plan.height, static_cast<int32_t>(result));
             geometry = aax_native_geometry(parent, child);
             runtime::log_info("AAX editor: geometry after SetViewSize {}",
                               aax_describe_geometry(geometry));
@@ -304,11 +304,10 @@ private:
                 aax_place_child_top_left(parent, child);
             } else {
                 aax_fill_parent(parent, child);
-                runtime::log_info(
-                    "AAX editor: host kept {}x{}; child fills the parent and the "
-                    "design viewport letterboxes the content",
-                    static_cast<int>(geometry.parent_bounds.width),
-                    static_cast<int>(geometry.parent_bounds.height));
+                runtime::log_info("AAX editor: host kept {}x{}; child fills the parent and the "
+                                  "design viewport letterboxes the content",
+                                  static_cast<int>(geometry.parent_bounds.width),
+                                  static_cast<int>(geometry.parent_bounds.height));
             }
             aax_set_child_tracks_parent(child, true);
         }
@@ -352,7 +351,8 @@ private:
         }
         const auto plan = plan_editor_size(*hints);
         oMinimumViewSize->horz = static_cast<float>(aax_host_dimension(plan.min_width, aax_scale_));
-        oMinimumViewSize->vert = static_cast<float>(aax_host_dimension(plan.min_height, aax_scale_));
+        oMinimumViewSize->vert =
+            static_cast<float>(aax_host_dimension(plan.min_height, aax_scale_));
         log_size_query("GetMinimumViewSize", minimum_size_queries_, *oMinimumViewSize);
         return AAX_SUCCESS;
     }
@@ -364,7 +364,8 @@ private:
     /// vert/horz; GetViewSize writes the named fields directly.
     AAX_Result publish_view_size(uint32_t w, uint32_t h, const char* why) {
         auto* container = GetViewContainer();
-        if (!container) return AAX_ERROR_NULL_OBJECT;
+        if (!container)
+            return AAX_ERROR_NULL_OBJECT;
         AAX_Point size(static_cast<float>(aax_host_dimension(h, aax_scale_)),
                        static_cast<float>(aax_host_dimension(w, aax_scale_)));
         published_width_ = w;
@@ -383,10 +384,10 @@ private:
                         const AAX_Point& size) const {
         constexpr uint32_t kLoggedQueries = 8;
         const uint32_t n = counter.fetch_add(1, std::memory_order_relaxed) + 1;
-        if (n > kLoggedQueries) return;
-        runtime::log_info("AAX editor: {} #{} -> {}x{} ({})", query, n,
-                          static_cast<int>(size.horz), static_cast<int>(size.vert),
-                          bridge_ ? "editor open" : "no editor yet");
+        if (n > kLoggedQueries)
+            return;
+        runtime::log_info("AAX editor: {} #{} -> {}x{} ({})", query, n, static_cast<int>(size.horz),
+                          static_cast<int>(size.vert), bridge_ ? "editor open" : "no editor yet");
     }
 
     /// A host parameter change (automation, control surface, another editor).
@@ -410,9 +411,12 @@ private:
     /// the next host frame then advances the native editor's FrameClock and
     /// paints the current modulation state.
     AAX_Result TimerWakeup() override {
-        if (!bridge_) return AAX_SUCCESS;
-        if (idle_pump_) idle_pump_();
-        if (auto* view = bridge_->view()) view->request_repaint();
+        if (!bridge_)
+            return AAX_SUCCESS;
+        if (idle_pump_)
+            idle_pump_();
+        if (auto* view = bridge_->view())
+            view->request_repaint();
         return AAX_SUCCESS;
     }
 
@@ -489,16 +493,17 @@ private:
     void schedule_geometry_report(void* parent, double delay_seconds) {
         auto alive = std::weak_ptr<std::atomic<bool>>(geometry_report_alive_);
         auto* owner = this;
-        const auto when = dispatch_time(
-            DISPATCH_TIME_NOW, static_cast<int64_t>(delay_seconds * NSEC_PER_SEC));
+        const auto when =
+            dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(delay_seconds * NSEC_PER_SEC));
         dispatch_after(when, dispatch_get_main_queue(), ^{
-            auto token = alive.lock();
-            if (!token || !token->load(std::memory_order_acquire)) return;
-            if (!owner->host_) return;
-            runtime::log_info(
-                "AAX editor: geometry +{}s {}", delay_seconds,
-                aax_describe_geometry(
-                    aax_native_geometry(parent, owner->host_->native_handle())));
+          auto token = alive.lock();
+          if (!token || !token->load(std::memory_order_acquire))
+              return;
+          if (!owner->host_)
+              return;
+          runtime::log_info(
+              "AAX editor: geometry +{}s {}", delay_seconds,
+              aax_describe_geometry(aax_native_geometry(parent, owner->host_->native_handle())));
         });
     }
 #endif
@@ -510,7 +515,7 @@ private:
 #if defined(__APPLE__)
     std::shared_ptr<std::atomic<bool>> geometry_report_alive_;
 #endif
-    uint32_t published_width_ = 0;   ///< last size handed to SetViewSize
+    uint32_t published_width_ = 0; ///< last size handed to SetViewSize
     uint32_t published_height_ = 0;
     mutable std::atomic<uint32_t> view_size_queries_{0};
     mutable std::atomic<uint32_t> minimum_size_queries_{0};
