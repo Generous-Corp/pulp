@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/aax_entry.hpp>
+#include <pulp/format/aax_runtime_testing.hpp>
 #include <pulp/format/processor.hpp>
 
 #include <AAX_ICollection.h>
@@ -22,6 +23,7 @@
 #include <AAX_IPropertyMap.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -288,4 +290,115 @@ TEST_CASE("the entry macros differ only in the editor proc", "[aax][entry]") {
                                   static_cast<AAX_CProcPtrID>(kAAX_ProcPtrID_Create_EffectGUI)),
                       without_gui.end());
     REQUIRE(without_gui == strip.descriptor.proc_ids);
+}
+
+// ── Editor <-> audio-owner binding ──────────────────────────────────────────
+//
+// AAX keeps a data model and an algorithm instance; the model constructs the
+// instance's Processor itself (ResetFieldData), so the editor can run on the
+// Processor that renders audio. These drive that lifecycle the way the host
+// does, with no window and no audio.
+
+namespace {
+
+struct ModelHandle {
+    IACFUnknown* unknown = nullptr;
+    pulp::format::aax::EditorHost* host = nullptr;
+    explicit ModelHandle(const pulp::format::aax::EntryConfig& config)
+        : unknown(pulp::format::aax::create_effect_parameters(config)) {
+        REQUIRE(unknown != nullptr);
+        unknown->AddRef();
+        host = pulp::format::aax::testing::editor_host(unknown);
+        REQUIRE(host != nullptr);
+    }
+    ~ModelHandle() { if (unknown) unknown->Release(); }
+    void release() { if (unknown) unknown->Release(); unknown = nullptr; host = nullptr; }
+};
+
+pulp::format::aax::EntryConfig binding_config() {
+    return pulp::format::aax::make_entry_config(&make_gain, "PulP", "Gain", "GnNt");
+}
+
+} // namespace
+
+TEST_CASE("AAX editor binds to the processor that renders audio", "[aax][entry][view-bridge]") {
+    using namespace pulp::format::aax::testing;
+    ModelHandle model(binding_config());
+    std::vector<std::byte> block(private_data_block_size());
+
+    REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+    auto* audio_owner = algorithm_processor(block.data());
+    REQUIRE(audio_owner != nullptr);
+
+    CHECK(model.host->editor_processor() == audio_owner);
+    CHECK(model.host->editor_store() == algorithm_store(block.data()));
+
+    // An editor edit lands in the store the audio thread reads.
+    model.host->editor_store()->set_value(1, 6.0f);
+    CHECK(algorithm_store(block.data())->get_value(1) == 6.0f);
+
+    // A host reset re-prepares in place: the editor's Processor survives.
+    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_ResetInstance) == 0);
+    CHECK(algorithm_processor(block.data()) == audio_owner);
+    CHECK(model.host->editor_processor() == audio_owner);
+
+    // Removing the instance invalidates the editor BEFORE the Processor dies.
+    bool invalidated = false;
+    pulp::format::Processor* seen_at_invalidation = nullptr;
+    model.host->set_editor_invalidation_handler([&] {
+        invalidated = true;
+        seen_at_invalidation = algorithm_processor(block.data());
+    });
+    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
+    CHECK(invalidated);
+    CHECK(seen_at_invalidation == audio_owner);
+    CHECK(algorithm_processor(block.data()) == nullptr);
+
+    // The model falls back to its own Processor for a later open. The
+    // allocator may hand the fallback the dead instance's address, so prove
+    // it is a fresh pair by its state: the audio store held +6 dB.
+    auto* fallback = model.host->editor_processor();
+    REQUIRE(fallback != nullptr);
+    REQUIRE(model.host->editor_store() != nullptr);
+    CHECK(model.host->editor_store()->get_value(1) == 0.0f);
+}
+
+TEST_CASE("AAX editor opened before any algorithm instance keeps its fallback",
+          "[aax][entry][view-bridge]") {
+    using namespace pulp::format::aax::testing;
+    ModelHandle model(binding_config());
+    auto* fallback = model.host->editor_processor();
+    REQUIRE(fallback != nullptr);
+
+    std::vector<std::byte> block(private_data_block_size());
+    REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+    REQUIRE(algorithm_processor(block.data()) != nullptr);
+    // No live rebind: an open editor's view tree points at the fallback.
+    CHECK(model.host->editor_processor() == fallback);
+
+    bool invalidated = false;
+    model.host->set_editor_invalidation_handler([&] { invalidated = true; });
+    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
+    CHECK_FALSE(invalidated);  // the fallback was never bound to the instance
+    CHECK(model.host->editor_processor() == fallback);
+}
+
+TEST_CASE("AAX model destroyed before its algorithm instance leaves the instance intact",
+          "[aax][entry][view-bridge]") {
+    using namespace pulp::format::aax::testing;
+    std::vector<std::byte> block(private_data_block_size());
+    {
+        ModelHandle model(binding_config());
+        REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+        REQUIRE(model.host->editor_processor() == algorithm_processor(block.data()));
+        model.release();
+    }
+    auto* audio_owner = algorithm_processor(block.data());
+    REQUIRE(audio_owner != nullptr);
+    // The store the dead model subscribed to is still usable...
+    algorithm_store(block.data())->set_value(1, -3.0f);
+    CHECK(algorithm_store(block.data())->get_value(1) == -3.0f);
+    // ...and the instance tears down on its own.
+    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
+    CHECK(algorithm_processor(block.data()) == nullptr);
 }

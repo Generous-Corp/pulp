@@ -405,7 +405,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
     )
     if(APPLE AND NOT headless)
         target_sources(${target}_AAX PRIVATE
-            ${_PULP_FORMAT_SOURCE_DIR}/aax_display_scale_mac.mm)
+            ${_PULP_FORMAT_SOURCE_DIR}/aax_native_view_mac.mm)
     endif()
     if(NOT headless)
         target_sources(${target}_AAX PRIVATE ${_PULP_FORMAT_SOURCE_DIR}/aax_effect_gui.cpp)

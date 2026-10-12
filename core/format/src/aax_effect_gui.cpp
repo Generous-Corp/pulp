@@ -12,7 +12,7 @@
 #include <pulp/format/aax_effect_gui.hpp>
 
 #include <pulp/format/aax_editor.hpp>
-#include <pulp/format/aax_display_scale.hpp>
+#include <pulp/format/aax_native_view.hpp>
 #include <pulp/format/aax_model.hpp>
 #include <pulp/format/plugin_descriptor.hpp>
 #include <pulp/format/gpu_host_select.hpp>
@@ -58,7 +58,7 @@ class PulpAaxEffectGUI final : public AAX_CEffectGUI {
 public:
     PulpAaxEffectGUI()
 #if defined(__APPLE__)
-        : initial_size_sync_alive_(std::make_shared<std::atomic<bool>>(true)),
+        : geometry_report_alive_(std::make_shared<std::atomic<bool>>(true)),
 #else
         :
 #endif
@@ -66,7 +66,7 @@ public:
 
     ~PulpAaxEffectGUI() override {
 #if defined(__APPLE__)
-        initial_size_sync_alive_->store(false, std::memory_order_release);
+        geometry_report_alive_->store(false, std::memory_order_release);
 #endif
         // The SDK calls DeleteViewContainer from SetViewContainer(null), but a
         // host that drops the GUI without that call would otherwise leak the
@@ -125,6 +125,13 @@ private:
             return;
         }
 
+        // The editor runs on the processor that renders audio when the host has
+        // built one; its removal must take the view tree down first.
+        model->set_editor_invalidation_handler([this] {
+            runtime::log_info("AAX editor: audio-owner processor going away; closing editor");
+            teardown();
+        });
+
         bridge_ = std::make_unique<ViewBridge>(
             *processor, *store,
             ViewBridge::Options::hosted_editor());
@@ -177,16 +184,18 @@ private:
         ViewBridge* bridge_ptr = bridge_.get();
         host_->set_resize_callback([this, bridge_ptr](uint32_t w, uint32_t h) {
             bridge_ptr->resize(w, h);
-            if (auto* view_container = GetViewContainer()) {
-                // AAX_Point's constructor is (vertical, horizontal), despite
-                // the fields being named vert/horz.  Use the SDK's constructor
-                // order for every host resize transaction; GetViewSize below
-                // writes the named fields directly.
-                AAX_Point size(
-                    static_cast<float>(aax_host_dimension(h, aax_scale_)),
-                    static_cast<float>(aax_host_dimension(w, aax_scale_)));
-                view_container->SetViewSize(size);
+            // Pro Tools resizes its parent in response to the plug-in's own
+            // SetViewSize, and the child follows through autoresizing, so a
+            // frame change that matches the size already published is the
+            // host's echo of that transaction, not a new size to publish.
+            // Forwarding it anyway opens a second host transaction per resize
+            // step; forwarding a frame the host never asked for (an
+            // autoresizing artefact) can resize the host window to it.
+            if (w == published_width_ && h == published_height_) {
+                runtime::log_info("AAX editor: native frame -> {}x{} (published)", w, h);
+                return;
             }
+            publish_view_size(w, h, "native frame");
         });
 
         // AAX does not call back into the editor when the user drags a resize
@@ -204,12 +213,8 @@ private:
                     *bridge_ptr, w, h,
                     [this](uint32_t requested_width,
                            uint32_t requested_height) -> bool {
-                        auto* container = GetViewContainer();
-                        if (!container) return false;
-                        AAX_Point size(
-                            static_cast<float>(aax_host_dimension(requested_height, aax_scale_)),
-                            static_cast<float>(aax_host_dimension(requested_width, aax_scale_)));
-                        return container->SetViewSize(size) == AAX_SUCCESS;
+                        return publish_view_size(requested_width, requested_height,
+                                                 "editor request") == AAX_SUCCESS;
                     });
                 if (!accepted || !host_) return false;
                 commit_editor_requested_viewport(
@@ -220,40 +225,26 @@ private:
                 return bridge_.get() == bridge_ptr && GetViewContainer() != nullptr;
             });
 
-        // Install the design viewport before publishing the initial host size.
-        // Pro Tools may synchronously lay out and paint from SetViewSize; if
-        // the aspect lock is installed afterwards, that first transaction can
-        // use the host's stale frame and crop the editor (including its resize
-        // grip) until the user performs a second resize.
-        if (plan.pin_viewport) {
-            host_->set_design_viewport(static_cast<float>(plan.width),
-                                       static_cast<float>(plan.height));
-            host_->set_fixed_aspect_ratio(plan.aspect_ratio);
+        // Viewport pin + aspect lock through the predicate every other adapter
+        // uses (VST3 PulpPlugView, the AU v2 Cocoa view): the root lays out in
+        // the AUTHORED box and paint scales it into the host frame. Top-align
+        // like AU v2 — AAX cannot negotiate the pane aspect either, so slack
+        // collects as one bottom strip instead of two bands.
+        const ViewSize& hints = bridge_->size_hints();
+        configure_native_viewport(*host_, hints);
+        if (should_pin_design_viewport(hints)) {
+            host_->set_design_viewport_top_align(true);
         }
+        runtime::log_info(
+            "AAX editor: viewport preferred={}x{} design={}x{} pin={} aspect={}",
+            plan.width, plan.height, plan.design_width, plan.design_height,
+            plan.pin_viewport, plan.aspect_ratio);
 
-        // Publish the logical preferred size during the container-creation
-        // transaction.  Pro Tools can size its outer wrapper from this call;
-        // relying only on GetViewSize() leaves some hosts with their default
-        // wrapper while the child view stays at the authored 990x645 frame.
-        // Keep this to one synchronous publication: the old repeated timer
-        // loop caused host re-entrancy/crashes and is deliberately gone.
-        if (auto* view_container = GetViewContainer()) {
-            // Keep the initial transaction in the same logical coordinate
-            // space as GetViewSize().  The native NSView applies its Retina
-            // backing scale when it is composited; applying that scale here
-            // makes the Pro Tools outer frame larger than the child and is
-            // the exact state that only a later manual resize repairs.
-            AAX_Point initial_size(static_cast<float>(plan.height),
-                                   static_cast<float>(plan.width));
-            if (view_container->SetViewSize(initial_size) != AAX_SUCCESS) {
-                runtime::log_error("AAX editor: initial SetViewSize rejected ({}x{})",
-                                   plan.width, plan.height);
-            }
-        }
-
-        // Mirror the same logical size into the native child and bridge after
-        // the AAX transaction. This keeps the first paint and the host's
-        // preferred frame in the same coordinate space.
+        // The host sizes its parent from GetViewSize; the child is seeded at
+        // the same preferred size so the first frame, the native child, and
+        // the host's preferred frame share one geometry. Reconciling the two
+        // against the parent the host actually built happens below, once the
+        // first frame exists.
         host_->set_size(plan.width, plan.height);
 
         bridge_->notify_attached();
@@ -262,18 +253,71 @@ private:
         // (ViewBridge::prepare_first_frame()).
         bridge_->prepare_first_frame(*host_);
 
-#if defined(__APPLE__)
-        // Pro Tools can finish installing its wrapper frame after
-        // CreateViewContainer returns.  In that case it ignores the initial
-        // GetViewSize result and leaves a stale (often 2x) outer frame around
-        // the correctly sized child.  A single next-run-loop publication is
-        // enough to reconcile that lifecycle race; repeated timers fought
-        // host/user resizes and were the source of the earlier crash loop.
-        schedule_initial_size_sync(plan.width, plan.height);
-#endif
-
         runtime::log_info("AAX editor: attached ({}x{}, mode={}, gpu={})",
                           plan.width, plan.height, gpu.mode, host_->is_gpu_backed());
+
+        reconcile_native_parent(parent, plan);
+    }
+
+    /// Fit the native child to the parent Pro Tools handed down.
+    ///
+    /// `PluginViewHost::attach_to_parent` only adds the child at origin (0,0),
+    /// which in AppKit's upward-growing view space is the parent's BOTTOM-LEFT
+    /// corner; a parent larger than the child then shows the editor in its
+    /// lower-left with the rest of the pane empty. JUCE's AAX wrapper places
+    /// its content at the top-left and re-asserts its own size whenever the
+    /// parent changes; this does the same, once, and records every frame it
+    /// saw so the host receipt shows what Pro Tools requested and accepted.
+    /// Should the host keep an off-size parent anyway, the child fills it and
+    /// the pinned design viewport letterboxes the content — a whole,
+    /// proportional editor rather than a clipped corner.
+    void reconcile_native_parent(void* parent, const EditorSizePlan& plan) {
+        if (!host_) return;
+        void* child = host_->native_handle();
+        auto geometry = aax_native_geometry(parent, child);
+        runtime::log_info("AAX editor: attach geometry {}",
+                          aax_describe_geometry(geometry));
+        if (!geometry.valid) return;
+
+        aax_place_child_top_left(parent, child);
+
+        auto parent_matches = [&](const AaxNativeGeometry& g) {
+            return static_cast<uint32_t>(g.parent_bounds.width + 0.5f) == plan.width &&
+                   static_cast<uint32_t>(g.parent_bounds.height + 0.5f) == plan.height;
+        };
+        if (!parent_matches(geometry)) {
+            // The host lays its parent out from this transaction, often
+            // synchronously and from 0x0. The child must not follow that
+            // delta (see aax_set_child_tracks_parent); it is re-fitted below.
+            aax_set_child_tracks_parent(child, false);
+            const AAX_Result result = publish_view_size(plan.width, plan.height,
+                                                        "host parent mismatch");
+            runtime::log_info(
+                "AAX editor: host parent {}x{} != preferred {}x{}; SetViewSize -> {}",
+                static_cast<int>(geometry.parent_bounds.width),
+                static_cast<int>(geometry.parent_bounds.height),
+                plan.width, plan.height, static_cast<int32_t>(result));
+            geometry = aax_native_geometry(parent, child);
+            runtime::log_info("AAX editor: geometry after SetViewSize {}",
+                              aax_describe_geometry(geometry));
+            if (parent_matches(geometry)) {
+                aax_place_child_top_left(parent, child);
+            } else {
+                aax_fill_parent(parent, child);
+                runtime::log_info(
+                    "AAX editor: host kept {}x{}; child fills the parent and the "
+                    "design viewport letterboxes the content",
+                    static_cast<int>(geometry.parent_bounds.width),
+                    static_cast<int>(geometry.parent_bounds.height));
+            }
+            aax_set_child_tracks_parent(child, true);
+        }
+        runtime::log_info("AAX editor: settled geometry {}",
+                          aax_describe_geometry(aax_native_geometry(parent, child)));
+#if defined(__APPLE__)
+        schedule_geometry_report(parent, 1.0);
+        schedule_geometry_report(parent, 3.0);
+#endif
     }
 
     /// Called from SetViewContainer() when the window goes away.
@@ -292,6 +336,7 @@ private:
         const auto plan = plan_editor_size(*hints);
         oViewSize->horz = static_cast<float>(aax_host_dimension(plan.width, aax_scale_));
         oViewSize->vert = static_cast<float>(aax_host_dimension(plan.height, aax_scale_));
+        log_size_query("GetViewSize", view_size_queries_, *oViewSize);
         return AAX_SUCCESS;
     }
 
@@ -308,7 +353,40 @@ private:
         const auto plan = plan_editor_size(*hints);
         oMinimumViewSize->horz = static_cast<float>(aax_host_dimension(plan.min_width, aax_scale_));
         oMinimumViewSize->vert = static_cast<float>(aax_host_dimension(plan.min_height, aax_scale_));
+        log_size_query("GetMinimumViewSize", minimum_size_queries_, *oMinimumViewSize);
         return AAX_SUCCESS;
+    }
+
+    /// The one path to `AAX_IViewContainer::SetViewSize`. Records the size
+    /// the host was asked for so the resize callback can tell the host's echo
+    /// of this transaction from a genuinely new frame. `AAX_Point`'s
+    /// constructor is (vertical, horizontal), despite the fields being named
+    /// vert/horz; GetViewSize writes the named fields directly.
+    AAX_Result publish_view_size(uint32_t w, uint32_t h, const char* why) {
+        auto* container = GetViewContainer();
+        if (!container) return AAX_ERROR_NULL_OBJECT;
+        AAX_Point size(static_cast<float>(aax_host_dimension(h, aax_scale_)),
+                       static_cast<float>(aax_host_dimension(w, aax_scale_)));
+        published_width_ = w;
+        published_height_ = h;
+        const AAX_Result result = container->SetViewSize(size);
+        runtime::log_info("AAX editor: {} -> {}x{}; SetViewSize -> {}", why, w, h,
+                          static_cast<int32_t>(result));
+        return result;
+    }
+
+    /// Host sizing queries, in the receipt. Pro Tools asks before and after
+    /// the container exists; which of the two a query came from is the fact
+    /// that decides whether a wrong outer frame came from the plug-in's answer
+    /// or from the host. Bounded so a host polling per paint cannot flood it.
+    void log_size_query(const char* query, std::atomic<uint32_t>& counter,
+                        const AAX_Point& size) const {
+        constexpr uint32_t kLoggedQueries = 8;
+        const uint32_t n = counter.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n > kLoggedQueries) return;
+        runtime::log_info("AAX editor: {} #{} -> {}x{} ({})", query, n,
+                          static_cast<int>(size.horz), static_cast<int>(size.vert),
+                          bridge_ ? "editor open" : "no editor yet");
     }
 
     /// A host parameter change (automation, control surface, another editor).
@@ -380,6 +458,7 @@ private:
         // the host; the router outlives this editor, so it cannot notice.
         if (auto* model = host_model()) {
             model->release_editor_gestures();
+            model->set_editor_invalidation_handler({});
             if (auto* processor = model->editor_processor()) {
                 processor->set_editor_resize_handler(this, nullptr);
             }
@@ -401,21 +480,25 @@ private:
     }
 
 #if defined(__APPLE__)
-    void schedule_initial_size_sync(uint32_t width, uint32_t height) {
-        auto alive = std::weak_ptr<std::atomic<bool>>(initial_size_sync_alive_);
+    /// Read-only: log the parent/child/window frames after the host has had
+    /// `delay_seconds` to finish its own window layout. Pro Tools can resize
+    /// the container after SetViewContainer returns, and only a later read
+    /// shows the frame the user actually sees. Never writes a frame or opens a
+    /// SetViewSize transaction — a repeated size publication from a timer is
+    /// what previously fought host and user resizes.
+    void schedule_geometry_report(void* parent, double delay_seconds) {
+        auto alive = std::weak_ptr<std::atomic<bool>>(geometry_report_alive_);
         auto* owner = this;
-        dispatch_async(dispatch_get_main_queue(), ^{
+        const auto when = dispatch_time(
+            DISPATCH_TIME_NOW, static_cast<int64_t>(delay_seconds * NSEC_PER_SEC));
+        dispatch_after(when, dispatch_get_main_queue(), ^{
             auto token = alive.lock();
             if (!token || !token->load(std::memory_order_acquire)) return;
-            if (!owner->bridge_ || !owner->host_) return;
-            auto* container = owner->GetViewContainer();
-            if (!container) return;
-            AAX_Point size(
-                static_cast<float>(aax_host_dimension(height, owner->aax_scale_)),
-                static_cast<float>(aax_host_dimension(width, owner->aax_scale_)));
-            (void)container->SetViewSize(size);
-            owner->host_->set_size(width, height);
-            owner->bridge_->resize(width, height);
+            if (!owner->host_) return;
+            runtime::log_info(
+                "AAX editor: geometry +{}s {}", delay_seconds,
+                aax_describe_geometry(
+                    aax_native_geometry(parent, owner->host_->native_handle())));
         });
     }
 #endif
@@ -425,8 +508,12 @@ private:
     std::function<void()> idle_pump_;
     view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding_;
 #if defined(__APPLE__)
-    std::shared_ptr<std::atomic<bool>> initial_size_sync_alive_;
+    std::shared_ptr<std::atomic<bool>> geometry_report_alive_;
 #endif
+    uint32_t published_width_ = 0;   ///< last size handed to SetViewSize
+    uint32_t published_height_ = 0;
+    mutable std::atomic<uint32_t> view_size_queries_{0};
+    mutable std::atomic<uint32_t> minimum_size_queries_{0};
     float aax_scale_ = 1.0f;
 };
 

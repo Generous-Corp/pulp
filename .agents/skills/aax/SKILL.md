@@ -170,6 +170,54 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
 - **Sizing is plugin-driven.** AAX reads a size from `GetViewSize()`; the
   plugin pushes later changes through `AAX_IViewContainer::SetViewSize`. Follow
   the AU v2 model (forward native size changes), not VST3's.
+- **Pin the viewport at the AUTHORED box, through the shared contract.** The
+  editor shell calls `configure_native_viewport()` (plugin_descriptor.hpp) like
+  VST3 and AU v2 do, so an imported 1320x860 design that opens in a 990x645
+  host frame lays out at 1320x860 and paint scales it 0.75x. `plan_editor_size`
+  carries the same box in `design_width/height`. Pinning the *preferred* size
+  instead paints the authored tree at scale 1 into the smaller frame: the host
+  shows the top-left corner of the design, clipped right and bottom, and only a
+  grip drag (which goes through `commit_editor_requested_viewport`) repairs it.
+  That is exactly the Spectr first-open failure in Pro Tools.
+- **Place the native child at the parent's top-left and reconcile the parent.**
+  `PluginViewHost::attach_to_parent` only adds the child at origin (0,0), which
+  is AppKit's BOTTOM-left; a host parent larger than the child shows the editor
+  in its lower-left corner. `aax_native_view.hpp` (`aax_place_child_top_left`,
+  `aax_fill_parent`, `aax_native_geometry`) keeps that placement AAX-only —
+  no other format's attach path changes, and `pulp-test-aax-native-view`
+  proves a same-size parent is a no-op. After the first frame the shell reads
+  the parent, re-asserts the preferred size once through `SetViewSize` if the
+  parent disagrees (JUCE's `parentSizeChanged` does the same), and if the host
+  keeps an off-size parent the child fills it so the pinned viewport
+  letterboxes a whole, proportional editor rather than a clipped corner.
+- **The editor runs on the Processor that renders audio.** The data model
+  constructs the algorithm instance in `ResetFieldData` and binds its editor
+  to that instance's Processor and store (`bind_algorithm`). A second,
+  model-side Processor — the previous design — never processes a block, so
+  everything that is not a host parameter was dead in Pro Tools: published
+  analyzer/meter frames, LFO/modulation animation, transport-driven state,
+  `set_gpu_processing` (which only acts on a *prepared* Processor), and any
+  editor toggle stored on the Processor rather than in the store. Band gains
+  and freeze still worked because they are parameters and travel through the
+  coefficient packet. Consequences to keep straight: `sync_from_packet` writes
+  with `set_value_rt` so the editor's parameter mirror (a Main-thread
+  listener drained by the ViewBridge pump) never runs under the render-thread
+  no-alloc guard; `ResetInstance` re-prepares in place instead of recreating
+  the Processor an open editor points at; `RemovingInstance` fires
+  `EditorHost::set_editor_invalidation_handler` so the GUI tears down before
+  the delete; model and instance may die in either order and unhook under
+  `binding_mutex()`. Lifecycle tests: `test_aax_entry_registration.cpp`
+  `[view-bridge]`, driven through `aax_runtime_testing.hpp`.
+- **Read the host receipt from Pro Tools' stderr, not the unified log.**
+  `runtime::log_info` writes to `os_log` and stderr, but `log show` returned
+  zero `dev.pulp.runtime` lines over three days on a dev Mac, so it is not an
+  instrument here. Launch the host binary directly with stderr redirected
+  (`"/Applications/Pro Tools.app/Contents/MacOS/Pro Tools" 2>receipt.txt &`)
+  instead of `open -a`. The shell logs every `GetViewSize` /
+  `GetMinimumViewSize` answer (first eight, tagged "no editor yet" vs "editor
+  open"), every `SetViewSize` result, the parent/child/window frames at attach,
+  after reconciliation, and again at +1s and +3s. A wrong outer frame is then
+  attributable: the plug-in's answer, or the host's own window.
 - **Never defer to `AAX_CEffectGUI::GetViewSize()` / `GetMinimumViewSize()`.**
   Both base implementations `return AAX_SUCCESS` *without writing the point*, so
   the host reads back whatever it passed in and the plug-in appears to have
@@ -213,8 +261,10 @@ all of these are recorded against the exact installed bundle:
 - The first editor transaction must be checked in Pro Tools: the preferred
   width/height, aspect lock, and resize grip must be visible before any manual
   drag. `AAX_Point` is `(vertical, horizontal)`. The adapter seeds the host and
-  bridge geometry after `SetViewSize` because Pro Tools may not emit an initial
-  native frame callback.
+  bridge geometry at the preferred size and then reconciles the native child
+  against the parent Pro Tools built, because the host may not emit an initial
+  native frame callback. Capture the geometry receipt from stderr (above) in
+  the same run; a screenshot alone cannot say which side chose the frame.
 - A real host run must separately prove mono and stereo discovery, editor
   creation, proportional resize, audio-through, active-versus-bypass output,
   bounce output, transport tempo, LFO animation, and automation write/read

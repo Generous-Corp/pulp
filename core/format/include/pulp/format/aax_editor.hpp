@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/aax_model.hpp>
+#include <pulp/format/plugin_descriptor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/parameter.hpp>
@@ -123,6 +124,15 @@ public:
     /// tears down: a window closed mid-drag would otherwise leave the host's
     /// automation record open with no editor left to close it.
     virtual void release_editor_gestures() = 0;
+
+    /// Install the callback the model fires when the Processor behind
+    /// `editor_processor()` is about to go away — the host removing or
+    /// re-creating the algorithm instance the editor is bound to. The editor
+    /// must tear down its view tree inside the callback; the Processor is
+    /// deleted as soon as it returns. An empty function clears the hook.
+    virtual void set_editor_invalidation_handler(std::function<void()> handler) {
+        (void)handler;
+    }
 };
 
 /// How the editor surface reacts to the size AAX gives it.
@@ -146,7 +156,15 @@ struct EditorSizePlan {
     uint32_t min_height = 0;
     bool resizable = false;    ///< host may drive a different size
     bool pin_viewport = false; ///< pin design viewport + lock aspect
-    float aspect_ratio = 0.0f; ///< design aspect; meaningful iff pin_viewport
+    /// The coordinate space the root lays out in while pinned. This is the
+    /// AUTHORED box (`ViewSize::design_width/height`) when the plugin declares
+    /// one, else the preferred size; it is the size every other adapter hands
+    /// `set_design_viewport` through `configure_native_viewport`. Pinning the
+    /// preferred size instead paints an authored 1320x860 tree at scale 1 into
+    /// a 990x645 host frame and shows its top-left corner. Zero iff unpinned.
+    uint32_t design_width = 0;
+    uint32_t design_height = 0;
+    float aspect_ratio = 0.0f; ///< host aspect lock; 0 = none
 };
 
 /// Convert Pulp's logical editor coordinates to AAX host units.
@@ -163,19 +181,25 @@ constexpr uint32_t aax_host_dimension(uint32_t logical, float display_scale) {
 }
 
 /// Derive the sizing plan from a plugin's declared `ViewSize` hints.
+///
+/// Every viewport decision defers to the predicates in plugin_descriptor.hpp
+/// that VST3, AU v2, and CLAP already share, so the AAX editor cannot drift
+/// from them: `should_pin_design_viewport` decides the pin,
+/// `design_viewport_width/height` choose the authored box, and
+/// `native_view_aspect_ratio` the host lock. Only the host-facing numbers
+/// (`width/height`, `min_*`) are AAX's own.
 inline EditorSizePlan plan_editor_size(const ViewSize& hints) {
     EditorSizePlan plan;
     plan.width = hints.preferred_width;
     plan.height = hints.preferred_height;
     plan.resizable = hints.min_width > 0 && hints.min_height > 0;
 
-    const bool free_resize = plan.resizable && hints.aspect_ratio <= 0.0;
-    const bool has_design_size = hints.preferred_width > 0 && hints.preferred_height > 0;
-    plan.pin_viewport = has_design_size && !free_resize;
+    plan.pin_viewport = should_pin_design_viewport(hints);
     if (plan.pin_viewport) {
-        plan.aspect_ratio = static_cast<float>(hints.preferred_width) /
-                            static_cast<float>(hints.preferred_height);
+        plan.design_width = design_viewport_width(hints);
+        plan.design_height = design_viewport_height(hints);
     }
+    plan.aspect_ratio = static_cast<float>(native_view_aspect_ratio(hints));
 
     // A fixed-size editor's floor is its design size: reporting a smaller one
     // would invite the host to shrink a surface that cannot reflow.
