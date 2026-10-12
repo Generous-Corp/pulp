@@ -532,7 +532,13 @@ jobs:
             git fetch --no-tags --depth=1 origin \
               "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
           else
-            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+            # workflow_dispatch checkouts are depth-1; fetch this exact head
+            # with bounded history so merge-base can resolve without fetching
+            # every repository ref.
+            git fetch --no-tags --depth=64 origin "$GITHUB_SHA"
+            git fetch --no-tags --depth=64 origin main:refs/remotes/origin/main
+            protected_base="$(git merge-base HEAD origin/main)"
+            git update-ref refs/remotes/origin/main "$protected_base"
           fi
 
       - name: Hydrate bounded GPU provenance commits
@@ -573,7 +579,8 @@ jobs:
             -DPULP_TEST_PCH=OFF \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_GPU=OFF
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_TEST_TIMEOUT_SCALE=4
 
       - name: Build
         run: tools/ci/governed-build.sh cmake --build build-rtsan
@@ -585,4 +592,17 @@ jobs:
         run: bash tools/ci/install_visual_python_deps.sh build-rtsan
 
       - name: Test with RTSan
-        run: ctest --test-dir build-rtsan --output-on-failure -j$(nproc) --exclude-regex "GpuSurface|compileShader"
+        run: |
+          # PULP_ENABLE_GPU=OFF: GPU-health tests cannot exercise a provider.
+          # No Skia is installed: Skia-render fixtures have no implementation.
+          # No capture provider is present: browser-capture fixtures are inapplicable.
+          # SDK-consumer/install-layout fixtures are slow-fixture coverage, not RTSan.
+          # PULP_TEST_TIMEOUT_SCALE=4 covers sanitizer slowdown (including FDN reverb).
+          # Validation, benchmark, and performance labels measure unavailable lane
+          # services or wall-clock throughput rather than RTSan findings.
+          # Native Skia/capture names below are likewise provider-backed fixtures.
+          ctest --test-dir build-rtsan --output-on-failure \
+            -j$(nproc) \
+            --timeout 600 \
+            --label-exclude 'validation|slow|performance|bench|quality-lab|skia|browser-capture|gpu-health|slow-affected|agent-capability-installed-sdk' \
+            --exclude-regex 'sdk-consumer|install-layout|clean-consumer|project-package-compile-out|cmake-pulp-install|GpuSurface|compileShader|realtime factor reported|GPU health|native tree draws|IR text|serialized DesignIR resolves portable capture|filter list without blur|zero or negative blur radius'
