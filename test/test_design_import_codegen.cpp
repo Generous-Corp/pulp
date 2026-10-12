@@ -378,11 +378,13 @@ TEST_CASE("provider display codegen guards fallback in faithful and native modes
 
     const auto native = generate_pulp_cpp(make_ir(NodeRenderMode::normal), {}, {});
     REQUIRE(native.source.find("make_data_display(\"pulp.level\")") != std::string::npos);
-    REQUIRE(native.source.find("if (!node_0) node_0 = std::make_unique<pulp::view::View>();") != std::string::npos);
+    REQUIRE(native.source.find("if (!node_0) node_0 = std::make_unique<pulp::view::View>();") !=
+            std::string::npos);
 
     const auto faithful = generate_pulp_cpp(make_ir(NodeRenderMode::faithful_svg), {}, {});
     REQUIRE(faithful.source.find("DesignFrameView") != std::string::npos);
-    REQUIRE(faithful.source.find("if (!node_0) node_0 = std::make_unique<pulp::view::View>();") == std::string::npos);
+    REQUIRE(faithful.source.find("if (!node_0) node_0 = std::make_unique<pulp::view::View>();") ==
+            std::string::npos);
 }
 
 TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large SVG",

@@ -3471,7 +3471,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2e46ba8be5b1"
+name = "script-readers-44f9a3fea0d3"
 paths = ["tools/scripts/test_p19_audio_widget_proofs.py"]
 tests = [
   "build-parallelism-guard",
@@ -3490,7 +3490,11 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "p19-contracts-proof",
+  "p19-f2-proof",
+  "p19-link-floor-proof",
   "p19-m4-proof",
+  "p19-m6-3-proof",
+  "p19-p7-proof",
   "p19-runtime-proof",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
