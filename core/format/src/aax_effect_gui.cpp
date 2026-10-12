@@ -34,6 +34,7 @@
 #include <functional>
 #include <string>
 #include <atomic>
+#include <chrono>
 
 #if defined(__APPLE__)
 #include <dispatch/dispatch.h>
@@ -158,7 +159,13 @@ private:
         }
         // Run editor automation, restore/reload, and scripted work per vsync.
         idle_pump_ = make_editor_idle_pump(*bridge_);
-        host_->set_idle_callback(idle_pump_);
+        // The driver's call stamps itself so TimerWakeup can tell a live
+        // driver from a quiet one (see there).
+        host_->set_idle_callback([this] {
+            last_driver_pump_ = std::chrono::steady_clock::now();
+            if (idle_pump_)
+                idle_pump_();
+        });
 
         // Follow the host's GPU surface rather than sampling it once: on
         // Windows it does not exist until try_attach_to_parent() below. Also
@@ -415,7 +422,17 @@ private:
         PULP_TRACE_SCOPE_NAMED("render", "aax_timer_wakeup");
         if (!bridge_)
             return AAX_SUCCESS;
-        if (idle_pump_)
+        // The view host's frame driver already runs this pump once per
+        // presented frame. Running it again from the host's ~20 Hz timer
+        // doubled the pump rate in Pro Tools (a trace measured 67 pumps/s for
+        // 46 frames, 3 ms each, 25 ms worst case, all on the host's main
+        // thread). The timer therefore pumps only when the driver has gone
+        // quiet — a legacy AAX window or a busy host — and otherwise just
+        // asks for a frame.
+        const auto now = std::chrono::steady_clock::now();
+        const bool driver_quiet = last_driver_pump_ == std::chrono::steady_clock::time_point{} ||
+                                  now - last_driver_pump_ > kDriverQuietAfter;
+        if (driver_quiet && idle_pump_)
             idle_pump_();
         if (auto* view = bridge_->view())
             view->request_repaint();
@@ -519,6 +536,10 @@ private:
 #endif
     uint32_t published_width_ = 0; ///< last size handed to SetViewSize
     uint32_t published_height_ = 0;
+    /// When the view host's frame driver last ran the idle pump; the timer
+    /// defers to the driver while it is within this window.
+    static constexpr std::chrono::milliseconds kDriverQuietAfter{120};
+    std::chrono::steady_clock::time_point last_driver_pump_{};
     mutable std::atomic<uint32_t> view_size_queries_{0};
     mutable std::atomic<uint32_t> minimum_size_queries_{0};
     float aax_scale_ = 1.0f;
