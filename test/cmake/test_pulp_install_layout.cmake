@@ -410,6 +410,23 @@ if(_installed_pins_error OR NOT _installed_pins_schema STREQUAL "pulp.runtime-pi
         "Installed runtime-pins.json is not a finalized pulp.runtime-pins.v1 record.")
 endif()
 
+set(_installed_provenance "${_prefix}/sdk-provenance.json")
+if(NOT EXISTS "${_installed_provenance}")
+    message(FATAL_ERROR "Source install did not stamp sdk-provenance.json")
+endif()
+file(READ "${_installed_provenance}" _installed_provenance_json)
+string(JSON _provenance_schema ERROR_VARIABLE _provenance_schema_error
+    GET "${_installed_provenance_json}" schema)
+string(JSON _provenance_kind ERROR_VARIABLE _provenance_kind_error
+    GET "${_installed_provenance_json}" kind)
+string(JSON _provenance_sha ERROR_VARIABLE _provenance_sha_error
+    GET "${_installed_provenance_json}" source_git_sha)
+if(_provenance_schema_error OR NOT _provenance_schema STREQUAL "pulp.sdk-provenance.v1" OR
+   _provenance_kind_error OR NOT _provenance_kind STREQUAL "source-install" OR
+   _provenance_sha_error OR NOT _provenance_sha MATCHES "^[0-9a-f]{40}$")
+    message(FATAL_ERROR "Source install provenance is incomplete: ${_installed_provenance_json}")
+endif()
+
 # The encoder MUST live next to PulpUtils.cmake — this is the path
 # pulp_add_binary_data computes via CMAKE_CURRENT_FUNCTION_LIST_DIR.
 set(_installed_encoder "${_pulp_cmake_dir}/scripts/encode_binary_data.py")

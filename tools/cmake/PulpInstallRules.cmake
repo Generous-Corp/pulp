@@ -728,6 +728,32 @@ file(WRITE "${CMAKE_BINARY_DIR}/sdk_build_type.txt"
      "${CMAKE_BUILD_TYPE}\n")
 install(FILES "${CMAKE_BINARY_DIR}/sdk_build_type.txt" DESTINATION ".")
 
+# Preserve the exact source identity in ordinary cmake --install prefixes.
+# This is local provenance only; release eligibility still requires the
+# separately verified release marker.
+find_package(Git REQUIRED)
+execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE PULP_SOURCE_INSTALL_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _pulp_source_install_sha_result ERROR_QUIET)
+execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" status --porcelain --untracked-files=no
+    OUTPUT_VARIABLE _pulp_source_install_status OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _pulp_source_install_status_result ERROR_QUIET)
+string(LENGTH "${PULP_SOURCE_INSTALL_SHA}" _pulp_source_install_sha_length)
+if(NOT _pulp_source_install_sha_result EQUAL 0 OR
+   NOT _pulp_source_install_sha_length EQUAL 40 OR
+   NOT PULP_SOURCE_INSTALL_SHA MATCHES "^[0-9a-f]+$" OR
+   NOT _pulp_source_install_status_result EQUAL 0)
+    message(FATAL_ERROR "Pulp source install provenance: unable to resolve checkout identity")
+endif()
+if(_pulp_source_install_status STREQUAL "")
+    set(PULP_SOURCE_INSTALL_DIRTY false)
+else()
+    set(PULP_SOURCE_INSTALL_DIRTY true)
+endif()
+configure_file("${PULP_ROOT_DIR}/tools/cmake/PulpStampSourceInstall.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake" @ONLY)
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake")
+
 # CMake config files for find_package(Pulp)
 install(EXPORT PulpTargets
     FILE PulpTargets.cmake
