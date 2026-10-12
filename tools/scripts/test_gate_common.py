@@ -578,7 +578,7 @@ class DependabotUsesOnlyDiffTests(unittest.TestCase):
         def run(args, **kwargs):
             if "--name-only" in args:
                 return subprocess.CompletedProcess(args, 0, ".github/workflows/a.yml\n", "")
-            if args[1] == "log":
+            if "log" in args:
                 return subprocess.CompletedProcess(args, 0, authors, "")
             return subprocess.CompletedProcess(args, 0, diff, "")
 
@@ -593,6 +593,27 @@ class DependabotUsesOnlyDiffTests(unittest.TestCase):
             "dependabot[bot]\x0049699333+dependabot[bot]@users.noreply.github.com\n",
             actor="github-merge-queue[bot]",
         ))
+
+    def test_update_branch_merge_commit_does_not_void_dependabot_range(self) -> None:
+        commands: list[list[str]] = []
+
+        def run(args, **kwargs):
+            commands.append(args)
+            if "--name-only" in args:
+                return subprocess.CompletedProcess(args, 0, ".github/workflows/a.yml\n", "")
+            if "log" in args:
+                # `--no-merges` is what removes the structural app merge;
+                # the remaining authored commit is the Dependabot update.
+                self.assertIn("--no-merges", args)
+                return subprocess.CompletedProcess(
+                    args, 0,
+                    "dependabot[bot]\x0049699333+dependabot[bot]@users.noreply.github.com\n",
+                    "",
+                )
+            return subprocess.CompletedProcess(args, 0, self.PATCH, "")
+
+        with mock.patch.object(gc.subprocess, "run", side_effect=run):
+            self.assertTrue(gc.dependabot_uses_only_diff("origin/main"))
 
     def test_human_authored_uses_only_diff_does_not_bypass(self) -> None:
         self.assertFalse(self.check("Daniel Raffel\x00daniel@example.com\n"))

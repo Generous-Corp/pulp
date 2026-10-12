@@ -83,12 +83,15 @@ def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | Non
 
     The actor is deliberately not authoritative: merge-group runs and
     maintainer re-runs use a different actor while retaining the commit
-    authorship that identifies the Dependabot update.
+    authorship that identifies the Dependabot update. Structural merge
+    commits are omitted from the author walk because GitHub's update-branch
+    operation records the maintainer/app merge separately from the
+    Dependabot commit; non-merge commits must still all be Dependabot.
     """
     if not workflow_uses_only_diff(base, head):
         return False
     authors = subprocess.run(
-        ["git", "log", "--format=%an%x00%ae", f"{base}..{head}"],
+        ["git", "log", "--no-merges", "--format=%an%x00%ae", f"{base}..{head}"],
         capture_output=True, text=True, encoding="utf-8",
     )
     if authors.returncode != 0:
