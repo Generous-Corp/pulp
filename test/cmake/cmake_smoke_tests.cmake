@@ -412,8 +412,14 @@ if(TARGET pulp-view-audio AND PULP_ENABLE_DESIGN_IMPORT)
             "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
             "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_audio_sdk_consumer.cmake)
+    # The required macOS gate runs it; elsewhere it rides the slow lane with
+    # the other installed-SDK builds until a fast install there is measured.
+    set(_view_audio_sdk_consumer_labels "cmake;sdk;view;data-display")
+    if(NOT APPLE)
+        list(APPEND _view_audio_sdk_consumer_labels slow)
+    endif()
     set_tests_properties(cmake-view-audio-sdk-consumer PROPERTIES
-        LABELS "cmake;sdk;view;data-display"
+        LABELS "${_view_audio_sdk_consumer_labels}"
         COST 60
         TIMEOUT 600)
 endif()

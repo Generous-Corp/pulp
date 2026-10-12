@@ -2,7 +2,8 @@
 # built with pulp_add_plugin, opened through format-view, and a hot-reloaded
 # editor whose logic resolves the display registry from its host.
 
-if(NOT TARGET pulp-view-audio OR NOT TARGET pulp-format-view OR NOT PULP_ENABLE_DESIGN_IMPORT)
+if(PULP_IOS OR ANDROID OR EMSCRIPTEN OR NOT TARGET pulp-view-audio OR
+   NOT TARGET pulp-format-view OR NOT PULP_ENABLE_DESIGN_IMPORT)
     return()
 endif()
 
