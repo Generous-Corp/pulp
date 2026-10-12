@@ -152,11 +152,10 @@ class SelectionTests(unittest.TestCase):
         plan = self.plan(["test/test_a.cpp"], selection("focused", ["unit-a"]), own=["unit-b"])
         self.assertEqual(plan["tests"], ["unit-a"])
 
-    def test_an_unrelated_tools_change_fails_open_to_all_script_tests(self) -> None:
-        with mock.patch.object(step, "all_script_tests", return_value=["unit-a", "unit-b"]):
-            plan = self.plan(["tools/scripts/unknown_reader.py"], selection("focused", []))
-        self.assertEqual(plan["tests"], ["unit-a", "unit-b"])
-        self.assertEqual(plan["script_fail_open"], 2)
+    def test_an_unrelated_tools_change_defers_to_the_merge_queue(self) -> None:
+        plan = self.plan(["tools/scripts/unknown_reader.py"], selection("focused", []))
+        self.assertEqual(plan["tests"], [])
+        self.assertTrue(plan["selection_unknown"])
 
     def test_sample_region_include_closure_paths_select_the_baseline(self) -> None:
         for path in ("core/host/include/pulp/host/custom_node_type.hpp",
@@ -509,10 +508,10 @@ class DiffScopedRegistrationTests(unittest.TestCase):
 class ExitCodeTests(unittest.TestCase):
     """A red main does not fail the pull request; its own failure does."""
 
-    def _main(self, verdicts: dict) -> int:
+    def _main(self, verdicts: dict, *, skipped: list[str] | None = None) -> int:
         plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
                 "tests": ["a", "b"]}
-        results = {"passed": [], "failed": list(verdicts), "skipped": [],
+        results = {"passed": [], "failed": list(verdicts), "skipped": skipped or [],
                    "excluded_or_absent": [], "seconds": 1.0}
         with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
                 mock.patch.object(step, "inventory_tests", return_value={}), \
@@ -527,6 +526,18 @@ class ExitCodeTests(unittest.TestCase):
 
     def test_control_one_branch_caused_failure_fails(self) -> None:
         self.assertEqual(self._main({"a": (True, "same"), "b": (False, "passes on base")}), 1)
+
+    def test_budget_skipped_selection_fails_the_real_step(self) -> None:
+        self.assertEqual(self._main({}, skipped=["b"]), 1)
+
+    def test_unknown_selection_defers_neutrally_to_the_merge_queue(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
+                "tests": [], "selection_unknown": True}
+        with mock.patch.object(step, "diff_paths", return_value=["tools/scripts/new.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=plan), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 0)
 
 
 if __name__ == "__main__":

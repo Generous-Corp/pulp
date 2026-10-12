@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import sample_region_compat_baseline as baseline
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
+from pr_head_affected_tests import script_input_tests
+sys.path.pop(0)
 
 
 class BaselineTests(unittest.TestCase):
@@ -17,8 +21,18 @@ class BaselineTests(unittest.TestCase):
             "core/host/include/pulp/host/signal_graph.hpp",
         }
         inputs = set(baseline.COMPAT_INPUTS)
-        self.assertTrue(required & inputs)
-        self.assertIn("core/host/include/pulp/host", inputs)
+        self.assertTrue(required <= inputs)
+
+    def test_real_manifest_selects_every_declared_compat_input(self):
+        for path in (
+            "test/sample_region_compat/old_installed_sdk_consumer.cpp",
+            "test/sample_region_compat/old_graph_serializer_v2.hpp",
+            "test/sample_region_compat/CMakeLists.txt",
+            "core/host/src/signal_graph.cpp",
+        ):
+            with self.subTest(path=path):
+                self.assertIn("sample-region-compat-baseline",
+                              script_input_tests([path]))
 
     def test_frozen_receipt_includes_sdk_build_type_configure_input(self):
         repo = Path(__file__).resolve().parents[2]
