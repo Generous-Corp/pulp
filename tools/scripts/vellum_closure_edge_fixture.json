@@ -1,0 +1,7 @@
+{
+  "source_root": ".",
+  "targets": [
+    {"name": "pulp-design-import", "link_targets": ["pulp::view-audio"]}
+  ],
+  "files": []
+}

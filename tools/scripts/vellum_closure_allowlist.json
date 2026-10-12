@@ -1,0 +1,61 @@
+{
+  "schema": "pulp.vellum.closure.allowlist.v1",
+  "entries": [
+    {
+      "id": "design-import-view-audio-link",
+      "owner": "l3-gpu",
+      "debt_id": "design-import-view-audio-link",
+      "kind": "edge",
+      "match": "pulp-design-import->pulp-view-audio",
+      "exit_criterion": "Remove when P4 removes the design-import to view-audio link from the extracted target graph."
+    },
+    {
+      "id": "view-script-view-audio-link",
+      "owner": "l3-gpu",
+      "debt_id": "view-script-view-audio-link",
+      "kind": "edge",
+      "match": "pulp-view-script->pulp-view-audio",
+      "exit_criterion": "Remove when P4 removes the view-script to view-audio link from the extracted target graph."
+    },
+    {
+      "id": "P4-edge-1",
+      "owner": "carve-p4",
+      "debt_id": "P4-view-audio",
+      "kind": "edge",
+      "match": "pulp-design-import->pulp-midi",
+      "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
+    },
+    {
+      "id": "P4-edge-4",
+      "owner": "carve-p4",
+      "debt_id": "P4-view-audio",
+      "kind": "edge",
+      "match": "pulp-view-native->pulp-view-audio",
+      "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
+    },
+    {
+      "id": "P4-edge-5",
+      "owner": "carve-p4",
+      "debt_id": "P4-view-audio",
+      "kind": "edge",
+      "match": "pulp-view-native->pulp-design-import-audio-pack",
+      "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
+    },
+    {
+      "id": "P4-edge-6",
+      "owner": "carve-p4",
+      "debt_id": "P4-view-audio",
+      "kind": "edge",
+      "match": "pulp-view-native->pulp-midi",
+      "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
+    },
+    {
+      "id": "P4-edge-7",
+      "owner": "carve-p4",
+      "debt_id": "P4-view-audio",
+      "kind": "edge",
+      "match": "pulp-view-script->pulp-midi",
+      "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
+    }
+  ]
+}

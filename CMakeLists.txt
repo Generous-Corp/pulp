@@ -562,36 +562,23 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             manifest
             --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
             --build-dir "${CMAKE_BINARY_DIR}"
-            --target pulp-canvas
-            --target pulp-render
-            --target pulp-view-core
-            --target pulp-view-script
-            --target pulp-platform
-            --target pulp-runtime
-            --target pulp-simd
+            --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
             --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
     set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
-        LABELS "validation")
+        LABELS "pr")
     add_test(NAME pulp.vellum-closure-gate
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
             gate
             --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
-            --allow pulp-audio
-            --allow pulp-midi
-            --allow pulp-view-audio
-            --allow pulp-content
-            --allow-include-prefix core/view/include/pulp/view/
-            --allow-include-prefix core/view/src/
-            --allow-include-prefix core/audio/include/pulp/audio/
-            --allow-include-prefix core/signal/include/pulp/signal/
-            --allow-include-edge "core/platform/src/android/jni_motion.cpp=pulp/view/motion.hpp"
-            --allow-include-prefix core/render/platform/android/gpu_surface_android
-            --allow-root-prefix core/audio/
-            --allow-root-prefix core/signal/)
+            --allowlist "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_allowlist.json"
+            --generate
+            --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --build-dir "${CMAKE_BINARY_DIR}"
+            --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
     set_tests_properties(pulp.vellum-closure-gate PROPERTIES
         DEPENDS pulp.vellum-closure-boundary
-        LABELS "validation")
+        LABELS "pr")
     add_test(NAME pulp.vellum-closure-gate-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
             --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json"
@@ -599,12 +586,28 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
     set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
-        LABELS "validation")
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-external-input-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json"
+            --break "perl -0pi -e 's/https:\\/\\/github.com\\/danielraffel\\/choc.git/build-tree/; s/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60/unresolved/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
+    set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-edge-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json"
+            --break "perl -0pi -e 's/pulp::view-audio/pulp::audio/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allow pulp::view-audio")
+    set_tests_properties(pulp.vellum-closure-edge-negative PROPERTIES
+        LABELS "pr")
     add_test(NAME pulp.vellum-closure-policy-selftest
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/test_vellum_closure.py")
     set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
-        LABELS "validation")
+        LABELS "pr")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
     FetchContent_Declare(
