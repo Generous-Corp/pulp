@@ -23,6 +23,14 @@ about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
 runs). Keeping it
 lean is why the two label groups below are excluded from it.
 
+The **ThreadSanitizer lane** keeps its SignalGraph selection exact and
+bounded. It includes the compile-first lifecycle case, the mutation-lock and
+prepare/swap publication cases, and the two re-prepare/process race hammers for
+the executor and parallel paths. It does not select the full graph parity
+matrix: ordinary lanes own parity coverage, while TSan owns these concurrent
+publication and rendering cases. Keep the case names and this selection in
+sync when adding another lifecycle race proof.
+
 ### Where the required gate's wall-clock goes
 
 Measured per-step medians over the same sample, across the 40 runs that
