@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.952.0
+    VERSION 0.953.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -585,7 +585,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --allow-include-prefix core/view/src/
             --allow-include-prefix core/audio/include/pulp/audio/
             --allow-include-prefix core/signal/include/pulp/signal/
-            --allow-include-path core/platform/src/android/jni_motion.cpp
+            --allow-include-edge "core/platform/src/android/jni_motion.cpp=pulp/view/motion.hpp"
             --allow-include-prefix core/render/platform/android/gpu_surface_android
             --allow-root-prefix core/audio/
             --allow-root-prefix core/signal/)
