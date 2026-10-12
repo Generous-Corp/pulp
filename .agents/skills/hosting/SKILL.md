@@ -1722,7 +1722,7 @@ Keep these host graph invariants covered by tests:
 
 `pulp::view::PluginManagerPanel` sits on top of the scanner backend and
 gives host apps a ready-made "manage plugins" UI. The widget is
-header-only (`core/view/include/pulp/view/plugin_manager_panel.hpp`)
+header-only (`core/view/audio/include/pulp/view/plugin_manager_panel.hpp`)
 and drives everything through `PluginManagerModel`:
 
 - Tests use `InMemoryPluginManagerModel` — pre-populate `scanned_rows`,

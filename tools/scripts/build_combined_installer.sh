@@ -127,6 +127,28 @@ for _distribution_input in \
   fi
 done
 
+# Control-shipping manifests and scan reports are build evidence, not Mach-O
+# subcomponents, and Apple reserves Contents/MacOS for code: JSON there makes
+# codesign report an unsigned subcomponent. The build writes them to
+# Contents/Resources, where the signature seals them; a bundle that still has
+# them beside its binary was built by an older SDK (or copied from one).
+# Nested bundles (an AUv3 host app's extension and framework) are searched too;
+# anywhere outside a Resources directory is a code directory to codesign.
+for _distribution_input in \
+    ${P_PATH[@]+"${P_PATH[@]}"} \
+    ${A_PATH[@]+"${A_PATH[@]}"}; do
+  [[ -d "$_distribution_input" ]] || continue
+  _legacy_evidence="$(find "$_distribution_input" -type f \
+    \( -name "*.inspector-capabilities.json" \
+       -o -name "*.control-shipping.json" \
+       -o -name "*.control-shipping-report.json" \) \
+    -not -path "*/Resources/*" -print -quit)"
+  if [[ -n "$_legacy_evidence" ]]; then
+    echo "[installer] ERROR: $_distribution_input carries control evidence outside Resources (${_legacy_evidence#"$_distribution_input/"}); rebuild it with this SDK, which writes it to Contents/Resources (a code directory must hold only code to be signed)" >&2
+    exit 1
+  fi
+done
+
 STAGE="$(mktemp -d)"; mkdir -p "$OUT" "$STAGE/comp"
 trap 'rm -rf "$STAGE"' EXIT   # clean the staging tree on any exit (success, error, signal)
 if [[ -f ~/.config/pulp/secrets/keychain.env ]]; then
@@ -197,23 +219,6 @@ sign_embedded_frameworks() {  # $1=bundle
 
 deep_sign() {  # $1=bundle  $2=entitlements(optional)
   local b="$1" ent="${2:-}"
-  # Control-shipping manifests and scan reports are build evidence, not Mach-O
-  # subcomponents. CMake emits them beside the target so direct-build scanners
-  # can prove the exact binary, but Apple reserves Contents/MacOS for code and
-  # rejects an otherwise valid Developer-ID signature when JSON lives there.
-  # Preserve the receipts in the sealed bundle resources before signing.
-  if [[ -d "$b/Contents/MacOS" ]]; then
-    local _evidence_dir="$b/Contents/Resources/pulp-control-shipping-evidence"
-    local _evidence_moved=0
-    while IFS= read -r -d '' _evidence; do
-      [[ "$_evidence_moved" -eq 1 ]] || mkdir -p "$_evidence_dir"
-      mv "$_evidence" "$_evidence_dir/$(basename "$_evidence")"
-      _evidence_moved=1
-    done < <(find "$b/Contents/MacOS" -maxdepth 1 -type f \
-      \( -name "*.inspector-capabilities.json" \
-         -o -name "*.control-shipping.json" \
-         -o -name "*.control-shipping-report.json" \) -print0)
-  fi
   # An ABSOLUTE rpath in anything the bundle carries is a build-machine leak,
   # and it fails in two different ways that both look like a broken feature
   # rather than a packaging mistake. Where the path is missing, dyld reports

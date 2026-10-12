@@ -842,3 +842,99 @@ TEST_CASE("plugin-like directory names cannot hide inspector artifacts") {
     CHECK(report.error.find("missing inspector capability sidecar") !=
           std::string::npos);
 }
+
+TEST_CASE("macOS bundle sidecars in Contents/Resources bind the executable in Contents/MacOS") {
+    TemporaryDirectory temporary;
+    fs::remove_all(temporary.path / "pulp-inspector-manifests");
+    pulp::inspect::ControlManifest control;
+    control.target = "Bundled";
+    control.product_name = "Bundled";
+    control.bundle_id = "dev.pulp.test.bundled";
+    control.build_id = "build:55555555555555555555555555555555";
+    const auto json = pulp::inspect::serialize_control_manifest(control);
+    const auto digest = pulp::inspect::control_manifest_digest(control);
+
+    const auto contents = temporary.path / "Bundled.app" / "Contents";
+    const auto executable = contents / "MacOS" / "Bundled";
+    fs::create_directories(executable.parent_path());
+    fs::create_directories(contents / "Resources");
+    write_artifact(executable, standalone_artifact(" PULP_CONTROL_PROFILE_PRODUCTION_STRIPPED_V1 "
+                                                   "PULP_CONTROL_MANIFEST_SHA256_" +
+                                                   digest + "_V1"));
+
+    // No sidecar anywhere: the standalone is reported, not silently passed.
+    const auto missing = pulp::cli::inspector_shipping::audit_artifact(executable);
+    CHECK_FALSE(missing.complete);
+
+    write_manifest(contents / "Resources" / "Bundled.inspector-capabilities.json", json);
+    const auto direct = pulp::cli::inspector_shipping::audit_artifact(executable);
+    REQUIRE(direct.complete);
+    CHECK(direct.manifests.front().product_name == "Bundled");
+
+    const auto container = pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    REQUIRE(container.complete);
+    REQUIRE(container.manifests.size() == 1);
+    CHECK(container.manifests.front().product_name == "Bundled");
+
+    // A bundle built before the move keeps its sidecar beside the executable,
+    // which is still read.
+    fs::rename(contents / "Resources" / "Bundled.inspector-capabilities.json",
+               contents / "MacOS" / "Bundled.inspector-capabilities.json");
+    const auto legacy = pulp::cli::inspector_shipping::audit_artifact(executable);
+    REQUIRE(legacy.complete);
+    const auto legacy_container =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    REQUIRE(legacy_container.complete);
+
+    // Copies in both places are ambiguous in both audit modes.
+    fs::copy_file(contents / "MacOS" / "Bundled.inspector-capabilities.json",
+                  contents / "Resources" / "Bundled.inspector-capabilities.json");
+    const auto both_direct = pulp::cli::inspector_shipping::audit_artifact(executable);
+    CHECK_FALSE(both_direct.complete);
+    CHECK(both_direct.error_code == "audit.manifest-ambiguous");
+    CHECK_FALSE(pulp::cli::inspector_shipping::load_artifact_report(temporary.path).complete);
+}
+
+TEST_CASE("macOS bundle audits never follow a symlinked Contents/Resources or Contents/MacOS") {
+    TemporaryDirectory temporary;
+    fs::remove_all(temporary.path / "pulp-inspector-manifests");
+    pulp::inspect::ControlManifest control;
+    control.target = "Linked";
+    control.product_name = "Linked";
+    control.bundle_id = "dev.pulp.test.linked";
+    control.build_id = "build:66666666666666666666666666666666";
+    const auto json = pulp::inspect::serialize_control_manifest(control);
+    const auto digest = pulp::inspect::control_manifest_digest(control);
+    const auto marker = standalone_artifact(" PULP_CONTROL_PROFILE_PRODUCTION_STRIPPED_V1 "
+                                            "PULP_CONTROL_MANIFEST_SHA256_" +
+                                            digest + "_V1");
+
+    // The donor is a complete, valid bundle outside the audited tree.
+    const auto donor = temporary.path / "donor" / "Linked.app" / "Contents";
+    fs::create_directories(donor / "MacOS");
+    fs::create_directories(donor / "Resources");
+    write_artifact(donor / "MacOS" / "Linked", marker);
+    write_manifest(donor / "Resources" / "Linked.inspector-capabilities.json", json);
+
+    // A bundle whose Resources links to the donor's: the direct audit must not
+    // read the donor's manifest.
+    const auto borrowed = temporary.path / "audited" / "Linked.app" / "Contents";
+    fs::create_directories(borrowed / "MacOS");
+    write_artifact(borrowed / "MacOS" / "Linked", marker);
+    fs::create_directory_symlink(donor / "Resources", borrowed / "Resources");
+    const auto direct =
+        pulp::cli::inspector_shipping::audit_artifact(borrowed / "MacOS" / "Linked");
+    CHECK_FALSE(direct.complete);
+    CHECK(direct.error_code == "audit.symlink-forbidden");
+
+    // A bundle whose MacOS links to the donor's: the directory audit must not
+    // certify the donor's binary through this bundle's manifest.
+    const auto hollow = temporary.path / "tree" / "Linked.app" / "Contents";
+    fs::create_directories(hollow / "Resources");
+    write_manifest(hollow / "Resources" / "Linked.inspector-capabilities.json", json);
+    fs::create_directory_symlink(donor / "MacOS", hollow / "MacOS");
+    const auto container =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path / "tree");
+    CHECK_FALSE(container.complete);
+    CHECK(container.error_code == "audit.symlink-forbidden");
+}

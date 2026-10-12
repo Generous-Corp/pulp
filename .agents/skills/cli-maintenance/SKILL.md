@@ -633,7 +633,13 @@ must be safe sibling basenames, and an exact-named sidecar must still match the
 artifact filename (with the supported `.exe` form) before consent is bound. Keep
 canonical sidecar stems equal to their manifest target, never use a
 marker-bearing sibling fallback for canonical evidence, and exclude
-plugin-format subtrees from standalone scanning in every traversal. Keep
+plugin-format subtrees from standalone scanning in every traversal. A macOS
+`.app` keeps its sidecars in `Contents/Resources`, not beside the executable in
+`Contents/MacOS` (Apple reserves it for code and a non `--deep` signature fails
+on JSON there); resolve sidecar locations only through
+`pulp::inspect::control_sidecar_directories()` and
+`control_sidecar_executable_directory()`, which also keep the legacy location
+readable, rather than joining paths onto the executable's directory. Keep
 `cmd_inspect.cpp`, `cmd_inspect_unavailable.cpp`, `inspector_shipping_report.*`,
 `docs/guides/development-inspector-shipping.md`, `docs/reference/cli.md`, and
 `docs/status/cli-commands.yaml` aligned. It intentionally has no MCP tool until
