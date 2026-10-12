@@ -9,6 +9,24 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09551"></a>
+## [0.955.1] - 2026-10-12
+
+- release/version bump ([#10136](https://github.com/Generous-Corp/pulp/pull/10136))
+- codex/wgpu portability replacement 20261011 ([#10065](https://github.com/Generous-Corp/pulp/pull/10065))
+
+<a id="v09550"></a>
+## [0.955.0] - 2026-10-12
+
+- release/version bump ([#10134](https://github.com/Generous-Corp/pulp/pull/10134))
+- feature/vellum export f8f7 ([#10114](https://github.com/Generous-Corp/pulp/pull/10114))
+- fix/hosted macos advisory arm 20261011 ([#10100](https://github.com/Generous-Corp/pulp/pull/10100))
+- docs/keyed canary followup ([#10049](https://github.com/Generous-Corp/pulp/pull/10049))
+- codex/rtsan dispatch cleanup 2026 10 11 ([#10074](https://github.com/Generous-Corp/pulp/pull/10074))
+- docs/keyed same base canary 20261011 v2 ([#10076](https://github.com/Generous-Corp/pulp/pull/10076))
+- fix/pulp install origin aliases 20261010 ([#10058](https://github.com/Generous-Corp/pulp/pull/10058))
+- fix/dependabot merge exemption 20261012 ([#10130](https://github.com/Generous-Corp/pulp/pull/10130))
+
 <a id="v09540"></a>
 ## [0.954.0] - 2026-10-12
 
@@ -10499,6 +10517,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.955.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.955.1
+[0.955.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.955.0
 [0.954.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.954.0
 [0.953.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.953.0
 [0.952.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.952.0

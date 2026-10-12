@@ -128,6 +128,12 @@ route the build through `tools/ci/governed-build.sh` without an explicit
 `--parallel` cap. The governor owns the worker share and build-directory lock;
 the emulator and fixture execution steps remain separate.
 
+The TSan workflow keeps its SignalGraph selection exact and bounded: include
+the compile-first lifecycle cases, mutation-lock and prepare-swap publication
+cases, and the routed and parallel re-prepare/process race hammers. Do not
+replace this with the full graph parity matrix; ordinary lanes own parity
+coverage while TSan owns these thread-race cases.
+
 The cross-platform software-GPU workflow also routes its Linux and Windows
 build steps through the governor. Keep each runner's existing build directory,
 Release configuration, log tee, and platform-specific test flow unchanged;
@@ -142,6 +148,9 @@ doctor/remediation output, is a build emitter and must invoke
 `tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
 directory explicit, but do not include `-j`, `--parallel`, or a host-core
 probe: the governor owns parallelism, leases, and build-directory locking.
+The local sanitizer and coverage helper scripts follow the same rule: pass a
+requested cap through `PULP_BUILD_JOBS` and leave worker flags out of the
+`cmake --build` argv.
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
 and run only what the working diff affects (`pulp affected`, the build-target

@@ -32,6 +32,7 @@ CORE_DIRTY = (
     "libpulp-view-core.a[inspector.cpp.o]: __ZTIN4pulp4view5MeterE U 0 0\n"
 )
 CORE_CLEAN = "libpulp-view-core.a[inspector.cpp.o]: __ZN4pulp4view4View5paintEv T 0 0\n"
+CORE_WEAK = "libpulp-view-core.a[inspector.cpp.o]: __ZTIN4pulp4view5MeterE w 0 0\n"
 
 
 class SymbolFloorTests(unittest.TestCase):
@@ -66,7 +67,12 @@ class SymbolFloorTests(unittest.TestCase):
         core = self._archive("core.a", CORE_DIRTY)
         rc, out = self._run("--check", f"view-core={core}")
         self.assertEqual(rc, 1, out)
-        self.assertIn("inspector.cpp.o", out)
+        self.assertIn("__ZTIN4pulp4view5MeterE", out)
+
+    def test_a_weak_undefined_reference_fails(self):
+        core = self._archive("core.a", CORE_WEAK)
+        rc, out = self._run("--check", f"view-core={core}")
+        self.assertEqual(rc, 1, out)
 
     def test_a_clean_library_passes(self):
         core = self._archive("core.a", CORE_CLEAN)
@@ -76,7 +82,7 @@ class SymbolFloorTests(unittest.TestCase):
     def test_an_undefined_symbol_view_audio_also_needs_is_not_a_violation(self):
         # View::paint is undefined in the audio archive too; only symbols the
         # audio archive DEFINES count.
-        core = self._archive("core.a", "libpulp-view-core.a[x.o]: __ZN4pulp4view4View5paintEv U 0 0\n")
+        core = self._archive("core.a", "libpulp-view-core.a[x.o]: _ZN4pulp4view4View5paintEv U 0 0\n")
         rc, out = self._run("--check", f"view-core={core}")
         self.assertEqual(rc, 0, out)
 

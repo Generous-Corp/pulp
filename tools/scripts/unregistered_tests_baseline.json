@@ -63,7 +63,6 @@
     "tools/audio/quality-lab/tests/test_tonal.py",
     "tools/audio/quality-lab/tests/test_transient_integrity.py",
     "tools/ci/test_bootstrap_macos_host.py",
-    "tools/ci/test_build_governance_paths.py",
     "tools/ci/test_intel_vm_tooling.py",
     "tools/ci/test_receipts_shadow.py",
     "tools/ci/test_sanitizer_runner_template.py",
