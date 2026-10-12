@@ -21,23 +21,27 @@ using namespace pulp;
 namespace {
 
 view::View* find_anchor(view::View& root, std::string_view anchor) {
-    if (root.anchor_id() == anchor) return &root;
+    if (root.anchor_id() == anchor)
+        return &root;
     for (std::size_t i = 0; i < root.child_count(); ++i)
-        if (auto* hit = find_anchor(*root.child_at(i), anchor)) return hit;
+        if (auto* hit = find_anchor(*root.child_at(i), anchor))
+            return hit;
     return nullptr;
 }
 
 class MeterLogic final : public format::Processor {
-public:
+  public:
     format::PluginDescriptor descriptor() const override {
-        return {.name = "ReloadMeter", .manufacturer = "Pulp Examples",
-                .bundle_id = "com.pulp.reload.meter", .version = "0.1.0",
+        return {.name = "ReloadMeter",
+                .manufacturer = "Pulp Examples",
+                .bundle_id = "com.pulp.reload.meter",
+                .version = "0.1.0",
                 .category = format::PluginCategory::Effect,
-                .input_buses = {{"In", 2}}, .output_buses = {{"Out", 2}}};
+                .input_buses = {{"In", 2}},
+                .output_buses = {{"Out", 2}}};
     }
     void define_parameters(state::StateStore& s) override {
-        s.add_parameter({.id = 1, .name = "Gain", .unit = "",
-                         .range = {0.0f, 2.0f, 1.0f, 0.0f}});
+        s.add_parameter({.id = 1, .name = "Gain", .unit = "", .range = {0.0f, 2.0f, 1.0f, 0.0f}});
     }
     void prepare(const format::PrepareContext&) override {}
     void process(audio::BufferView<float>& out, const audio::BufferView<const float>& in,
@@ -46,7 +50,8 @@ public:
         for (std::size_t c = 0; c < ch; ++c) {
             auto o = out.channel(c);
             auto i = in.channel(c);
-            for (std::size_t n = 0; n < out.num_samples(); ++n) o[n] = i[n];
+            for (std::size_t n = 0; n < out.num_samples(); ++n)
+                o[n] = i[n];
         }
     }
     std::unique_ptr<view::View> create_view() override {
@@ -64,7 +69,8 @@ public:
         ir.root.children.push_back(meter);
 
         auto root = view::build_native_view_tree(ir, ir.asset_manifest);
-        if (!root) return root;
+        if (!root)
+            return root;
         auto* imported = find_anchor(*root, "reload-meter");
         if (auto* level = imported ? dynamic_cast<view::LevelDisplay*>(imported) : nullptr) {
             level->set_levels(0.5f, 0.75f);

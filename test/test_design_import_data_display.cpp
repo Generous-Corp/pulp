@@ -75,7 +75,7 @@ struct Calls {
 
 // A plugin written before the provider-neutral virtuals existed.
 class ConcreteOnlyContext final : public NativeImportBindingContext {
-public:
+  public:
     void bind_meter(Meter& meter, const NativeImportMeterBindingDescriptor& d) override {
         CHECK(ViewInspector::type_name(meter) == "Meter");
         calls.meter.emplace_back(d.channel);
@@ -90,7 +90,7 @@ public:
 
 // A plugin that overrides both generations is called through both.
 class BothContext final : public NativeImportBindingContext {
-public:
+  public:
     void bind_level_display(View&, LevelDisplay&,
                             const NativeImportMeterBindingDescriptor& d) override {
         calls.level.emplace_back(d.channel);
@@ -116,7 +116,7 @@ public:
 #endif
 
 class InterfaceOnlyContext final : public NativeImportBindingContext {
-public:
+  public:
     void bind_level_display(View& view, LevelDisplay&,
                             const NativeImportMeterBindingDescriptor& d) override {
         CHECK(ViewInspector::type_name(view) == "Meter");
@@ -130,8 +130,7 @@ public:
     Calls calls;
 };
 
-template <typename Context>
-Calls bind_with(Context& ctx) {
+template <typename Context> Calls bind_with(Context& ctx) {
     register_audio_widgets();
     const auto ir = bound_displays_ir();
     auto root = build_native_view_tree(ir, ir.asset_manifest);
@@ -153,8 +152,9 @@ TEST_CASE("a context overriding only the deprecated concrete binders is still bo
     CHECK(calls.waveform == std::vector<std::string>{"osc.shape"});
 }
 
-TEST_CASE("a context overriding only the provider-neutral binders is bound to the provider's widgets",
-          "[view][import][data-display][binding]") {
+TEST_CASE(
+    "a context overriding only the provider-neutral binders is bound to the provider's widgets",
+    "[view][import][data-display][binding]") {
     InterfaceOnlyContext ctx;
     const auto calls = bind_with(ctx);
     CHECK(calls.level == std::vector<std::string>{"left"});

@@ -4989,8 +4989,10 @@ std::vector<std::string> provider_only_names(std::string_view emitted) {
 
 std::vector<std::string> provider_only_names(const CppExportResult& result) {
     auto hits = provider_only_names(result.header);
-    for (auto& hit : provider_only_names(result.source)) hits.push_back(std::move(hit));
-    for (auto& hit : provider_only_names(result.binding_manifest)) hits.push_back(std::move(hit));
+    for (auto& hit : provider_only_names(result.source))
+        hits.push_back(std::move(hit));
+    for (auto& hit : provider_only_names(result.binding_manifest))
+        hits.push_back(std::move(hit));
     return hits;
 }
 
@@ -5057,9 +5059,12 @@ TEST_CASE("generated C++ never names a provider-only audio class",
             INFO("faithful=" << (mode == NodeRenderMode::faithful_svg) << " comments=" << comments);
             CHECK(provider_only_names(generated).empty());
             if (mode == NodeRenderMode::normal) {
-                CHECK(generated.source.find("make_data_display(\"pulp.level\")") != std::string::npos);
-                CHECK(generated.source.find("make_data_display(\"pulp.series\")") != std::string::npos);
-                CHECK(generated.source.find("make_data_display(\"pulp.bins\")") != std::string::npos);
+                CHECK(generated.source.find("make_data_display(\"pulp.level\")") !=
+                      std::string::npos);
+                CHECK(generated.source.find("make_data_display(\"pulp.series\")") !=
+                      std::string::npos);
+                CHECK(generated.source.find("make_data_display(\"pulp.bins\")") !=
+                      std::string::npos);
             }
         }
     }
@@ -5080,15 +5085,16 @@ TEST_CASE("generated C++ never names a provider-only audio class",
     CHECK(provider_only_names("pulp::view::MeterSource source;").empty());
 }
 
-TEST_CASE("generated provider displays compile against view-core headers in native and faithful modes",
-          "[view][import][native-materializer][cpp-codegen][data-display]") {
+TEST_CASE(
+    "generated provider displays compile against view-core headers in native and faithful modes",
+    "[view][import][native-materializer][cpp-codegen][data-display]") {
     for (const auto mode : {NodeRenderMode::normal, NodeRenderMode::faithful_svg}) {
         const bool faithful = mode == NodeRenderMode::faithful_svg;
         INFO("faithful=" << faithful);
         const auto ir = provider_display_ir(mode);
         const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, {});
-        const bool has_frame_view = generated.source.find("pulp::view::DesignFrameView") !=
-                                    std::string::npos;
+        const bool has_frame_view =
+            generated.source.find("pulp::view::DesignFrameView") != std::string::npos;
         REQUIRE(has_frame_view == faithful);
 
 #if defined(_WIN32)
@@ -5103,8 +5109,8 @@ TEST_CASE("generated provider displays compile against view-core headers in nati
         write_text(tmp.path / "imported_ui.hpp", generated.header);
         write_text(source, generated.source);
         std::string diagnostics;
-        const bool compiled = compile_generated_source(source, tmp.path / "imported_ui.o",
-                                                       &diagnostics);
+        const bool compiled =
+            compile_generated_source(source, tmp.path / "imported_ui.o", &diagnostics);
         INFO(diagnostics);
         REQUIRE(compiled);
 #endif

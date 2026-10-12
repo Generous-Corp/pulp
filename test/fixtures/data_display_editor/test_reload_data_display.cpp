@@ -24,9 +24,11 @@
 
 namespace {
 pulp::view::View* find_id(pulp::view::View& root, std::string_view id) {
-    if (root.id() == id) return &root;
+    if (root.id() == id)
+        return &root;
     for (std::size_t i = 0; i < root.child_count(); ++i)
-        if (auto* hit = find_id(*root.child_at(i), id)) return hit;
+        if (auto* hit = find_id(*root.child_at(i), id))
+            return hit;
     return nullptr;
 }
 

@@ -35,27 +35,30 @@ pulp::view::DesignIR meter_panel() {
 }
 
 class DataDisplayFixture final : public pulp::format::Processor {
-public:
+  public:
     pulp::format::PluginDescriptor descriptor() const override {
-        return {.name = "PulpDataDisplayFixture", .manufacturer = "Pulp",
-                .bundle_id = "dev.pulp.test.data-display-fixture", .version = "1.0.0",
+        return {.name = "PulpDataDisplayFixture",
+                .manufacturer = "Pulp",
+                .bundle_id = "dev.pulp.test.data-display-fixture",
+                .version = "1.0.0",
                 .category = pulp::format::PluginCategory::Effect,
-                .input_buses = {{"In", 2}}, .output_buses = {{"Out", 2}}};
+                .input_buses = {{"In", 2}},
+                .output_buses = {{"Out", 2}}};
     }
     void define_parameters(pulp::state::StateStore& store) override {
-        store.add_parameter({.id = 1, .name = "Gain", .unit = "",
-                             .range = {0.0f, 1.0f, 1.0f, 0.0f}});
+        store.add_parameter(
+            {.id = 1, .name = "Gain", .unit = "", .range = {0.0f, 1.0f, 1.0f, 0.0f}});
     }
     void prepare(const pulp::format::PrepareContext&) override {}
     void process(pulp::audio::BufferView<float>& out,
-                 const pulp::audio::BufferView<const float>& in,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
         const std::size_t channels = std::min(out.num_channels(), in.num_channels());
         for (std::size_t c = 0; c < channels; ++c) {
             auto o = out.channel(c);
             auto i = in.channel(c);
-            for (std::size_t n = 0; n < out.num_samples(); ++n) o[n] = i[n];
+            for (std::size_t n = 0; n < out.num_samples(); ++n)
+                o[n] = i[n];
         }
     }
     std::unique_ptr<pulp::view::View> create_view() override {

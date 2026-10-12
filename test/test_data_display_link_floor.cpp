@@ -74,15 +74,15 @@ View* find_anchor(View& root, std::string_view anchor) {
 }
 
 std::size_t count_code(const std::vector<ImportDiagnostic>& diagnostics, std::string_view code) {
-    return static_cast<std::size_t>(std::count_if(
-        diagnostics.begin(), diagnostics.end(),
-        [&](const ImportDiagnostic& d) { return d.code == code; }));
+    return static_cast<std::size_t>(
+        std::count_if(diagnostics.begin(), diagnostics.end(),
+                      [&](const ImportDiagnostic& d) { return d.code == code; }));
 }
 
 // Overrides only the provider-neutral virtuals, as a plugin written against
 // view-core does.
 class InterfaceOnlyContext final : public NativeImportBindingContext {
-public:
+  public:
     void bind_level_display(View&, LevelDisplay&,
                             const NativeImportMeterBindingDescriptor& descriptor) override {
         level_channels.emplace_back(descriptor.channel);
@@ -98,7 +98,7 @@ public:
 // A provider that is not pulp::view-audio: proves the importer reaches a display
 // only through the view-core facets.
 class StubLevel final : public View, public LevelDisplay {
-public:
+  public:
     void set_levels(float, float) override {}
     void set_level_orientation(Orientation) override {}
     void set_level_fill(pulp::canvas::Color, std::vector<pulp::canvas::Color>) override {}
@@ -108,16 +108,22 @@ public:
 };
 
 class StubSeries final : public View, public SeriesDisplay {
-public:
+  public:
     void set_series(const float*, std::size_t) override {}
     void set_series_preview(std::string_view) override {}
 };
 
-std::unique_ptr<View> make_stub_level() { return std::make_unique<StubLevel>(); }
-std::unique_ptr<View> make_stub_series() { return std::make_unique<StubSeries>(); }
+std::unique_ptr<View> make_stub_level() {
+    return std::make_unique<StubLevel>();
+}
+std::unique_ptr<View> make_stub_series() {
+    return std::make_unique<StubSeries>();
+}
 
 struct ClearDisplaysOnExit {
-    ~ClearDisplaysOnExit() { clear_data_displays(); }
+    ~ClearDisplaysOnExit() {
+        clear_data_displays();
+    }
 };
 
 } // namespace

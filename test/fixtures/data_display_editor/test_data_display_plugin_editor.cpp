@@ -21,9 +21,11 @@ std::unique_ptr<pulp::format::Processor> make_data_display_fixture();
 
 namespace {
 pulp::view::View* find_anchor(pulp::view::View& root, std::string_view anchor) {
-    if (root.anchor_id() == anchor) return &root;
+    if (root.anchor_id() == anchor)
+        return &root;
     for (std::size_t i = 0; i < root.child_count(); ++i)
-        if (auto* hit = find_anchor(*root.child_at(i), anchor)) return hit;
+        if (auto* hit = find_anchor(*root.child_at(i), anchor))
+            return hit;
     return nullptr;
 }
 } // namespace

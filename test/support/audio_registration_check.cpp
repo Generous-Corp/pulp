@@ -13,7 +13,8 @@ namespace pulp::test {
 int check_explicit_audio_registration() {
     for (const char* id : {"pulp.level", "pulp.series", "pulp.bins"}) {
         if (pulp::view::has_data_display(id)) {
-            std::fprintf(stderr, "'%s' was registered before main(); the shim reached this image\n", id);
+            std::fprintf(stderr, "'%s' was registered before main(); the shim reached this image\n",
+                         id);
             return 2;
         }
     }
@@ -25,7 +26,8 @@ int check_explicit_audio_registration() {
             return 1;
         }
     }
-    if (!dynamic_cast<pulp::view::LevelDisplay*>(pulp::view::make_data_display("pulp.level").get())) {
+    if (!dynamic_cast<pulp::view::LevelDisplay*>(
+            pulp::view::make_data_display("pulp.level").get())) {
         std::fprintf(stderr, "'pulp.level' is not a LevelDisplay\n");
         return 1;
     }
