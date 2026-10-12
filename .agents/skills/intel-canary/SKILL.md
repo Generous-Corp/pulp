@@ -252,3 +252,10 @@ Adding another Intel leg that runs a broad `ctest` means adding this step too.
 lane is missing it, so the omission surfaces locally rather than as a red Intel
 lane whose message points at neither Intel nor portability. It runs in `workflow-lint.yml`, not as a ctest: it parses the workflow
 YAML, and the required macOS CTest hosts carry no PyYAML.
+
+### Hosted advisory cadence
+
+The Intel portability workflow is advisory and is scheduled nightly on `main`
+or dispatched by Shipyard at arm time for an approved PR head. It intentionally
+has no `pull_request` trigger, so ordinary PR pushes do not consume the hosted
+Intel capacity.

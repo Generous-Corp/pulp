@@ -233,7 +233,7 @@ class CodecovYamlStructure(unittest.TestCase):
         self.assertEqual(self.doc["codecov"]["notify"]["after_n_builds"], 1)
         coverage = COVERAGE_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
-            "github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true'",
+            "github.event_name != 'pull_request' || github.event.action == 'auto_merge_enabled'",
             coverage,
         )
 
@@ -243,7 +243,7 @@ class CodecovYamlStructure(unittest.TestCase):
 
         self.assertIn("pulp-react-coverage:", coverage)
         self.assertIn("name: Coverage report (@pulp/react, Vitest)", coverage)
-        self.assertIn("if: github.event_name != 'pull_request'", coverage)
+        self.assertIn("github.event_name != 'pull_request' || github.event.action == 'auto_merge_enabled'", coverage)
         self.assertIn("packages/pulp-react/coverage/cobertura-coverage.xml", coverage)
         self.assertIn("flags: pulp-react", coverage)
 

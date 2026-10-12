@@ -128,13 +128,6 @@
       "timeout": 120.0
     },
     {
-      "name": "pulp-worktree-creation-selftest",
-      "argv": [
-        "{repo}/tools/ci/test_pulp_worktree_creation.py"
-      ],
-      "timeout": 120.0
-    },
-    {
       "name": "ci-python-selector-selftest",
       "argv": [
         "{repo}/tools/ci/test_find_python311.py"
@@ -180,8 +173,8 @@
         "unittest",
         "test_clean_worktree_planning"
       ],
-      "timeout": 300.0,
-      "cwd": "{repo}/tools/scripts"
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 300.0
     },
     {
       "name": "clean-worktrees-selftest",
@@ -639,6 +632,13 @@
       "timeout": 60.0
     },
     {
+      "name": "pulp-worktree-creation-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_pulp_worktree_creation.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "queue-batch-attribute-selftest",
       "argv": [
         "{repo}/tools/scripts/test_queue_batch_attribute.py"
@@ -974,15 +974,15 @@
       ]
     },
     {
-      "name": "toolchain-test_generate-selftest",
-      "argv": [
-        "{repo}/tools/toolchain/test_generate.py"
-      ]
-    },
-    {
       "name": "toolchain-mise_profile-selftest",
       "argv": [
         "{repo}/tools/toolchain/test_mise_profile.py"
+      ]
+    },
+    {
+      "name": "toolchain-test_generate-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_generate.py"
       ]
     },
     {
