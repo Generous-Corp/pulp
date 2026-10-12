@@ -11,7 +11,7 @@ KNOWN = {
 
 def gh(repo: str, path: str):
     p = subprocess.run(["gh", "api", f"repos/{repo}/{path}", "--paginate"], text=True,
-                       capture_output=True, check=True)
+                       capture_output=True, encoding="utf-8", check=True)
     return json.loads(p.stdout)
 
 def selected(files: list[str]) -> set[str]:
