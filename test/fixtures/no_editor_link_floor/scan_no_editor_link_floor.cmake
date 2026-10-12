@@ -25,14 +25,11 @@ set(_families
     "skia=[A-Za-z] (Sk[A-Z][A-Za-z0-9_]*::|skgpu::)"
     "dawn=[A-Za-z] dawn::"
     "wgpu=[A-Za-z] _?wgpu[A-Z]")
-# A GPU runtime reaches a module as a shared WebGPU/Skia library, or, when Skia
-# and Dawn are linked statically (a Skia build that carries its own Dawn links
-# no wgpu-native), as the platform GPU API that Dawn calls directly.
-set(_runtime_deps "libwgpu_native|libdawn|libwebgpu|libskia")
+include("${CMAKE_CURRENT_LIST_DIR}/no_editor_runtime_deps.cmake")
 if(APPLE)
-    string(APPEND _runtime_deps "|/Metal\\.framework/|/MetalKit\\.framework/|/QuartzCore\\.framework/")
+    pulp_no_editor_runtime_deps(_runtime_deps apple)
 else()
-    string(APPEND _runtime_deps "|libvulkan|libGL[.X]|libEGL")
+    pulp_no_editor_runtime_deps(_runtime_deps elf)
 endif()
 
 function(_scan artifact out_deps out_symbols)
@@ -59,16 +56,38 @@ function(_count out symbols regex)
     set(${out} ${_n} PARENT_SCOPE)
 endfunction()
 
-# Positive control first: every family and the runtime dependency must be seen.
+# Positive control first. The build says which families its editor stack has
+# (CONTROL_FAMILIES) and whether that stack carries a GPU runtime
+# (CONTROL_GPU_RUNTIME): a build with PULP_ENABLE_GPU=OFF links view and canvas
+# but no render, Skia, Dawn or wgpu code, so its control cannot show those. Every
+# family the build has must be seen in the control; the editor-less modules are
+# still checked against every family and the runtime pattern below.
+if(NOT DEFINED CONTROL_FAMILIES OR NOT DEFINED CONTROL_GPU_RUNTIME)
+    message(FATAL_ERROR "no-editor link floor: CONTROL_FAMILIES and CONTROL_GPU_RUNTIME are required")
+endif()
+string(REPLACE "|" ";" CONTROL_FAMILIES "${CONTROL_FAMILIES}")
 _scan("${CONTROL}" _control_deps _control_symbols)
-if(NOT _control_deps MATCHES "${_runtime_deps}")
+if(CONTROL_GPU_RUNTIME AND NOT _control_deps MATCHES "${_runtime_deps}")
     message(FATAL_ERROR
         "control module has no GPU-runtime dependency; the dependency check is blind:\n${_control_deps}")
+endif()
+if(NOT CONTROL_GPU_RUNTIME)
+    # No GPU runtime to look for, but the dependency listing must still be
+    # proven to work: every module loads the platform C/C++ runtime.
+    if(NOT _control_deps MATCHES "libSystem|libc\\.so|libc\\+\\+|libstdc\\+\\+")
+        message(FATAL_ERROR
+            "control module lists no C/C++ runtime dependency; the dependency scan is blind:\n${_control_deps}")
+    endif()
+    message(STATUS "control GPU runtime: not built (PULP_ENABLE_GPU=OFF); dependency listing proven by the C/C++ runtime")
 endif()
 foreach(_family IN LISTS _families)
     string(REPLACE "=" ";" _pair "${_family}")
     list(GET _pair 0 _name)
     list(GET _pair 1 _regex)
+    if(NOT _name IN_LIST CONTROL_FAMILIES)
+        message(STATUS "control ${_name}: not built in this configuration")
+        continue()
+    endif()
     _count(_n "${_control_symbols}" "${_regex}")
     if(_n EQUAL 0)
         message(FATAL_ERROR

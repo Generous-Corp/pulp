@@ -816,8 +816,17 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
       setZIndex: (id, value) => calls.push(['z', id, value]),
     },
   });
+  assert.ok(calls.some(call => call[0] === 'createCol' &&
+    call[1] === '__pulp_materialized_pseudo_root__' && call[2] === ''),
+    'pseudo planes have a sibling visual root');
+  assert.ok(calls.some(call => call[0] === 'opacity' &&
+    call[1] === '__pulp_materialized_pseudo_root__' && call[2] === 1),
+    'pseudo root stays visible when behavior root is hidden');
+  assert.ok(calls.some(call => call[0] === 'opacity' &&
+    call[1] === '__pulp_materialized_behavior__' && call[2] === 0),
+    'reference behavior root remains transparent');
   assert.deepEqual(calls.filter(call => call[1] === '__pulp_materialized_pseudo_0'), [
-    ['createCol', '__pulp_materialized_pseudo_0', '__pulp_materialized_behavior__'],
+    ['createCol', '__pulp_materialized_pseudo_0', '__pulp_materialized_pseudo_root__'],
     ['left', '__pulp_materialized_pseudo_0', 2],
     ['top', '__pulp_materialized_pseudo_0', 3],
     ['flex', '__pulp_materialized_pseudo_0', 'width', 20],
@@ -829,7 +838,7 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
     ['z', '__pulp_materialized_pseudo_0', 19000],
   ]);
   const planeIds = new Set(calls.filter(call => call[0] === 'createCol' &&
-    call[1].startsWith('__pulp_materialized_pseudo_')).map(call => call[1]));
+    /^__pulp_materialized_pseudo_[0-9]+$/.test(call[1])).map(call => call[1]));
   assert.deepEqual(planeIds, new Set([
     '__pulp_materialized_pseudo_0', '__pulp_materialized_pseudo_1',
   ]));
