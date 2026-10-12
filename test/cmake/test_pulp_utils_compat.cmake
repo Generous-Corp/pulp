@@ -42,6 +42,25 @@ if(NOT _installed_utils)
     message(FATAL_ERROR
         "Installed PulpUtils.cmake not found under ${_prefix}/lib*/cmake/Pulp")
 endif()
+
+set(_source_provenance "${_prefix}/sdk-provenance.json")
+if(NOT EXISTS "${_source_provenance}")
+    message(FATAL_ERROR "Source install did not stamp sdk-provenance.json")
+endif()
+file(READ "${_source_provenance}" _source_provenance_json)
+string(JSON _source_provenance_kind ERROR_VARIABLE _source_provenance_kind_error
+    GET "${_source_provenance_json}" kind)
+string(JSON _source_provenance_sha ERROR_VARIABLE _source_provenance_sha_error
+    GET "${_source_provenance_json}" source_git_sha)
+if(_source_provenance_kind_error OR NOT _source_provenance_kind STREQUAL "source-install" OR
+   _source_provenance_sha_error)
+    message(FATAL_ERROR "Source install provenance is incomplete: ${_source_provenance_json}")
+endif()
+string(LENGTH "${_source_provenance_sha}" _source_provenance_sha_length)
+if(NOT _source_provenance_sha_length EQUAL 40 OR
+   NOT _source_provenance_sha MATCHES "^[0-9a-f]+$")
+    message(FATAL_ERROR "Source install provenance has no exact source SHA")
+endif()
 list(GET _installed_utils 0 _installed_utils)
 get_filename_component(_installed_cmake_dir "${_installed_utils}" DIRECTORY)
 file(READ "${_installed_utils}" _utils_text)
@@ -167,3 +186,40 @@ endif()
 message(STATUS
     "pulp_utils_compat_verified=true helpers=${_relative_helpers} "
     "target_receipt=${_root}/target-list.txt")
+
+# A source-tree consumer gets the same target names and helper behavior after
+# add_subdirectory(Pulp), without including PulpUtils from the parent manually.
+set(_subdir_source "${_root}/subdir-consumer")
+set(_subdir_build "${_root}/subdir-consumer-build")
+file(MAKE_DIRECTORY "${_subdir_source}")
+file(WRITE "${_subdir_source}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.24)
+project(PulpSubdirectoryConsumer LANGUAGES CXX)
+set(PULP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(PULP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory("@PULP_SOURCE_DIR@" pulp)
+include("@PULP_SOURCE_DIR@/tools/cmake/PulpUtils.cmake")
+foreach(_target Pulp::gpu-audio Pulp::render Pulp::view Pulp::canvas)
+    if(NOT TARGET "${_target}")
+        message(FATAL_ERROR "add_subdirectory(Pulp) did not provide ${_target}")
+    endif()
+endforeach()
+if(NOT COMMAND pulp_add_plugin)
+    message(FATAL_ERROR "add_subdirectory(Pulp) did not provide pulp_add_plugin()")
+endif()
+]=])
+file(READ "${_subdir_source}/CMakeLists.txt" _subdir_text)
+string(REPLACE "@PULP_SOURCE_DIR@" "${PULP_SOURCE_DIR}" _subdir_text "${_subdir_text}")
+file(WRITE "${_subdir_source}/CMakeLists.txt" "${_subdir_text}")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -S "${_subdir_source}" -B "${_subdir_build}"
+            "-DCMAKE_BUILD_TYPE=${_config}"
+    RESULT_VARIABLE _subdir_result
+    OUTPUT_VARIABLE _subdir_output
+    ERROR_VARIABLE _subdir_error)
+if(NOT _subdir_result EQUAL 0)
+    message(FATAL_ERROR
+        "add_subdirectory(Pulp) consumer configure failed (${_subdir_result})\n"
+        "${_subdir_output}\n${_subdir_error}")
+endif()
+message(STATUS "pulp_subdirectory_consumer_verified=true")

@@ -87,6 +87,7 @@ endfunction()
 #   ${target}_Standalone — Standalone executable
 #
 function(pulp_add_plugin target)
+    _pulp_resolve_consumer_targets()
     cmake_parse_arguments(PLUGIN
         "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
@@ -520,6 +521,7 @@ endfunction()
 #       SOURCES      plugin_a.cpp plugin_b.cpp   # union of the bundled plugins
 #   )
 function(pulp_add_plugin_bundle target)
+    _pulp_resolve_consumer_targets()
     cmake_parse_arguments(BUNDLE
         ""
         "BUNDLE_NAME;BUNDLE_ID;VERSION;MANUFACTURER"

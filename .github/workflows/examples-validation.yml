@@ -21,15 +21,18 @@
 name: Example validation
 
 on:
-  pull_request:
+  schedule:
+    - cron: '53 3 * * *'
   # Deliberately NOT run on `merge_group` — see header-self-contained.yml for the
   # full rationale. Neither `Validate examples (macOS)` nor `example-validation`
   # is a required context, and the macOS leg claimed a self-hosted runner on
   # every queue entry, starving the required `macos` gate.
+  pull_request:
+    types: [auto_merge_enabled]
   workflow_dispatch:
 
 concurrency:
-  group: example-validation-${{ github.ref }}
+  group: example-validation-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -38,6 +41,7 @@ permissions:
 jobs:
   changes:
     name: Detect example changes
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     # Advisory bookkeeping must never wait behind the required macOS gate.
     runs-on: ubuntu-latest
     outputs:
@@ -100,6 +104,7 @@ jobs:
 
   resolve-advisory-macos:
     name: Resolve isolated advisory macOS runner
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     outputs:
       selector_json: ${{ steps.resolve.outputs.selector_json }}

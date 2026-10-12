@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -45,7 +46,17 @@ class AdvisorLog(unittest.TestCase):
         git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
 
     def tearDown(self) -> None:
-        self.tmp.cleanup()
+        # Git can briefly retain a directory entry after the last subprocess
+        # exits on a busy sanitizer runner. Retry the bounded cleanup instead
+        # of turning that transient teardown race into a lane failure.
+        for attempt in range(5):
+            try:
+                self.tmp.cleanup()
+                return
+            except OSError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (2**attempt))
 
     def run_advisor(self) -> subprocess.CompletedProcess:
         env = dict(os.environ, PULP_PR_BATCH_ADVICE_LOG=str(self.log))

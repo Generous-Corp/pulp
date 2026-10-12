@@ -27,11 +27,15 @@ project(installed_render_runtime_staging LANGUAGES CXX)
 include("${PULP_RUNTIME_STAGING_MODULE}")
 
 # Match the installed SDK's provider target shape.  The staging helper must
-# inspect Pulp::render, not assume the in-tree pulp-render target exists.
+# follow Pulp::render through its private gpu-device edge instead of assuming
+# the provider appears directly on the renderer target.
 add_library(webgpu INTERFACE IMPORTED GLOBAL)
+add_library(Pulp::gpu-device INTERFACE IMPORTED GLOBAL)
+set_target_properties(Pulp::gpu-device PROPERTIES
+    INTERFACE_LINK_LIBRARIES "$<LINK_ONLY:webgpu>")
 add_library(Pulp::render INTERFACE IMPORTED GLOBAL)
 set_target_properties(Pulp::render PROPERTIES
-    INTERFACE_LINK_LIBRARIES "webgpu")
+    INTERFACE_LINK_LIBRARIES "$<LINK_ONLY:Pulp::gpu-device>")
 set(WEBGPU_RUNTIME_LIB
     "${CMAKE_CURRENT_SOURCE_DIR}/${PULP_RUNTIME_NAME}"
     CACHE FILEPATH "fixture WebGPU runtime")

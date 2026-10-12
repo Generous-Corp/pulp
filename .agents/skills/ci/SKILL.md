@@ -142,6 +142,9 @@ doctor/remediation output, is a build emitter and must invoke
 `tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
 directory explicit, but do not include `-j`, `--parallel`, or a host-core
 probe: the governor owns parallelism, leases, and build-directory locking.
+The local sanitizer and coverage helper scripts follow the same rule: pass a
+requested cap through `PULP_BUILD_JOBS` and leave worker flags out of the
+`cmake --build` argv.
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
 and run only what the working diff affects (`pulp affected`, the build-target
@@ -11989,3 +11992,17 @@ that prints non-ASCII marks, reconfigure its own stdout at its entry point
 (`sys.stdout.reconfigure(encoding="utf-8", errors="replace")`); a Windows pipe
 defaults to the ANSI code page. `PYTHONIOENCODING=cp1252` reproduces that pipe
 on macOS.
+
+## Hosted macOS advisory cadence
+
+Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
+native matrix are scheduled nightly and dispatched on an approved PR head. The
+`pulp pr` wrapper invokes `tools/scripts/dispatch_advisory_lanes.sh` after its
+delegated Shipyard arm/ship path succeeds. Direct `shipyard pr` does not yet
+invoke that Pulp hook; until the Shipyard arm hook lands, nightly main runs are
+the interim signal. These workflows intentionally have no `pull_request`
+trigger, so a PR push does not consume hosted macOS capacity for advisory work.
+ASan and UBSan remain on non-draft `core/**` pull requests (opened, synchronize,
+and ready-for-review events); TSan runs nightly or by dispatch. Coverage alone
+has a `max-parallel: 2` matrix cap; sanitizer jobs are independent named legs.
+These changes preserve the required Vellum lanes on their existing runners.

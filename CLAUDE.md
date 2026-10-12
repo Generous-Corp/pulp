@@ -1177,17 +1177,18 @@ and the required gate excludes **five** label groups —
 `validation|slow|performance|bench|quality-lab`. `slow` is a genuinely long test
 (e.g. the iOS try-compile). `validation` is the **example** plugins' real-host
 `pluginval`/`auval`/`clap-dlopen` validators — the only users of that label;
-these are reported by the advisory `example-validation` lane and do not block
-until that context is promoted to required. `performance`, `bench`, and
+these are reported by the advisory `example-validation` lane on nightly and
+approved-head dispatches from `pulp pr`/Shipyard arm; no automatic pull-request
+run, and no blocking status until promoted to required. `performance`, `bench`, and
 `quality-lab` are relative-timing and CPU-budget measurements: they are robust
 to steady load but not to the load *variance* a runner hosting concurrent build
-VMs produces, so they cannot hold a required gate there. They still run on
-push, on the nightly, and on the advisory `cross-platform-check` lane — which
+VMs produces, so they cannot hold a required gate there. They still run on pushes to `main`, on the nightly, and on the advisory
+`cross-platform-check` dispatch — which
 excludes only `validation|slow`, so a timing test lands there on x86-64 Linux
 and Windows and on arm64 Linux.
-`build.yml`'s required `macos` job configures examples OFF; examples compile on the
-advisory `example-validation` lane, and on Shipyard's opt-in local `mac` lane
-only when requested (`--target mac`), until that lane is promoted to required.
+`build.yml`'s required `macos` job configures examples OFF; examples compile on
+the nightly or approved-head `example-validation` dispatch, and on Shipyard's
+opt-in local `mac` lane only when requested (`--target mac`), until promoted.
 That dedicated lane compiles
 the full examples tree on Linux and compiles plus runs the available hosted
 validators on macOS (auval and built-in CLAP dlopen checks; pluginval and
@@ -1516,9 +1517,8 @@ When in doubt, validate in the branch/worktree first and merge to `main` second.
 
 ### Local Diff-Coverage Check
 
-Before pushing a PR, run a local diff-coverage check to catch the same
-`Diff coverage required (75%)` gate that CI runs. Saves a 20-min CI
-roundtrip on coverage-only failures.
+Before pushing a PR, run local diff coverage to catch instrumentation or attribution regressions.
+Coverage no longer runs it on pull requests; this advisory result is not a merge gate and still saves a CI roundtrip.
 
 ```bash
 # Focused: only targets/tests the diff reaches (pre-push runs this)

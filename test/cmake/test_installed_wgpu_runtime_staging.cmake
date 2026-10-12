@@ -78,6 +78,14 @@ function(_run_case name links)
     if(NOT _rc EQUAL 0)
         message(FATAL_ERROR "${name}: configure failed (${_rc})\n${_out}\n${_err}")
     endif()
+    if(name STREQUAL "skia-on")
+        # Simulate a reused consumer build directory that staged wgpu-native
+        # before switching to the Skia/Dawn provider. Installed consumers do
+        # not define WEBGPU_RUNTIME_LIB, so cleanup must derive the name from
+        # the imported webgpu target.
+        file(MAKE_DIRECTORY "${_build}/plugin")
+        file(WRITE "${_build}/plugin/${_runtime_name}" "stale wgpu-native runtime\n")
+    endif()
     set(_configure_out "${_out}" PARENT_SCOPE)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" --build "${_build}" --config Release
