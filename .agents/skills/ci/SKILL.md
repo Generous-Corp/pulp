@@ -3076,6 +3076,12 @@ stall the tool exists to catch.
 
 ## Diagnosing a slow / stuck PR — investigate before assuming runner saturation
 
+If the required `macos` job is queued and never starts while hosts report
+"fleet ready", read the lane logs and the admission verdict on the hosts before
+anything else: see the `tart-ci` skill, "Diagnosing a queued macOS job that
+never starts". An empty runner list from the API is normal for just-in-time
+runners and is not evidence of an outage.
+
 When a PR sits without merging, don't ASSUME "the macOS CI pool is saturated"
 from a long-queued run — investigate. Saturation IS possible (a genuine burst, or
 a wedged/dead runner — see the `pulp-runner-ops` skill), so it's worth checking;
@@ -6544,13 +6550,13 @@ The PR enters the queue once its required contexts are green. Note GitHub uses
 the **latest** run for a required context, so a newly-queued re-run makes an
 already-green context pending again and delays entry — that resolves itself.
 
-#### `shipyard update` is an updater, not a converger — it will not go backwards
+#### `shipyard update` tracks `latest` unless you pin it with `--to`
 
-`shipyard update --to vX.Y.Z` silently does **nothing** when `X.Y.Z` is older
-than the installed version: it reports `update_available: false` and exits 0.
-Verified against v0.70.0 — asked for `--to v0.60.0` with 0.70.0 installed it
-reports no update available, exactly as it does for an already-current
-machine. The two outcomes are indistinguishable from the exit code.
+Downgrade behaviour changed between releases. On v0.70.0, `shipyard update --to
+v0.60.0` silently did nothing (`update_available: false`, exit 0). On v0.307.0,
+`shipyard update --to v0.301.0` really did install v0.301.0; that downgrade was
+the stopgap that restored the fleet on 2026-10-12. Read `shipyard --version`
+after every `--to` rather than trusting the exit code.
 
 Two consequences:
 

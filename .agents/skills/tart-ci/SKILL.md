@@ -292,6 +292,40 @@ real failing test, don't chase your own diff. (Found 2026-06-03: #3386's
 `--emit swiftui` broke two `test_import_design_tool.cpp` exact-match asserts on
 main, reddening every PR's macOS gate.)
 
+## Diagnosing a queued macOS job that never starts (the fleet looks "ready")
+
+An empty `GET repos/<o>/<r>/actions/runners` proves nothing: gate runners are
+just-in-time, minted per job, so none are registered between jobs. And
+`tartci pool status` reporting `fleet ready: yes` / `5/5` only means the lane
+supervisors are alive, not that they can clone. Read the lane's own record on
+each host instead:
+
+1. **Lane log** — `~/Library/Logs/tartci/macos-fleet-pulp-gate*.log`. A healthy
+   lane with demand prints `queued=N … → booting ephemeral VM` and then
+   `vm … up at <ip> — launching JIT runner`. If it sees `queued=N` but every
+   cycle ends in `Shipyard admission failed before clone`, `VM DHCP … breaker
+   open`, `SCAN BLIND`, or a lease refusal, that line names the blocker.
+2. **Admission verdict** — `~/.tartci/state/macos-fleet/<lane>/*.admission-precheck.json`
+   holds Shipyard's full error (`verdict`, `reason`, `error`). Reproduce it by
+   hand only with the lane's environment, or `ghapp` refuses for an unrelated
+   reason ("exact repository provenance is required"):
+   ```bash
+   SHIPYARD_GH_APP_REPO=Generous-Corp/pulp GH_REPO=Generous-Corp/pulp \
+     shipyard runner admission-clean --repo Generous-Corp/pulp --base main \
+     --labels self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-build-pr-head --json
+   ```
+3. **DHCP breaker** — `tartci vm-dhcp status`. `cause=probe_unreported` with
+   `failed_probes=0` means the granted probe never cloned a VM (it bailed
+   earlier, usually at admission), not that VMs lost DHCP; fix the earlier
+   blocker, then `tartci vm-dhcp probe-now` on each host instead of waiting
+   for the 300 s probe cadence.
+
+On 2026-10-12 every host showed `fleet ready: yes` while no VM could clone for
+about three hours: a Shipyard release asked GitHub for a bulk open-PR list with
+a nested `commits{authors}` connection (about 1,000,000 nodes, over the
+500,000 limit), so every admission check failed, and the DHCP breaker then
+blamed DHCP. The lane log and admission JSON named the cause in one read.
+
 ## Rollout: pilot → graduate
 1. **Additive pilot (safe):** run `tartci serve macos --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
 2. **Required-label prevalidation (safe):** run a one-shot VM with `pulp-build` **plus a unique proof label**, then dispatch `Build and Test` with `macos_runner_selector_json` requiring both labels. This proves a VM can satisfy the required label while bare-metal `pulp-build` remains online. Verified 2026-06-10: run `27250564395`, runner `tartci-phase6-pulp-build-proof-r2-20260610`, `macOS (ARM64) [operator]` success, `macos` alias success, VM/JIT runner cleaned up. Cancel unrelated Linux/Windows legs after `macos` is green.
@@ -314,6 +348,17 @@ main, reddening every PR's macOS gate.)
    from `tools/scripts/runner_topology.json`, preserve both event classes and
    their repository-scoped registration authority, and change one idle host at
    a time with a proven assignment receipt.
+
+## Rolling a CI-path tool to the fleet (Shipyard, tartci, the ghapp wrapper)
+
+Never update every host at once. Update ONE host, run the lane-path check above
+(admission must return `admit` or `defer`, never an observation error), confirm
+a gate VM clones there, then update the rest. A version check is not a
+functional check. Emergency rollback: `shipyard update --to vX.Y.Z` on each host
+works even when `shipyard runner fleet-update` refuses. On m1 an unaccepted
+Xcode license turns `/usr/bin/python3` and `/usr/bin/git` into shims that exit
+69, which breaks `fleet-update` and several tartci commands until someone runs
+`sudo xcodebuild -license accept` there.
 
 ## Gotchas (hard-won)
 - **Dynamic event classes require dynamic registration authority, not just
