@@ -76,6 +76,13 @@
       "timeout": 120.0
     },
     {
+      "name": "build-governance-paths-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_build_governance_paths.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "build-matrix-contract",
       "argv": [
         "{repo}/tools/ci/test_build_matrix_contract.py"
