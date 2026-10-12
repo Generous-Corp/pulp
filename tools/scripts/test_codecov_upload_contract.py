@@ -53,8 +53,8 @@ class CoverageWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-    def test_coverage_is_dispatch_and_schedule_only(self) -> None:
-        self.assertNotIn("\n  pull_request:\n", self.coverage)
+    def test_coverage_is_dispatch_schedule_and_arm_only(self) -> None:
+        self.assertIn("\n  pull_request:\n    types: [auto_merge_enabled]", self.coverage)
         self.assertIn(
             "not in protected main's required-check set",
             self.coverage,

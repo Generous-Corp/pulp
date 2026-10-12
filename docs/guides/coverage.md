@@ -392,10 +392,10 @@ Coverage workflow finishes. The comment layout is `reach, diff, flags, tree`:
 Project-level and patch-level coverage numbers are informational and do not
 block merges on their own.
 
-**Diff-coverage gate (advisory).** The `coverage-diff-gate` job reports the
-coverage of changed lines at a **75%** floor when a dispatched run includes
-a pull request context. The coverage workflow no longer runs on pull-request
-events, so this gate is informational and does not block merges.
+**Diff-coverage gate (retired for this workflow).** The `coverage-diff-gate`
+job is guarded for pull-request events, but the Coverage workflow no longer
+has a pull-request trigger. It therefore does not run in scheduled or
+dispatched Coverage runs and does not block merges.
 
 The native coverage matrix runs the full Linux, macOS, and Windows set on
 the scheduled refresh and on explicit workflow dispatch. The nightly

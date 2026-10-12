@@ -27,10 +27,12 @@ on:
   # full rationale. Neither `Validate examples (macOS)` nor `example-validation`
   # is a required context, and the macOS leg claimed a self-hosted runner on
   # every queue entry, starving the required `macos` gate.
+  pull_request:
+    types: [auto_merge_enabled]
   workflow_dispatch:
 
 concurrency:
-  group: example-validation-${{ github.ref }}
+  group: example-validation-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:

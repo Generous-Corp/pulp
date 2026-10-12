@@ -402,15 +402,22 @@ class SanitizerCadenceTests(unittest.TestCase):
 
 
 class AdvisoryMacOSCadenceTests(unittest.TestCase):
-    def test_advisory_workflows_are_nightly_and_dispatch_only(self) -> None:
+    def test_advisory_workflows_are_nightly_dispatch_and_arm_triggered(self) -> None:
         for name, path in ADVISORY_WORKFLOWS.items():
             with self.subTest(workflow=name):
-                triggers = trigger_map(load_workflow(path))
-                self.assertNotIn("pull_request", triggers)
+                workflow = load_workflow(path)
+                triggers = trigger_map(workflow)
+                self.assertIn("pull_request", triggers)
+                self.assertEqual(
+                    triggers["pull_request"].get("types"), ["auto_merge_enabled"]
+                )
                 self.assertIn("schedule", triggers)
                 self.assertIn("workflow_dispatch", triggers)
                 if name == "coverage":
                     self.assertNotIn("push", triggers)
+                group = workflow["concurrency"]["group"]
+                self.assertIn("'nightly'", group)
+                self.assertIn("'arm-{0}'", group)
 
     def test_scheduled_guards_use_the_configured_primary_repository(self) -> None:
         stale = "github.repository == 'danielraffel/pulp'"

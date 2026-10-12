@@ -29,10 +29,12 @@ permissions:
 on:
   schedule:
     - cron: '47 3 * * *'
+  pull_request:
+    types: [auto_merge_enabled]
   workflow_dispatch:
 
 concurrency:
-  group: scene3d-advisory-${{ github.ref }}
+  group: scene3d-advisory-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
