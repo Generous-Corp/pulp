@@ -605,6 +605,31 @@ An older naming put the function in the slice name (`js_native:<fn>`); a
 as "no bridge calls". Pair it with `SELECT COUNT(*) FROM slice WHERE name =
 'js_native'` before believing a zero.
 
+**A script-named `js` span at ~0.2 µs is swapped, not cheap.** When a build
+ran `__traceBegin__` inside the `js_native` wrapper, Perfetto's last-in
+first-out close gave the script-named slice the native call's duration and the
+`js_native` slice with `debug.fn = '__traceBegin__'` the script's. Detect it
+first — on a correct build this average is sub-microsecond:
+
+```sql
+SELECT AVG(dur) / 1000.0 AS avg_us, COUNT(*) AS n FROM slice
+WHERE name = 'js_native' AND EXTRACT_ARG(arg_set_id, 'debug.fn') = '__traceBegin__';
+```
+
+If it is not, recover each script span's real duration from the `js_native`
+slice opened at the same instant (bounded join; the unbounded form over a
+multi-million-slice trace runs for minutes):
+
+```sql
+WITH b AS (SELECT id, ts, dur, track_id FROM slice
+           WHERE name = 'js_native'
+             AND EXTRACT_ARG(arg_set_id, 'debug.fn') = '__traceBegin__')
+SELECT s.name, COUNT(*) AS n, AVG(b.dur) / 1000.0 AS avg_us, SUM(b.dur) / 1e6 AS total_ms
+FROM slice s JOIN b ON b.track_id = s.track_id AND s.ts BETWEEN b.ts AND b.ts + 2000
+WHERE s.category = 'js' AND s.name <> 'js_native' AND s.id <> b.id
+GROUP BY s.name ORDER BY total_ms DESC;
+```
+
 **Check for corrupted parentage before trusting any `js` aggregate.** An
 unbalanced `__traceBegin__` re-parents later slices under a span that never
 closed; the runtime force-closes it and marks the trace. This must return zero

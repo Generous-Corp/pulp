@@ -537,11 +537,19 @@ Fingerprints and what they mean:
   (`pulp_check_vendored_react_runtime()` says so). Promise-job and
   passive-effect commits are NOT batched by this — look for `.then(setX)`
   chains and mount effects that set state.
-- **`js_native` spans that start a script-driven span** corrupt nesting:
-  `__traceBegin__` inside a `js_native` scope closes on the native's end.
-  For JS-level attribution of a bundled runtime, wrap functions with a
-  timing accumulator (`performance.now()` deltas into a global table dumped
-  with `console.log` from a `setTimeout`) instead of trace spans.
+- **A script-named span whose duration is sub-microsecond is a swapped
+  slice, not a cheap function.** Perfetto closes slices last-in first-out per
+  track, so a `__traceBegin__` that runs inside the `js_native` wrapper has its
+  span closed by the wrapper's RAII end: the script-named slice gets the
+  native call's ~0.2 µs and the `js_native` slice with `debug.fn =
+  '__traceBegin__'` absorbs the script's real duration (a Spectr AAX trace
+  showed `drawSpectrum` at 0.23 µs and `__traceBegin__` at 355 µs avg). The
+  trace seam is now registered through `register_trace_seam_function`, which
+  never wraps it; `__traceStats__().beginInsideNative` reads 0 on a correct
+  build and the `script trace spans never open inside a wrapped native call`
+  test pins it. On a trace from an older build, recover the real durations by
+  joining each script-named slice to the `js_native` slice at the same `ts`
+  (the trace-sql skill has the query) instead of trusting the named slice.
 - `getLayoutBoxMetrics` counts are a symptom, not the cost; measure the
   commit (see `getLayoutRect` coalescing in view-bridge).
 

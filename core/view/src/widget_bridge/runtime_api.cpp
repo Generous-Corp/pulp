@@ -82,8 +82,7 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             "    if (typeof console !== 'undefined' && console.error)"
             "      console.error('timer:', e);"
             "  }"
-            "}"
-        );
+            "}");
     }
 
     BridgeApiContext api{self.engine_};
@@ -302,22 +301,23 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
     // see inside it. These name what is inside. The pair is balanced by the
     // script, so safe_dispatch_eval force-closes whatever the handler leaves
     // open and reports it rather than silently re-parenting later slices.
-    register_bridge_function(api, "__traceBegin__", [](choc::javascript::ArgumentList args) {
+    register_trace_seam_function(api, "__traceBegin__", [](choc::javascript::ArgumentList args) {
         return choc::value::createBool(js_trace::begin(args.get<std::string>(0, "js_scope")));
     });
 
-    register_bridge_function(api, "__traceEnd__", [](choc::javascript::ArgumentList) {
+    register_trace_seam_function(api, "__traceEnd__", [](choc::javascript::ArgumentList) {
         return choc::value::createBool(js_trace::end());
     });
 
     // Balance bookkeeping, readable from script and from a test. Kept in one
-    // native so the four counters are always read from the same instant.
+    // native so the counters are always read from the same instant.
     register_bridge_function(api, "__traceStats__", [](choc::javascript::ArgumentList) {
-        return choc::value::createObject("PulpTraceStats",
-            "depth", static_cast<int64_t>(js_trace::open_depth()),
-            "forceClosed", static_cast<int64_t>(js_trace::force_closed_count()),
-            "unmatchedEnd", static_cast<int64_t>(js_trace::unmatched_end_count()),
-            "refused", static_cast<int64_t>(js_trace::refused_count()));
+        return choc::value::createObject(
+            "PulpTraceStats", "depth", static_cast<int64_t>(js_trace::open_depth()), "forceClosed",
+            static_cast<int64_t>(js_trace::force_closed_count()), "unmatchedEnd",
+            static_cast<int64_t>(js_trace::unmatched_end_count()), "refused",
+            static_cast<int64_t>(js_trace::refused_count()), "beginInsideNative",
+            static_cast<int64_t>(js_trace::begun_inside_native_count()));
     });
 
     // Install the JS-side `pulpTrace` global wrapping the natives.

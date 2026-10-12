@@ -32,7 +32,33 @@ inline int& depth()             { static thread_local int d = 0;        return d
 inline long long& refused()     { static thread_local long long n = 0;  return n; }
 inline long long& force_closed(){ static thread_local long long n = 0;  return n; }
 inline long long& unmatched()   { static thread_local long long n = 0;  return n; }
+// How many native-bridge wrapper scopes are open on this thread. A script span
+// must never be opened from inside one: Perfetto closes slices last-in
+// first-out per track, so a wrapper's RAII end would close the script's span
+// instead of its own and the two durations swap names.
+inline int& native_wrapper_depth() {
+    static thread_local int d = 0;
+    return d;
+}
+inline long long& begun_inside_native() {
+    static thread_local long long n = 0;
+    return n;
+}
 } // namespace detail
+
+/// Marks the extent of one wrapped native-bridge call. `begin()` counts an open
+/// made while one of these is alive, so a trace seam that is accidentally
+/// routed through the wrapper is observable from script on every build.
+struct NativeWrapperScope {
+    NativeWrapperScope() {
+        ++detail::native_wrapper_depth();
+    }
+    ~NativeWrapperScope() {
+        --detail::native_wrapper_depth();
+    }
+    NativeWrapperScope(const NativeWrapperScope&) = delete;
+    NativeWrapperScope& operator=(const NativeWrapperScope&) = delete;
+};
 
 /// Opens a `js` span named `name`. Returns false when the depth cap refused it,
 /// in which case nothing was opened and the caller must not expect a close.
@@ -41,6 +67,8 @@ inline bool begin(const std::string& name) {
         ++detail::refused();
         return false;
     }
+    if (detail::native_wrapper_depth() > 0)
+        ++detail::begun_inside_native();
     PULP_TRACE_BEGIN_DYNAMIC("js", name);
     ++detail::depth();
     return true;
@@ -78,6 +106,12 @@ inline int force_close_open_scopes(const char* context) {
 
 /// Spans open on this thread right now.
 inline int open_depth() { return detail::depth(); }
+
+/// Opens that happened inside a wrapped native-bridge call. Any non-zero value
+/// means script span durations in the trace cannot be trusted.
+inline long long begun_inside_native_count() {
+    return detail::begun_inside_native();
+}
 /// Spans force-closed at a dispatch boundary since process start.
 inline long long force_closed_count() { return detail::force_closed(); }
 /// __traceEnd__ calls that had nothing to close.
