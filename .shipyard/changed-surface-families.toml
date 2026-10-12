@@ -293,46 +293,6 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9ef1a17e196d"
-paths = ["tools/scripts/archive_symbol_closure_check.py"]
-tests = [
-  "archive-symbol-closure-selftest",
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "pulp-state-symbol-closure",
-  "reuse-policy-replay-selftest",
-]
-build_targets = [
-  "pulp-audio",
-  "pulp-cli",
-  "pulp-content",
-  "pulp-events",
-  "pulp-midi",
-  "pulp-runtime",
-  "pulp-sample-bank-manifest",
-  "pulp-state",
-]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
 name = "script-readers-fb79b32bc3a1"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
@@ -5892,42 +5852,6 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a8f036749a1f"
-paths = ["tools/scripts/view_audio_symbol_floor.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "pulp-view-audio-symbol-floor",
-  "reuse-policy-replay-selftest",
-]
-build_targets = [
-  "pulp-cli",
-  "pulp-design-import",
-  "pulp-view-audio",
-  "pulp-view-core",
-  "pulp-view-script",
-]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
 name = "script-readers-49ec3792108d"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
@@ -6063,7 +5987,6 @@ name = "script-surface-whole-tree"
 paths = [
   ".agents/skills/*/SKILL.md",
   "tools/scripts/action_pin_lint.py",
-  "tools/scripts/archive_symbol_closure_check.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -6504,7 +6427,6 @@ paths = [
   "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
-  "tools/scripts/view_audio_symbol_floor.py",
   "tools/scripts/web_timeline_source_closure_check.py",
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",
@@ -6608,7 +6530,6 @@ name = "script-surface-environment-bound"
 paths = [
   ".agents/skills/*/SKILL.md",
   "tools/scripts/action_pin_lint.py",
-  "tools/scripts/archive_symbol_closure_check.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -7049,7 +6970,6 @@ paths = [
   "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
-  "tools/scripts/view_audio_symbol_floor.py",
   "tools/scripts/web_timeline_source_closure_check.py",
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",
