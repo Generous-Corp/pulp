@@ -7435,3 +7435,5 @@ all of those fetches a shared 300 s budget and treats a fetch that runs past it 
 an unfetchable ref (a WARN, then its fail-closed ancestry checks decide). The step
 also carries `timeout-minutes: 10`. Before this, a stalled fetch held the required
 `macos` gate for 43 minutes with no output and no build.
+
+<!-- same-base keyed reuse canary probe -->
