@@ -556,29 +556,37 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
     file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    add_test(NAME pulp.vellum-closure-boundary
-        COMMAND "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
-            manifest
-            --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
-            --build-dir "${CMAKE_BINARY_DIR}"
-            --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
-            --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
-    set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
-        LABELS "pr")
-    add_test(NAME pulp.vellum-closure-gate
-        COMMAND "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
-            gate
-            --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
-            --allowlist "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_allowlist.json"
-            --generate
-            --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
-            --build-dir "${CMAKE_BINARY_DIR}"
-            --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
-    set_tests_properties(pulp.vellum-closure-gate PROPERTIES
-        DEPENDS pulp.vellum-closure-boundary
-        LABELS "pr")
+    # The D3 manifest describes the GPU-backed Vellum extraction graph. Keep
+    # its positive graph receipt/gate on GPU-enabled configurations: the
+    # sanitizer and other CPU-only lanes intentionally omit those targets, so
+    # reporting them as missing would turn an out-of-scope graph into a false
+    # failure. The policy and negative controls below remain enabled for every
+    # desktop test configuration.
+    if(PULP_ENABLE_GPU)
+        add_test(NAME pulp.vellum-closure-boundary
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                manifest
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
+        set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-gate
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                gate
+                --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+                --allowlist "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_allowlist.json"
+                --generate
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
+        set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+    endif()
     add_test(NAME pulp.vellum-closure-gate-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
             --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json"
