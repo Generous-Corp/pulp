@@ -3154,6 +3154,46 @@ TEST_CASE("SignalGraph preserves pending MIDI egress by rejecting a live swap",
     }
 }
 
+TEST_CASE("SignalGraph ordinary failed live swap invalidates the published snapshot",
+          "[host][graph][live-swap][lifecycle]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto gain = graph.add_gain_node("gain");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 8));
+    REQUIRE(graph.set_node_gain(gain, 0.5f));
+
+    // Feedback changes the execution state carried by a compiled snapshot, so
+    // prepare_swap must reject the candidate. Ordinary refusals fail closed by
+    // invalidating the published snapshot; only the documented MIDI-output
+    // pending-egress refusal keeps the old snapshot readable.
+    graph.begin_swap_edit();
+    REQUIRE(graph.connect_feedback(gain, 0, gain, 0));
+    REQUIRE(graph.prepare_swap(48000.0, 8) == SignalGraph::SwapResult::NeedsEagerPrepare);
+
+    std::array<float, 8> input_samples{};
+    std::array<float, 8> output_samples{};
+    input_samples[0] = 1.0f;
+    const float* input_ptrs[1] = {input_samples.data()};
+    float* output_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> input_view(input_ptrs, 1, 8);
+    pulp::audio::BufferView<float> output_view(output_ptrs, 1, 8);
+
+    // No candidate was published, and the ordinary refusal invalidated the
+    // live snapshot. Until the caller performs an eager prepare, processing is
+    // therefore silent rather than accidentally rendering the feedback graph.
+    graph.process(output_view, input_view, 8);
+    for (const float sample : output_samples)
+        CHECK(sample == 0.0f);
+    std::fill(input_samples.begin(), input_samples.end(), 0.0f);
+    std::fill(output_samples.begin(), output_samples.end(), 0.0f);
+    graph.process(output_view, input_view, 8);
+    for (const float sample : output_samples)
+        CHECK(sample == 0.0f);
+}
+
 TEST_CASE("SignalGraph MIDI egress queue retains earliest blocks on overflow",
           "[host][graph][midi][mailbox][egress][overflow]") {
     for (const int mode : {0, 1, 2}) {
