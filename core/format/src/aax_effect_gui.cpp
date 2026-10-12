@@ -238,13 +238,13 @@ private:
         // Keep this to one synchronous publication: the old repeated timer
         // loop caused host re-entrancy/crashes and is deliberately gone.
         if (auto* view_container = GetViewContainer()) {
-            // The Pulp child remains in logical points, but AAX's macOS
-            // container transaction uses backing pixels. Keep this initial
-            // publication in the same coordinate space as GetViewSize(), the
-            // resize callback, and the deferred reconciliation below.
-            AAX_Point initial_size(
-                static_cast<float>(aax_host_dimension(plan.height, aax_scale_)),
-                static_cast<float>(aax_host_dimension(plan.width, aax_scale_)));
+            // Keep the initial transaction in the same logical coordinate
+            // space as GetViewSize().  The native NSView applies its Retina
+            // backing scale when it is composited; applying that scale here
+            // makes the Pro Tools outer frame larger than the child and is
+            // the exact state that only a later manual resize repairs.
+            AAX_Point initial_size(static_cast<float>(plan.height),
+                                   static_cast<float>(plan.width));
             if (view_container->SetViewSize(initial_size) != AAX_SUCCESS) {
                 runtime::log_error("AAX editor: initial SetViewSize rejected ({}x{})",
                                    plan.width, plan.height);
