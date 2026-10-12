@@ -241,6 +241,53 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
   `PluginViewHost` falls back to the no-op stub factory, `create()` returns
   null, and the plugin loads with no editor.
 
+### Pro Tools acceptance learnings (Spectr, 2026-10)
+
+Hard-won on the first real AAX editor; each one cost hours and none is
+visible from validators or screenshots alone.
+
+- **Pro Tools scans the plug-in folder recursively.** A mis-staged package once
+  installed a second bundle under `Plug-Ins/Library/Application Support/…`,
+  and Pro Tools kept loading that stale copy while every later install
+  replaced the top-level one — a full day of "no source change has any
+  effect". Before judging a host run, `find` the plug-in tree with no depth
+  limit, and prove the loaded binary with a string that exists only in the
+  new build (`strings … | grep -c`, positive AND negative control).
+- **The outer frame can lie about who chose it.** A screenshot cannot say
+  whether a wrong window came from the plug-in's answer or from the host;
+  only the stderr receipt (`GetViewSize`/`SetViewSize` with results, native
+  parent/child/window frames at attach and later) can. Pro Tools hands over a
+  0x0 parent and sizes it from the plug-in's transaction, synchronously.
+- **A flexible autoresizing mask against that 0x0 parent doubles the child.**
+  AppKit applies the parent's size delta: a 990x645 child becomes 1980x1290
+  when the parent reaches 990x645, and the resize callback then publishes the
+  doubled frame. Freeze tracking around the transaction, place the child
+  top-left, and never echo a frame the host already has.
+- **GPU audio is a build option, not a runtime discovery.** Spectr's Mixing
+  renderer switches to the GPU only when the product was configured with
+  `SPECTR_EXPERIMENTAL_SHARED_RENDERER=ON` (which links `Pulp::gpu-audio`);
+  an AAX built without it shows the toggle but `gpu_processing_available()`
+  is false. Mirror the flags of the AU/VST3 build that "works".
+- **`AAX_EUpdateSource` cannot tell automation playback from a GUI edit.**
+  Both reach `UpdateParameterNormalizedValue` as Unspecified; Parameter marks
+  a re-entrant write and Chunk a preset load. Prove playback by value updates
+  arriving with no `TouchParameter`/`ReleaseParameter` around them (the
+  adapter logs both).
+- **Two indicators on a modulated knob are the design, not a bug.** The
+  violet needle and arc sit at the value playing; the short white tick is
+  the base the user set (or host automation plays). Check the product's
+  modulation doc before "fixing" a renderer difference that is not one.
+- **The rounded window corner on macOS 26+ masks a flush resize grip.**
+  Keep the grip's hit box flush but inset its ink by ~6pt. Where the grip
+  lives today: Pro Tools draws no resize affordance of its own (like AU v2),
+  so the product opts in per format — Spectr's `aax_entry.cpp` calls
+  `set_editor_owns_resize_grip(true)` and its `EditorResizeGrip` (a
+  `pulp::view::ResizableCorner` subclass in `src/ui/native_editor.cpp`)
+  resolves the drag through `Processor::request_editor_resize`, which the AAX
+  shell turns into `SetViewSize`. SDK follow-up: move that grip into Pulp so
+  every AAX/AU v2 editor gets it without product code — the shell already
+  knows the format has no host grip.
+
 ### macOS host acceptance and poka-yoke
 
 The SDK-free tests and AAX validator do not prove that Pro Tools can create the

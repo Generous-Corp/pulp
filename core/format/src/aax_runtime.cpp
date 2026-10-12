@@ -762,8 +762,29 @@ public:
             AAX_CEffectParameters::UpdateParameterNormalizedValue(parameter_id, value, source);
         if (result == AAX_SUCCESS) {
             push_to_editor_store(parameter_id, value);
+            log_host_value_update(parameter_id, value, source);
         }
         return result;
+    }
+
+    /// Host receipt for automation: which parameter the host wrote, with what
+    /// value, and from where. AAX_eUpdateSource does not separate a playing
+    /// automation lane from a GUI or control-surface edit (both arrive as
+    /// Unspecified; Parameter marks a re-entrant write, Chunk a preset load),
+    /// so playback is proven by value updates that arrive with no
+    /// touch/release around them. Dense after the first writes so a lane
+    /// cannot flood the log.
+    void log_host_value_update(AAX_CParamID parameter_id, double value,
+                               AAX_EUpdateSource source) {
+        constexpr uint32_t kDenseWrites = 64;
+        constexpr uint32_t kSparseEvery = 64;
+        const auto index = static_cast<std::size_t>(source) < host_update_counts_.size()
+            ? static_cast<std::size_t>(source) : host_update_counts_.size() - 1;
+        const uint32_t n = ++host_update_counts_[index];
+        if (n > kDenseWrites && (n % kSparseEvery) != 0) return;
+        runtime::log_info("AAX host: value update #{} {}={:.4f} source={}", n,
+                          parameter_id ? parameter_id : "?", value,
+                          static_cast<int>(source));
     }
 
     AAX_Result GenerateCoefficients() override {
@@ -942,8 +963,14 @@ private:
         // every edit lands as an isolated point instead of a stroke.
         model->gestures = std::make_unique<GestureRouter>(
             definition_,
-            [this](const char* aax_id) { TouchParameter(aax_id); },
-            [this](const char* aax_id) { ReleaseParameter(aax_id); });
+            [this](const char* aax_id) {
+                const auto result = TouchParameter(aax_id);
+                runtime::log_info("AAX host: touch {} -> {}", aax_id, static_cast<int32_t>(result));
+            },
+            [this](const char* aax_id) {
+                const auto result = ReleaseParameter(aax_id);
+                runtime::log_info("AAX host: release {} -> {}", aax_id, static_cast<int32_t>(result));
+            });
         model->store->set_gesture_callbacks(
             [this](state::ParamID id) {
                 if (editor_) editor_->gestures->begin(id);
@@ -1004,6 +1031,7 @@ private:
     std::unique_ptr<EditorBinding> editor_;
     bool editor_init_failed_ = false;
     InstanceState* algorithm_ = nullptr;        ///< under binding_mutex()
+    std::array<uint32_t, 8> host_update_counts_{}; ///< per AAX_EUpdateSource
     std::function<void()> editor_invalidation_; ///< EditorHost hook
 
     friend void on_algorithm_instance_destroyed(EffectParameters&, InstanceState&);
