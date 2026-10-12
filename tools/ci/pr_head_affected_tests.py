@@ -404,7 +404,8 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                  label_exclude: str, junit_dir: Path, chunk: int) -> dict:
     """Run ``tests`` in batches until the budget is spent."""
     start = time.monotonic()
-    results = {"passed": [], "failed": [], "skipped": [], "excluded_or_absent": []}
+    results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+               "excluded_or_absent": []}
     for index in range(0, len(tests), chunk):
         batch = tests[index:index + chunk]
         if time.monotonic() - start >= budget:
@@ -427,7 +428,10 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
             elif state == "run":
                 results["passed"].append(test)
             elif state == "notrun":
-                results["skipped"].append(test)
+                # CTest's SKIP_RETURN_CODE is a self-reported notrun, not a
+                # budget omission.  It is useful evidence but must not make
+                # the PR-head step red.
+                results["notrun"].append(test)
             else:
                 results["excluded_or_absent"].append(test)
     results["seconds"] = round(time.monotonic() - start, 1)
@@ -566,10 +570,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(plan, indent=2))
         return 0
     if plan.get("selection_unknown"):
+        # Keep running selections established by declared inputs, registrations,
+        # and the build projection. Only the unknown portion is deferred to the
+        # merge queue; an unknown script must not discard known coverage.
         print("::warning title=pr-head-affected-tests::selection unknown, deferred to merge queue")
-        return 0
 
-    results = {"passed": [], "failed": [], "skipped": [], "excluded_or_absent": [],
+    results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+               "excluded_or_absent": [],
                "seconds": 0.0}
     if plan["tests"]:
         junit_dir = args.junit_dir or Path(tempfile.mkdtemp(prefix="pr-head-affected-"))
@@ -600,6 +607,7 @@ def main(argv: list[str] | None = None) -> int:
         "selected": len(plan["tests"]), "passed": len(results["passed"]),
         "failed": len(results["failed"]), "pre_existing_on_base": len(pre_existing),
         "skipped_for_budget": len(results["skipped"]),
+        "notrun": len(results["notrun"]),
         "excluded_or_absent": len(results["excluded_or_absent"]),
         "minutes": round(results["seconds"] / 60, 2), "budget_minutes": args.budget_secs / 60,
     }
@@ -609,6 +617,11 @@ def main(argv: list[str] | None = None) -> int:
         more = len(results["skipped"]) - 40
         print(f"pr-head-affected-tests: SKIPPED (budget spent, not run here; the merge group "
               f"runs them): {shown}{f' and {more} more' if more > 0 else ''}")
+    if results["notrun"]:
+        shown = ", ".join(results["notrun"][:40])
+        more = len(results["notrun"]) - 40
+        print(f"pr-head-affected-tests: NOTRUN (self-skipped by ctest; not a budget omission): "
+              f"{shown}{f' and {more} more' if more > 0 else ''}")
     for test in results["failed"]:
         print(f"::error title=pr-head-affected-tests::{test} failed on this pull request head; "
               "it is a test this diff reaches, and it would fail the merge group too")

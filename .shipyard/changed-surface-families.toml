@@ -6662,6 +6662,7 @@ tests = [
   "reuse-record-selftest",
   "runner-topology-selftest",
   "runner-topology-static-selftest",
+  "sample-region-compat-baseline",
   "sample-region-compat-baseline-selftest",
   "script-argv-selftest",
   "sequencer-control-skill-coverage",

@@ -336,15 +336,15 @@ class BudgetTests(unittest.TestCase):
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
         # A ctest stand-in: reads the listed tests and writes a JUnit file in
-        # which a test named `bad-*` fails and the rest pass.
+        # which a test named `bad-*` fails, `skip-*` self-skips, and the rest pass.
         (self.bin / "ctest").write_text(
             "#!/usr/bin/env python3\n"
             "import sys, time\n"
             "a = sys.argv\n"
             "names = open(a[a.index('--tests-from-file') + 1]).read().split()\n"
             "time.sleep(float(__import__('os').environ.get('FAKE_CTEST_SLEEP', '0')))\n"
-            "cases = ''.join(f'<testcase name=\"{n}\" status=\"{\"fail\" if n.startswith(\"bad\") else \"run\"}\">'\n"
-            "                + ('<failure/>' if n.startswith('bad') else '') + '</testcase>' for n in names)\n"
+            "cases = ''.join(f'<testcase name=\"{n}\" status=\"{\"fail\" if n.startswith(\"bad\") else \"notrun\" if n.startswith(\"skip\") else \"run\"}\">'\n"
+            "                + ('<failure/>' if n.startswith('bad') else '<skipped/>' if n.startswith('skip') else '') + '</testcase>' for n in names)\n"
             "open(a[a.index('--output-junit') + 1], 'w').write(f'<testsuite>{cases}</testsuite>')\n")
         (self.bin / "ctest").chmod(0o755)
         self.env = mock.patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"})
@@ -365,6 +365,11 @@ class BudgetTests(unittest.TestCase):
             results = step.run_budgeted(self.tmp, ["a", "b", "c", "d"], 0.2, 1, "", self.tmp, 2)
         self.assertEqual(sorted(results["passed"]), ["a", "b"])
         self.assertEqual(results["skipped"], ["c", "d"])
+
+    def test_ctest_self_skips_are_reported_notrun_not_budget_skipped(self) -> None:
+        results = step.run_budgeted(self.tmp, ["skip-self"], 60, 1, "", self.tmp, 1)
+        self.assertEqual(results["notrun"], ["skip-self"])
+        self.assertEqual(results["skipped"], [])
 
 
 class WorkflowWiringTests(unittest.TestCase):
@@ -508,10 +513,12 @@ class DiffScopedRegistrationTests(unittest.TestCase):
 class ExitCodeTests(unittest.TestCase):
     """A red main does not fail the pull request; its own failure does."""
 
-    def _main(self, verdicts: dict, *, skipped: list[str] | None = None) -> int:
+    def _main(self, verdicts: dict, *, skipped: list[str] | None = None,
+              notrun: list[str] | None = None) -> int:
         plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
                 "tests": ["a", "b"]}
         results = {"passed": [], "failed": list(verdicts), "skipped": skipped or [],
+                   "notrun": notrun or [],
                    "excluded_or_absent": [], "seconds": 1.0}
         with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
                 mock.patch.object(step, "inventory_tests", return_value={}), \
@@ -530,6 +537,9 @@ class ExitCodeTests(unittest.TestCase):
     def test_budget_skipped_selection_fails_the_real_step(self) -> None:
         self.assertEqual(self._main({}, skipped=["b"]), 1)
 
+    def test_ctest_self_skip_does_not_fail_the_real_step(self) -> None:
+        self.assertEqual(self._main({}, notrun=["b"]), 0)
+
     def test_unknown_selection_defers_neutrally_to_the_merge_queue(self) -> None:
         plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
                 "tests": [], "selection_unknown": True}
@@ -538,6 +548,19 @@ class ExitCodeTests(unittest.TestCase):
                 mock.patch.object(step, "select", return_value=plan), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 0)
+
+    def test_unknown_selection_keeps_known_tests(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
+                "tests": ["known"], "selection_unknown": True}
+        results = {"passed": ["known"], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": [], "seconds": 0.1}
+        with mock.patch.object(step, "diff_paths", return_value=["tools/scripts/new.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=plan), \
+                mock.patch.object(step, "run_budgeted", return_value=results) as run, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 0)
+        run.assert_called_once()
 
 
 if __name__ == "__main__":

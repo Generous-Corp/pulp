@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the selector inputs for the sample-region compatibility probe.
-
-The source of truth is the compiler's ``.d`` files, not a hand-maintained
-header list.  Configure and build ``test/sample_region_compat`` first, then
-run this script with that build directory.
-"""
+"""Generate sample-region compatibility selector inputs from a real build."""
 
 from __future__ import annotations
 
 import argparse
+import re
 import shlex
 from pathlib import Path
 
@@ -16,6 +12,15 @@ from pathlib import Path
 START = "COMPAT_INPUTS = ("
 END = "COMPAT_FIXTURES"
 TARGETS = {"compat_runner.cpp.o.d", "old_installed_sdk_consumer.cpp.o.d"}
+SOURCE_RE = re.compile(r'"([^"\n]+\.(?:c|cc|cpp|cxx|mm|m|hpp|h))"')
+ARCHIVE_RE = re.compile(r"(?:^|/)(?:lib)?([^/]+)\.a$")
+
+
+def repo_relative(repo: Path, raw: str) -> str | None:
+    try:
+        return Path(raw).resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return None
 
 
 def dependency_paths(repo: Path, build: Path) -> list[str]:
@@ -25,19 +30,34 @@ def dependency_paths(repo: Path, build: Path) -> list[str]:
             continue
         words = shlex.split(depfile.read_text(encoding="utf-8").replace("\\\n", " "))
         for raw in words[1:]:
-            candidate = Path(raw)
-            try:
-                relative = candidate.resolve().relative_to(repo.resolve()).as_posix()
-            except ValueError:
-                continue
-            if not relative.startswith("build"):
+            relative = repo_relative(repo, raw)
+            if relative and not relative.startswith("build"):
                 paths.add(relative)
-    paths.update({
-        "test/sample_region_compat/CMakeLists.txt",
-        "core/host/src/signal_graph.cpp",
-        "test/fixtures/sample-region-compat",
-        "test/sample_region_compat/old_graph_serializer_v2.hpp",
-    })
+
+    # The real link commands identify the archives in the compatibility
+    # targets. Their CMake DependInfo files contain the complete source lists
+    # for those linked targets, including pulp-host and native-components.
+    for target in ("sample-region-compat-runner", "sample-region-old-sdk-consumer"):
+        link = next(build.rglob(f"CMakeFiles/{target}.dir/link.txt"), None)
+        if not link:
+            continue
+        for raw in shlex.split(link.read_text(encoding="utf-8")):
+            match = ARCHIVE_RE.search(raw)
+            if not match:
+                continue
+            for info in build.rglob(f"CMakeFiles/{match.group(1)}.dir/DependInfo.cmake"):
+                for source in SOURCE_RE.findall(info.read_text(encoding="utf-8")):
+                    relative = repo_relative(repo, source)
+                    if relative and not relative.startswith("build"):
+                        paths.add(relative)
+
+    # The installed-SDK consumer's source tree is itself a target input. This
+    # is derived from the target directory, not a hand-maintained list.
+    target_source = repo / "test" / "sample_region_compat"
+    if target_source.is_dir():
+        paths.update(p.relative_to(repo).as_posix() for p in target_source.rglob("*") if p.is_file())
+    paths.update({"test/sample_region_compat/CMakeLists.txt",
+                  "test/fixtures/sample-region-compat"})
     return sorted(paths)
 
 
