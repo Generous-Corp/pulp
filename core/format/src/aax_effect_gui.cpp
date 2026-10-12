@@ -19,6 +19,7 @@
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 
@@ -411,6 +412,7 @@ private:
     /// the next host frame then advances the native editor's FrameClock and
     /// paints the current modulation state.
     AAX_Result TimerWakeup() override {
+        PULP_TRACE_SCOPE_NAMED("render", "aax_timer_wakeup");
         if (!bridge_)
             return AAX_SUCCESS;
         if (idle_pump_)

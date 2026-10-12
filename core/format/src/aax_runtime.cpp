@@ -5,6 +5,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/runtime/trace_session.hpp>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/format/aax_midi_packets.hpp>
@@ -760,6 +761,10 @@ public:
                                               double value,
                                               AAX_EUpdateSource source) override
     {
+        // One span per host write, with the source, so a trace shows the
+        // cadence Pro Tools delivers automation at against the editor's frames.
+        PULP_TRACE_SCOPE_NAMED_ARGS("state", "aax_host_param_update", "source",
+                                    static_cast<int64_t>(source));
         const auto result =
             AAX_CEffectParameters::UpdateParameterNormalizedValue(parameter_id, value, source);
         if (result == AAX_SUCCESS) {
@@ -790,6 +795,7 @@ public:
     }
 
     AAX_Result GenerateCoefficients() override {
+        PULP_TRACE_SCOPE_NAMED("state", "aax_generate_coefficients");
         auto* controller = Controller();
         if (!controller) {
             return AAX_SUCCESS;
