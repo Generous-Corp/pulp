@@ -7051,6 +7051,7 @@
     "tools/import-design/browser_capture/text_diagnostics.test.mjs",
     "tools/import-design/browser_capture/tokens.test.mjs",
     "tools/import-design/browser_capture/vendor_payload.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_browser_document_schema.test.mjs",
     "tools/import-design/jsx-runtime/materialized_css_variables.test.mjs",
     "tools/import-design/jsx-runtime/materialized_dynamic_layout.test.mjs",
     "tools/import-design/jsx-runtime/materialized_font_bindings.test.mjs",
