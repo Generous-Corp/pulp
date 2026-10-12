@@ -586,6 +586,22 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
         set_tests_properties(pulp.vellum-closure-gate PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
+    else()
+        # Register the gate as an explicit skip so a CPU-only configuration
+        # reports it as not run rather than dropping it silently.
+        message(STATUS "pulp.vellum-closure-boundary/gate: skipped, PULP_ENABLE_GPU is OFF")
+        add_test(NAME pulp.vellum-closure-boundary
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum closure boundary needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-gate
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum closure gate needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
     endif()
     add_test(NAME pulp.vellum-closure-gate-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
