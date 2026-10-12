@@ -142,6 +142,9 @@ doctor/remediation output, is a build emitter and must invoke
 `tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
 directory explicit, but do not include `-j`, `--parallel`, or a host-core
 probe: the governor owns parallelism, leases, and build-directory locking.
+The local sanitizer and coverage helper scripts follow the same rule: pass a
+requested cap through `PULP_BUILD_JOBS` and leave worker flags out of the
+`cmake --build` argv.
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
 and run only what the working diff affects (`pulp affected`, the build-target
