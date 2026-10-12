@@ -309,8 +309,13 @@ class ObjectDiscoveryTests(unittest.TestCase):
     def test_coverage_build_output_does_not_fill_runner_logs(self) -> None:
         script = SCRIPT.read_text()
         self.assertIn(
-            'cmake --build "${BUILD_DIR}" -j"${JOBS}" > /dev/null 2>"${BUILD_LOG}"',
+            'cmake --build "${BUILD_DIR}" > /dev/null 2>"${BUILD_LOG}"',
             script,
+        )
+        self.assertNotIn(
+            'cmake --build "${BUILD_DIR}" -j"${JOBS}"',
+            script,
+            "the governed wrapper owns build parallelism",
         )
         self.assertIn('tail -n 200 "${BUILD_LOG}"', script)
 

@@ -333,7 +333,8 @@ fi
 ran=$((ran + 1))
 if [ "$(grep -c 'bash "\$REPO/tools/ci/governed-build.sh"' "$FM/package.sh")" -eq 2 ] && \
    grep -q 'PULP_BUILD_JOBS="\${PULP_PACKAGE_JOBS:-8}"' "$FM/package.sh" && \
-   ! grep -q -- '--parallel' "$FM/package.sh"; then
+   ! grep -q -- '--parallel' "$FM/package.sh" && \
+   ! grep -Eq 'cmake --build.*(-j|--parallel)' "$FM/package.sh"; then
     ok "package rebuild uses the governed build share"
 else
     fail "package rebuild bypasses governed build sharing"

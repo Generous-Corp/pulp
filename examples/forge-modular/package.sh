@@ -624,7 +624,7 @@ check_has_binary() {
         echo "WRONG SHELL: $binary does not contain \"$SHELL_MARKER\"." >&2
         echo "  This is the old examples/forge-modular shell, not the Forge one." >&2
         echo "  Build the Forge worktree and point --build-dir at it:" >&2
-        echo "    forge-seam/populate.sh && cmake --build /tmp/forge-cur/build -j8" >&2
+        echo "    forge-seam/populate.sh && bash \"\$REPO/tools/ci/governed-build.sh\" cmake --build /tmp/forge-cur/build" >&2
         echo "    package.sh --build-dir /tmp/forge-cur/build …" >&2
         return 1
     fi
