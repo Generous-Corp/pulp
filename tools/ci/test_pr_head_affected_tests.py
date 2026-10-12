@@ -33,6 +33,8 @@ NAMES = {
     "unit-a": set(), "unit-b": set(), "fast-one": {"pr-fast"},
     "cmake-install-layout": set(), "cmake-sdk-smoke": set(),
     "wide-non-native-selftest": set(), "other": set(),
+    "sample-region-compat-baseline": set(),
+    "no-editor-plugin-link-floor-artifacts": set(),
     "pulp-gpu-host-mapped-pointer-probe": set(), "pulp-gpu-audio-provider-identity": set(),
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
     "cmake-ios-auv3-control-shipping": set(),
@@ -106,6 +108,31 @@ class SelectionTests(unittest.TestCase):
         plan = self.plan(["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],
                          selection("all", []))
         self.assertIn("no-editor-link-floor", plan["families"])
+
+    def test_p0_2_replay_set_selects_each_merge_group_only_check(self) -> None:
+        cases = {
+            # #10053(a): the scanner is in the fixture tree, so the family rule
+            # reaches the platform link-floor artifact probe.
+            "10053a": (["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],
+                        "no-editor-plugin-link-floor-artifacts"),
+            # #8926 and #9015: the wide tier walks every tools/scripts file;
+            # its directory declaration is generated into the input manifest.
+            "8926": (["tools/scripts/test_sdk_development_provenance.py"],
+                      "wide-non-native-selftest"),
+            "9015": (["tools/scripts/gate_python_imports_check.py"],
+                      "wide-non-native-selftest"),
+            # #9177: the compatibility baseline declares its fixture directory.
+            "9177": (["test/fixtures/sample-region-compat/expected/abi.txt"],
+                      "sample-region-compat-baseline"),
+        }
+        for case, (paths, expected) in cases.items():
+            with self.subTest(case=case):
+                declared = step.script_input_tests(paths, REPO)
+                families = step.family_tests(paths, sorted(NAMES))
+                selected = set(declared)
+                selected.update(name for names in families.values() for name in names)
+                self.assertIn(expected, selected,
+                              f"replay {case} did not select {expected}: {selected}")
 
     def test_script_tests_are_added_even_for_a_docs_only_diff(self) -> None:
         # A census test parses docs/status: the declared inputs apply where the
