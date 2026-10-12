@@ -9916,6 +9916,7 @@
    "entry": "tools/scripts/vellum_inheritance_ledger_check.py",
    "inputs": [
     ".github/vellum-change-events",
+    ".github/vellum-expansion-watch-events",
     "tools/scripts/vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"
@@ -9923,6 +9924,7 @@
   "vellum-inheritance-ledger-negative-contract": {
    "entry": "tools/scripts/test_vellum_inheritance_ledger_check.py",
    "inputs": [
+    "test/cmake/quality_tests.cmake",
     "tools/scripts/test_vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"

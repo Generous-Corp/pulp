@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261004-design-import-next-wave-watch",
+  "slices": [
+    "chromium-authoring-frontend"
+  ],
+  "vellum_obligation": "Carry the browser fidelity and importer safety improvements into the Vellum design-import implementation when this slice flips.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261004-design-import-next-wave-watch.json",
+    "Pulp commit ffec658aa4bba27f550e017f3d67979113d120e5 adds the event"
+  ]
+}

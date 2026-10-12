@@ -393,6 +393,17 @@ class FreezeUnitTests(unittest.TestCase):
                 event, ".github/vellum-change-events/20260722-design-fix.json"
             )
 
+    def test_vellum_inherits_is_an_optional_boolean(self):
+        name = ".github/vellum-change-events/20260722-design-fix.json"
+        for flag in (True, False):
+            event = change_event()
+            event["vellum_inherits"] = flag
+            freeze.validate_event(event, name)
+        event = change_event()
+        event["vellum_inherits"] = 1
+        with self.assertRaisesRegex(freeze.FreezeError, "vellum_inherits must be true or false"):
+            freeze.validate_event(event, name)
+
     def test_nested_event_path_cannot_duplicate_a_durable_event_id(self):
         with self.assertRaisesRegex(freeze.FreezeError, "direct .json child"):
             freeze.validate_event(
