@@ -9864,6 +9864,21 @@
    ],
    "kind": "python"
   },
+  "vellum-inheritance-ledger": {
+   "entry": "tools/scripts/vellum_inheritance_ledger_check.py",
+   "inputs": [
+    ".github/vellum-change-events",
+    "tools/scripts/vellum_inheritance_ledger_check.py"
+   ],
+   "kind": "python"
+  },
+  "vellum-inheritance-ledger-negative-contract": {
+   "entry": "tools/scripts/test_vellum_inheritance_ledger_check.py",
+   "inputs": [
+    "tools/scripts/test_vellum_inheritance_ledger_check.py"
+   ],
+   "kind": "python"
+  },
   "vellum-trusted-merge-selftest": {
    "entry": "tools/scripts/test_vellum_trusted_merge.py",
    "inputs": [
