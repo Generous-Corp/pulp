@@ -28,8 +28,14 @@ set(_families
 include("${CMAKE_CURRENT_LIST_DIR}/no_editor_runtime_deps.cmake")
 if(APPLE)
     pulp_no_editor_runtime_deps(_runtime_deps apple)
+    string(APPEND _runtime_deps "|/Metal\\.framework/|/MetalKit\\.framework/|/QuartzCore\\.framework/")
 else()
     pulp_no_editor_runtime_deps(_runtime_deps elf)
+    # Static Skia/Dawn builds on Linux can retain the X11 windowing
+    # dependency without loading a separate Vulkan/GL/EGL runtime.  Keep the
+    # positive control meaningful on those builds while the symbol-family
+    # checks continue to guard the NO_EDITOR artifacts.
+    string(APPEND _runtime_deps "|libvulkan|libGL[.X]|libEGL|libX11")
 endif()
 
 function(_scan artifact out_deps out_symbols)

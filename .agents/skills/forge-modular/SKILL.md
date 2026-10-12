@@ -2136,6 +2136,11 @@ signed/notarized installer primitive, and verifies the expanded PKG contains no
 sibling Forge products. `forge-seam/patches/BASE` remains historical seam
 reconstruction input and is never product provenance for this release path.
 
+The package script's verification rebuild is a shared-host build emitter. Keep
+it behind `tools/ci/governed-build.sh cmake --build` and pass the requested
+package job cap through `PULP_BUILD_JOBS`; do not add a raw `--parallel` build
+to the packaging path.
+
 ## A module's WIDTH is knowable from its artwork, and from nowhere else
 
 Four things could say how wide a third-party module is and, for a plugin

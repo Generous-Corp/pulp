@@ -44,6 +44,15 @@ if(TARGET pulp-render-provider-floor-wgpu-control)
     set(_native_link_floor_wgpu_control_target pulp-render-provider-floor-wgpu-control)
 endif()
 
+# Skia normally supplies Dawn, but the supported native fallback is the
+# imported wgpu-native provider when the Skia bundle has no Dawn archive.
+# Pass the selected provider to the artifact scanner so it checks the actual
+# configuration rather than assuming that every Skia build contains Dawn.
+set(_native_link_floor_provider_args -DEXPECT_DAWN=OFF)
+if(PULP_HAS_SKIA AND EXISTS "${DAWN_LIBRARY}")
+    set(_native_link_floor_provider_args -DEXPECT_DAWN=ON)
+endif()
+
 # Target-graph contract: mutating NATIVE_UI back to the legacy view umbrella,
 # or moving WebKit onto a native dependency, fails at configure time before
 # dead stripping can conceal the regression in the final binary.
@@ -78,6 +87,7 @@ add_custom_target(pulp-native-link-floor-proof
         -DWEBKIT_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-webkit-control>
         -DJSC_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-jsc-control>
         -DEXPECT_JSC=${PULP_HAS_JSC_ACTUAL}
+        ${_native_link_floor_provider_args}
         ${_native_link_floor_wgpu_control_args}
         -P "${_native_link_floor_scan}"
     DEPENDS
@@ -95,6 +105,7 @@ add_test(NAME native-ui-link-floor-artifacts
         -DWEBKIT_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-webkit-control>
         -DJSC_POSITIVE_CONTROL=$<TARGET_FILE:pulp-native-link-floor-jsc-control>
         -DEXPECT_JSC=${PULP_HAS_JSC_ACTUAL}
+        ${_native_link_floor_provider_args}
         ${_native_link_floor_wgpu_control_args}
         -P "${_native_link_floor_scan}")
 set_tests_properties(native-ui-link-floor-artifacts PROPERTIES
