@@ -6988,7 +6988,6 @@ tests = [
   "gpu-health-run-attestation",
   "process-deadline-selftest",
   "pulp-browser-capture-node-integration",
-  "pulp-browser-capture-node-unit",
   "pulp-browser-capture-process-lifecycle",
   "pulp-materialized-runtime-conformance",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
