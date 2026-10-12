@@ -52,7 +52,8 @@ void BridgeRegistrars::register_widget_value_basic_api(WidgetBridge& self) {
         auto* v = self.widget(id);
         if (auto* k = dynamic_cast<Knob*>(v)) k->set_render_style(style);
         else if (auto* f = dynamic_cast<Fader*>(v)) f->set_render_style(style);
-        else if (auto* m = dynamic_cast<Meter*>(v)) m->set_render_style(style);
+        else if (auto* m = dynamic_cast<LevelDisplay*>(v))
+            m->set_level_render_style(style);
         return choc::value::Value();
     });
 

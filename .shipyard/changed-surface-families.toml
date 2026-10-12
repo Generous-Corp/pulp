@@ -5852,6 +5852,36 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-e67cb9281580"
+paths = ["tools/scripts/view_audio_seam_debts.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "view-audio-seam-debts",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-49ec3792108d"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
@@ -6428,6 +6458,7 @@ paths = [
   "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
+  "tools/scripts/view_audio_seam_debts.py",
   "tools/scripts/web_timeline_source_closure_check.py",
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",
@@ -6971,6 +7002,7 @@ paths = [
   "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
+  "tools/scripts/view_audio_seam_debts.py",
   "tools/scripts/web_timeline_source_closure_check.py",
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",

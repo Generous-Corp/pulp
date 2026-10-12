@@ -23,6 +23,24 @@ times to be worth remembering.
 | Hand the built view to an external container (TabPanel, WindowHost) | Yes — call `ViewBridge::release_view()` |
 | Ship a paint-only overlay | No — the legacy standalone inspector runtime was removed; compose canonical control separately |
 
+### Audio displays are registered by editor creation, not by linking
+
+`Meter`, `WaveformView` and `SpectrumView` live in `pulp::view-audio`; view-core,
+the design importer and the script bridge reach them only through
+`make_data_display("pulp.level" | "pulp.series" | "pulp.bins")`, which returns
+nullptr until something calls `pulp::view::register_audio_widgets()`.
+`ViewBridge::open()` calls it on every editor creation and `StandaloneApp`
+calls it at construction, so a `create_view()` may import a meter or call
+`createMeter` freely. Anything that builds an editor tree WITHOUT going through
+ViewBridge (a custom host, a capture tool, a test that calls `create_view()`
+directly on an installed SDK) must call it first, or imported displays become
+placeholders with a `data-display-unavailable` diagnostic and the bridge's
+`createMeter`/`createWaveform`/`createSpectrum` throw a JS `Error`. The
+build-tree `INTERFACE_SOURCES` shim hides a missing call in-tree; it is not
+installed and does not cross a PRIVATE static-library link. The proofs live in
+`test/fixtures/data_display_editor/` (plug-in editor and hot reload, both with
+the registry cleared first) and `cmake-view-audio-sdk-consumer`.
+
 ### Native scripted UI is not a WebView
 
 When a materialized canvas is retained as the native paint and hit-test

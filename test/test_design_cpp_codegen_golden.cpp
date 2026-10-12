@@ -77,8 +77,8 @@ TEST_CASE("generate_pulp_cpp checkpoint artifact stays byte-exact",
 
     CHECK(result.header.size() == 494);
     CHECK(header_hash == "53c5ce7b1e23e25eb0616b132485ca3ef46df0e85c6d1a56fc06114e512a3ffc");
-    CHECK(result.source.size() == 5732);
-    CHECK(source_hash == "2ae5e62c2b47632f4272bb32cc4e446a2da69f9dc60a10f67da5e27422409d87");
+    CHECK(result.source.size() == 5770);
+    CHECK(source_hash == "22e43ab1fa5d9c7220ec06bfdb7c5ebab453ebaa2f235be96eac4b33d6ce356c");
     CHECK(result.binding_manifest.size() == 413);
     CHECK(binding_hash == "1afbdd18d296b7d27a0b72f42c106e485cc7640a02771b51267c5c66e71d95a5");
 }

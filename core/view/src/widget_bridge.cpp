@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/data_display.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include "widget_bridge/registrars.hpp"
@@ -388,6 +389,23 @@ function on(id, eventName, fn) {
         __ensureNativeRegistered__(id, 'contextmenu');
     }
 }
+
+// The level, series and bin display factories return a marker object, not a
+// thrown C++ exception, when no provider has registered the display: unwinding
+// C++ through the engine's frames leaks the objects it owns. The marker becomes
+// an ordinary JS Error here, so a script can catch it.
+(function() {
+    ['createMeter', 'createWaveform', 'createSpectrum'].forEach(function(name) {
+        var native = globalThis[name];
+        if (typeof native !== 'function') return;
+        globalThis[name] = function() {
+            var result = native.apply(null, arguments);
+            if (result && typeof result === 'object' && typeof result.pulpUnavailable === 'string')
+                throw new Error(result.pulpUnavailable);
+            return result;
+        };
+    });
+})();
 )";
 
 // Window event-listener shim installed after the web-compat-document.js prelude
@@ -1210,11 +1228,11 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
     } else if (tag == "checkbox") {
         w = std::make_unique<Checkbox>();
     } else if (tag == "spectrum") {
-        w = std::make_unique<SpectrumView>();
+        w = make_data_display("pulp.bins");
     } else if (tag == "waveform") {
-        w = std::make_unique<WaveformView>();
+        w = make_data_display("pulp.series");
     } else if (tag == "meter") {
-        w = std::make_unique<Meter>();
+        w = make_data_display("pulp.level");
     } else if (tag == "xypad") {
         w = std::make_unique<XYPad>();
     } else if (tag == "listbox") {
