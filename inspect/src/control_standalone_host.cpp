@@ -157,12 +157,16 @@ std::optional<ControlManifest> installed_manifest() {
     const auto executable = current_executable();
     if (executable.empty())
         return std::nullopt;
-    std::ifstream input(executable.string() + ".inspector-capabilities.json", std::ios::binary);
-    if (!input)
-        return std::nullopt;
-    const std::string bytes((std::istreambuf_iterator<char>(input)),
-                            std::istreambuf_iterator<char>());
-    return parse_control_manifest(bytes);
+    const auto sidecar = executable.filename().string() + ".inspector-capabilities.json";
+    for (const auto& directory : control_sidecar_directories(executable.parent_path())) {
+        std::ifstream input(directory / sidecar, std::ios::binary);
+        if (!input)
+            continue;
+        const std::string bytes((std::istreambuf_iterator<char>(input)),
+                                std::istreambuf_iterator<char>());
+        return parse_control_manifest(bytes);
+    }
+    return std::nullopt;
 }
 
 class MainThreadQueue {

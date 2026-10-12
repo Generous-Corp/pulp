@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 import unittest
+import json
+import tempfile
+from pathlib import Path
+from argparse import Namespace
 from vellum_closure import (
     external_input_violations,
     edge_key,
@@ -53,6 +57,28 @@ class ClosurePolicyTests(unittest.TestCase):
         entries = load_allowlist(__import__("pathlib").Path(__file__).with_name("vellum_closure_allowlist.json"))
         self.assertTrue(any(e["kind"] == "edge" and e["match"] == "pulp-design-import->pulp-view-audio" for e in entries))
         self.assertFalse(any(e["kind"] == "target" for e in entries))
+
+    def test_include_allowlist_is_edge_specific(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "core/platform/src/android/jni_motion.cpp"
+            source.parent.mkdir(parents=True)
+            source.write_text("#include <pulp/audio/secret.hpp>\n", encoding="utf-8")
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({
+                "source_root": str(root),
+                "files": ["core/platform/src/android/jni_motion.cpp"],
+                "targets": [],
+                "undefined_symbols": [],
+            }), encoding="utf-8")
+            args = Namespace(
+                manifest=[str(manifest)], allow=[], allow_include_path=[],
+                allow_include_edge=[("core/platform/src/android/jni_motion.cpp", "pulp/view/motion.hpp")],
+                allow_include_prefix=[], allow_root_prefix=[], report_only=False,
+                allowlist=None, generate=False, unit_manifest=None, target=None,
+                source_root=None, build_dir=None,
+            )
+            self.assertEqual(__import__("vellum_closure").cmd_gate(args), 1)
 
 
 if __name__ == "__main__":

@@ -87,6 +87,13 @@ are `nm`, `otool`, and `lipo`; Linux uses `nm` and `readelf`; Windows uses
 `dumpbin`. A missing native scanner blocks the artifact, so each platform lane
 must provide its native toolchain rather than silently claiming evidence.
 
+The sidecars sit beside the binary, except in a macOS bundle, where they go to
+`Contents/Resources` (`Versions/A/Resources` for a framework). Apple reserves
+`Contents/MacOS` for code, and a JSON file there makes an ordinary,
+non `--deep` signature such as `pulp ship sign` makes fail. Readers look in
+`Contents/Resources` first and still accept the old location beside the binary
+(`pulp::inspect::control_sidecar_directories()`).
+
 For an intentional profile, every declared capability and endpoint marker must
 be retained from the linked control implementations; the shipping helper emits
 only artifact identity and cannot make an empty target satisfy its declaration.
@@ -138,7 +145,8 @@ record `status: unavailable`, `proof: false`, and
 AAX proof, and a configured URL without its checksum fails closed.
 
 Directory and direct-file audits resolve artifact names only as safe basenames
-beside their sidecars. An exact-named direct sidecar is not sufficient by
+beside their sidecars (for a sidecar in a macOS bundle's `Contents/Resources`,
+in that bundle's `Contents/MacOS`). An exact-named direct sidecar is not sufficient by
 itself: its target or product identity must also match the artifact filename
 (including the supported `.exe` form). Absolute names, `..` traversal,
 identity mismatches, and symlinked artifacts or sidecars are rejected rather

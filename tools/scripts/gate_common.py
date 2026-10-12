@@ -83,26 +83,57 @@ def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | Non
 
     The actor is deliberately not authoritative: merge-group runs and
     maintainer re-runs use a different actor while retaining the commit
-    authorship that identifies the Dependabot update.
+    authorship that identifies the Dependabot update. A merge commit is
+    structural only when its tree exactly matches ``git merge-tree
+    --write-tree`` for its two parents, so an evil merge that rewrites an
+    action remains in the authored range and fails closed.
     """
     if not workflow_uses_only_diff(base, head):
         return False
-    authors = subprocess.run(
-        ["git", "log", "--format=%an%x00%ae", f"{base}..{head}"],
+    commits = subprocess.run(
+        ["git", "rev-list", "--parents", f"{base}..{head}"],
         capture_output=True, text=True, encoding="utf-8",
     )
-    if authors.returncode != 0:
-        return False
-    records = [line.split("\x00", 1) for line in authors.stdout.splitlines() if line]
-    if not records:
+    if commits.returncode != 0:
         return False
     dependabot_email = "49699333+dependabot[bot]@users.noreply.github.com"
-    return all(
-        len(record) == 2
-        and record[0] == "dependabot[bot]"
-        and record[1].lower() == dependabot_email
-        for record in records
-    )
+    records = [line.split() for line in commits.stdout.splitlines() if line]
+    if not records:
+        return False
+    for record in records:
+        commit = record[0]
+        if len(record) > 2:
+            if len(record) != 3:
+                return False
+            expected = subprocess.run(
+                ["git", "merge-tree", "--write-tree", record[1], record[2]],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            actual = subprocess.run(
+                ["git", "show", "-s", "--format=%T", commit],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            if expected.returncode != 0 or actual.returncode != 0:
+                return False
+            expected_lines = expected.stdout.splitlines()
+            expected_tree = expected_lines[0].strip() if expected_lines else ""
+            if expected_tree != actual.stdout.strip():
+                return False
+            continue
+        author = subprocess.run(
+            ["git", "show", "-s", "--format=%an%x00%ae", commit],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        if author.returncode != 0:
+            return False
+        fields = author.stdout.strip().split("\x00", 1)
+        if (
+            len(fields) != 2
+            or fields[0] != "dependabot[bot]"
+            or fields[1].lower() != dependabot_email
+        ):
+            return False
+    return True
 
 
 # ── Git helpers ─────────────────────────────────────────────────────────

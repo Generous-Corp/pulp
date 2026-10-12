@@ -41,6 +41,7 @@ foreach(_pulp_gpu_entry IN ITEMS
         "api.interface_link;pulp-gpu-device-api;INTERFACE_LINK_LIBRARIES"
         "device.type;pulp-gpu-device;TYPE"
         "device.link;pulp-gpu-device;LINK_LIBRARIES"
+        "device.interface_link;pulp-gpu-device;INTERFACE_LINK_LIBRARIES"
         "device.sources;pulp-gpu-device;SOURCES"
         "device.source_dir;pulp-gpu-device;SOURCE_DIR"
         "render.link;pulp-render;LINK_LIBRARIES"

@@ -1,7 +1,7 @@
 # Vellum extraction freeze
 
-This repository is preparing an independent, private Vellum framework
-extraction. Pulp continues to build and ship from its existing implementation;
+This repository is preparing an independent Vellum framework extraction into
+the public `Generous-Corp/vellum` repository. Pulp continues to build and ship from its existing implementation;
 Pulp does not consume Vellum during this experiment.
 
 The remaining operational gates are tracked in
@@ -66,7 +66,7 @@ two exact commits. It does not consume GitHub's asynchronous
 behind PR, while a source-head mismatch or merge conflict still fails closed.
 A separate post-merge
 workflow recomputes the compact outbox record without secrets and dispatches it
-to the private Vellum observatory from a one-step credential-bearing job. The
+to the Vellum observatory from a one-step credential-bearing job. The
 event remains permanently replayable from Pulp history even if dispatch is
 temporarily unavailable. Neither workflow copies or applies source changes.
 Generic features and fixes originate in Vellum after authority transfers,
@@ -91,9 +91,11 @@ exactly with:
 
 > design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger)
 
-and adds a row to [`vellum-inheritance-ledger.md`](vellum-inheritance-ledger.md).
+and adds the entry `vellum-inheritance-ledger/<event_id>.json` (see
+[`vellum-inheritance-ledger/README.md`](vellum-inheritance-ledger/README.md);
+`tools/scripts/vellum_inheritance_ledger_check.py` enforces it).
 Here `pulp-only` means "landed in Pulp", not "Pulp-specific": the prefix and the
-ledger row are what distinguish an inherited generic change from Pulp-specific
+ledger entry are what distinguish an inherited generic change from Pulp-specific
 integration work.
 
 The exception ends per target, not globally: in the same Pulp change that

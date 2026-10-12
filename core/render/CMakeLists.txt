@@ -7,10 +7,10 @@
 #                        WebGPU or Skia dependency and no Pulp module.
 #   pulp-gpu-device      The device implementation: the Dawn surface and
 #                        compute TUs, GPU diagnostics, the startup report and
-#                        the Apple Metal-layer helpers. It carries the same
-#                        Skia/Dawn and webgpu links as pulp-render (native Dawn
-#                        is libdawn_combined inside skia::skia; FindSkia defines
-#                        no separate skia::dawn target).
+#                        the Apple Metal-layer helpers. It links the same
+#                        Skia/Dawn and webgpu providers as pulp-render, but
+#                        PRIVATE (native Dawn is libdawn_combined inside
+#                        skia::skia; FindSkia defines no skia::dawn target).
 #
 # pulp-render links the API PUBLIC and the implementation PRIVATE, so every
 # existing pulp::render consumer keeps the same headers, definitions and
@@ -184,32 +184,49 @@ endif()
 # backs the fallback GpuSurface in gpu_surface_dawn.cpp. Android bundles Dawn
 # in Skia and has no webgpu target.
 #
-# pulp-gpu-device receives the same provider link, scope and definitions as
-# pulp-render, so a consumer of either sees an identical Dawn/WebGPU surface.
+# pulp-gpu-device receives the same provider links and definitions as
+# pulp-render, but PRIVATE: its public headers name no provider type, so a
+# consumer of the device layer inherits the provider archives only as link-only
+# dependencies and never their include directories or feature definitions.
+# pulp-render keeps them PUBLIC, unchanged for its existing consumers.
 foreach(_pulp_gpu_target IN ITEMS pulp-gpu-device pulp-render)
+    if(_pulp_gpu_target STREQUAL "pulp-gpu-device")
+        set(_pulp_gpu_provider_scope PRIVATE)
+        set(_pulp_gpu_provider_def_scope PRIVATE)
+    else()
+        set(_pulp_gpu_provider_scope PUBLIC)
+        set(_pulp_gpu_provider_def_scope PUBLIC)
+    endif()
     if(PULP_HAS_WEBGPU AND TARGET webgpu
        AND NOT (PULP_HAS_SKIA AND NOT DAWN_LIBRARY STREQUAL "DAWN_LIBRARY-NOTFOUND"))
-        target_link_libraries(${_pulp_gpu_target} PUBLIC webgpu)
+        target_link_libraries(${_pulp_gpu_target} ${_pulp_gpu_provider_scope} webgpu)
     endif()
     if(PULP_HAS_WEBGPU)
-        target_compile_definitions(${_pulp_gpu_target} PUBLIC PULP_HAS_WEBGPU=1)
+        target_compile_definitions(${_pulp_gpu_target} ${_pulp_gpu_provider_def_scope} PULP_HAS_WEBGPU=1)
     endif()
 endforeach()
 
 # Link Skia Graphite if available
 if(PULP_HAS_SKIA)
   foreach(_pulp_gpu_target IN ITEMS pulp-gpu-device pulp-render)
-    target_link_libraries(${_pulp_gpu_target} PUBLIC skia::skia)
-    if(TARGET skia::dawn)
-        target_link_libraries(${_pulp_gpu_target} PUBLIC skia::dawn)
+    if(_pulp_gpu_target STREQUAL "pulp-gpu-device")
+        set(_pulp_gpu_provider_scope PRIVATE)
+        set(_pulp_gpu_provider_def_scope PRIVATE)
+    else()
+        set(_pulp_gpu_provider_scope PUBLIC)
+        set(_pulp_gpu_provider_def_scope PUBLIC)
     endif()
-    target_compile_definitions(${_pulp_gpu_target} PUBLIC PULP_HAS_SKIA=1)
+    target_link_libraries(${_pulp_gpu_target} ${_pulp_gpu_provider_scope} skia::skia)
+    if(TARGET skia::dawn)
+        target_link_libraries(${_pulp_gpu_target} ${_pulp_gpu_provider_scope} skia::dawn)
+    endif()
+    target_compile_definitions(${_pulp_gpu_target} ${_pulp_gpu_provider_def_scope} PULP_HAS_SKIA=1)
     # The GPU-compute layer (gpu_compute.cpp / gpu_compute_pool.hpp) contains no
     # Skia — it needs Dawn. On native, Dawn arrives inside the Skia prebuilt
     # slice (skia::dawn + ${SKIA_INCLUDE_DIRS}/dawn below), so the two travel
     # together here; a browser build gets Dawn from Emscripten's emdawnwebgpu
     # port with no Skia at all and defines PULP_HAS_DAWN on its own.
-    target_compile_definitions(${_pulp_gpu_target} PUBLIC PULP_HAS_DAWN=1)
+    target_compile_definitions(${_pulp_gpu_target} ${_pulp_gpu_provider_def_scope} PULP_HAS_DAWN=1)
     target_include_directories(${_pulp_gpu_target} PRIVATE ${SKIA_INCLUDE_DIRS})
 
     # Dawn headers from Skia's bundled Dawn
@@ -219,3 +236,5 @@ if(PULP_HAS_SKIA)
   endforeach()
 endif()
 unset(_pulp_gpu_target)
+unset(_pulp_gpu_provider_scope)
+unset(_pulp_gpu_provider_def_scope)
