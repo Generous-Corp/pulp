@@ -581,6 +581,8 @@ class DependabotUsesOnlyDiffTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = pathlib.Path(tmp)
             self._git(repo, "init", "-q", "-b", "main")
+            self._git(repo, "config", "user.name", "Gate Fixture")
+            self._git(repo, "config", "user.email", "gate-fixture@example.com")
             (repo / ".agents/skills/ci").mkdir(parents=True)
             (repo / ".github/workflows").mkdir(parents=True)
             (repo / ".agents/skills/ci/SKILL.md").write_text("# CI\n", encoding="utf-8")
@@ -618,13 +620,20 @@ class DependabotUsesOnlyDiffTests(unittest.TestCase):
             self._git(repo, "commit", "-qm", "build(deps): bump checkout", env=bot_env)
 
             self._git(repo, "checkout", "-q", "main")
-            (repo / "README.md").write_text("main advanced\n", encoding="utf-8")
-            self._git(repo, "add", "README.md")
+            if shape == "conflicting-merge":
+                workflow.write_text(
+                    "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v6\n",
+                    encoding="utf-8",
+                )
+                self._git(repo, "add", ".github/workflows/build.yml")
+            else:
+                (repo / "README.md").write_text("main advanced\n", encoding="utf-8")
+                self._git(repo, "add", "README.md")
             self._git(repo, "commit", "-qm", "main advances")
             base = self._git(repo, "rev-parse", "HEAD")
             self._git(repo, "checkout", "-q", "dependabot")
 
-            if shape in {"clean-merge", "evil-merge"}:
+            if shape in {"clean-merge", "evil-merge", "conflicting-merge"}:
                 if shape == "evil-merge":
                     self._git(repo, "merge", "--no-commit", "--no-ff", "main")
                     workflow.write_text(
@@ -633,6 +642,15 @@ class DependabotUsesOnlyDiffTests(unittest.TestCase):
                     )
                     self._git(repo, "add", ".github/workflows/build.yml")
                     self._git(repo, "commit", "-qm", "merge main")
+                elif shape == "conflicting-merge":
+                    merge = subprocess.run(
+                        ["git", "merge", "--no-commit", "--no-ff", "main"],
+                        cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                    )
+                    self.assertNotEqual(merge.returncode, 0)
+                    self._git(repo, "checkout", "--ours", ".github/workflows/build.yml")
+                    self._git(repo, "add", ".github/workflows/build.yml")
+                    self._git(repo, "commit", "-qm", "merge main with obvious resolution")
                 else:
                     self._git(repo, "merge", "--no-edit", "--no-ff", "main")
             elif shape == "non-merge":
@@ -661,6 +679,9 @@ class DependabotUsesOnlyDiffTests(unittest.TestCase):
 
     def test_non_merge_rewrite_fails_closed(self) -> None:
         self.assertEqual(self._fixture_result("non-merge"), 1)
+
+    def test_conflicting_merge_with_resolution_fails_closed(self) -> None:
+        self.assertEqual(self._fixture_result("conflicting-merge"), 1)
 
     def test_workflow_helper_rejects_core_change_before_line_scan(self) -> None:
         names = subprocess.CompletedProcess(
