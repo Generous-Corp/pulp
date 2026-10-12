@@ -1389,3 +1389,16 @@ relayout all land there.
 - **Shared-host load skews timings** more than most code changes do. Capture
   baseline and candidate back to back on the same host with the same signal
   and gesture; never compare against a number from another session.
+
+## Tracing a DAW-hosted plug-in (Pro Tools, 2026-10)
+
+`PULP_TRACE_PATH` in the launcher's environment never reaches Pro Tools (it
+re-execs itself; `ps eww` on the PID shows none of the variables). Write
+`~/.config/pulp/trace-autostart` with PATH (a directory ending in `/`),
+SECONDS and RING_KB, launch, and delete the file afterwards; the plug-in logs
+`Tracing: ~/.config/pulp/trace-autostart -> <file>` at instantiation and
+`auto-flushed N bytes` at the end of the window. The broker's
+`pulp control instances` lists only the standalone host, so the live
+start/stop path cannot reach a hosted instance. Give the window the whole
+interaction (600 s, 256 MB served a 450 s Pro Tools pass with 5.7 M slices
+and no data loss).
