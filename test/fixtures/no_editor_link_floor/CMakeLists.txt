@@ -69,8 +69,17 @@ endforeach()
 set(_no_editor_control_families view canvas)
 set(_no_editor_control_gpu OFF)
 if(PULP_ENABLE_GPU AND TARGET pulp-render AND (PULP_HAS_SKIA OR PULP_HAS_WEBGPU))
-    list(APPEND _no_editor_control_families render wgpu)
+    list(APPEND _no_editor_control_families render)
     set(_no_editor_control_gpu ON)
+    # The control must describe the provider actually linked by pulp-render.
+    # When Skia supplies Dawn, the optional wgpu-native target is deliberately
+    # absent from the renderer link graph, so expecting `_wgpu*` symbols makes
+    # the positive control report a false blind spot.
+    if(PULP_HAS_WEBGPU AND TARGET webgpu
+       AND NOT (PULP_HAS_SKIA AND DAWN_LIBRARY
+                AND NOT DAWN_LIBRARY STREQUAL "DAWN_LIBRARY-NOTFOUND"))
+        list(APPEND _no_editor_control_families wgpu)
+    endif()
     if(PULP_HAS_SKIA)
         list(APPEND _no_editor_control_families skia)
         # Skia's own Dawn archive (the same test core/render uses).
