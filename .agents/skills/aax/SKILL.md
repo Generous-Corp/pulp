@@ -300,6 +300,22 @@ visible from validators or screenshots alone.
   `SPECTR_EXPERIMENTAL_SHARED_RENDERER=ON` (which links `Pulp::gpu-audio`);
   an AAX built without it shows the toggle but `gpu_processing_available()`
   is false. Mirror the flags of the AU/VST3 build that "works".
+- **Automation is "automatable" at the plug-in and "automation-enabled" at the
+  host, and only the host can flip the second.** Pro Tools records nothing
+  for a parameter until the user enables it (the plug-in window's **auto**
+  button → Plug-in Automation dialog) or sets Preferences → Mixing →
+  Automation → "Plug-in Controls Default to Auto-Enabled". The SDK has no
+  property for it; the automation delegate's header says so explicitly. A
+  receipt full of accepted touches and echoed values with no lane written
+  is this, not a plug-in bug.
+- **Trace a hosted plug-in through the environment, not the broker.** A
+  `PULP_TRACING=ON` build records when `PULP_TRACE_PATH` (a directory ending
+  in `/`), `PULP_TRACE_SECONDS` and `PULP_TRACE_RING_KB` are set in the
+  HOST's environment — launch the Pro Tools binary directly with them — or
+  read from `~/.config/pulp/trace-autostart` for hosts that inherit nothing.
+  Each process writes `<process>-<pid>.pftrace`. `pulp control instances`
+  lists only the standalone control host, so the broker path does not reach
+  a DAW-hosted instance.
 - **`AAX_EUpdateSource` cannot tell automation playback from a GUI edit.**
   Both reach `UpdateParameterNormalizedValue` as Unspecified; Parameter marks
   a re-entrant write and Chunk a preset load. Prove playback by value updates
