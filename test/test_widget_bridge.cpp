@@ -1291,6 +1291,36 @@ TEST_CASE("WidgetBridge setMeterColors applies a value-driven gradient",
     REQUIRE_FALSE(m->has_skin_gradient());
 }
 
+TEST_CASE("WidgetBridge setMeterColors keeps the background it was given",
+          "[view][bridge][data-display]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // A light housing stays light: the gradient must not restate the background.
+    bridge.load_script("createMeter('light', 'vertical', '');"
+                       "setMeterColors('light', '#ffffff', '#33a74d,#ffab33,#ff6b66');");
+    auto* light = dynamic_cast<Meter*>(bridge.widget("light"));
+    REQUIRE(light != nullptr);
+    REQUIRE(light->has_skin_gradient());
+    REQUIRE(light->has_skin_background_color());
+    const auto bg = light->skin_background_color();
+    CHECK(bg.r == 1.0f);
+    CHECK(bg.g == 1.0f);
+    CHECK(bg.b == 1.0f);
+    CHECK(bg.a == 1.0f);
+
+    // No background argument leaves the theme background in charge.
+    bridge.load_script("createMeter('bare', 'vertical', '');"
+                       "setMeterColors('bare', '', '#33a74d,#ffab33');");
+    auto* bare = dynamic_cast<Meter*>(bridge.widget("bare"));
+    REQUIRE(bare != nullptr);
+    REQUIRE(bare->has_skin_gradient());
+    CHECK_FALSE(bare->has_skin_background_color());
+}
+
 TEST_CASE("WidgetBridge creates toggle from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;

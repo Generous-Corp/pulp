@@ -14,6 +14,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -287,8 +288,11 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         auto* m = dynamic_cast<LevelDisplay*>(self.widget(args.get<std::string>(0, "")));
         if (!m)
             return choc::value::Value();
+        // One call, so the gradient never restates the background: an empty or
+        // unparseable background argument leaves the display's own in place.
+        std::optional<canvas::Color> background;
         if (auto [bg, ok] = parse_skin_color(args.get<std::string>(1, "")); ok)
-            m->set_level_fill(bg, {});
+            background = bg;
         auto stops_str = args.get<std::string>(2, "");
         std::vector<canvas::Color> stops;
         size_t start = 0;
@@ -309,7 +313,7 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
             start = comma + 1;
         }
         if (stops.size() >= 2)
-            m->set_level_fill(canvas::Color{}, std::move(stops));
+            m->set_level_fill(background, std::move(stops));
         else
             m->clear_level_fill();
         if (auto* view = dynamic_cast<View*>(m))

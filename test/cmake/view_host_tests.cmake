@@ -626,12 +626,19 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio)
     # switch stays PRIVATE so consumer headers do not depend on it.
     set(_pulp_view_audio_interface_definitions_file
         "${CMAKE_CURRENT_BINARY_DIR}/view-audio-interface-definitions.txt")
+    # A definition can also arrive as a -D in INTERFACE_COMPILE_OPTIONS, so the
+    # options are recorded beside the definitions.
     function(_pulp_record_view_audio_interface_definitions output)
         get_target_property(_definitions pulp-view-audio INTERFACE_COMPILE_DEFINITIONS)
         if(NOT _definitions)
             set(_definitions "")
         endif()
         file(WRITE "${output}" "${_definitions}")
+        get_target_property(_options pulp-view-audio INTERFACE_COMPILE_OPTIONS)
+        if(NOT _options)
+            set(_options "")
+        endif()
+        file(WRITE "${output}.options" "${_options}")
     endfunction()
     # Deferred arguments are expanded when the call runs, in the top-level
     # scope, so the path is baked in here.

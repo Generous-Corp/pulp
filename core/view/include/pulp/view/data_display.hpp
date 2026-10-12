@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/view.hpp>
 #include <string>
@@ -9,6 +10,13 @@
 #include <vector>
 
 namespace pulp::view {
+/// Rendering style for widgets.
+/// `standard` = interactive widget (arcs, thumbs, fills).
+/// `minimal` = design-preview mode (simple shapes matching design tools).
+/// `silver` = skeuomorphic chrome body, radial-gradient highlight, indicator
+///           notch. Vector all the way — works on CPU raster + GPU Graphite.
+///           Used by the figma-import lane as a native-vector alternative to
+///           sprite-strip PNGs (no PNG bleed, crisp at any scale).
 enum class WidgetRenderStyle { standard, minimal, silver };
 
 /// Generic level, series and bin display seams owned by view-core. Implementations
@@ -19,7 +27,10 @@ class LevelDisplay {
     virtual ~LevelDisplay();
     virtual void set_levels(float primary, float secondary) = 0;
     virtual void set_level_orientation(Orientation) = 0;
-    virtual void set_level_fill(canvas::Color background, std::vector<canvas::Color> gradient) = 0;
+    /// Installs a fill gradient (stops low to high). A background, when given,
+    /// replaces the display's own; std::nullopt leaves it untouched.
+    virtual void set_level_fill(std::optional<canvas::Color> background,
+                                std::vector<canvas::Color> gradient) = 0;
     virtual void clear_level_fill() = 0;
     virtual void set_level_bar_ratio(float ratio) = 0;
     virtual void set_level_render_style(WidgetRenderStyle) = 0;

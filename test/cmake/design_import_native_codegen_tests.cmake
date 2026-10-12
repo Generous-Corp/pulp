@@ -77,7 +77,7 @@ if(TARGET pulp-view-script AND TARGET pulp-design-import AND PULP_ENABLE_JS)
     target_link_libraries(pulp-test-data-display-link-floor
         PRIVATE pulp::design-import pulp::view-script Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-data-display-link-floor
-        PROPERTIES LABELS "parser-import;link-contract")
+        PROPERTIES LABELS "parser-import;link-contract;data-display")
     # Configure-time half: the fixture's link closure must not reach the audio
     # provider, or it would prove nothing. The umbrella-linked suite above is the
     # positive control for the closure walk. Deferred to the end of the top-level

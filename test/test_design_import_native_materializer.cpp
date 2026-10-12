@@ -5065,6 +5065,14 @@ TEST_CASE("generated C++ never names a provider-only audio class",
                       std::string::npos);
                 CHECK(generated.source.find("make_data_display(\"pulp.bins\")") !=
                       std::string::npos);
+                // Binding helpers go through the shared helpers that also reach the
+                // deprecated concrete binders, never a bare provider-neutral call.
+                CHECK(generated.source.find("pulp::view::bind_imported_level_display(ctx,") !=
+                      std::string::npos);
+                CHECK(generated.source.find("pulp::view::bind_imported_series_display(ctx,") !=
+                      std::string::npos);
+                CHECK(generated.source.find("ctx.bind_level_display(") == std::string::npos);
+                CHECK(generated.source.find("ctx.bind_series_display(") == std::string::npos);
             }
         }
     }

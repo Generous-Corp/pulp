@@ -316,8 +316,7 @@ bool bind_imported_view(View& view,
             .channel = text_or_empty(md.meter_channel),
             .value_key = text_or_empty(md.meter_value_key),
             .event_contract = text_or_empty(md.event_contract)};
-        ctx.bind_level_display(view, *level, descriptor);
-        invoke_legacy_import_binder("pulp.level", ctx, view, &descriptor, nullptr);
+        bind_imported_level_display(ctx, view, *level, descriptor);
         return true;
     }
     if (auto* series = dynamic_cast<SeriesDisplay*>(&view);
@@ -327,8 +326,7 @@ bool bind_imported_view(View& view,
             .param_key = text_or_empty(md.param_key),
             .shape = text_or_empty(md.waveform_shape),
             .event_contract = text_or_empty(md.event_contract)};
-        ctx.bind_series_display(view, *series, descriptor);
-        invoke_legacy_import_binder("pulp.series", ctx, view, nullptr, &descriptor);
+        bind_imported_series_display(ctx, view, *series, descriptor);
         return true;
     }
     if (auto* editor = dynamic_cast<TextEditor*>(&view);

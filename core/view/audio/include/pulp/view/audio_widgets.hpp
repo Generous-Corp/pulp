@@ -50,8 +50,10 @@ class Meter : public View,
         set_orientation(o == LevelDisplay::Orientation::horizontal ? Orientation::horizontal
                                                                    : Orientation::vertical);
     }
-    void set_level_fill(canvas::Color background, std::vector<canvas::Color> gradient) override {
-        set_skin_background_color(background);
+    void set_level_fill(std::optional<canvas::Color> background,
+                        std::vector<canvas::Color> gradient) override {
+        if (background)
+            set_skin_background_color(*background);
         set_skin_gradient(std::move(gradient));
     }
     void clear_level_fill() override {

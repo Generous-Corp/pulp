@@ -13,7 +13,9 @@
   "rationale": "P19 moves audio widget construction behind view-core display facets and keeps all design-import, rendering, packaging, and authority ownership unchanged; this event records watch-only coverage for the touched integration paths.",
   "tests": [
     "ctest --test-dir build -R pulp-test-widgets",
-    "ctest --test-dir build -R p19-.*-proof",
+    "ctest --test-dir build -L data-display",
+    "ctest --test-dir build -R 'provider-only|provider displays|binder generations|binders|setMeterColors'",
+    "ctest --test-dir build -R '^(pulp-view-core-audio-free|pulp-view-audio-widgets-gate|view-audio-seam-debts|pulp-test-audio-registration|cmake-view-audio-sdk-consumer|pulp-view-audio-symbol-floor)$'",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],

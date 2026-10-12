@@ -98,4 +98,36 @@ if(NOT _ok)
         "PULP_VIEW_HAS_AUDIO_WIDGETS=1, got '${_view_audio_interface_definitions}'")
 endif()
 
+# The same rule for a definition smuggled in as a compile option.
+function(options_define_nothing OPTIONS OUT_VAR)
+    if(OPTIONS MATCHES "(^|[;:> ])[-/]D")
+        set(${OUT_VAR} FALSE PARENT_SCOPE)
+    else()
+        set(${OUT_VAR} TRUE PARENT_SCOPE)
+    endif()
+endfunction()
+foreach(_control "-DPULP_VIEW_AUDIO_HAS_DESIGN_IMPORT=1" "-Wall;/DFOO"
+        "$<$<COMPILE_LANGUAGE:CXX>:-DFOO>")
+    options_define_nothing("${_control}" _ok)
+    if(_ok)
+        message(FATAL_ERROR
+            "pulp-view-core-audio-free: option negative control '${_control}' was accepted")
+    endif()
+endforeach()
+options_define_nothing("-Wall;-fno-exceptions" _ok)
+if(NOT _ok)
+    message(FATAL_ERROR "pulp-view-core-audio-free: option positive control was rejected")
+endif()
+if(NOT EXISTS "${PULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE}.options")
+    message(FATAL_ERROR
+        "pulp-view-core-audio-free: ${PULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE}.options was not recorded")
+endif()
+file(READ "${PULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE}.options" _view_audio_interface_options)
+options_define_nothing("${_view_audio_interface_options}" _ok)
+if(NOT _ok)
+    message(FATAL_ERROR
+        "pulp-view-core-audio-free: pulp-view-audio INTERFACE_COMPILE_OPTIONS define a macro: "
+        "'${_view_audio_interface_options}'")
+endif()
+
 message(STATUS "pulp-view-core-audio-free: PASS (view-core, view-audio and umbrella LINK_LIBRARIES; view-audio INTERFACE_COMPILE_DEFINITIONS; negative controls detected)")

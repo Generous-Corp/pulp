@@ -101,7 +101,8 @@ class StubLevel final : public View, public LevelDisplay {
   public:
     void set_levels(float, float) override {}
     void set_level_orientation(Orientation) override {}
-    void set_level_fill(pulp::canvas::Color, std::vector<pulp::canvas::Color>) override {}
+    void set_level_fill(std::optional<pulp::canvas::Color>,
+                        std::vector<pulp::canvas::Color>) override {}
     void clear_level_fill() override {}
     void set_level_bar_ratio(float) override {}
     void set_level_render_style(WidgetRenderStyle) override {}

@@ -549,7 +549,8 @@ void emit_binding_context_helpers(std::ostringstream& out,
             if (route.kind == NativeWidgetKind::meter) {
                 emit_line(out, 2, opts.indent_spaces,
                           "if (auto* meter = dynamic_cast<pulp::view::LevelDisplay*>(view)) {");
-                emit_line(out, 3, opts.indent_spaces, "ctx.bind_level_display(*view, *meter,");
+                emit_line(out, 3, opts.indent_spaces,
+                          "pulp::view::bind_imported_level_display(ctx, *view, *meter,");
                 emit_meter_descriptor(route, 3);
                 emit_line(out, 2, opts.indent_spaces, "}");
                 emit_line(out, 1, opts.indent_spaces, "}");
@@ -558,7 +559,8 @@ void emit_binding_context_helpers(std::ostringstream& out,
             if (route.kind == NativeWidgetKind::waveform) {
                 emit_line(out, 2, opts.indent_spaces,
                           "if (auto* waveform = dynamic_cast<pulp::view::SeriesDisplay*>(view)) {");
-                emit_line(out, 3, opts.indent_spaces, "ctx.bind_series_display(*view, *waveform,");
+                emit_line(out, 3, opts.indent_spaces,
+                          "pulp::view::bind_imported_series_display(ctx, *view, *waveform,");
                 emit_waveform_descriptor(route, 3);
                 emit_line(out, 2, opts.indent_spaces, "}");
                 emit_line(out, 1, opts.indent_spaces, "}");

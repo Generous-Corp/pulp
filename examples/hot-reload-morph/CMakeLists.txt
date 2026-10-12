@@ -18,8 +18,8 @@
 # planning/2026-07-03-m2b-...): (1) the plugin's restrictive -exported_symbols_list
 # is augmented to export the pulp:: surface (force-loading the small
 # pulp-view-reload-exports keep-alive so the editor symbols aren't dead-stripped);
-# (2) the thin logic is pinned to the SDK's C++ standard so the reload
-# build-fingerprint matches. Verified via auval + the A/B capture below.
+# (2) the thin logic takes the format target's compile features, so it builds
+# at the same C++ standard as its host and the reload build-fingerprint matches. Verified via auval + the A/B capture below.
 
 set(_morph_publish "$ENV{HOME}/.pulp/hot-reload-morph")
 
@@ -74,9 +74,6 @@ endforeach()
 # SDK symbols too.
 if(PULP_BUILD_TESTS OR PULP_HAS_SKIA)
     add_executable(hot-reload-morph-capture capture_morph.cpp)
-    set_target_properties(hot-reload-morph-capture PROPERTIES
-        CXX_STANDARD 23
-        CXX_STANDARD_REQUIRED ON)
     target_link_libraries(hot-reload-morph-capture PRIVATE pulp::view pulp::format)
     target_include_directories(hot-reload-morph-capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     if(NOT WIN32)
