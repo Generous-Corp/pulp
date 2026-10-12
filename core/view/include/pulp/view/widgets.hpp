@@ -2687,6 +2687,8 @@ private:
 
 } // namespace pulp::view
 
+// clang-format off
 #if defined(PULP_VIEW_HAS_AUDIO_WIDGETS)
 #include <pulp/view/audio_widgets.hpp>
-#endif // PULP_VIEW_HAS_AUDIO_WIDGETS
+#endif  // PULP_VIEW_HAS_AUDIO_WIDGETS
+// clang-format on

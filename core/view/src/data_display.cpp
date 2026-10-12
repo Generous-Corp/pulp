@@ -1,4 +1,5 @@
 #include <mutex>
+#include <pulp/runtime/log.hpp>
 #include <pulp/view/data_display.hpp>
 #include <unordered_map>
 #include <utility>
@@ -39,6 +40,8 @@ void register_data_display(DataDisplayRegistration registration) {
     }
     if (it != entries.end() && it->second.make == registration.make && same_catalog)
         return;
+    if (it != entries.end() && it->second.make != registration.make)
+        runtime::log_info("view: replacing data-display factory for '{}'", registration.id);
     entries[registration.id] = std::move(registration);
 }
 

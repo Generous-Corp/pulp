@@ -1,0 +1,29 @@
+{
+  "schema": "pulp.p19.phase6-debts.v1",
+  "goal": "G2c",
+  "entries": [
+    {
+      "id": "vellum-header-audio-widgets-include",
+      "owner": "P19 Codex worker",
+      "deferred_to": "phase6",
+      "file": "core/view/include/pulp/view/widgets.hpp",
+      "patterns": [
+        "#if defined(PULP_VIEW_HAS_AUDIO_WIDGETS)",
+        "#include <pulp/view/audio_widgets.hpp>",
+        "^#endif\\s*//.*PULP_VIEW_HAS_AUDIO_WIDGETS"
+      ]
+    },
+    {
+      "id": "design-import-audio-forward-decls",
+      "owner": "P19 Codex worker",
+      "deferred_to": "phase6",
+      "file": "core/view/include/pulp/view/design_import.hpp",
+      "patterns": [
+        "^class Meter;$",
+        "^class WaveformView;$",
+        "virtual void bind_meter(Meter&",
+        "virtual void bind_waveform_display(WaveformView&"
+      ]
+    }
+  ]
+}

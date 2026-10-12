@@ -7,11 +7,13 @@
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
     "design-ir-contract",
+    "design-source-ingest",
     "render-assets-and-backends"
   ],
   "rationale": "P19 moves audio widget construction behind view-core display facets and keeps all design-import, rendering, packaging, and authority ownership unchanged; this event records watch-only coverage for the touched integration paths.",
   "tests": [
     "ctest --test-dir build -R pulp-test-widgets",
+    "ctest --test-dir build -R p19-.*-proof",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],

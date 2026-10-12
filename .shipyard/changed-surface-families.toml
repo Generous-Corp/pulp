@@ -3471,6 +3471,38 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-2e46ba8be5b1"
+paths = ["tools/scripts/test_p19_audio_widget_proofs.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "p19-contracts-proof",
+  "p19-m4-proof",
+  "p19-runtime-proof",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-58a830350517"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
@@ -6266,6 +6298,7 @@ paths = [
   "tools/scripts/test_mkdocs_hooks.py",
   "tools/scripts/test_node_abi_gate.py",
   "tools/scripts/test_node_build_deps_step.py",
+  "tools/scripts/test_p19_audio_widget_proofs.py",
   "tools/scripts/test_package_cli_extra.py",
   "tools/scripts/test_param_designator_order.py",
   "tools/scripts/test_pch_wiring_check.py",
@@ -6809,6 +6842,7 @@ paths = [
   "tools/scripts/test_mkdocs_hooks.py",
   "tools/scripts/test_node_abi_gate.py",
   "tools/scripts/test_node_build_deps_step.py",
+  "tools/scripts/test_p19_audio_widget_proofs.py",
   "tools/scripts/test_package_cli_extra.py",
   "tools/scripts/test_param_designator_order.py",
   "tools/scripts/test_pch_wiring_check.py",

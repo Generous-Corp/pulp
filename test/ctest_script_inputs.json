@@ -2721,6 +2721,7 @@
   "pulp-test-osc-minblep",
   "pulp-test-osc-parameter-map",
   "pulp-test-osc-render-wav-cli",
+  "pulp-test-p19-registration",
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
@@ -6739,6 +6740,60 @@
     "core/view/platform",
     "core/view/src/overlay_dismissal.cpp",
     "tools/scripts/overlay_dismissal_wiring_guard.py"
+   ],
+   "kind": "python"
+  },
+  "p19-contracts-proof": {
+   "entry": "tools/scripts/test_p19_audio_widget_proofs.py",
+   "inputs": [
+    "core/canvas/include",
+    "core/format/src/standalone.cpp",
+    "core/format/src/view_bridge.cpp",
+    "core/runtime/include",
+    "core/view/CMakeLists.txt",
+    "core/view/audio/include",
+    "core/view/include",
+    "core/view/include/pulp/view/design_import.hpp",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/design_cpp_tree_codegen.cpp",
+    "docs/status/p19-phase6-debts.json",
+    "tools/scripts/test_p19_audio_widget_proofs.py"
+   ],
+   "kind": "python"
+  },
+  "p19-m4-proof": {
+   "entry": "tools/scripts/test_p19_audio_widget_proofs.py",
+   "inputs": [
+    "core/canvas/include",
+    "core/format/src/standalone.cpp",
+    "core/format/src/view_bridge.cpp",
+    "core/runtime/include",
+    "core/view/CMakeLists.txt",
+    "core/view/audio/include",
+    "core/view/include",
+    "core/view/include/pulp/view/design_import.hpp",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/design_cpp_tree_codegen.cpp",
+    "docs/status/p19-phase6-debts.json",
+    "tools/scripts/test_p19_audio_widget_proofs.py"
+   ],
+   "kind": "python"
+  },
+  "p19-runtime-proof": {
+   "entry": "tools/scripts/test_p19_audio_widget_proofs.py",
+   "inputs": [
+    "core/canvas/include",
+    "core/format/src/standalone.cpp",
+    "core/format/src/view_bridge.cpp",
+    "core/runtime/include",
+    "core/view/CMakeLists.txt",
+    "core/view/audio/include",
+    "core/view/include",
+    "core/view/include/pulp/view/design_import.hpp",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/design_cpp_tree_codegen.cpp",
+    "docs/status/p19-phase6-debts.json",
+    "tools/scripts/test_p19_audio_widget_proofs.py"
    ],
    "kind": "python"
   },

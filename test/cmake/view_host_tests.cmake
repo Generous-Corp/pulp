@@ -643,6 +643,22 @@ set_tests_properties(pulp-view-core-include-boundary
     pulp-view-core-include-boundary-negative-contract
     PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
 
+# G2c P19 seam proofs: the extracted-unit M4 controls, F3/A4 codegen guard,
+# P7 interface-definition/debt checks, and installed/plugin prerequisites.
+foreach(_p19_case m4 contracts runtime)
+    add_test(NAME "p19-${_p19_case}-proof"
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_p19_audio_widget_proofs.py"
+            --source-root "${CMAKE_SOURCE_DIR}" --case "${_p19_case}")
+endforeach()
+set_tests_properties(p19-m4-proof p19-contracts-proof p19-runtime-proof
+    PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+
+add_executable(pulp-test-p19-registration test_p19_registration_main.cpp)
+target_link_libraries(pulp-test-p19-registration PRIVATE pulp::view)
+add_test(NAME p19-test-main-registration COMMAND pulp-test-p19-registration)
+set_tests_properties(p19-test-main-registration PROPERTIES LABELS "pr;view;gate")
+
 # The symbol half: neither header nor link checks see an object that needs
 # another library's code (a dynamic_cast to Meter compiles against a view-core
 # header but needs Meter's typeinfo from pulp-view-audio). This reads the

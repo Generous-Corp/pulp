@@ -1185,6 +1185,18 @@ std::unique_ptr<View> make_asset_placeholder(const IRNode& node,
     return std::make_unique<View>();
 }
 
+std::unique_ptr<View> make_data_display_placeholder(const IRNode& node, std::string_view path,
+                                                    std::string_view id,
+                                                    std::vector<ImportDiagnostic>& diagnostics) {
+    diagnostics.push_back(diagnostic(ImportDiagnosticSeverity::warning,
+                                     ImportDiagnosticKind::unsupported_property,
+                                     "data-display-unavailable", std::string(path),
+                                     "data display '" + std::string(id) +
+                                         "' is unavailable; link pulp::view or pulp::view-audio",
+                                     node));
+    return std::make_unique<View>();
+}
+
 void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& resolved) {
     view.set_id(resolved.id);
     if (node.stable_anchor_id && !node.stable_anchor_id->empty())
@@ -2465,7 +2477,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             auto meter = make_data_display("pulp.level");
             auto* level = meter ? dynamic_cast<LevelDisplay*>(meter.get()) : nullptr;
             if (!level)
-                return make_asset_placeholder(node, path, "pulp.level", diagnostics);
+                return make_data_display_placeholder(node, path, "pulp.level", diagnostics);
             level->set_levels(semantics.normalized_value, semantics.peak_value);
             if (semantics.horizontal)
                 level->set_level_orientation(LevelDisplay::Orientation::horizontal);
@@ -2485,7 +2497,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             auto waveform = make_data_display("pulp.series");
             auto* series = waveform ? dynamic_cast<SeriesDisplay*>(waveform.get()) : nullptr;
             if (!series)
-                return make_asset_placeholder(node, path, "pulp.series", diagnostics);
+                return make_data_display_placeholder(node, path, "pulp.series", diagnostics);
             if (semantics.waveform_shape)
                 series->set_series_preview(*semantics.waveform_shape);
             return waveform;
@@ -2493,7 +2505,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         case NativeWidgetKind::spectrum: {
             auto spectrum = make_data_display("pulp.bins");
             if (!spectrum || dynamic_cast<BinDisplay*>(spectrum.get()) == nullptr)
-                return make_asset_placeholder(node, path, "pulp.bins", diagnostics);
+                return make_data_display_placeholder(node, path, "pulp.bins", diagnostics);
             return spectrum;
         }
         case NativeWidgetKind::image_view: {
