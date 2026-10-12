@@ -9,6 +9,30 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09510"></a>
+## [0.951.0] - 2026-10-11
+
+- release/version bump ([#10123](https://github.com/Generous-Corp/pulp/pull/10123))
+- fix/materialized pseudo runtime manifest 20261011 ([#10113](https://github.com/Generous-Corp/pulp/pull/10113))
+- feature/design import fail closed f4 ([#10075](https://github.com/Generous-Corp/pulp/pull/10075))
+- codex/dependabot test contracts 20261011 ([#10108](https://github.com/Generous-Corp/pulp/pull/10108))
+
+<a id="v09501"></a>
+## [0.950.1] - 2026-10-11
+
+- release/version bump ([#10112](https://github.com/Generous-Corp/pulp/pull/10112))
+- release/version bump ([#10109](https://github.com/Generous-Corp/pulp/pull/10109))
+- fix/design ir asset path lexical ([#10077](https://github.com/Generous-Corp/pulp/pull/10077))
+- feat/pseudo materialized import 20261011 ([#10084](https://github.com/Generous-Corp/pulp/pull/10084))
+- fix/vellum inventory pyyaml message ([#10096](https://github.com/Generous-Corp/pulp/pull/10096))
+- codex/gate host build poka yoke ([#10088](https://github.com/Generous-Corp/pulp/pull/10088))
+- codex/dependabot actions 20261010 ([#10042](https://github.com/Generous-Corp/pulp/pull/10042))
+- release/version bump ([#10105](https://github.com/Generous-Corp/pulp/pull/10105))
+- release/version bump ([#10104](https://github.com/Generous-Corp/pulp/pull/10104))
+- fix/ios shallow bundle signing ([#10097](https://github.com/Generous-Corp/pulp/pull/10097))
+- feature/vellum p14 wgpu native skia off ([#10053](https://github.com/Generous-Corp/pulp/pull/10053))
+- release/version bump ([#10102](https://github.com/Generous-Corp/pulp/pull/10102))
+
 <a id="v09500"></a>
 ## [0.950.0] - 2026-10-11
 
@@ -10447,6 +10471,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.951.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.951.0
+[0.950.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.950.1
 [0.950.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.950.0
 [0.949.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.949.0
 [0.948.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.948.0

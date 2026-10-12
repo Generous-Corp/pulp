@@ -53,6 +53,7 @@ REQUIRED_KEYS = (
     "api.interface_link",
     "device.type",
     "device.link",
+    "device.interface_link",
     "device.sources",
     "device.source_dir",
     "render.link",
@@ -158,6 +159,20 @@ def check_links(props: dict[str, str]) -> list[Violation]:
             "device-reaches-up",
             f"pulp-gpu-device links Pulp modules outside {sorted(DEVICE_ALLOWED_PULP_LINKS)}: "
             f"{escaped}"))
+
+    # Provider archives are implementation details of the device target. A
+    # plain entry in INTERFACE_LINK_LIBRARIES makes every installed consumer
+    # inherit the renderer provider target; PRIVATE links are represented by
+    # LINK_ONLY generator expressions and remain available to the archive's
+    # final link without becoming part of the public API.
+    device_interface = split_list(props["device.interface_link"])
+    leaked_providers = [entry for entry in device_interface
+                        if entry in {"webgpu", "skia::skia", "skia::dawn"}]
+    if leaked_providers:
+        violations.append(Violation(
+            "device-provider-public",
+            "pulp-gpu-device exposes implementation providers publicly: "
+            f"{leaked_providers}; use PRIVATE links"))
 
     render_links = split_list(props["render.link"])
     for module in ("gpu-device-api", "gpu-device"):
