@@ -143,6 +143,13 @@ class BuildGovernancePathTests(unittest.TestCase):
             self.assertIn("tools/ci/governed-build.sh", line)
             self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
 
+    def test_tsan_selects_signal_graph_reprepare_race_hammers(self) -> None:
+        source = read_source(".github/workflows/sanitizers.yml")
+        self.assertIn(
+            "SignalGraph re-prepare while the (executor|parallel) path renders is race-free",
+            source,
+        )
+
     def test_generated_wasm_fixture_build_uses_governor(self) -> None:
         source = read_source("test/cmake/gpu_audio_web_tests.cmake")
         self.assertIn(

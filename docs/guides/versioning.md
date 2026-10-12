@@ -695,3 +695,10 @@ v0.80.4 keeps Git-over-SSH pushes alive during Pulp's long pre-push proof while
 preserving any explicitly configured SSH identity or proxy command. Without it,
 a successful local proof can still end in an expired SSH connection and waste
 the entire validation cycle.
+
+### Coverage cadence
+
+The hosted macOS Coverage workflow is advisory and runs on the main schedule or
+through an arm-time `workflow_dispatch` of the approved PR head. It does not
+start for every pull request push; the required version and skill checks remain
+unchanged.

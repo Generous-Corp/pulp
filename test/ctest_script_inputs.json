@@ -3261,6 +3261,34 @@
    ],
    "kind": "python"
   },
+  "build-governance-paths-selftest": {
+   "entry": "tools/ci/test_build_governance_paths.py",
+   "inputs": [
+    ".github/workflows/android.yml",
+    ".github/workflows/build-macos.yml",
+    ".github/workflows/cross-platform-check.yml",
+    ".github/workflows/gcc-compile-gate.yml",
+    ".github/workflows/intel-portability.yml",
+    ".github/workflows/sanitizers.yml",
+    ".github/workflows/timeline-fuzz.yml",
+    ".github/workflows/visual-harness.yml",
+    ".github/workflows/wclap-cloudflare.yml",
+    ".github/workflows/web-plugins.yml",
+    ".github/workflows/windows-cli-compile.yml",
+    "test/cmake/gpu_audio_web_tests.cmake",
+    "tools/ci/governed-build.sh",
+    "tools/ci/tart-run-job.sh",
+    "tools/ci/test_build_governance_paths.py",
+    "tools/ci/wasm-fixture-lane.sh",
+    "tools/cli/cmd_design.cpp",
+    "tools/mcp/mcp_tools.cpp",
+    "tools/scripts/confirm_failure.sh",
+    "tools/scripts/contributor_check.sh",
+    "tools/scripts/release-cli-local.sh",
+    "tools/scripts/sdk_consumer_sweep.py"
+   ],
+   "kind": "python"
+  },
   "build-matrix-contract": {
    "entry": "tools/ci/test_build_matrix_contract.py",
    "inputs": [
@@ -4816,10 +4844,14 @@
    "entry": "tools/scripts/test_gate_common.py",
    "inputs": [
     ".github/workflows",
+    ".github/workflows/build.yml",
     "tools/cli",
     "tools/cli/cmd_doctor.cpp",
+    "tools/scripts",
     "tools/scripts/gate_common.py",
-    "tools/scripts/test_gate_common.py"
+    "tools/scripts/skill_path_map.json",
+    "tools/scripts/test_gate_common.py",
+    "tools/scripts/versioning.json"
    ],
    "kind": "python"
   },
@@ -7253,9 +7285,9 @@
    "kind": "python"
   },
   "pulp-view-audio-symbol-floor": {
-   "entry": "tools/scripts/view_audio_symbol_floor.py",
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/view_audio_symbol_floor.py"
+    "tools/scripts/archive_symbol_closure_check.py"
    ],
    "kind": "python"
   },
@@ -7313,9 +7345,26 @@
     "core/view/cmake/PulpViewJsPreludes.cmake",
     "core/view/js/embed_js.py",
     "tools/cmake/PulpInstallRules.cmake",
-    "tools/scripts/vellum_closure.py"
+    "tools/scripts/vellum_closure.py",
+    "tools/scripts/vellum_d3_units.json"
    ],
    "kind": "python"
+  },
+  "pulp.vellum-closure-edge-negative": {
+   "entry": "tools/scripts/confirm_failure.sh",
+   "inputs": [
+    "tools/scripts/confirm_failure.sh",
+    "tools/scripts/vellum_closure_edge_fixture.json"
+   ],
+   "kind": "shell"
+  },
+  "pulp.vellum-closure-external-input-negative": {
+   "entry": "tools/scripts/confirm_failure.sh",
+   "inputs": [
+    "tools/scripts/confirm_failure.sh",
+    "tools/scripts/vellum_closure_external_input_fixture.json"
+   ],
+   "kind": "shell"
   },
   "pulp.vellum-closure-gate": {
    "entry": "tools/scripts/vellum_closure.py",
@@ -7328,7 +7377,9 @@
     "core/view/cmake/PulpViewJsPreludes.cmake",
     "core/view/js/embed_js.py",
     "tools/cmake/PulpInstallRules.cmake",
-    "tools/scripts/vellum_closure.py"
+    "tools/scripts/vellum_closure.py",
+    "tools/scripts/vellum_closure_allowlist.json",
+    "tools/scripts/vellum_d3_units.json"
    ],
    "kind": "python"
   },

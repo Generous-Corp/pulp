@@ -516,7 +516,8 @@ class WorkflowBuildDirTests(unittest.TestCase):
         pull_request_paths = text.split("  pull_request:", 1)[1].split(
             "  schedule:", 1
         )[0]
-        self.assertIn("- 'inspect/**'", pull_request_paths)
+        self.assertIn("- 'core/**'", pull_request_paths)
+        self.assertNotIn("- 'inspect/**'", pull_request_paths)
 
     def test_fuzz_workflow_builds_and_runs_control_protocol_targets(self) -> None:
         text = TIMELINE_FUZZ_WORKFLOW.read_text(encoding="utf-8")
