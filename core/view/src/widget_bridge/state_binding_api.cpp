@@ -10,6 +10,7 @@
 //     replacement for a requestAnimationFrame metering loop.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/data_display.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/widgets.hpp>
@@ -275,12 +276,12 @@ bool WidgetBridge::apply_scope_binding(ParamBinding& b, View* w,
                                        : kEmptyFrame.data();
     // A stale scope renders empty rather than holding the last block on screen,
     // which would read as a frozen display of live audio.
-    if (auto* spectrum = dynamic_cast<SpectrumView*>(w)) {
-        spectrum->set_spectrum(samples, static_cast<size_t>(count));
+    if (auto* spectrum = dynamic_cast<BinDisplay*>(w)) {
+        spectrum->set_bins(samples, static_cast<size_t>(count));
         return true;
     }
-    if (auto* wave = dynamic_cast<WaveformView*>(w)) {
-        wave->set_data(samples, static_cast<size_t>(count));
+    if (auto* wave = dynamic_cast<SeriesDisplay*>(w)) {
+        wave->set_series(samples, static_cast<size_t>(count));
         return true;
     }
     return false;
@@ -302,7 +303,8 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
         (value_frame == nullptr || value_channel_is_stale(b, publish_seq))) {
         if (b.last_applied == b.neutral) return false;
         b.last_applied = b.neutral;
-        if (auto* m = dynamic_cast<Meter*>(w)) m->set_level(b.neutral, b.neutral);
+        if (auto* m = dynamic_cast<LevelDisplay*>(w))
+            m->set_levels(b.neutral, b.neutral);
         return true;
     }
     // A value channel already publishes in the domain the widget wants, so the
@@ -322,7 +324,8 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
         // static source doesn't spin the paint loop every vsync.
         if (!changed) return false;
         b.last_applied = target;
-        if (auto* m = dynamic_cast<Meter*>(w)) m->set_level(target, target);
+        if (auto* m = dynamic_cast<LevelDisplay*>(w))
+            m->set_levels(target, target);
         return true;
     }
 
@@ -572,15 +575,13 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
         // scripts may intentionally register bindings before creating views.
         View* const view = widget->second;
         const bool supported =
-            target == ParamBinding::Target::scope
-                ? (dynamic_cast<SpectrumView*>(view) != nullptr ||
-                   dynamic_cast<WaveformView*>(view) != nullptr)
+            target == ParamBinding::Target::scope ? (dynamic_cast<BinDisplay*>(view) != nullptr ||
+                                                     dynamic_cast<SeriesDisplay*>(view) != nullptr)
             : target == ParamBinding::Target::uniform
                 ? dynamic_cast<CustomShaderHost*>(view) != nullptr
             : target == ParamBinding::Target::meter
-                ? dynamic_cast<Meter*>(view) != nullptr
-                : dynamic_cast<Knob*>(view) != nullptr ||
-                      dynamic_cast<Fader*>(view) != nullptr ||
+                ? dynamic_cast<LevelDisplay*>(view) != nullptr
+                : dynamic_cast<Knob*>(view) != nullptr || dynamic_cast<Fader*>(view) != nullptr ||
                       dynamic_cast<RangeSlider*>(view) != nullptr ||
                       dynamic_cast<Toggle*>(view) != nullptr ||
                       dynamic_cast<SegmentedControl*>(view) != nullptr ||

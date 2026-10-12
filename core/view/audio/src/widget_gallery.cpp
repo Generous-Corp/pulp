@@ -7,6 +7,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/audio_widgets.hpp>
 
 #include <memory>
 

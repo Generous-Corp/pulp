@@ -42,6 +42,8 @@ class SegmentedControl;
 class Stepper;
 class Knob;
 class Fader;
+class LevelDisplay;
+class SeriesDisplay;
 class Meter;
 class ToggleButton;
 class TextButton;
@@ -241,6 +243,12 @@ public:
         (void)fader;
         (void)descriptor;
     }
+    virtual void bind_level_display(View& view, LevelDisplay& display,
+                                    const NativeImportMeterBindingDescriptor& descriptor) {
+        (void)view;
+        (void)display;
+        (void)descriptor;
+    }
     virtual void bind_meter(Meter& meter, const NativeImportMeterBindingDescriptor& descriptor) {
         (void)meter;
         (void)descriptor;
@@ -255,6 +263,12 @@ public:
     }
     virtual void bind_xy_pad(XYPad& pad, const NativeImportXYPadBindingDescriptor& descriptor) {
         (void)pad;
+        (void)descriptor;
+    }
+    virtual void bind_series_display(View& view, SeriesDisplay& display,
+                                     const NativeImportWaveformBindingDescriptor& descriptor) {
+        (void)view;
+        (void)display;
         (void)descriptor;
     }
     virtual void bind_waveform_display(WaveformView& waveform,
@@ -297,6 +311,14 @@ public:
         (void)descriptor;
     }
 };
+
+using LegacyImportBinder = void (*)(NativeImportBindingContext&, View&,
+                                    const NativeImportMeterBindingDescriptor*,
+                                    const NativeImportWaveformBindingDescriptor*);
+void register_legacy_import_binder(std::string id, LegacyImportBinder binder);
+void invoke_legacy_import_binder(std::string_view id, NativeImportBindingContext&, View&,
+                                 const NativeImportMeterBindingDescriptor* meter,
+                                 const NativeImportWaveformBindingDescriptor* waveform);
 
 /// Optional capability for binding a collapsed selector. This is a separate
 /// interface rather than a new NativeImportBindingContext virtual so a current

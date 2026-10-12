@@ -15,6 +15,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/designed_control_painter.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/data_display.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
@@ -307,25 +308,27 @@ bool bind_imported_view(View& view,
                             .gesture_contract = text_or_empty(md.gesture_contract)});
         return true;
     }
-    if (auto* meter = dynamic_cast<Meter*>(&view);
-        meter && has_text(md.meter_source) && has_text(md.meter_channel)) {
-        ctx.bind_meter(*meter,
-                       NativeImportMeterBindingDescriptor{
-                           .route_id = text_or_empty(md.route_id),
-                           .meter_source = text_or_empty(md.meter_source),
-                           .channel = text_or_empty(md.meter_channel),
-                           .value_key = text_or_empty(md.meter_value_key),
-                           .event_contract = text_or_empty(md.event_contract)});
+    if (auto* level = dynamic_cast<LevelDisplay*>(&view);
+        level && has_text(md.meter_source) && has_text(md.meter_channel)) {
+        const NativeImportMeterBindingDescriptor descriptor{
+            .route_id = text_or_empty(md.route_id),
+            .meter_source = text_or_empty(md.meter_source),
+            .channel = text_or_empty(md.meter_channel),
+            .value_key = text_or_empty(md.meter_value_key),
+            .event_contract = text_or_empty(md.event_contract)};
+        ctx.bind_level_display(view, *level, descriptor);
+        invoke_legacy_import_binder("pulp.level", ctx, view, &descriptor, nullptr);
         return true;
     }
-    if (auto* waveform = dynamic_cast<WaveformView*>(&view);
-        waveform && has_text(md.param_key) && has_text(md.waveform_shape)) {
-        ctx.bind_waveform_display(*waveform,
-                                  NativeImportWaveformBindingDescriptor{
-                                      .route_id = text_or_empty(md.route_id),
-                                      .param_key = text_or_empty(md.param_key),
-                                      .shape = text_or_empty(md.waveform_shape),
-                                      .event_contract = text_or_empty(md.event_contract)});
+    if (auto* series = dynamic_cast<SeriesDisplay*>(&view);
+        series && has_text(md.param_key) && has_text(md.waveform_shape)) {
+        const NativeImportWaveformBindingDescriptor descriptor{
+            .route_id = text_or_empty(md.route_id),
+            .param_key = text_or_empty(md.param_key),
+            .shape = text_or_empty(md.waveform_shape),
+            .event_contract = text_or_empty(md.event_contract)};
+        ctx.bind_series_display(view, *series, descriptor);
+        invoke_legacy_import_binder("pulp.series", ctx, view, nullptr, &descriptor);
         return true;
     }
     if (auto* editor = dynamic_cast<TextEditor*>(&view);
@@ -388,9 +391,11 @@ bool can_bind_imported_view(View& view,
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
         return true;
-    if (dynamic_cast<Meter*>(&view) && has_text(md.meter_source) && has_text(md.meter_channel))
+    if (dynamic_cast<LevelDisplay*>(&view) && has_text(md.meter_source) &&
+        has_text(md.meter_channel))
         return true;
-    if (dynamic_cast<WaveformView*>(&view) && has_text(md.param_key) && has_text(md.waveform_shape))
+    if (dynamic_cast<SeriesDisplay*>(&view) && has_text(md.param_key) &&
+        has_text(md.waveform_shape))
         return true;
     if (dynamic_cast<TextEditor*>(&view) && (has_text(md.value_key) || has_text(md.initial_value)))
         return true;
@@ -2457,11 +2462,15 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return fader;
         }
         case NativeWidgetKind::meter: {
-            auto meter = std::make_unique<Meter>();
-            meter->set_level(semantics.normalized_value, semantics.peak_value);
+            auto meter = make_data_display("pulp.level");
+            auto* level = meter ? dynamic_cast<LevelDisplay*>(meter.get()) : nullptr;
+            if (!level)
+                return make_asset_placeholder(node, path, "pulp.level", diagnostics);
+            level->set_levels(semantics.normalized_value, semantics.peak_value);
             if (semantics.horizontal)
-                meter->set_orientation(Meter::Orientation::horizontal);
-            if (options.preview_mode) meter->set_render_style(WidgetRenderStyle::minimal);
+                level->set_level_orientation(LevelDisplay::Orientation::horizontal);
+            if (options.preview_mode)
+                level->set_level_render_style(WidgetRenderStyle::minimal);
             return meter;
         }
         case NativeWidgetKind::xy_pad: {
@@ -2473,13 +2482,20 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return pad;
         }
         case NativeWidgetKind::waveform: {
-            auto waveform = std::make_unique<WaveformView>();
+            auto waveform = make_data_display("pulp.series");
+            auto* series = waveform ? dynamic_cast<SeriesDisplay*>(waveform.get()) : nullptr;
+            if (!series)
+                return make_asset_placeholder(node, path, "pulp.series", diagnostics);
             if (semantics.waveform_shape)
-                waveform->set_preview_shape(*semantics.waveform_shape);
+                series->set_series_preview(*semantics.waveform_shape);
             return waveform;
         }
-        case NativeWidgetKind::spectrum:
-            return std::make_unique<SpectrumView>();
+        case NativeWidgetKind::spectrum: {
+            auto spectrum = make_data_display("pulp.bins");
+            if (!spectrum || dynamic_cast<BinDisplay*>(spectrum.get()) == nullptr)
+                return make_asset_placeholder(node, path, "pulp.bins", diagnostics);
+            return spectrum;
+        }
         case NativeWidgetKind::image_view: {
             const auto asset_id = first_asset_id(node);
             if (!asset_id)

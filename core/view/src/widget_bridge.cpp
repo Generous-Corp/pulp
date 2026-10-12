@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/data_display.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include "widget_bridge/registrars.hpp"
@@ -1210,11 +1211,11 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
     } else if (tag == "checkbox") {
         w = std::make_unique<Checkbox>();
     } else if (tag == "spectrum") {
-        w = std::make_unique<SpectrumView>();
+        w = make_data_display("pulp.bins");
     } else if (tag == "waveform") {
-        w = std::make_unique<WaveformView>();
+        w = make_data_display("pulp.series");
     } else if (tag == "meter") {
-        w = std::make_unique<Meter>();
+        w = make_data_display("pulp.level");
     } else if (tag == "xypad") {
         w = std::make_unique<XYPad>();
     } else if (tag == "listbox") {

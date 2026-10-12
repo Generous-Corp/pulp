@@ -656,8 +656,7 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
             --check "view-core=$<TARGET_FILE:pulp-view-core>"
             --check "view-script=$<TARGET_FILE:pulp-view-script>"
             --check "design-import=$<TARGET_FILE:pulp-design-import>"
-            --debt "view-script=view-script-view-audio-link (P19)"
-            --debt "design-import=design-import-view-audio-link (P19)")
+)
     add_test(NAME pulp-view-audio-symbol-floor-negative-contract
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_view_audio_symbol_floor.py")

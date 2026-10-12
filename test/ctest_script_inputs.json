@@ -4735,6 +4735,7 @@
     "core/view",
     "core/view/audio",
     "core/view/include",
+    "core/view/src/reload_exports.cpp",
     "tools/scripts/foundation_include_lint.py",
     "tools/scripts/include_boundary.py"
    ],
@@ -7273,6 +7274,7 @@
     "core/view",
     "core/view/audio",
     "core/view/include",
+    "core/view/src/reload_exports.cpp",
     "tools/scripts/include_boundary.py"
    ],
    "kind": "python"
