@@ -128,6 +128,12 @@ route the build through `tools/ci/governed-build.sh` without an explicit
 `--parallel` cap. The governor owns the worker share and build-directory lock;
 the emulator and fixture execution steps remain separate.
 
+The TSan workflow keeps its SignalGraph selection exact and bounded: include
+the compile-first lifecycle cases, mutation-lock and prepare-swap publication
+cases, and the routed and parallel re-prepare/process race hammers. Do not
+replace this with the full graph parity matrix; ordinary lanes own parity
+coverage while TSan owns these thread-race cases.
+
 The cross-platform software-GPU workflow also routes its Linux and Windows
 build steps through the governor. Keep each runner's existing build directory,
 Release configuration, log tee, and platform-specific test flow unchanged;
