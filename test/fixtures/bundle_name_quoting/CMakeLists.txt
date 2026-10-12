@@ -54,6 +54,24 @@ add_test(NAME cmake-bundle-name-quoting
 set_tests_properties(cmake-bundle-name-quoting PROPERTIES
     LABELS "cmake;format;artifact" TIMEOUT 30)
 
+# Every macOS bundle pulp_add_plugin() produces must take an ordinary,
+# non --deep signature, the kind `pulp ship sign` and Xcode make: copies are
+# signed inside out and verified strictly. Control evidence or any other data
+# file left in Contents/MacOS fails this.
+if(APPLE AND NOT PULP_IOS)
+    set(_signing_bundles "$<TARGET_BUNDLE_DIR:PulpBundleNameQuoting_Standalone>")
+    foreach(_fmt VST3 CLAP AU)
+        if(TARGET PulpBundleNameQuoting_${_fmt})
+            list(APPEND _signing_bundles "$<TARGET_BUNDLE_DIR:PulpBundleNameQuoting_${_fmt}>")
+        endif()
+    endforeach()
+    add_test(NAME macos-plugin-bundle-signing
+        COMMAND bash "${PROJECT_SOURCE_DIR}/tools/scripts/check_apple_bundle_signing.sh"
+            ${_signing_bundles})
+    set_tests_properties(macos-plugin-bundle-signing PROPERTIES
+        LABELS "cmake;format;artifact;signing" TIMEOUT 120)
+endif()
+
 # Real-host proof, advisory: pluginval automates the Freeze toggle, whose tail
 # edges queue a VST3 kReloadComponent that must never be delivered from inside
 # the host's own deactivation. Labeled `validation`, so it stays off the

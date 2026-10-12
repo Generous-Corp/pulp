@@ -506,3 +506,32 @@ TEST_CASE("fixture shipping markers hash the manifest bytes the fixtures ship",
     REQUIRE(pulp::test::kTrustedHostE2eFixtureManifest.find(field) != std::string_view::npos);
     REQUIRE(pulp::test::kInstalledHostE2eFixtureManifest.find(field) != std::string_view::npos);
 }
+
+TEST_CASE("control sidecars of a macOS bundle are looked up in Contents/Resources first",
+          "[inspect][control-manifest]") {
+    namespace fs = std::filesystem;
+    const fs::path macos{"/Apps/Example.app/Contents/MacOS"};
+    const auto directories = control_sidecar_directories(macos);
+    REQUIRE(directories.size() == 2);
+    CHECK(directories[0] == fs::path{"/Apps/Example.app/Contents/Resources"});
+    CHECK(directories[1] == macos);
+    CHECK(control_sidecar_directories(fs::path{"/Apps/Example.app/Contents/MacOS/"}).front() ==
+          fs::path{"/Apps/Example.app/Contents/Resources"});
+
+    // Anything that is not a bundle's code directory keeps its sidecars beside
+    // the binary.
+    for (const fs::path plain :
+         {fs::path{"/usr/local/libexec/pulp"}, fs::path{"Contents/MacOS"},
+          fs::path{"/Apps/Example.app/Contents"}, fs::path{"/Apps/Example.app/MacOS"}}) {
+        const auto only = control_sidecar_directories(plain);
+        REQUIRE(only.size() == 1);
+        CHECK(only.front() == plain);
+    }
+
+    CHECK(control_sidecar_executable_directory(fs::path{"/Apps/Example.app/Contents/Resources"}) ==
+          fs::path{"/Apps/Example.app/Contents/MacOS"});
+    CHECK(control_sidecar_executable_directory(fs::path{"/Apps/Example.app/Contents/MacOS"}) ==
+          fs::path{"/Apps/Example.app/Contents/MacOS"});
+    CHECK(control_sidecar_executable_directory(fs::path{"/srv/Resources"}) ==
+          fs::path{"/srv/Resources"});
+}
