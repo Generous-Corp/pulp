@@ -31,8 +31,15 @@ import sys
 
 DEFAULT_REPO = "Generous-Corp/pulp"
 
-# The workflow's suite steps are "Test (non-Windows)" and "Test (Windows ...)".
-TEST_STEP_RE = re.compile(r"^\s*Test\s*\(", re.IGNORECASE)
+# Keep this in step-name terms because the Actions jobs API exposes names, not
+# workflow step ids. These are the suite steps currently declared in
+# `.github/workflows/build.yml`; the other `Test ...` steps there are receipts
+# or capability checks and must remain controls rather than suite evidence.
+TEST_STEP_RE = re.compile(
+    r"^\s*Test\s+(?:\([^)]*\)|fast deterministic tier\b|"
+    r"what this pull request reaches\b)",
+    re.IGNORECASE,
+)
 BUILD_STEP_RE = re.compile(r"^\s*Build\s*$", re.IGNORECASE)
 
 # A step with any other conclusion (skipped, cancelled, null) did not run.

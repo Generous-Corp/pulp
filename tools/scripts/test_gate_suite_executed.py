@@ -37,7 +37,8 @@ REAL_JOB = [
     step("Bootstrap repository dependencies"),
     step("Configure"),
     step("Build"),
-    step("Test (non-Windows)"),
+    step("Test fast deterministic tier (pull request head)"),
+    step("Test what this pull request reaches (pull request head)"),
     step("Surface ctest failures (non-Windows)"),
     step("Complete job"),
 ]
@@ -54,7 +55,7 @@ class ClassifyStepsTests(unittest.TestCase):
         """The question is whether it RAN, not whether it passed."""
         failed = [s.copy() for s in REAL_JOB]
         for s in failed:
-            if s["name"].startswith("Test ("):
+            if gse.TEST_STEP_RE.match(s["name"]):
                 s["conclusion"] = "failure"
         self.assertEqual(gse.classify_steps(failed), gse.EXECUTED)
 
@@ -62,14 +63,14 @@ class ClassifyStepsTests(unittest.TestCase):
         """A pull-request head builds but skips the suite; that is not a pass."""
         skipped = [s.copy() for s in REAL_JOB]
         for s in skipped:
-            if s["name"].startswith("Test ("):
+            if gse.TEST_STEP_RE.match(s["name"]):
                 s["conclusion"] = "skipped"
         self.assertEqual(gse.classify_steps(skipped), gse.BUILT_BUT_UNTESTED)
 
     def test_cancelled_test_step_is_not_a_pass(self) -> None:
         cancelled = [s.copy() for s in REAL_JOB]
         for s in cancelled:
-            if s["name"].startswith("Test ("):
+            if gse.TEST_STEP_RE.match(s["name"]):
                 s["conclusion"] = "cancelled"
         self.assertNotEqual(gse.classify_steps(cancelled), gse.EXECUTED)
 
@@ -79,6 +80,16 @@ class ClassifyStepsTests(unittest.TestCase):
     def test_windows_test_step_also_counts(self) -> None:
         job = [step("Set up job"), step("Test (Windows — UTF-8 code page wrapped)")]
         self.assertEqual(gse.classify_steps(job), gse.EXECUTED)
+
+    def test_build_with_non_suite_test_step_is_not_executed(self) -> None:
+        """A real build plus an issuer/check step is still not suite evidence."""
+        job = [
+            step("Set up job"),
+            step("Build"),
+            step("Test A2T structural receipt issuer"),
+            step("Complete job"),
+        ]
+        self.assertEqual(gse.classify_steps(job), gse.BUILT_BUT_UNTESTED)
 
     def test_a_step_merely_named_test_does_not_count(self) -> None:
         """`Test A2T structural receipt issuer` is not the suite."""
