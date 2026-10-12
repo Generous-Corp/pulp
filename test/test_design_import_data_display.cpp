@@ -68,6 +68,9 @@ struct Calls {
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
 
 // A plugin written before the provider-neutral virtuals existed.
@@ -108,6 +111,8 @@ public:
 
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
 
 class InterfaceOnlyContext final : public NativeImportBindingContext {
