@@ -6677,6 +6677,16 @@
    ],
    "kind": "python"
   },
+  "merge-group-hold-check-selftest": {
+   "entry": "tools/ci/test_merge_group_hold_check.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/fixtures/merge_group_hold/pr-10114-verdicts.json",
+    "tools/ci/merge_group_hold_check.py",
+    "tools/ci/test_merge_group_hold_check.py"
+   ],
+   "kind": "python"
+  },
   "merge-group-shadows-selftest": {
    "entry": "tools/ci/test_merge_group_shadows.py",
    "inputs": [

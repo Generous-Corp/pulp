@@ -318,6 +318,26 @@ failure on a merge group names a commit that is not in the ejected PR, read the
 `diff base:` line in the job log before touching the PR. Any new diff-scoped
 gate added to a merge_group workflow should reuse the same resolver.
 
+## A HOLD on a queued head fails the merge group
+
+On 2026-10-12/13 six pulp pull requests merged minutes after a `verdict: HOLD`
+naming their merge head: each was armed before the HOLD, and review before arm
+judges only the arm. Two layers stop that now. Shipyard's `verdict-hold-hook`
+dequeues or disarms the exact head when the HOLD posts through `ghapp` (on
+hosts that enable `hold-disarms`). Behind it, the merge-group classify job runs
+`tools/ci/merge_group_hold_check.py`, which fails `macos` closed, before any VM,
+when a queued pull request's latest trusted verdict on the head it lands is
+HOLD. Its error annotation names the pull request, the HOLD's URL and the fix:
+a new head plus an APPROVE, or an APPROVE on that head if the HOLD no longer
+applies, then re-queue. It fails closed: an "(unreadable)" error annotation
+means it could not read the group (a commit on the chain, a missing token) or a
+pull request's comments or reviews in full (a failed read, a GraphQL `errors`
+answer, a list short of its `totalCount`), and that fails the group too. A
+stalled queue is the deliberate lesser harm: re-run the group's classify job or
+re-queue. A failed fetch of the base branch fails the same way; only a base
+that does not carry the check yet passes, with a notice. A HOLD from the pull
+request's own author counts; their APPROVE never does.
+
 ## A failed batch's branch name is not the culprit
 
 A merge_group batch is NAMED for one pull request but CONTAINS every entry

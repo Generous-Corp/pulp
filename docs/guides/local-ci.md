@@ -3368,6 +3368,26 @@ both wait on classify; a failing in-job classifier fails closed.
 `tools/ci/test_macos_merge_group_bootstrap.py` runs the script against stub
 results.
 
+On a merge group, the classify job first runs the protected base branch's copy
+of `tools/ci/merge_group_hold_check.py` (fetched from
+`merge_group.base_ref`; the token never reaches a queue entry's code). It reads the group's pull requests from
+the first-parent chain of queue merge commits (each lands its second parent),
+and fails when one's latest trusted verdict on that head is
+`verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. "Trusted" means the
+fleet App or an OWNER, MEMBER or COLLABORATOR who is not the author,
+Shipyard's rule, except that the author's own HOLD counts (never their
+APPROVE). The chain is read one commit at a time and comments and reviews are
+paginated, so a large group or a long pull request is read in full. The failure names the pull request, the HOLD's URL and the
+fix, and a failed classify fails `macos` closed through the bootstrap above,
+before any VM. It is the backstop for a HOLD on a head that was already armed
+or queued, which Shipyard's `verdict-hold-hook` otherwise dequeues or disarms
+when the HOLD posts. It fails closed: anything it cannot read (a commit on
+the chain, a pull request's comments or reviews, a missing token, a failed
+fetch of the base branch) fails the group with an error naming the pull request
+or group, the error and the fix (re-run the classify job, or re-queue). A
+stalled queue is the deliberate lesser harm. Only a base branch that does not
+carry the check yet passes, with a notice.
+
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
 stdin script, so a wedged checkout volume can freeze the routing probe even

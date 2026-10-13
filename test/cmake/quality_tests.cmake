@@ -821,6 +821,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_binary_identity_shadow.py")
         set_tests_properties(binary-identity-shadow-selftest PROPERTIES TIMEOUT 120)
+        # The merge-group preamble's HOLD backstop (group decoding, trust rule,
+        # fail-open on unreadable input, build.yml wiring).
+        add_test(NAME merge-group-hold-check-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_hold_check.py")
+        set_tests_properties(merge-group-hold-check-selftest PROPERTIES TIMEOUT 60)
         # The one merge-group step that runs all four shadow instruments.
         add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")
