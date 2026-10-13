@@ -135,6 +135,7 @@ def validate_tool_registry(tool_registry: dict) -> list[str]:
     errors: list[str] = []
     for tool_id, tool in tool_registry.get("tools", {}).items():
         errors.extend(validate_binary_source_digests(tool_id, tool))
+        errors.extend(validate_bundleable_license(tool_id, tool))
         if not tool.get("managed_by_pulp"):
             continue
         pinned = tool.get("pinned_version", "")
@@ -187,6 +188,91 @@ def validate_code_owned_digests(tool_registry: dict) -> list[str]:
                     "this tool. Update both together."
                 )
     return errors
+
+
+class _UnsupportedLicenseExpression(ValueError):
+    """The expression is not one this evaluator can judge exactly."""
+
+
+def _license_tokens(expression: str) -> list[str]:
+    return re.findall(r"\(|\)|[^\s()]+", expression)
+
+
+def license_permits_bundling(expression: object) -> bool:
+    """True when an SPDX expression can only resolve to allowed licenses.
+
+    Evaluated with SPDX precedence: parentheses first, then AND, which binds
+    tighter than OR. `A OR B` is permitted when either branch is (the
+    distributor picks it); `A AND B` only when both are. A `WITH` exception,
+    an unknown, copyleft or prose license, an empty value, or any expression
+    that does not parse cleanly is not bundleable: the evaluator fails closed.
+    """
+    if not isinstance(expression, str) or not expression.strip():
+        return False
+    tokens = _license_tokens(expression)
+    pos = 0
+
+    def peek() -> str | None:
+        return tokens[pos] if pos < len(tokens) else None
+
+    def take() -> str:
+        nonlocal pos
+        if pos >= len(tokens):
+            raise _UnsupportedLicenseExpression("unexpected end")
+        pos += 1
+        return tokens[pos - 1]
+
+    def parse_or() -> bool:
+        result = parse_and()
+        while peek() == "OR":
+            take()
+            right = parse_and()
+            result = result or right
+        return result
+
+    def parse_and() -> bool:
+        result = parse_atom()
+        while peek() == "AND":
+            take()
+            right = parse_atom()
+            result = result and right
+        return result
+
+    def parse_atom() -> bool:
+        token = take()
+        if token == "(":
+            inner = parse_or()
+            if take() != ")":
+                raise _UnsupportedLicenseExpression("unbalanced parenthesis")
+            return inner
+        if token in {")", "AND", "OR", "WITH"}:
+            raise _UnsupportedLicenseExpression(f"unexpected {token}")
+        return token in ALLOWED_LICENSES
+
+    try:
+        permitted = parse_or()
+        if pos != len(tokens):
+            return False
+        return permitted
+    except _UnsupportedLicenseExpression:
+        return False
+
+
+def validate_bundleable_license(tool_id: str, tool: dict) -> list[str]:
+    """A tool may claim `bundleable: true` only under a permissive license.
+
+    Pulp never ships GPL, AGPL or LGPL code in its artifacts, and an unknown
+    license is not a reviewed one, so `bundleable` is refused for all of them.
+    """
+    if tool.get("bundleable") is not True or license_permits_bundling(tool.get("license")):
+        return []
+    return [
+        f"  {tool_id}: 'bundleable: true' with license {tool.get('license')!r}, which is "
+        "copyleft, unknown or not in the allowed list "
+        f"({', '.join(sorted(ALLOWED_LICENSES))}). Pulp's artifacts may not carry "
+        "GPL/AGPL/LGPL code. Set 'bundleable': false, or pin a build whose license "
+        "is allowed and record it in 'license'."
+    ]
 
 
 def main() -> int:

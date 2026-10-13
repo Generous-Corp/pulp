@@ -408,6 +408,18 @@ verifies it. A binary source therefore needs an immutable, versioned URL; a
 "latest" redirect cannot hold a digest. Recording digests and the
 unverified-version override behavior: the `installable-tools` skill.
 
+`bundleable: true` is refused unless the tool's `license` can only resolve to
+an allowed permissive license. The validator parses SPDX properly: parentheses
+group, `AND` binds tighter than `OR`, an `OR` needs one permitted branch and an
+`AND` needs both. GPL, AGPL, LGPL, prose terms, `WITH` exceptions, an empty
+license and anything that does not parse are not bundleable (it fails closed). Record
+the license of the build actually pinned, not of the upstream project: FFmpeg's
+source is LGPL, but every prebuilt Pulp pins is configured `--enable-gpl`, so
+the registry says GPL and `bundleable: false`. Read a binary's configuration
+with `strings <binary> | grep -- --enable-gpl` (look for `--enable-nonfree`
+too, which makes a build unredistributable) rather than trusting a download
+page.
+
 For `python_pip` tools, the managed venv manifest is also the installed-version
 authority. `pulp tool install` may reuse an existing venv only when its wrapper
 exists and `manifest.json` records the current registry pin; a missing or stale

@@ -144,8 +144,8 @@
       "category": "binary",
       "description": "Audio/video transcoding and format conversion",
       "upstream_url": "https://ffmpeg.org",
-      "license": "LGPL-2.1-or-later",
-      "license_note": "Used as a separate process, not linked. LGPL applies to ffmpeg itself, not to plugins invoking it.",
+      "license": "GPL-3.0-or-later",
+      "license_note": "Every pinned source is a GPL build of FFmpeg: the binaries are configured with --enable-gpl and link GPL libraries such as libx264 and libx265 (the Windows and Linux builds also --enable-version3, so GPL-3.0-or-later; the macOS build is GPL-2.0-or-later, usable under GPL-3.0). It is a developer machine tool run as a separate process; it must never be linked into Pulp or bundled into an installer, plugin or app.",
       "install_method": "binary_download",
       "binary_sources": {
         "macOS-arm64": {
@@ -170,8 +170,8 @@
       "pinned_version": "7.1",
       "requires_tools": [],
       "managed_by_pulp": true,
-      "bundleable": true,
-      "bundle_note": "Can be included in standalone app installers for audio conversion"
+      "bundleable": false,
+      "bundle_note": "Not bundleable: the pinned builds are GPL. Shipping FFmpeg inside an artifact would need a separately pinned LGPL build (configured without --enable-gpl or --enable-nonfree) and its own license review."
     },
     "yt-dlp": {
       "display_name": "yt-dlp",

@@ -387,6 +387,49 @@ class ValidateRegistryTests(unittest.TestCase):
         self.assertEqual(vr.validate_tool_registry(shipped), [])
         self.assertEqual(vr.validate_code_owned_digests(shipped), [])
 
+    def test_bundleable_requires_a_permissive_license(self) -> None:
+        cases = {
+            "gpl": ("GPL-3.0-or-later", False),
+            "lgpl": ("LGPL-2.1-or-later", False),
+            "agpl": ("AGPL-3.0-only", False),
+            "prose": ("Google Chrome Terms of Service", False),
+            "missing": (None, False),
+            "empty": ("", False),
+            "gpl-and-mit": ("MIT AND GPL-2.0-only", False),
+            "mit": ("MIT", True),
+            "dual": ("MIT OR Apache-2.0", True),
+            "gpl-or-mit": ("(GPL-2.0-only OR MIT)", True),
+            # AND binds tighter than OR, and parentheses group: these two
+            # always require a GPL license.
+            "gpl-and-group": ("GPL-3.0-only AND (MIT OR Apache-2.0)", False),
+            "group-and-gpl": ("(MIT OR GPL-2.0-only) AND GPL-3.0-only", False),
+            "and-group-or-mit": ("(MIT AND GPL-2.0-only) OR Apache-2.0", True),
+            "precedence": ("MIT OR GPL-2.0-only AND GPL-3.0-only", True),
+            "all-permissive-group": ("(MIT OR Apache-2.0) AND BSD-3-Clause", True),
+            "with-exception": ("Apache-2.0 WITH LLVM-exception", False),
+            "with-in-group": ("(Apache-2.0 WITH LLVM-exception) OR GPL-2.0-only", False),
+            "with-then-or": ("Apache-2.0 WITH LLVM-exception OR MIT", False),
+            "unbalanced": ("(MIT OR Apache-2.0", False),
+            "dangling-or": ("MIT OR", False),
+            "trailing-token": ("MIT Apache-2.0", False),
+        }
+        tools = {name: {"bundleable": True, "license": lic}
+                 for name, (lic, _) in cases.items()}
+        tools["unbundled-gpl"] = {"bundleable": False, "license": "GPL-3.0-only"}
+        joined = "\n".join(vr.validate_tool_registry({"tools": tools}))
+        for name, (_, allowed) in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(f"  {name}: 'bundleable: true'" in joined, not allowed, joined)
+        self.assertNotIn("unbundled-gpl", joined)
+
+    def test_shipped_tool_registry_bundles_nothing_copyleft(self) -> None:
+        shipped = json.loads((ROOT / "tool-registry.json").read_text(encoding="utf-8"))
+        self.assertIn("ffmpeg", shipped["tools"], "control: the registry lists ffmpeg")
+        self.assertFalse(shipped["tools"]["ffmpeg"]["bundleable"])
+        self.assertTrue(shipped["tools"]["ffmpeg"]["license"].startswith("GPL-"))
+        bundle_errors = [e for e in vr.validate_tool_registry(shipped) if "bundleable" in e]
+        self.assertEqual(bundle_errors, [])
+
     def test_main_reports_tool_registry_update_override_error(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
