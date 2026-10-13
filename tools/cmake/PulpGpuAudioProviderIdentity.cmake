@@ -21,19 +21,18 @@ function(pulp_gpu_audio_configure_provider_identity target)
             "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires a thin Apple-Silicon macOS target")
     endif()
     if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND
-            (NOT PULP_HAS_SKIA OR NOT EXISTS "${DAWN_LIBRARY}"))
+            NOT PULP_SKIA_PROVIDES_DAWN)
         message(FATAL_ERROR
             "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires the pinned Skia/Dawn provider")
     endif()
 
-    if(NOT (APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_HAS_SKIA
-            AND EXISTS "${DAWN_LIBRARY}"))
+    if(NOT (APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN))
         return()
     endif()
     if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
     endif()
-    file(SHA256 "${DAWN_LIBRARY}" _pulp_gpu_audio_dawn_archive_sha256)
+    file(SHA256 "${PULP_SKIA_DAWN_ARCHIVE}" _pulp_gpu_audio_dawn_archive_sha256)
     set(_pulp_gpu_audio_asset_sha256 "unknown")
     if(EXISTS "${SKIA_DIR}/.skia-asset-sha256")
         file(READ "${SKIA_DIR}/.skia-asset-sha256"
@@ -69,7 +68,7 @@ function(pulp_gpu_audio_configure_provider_identity target)
                 --platform darwin-arm64
                 --skia-dir "${SKIA_DIR}"
                 --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                --dawn-library "${DAWN_LIBRARY}"
+                --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                 --result "${_pulp_gpu_audio_configure_receipt}"
                 --cmake-output "${_pulp_gpu_audio_identity_cmake}"
             RESULT_VARIABLE _pulp_gpu_audio_identity_result
@@ -107,7 +106,7 @@ function(pulp_gpu_audio_configure_provider_identity target)
                 --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
                 --platform darwin-arm64 --skia-dir "${SKIA_DIR}"
                 --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                --dawn-library "${DAWN_LIBRARY}"
+                --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                 --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                 --result "${_pulp_gpu_audio_prelink_receipt}"
             VERBATIM)

@@ -49,7 +49,7 @@ endif()
 # Pass the selected provider to the artifact scanner so it checks the actual
 # configuration rather than assuming that every Skia build contains Dawn.
 set(_native_link_floor_provider_args -DEXPECT_DAWN=OFF)
-if(PULP_HAS_SKIA AND EXISTS "${DAWN_LIBRARY}")
+if(PULP_SKIA_PROVIDES_DAWN)
     set(_native_link_floor_provider_args -DEXPECT_DAWN=ON)
 endif()
 
