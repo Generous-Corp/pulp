@@ -2133,6 +2133,29 @@ Two consequences when changing that radius:
   silently averages in the design's own concentric decoration (kelvin's copper
   hairline at r≈89 and tick ring at r≈98) and reports a radius a pixel high.
 
+### Meters, waveforms and spectra go through the view-core display seam
+
+Native materialization and the generated C++ never name `Meter`,
+`WaveformView` or `SpectrumView`: a `meter`/`waveform`/`spectrum` node is made
+with `make_data_display("pulp.level" | "pulp.series" | "pulp.bins")` and
+configured through `LevelDisplay`/`SeriesDisplay`/`BinDisplay`; binding goes
+through `bind_imported_level_display`/`bind_imported_series_display`, in both
+the materializer and the generated binding helpers. Those call the
+provider-neutral virtual and then the deprecated `bind_meter`/
+`bind_waveform_display` through the binder `pulp::view-audio` registers, so
+emit the helper, never a bare `ctx.bind_level_display`, or old-only contexts
+go silently unbound. `setMeterColors` fills through one
+`set_level_fill(optional background, stops)` call: a gradient must never
+restate the background. With no provider registered the materializer
+returns a placeholder plus a `data-display-unavailable` diagnostic and the
+binding reports `native-binding-not-applied`. Generated code keeps that
+property: the non-faithful path emits a `View` fallback for a null factory
+result, and the faithful_svg path must not (its variable is a
+`unique_ptr<DesignFrameView>`). The guard is `[data-display]` in
+`test_design_import_native_materializer.cpp`, which compiles generated displays
+in both modes against view-core headers only and scans emitted output for
+provider-only names.
+
 ### Native codegen fidelity gaps
 
 The render uses `generate_native_node` in `core/view/src/design_codegen.cpp`

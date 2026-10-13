@@ -13,7 +13,8 @@
 add_library(pulp-design-ir INTERFACE)
 add_library(pulp::design-ir ALIAS pulp-design-ir)
 
-add_library(pulp-view-core)
+add_library(pulp-view-core
+    src/data_display.cpp)
 add_library(pulp::view-core ALIAS pulp-view-core)
 # Consumers (and view-core's own headers) gate any optional JS use on this.
 target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_ENABLE_JS}>)
@@ -73,7 +74,7 @@ target_link_libraries(pulp-view-native PUBLIC pulp::view-audio)
 # a whole-archive force-load of view-core would. Self-contained: links view-core.
 add_library(pulp-view-reload-exports STATIC src/reload_exports.cpp)
 add_library(pulp::view-reload-exports ALIAS pulp-view-reload-exports)
-target_link_libraries(pulp-view-reload-exports PUBLIC pulp-view-core)
+target_link_libraries(pulp-view-reload-exports PUBLIC pulp::view-audio)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
@@ -245,6 +246,15 @@ target_link_libraries(pulp-view-core PUBLIC
 # surface while keeping pulp-view-core's direct PUBLIC closure audio-free.
 target_link_libraries(pulp-view-audio PUBLIC pulp::view-core)
 target_link_libraries(pulp-view-audio PUBLIC pulp::audio pulp::signal pulp::midi)
+target_compile_definitions(pulp-view-audio PRIVATE PULP_VIEW_HAS_AUDIO_WIDGETS=1 INTERFACE PULP_VIEW_HAS_AUDIO_WIDGETS=1)
+# Convenience only for direct in-tree consumers.  Product entry points call
+# register_audio_widgets() explicitly; the shim is intentionally not exported
+# as an installed source file.
+target_sources(pulp-view-audio INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/src/register_audio_widgets_shim.cpp>)
+if(PULP_ENABLE_DESIGN_IMPORT)
+    target_compile_definitions(pulp-view-audio PRIVATE PULP_VIEW_AUDIO_HAS_DESIGN_IMPORT=1)
+endif()
 # Host-backed view facilities are implemented by pulp-host. Keeping that
 # integration out of both view targets is load-bearing: every plugin format
 # links pulp::view, so a view-to-host edge would make even a plugin that only
@@ -252,7 +262,6 @@ target_link_libraries(pulp-view-audio PUBLIC pulp::audio pulp::signal pulp::midi
 # The scripting bridge instantiates audio widgets (Meter, WaveformView,
 # SpectrumView, etc.), so its static link closure must carry the audio view
 # target after those implementations leave pulp-view-core.
-target_link_libraries(pulp-view-script PUBLIC pulp::view-audio)
 # design_import.cpp uses pulp::runtime::base64_decode +
 # gzip_decompress to unpack Claude Design's base64-gzip envelope.
 # PUBLIC because the public header model_manager_view.hpp includes
@@ -261,6 +270,8 @@ target_link_libraries(pulp-view-script PUBLIC pulp::view-audio)
 # include path + link.
 target_link_libraries(pulp-view-core PUBLIC pulp::runtime)
 target_link_libraries(pulp-view-script PRIVATE pulp::runtime)
+# view-script still consumes view-core headers in native-only/design-import-off builds.
+target_link_libraries(pulp-view-script PUBLIC pulp::view-core pulp::state)
 
 # Design units (DesignIR value types below view-core; the importer and its
 # Pulp-owned audio-control recognition pack above it). Directory scope: the

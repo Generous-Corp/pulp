@@ -85,6 +85,7 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
            << "#include <pulp/view/text_editor.hpp>\n"
            << "#include <pulp/view/ui_components.hpp>\n"
            << "#include <pulp/view/widgets.hpp>\n"
+           << "#include <pulp/view/data_display.hpp>\n"
            << "#include <pulp/view/widgets/svg_line.hpp>\n"
            << "#include <pulp/view/widgets/svg_rect.hpp>\n"
            << "#include <pulp/runtime/base64.hpp>\n\n";

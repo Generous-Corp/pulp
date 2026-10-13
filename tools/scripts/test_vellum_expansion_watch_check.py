@@ -345,6 +345,17 @@ class Tests(unittest.TestCase):
                 "20260811-render-watch-change.json",
             )
 
+    def test_vellum_inherits_is_an_optional_boolean(self) -> None:
+        name = ".github/vellum-expansion-watch-events/20260811-render-watch-change.json"
+        for flag in (True, False):
+            value = event("render-assets-and-backends")
+            value["vellum_inherits"] = flag
+            watch.validate_event(value, name)
+        value = event("render-assets-and-backends")
+        value["vellum_inherits"] = "yes"
+        with self.assertRaisesRegex(watch.WatchError, "vellum_inherits must be true or false"):
+            watch.validate_event(value, name)
+
     def test_refresh_overlap_count_requires_integer_zero(self) -> None:
         value = refresh_event()
         value["refresh"]["open_vellum_overlap_count"] = False

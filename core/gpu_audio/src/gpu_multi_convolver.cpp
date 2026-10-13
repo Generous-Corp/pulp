@@ -1,4 +1,5 @@
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
+#include <pulp/render/gpu_compute.hpp>
 
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
 
@@ -7,6 +8,12 @@
 #include <utility>
 
 namespace pulp::gpu_audio {
+
+std::string GpuMultiConvolver::backend() const {
+    return gpu_ ? gpu_->capabilities().backend : std::string();
+}
+
+GpuMultiConvolver::~GpuMultiConvolver() = default;
 
 GpuMultiConvolver::GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
                                      std::vector<std::vector<float>> irs)

@@ -273,6 +273,18 @@ pulp_add_test_suite(pulp-test-aax-model GROUP pulp-test-group-fmt-format
 pulp_add_test_suite(pulp-test-aax-editor GROUP pulp-test-group-fmt-format
     LIBRARIES pulp::format)
 
+# AAX native child placement — the frame invariants behind the editor shell's
+# parent reconciliation, driven against real NSViews (no window, no SDK). Only
+# the macOS helper exists; the other platforms get header no-ops.
+if(APPLE)
+    pulp_add_test_suite(pulp-test-aax-native-view
+        SOURCES test_aax_native_view_mac.mm
+                "${CMAKE_SOURCE_DIR}/core/format/src/aax_native_view_mac.mm"
+        LIBRARIES pulp::view
+        INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")
+    target_link_libraries(pulp-test-aax-native-view PRIVATE "-framework AppKit")
+endif()
+
 # AAX MIDI bridge — SDK-gated runtime test. test_aax_midi.cpp covers the
 # reassembly/fragmentation SDK-free; this drives the thin SDK glue
 # (decode_midi_node / encode_midi_node in aax_midi_node.cpp) through the real
@@ -301,6 +313,7 @@ if(PULP_HAS_AAX)
     pulp_add_test_suite(pulp-test-aax-effect-gui
         SOURCES test_aax_effect_gui.cpp
                 "${CMAKE_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
+                "$<$<PLATFORM_ID:Darwin>:${CMAKE_SOURCE_DIR}/core/format/src/aax_native_view_mac.mm>"
         LIBRARIES pulp::format pulp::view pulp-aax-library
         INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")
     target_compile_options(pulp-test-aax-effect-gui PRIVATE
@@ -318,6 +331,7 @@ if(PULP_HAS_AAX)
         SOURCES test_aax_entry_registration.cpp
                 "${CMAKE_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
                 "${CMAKE_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
+                "$<$<PLATFORM_ID:Darwin>:${CMAKE_SOURCE_DIR}/core/format/src/aax_native_view_mac.mm>"
                 "${CMAKE_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
         LIBRARIES pulp::format pulp::view pulp-aax-library
         INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")

@@ -596,6 +596,12 @@ def validate_event(
                 )
         elif disposition != "pulp-only":
             raise FreezeError(f"event {path} has an invalid change disposition")
+        # Optional: whether Vellum inherits the change, read by the
+        # inheritance ledger checker (vellum_inheritance_ledger_check.py).
+        if "vellum_inherits" in event:
+            if type(event["vellum_inherits"]) is not bool:
+                raise FreezeError(f"event {path} vellum_inherits must be true or false")
+            allowed = allowed | {"vellum_inherits"}
         if set(event) != allowed:
             raise FreezeError(f"event {path} has missing or unknown fields")
     elif kind == "authority-transition":

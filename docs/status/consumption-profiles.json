@@ -230,6 +230,8 @@
       "pulp/format/aax_midi_node.hpp",
       "pulp/format/aax_midi_packets.hpp",
       "pulp/format/aax_model.hpp",
+      "pulp/format/aax_native_view.hpp",
+      "pulp/format/aax_runtime_testing.hpp",
       "pulp/format/adapter_boundary.hpp",
       "pulp/format/app_updates.hpp",
       "pulp/format/app_updates_bridge.hpp",
@@ -1218,10 +1220,12 @@
     "core/view/audio/include": [
       "pulp/view/audio_inspector_panel.hpp",
       "pulp/view/audio_inspector_window.hpp",
+      "pulp/view/audio_widgets.hpp",
       "pulp/view/eq_curve_view.hpp",
       "pulp/view/hosted_editor_attachment.hpp",
       "pulp/view/midi_binding.hpp",
       "pulp/view/plugin_manager_panel.hpp",
+      "pulp/view/register_audio_widgets.hpp",
       "pulp/view/sample_asset_drop_target.hpp",
       "pulp/view/visualization_bridge.hpp",
       "pulp/view/visualizers.hpp",
@@ -1278,6 +1282,7 @@
       "pulp/view/css_effect_parse.hpp",
       "pulp/view/css_gradient.hpp",
       "pulp/view/custom_shader_host.hpp",
+      "pulp/view/data_display.hpp",
       "pulp/view/design_capture_lowering.hpp",
       "pulp/view/design_codegen.hpp",
       "pulp/view/design_export.hpp",
@@ -1628,20 +1633,20 @@
             "closure_node_count": 79
           },
           {
-            "exported_as": "Pulp::design-import-audio-pack",
-            "closure_node_count": 77
-          },
-          {
-            "exported_as": "Pulp::view-script",
-            "closure_node_count": 77
-          },
-          {
-            "exported_as": "Pulp::design-import",
+            "exported_as": "Pulp::view-audio",
             "closure_node_count": 76
           },
           {
-            "exported_as": "Pulp::view-audio",
-            "closure_node_count": 74
+            "exported_as": "Pulp::design-import-audio-pack",
+            "closure_node_count": 68
+          },
+          {
+            "exported_as": "Pulp::view-script",
+            "closure_node_count": 68
+          },
+          {
+            "exported_as": "Pulp::design-import",
+            "closure_node_count": 67
           },
           {
             "exported_as": "Pulp::inspect-telemetry",
@@ -2531,9 +2536,8 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 76,
+            "node_count": 67,
             "pulp_targets": [
-              "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-design-import",
@@ -2542,17 +2546,11 @@
               "pulp-foundation",
               "pulp-gpu-device",
               "pulp-gpu-device-api",
-              "pulp-midi",
-              "pulp-music",
               "pulp-platform",
               "pulp-render",
               "pulp-runtime",
-              "pulp-sample-bank-manifest",
-              "pulp-signal",
               "pulp-simd",
               "pulp-state",
-              "pulp-timebase",
-              "pulp-view-audio",
               "pulp-view-core"
             ],
             "third_party_targets": [
@@ -2573,7 +2571,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 53,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -2611,11 +2609,9 @@
               "Carbon",
               "Cocoa",
               "CoreAudio",
-              "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
               "CoreHaptics",
-              "CoreMIDI",
               "CoreMedia",
               "CoreServices",
               "CoreText",
@@ -2645,7 +2641,6 @@
           },
           "direct_dependencies": [
             "pulp-design-ir",
-            "pulp-view-audio",
             "pulp-view-core",
             "yaml-cpp"
           ]
@@ -2656,9 +2651,8 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 77,
+            "node_count": 68,
             "pulp_targets": [
-              "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-design-import",
@@ -2668,17 +2662,11 @@
               "pulp-foundation",
               "pulp-gpu-device",
               "pulp-gpu-device-api",
-              "pulp-midi",
-              "pulp-music",
               "pulp-platform",
               "pulp-render",
               "pulp-runtime",
-              "pulp-sample-bank-manifest",
-              "pulp-signal",
               "pulp-simd",
               "pulp-state",
-              "pulp-timebase",
-              "pulp-view-audio",
               "pulp-view-core"
             ],
             "third_party_targets": [
@@ -2699,7 +2687,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 53,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -2737,11 +2725,9 @@
               "Carbon",
               "Cocoa",
               "CoreAudio",
-              "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
               "CoreHaptics",
-              "CoreMIDI",
               "CoreMedia",
               "CoreServices",
               "CoreText",
@@ -3445,6 +3431,7 @@
             "clap",
             "pulp-content",
             "pulp-format-core",
+            "pulp-view-audio",
             "pulp-view-core",
             "pulp-view-script"
           ]
@@ -7550,11 +7537,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 74,
+            "node_count": 76,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-design-import",
               "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
@@ -7586,11 +7574,12 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 54,
+            "count": 55,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7604,6 +7593,7 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
+              "yaml-cpp",
               "yogacore"
             ],
             "prebuilt_archives": [
@@ -7663,6 +7653,7 @@
           },
           "direct_dependencies": [
             "pulp-audio",
+            "pulp-design-import",
             "pulp-midi",
             "pulp-signal",
             "pulp-view-core"
@@ -8077,9 +8068,8 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 77,
+            "node_count": 68,
             "pulp_targets": [
-              "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-design-import",
@@ -8088,17 +8078,11 @@
               "pulp-foundation",
               "pulp-gpu-device",
               "pulp-gpu-device-api",
-              "pulp-midi",
-              "pulp-music",
               "pulp-platform",
               "pulp-render",
               "pulp-runtime",
-              "pulp-sample-bank-manifest",
-              "pulp-signal",
               "pulp-simd",
               "pulp-state",
-              "pulp-timebase",
-              "pulp-view-audio",
               "pulp-view-core",
               "pulp-view-script"
             ],
@@ -8120,7 +8104,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 53,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8158,11 +8142,9 @@
               "Carbon",
               "Cocoa",
               "CoreAudio",
-              "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
               "CoreHaptics",
-              "CoreMIDI",
               "CoreMedia",
               "CoreServices",
               "CoreText",
@@ -8196,7 +8178,8 @@
             "pulp-design-import",
             "pulp-render",
             "pulp-runtime",
-            "pulp-view-audio"
+            "pulp-state",
+            "pulp-view-core"
           ]
         },
         "vst3-sdk": {

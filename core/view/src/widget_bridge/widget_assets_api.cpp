@@ -14,6 +14,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -283,43 +284,56 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         });
 
     // setMeterColors(id, backgroundColor, "#stop0,#stop1,#stop2,...")
-    register_bridge_function(api, "setMeterColors",
-        [&self](choc::javascript::ArgumentList args) {
-            auto* m = dynamic_cast<Meter*>(self.widget(args.get<std::string>(0, "")));
-            if (!m) return choc::value::Value();
-            if (auto [bg, ok] = parse_skin_color(args.get<std::string>(1, "")); ok)
-                m->set_skin_background_color(bg);
-            auto stops_str = args.get<std::string>(2, "");
-            std::vector<canvas::Color> stops;
-            size_t start = 0;
-            while (start <= stops_str.size()) {
-                size_t comma = stops_str.find(',', start);
-                std::string tok = stops_str.substr(start, comma == std::string::npos
-                                                              ? std::string::npos
-                                                              : comma - start);
-                while (!tok.empty() && std::isspace(static_cast<unsigned char>(tok.front()))) tok.erase(tok.begin());
-                while (!tok.empty() && std::isspace(static_cast<unsigned char>(tok.back()))) tok.pop_back();
-                if (!tok.empty()) {
-                    if (auto [c, ok] = parse_skin_color(tok); ok) stops.push_back(c);
-                }
-                if (comma == std::string::npos) break;
-                start = comma + 1;
-            }
-            if (stops.size() >= 2) m->set_skin_gradient(std::move(stops));
-            else m->clear_skin();
-            m->request_repaint();
+    register_bridge_function(api, "setMeterColors", [&self](choc::javascript::ArgumentList args) {
+        auto* m = dynamic_cast<LevelDisplay*>(self.widget(args.get<std::string>(0, "")));
+        if (!m)
             return choc::value::Value();
-        });
+        // One call, so the gradient never restates the background: an empty or
+        // unparseable background argument leaves the display's own in place.
+        std::optional<canvas::Color> background;
+        if (auto [bg, ok] = parse_skin_color(args.get<std::string>(1, "")); ok)
+            background = bg;
+        auto stops_str = args.get<std::string>(2, "");
+        std::vector<canvas::Color> stops;
+        size_t start = 0;
+        while (start <= stops_str.size()) {
+            size_t comma = stops_str.find(',', start);
+            std::string tok = stops_str.substr(start, comma == std::string::npos ? std::string::npos
+                                                                                 : comma - start);
+            while (!tok.empty() && std::isspace(static_cast<unsigned char>(tok.front())))
+                tok.erase(tok.begin());
+            while (!tok.empty() && std::isspace(static_cast<unsigned char>(tok.back())))
+                tok.pop_back();
+            if (!tok.empty()) {
+                if (auto [c, ok] = parse_skin_color(tok); ok)
+                    stops.push_back(c);
+            }
+            if (comma == std::string::npos)
+                break;
+            start = comma + 1;
+        }
+        if (stops.size() >= 2)
+            m->set_level_fill(background, std::move(stops));
+        else
+            m->clear_level_fill();
+        if (auto* view = dynamic_cast<View*>(m))
+            view->request_repaint();
+        return choc::value::Value();
+    });
 
     // setMeterBarRatio(id, ratio)
-    register_bridge_function(api, "setMeterBarRatio",
-        [&self](choc::javascript::ArgumentList args) {
-            auto* m = dynamic_cast<Meter*>(self.widget(args.get<std::string>(0, "")));
-            if (!m) return choc::value::Value();
-            float r = static_cast<float>(args.get<double>(1, 0));
-            if (r > 0.0f) { m->set_bar_fill_ratio(r); m->request_repaint(); }
+    register_bridge_function(api, "setMeterBarRatio", [&self](choc::javascript::ArgumentList args) {
+        auto* m = dynamic_cast<LevelDisplay*>(self.widget(args.get<std::string>(0, "")));
+        if (!m)
             return choc::value::Value();
-        });
+        float r = static_cast<float>(args.get<double>(1, 0));
+        if (r > 0.0f) {
+            m->set_level_bar_ratio(r);
+            if (auto* view = dynamic_cast<View*>(m))
+                view->request_repaint();
+        }
+        return choc::value::Value();
+    });
 }
 
 } // namespace pulp::view
