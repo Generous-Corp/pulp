@@ -168,8 +168,13 @@ def _jsx_runtime_registration_reason(build_dir: Path, cache: dict[str, str],
     if not missing:
         return None
     return ("jsx-runtime npm dependencies are missing from this configure; registered Node tests omit "
-            f"{', '.join(missing)}. Run `npm ci --prefix tools/import-design/jsx-runtime` "
-            "then reconfigure the build")
+            + ", ".join(missing) + "; file=test/ctest_script_inputs.json; test=" + ",".join(missing) +
+            "; evidence=CTest inventory has Node configured but these registrations are absent; "
+            "cause_class=INCOMPLETE_CONFIGURE; "
+            "fix=`npm ci --prefix tools/import-design/jsx-runtime && pulp build`; "
+            "safe_to_auto_apply=no; "
+            "verify=`ctest --test-dir <build-dir> -N -R 'pulp-materialized-runtime-(conformance|node-dependencies)'` "
+            "must list both tests")
 
 
 def outside_gate_profile_build(build_dir: Path | None,
@@ -250,7 +255,9 @@ def stale_build_reason(build_dir: Path | None, root: Path | None) -> str | None:
             return None
         rel = _rel(newest_path, root) or str(newest_path)
         return (f"build directory is older than the source tree: CMakeCache.txt predates {rel}; "
-                "reconfigure this build before regenerating inventory files")
+                f"file=test/ctest_script_inputs.json; evidence=CMakeCache.txt predates {rel}; "
+                "cause_class=STALE_BUILD; fix=`pulp build --clean`; safe_to_auto_apply=no; "
+                f"verify=`test <build-dir>/CMakeCache.txt -nt {rel}` before regenerating")
     except OSError:
         return None
 
@@ -1243,7 +1250,10 @@ def main(argv: list[str]) -> int:
         return 0
     off_platform = outside_gate_platform(build_dir)
     if off_platform and a.write:
-        print("script-test-inputs: refusing to write: " + off_platform + ".\nRegenerate from a "
+        print("script-test-inputs: refusing to write: file=test/ctest_script_inputs.json; "
+              "cause_class=WRONG_PLATFORM; evidence=" + off_platform +
+              "; safe_to_auto_apply=no; verify=`pulp build --platform macOS` then rerun "
+              "script_test_inputs.py --check.\nRegenerate from a "
               f"{GATE_SYSTEM_NAME} gate-profile configure.", file=sys.stderr)
         return 2
     if off_platform:
@@ -1255,7 +1265,8 @@ def main(argv: list[str]) -> int:
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
                         os.path.basename(t["command"][0]).startswith(INTERPRETERS))
     if a.write and off_profile:
-        print("script-test-inputs: refusing to write: the compiled entries depend on the configuration and "
+        print("script-test-inputs: refusing to write: file=test/ctest_script_inputs.json; "
+              "cause_class=INCOMPLETE_CONFIGURE; evidence=the compiled entries depend on the configuration and "
               "this build is not the gate's: " + "; ".join(off_profile) + ".\nRegenerate from a gate-profile "
               "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER, "
               "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF OFF).",
@@ -1352,7 +1363,10 @@ def main(argv: list[str]) -> int:
               f"scripts this change does not touch ({scope}); not blocking. Refresh when convenient with\n"
               f"  python3 tools/scripts/script_test_inputs.py --build-dir {a.build_dir or '<configured build dir>'} --write")
         for kind, name, _ in advisory[:15]:
-            print(f"  {kind}: {name}")
+            print(f"  file={DEFAULT_LIST.as_posix()}; test={name}; cause_class=ADVISORY_DRIFT; "
+                  f"evidence={kind}: {name}; fix=`python3 tools/scripts/script_test_inputs.py --build-dir "
+                  f"{a.build_dir or '<configured build dir>'} --write`; safe_to_auto_apply=no; "
+                  "verify=`python3 tools/scripts/script_test_inputs.py --check`")
     if blocking:
         build_hint = a.build_dir or "<configured build dir>"
         fix = ("Fix: regenerate the list from a configure of THIS tree and commit it:\n"
@@ -1360,7 +1374,10 @@ def main(argv: list[str]) -> int:
                f"  git add {DEFAULT_LIST.as_posix()}")
         print(f"script-test-inputs: {len(blocking)} drift problem(s) in scripts this change touches ({scope}).")
         for kind, name, _ in blocking[:40]:
-            print(f"  {kind}: {name}")
+            print(f"  file={DEFAULT_LIST.as_posix()}; test={name}; cause_class=INVENTORY_DRIFT; "
+                  f"evidence={kind}: {name}; fix=`python3 tools/scripts/script_test_inputs.py --build-dir "
+                  f"{build_hint} --write`; safe_to_auto_apply=no; "
+                  "verify=`python3 tools/scripts/script_test_inputs.py --check`")
         if any(kind.startswith(("NONE review", "stale NONE")) for kind, _, _ in blocking):
             print("A pulp_test_spawns(<test> NONE REASON ...) review must state what makes the test load\n"
                   "nothing this tree builds. When its sources name a build path (a build-directory or binary\n"

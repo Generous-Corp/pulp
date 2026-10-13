@@ -550,6 +550,8 @@ class DriftCheckTest(FamilyFixture):
         self.assertEqual(rc, 2)
         self.assertIn("refusing to write", err.getvalue())
         self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", err.getvalue())
+        self.assertIn("cause_class=INCOMPLETE_CONFIGURE", err.getvalue())
+        self.assertIn("safe_to_auto_apply=no", err.getvalue())
         self.assertEqual((self.root / families.FAMILIES_FILE).read_text(encoding="utf-8"),
                          "# stale\n")
 

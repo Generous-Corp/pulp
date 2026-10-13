@@ -134,6 +134,10 @@ class ProfileIndependenceTests(unittest.TestCase):
         self.assertEqual(len(reason), 1)
         self.assertIn("jsx-runtime npm dependencies", reason[0])
         self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", reason[0])
+        self.assertIn("file=test/ctest_script_inputs.json", reason[0])
+        self.assertIn("cause_class=INCOMPLETE_CONFIGURE", reason[0])
+        self.assertIn("safe_to_auto_apply=no", reason[0])
+        self.assertIn("ctest --test-dir <build-dir>", reason[0])
 
     def test_gate_shaped_node_dependency_registration_is_accepted(self) -> None:
         self._profile_cache(self.repo.build)
@@ -185,6 +189,8 @@ class ProfileIndependenceTests(unittest.TestCase):
         reason = sti.outside_gate_profile_build(self.repo.build, self.repo.inventory(), self.repo.root)
         self.assertTrue(reason)
         self.assertIn("older than the source tree", reason[-1])
+        self.assertIn("cause_class=STALE_BUILD", reason[-1])
+        self.assertIn("safe_to_auto_apply=no", reason[-1])
         inv_path = self.repo.build / "inv.json"
         inv_path.write_text(json.dumps(self.repo.inventory()), encoding="utf-8")
         out = self.repo.build / "list.json"
@@ -1066,7 +1072,7 @@ class GatePlatformTests(unittest.TestCase):
             self.assertIn("this is a skip, not a pass", proc.stdout)
             proc = self.run_tool(repo, "--write")
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("refusing to write: CMAKE_SYSTEM_NAME=Linux", proc.stderr)
+            self.assertIn("cause_class=WRONG_PLATFORM", proc.stderr)
             # Control: the same drift on the gate's platform still fails.
             self.cache(repo, CMAKE_SYSTEM_NAME="Darwin")
             self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 1)

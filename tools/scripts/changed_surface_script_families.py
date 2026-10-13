@@ -687,8 +687,11 @@ def main(argv: list[str]) -> int:
         # gate-profile build may write or judge it.
         reasons = "; ".join(off_profile)
         if args.write:
-            print(f"changed-surface script families: refusing to write {FAMILIES_FILE} from a build "
-                  f"that is not the gate's: {reasons}. Regenerate from a gate-profile configure.",
+            print(f"changed-surface script families: refusing to write file={FAMILIES_FILE}; "
+                  f"cause_class=INCOMPLETE_CONFIGURE; evidence={reasons}; "
+                  "fix=`pulp build --clean`; safe_to_auto_apply=no; "
+                  "verify=`python3 tools/scripts/changed_surface_script_families.py "
+                  "--build-dir <gate-build> --check` after regeneration.",
                   file=sys.stderr)
             return 2
         print(f"changed-surface script families: SKIP: {args.build_dir} is not a gate-profile "
@@ -714,18 +717,27 @@ def main(argv: list[str]) -> int:
     base = script_test_inputs.resolve_base(root, args.base)
     removed = globally_removed_registered_tests(root, base, current, updated)
     if removed:
-        print("changed-surface script families: committed inventory removed tests still "
-              "registered on main: " + ", ".join(removed), file=sys.stderr)
+        print("changed-surface script families: file=" + str(FAMILIES_FILE) +
+              "; cause_class=REMOVED_BASE_ENTRY; test=" + ",".join(removed) +
+              "; evidence=tests remain registered on main and current CTest output but are absent "
+              "from the committed inventory; fix=`pulp build --clean`; safe_to_auto_apply=no; "
+              "verify=`python3 tools/scripts/changed_surface_script_families.py --build-dir "
+              "<gate-build> --check`", file=sys.stderr)
         print("This is always blocking on pull-request heads; regenerate from a complete "
               "gate-profile configure.", file=sys.stderr)
         if not script_test_inputs.advisory_here():
             return 1
     touched = sorted(script_test_inputs.changed_files(root, base)) if base else None
     if touched is not None and not any(blocks_on(path) for path in touched):
-        print(f"changed-surface script families: note: {FAMILIES_FILE} drifted, but this change touches "
-              f"none of its inputs; the next change to a mapped surface must {fix}")
+        print(f"changed-surface script families: file={FAMILIES_FILE}; cause_class=ADVISORY_DRIFT; "
+              f"evidence=generated family mapping differs but this change touches none of its inputs; "
+              f"fix={fix}; safe_to_auto_apply=no; verify=`python3 tools/scripts/changed_surface_script_families.py "
+              "--build-dir <gate-build> --check`")
         return 0
-    print(f"changed-surface script families drifted in {FAMILIES_FILE}; {fix}", file=sys.stderr)
+    print(f"changed-surface script families: file={FAMILIES_FILE}; cause_class=INVENTORY_DRIFT; "
+          f"evidence=generated family mapping differs; fix={fix}; safe_to_auto_apply=no; "
+          "verify=`python3 tools/scripts/changed_surface_script_families.py --build-dir <gate-build> --check`",
+          file=sys.stderr)
     for line in describe_drift(current, updated)[:12]:
         print(f"  {line}", file=sys.stderr)
     if script_test_inputs.advisory_here():
