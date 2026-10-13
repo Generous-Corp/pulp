@@ -8,6 +8,36 @@
 namespace pulp::view {
 enum class DesignUpdateKind { retained, moved, inserted, removed };
 
+// A materialized node can contain a static visual region plus one or more
+// typed, host-driven slots.  This classification is intentionally narrower
+// than a widget kind: it tells an update consumer which value setter can be
+// used without rebuilding the Skia/Dawn-backed visual record.
+enum class DesignSlotKind {
+    static_visual,
+    dynamic_scalar,
+    dynamic_vector,
+    dynamic_meter,
+    dynamic_text,
+    dynamic_action,
+};
+
+struct DesignSlot {
+    DesignSlotKind kind = DesignSlotKind::static_visual;
+    std::string route_id;
+    // Canonical binding key (for a vector this is `x|y`; static slots are
+    // empty).  Keeping the key in the classification makes re-key updates
+    // observable and prevents a caller from accidentally treating two
+    // controls with different host routes as the same slot.
+    std::string key;
+
+    friend bool operator==(const DesignSlot&, const DesignSlot&) = default;
+};
+
+// Return a deterministic typed slot inventory for `node` and its descendants.
+// Static nodes produce one static_visual entry; dynamic entries are sorted by
+// route, kind, and key so unordered IR attributes cannot perturb update plans.
+std::vector<DesignSlot> classify_design_slots(const IRNode& node);
+
 // A keyed node is retained or moved only while its materialization shape is
 // compatible. If the same stable anchor changes node type, render lane, widget
 // kind, or binding topology, the planner emits a removed/inserted pair so a

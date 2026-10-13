@@ -9,6 +9,71 @@
 namespace pulp::view {
 namespace {
 
+std::string nonempty_attribute(const IRNode& node, std::string_view key) {
+    const auto it = node.attributes.find(std::string(key));
+    return it == node.attributes.end() ? std::string{} : it->second;
+}
+
+void append_slot(std::vector<DesignSlot>& slots, DesignSlotKind kind,
+                 std::string route, std::string key) {
+    slots.push_back({kind, std::move(route), std::move(key)});
+}
+
+void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
+    const auto route = nonempty_attribute(node, "pulpRouteId");
+    const auto scalar = !nonempty_attribute(node, "binding").empty()
+        ? nonempty_attribute(node, "binding")
+        : nonempty_attribute(node, "pulpParamKey");
+    const auto x = nonempty_attribute(node, "pulpParamKeyX");
+    const auto y = nonempty_attribute(node, "pulpParamKeyY");
+    if (!scalar.empty())
+        append_slot(slots, DesignSlotKind::dynamic_scalar, route, scalar);
+    if (!x.empty() || !y.empty())
+        append_slot(slots, DesignSlotKind::dynamic_vector, route, x + "|" + y);
+
+    const auto meter = nonempty_attribute(node, "pulpMeterValueKey");
+    if (!meter.empty() || !nonempty_attribute(node, "pulpMeterSource").empty() ||
+        !nonempty_attribute(node, "pulpMeterChannel").empty()) {
+        append_slot(slots, DesignSlotKind::dynamic_meter, route,
+                    meter.empty() ? nonempty_attribute(node, "pulpMeterSource") + "/" +
+                                         nonempty_attribute(node, "pulpMeterChannel")
+                                  : meter);
+    }
+
+    const auto text = nonempty_attribute(node, "pulpValueKey");
+    if (!text.empty())
+        append_slot(slots, DesignSlotKind::dynamic_text, route, text);
+
+    const auto action = nonempty_attribute(node, "pulpHostAction");
+    if (!action.empty())
+        append_slot(slots, DesignSlotKind::dynamic_action, route, action);
+
+    // Geometry-detected controls carry their host route on the interactive
+    // element instead of the node-level pulp* attributes. Preserve the
+    // element's typed setter lane in the same inventory used by recognized
+    // widgets; this is what lets a re-key update avoid rebuilding its SVG
+    // record.
+    for (const auto& element : node.interactive_elements) {
+        if (!element.param_key.empty()) {
+            const auto kind = element.kind == InteractiveElementKind::value_label
+                                  ? DesignSlotKind::dynamic_text
+                                  : DesignSlotKind::dynamic_scalar;
+            append_slot(slots, kind, route, element.param_key);
+        }
+        if (!element.action.empty())
+            append_slot(slots, DesignSlotKind::dynamic_action, route, element.action);
+    }
+
+    for (const auto& child : node.children)
+        append_node_slots(child, slots);
+    for (const auto& frame : node.alternate_frames)
+        append_node_slots(frame, slots);
+}
+
+int slot_kind_rank(DesignSlotKind kind) {
+    return static_cast<int>(kind);
+}
+
 const std::string& key_for(const IRNode& node) {
     static const std::string empty;
     return node.stable_anchor_id ? *node.stable_anchor_id : empty;
@@ -275,5 +340,21 @@ DesignChildUpdatePlan plan_design_child_updates(std::span<const IRNode> old_chil
         }
     }
     return plan;
+}
+
+std::vector<DesignSlot> classify_design_slots(const IRNode& node) {
+    std::vector<DesignSlot> slots;
+    append_node_slots(node, slots);
+    if (slots.empty())
+        slots.push_back({DesignSlotKind::static_visual, {}, {}});
+    std::sort(slots.begin(), slots.end(), [](const DesignSlot& lhs, const DesignSlot& rhs) {
+        if (lhs.route_id != rhs.route_id)
+            return lhs.route_id < rhs.route_id;
+        if (slot_kind_rank(lhs.kind) != slot_kind_rank(rhs.kind))
+            return slot_kind_rank(lhs.kind) < slot_kind_rank(rhs.kind);
+        return lhs.key < rhs.key;
+    });
+    slots.erase(std::unique(slots.begin(), slots.end()), slots.end());
+    return slots;
 }
 } // namespace pulp::view

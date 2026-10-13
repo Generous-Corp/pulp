@@ -161,6 +161,76 @@ TEST_CASE("compatible keyed changes retain the existing materialization shape",
     CHECK(plan.updates.front().key == "control");
 }
 
+TEST_CASE("typed slot classification separates static and dynamic updates",
+          "[view][import][update][slots]") {
+    SECTION("a node without host metadata is a static visual slot") {
+        const auto slots = classify_design_slots(node("static"));
+        REQUIRE(slots == std::vector<DesignSlot>{{DesignSlotKind::static_visual, {}, {}}});
+    }
+
+    SECTION("scalar, vector, meter, text, and action routes are typed and sorted") {
+        auto root = node("root");
+        root.attributes["pulpRouteId"] = "panel.route";
+        root.attributes["pulpParamKey"] = "gain";
+        root.attributes["pulpParamKeyX"] = "pan.x";
+        root.attributes["pulpParamKeyY"] = "pan.y";
+        root.attributes["pulpMeterValueKey"] = "meter.level";
+        root.attributes["pulpValueKey"] = "preset.name";
+        root.attributes["pulpHostAction"] = "next_preset";
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 5);
+        CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, "panel.route", "gain"});
+        CHECK(slots[1] == DesignSlot{DesignSlotKind::dynamic_vector, "panel.route", "pan.x|pan.y"});
+        CHECK(slots[2] == DesignSlot{DesignSlotKind::dynamic_meter, "panel.route", "meter.level"});
+        CHECK(slots[3] == DesignSlot{DesignSlotKind::dynamic_text, "panel.route", "preset.name"});
+        CHECK(slots[4] == DesignSlot{DesignSlotKind::dynamic_action, "panel.route", "next_preset"});
+    }
+
+    SECTION("descendants remain observable") {
+        auto root = node("root");
+        auto child = node("child");
+        child.attributes["pulpParamKey"] = "child.gain";
+        root.children.push_back(child);
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 1);
+        CHECK(slots.front() == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "child.gain"});
+    }
+
+    SECTION("geometry-detected interactive routes use their typed lanes") {
+        auto root = node("root");
+        root.attributes["pulpRouteId"] = "geometry.route";
+        IRInteractiveElement knob;
+        knob.kind = InteractiveElementKind::knob;
+        knob.param_key = "geometry.gain";
+        root.interactive_elements.push_back(knob);
+        IRInteractiveElement readout;
+        readout.kind = InteractiveElementKind::value_label;
+        readout.param_key = "geometry.display";
+        root.interactive_elements.push_back(readout);
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, "geometry.route", "geometry.gain"});
+        CHECK(slots[1] == DesignSlot{DesignSlotKind::dynamic_text, "geometry.route", "geometry.display"});
+    }
+}
+
+TEST_CASE("slot classification mutation control preserves changed binding identity",
+          "[view][import][update][slots][negative]") {
+    auto old_node = node("control");
+    old_node.attributes["pulpRouteId"] = "route";
+    old_node.attributes["pulpParamKey"] = "gain";
+    auto new_node = old_node;
+    new_node.attributes["pulpParamKey"] = "cutoff";
+    const auto old_slots = classify_design_slots(old_node);
+    const auto new_slots = classify_design_slots(new_node);
+    REQUIRE(old_slots.size() == 1);
+    REQUIRE(new_slots.size() == 1);
+    CHECK(old_slots.front().kind == DesignSlotKind::dynamic_scalar);
+    CHECK(new_slots.front().kind == DesignSlotKind::dynamic_scalar);
+    CHECK(old_slots.front().route_id == new_slots.front().route_id);
+    CHECK(old_slots.front().key != new_slots.front().key);
+}
+
 TEST_CASE("value-only binding metadata does not change the materialization shape",
           "[view][import][update]") {
     auto old_node = node("editor");
