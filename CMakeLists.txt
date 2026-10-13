@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.955.1
+    VERSION 0.957.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -586,6 +586,22 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
         set_tests_properties(pulp.vellum-closure-gate PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
+    else()
+        # Register the gate as an explicit skip so a CPU-only configuration
+        # reports it as not run rather than dropping it silently.
+        message(STATUS "pulp.vellum-closure-boundary/gate: skipped, PULP_ENABLE_GPU is OFF")
+        add_test(NAME pulp.vellum-closure-boundary
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum closure boundary needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-gate
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum closure gate needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
     endif()
     add_test(NAME pulp.vellum-closure-gate-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
@@ -594,6 +610,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
     set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")
     add_test(NAME pulp.vellum-closure-external-input-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
@@ -602,6 +619,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
     set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")
     add_test(NAME pulp.vellum-closure-edge-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
@@ -610,6 +628,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allow pulp::view-audio")
     set_tests_properties(pulp.vellum-closure-edge-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")
     add_test(NAME pulp.vellum-closure-policy-selftest
         COMMAND "${Python3_EXECUTABLE}"
@@ -750,6 +769,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/render_provider_floor)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
+    add_subdirectory(test/fixtures/data_display_editor)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────

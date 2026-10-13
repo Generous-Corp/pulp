@@ -57,7 +57,7 @@ class ClosurePolicyTests(unittest.TestCase):
     def test_edge_allowlist_is_exact_and_canonicalizes_p4_target(self):
         self.assertEqual(edge_key("pulp-design-import", "pulp-audio"), "pulp-design-import->pulp-view-audio")
         entries = load_allowlist(__import__("pathlib").Path(__file__).with_name("vellum_closure_allowlist.json"))
-        self.assertTrue(any(e["kind"] == "edge" and e["match"] == "pulp-design-import->pulp-view-audio" for e in entries))
+        self.assertFalse(any(e["kind"] == "edge" and e["match"] == "pulp-design-import->pulp-view-audio" for e in entries))
         self.assertFalse(any(e["kind"] == "target" for e in entries))
 
     def test_include_allowlist_is_edge_specific(self):

@@ -16,6 +16,9 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/audio_widgets.hpp>
+#include <pulp/view/data_display.hpp>
+#include <pulp/view/register_audio_widgets.hpp>
 
 #include <memory>
 
@@ -46,6 +49,13 @@ namespace pulp::view::reload_exports {
     root->add_child(std::make_unique<ComboBox>());
     root->add_child(std::make_unique<SegmentedControl>());
     root->add_child(std::make_unique<XYPad>());
+    register_audio_widgets();
+    auto level = make_data_display("pulp.level");
+    auto series = make_data_display("pulp.series");
+    auto bins = make_data_display("pulp.bins");
+    (void)dynamic_cast<LevelDisplay*>(level.get());
+    (void)dynamic_cast<SeriesDisplay*>(series.get());
+    (void)dynamic_cast<BinDisplay*>(bins.get());
     return root;   // returned so the objects aren't provably dead
 }
 

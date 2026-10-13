@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261010-scripted-ui-mount-frame-bindings-watch",
+  "slices": [
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the scripted UI mount-frame parameter binding behavior into the Vellum runtime unit.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261010-scripted-ui-mount-frame-bindings-watch.json",
+    "planning ledger row F-firstframe-2"
+  ]
+}

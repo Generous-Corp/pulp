@@ -23,6 +23,24 @@ times to be worth remembering.
 | Hand the built view to an external container (TabPanel, WindowHost) | Yes — call `ViewBridge::release_view()` |
 | Ship a paint-only overlay | No — the legacy standalone inspector runtime was removed; compose canonical control separately |
 
+### Audio displays are registered by editor creation, not by linking
+
+`Meter`, `WaveformView` and `SpectrumView` live in `pulp::view-audio`; view-core,
+the design importer and the script bridge reach them only through
+`make_data_display("pulp.level" | "pulp.series" | "pulp.bins")`, which returns
+nullptr until something calls `pulp::view::register_audio_widgets()`.
+`ViewBridge::open()` calls it on every editor creation and `StandaloneApp`
+calls it at construction, so a `create_view()` may import a meter or call
+`createMeter` freely. Anything that builds an editor tree WITHOUT going through
+ViewBridge (a custom host, a capture tool, a test that calls `create_view()`
+directly on an installed SDK) must call it first, or imported displays become
+placeholders with a `data-display-unavailable` diagnostic and the bridge's
+`createMeter`/`createWaveform`/`createSpectrum` throw a JS `Error`. The
+build-tree `INTERFACE_SOURCES` shim hides a missing call in-tree; it is not
+installed and does not cross a PRIVATE static-library link. The proofs live in
+`test/fixtures/data_display_editor/` (plug-in editor and hot reload, both with
+the registry cleared first) and `cmake-view-audio-sdk-consumer`.
+
 ### Native scripted UI is not a WebView
 
 When a materialized canvas is retained as the native paint and hit-test
@@ -427,13 +445,17 @@ the `clap` skill's Parameters section for the complete transport contract.
 | AAX | `AAX_CEffectGUI::CreateViewContainer()` — not `CreateViewContents()`, which runs before any window exists | After `try_attach_to_parent` succeeds |
 | Standalone | Before `WindowHost::create` | After `WindowHost::create` succeeds |
 
-AAX is the one adapter whose editor runs on its **own** `Processor`. AAX keeps
-the host-side data model and the real-time algorithm apart, and the algorithm's
-`Processor` lives in a private data block the model cannot reach, so
-`EffectParameters` builds a second one for `create_view()` and mirrors its store
-against the AAX parameter manager (the value authority). Do not "fix" that into
-a shared instance by analogy with AU v2 — there, a second `Processor` was a real
-bug; here it is the format's structure. See the `aax` skill.
+AAX keeps a host-side data model and a real-time algorithm instance, but the
+model **constructs** the instance's `Processor` itself (`ResetFieldData`), and
+AAX Native runs it in-process — so the editor binds to the Processor that
+renders audio (`EffectParameters::bind_algorithm`), exactly like every other
+format. That binding is what carries non-parameter state across: published
+meter/analysis frames, modulation phase, transport, a renderer or GPU choice.
+A model-side `Processor` remains only as the fallback for an editor opened
+before any instance exists. The instance's removal invalidates the editor
+first (`EditorHost::set_editor_invalidation_handler`), and a host reset
+re-prepares the Processor in place rather than recreating it. See the `aax`
+skill.
 
 ### Host keyboard routing can bypass the NSView key path entirely — the DAW-spacebar trap
 
@@ -2628,6 +2650,18 @@ formats cannot drift. AU v2 historically skipped the pin entirely and a resized 
 CLIPPED in Logic; any new editor host must route through the predicate, not re-derive
 the three-way rule inline (contract test:
 `test/test_au_v2_cocoa_ui.mm` `[resize]`).
+
+The pin is only half of it: the **box** the viewport pins at must be the one
+`configure_native_viewport()` picks — `design_viewport_width/height`, i.e. the
+AUTHORED `ViewSize::design_width/height` when declared, else preferred. AAX
+re-derived the pin from its own `plan_editor_size()` and pinned the *preferred*
+box instead; an editor authored at 1320x860 that opens in a 990x645 host then
+lays out at 1320x860, paints at scale 1, and shows its top-left corner clipped —
+until a grip drag goes through `commit_editor_requested_viewport()` (which does
+use the authored box) and "fixes" it. Every editor host now calls
+`configure_native_viewport()` itself; a format-local plan may *mirror* those
+numbers (AAX's `EditorSizePlan::design_width/height`, asserted equal to the
+predicate in `test/test_aax_editor.cpp` `[resize]`), never choose them.
 
 ## Two ways to reach the host's parameters — wiring both DOUBLE-WRITES
 

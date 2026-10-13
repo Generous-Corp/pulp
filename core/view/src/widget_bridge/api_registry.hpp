@@ -8,6 +8,7 @@
 #include <pulp/view/script_engine.hpp>
 
 #include <pulp/runtime/trace.hpp>
+#include "js_trace_scopes.hpp"
 
 #include <cstddef>
 #include <string>
@@ -62,6 +63,7 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
                                    [inner = std::move(inner), span = std::move(span),
                                     count_call](choc::javascript::ArgumentList args) {
                                        count_call();
+                                       js_trace::NativeWrapperScope wrapped;
                                        PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span);
                                        return inner(args);
                                    }));
@@ -74,6 +76,7 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
             NativeFunction([inner = std::move(inner), span = std::move(span),
                             count_call](const choc::value::Value* args, size_t num_args) {
                 count_call();
+                js_trace::NativeWrapperScope wrapped;
                 PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span);
                 return inner(args, num_args);
             }));
@@ -89,6 +92,7 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
             choc::javascript::Context::NativeFunction(
                 [inner = std::move(inner), count_call](choc::javascript::ArgumentList args) {
                     count_call();
+                    js_trace::NativeWrapperScope wrapped;
                     return inner(args);
                 }));
     } else if constexpr (std::is_convertible_v<Fn&&, NativeFunction>) {
@@ -97,12 +101,31 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
             std::string(name), NativeFunction([inner = std::move(inner), count_call](
                                                   const choc::value::Value* args, size_t num_args) {
                 count_call();
+                js_trace::NativeWrapperScope wrapped;
                 return inner(args, num_args);
             }));
     } else {
         context.engine.register_function(std::string(name), std::forward<Fn>(fn));
     }
 #endif
+}
+
+// The script-driven trace seam (`__traceBegin__` / `__traceEnd__`) is the one
+// native that must not sit inside the `js_native` span: the script's span opens
+// inside that call, and Perfetto closes slices last-in first-out per track, so
+// the wrapper's RAII end would close the script's span instead of its own and
+// every script-named duration would swap with a sub-microsecond native call.
+// Counted like any other bridge call, never wrapped.
+inline void register_trace_seam_function(BridgeApiContext& context, std::string_view name,
+                                         choc::javascript::Context::NativeFunction fn) {
+    auto counter = context.bridge_call_count;
+    context.engine.register_function(
+        std::string(name),
+        choc::javascript::Context::NativeFunction(
+            [inner = std::move(fn), counter](choc::javascript::ArgumentList args) {
+                count_bridge_call(counter);
+                return inner(args);
+            }));
 }
 
 inline void register_bridge_host_object(BridgeApiContext& context,

@@ -2314,6 +2314,7 @@
   "pulp-sampler-cli-sidecar-probe",
   "pulp-sampler-heritage-render-wav",
   "pulp-sampler-render-wav",
+  "pulp-test-aax-native-view",
   "pulp-test-aax-rt-safety",
   "pulp-test-ableton-link-sdk",
   "pulp-test-adapter-audio-parity",
@@ -2335,6 +2336,7 @@
   "pulp-test-audio-edge-cases",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
+  "pulp-test-audio-registration",
   "pulp-test-audio-support",
   "pulp-test-audio-system-hotplug",
   "pulp-test-audio-tone-regression",
@@ -2467,6 +2469,8 @@
   "pulp-test-crossfade",
   "pulp-test-css-gradient-render",
   "pulp-test-css-translator-gaps-1434",
+  "pulp-test-data-display-link-floor",
+  "pulp-test-data-display-plugin-editor",
   "pulp-test-dawproject-export",
   "pulp-test-denormal-null",
   "pulp-test-design-debug-contracts",
@@ -2749,6 +2753,7 @@
   "pulp-test-reed-waveguide-loop",
   "pulp-test-relative-point",
   "pulp-test-reload-controller",
+  "pulp-test-reload-data-display",
   "pulp-test-reload-library",
   "pulp-test-reload-transaction",
   "pulp-test-reloadable-shell",
@@ -4763,6 +4768,8 @@
     "core/view",
     "core/view/audio",
     "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
     "tools/scripts/foundation_include_lint.py",
     "tools/scripts/include_boundary.py"
    ],
@@ -7061,6 +7068,7 @@
     "tools/import-design/jsx-runtime/materialized_metadata_contract.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canvas_owner.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_hot_region.test.mjs",
     "tools/import-design/jsx-runtime/materialized_source_emitter.test.mjs",
     "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
     "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
@@ -7302,6 +7310,8 @@
     "core/view",
     "core/view/audio",
     "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
     "tools/scripts/include_boundary.py"
    ],
    "kind": "python"
@@ -9916,6 +9926,7 @@
    "entry": "tools/scripts/vellum_inheritance_ledger_check.py",
    "inputs": [
     ".github/vellum-change-events",
+    ".github/vellum-expansion-watch-events",
     "tools/scripts/vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"
@@ -9923,6 +9934,7 @@
   "vellum-inheritance-ledger-negative-contract": {
    "entry": "tools/scripts/test_vellum_inheritance_ledger_check.py",
    "inputs": [
+    "test/cmake/quality_tests.cmake",
     "tools/scripts/test_vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"
@@ -9986,6 +9998,14 @@
     "tools/scripts/version_bump_render.py",
     "tools/scripts/version_bump_surfaces.py",
     "tools/scripts/versioning.json"
+   ],
+   "kind": "python"
+  },
+  "view-audio-seam-debts": {
+   "entry": "tools/scripts/view_audio_seam_debts.py",
+   "inputs": [
+    "docs/status/view-audio-seam-debts.json",
+    "tools/scripts/view_audio_seam_debts.py"
    ],
    "kind": "python"
   },

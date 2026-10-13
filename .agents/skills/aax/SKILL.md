@@ -28,6 +28,44 @@ want to build and validate AAX plugins locally.
 
 ## The custom editor
 
+### Processor-only AAX is the default shipping safety lane
+
+Plugins that need reliable host discovery and audio instantiation should use
+`pulp_add_plugin(... AAX_HEADLESS FORMATS AAX ...)` and emit `PULP_AAX_PLUGIN`.
+This target deliberately links `pulp::format-core`, omits `aax_effect_gui.cpp`
+and the view target, does not stage WebGPU/Skia sidecars, and advertises
+`AAX_eProperty_UsesClientGUI = 0`. It therefore cannot load the native editor
+stack while Pro Tools is scanning the component. The normal AU/VST3/CLAP/
+Standalone target remains editor-enabled. This option is reusable by Spectr,
+Forge, GPU-NAM, and other products.
+
+The AAX private-data lifecycle is also a hard gate: `ResetFieldData` must
+construct the processor state, reset must destroy and recreate it, and remove
+must destroy it exactly once. A nonzero private-storage pointer is not proof of
+construction; use the runtime lifecycle tests plus `load_unload`, `parameters`,
+and a host audio render before claiming DSP works.
+
+### Acceptance gates
+
+For a macOS release build, run these in order:
+
+1. Build the headless AAX target with governed tooling and inspect `otool -L`;
+   it must have no Metal, MetalKit, CoreHaptics, Skia, or WebGPU dependency and
+   no `libwgpu_native.dylib` sidecar.
+2. Run the SDK-gated entry/lifecycle tests and the AAX Validator's
+   `test.describe_validation`, `test.load_unload`, and `test.parameters`.
+3. Developer-ID sign nested non-PACE dylibs first, then PACE-wrap/sign the
+   outer AAX. Run Apple strict verification and `wraptool verify`; never run
+   outer `codesign` after PACE signing.
+4. Install exactly one copy under `/Library/Application Support/Avid/Audio/Plug-Ins`.
+   A validator pass is not a Pro Tools audio proof: insert the plug-in in a
+   real session and verify rendered or metered signal passes through it.
+
+Keep AAX SDK, validator, PACE binaries, customer identifiers, passwords, and
+license receipts outside repositories and command transcripts. A private setup
+backup may record versions, paths, checksums, and setup steps, but never the
+credentials themselves.
+
 `core/format/src/aax_effect_gui.cpp` embeds a Pulp editor in the Pro Tools
 plugin window through the shared, format-agnostic `view::PluginViewHost` — the
 same seam VST3 / AU v2 / AU v3 / CLAP use, so there is no AAX-specific render
@@ -164,6 +202,54 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
 - **Sizing is plugin-driven.** AAX reads a size from `GetViewSize()`; the
   plugin pushes later changes through `AAX_IViewContainer::SetViewSize`. Follow
   the AU v2 model (forward native size changes), not VST3's.
+- **Pin the viewport at the AUTHORED box, through the shared contract.** The
+  editor shell calls `configure_native_viewport()` (plugin_descriptor.hpp) like
+  VST3 and AU v2 do, so an imported 1320x860 design that opens in a 990x645
+  host frame lays out at 1320x860 and paint scales it 0.75x. `plan_editor_size`
+  carries the same box in `design_width/height`. Pinning the *preferred* size
+  instead paints the authored tree at scale 1 into the smaller frame: the host
+  shows the top-left corner of the design, clipped right and bottom, and only a
+  grip drag (which goes through `commit_editor_requested_viewport`) repairs it.
+  That is exactly the Spectr first-open failure in Pro Tools.
+- **Place the native child at the parent's top-left and reconcile the parent.**
+  `PluginViewHost::attach_to_parent` only adds the child at origin (0,0), which
+  is AppKit's BOTTOM-left; a host parent larger than the child shows the editor
+  in its lower-left corner. `aax_native_view.hpp` (`aax_place_child_top_left`,
+  `aax_fill_parent`, `aax_native_geometry`) keeps that placement AAX-only —
+  no other format's attach path changes, and `pulp-test-aax-native-view`
+  proves a same-size parent is a no-op. After the first frame the shell reads
+  the parent, re-asserts the preferred size once through `SetViewSize` if the
+  parent disagrees (JUCE's `parentSizeChanged` does the same), and if the host
+  keeps an off-size parent the child fills it so the pinned viewport
+  letterboxes a whole, proportional editor rather than a clipped corner.
+- **The editor runs on the Processor that renders audio.** The data model
+  constructs the algorithm instance in `ResetFieldData` and binds its editor
+  to that instance's Processor and store (`bind_algorithm`). A second,
+  model-side Processor — the previous design — never processes a block, so
+  everything that is not a host parameter was dead in Pro Tools: published
+  analyzer/meter frames, LFO/modulation animation, transport-driven state,
+  `set_gpu_processing` (which only acts on a *prepared* Processor), and any
+  editor toggle stored on the Processor rather than in the store. Band gains
+  and freeze still worked because they are parameters and travel through the
+  coefficient packet. Consequences to keep straight: `sync_from_packet` writes
+  with `set_value_rt` so the editor's parameter mirror (a Main-thread
+  listener drained by the ViewBridge pump) never runs under the render-thread
+  no-alloc guard; `ResetInstance` re-prepares in place instead of recreating
+  the Processor an open editor points at; `RemovingInstance` fires
+  `EditorHost::set_editor_invalidation_handler` so the GUI tears down before
+  the delete; model and instance may die in either order and unhook under
+  `binding_mutex()`. Lifecycle tests: `test_aax_entry_registration.cpp`
+  `[view-bridge]`, driven through `aax_runtime_testing.hpp`.
+- **Read the host receipt from Pro Tools' stderr, not the unified log.**
+  `runtime::log_info` writes to `os_log` and stderr, but `log show` returned
+  zero `dev.pulp.runtime` lines over three days on a dev Mac, so it is not an
+  instrument here. Launch the host binary directly with stderr redirected
+  (`"/Applications/Pro Tools.app/Contents/MacOS/Pro Tools" 2>receipt.txt &`)
+  instead of `open -a`. The shell logs every `GetViewSize` /
+  `GetMinimumViewSize` answer (first eight, tagged "no editor yet" vs "editor
+  open"), every `SetViewSize` result, the parent/child/window frames at attach,
+  after reconciliation, and again at +1s and +3s. A wrong outer frame is then
+  attributable: the plug-in's answer, or the host's own window.
 - **Never defer to `AAX_CEffectGUI::GetViewSize()` / `GetMinimumViewSize()`.**
   Both base implementations `return AAX_SUCCESS` *without writing the point*, so
   the host reads back whatever it passed in and the plug-in appears to have
@@ -186,6 +272,104 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
 - **The editor needs Skia.** Without `PULP_HAS_SKIA` the Windows
   `PluginViewHost` falls back to the no-op stub factory, `create()` returns
   null, and the plugin loads with no editor.
+
+### Pro Tools acceptance learnings (Spectr, 2026-10)
+
+Hard-won on the first real AAX editor; each one cost hours and none is
+visible from validators or screenshots alone.
+
+- **Pro Tools scans the plug-in folder recursively.** A mis-staged package once
+  installed a second bundle under `Plug-Ins/Library/Application Support/…`,
+  and Pro Tools kept loading that stale copy while every later install
+  replaced the top-level one — a full day of "no source change has any
+  effect". Before judging a host run, `find` the plug-in tree with no depth
+  limit, and prove the loaded binary with a string that exists only in the
+  new build (`strings … | grep -c`, positive AND negative control).
+- **The outer frame can lie about who chose it.** A screenshot cannot say
+  whether a wrong window came from the plug-in's answer or from the host;
+  only the stderr receipt (`GetViewSize`/`SetViewSize` with results, native
+  parent/child/window frames at attach and later) can. Pro Tools hands over a
+  0x0 parent and sizes it from the plug-in's transaction, synchronously.
+- **A flexible autoresizing mask against that 0x0 parent doubles the child.**
+  AppKit applies the parent's size delta: a 990x645 child becomes 1980x1290
+  when the parent reaches 990x645, and the resize callback then publishes the
+  doubled frame. Freeze tracking around the transaction, place the child
+  top-left, and never echo a frame the host already has.
+- **GPU audio is a build option, not a runtime discovery.** Spectr's Mixing
+  renderer switches to the GPU only when the product was configured with
+  `SPECTR_EXPERIMENTAL_SHARED_RENDERER=ON` (which links `Pulp::gpu-audio`);
+  an AAX built without it shows the toggle but `gpu_processing_available()`
+  is false. Mirror the flags of the AU/VST3 build that "works".
+- **Automation is "automatable" at the plug-in and "automation-enabled" at the
+  host, and only the host can flip the second.** Pro Tools records nothing
+  for a parameter until the user enables it (the plug-in window's **auto**
+  button → Plug-in Automation dialog) or sets Preferences → Mixing →
+  Automation → "Plug-in Controls Default to Auto-Enabled". The SDK has no
+  property for it; the automation delegate's header says so explicitly. A
+  receipt full of accepted touches and echoed values with no lane written
+  is this, not a plug-in bug.
+- **Trace a hosted plug-in through the environment, not the broker.** A
+  `PULP_TRACING=ON` build records when `PULP_TRACE_PATH` (a directory ending
+  in `/`), `PULP_TRACE_SECONDS` and `PULP_TRACE_RING_KB` are set in the
+  HOST's environment — launch the Pro Tools binary directly with them — or
+  read from `~/.config/pulp/trace-autostart` for hosts that inherit nothing.
+  Each process writes `<process>-<pid>.pftrace`. `pulp control instances`
+  lists only the standalone control host, so the broker path does not reach
+  a DAW-hosted instance.
+- **`AAX_EUpdateSource` cannot tell automation playback from a GUI edit.**
+  Both reach `UpdateParameterNormalizedValue` as Unspecified; Parameter marks
+  a re-entrant write and Chunk a preset load. Prove playback by value updates
+  arriving with no `TouchParameter`/`ReleaseParameter` around them (the
+  adapter logs both).
+- **Two indicators on a modulated knob are the design, not a bug.** The
+  violet needle and arc sit at the value playing; the short white tick is
+  the base the user set (or host automation plays). Check the product's
+  modulation doc before "fixing" a renderer difference that is not one.
+- **The rounded window corner on macOS 26+ masks a flush resize grip.**
+  Keep the grip's hit box flush but inset its ink by ~6pt. Where the grip
+  lives today: Pro Tools draws no resize affordance of its own (like AU v2),
+  so the product opts in per format — Spectr's `aax_entry.cpp` calls
+  `set_editor_owns_resize_grip(true)` and its `EditorResizeGrip` (a
+  `pulp::view::ResizableCorner` subclass in `src/ui/native_editor.cpp`)
+  resolves the drag through `Processor::request_editor_resize`, which the AAX
+  shell turns into `SetViewSize`. SDK follow-up: move that grip into Pulp so
+  every AAX/AU v2 editor gets it without product code — the shell already
+  knows the format has no host grip.
+
+### macOS host acceptance and poka-yoke
+
+The SDK-free tests and AAX validator do not prove that Pro Tools can create the
+custom editor or process a signal. A macOS acceptance run is closed only after
+all of these are recorded against the exact installed bundle:
+
+- Build the AAX target from the exact Pulp runtime/SDK input and record its
+  source provenance. Do not resolve an older sibling SDK from CMake's search
+  path.
+- Before installing, run the AAX validator's load/describe/parameter checks,
+  Apple deep-strict verification, and PACE verification. The validator's
+  `EffectGUI` warning means the strip lane was built; it is not custom-editor
+  proof.
+- Install one bundle only. Quit Pro Tools before replacing the bundle, install
+  through the machine's approved package wrapper, then verify the installed
+  executable hash equals the signed artifact. Clear/reload Pro Tools' plugin
+  cache when discovery disagrees with that hash.
+- The first editor transaction must be checked in Pro Tools: the preferred
+  width/height, aspect lock, and resize grip must be visible before any manual
+  drag. `AAX_Point` is `(vertical, horizontal)`. The adapter seeds the host and
+  bridge geometry at the preferred size and then reconciles the native child
+  against the parent Pro Tools built, because the host may not emit an initial
+  native frame callback. Capture the geometry receipt from stderr (above) in
+  the same run; a screenshot alone cannot say which side chose the frame.
+- A real host run must separately prove mono and stereo discovery, editor
+  creation, proportional resize, audio-through, active-versus-bypass output,
+  bounce output, transport tempo, LFO animation, and automation write/read
+  playback. A DigiShell load or parameter enumeration is only a host-load
+  signal; it is not audio-through or bounce evidence.
+
+Keep Avid/PACE SDKs, customer identifiers, signing credentials, and signed
+artifacts outside the public repository. A private machine capsule may store
+restore scripts and Keychain-backed lookup instructions, but never passwords or
+customer numbers in argv, logs, chat, or tracked source.
 
 The SDK-free logic (gesture routing, sizing) lives in
 `core/format/include/pulp/format/aax_editor.hpp` on purpose, so it is testable

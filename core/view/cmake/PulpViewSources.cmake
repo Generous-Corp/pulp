@@ -163,6 +163,8 @@ target_sources(pulp-view-audio PRIVATE
     # The gallery and the sampler starter construct audio widgets.
     audio/src/widget_gallery.cpp
     audio/src/sampler_starter.cpp
+    audio/src/register_audio_widgets.cpp
+    $<$<BOOL:${PULP_ENABLE_DESIGN_IMPORT}>:audio/src/register_audio_import_binders.cpp>
 )
 
 # Scripted view and widget-bridge sources.

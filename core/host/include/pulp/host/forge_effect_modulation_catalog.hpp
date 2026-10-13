@@ -112,10 +112,6 @@ inline constexpr float kModeDown = 1.0f;
 inline constexpr float kModeDualMono = 2.0f;
 inline constexpr float kModeStereoSplit = 3.0f;
 
-struct SsbFrequencyShifterInstance {
-    signal::SsbFrequencyShifter shifter;
-};
-
 /// Worst-case linear gain for the Forge registry (series law 8).
 ///
 /// The topology HAS a feedback loop, so unlike the feedforward compressor
@@ -127,9 +123,7 @@ struct SsbFrequencyShifterInstance {
 /// `kMaxFeedback · kGshiftBudget` and the steady-state envelope is
 /// `1/(1 − that)`. Both factors and the resulting peak are measured by the DSP
 /// suite; this function only restates the arithmetic they confirm.
-inline float ssb_frequency_shifter_worst_case_gain() {
-    return static_cast<float>(signal::SsbFrequencyShifter::worst_case_gain());
-}
+float ssb_frequency_shifter_worst_case_gain();
 
 /// Decodes the stepped `mode` param. Rounds rather than truncates, so a host
 /// that ramps to a stepped value lands on the nearest step instead of the one
@@ -145,77 +139,7 @@ inline signal::FrequencyShiftMode mode_from_param(float value) {
 }
 
 /// The Bode/Moog single-sideband frequency shifter as a lowerable custom node.
-inline CustomNodeType make_frequency_shifter_node() {
-    CustomNodeType t;
-    t.type_id = kSsbFrequencyShifterTypeId;
-    t.version = 1;
-    t.num_input_ports = 2;  // 0 = left, 1 = right (ONE logical stereo wire)
-    t.num_output_ports = 2;
-    t.default_name = "Frequency Shifter";
-    t.lowerable = true;
-
-    t.create = []() -> void* { return new SsbFrequencyShifterInstance{}; };
-    t.destroy = [](void* p) { delete static_cast<SsbFrequencyShifterInstance*>(p); };
-    t.prepare = [](void* p, double sr, int /*max_block*/) {
-        static_cast<SsbFrequencyShifterInstance*>(p)->shifter.prepare(sr);
-    };
-    t.reset = [](void* p) { static_cast<SsbFrequencyShifterInstance*>(p)->shifter.reset(); };
-
-    // Ranges and defaults are the module's canonical contract, in REAL units.
-    // Each row is a design-parameter declaration per the series contract; the
-    // `set_*` comments in the DSP header mirror these same numbers for
-    // readability at the call site and are not a second declaration.
-    //
-    // `shift_hz` is registered in HERTZ across its full signed range rather
-    // than as a normalised knob, because Hz is what the parameter means and
-    // what automation should record. The signed piecewise linear/log taper the
-    // spec describes — fine resolution below `kLinZoneHz` where detune and
-    // barberpole live, geometric above it — is a knob-to-Hz mapping and lives
-    // on `SsbFrequencyShifterT::shift_hz_from_knob`, so a UI, a macro or a
-    // preset importer can all apply the same one curve. Putting the taper in
-    // the baked range instead would make every automation lane store knob
-    // positions whose meaning changes if the curve is ever retuned.
-    using Shifter = signal::SsbFrequencyShifter;
-    t.baked_params.push_back({kShiftHz, static_cast<float>(-Shifter::kMaxShiftHz),
-                              static_cast<float>(Shifter::kMaxShiftHz), 0.0f});
-    t.baked_params.push_back({kFeedback, 0.0f, static_cast<float>(Shifter::kMaxFeedback), 0.0f});
-    t.baked_params.push_back({kFeedbackDelayMs, static_cast<float>(Shifter::kMinDelayMs),
-                              static_cast<float>(Shifter::kMaxLoopMs), 8.0f});
-    t.baked_params.push_back({kMix, 0.0f, 100.0f, 100.0f});
-    t.baked_params.push_back({kShiftMode, kModeUp, kModeStereoSplit, kModeUp});
-    t.baked_params.push_back({kStereoSpread, 0.0f, 100.0f, 100.0f});
-
-    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
-                                        const audio::BufferView<const float>& in, int n,
-                                        const BakedParamView& params) {
-        auto* s = static_cast<SsbFrequencyShifterInstance*>(p);
-        const float* in_left = in.channel_ptr(0);
-        const float* in_right = in.channel_ptr(1);
-        float* out_left = out.channel_ptr(0);
-        float* out_right = out.channel_ptr(1);
-
-        // Sample at a time so every knob is sample-accurate. The setters are a
-        // clamp, a store and a smoother retarget — no filter is redesigned and
-        // nothing is resized — so this costs a handful of inlined calls per
-        // sample rather than a re-preparation.
-        for (int k = 0; k < n; ++k) {
-            const auto offset = static_cast<std::int32_t>(k);
-            s->shifter.set_shift_hz(params.value_at(kShiftHz, offset));
-            s->shifter.set_feedback(params.value_at(kFeedback, offset));
-            s->shifter.set_feedback_delay_ms(params.value_at(kFeedbackDelayMs, offset));
-            s->shifter.set_mix(params.value_at(kMix, offset) * 0.01f);
-            s->shifter.set_stereo_spread(params.value_at(kStereoSpread, offset) * 0.01f);
-            s->shifter.set_mode(mode_from_param(params.value_at(kShiftMode, offset)));
-
-            float left = in_left[static_cast<std::size_t>(k)];
-            float right = in_right[static_cast<std::size_t>(k)];
-            s->shifter.process_stereo(left, right);
-            out_left[static_cast<std::size_t>(k)] = left;
-            out_right[static_cast<std::size_t>(k)] = right;
-        }
-    };
-    return t;
-}
+CustomNodeType make_frequency_shifter_node();
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Chorus — four voicings of one ensemble engine
