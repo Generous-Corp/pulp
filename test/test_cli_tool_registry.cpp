@@ -741,6 +741,62 @@ TEST_CASE("install_binary_tool installs an overridden version as unverified-vers
     }
 }
 
+TEST_CASE("an override on a fixed-build source is refused, never mislabelled",
+          "[cli][tool-registry][install][sha256][override]") {
+    VerifiedToolFixture fx("fixed-source");
+    // One fixed asset, no ${version} in the URL: the pinned build only.
+    auto digest = fx.publish("1.2.3", "pinned\n");
+    auto& source = fx.tool.binary_sources[current_platform_key()];
+    source.url_template = "file://" + fx.assets.generic_string() + "/fixed-source-1.2.3.tar.gz";
+    source.sha256 = digest;
+    ScopedEnv version{"PULP_TOOL_FIXED_SOURCE_VERSION", "2.0.0"};
+
+    auto result = install_binary_tool(fx.tool, /*force=*/true);
+    REQUIRE_FALSE(result.ok);
+    for (const std::string& needle :
+         {std::string("fixed-source 2.0.0 (env override)"), current_platform_key(),
+          std::string("serves one fixed build, fixed-source 1.2.3"),
+          std::string("pulp tool update fixed-source"), std::string("Fix:")}) {
+        INFO(result.error);
+        REQUIRE(result.error.find(needle) != std::string::npos);
+    }
+    REQUIRE_FALSE(fs::exists(fx.installed("2.0.0")));
+    REQUIRE_FALSE(fs::exists(fx.installed("1.2.3")));
+
+#ifndef _WIN32
+    // The same fixed source still installs its pin, verified.
+    version.set("");
+    auto pinned = install_binary_tool(fx.tool, /*force=*/true);
+    INFO(pinned.error);
+    REQUIRE(pinned.ok);
+    REQUIRE(pinned.verification == "sha256-verified");
+#endif
+}
+
+TEST_CASE("the installed-version check compares the manifest version exactly",
+          "[cli][tool-registry][install][override]") {
+#ifdef _WIN32
+    SKIP("downloads through curl file:// on Unix hosts");
+#endif
+    VerifiedToolFixture fx("exact-version");
+    // An installed pin whose manifest digest and path contain the digit 7.
+    auto existing = fx.installed("1.2.3");
+    write_file(existing, "pinned\n");
+    write_file(existing.parent_path() / "manifest.json",
+               "{\n  \"tool_id\": \"exact-version\",\n  \"version\": \"1.2.3\",\n"
+               "  \"sha256\": \"" +
+                   std::string(64, '7') + "\"\n}\n");
+    fx.publish("7", "seven\n");
+    ScopedEnv version{"PULP_TOOL_EXACT_VERSION_VERSION", "7"};
+
+    auto result = install_binary_tool(fx.tool, /*force=*/false);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(result.installed_version == "7");
+    REQUIRE(result.verification == "unverified-version"); // reinstalled, not cached
+    REQUIRE(read_file(fx.installed("7")) == "seven\n");
+}
+
 TEST_CASE("an override naming the pinned version is still verified",
           "[cli][tool-registry][install][sha256][override]") {
 #ifdef _WIN32

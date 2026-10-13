@@ -595,9 +595,15 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
             auto manifest = existing.path.parent_path() / "manifest.json";
             bool version_ok = true;
             if (fs::exists(manifest)) {
-                auto content = read_file(manifest);
-                // Simple check: does manifest contain the active version?
-                version_ok = content.find(version) != std::string::npos;
+                // Compare the recorded version field exactly: the manifest
+                // also holds a sha256 and a path, so a substring search would
+                // let a short version such as "7" match unrelated text.
+                JsonParser parser{read_file(manifest)};
+                auto root = parser.parse();
+                const JsonValue* recorded =
+                    root.type == JsonValue::Object ? root.get("version") : nullptr;
+                version_ok = recorded && recorded->type == JsonValue::String &&
+                             recorded->as_string() == version;
             }
             if (version_ok) {
                 result.ok = true;
@@ -646,6 +652,23 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
                        "release asset's sha256 to tools/packages/tool-registry.json, or "
                        "choose a version yourself with `pulp tool install " +
                        tool.id + " --version <v>` (installed as unverified-version).";
+        return result;
+    }
+
+    // A source whose URL has no ${version} serves one fixed build: the pin.
+    // Fetching it for another version would install the pinned bytes under the
+    // requested version's name, so the override cannot be honored here.
+    if (!pinned && source.url_template.find("${version}") == std::string::npos) {
+        result.error =
+            tool.id + " " + version + " (" + active.source + ") cannot be installed on " +
+            platform + ": this platform's source serves one fixed build, " + tool.id + " " +
+            tool.pinned_version + ", and has no per-version download, so installing it as " +
+            version + " would mislabel it. Fix: drop the override with `pulp tool update " +
+            tool.id + "` to use " + tool.pinned_version + ", or install " + tool.id + " " +
+            version +
+            " yourself and put it on PATH (Pulp uses a PATH copy only when no "
+            "managed copy is installed; `pulp tool uninstall " +
+            tool.id + "` removes it).";
         return result;
     }
 

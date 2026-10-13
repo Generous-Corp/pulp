@@ -169,6 +169,15 @@ the pin, Pulp has reviewed no digest for it: the tool installs, and its
 "unverified-version"`, the observed `sha256`, and the `version_source`. A pinned
 install records `"verification": "sha256-verified"`.
 
+The one exception to the override contract is a source that serves a single
+fixed build. Some upstreams publish no per-version download (the source's
+`url_template` has no `${version}`), and installing their one build under
+another version's name would mislabel it. On such a platform an override to a
+version other than the pin is refused, naming the tool, the platform and the
+fix: drop the override with `pulp tool update <id>`, or install the version
+yourself and put it on `PATH`. ffmpeg on macOS arm64 and Linux x64 is this
+case today; its Windows source is versioned, so overrides work there.
+
 ## See also
 
 - [skills.md](skills.md) — the agent-skills catalog; the `packages`, `kits`,

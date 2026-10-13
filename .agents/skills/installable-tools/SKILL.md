@@ -94,6 +94,14 @@ pinned download whose digest differs. Watch out for:
   with the upstream `.sha256` sidecar when the project publishes one. A control
   must be able to fail: check that a wrong asset against the same sidecar
   differs, or an empty-vs-empty comparison will read as a match.
+- **A fixed-build source refuses overrides.** When an upstream has no
+  per-version URL (no `${version}` in `url_template`), an override to another
+  version is refused rather than installing the pin under the wrong name. This
+  is the one documented exception in `extending-pulp.md`. Prefer a templated
+  source when one exists.
+- **Dated builds expire.** The ffmpeg Linux x64 pin is a BtbN monthly
+  autobuild, which BtbN keeps for about two years (this one until roughly
+  2028-07). Bump it before then, or the install fails on a 404.
 - **Overrides install, marked `unverified-version`.** The C++ delegate resolves
   the same precedence as the Rust front-end (env > `tool-overrides.json` >
   pin); a version other than the pin installs with the observed digest recorded
