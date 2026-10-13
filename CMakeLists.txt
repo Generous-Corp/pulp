@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.957.0
+    VERSION 0.959.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -610,6 +610,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
     set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")
     add_test(NAME pulp.vellum-closure-external-input-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
@@ -618,14 +619,16 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
     set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")
     add_test(NAME pulp.vellum-closure-edge-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
             --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json"
             --break "perl -0pi -e 's/pulp::view-audio/pulp::audio/'"
             --no-build
-            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allow pulp::view-audio")
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allowlist ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_allowlist_fixture.json")
     set_tests_properties(pulp.vellum-closure-edge-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")
     add_test(NAME pulp.vellum-closure-policy-selftest
         COMMAND "${Python3_EXECUTABLE}"

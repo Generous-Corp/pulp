@@ -99,7 +99,10 @@ public:
 
     /// Install the reader that lists installed content-pack presets. pulp-state
     /// carries no content-pack reader of its own; pulp-content provides one
-    /// (content_registry_preset_source()) and the format adapters install it.
+    /// (content_registry_preset_source()). Code that opts this manager into
+    /// content discovery installs it together with set_content_plugin_id() or
+    /// set_content_manifest(); the format adapters do neither, so their
+    /// managers list no content-pack presets and carry no pulp-content link.
     void set_content_preset_source(ContentPresetSource source);
 
     /// Opt into installed content-pack discovery for this plugin id.
