@@ -240,10 +240,17 @@ If the PR opens but required checks show `MISSING` rather than pending, the
 workflows did not run on its head; say so rather than waiting it out. An
 App-opened PR does trigger `pull_request` workflows like any other: across the
 fleet's last 180 pull requests (165 opened by `shipyard-local[bot]`), every one
-targeting `main` had `pull_request` runs on its head. A missing check means the
-trigger refused (a base other than `main`, a path filter) or a run was
-cancelled; the CI skill's slow/stuck-PR steps say which, and the fix is never a
-`workflow_dispatch`, which checks out the branch tip rather than the merge ref.
+targeting `main` had `pull_request` runs on its head. A missing check means one
+of three things, and the CI skill's slow/stuck-PR steps tell them apart:
+- the trigger refused (a base other than `main`, a path filter), so no run
+  exists on the head;
+- a run exists on the head but sits `pending` with zero jobs, because a
+  superseded run holds the workflow's concurrency group (case 1b): the check
+  reads `MISSING` because its job was never created;
+- a run was cancelled.
+
+The fix is never a `workflow_dispatch`, nor `shipyard rescue`, which dispatches
+one: a dispatch checks out the branch tip rather than the merge ref.
 
 ### If you have READ access only (the common case)
 You cannot push a branch. Two good options:

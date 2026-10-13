@@ -7044,8 +7044,8 @@ shipyard cleanup --ship-state --apply     # prune closed-PR + aged state
 shipyard run --targets windows --smoke    # fast Windows-only check
 shipyard run --resume-from test           # skip configure+build, run tests only
 shipyard cloud run build <branch>         # dispatch the GHA build workflow
-shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs
-shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs (not just cancelled), and — with --to omitted — RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This is the lever to recover a saturated/timed-out macOS leg (re-run it on a real local runner). Pass --to <provider> to force.
+shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs (a workflow_dispatch on the branch tip, not the merge ref)
+shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs as branch-tip workflow_dispatch replacements, not reruns; for a required pull_request run prefer `ghapp run rerun <run> --failed` (not just cancelled), and — with --to omitted — RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This is the lever to recover a saturated/timed-out macOS leg (re-run it on a real local runner). Pass --to <provider> to force.
 shipyard rescue <PR> --rerun-failed --to local   # force a re-run onto the local runner
 shipyard ship --pr N --base main --adopt-head     # recover "ship state SHA drift" after a force-push (Shipyard #346): adopt the current branch head + re-validate, instead of re-shipping from scratch
 shipyard runner watch --kill-hung-workers # host-side prevention daemon for self-hosted runners
@@ -7255,24 +7255,25 @@ log is NOT in the GHA store (`run view --job <id> --log` returns 0 lines), so
 read a GitHub-hosted sanitizer leg's log instead — a recurring culprit is
 `extract_keyboard_shortcuts does not catastrophically backtrack on large
 embedded data` (a ReDoS-guard timing test that overruns under ASan / runner
-load). Recovery, once confirmed flaky — **reach for the one-liner first**: arm
-`ghapp pr merge <pr> --auto` (no strategy flag), then
-**`shipyard rescue <pr> --rerun-failed`**.
-`rescue` cancels stuck runs and, with `--rerun-failed`, re-dispatches completed
-failed/cancelled runs — "e.g. a flaky required leg" (its own help) — re-resolving
-the provider so the rerun lands local-first on the JIT pool; the armed
-auto-merge then fires when it goes green. Do NOT hand-crank the cancel+rerun
-unless `rescue` is unavailable. `shipyard ship` now also *detects* this exact
-wedge (validated green + a red required check that maps to a validated-green
-target) and prints the `shipyard rescue … --rerun-failed` line for you in its
-hand-back, so on a fresh block you usually just copy it. Manual fallback only if
-`rescue` is missing/older: `ghapp run cancel <run>` (advisory legs are
-expendable), wait ~20–60s for `status: completed`, then `ghapp run rerun <run>
---failed`; the per-run rerun lock is why the cancel must come first. Do not
-substitute `ghapp workflow run build.yml --ref <branch>`: a `workflow_dispatch`
-run checks out the branch tip rather than `refs/pull/N/merge`, so its `macos`
-is the wrong proof under strict protection. Re-running the `pull_request` run
-keeps the merge ref. Over 2026-09-22..10-12, 26 dispatches on 13 pulp heads
+load). Recovery, once confirmed flaky, is to **re-run the `pull_request` run
+itself**: `ghapp run cancel <run>` while an advisory leg still holds it
+`in_progress` (advisory legs are expendable), wait ~20–60s for `status:
+completed`, then `ghapp run rerun <run> --failed`. The per-run rerun lock is why
+the cancel must come first. A re-run keeps the run's `pull_request` event and
+its `refs/pull/N/merge` checkout, so its `macos` is the proof strict protection
+asks for.
+
+Do not substitute a dispatch, by hand or through `rescue`.
+`ghapp workflow run build.yml --ref <branch>` starts a `workflow_dispatch` run,
+which checks out the branch tip rather than `refs/pull/N/merge`, so its `macos`
+is the wrong proof under strict protection. **`shipyard rescue <pr>
+--rerun-failed` does the same thing**: despite the name, it does not re-run the
+failed run. It dispatches a `workflow_dispatch` replacement of the workflow on
+the branch tip (`src/app/rescue_cmd.rs`, both for a terminal failed or cancelled
+run and for a queued-stuck one, which it then cancels). The `shipyard rescue …
+--rerun-failed` line `shipyard ship` prints in its hand-back has the same
+effect; use the cancel-then-rerun above instead until rescue re-runs
+`pull_request` runs. Over 2026-09-22..10-12, 26 dispatches on 13 pulp heads
 that already had a `pull_request` build went 0 green (13 failed, 13
 cancelled); the `pull_request` run before each had been cancelled (15), had
 failed (8) or had passed (3), so none was a missing trigger.
@@ -7967,13 +7968,20 @@ Shipyard's own `skills/ci/SKILL.md`; the commands surface from
 
 ### Recover: `shipyard rescue <PR>`
 
+**What rescue starts is a `workflow_dispatch` on the branch tip**, for queued and
+(with `--rerun-failed`) completed runs alike; it re-runs nothing. That moves an
+advisory or stuck queued run, but a required `pull_request` check it replaces is
+then proved on the branch tip rather than `refs/pull/N/merge`. For a required
+check, re-run the `pull_request` run instead (`ghapp run cancel <run>` if it is
+still running, then `ghapp run rerun <run> --failed`).
+
 When a PR's matrix is stuck behind a queue jam on the self-hosted local
 runner (the typical 5+ hour backlog scenario), cancel that PR's queued
 runs and redispatch them to GitHub-hosted runners:
 
 ```bash
 shipyard rescue 1920                  # cancel + redispatch queued runs to github-hosted
-shipyard rescue 1920 --rerun-failed   # also re-arm completed/cancelled runs (watchdog-cancelled case)
+shipyard rescue 1920 --rerun-failed   # also dispatch branch-tip replacements of completed/cancelled runs
 shipyard rescue 1920 --dry-run        # preview without acting
 shipyard rescue --all-stuck           # repo-wide
 shipyard rescue 1920 --to <provider>  # default: github-hosted
@@ -10115,11 +10123,18 @@ Pulp-specific gotchas.
 
 ### Recover — `shipyard rescue <PR>` (v0.53.0+)
 
+**What rescue starts is a `workflow_dispatch` on the branch tip**, for queued and
+(with `--rerun-failed`) completed runs alike; it re-runs nothing. That moves an
+advisory or stuck queued run, but a required `pull_request` check it replaces is
+then proved on the branch tip rather than `refs/pull/N/merge`. For a required
+check, re-run the `pull_request` run instead (`ghapp run cancel <run>` if it is
+still running, then `ghapp run rerun <run> --failed`).
+
 ```bash
 shipyard rescue <PR>                # cancel queued runs + redispatch
                                     # to github-hosted (default)
-shipyard rescue <PR> --rerun-failed # also re-arm completed/cancelled
-                                    # runs (watchdog-cancellation case)
+shipyard rescue <PR> --rerun-failed # also dispatch branch-tip replacements
+                                    # of completed/cancelled runs
 shipyard rescue <PR> --dry-run      # preview without acting
 shipyard rescue --all-stuck         # repo-wide sweep
 shipyard rescue <PR> --to github-hosted   # explicit provider
