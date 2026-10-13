@@ -7417,6 +7417,34 @@
    ],
    "kind": "shell"
   },
+  "pulp.vellum-closure-export-mentions": {
+   "entry": "tools/scripts/vellum_closure.py",
+   "inputs": [
+    "core/canvas",
+    "core/canvas/CMakeLists.txt",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/js/embed_js.py",
+    "core/view/src/reload_exports.cpp",
+    "tools/cmake",
+    "tools/cmake/PulpEmbedData.cmake",
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_closure.py",
+    "tools/scripts/vellum_d3_units.json"
+   ],
+   "kind": "python"
+  },
   "pulp.vellum-closure-external-input-negative": {
    "entry": "tools/scripts/confirm_failure.sh",
    "inputs": [

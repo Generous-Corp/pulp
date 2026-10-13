@@ -999,6 +999,40 @@ class GateScopeTests(unittest.TestCase):
             self.assertIn("pass --unit-manifest", out)
 
 
+class ClosureMentionTests(unittest.TestCase):
+    """A closure file naming a Pulp-owned subsystem fails before export, comments included."""
+
+    def scan(self, text, name="tools/cmake/PulpX.cmake"):
+        from vellum_closure import closure_mention_violations
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / name
+            path.parent.mkdir(parents=True)
+            path.write_text(text, encoding="utf-8")
+            return closure_mention_violations({"source_root": td, "files": [name]})
+
+    def test_comment_mention_of_a_product_target_fails(self):
+        found = self.scan("# PulpUtils fails fast unless `pulp::format` already exists.\n")
+        self.assertEqual(found, ["product-symbol mention tools/cmake/PulpX.cmake:1: pulp::format"])
+        self.assertTrue(self.scan("// validated against pulp::signal::Fft\n", "core/render/x.hpp"))
+        self.assertTrue(self.scan('#include <pulp/audio/buffer.hpp>\n', "core/canvas/x.cpp"))
+        self.assertTrue(self.scan("target_link_libraries(x PRIVATE pulp-audio)\n"))
+        self.assertTrue(self.scan('LINK_FLAGS "-framework CoreAudio"\n'))
+        self.assertEqual(self.scan("# the plug-in adapter targets\n"), [])
+
+    def test_embed_data_module_is_free_of_mentions(self):
+        from vellum_closure import closure_mention_violations
+        self.assertEqual(closure_mention_violations({"source_root": str(REPO_ROOT), "files": ["tools/cmake/PulpEmbedData.cmake"]}), [])
+
+    def test_export_refuses_a_closure_with_a_mention(self):
+        from vellum_closure import exportable_closure
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "x.cmake").write_text("# needs pulp::format\n", encoding="utf-8")
+            manifest = {**canvas_manifest(gpu_configure()), "source_root": td, "files": ["x.cmake"]}
+            with self.assertRaises(SystemExit) as raised:
+                exportable_closure(manifest, "canvas")
+            self.assertIn("pulp::format", str(raised.exception))
+
+
 class AllowlistGateTests(unittest.TestCase):
     def test_unused_allowlist_entry_fails_the_gate(self):
         with tempfile.TemporaryDirectory() as td:
