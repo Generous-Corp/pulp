@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261013-wgpu-native-pin-and-audit-scan-watch",
+  "created_at": "2026-10-13T04:34:07Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Pins the wgpu-native runtime archive by SHA-256 (manifest artifacts) in setup.sh and at configure (new PulpWgpuNative.cmake, called from PulpFetchContent/PulpDependencies; PulpWgpuUniversal reads the same pins) and widens tools/deps/audit.py's fetch scan. The same v24.0.3.1 runtime is selected and linked as before; the change only refuses bytes that do not match the pinned digests. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 tools/deps/test_audit.py",
+    "python3 tools/scripts/test_run_changed_surface_tests.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

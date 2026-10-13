@@ -206,9 +206,84 @@ destroyed with all their binaries built green.
 a test (`NeverDestructive`) asserts the source contains neither. Recovery by
 destroying release state is the bug this workflow exists to undo.
 
-Re-dispatch runs `release-cli.yml` from `main` (so it picks up the *current*,
-fixed workflow) with `version=<tag>` (so it builds the *tag's* source). It is
-idempotent: the finalizer no-ops on an already-published tag.
+Re-dispatch runs `release-cli.yml` with `--ref <tag>` and `version=<tag>`.
+The ref must be the tag: release-cli's "Dispatch must run on the tag it
+publishes" step refuses any dispatch whose commit is not the tag commit, because
+the build provenance would otherwise name a commit consumers do not pin. A
+dispatch from `main` fails that step in seconds without building anything. If a
+tag's own workflow is broken, the fix is a new tag cut from the fixed `main`.
+Re-dispatch is idempotent: the finalizer no-ops on an already-published tag.
+
+### Every incident entry says what to change
+
+An incident line that only names a failing leg sends every reader into the run
+log to rediscover the cause. `tools/scripts/release_failure_diagnosis.py` reads
+the failing job's log once and the reconciler appends, under each tag:
+
+- the failing workflow run (linked), job and step;
+- the **first error line** — the first specific error, never the generic
+  `Process completed with exit code 1`;
+- a **cause class**: `pinned-asset digest mismatch`, `pinned-revision mismatch`,
+  `compile error`, `re-dispatch from the wrong ref`, or `unclassified`;
+- the **fix** and how to **verify** it.
+
+For a pinned-asset digest mismatch (`ERROR: sha256 mismatch` from
+`fetch_skia_for_release.py`) the fix names the pin file and line
+(`tools/deps/manifest.json`, the `release_assets` key), the pinned and observed
+digests, and the provenance check to run *before* repinning: the upstream
+release asset's live `digest` from the GitHub API, the asset-replacement entry
+in that release's notes, and for Windows archives the `msvc-toolchain.json`
+inside the zip, which must carry real toolset/SDK/compiler values (no `unknown`,
+no `error`). Verification is the next SDK tag's `Release CLI` run passing the
+same step and publishing.
+
+The reconciler also checks the upstream digest itself. When the upstream asset
+now carries exactly the digest the failed run observed, the mismatch is a fact
+about the tag's frozen pin, so the circuit opens at once instead of spending
+re-dispatches; when it does not (a truncated or corrupt download is possible),
+the tag stays on the retry path and the entry says the mismatch is unconfirmed.
+
+The root cause is taken from the newest run that failed for a reason other than
+the dispatch-ref guard. During the v0.952.0–v0.955.1 outage every re-dispatch
+failed only that guard, the incident listed the guard as the failing leg five
+times, and the actual `sha256 mismatch` was never named.
+
+**`Sign and Release` failures are reported too.** That workflow runs on every tag
+push independently of `release-cli.yml`, so its failure never blocks a publish
+and is invisible to every published/unpublished check. The reconciler reads each
+tag's newest `Sign and Release` run and lists a failed one with the same
+diagnosis.
+
+**Accepted archives with broken provenance.** The "do not repin to an archive
+whose `msvc-toolchain.json` has `unknown`/`error` values" step holds for every
+future repin, except archives listed in `PROVENANCE_EXCEPTIONS` in
+`release_failure_diagnosis.py`, keyed by repo, release tag, asset and digest.
+The one entry is the chrome/m153 win-arm64 archive pinned by Pulp PR 10170
+(sha256 `18e57481…a9c7`): its provenance file is known broken, its contents were
+verified by archive comparison, and it is Skia 37c5ad6a rather than the release
+lock's 8b8c3872. The same is true of the old pin: both arm64 uploads built
+37c5ad6a, per `built_skia` in the resolve-skia logs of skia-builder runs
+37596862943 and 38178800952 (provenance finding:
+https://github.com/danielraffel/skia-builder/pull/32#issuecomment-6135800920). For that archive the incident names the exception instead of
+the rule, so it never tells an agent to undo the repin.
+
+**The incident body is bounded.** GitHub rejects an issue body over 65,536
+characters, and a rejected edit would fail every sweep. `incident_body()` keeps
+the newest five tags' diagnoses in full (each capped at 8,000 characters),
+collapses older tags to one line, and folds the oldest one-liners into a single
+line that still names every tag if needed, staying under 60,000 characters.
+
+**A tag joining the incident posts a comment.** The incident is one issue,
+edited in place, and an edit notifies nobody — which is how five broken
+releases sat in an already-open incident. Each sweep that adds a tag to an open
+incident comments with the newly unresolved tags.
+
+**Replaying a past incident.** `release_reconcile.py --tag vX.Y.Z [--tag …]`
+evaluates only those tags, never re-dispatches or edits the issue, and prints
+the incident body it would write. The workflow exposes this as the `tags`
+dispatch input. `test_release_failure_diagnosis.py` replays the recorded
+v0.955.1 outage (Release CLI run 38214661512) as the positive case and the
+published v0.951.0 as the negative control.
 
 ## Layer 1 — Workflow lint (pre-merge)
 
@@ -292,6 +367,13 @@ YAML bug (Layer 1 would catch), a runtime job failure (Layer 2 would
 catch), a missing secret (neither of the above might catch), a
 forgotten manual step, or a GitHub outage — the invariant fires because
 the *symptom* (missing release) appears.
+
+It checks only that the **tag** exists. A tag whose release never published,
+or published without its assets, passes this layer: during the
+v0.952.0–v0.955.1 outage every tag existed and the cadence check stayed green
+while no release shipped. Whether each tag's release published with the
+required assets — and why not, when it did not — is Layer 4's job (the release
+reconciler, above).
 
 ## release-path PR gate (pre-tag prevention, issue #1962)
 

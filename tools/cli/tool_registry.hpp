@@ -17,6 +17,8 @@ struct BinarySource {
     std::string url_template;    // with ${version} placeholder
     std::string archive_format;  // "tar.gz", "zip", "tar.xz"
     std::string binary_name;     // e.g., "uv", "ffmpeg.exe"
+    std::string sha256;          // hex digest of the archive at the registry pin;
+                                 // install refuses a pinned download that differs
 };
 
 // Per-platform packaged-artifact source for an importer add-on. Unlike
@@ -135,7 +137,24 @@ struct ToolInstallResult {
     fs::path binary_path;
     std::string installed_version;
     std::string error;
+    // Binary tools: "sha256-verified" when the download matched the registry
+    // digest for the pinned version, "unverified-version" when a user override
+    // selected a version Pulp has no reviewed digest for. Empty otherwise.
+    std::string verification;
+    std::string sha256; // observed digest of the downloaded archive
 };
+
+// The version a managed tool should install, with its provenance. Precedence
+// (highest first): `PULP_TOOL_<ID>_VERSION`, then
+// `$PULP_HOME/tool-overrides.json` (`{"overrides": {"<id>": "<version>"}}`),
+// then the registry `pinned_version`. Empty values are ignored. Matches the
+// Rust front-end's resolver, so a delegated install honors the same override.
+struct ActiveToolVersion {
+    std::string version;
+    std::string source; // "env override", "user override", "registry pin", "unset"
+};
+std::string tool_version_env_var(const std::string& tool_id);
+ActiveToolVersion resolve_active_tool_version(const ToolDescriptor& tool);
 
 // ── Pulp Home ──
 

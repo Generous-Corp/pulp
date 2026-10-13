@@ -124,6 +124,27 @@ Two consequences when touching this code:
 A fixture with zero padding cannot see any of this. Give the label real padding
 and assert the draw origin on both branches of the cache predicate.
 
+## A captured basis is retired the first time the copy diverges
+
+`cached_line_layout_usable()` honors a captured browser line box only while the
+label's transformed text equals the string it was captured for, and falls back
+to native placement otherwise. The two placements differ (the captured path
+starts at the browser's `top`, the native path centres its own line box), so a
+live readout that cycles through values — a modulated band count painted onto a
+captured span — flipped between them every time its value passed through the
+design's original copy. In Pro Tools that read as the BANDS header jumping.
+
+`Label::set_text` therefore sets `cached_line_basis_retired_` the first time
+the new copy differs from `cached_line_basis_text_`, and the usable predicate
+refuses a retired basis for good; `set_cached_line_boxes()` clears the flag
+when a fresh capture arrives. The boxes are deliberately NOT cleared: the
+responsive reflow still reads their line count and wrap intent, and the
+`line_break_path_counts().reflowed` accounting that
+`test_design_import_codegen_layout_text.cpp` pins must keep reporting a reflow,
+not an uncached shape. Clearing them was the first attempt and it broke that
+test on every platform. Regression: `Label keeps painting natively once its
+copy diverged from the captured basis` in `test/test_widgets_label.cpp`.
+
 ## Gotchas
 
 - **`white-space` is inherited, and wrapping is `soft_wraps()`, not

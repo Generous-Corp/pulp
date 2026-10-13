@@ -3582,6 +3582,7 @@
     "docs/status",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/test_pulp_add_sparkle.cmake",
+    "test/cmake/test_wgpu_native_pin.cmake",
     "test/fixtures",
     "test/support",
     "tools/ci",
@@ -3598,6 +3599,7 @@
     "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpSparkle.cmake",
     "tools/cmake/PulpTestData.cmake",
+    "tools/cmake/PulpWgpuNative.cmake",
     "tools/cmake/PulpWgpuUniversal.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/gate_common.py",
@@ -4371,23 +4373,35 @@
   "deps-audit-extra-selftest": {
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
+    "tools/ci/tart-provision.sh",
     "tools/deps/audit.py",
-    "tools/deps/test_audit_extra.py"
+    "tools/deps/test_audit_extra.py",
+    "tools/install-shipyard.sh",
+    "tools/packages/test-stubs"
    ],
    "kind": "python"
   },
   "deps-audit-selftest": {
    "entry": "tools/deps/test_audit.py",
    "inputs": [
+    "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpWclap.cmake",
     "tools/deps/audit.py",
-    "tools/deps/test_audit.py"
+    "tools/deps/test_audit.py",
+    "tools/deps/wgpu_native_digests.py",
+    "tools/install-shipyard.sh",
+    "tools/packages/test-stubs"
    ],
    "kind": "python"
   },
   "deps-offline-fetch-contract": {
    "entry": "tools/deps/audit.py",
    "inputs": [
-    "tools/deps/audit.py"
+    "tools/ci/tart-provision.sh",
+    "tools/deps/audit.py",
+    "tools/install-shipyard.sh",
+    "tools/packages/test-stubs"
    ],
    "kind": "python"
   },
@@ -6663,6 +6677,16 @@
    ],
    "kind": "python"
   },
+  "merge-group-hold-check-selftest": {
+   "entry": "tools/ci/test_merge_group_hold_check.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/fixtures/merge_group_hold/pr-10114-verdicts.json",
+    "tools/ci/merge_group_hold_check.py",
+    "tools/ci/test_merge_group_hold_check.py"
+   ],
+   "kind": "python"
+  },
   "merge-group-shadows-selftest": {
    "entry": "tools/ci/test_merge_group_shadows.py",
    "inputs": [
@@ -7156,6 +7180,27 @@
    ],
    "kind": "node"
   },
+  "pulp-format-clap-core-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-format-core-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-format-view-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
    "inputs": [
@@ -7340,13 +7385,25 @@
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
     "core/canvas",
-    "core/canvas/src/bundled_fonts.cpp",
+    "core/canvas/CMakeLists.txt",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
     "core/runtime/CMakeLists.txt",
+    "core/runtime/include",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/simd",
+    "core/simd/include",
     "core/view",
+    "core/view/audio",
     "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
-    "tools/cmake/PulpInstallRules.cmake",
+    "core/view/src/reload_exports.cpp",
+    "tools/cmake",
+    "tools/cmake/PulpEmbedData.cmake",
+    "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_d3_units.json"
    ],
@@ -7372,13 +7429,25 @@
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
     "core/canvas",
-    "core/canvas/src/bundled_fonts.cpp",
+    "core/canvas/CMakeLists.txt",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
     "core/runtime/CMakeLists.txt",
+    "core/runtime/include",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/simd",
+    "core/simd/include",
     "core/view",
+    "core/view/audio",
     "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
-    "tools/cmake/PulpInstallRules.cmake",
+    "core/view/src/reload_exports.cpp",
+    "tools/cmake",
+    "tools/cmake/PulpEmbedData.cmake",
+    "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
     "tools/scripts/vellum_d3_units.json"
@@ -7397,15 +7466,45 @@
    "entry": "tools/scripts/test_vellum_closure.py",
    "inputs": [
     "core/canvas",
+    "core/canvas/CMakeLists.txt",
+    "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
+    "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
     "core/runtime/CMakeLists.txt",
+    "core/runtime/include",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/simd",
+    "core/simd/include",
     "core/view",
+    "core/view/audio",
     "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
+    "core/view/src/reload_exports.cpp",
+    "external/fonts/Inter-Regular.ttf",
+    "external/fonts/NotoColorEmoji.ttf",
+    "tools/cmake",
+    "tools/cmake/PulpEmbedData.cmake",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpPatchChoc.cmake",
+    "tools/import-design/jsx-runtime/package-lock.json",
+    "tools/scripts/include_boundary.py",
     "tools/scripts/test_vellum_closure.py",
-    "tools/scripts/vellum_closure.py"
+    "tools/scripts/vellum_closure.py",
+    "tools/scripts/vellum_closure_allowlist.json",
+    "tools/scripts/vellum_d3_units.json"
+   ],
+   "kind": "python"
+  },
+  "pulp.vellum-view-core-pulp-kept": {
+   "entry": "tools/scripts/vellum_view_core_pulp_kept_check.py",
+   "inputs": [
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_view_core_pulp_kept_check.py"
    ],
    "kind": "python"
   },
@@ -9943,6 +10042,16 @@
    "entry": "tools/scripts/test_vellum_trusted_merge.py",
    "inputs": [
     "tools/scripts/test_vellum_trusted_merge.py"
+   ],
+   "kind": "python"
+  },
+  "vellum-view-core-pulp-kept-negative-contract": {
+   "entry": "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
+   "inputs": [
+    "core/view/include/pulp/view/host_surfaces.hpp",
+    "core/view/src/view.cpp",
+    "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
+    "tools/scripts/vellum_d3_units.json"
    ],
    "kind": "python"
   },

@@ -173,6 +173,11 @@ The control-shipping artifact scanner is one such contract: its non-Apple
 validation accepts both x86 and ARM spellings emitted by native inspection
 tools, so its paired ARM predicates are narrowly allowlisted.
 
+The lint does not report a stale allowlist entry (one whose substring no
+longer occurs in its file), so delete the entry when the code it excused goes
+away; `PulpWgpuUniversal.cmake`'s `_slice STREQUAL "aarch64"` entry went stale
+that way when its slice digests moved into the dependency manifest.
+
 When you change the lint, the allowlist, or an Intel workflow:
 
 1. `python3 tools/scripts/test_intel_canary_lint.py` — self-test must pass.

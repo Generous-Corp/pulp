@@ -79,6 +79,42 @@ what lets a Claude Code plugin user in a Pulp project say "install perfetto" and
 have it work. Add an alias when the tool's product name differs from its id;
 keep it exact-match (no fuzzy matching that could mis-resolve).
 
+## Download digests (binary tools)
+
+Every `binary_sources` entry needs the `sha256` of its release asset at
+`pinned_version`; `validate_registry.py` fails without it, and the generic
+installer (`install_binary_tool` in `tools/cli/tool_registry.cpp`) refuses a
+pinned download whose digest differs. Watch out for:
+
+- **Mutable URLs cannot be pinned.** A `.../latest/...` or `getrelease` URL
+  changes bytes under you, so the digest breaks every install the day upstream
+  ships. Use a versioned, immutable asset URL (prefer one with `${version}` so an
+  override fetches the overridden version).
+- **Record digests from a fresh download** into an empty directory, and compare
+  with the upstream `.sha256` sidecar when the project publishes one. A control
+  must be able to fail: check that a wrong asset against the same sidecar
+  differs, or an empty-vs-empty comparison will read as a match.
+- **A fixed-build source refuses overrides.** When an upstream has no
+  per-version URL (no `${version}` in `url_template`), an override to another
+  version is refused rather than installing the pin under the wrong name. This
+  is the one documented exception in `extending-pulp.md`. Prefer a templated
+  source when one exists. The rule runs in two places: the Rust front end
+  (`refuse_unservable_version` in `cmd/tool.rs`) refuses `--version` before
+  `set_override`, so a refused version is never saved, and the C++ installer
+  refuses env and file overrides. Its fix text must match the override's
+  source: `pulp tool update` clears only `tool-overrides.json`, so an env
+  override has to be unset by name.
+- **Dated builds expire.** The ffmpeg Linux x64 pin is a BtbN monthly
+  autobuild, which BtbN keeps for about two years (this one until roughly
+  2028-07). Bump it before then, or the install fails on a 404.
+- **Overrides install, marked `unverified-version`.** The C++ delegate resolves
+  the same precedence as the Rust front-end (env > `tool-overrides.json` >
+  pin); a version other than the pin installs with the observed digest recorded
+  in its `manifest.json`. Never make an override fail for lacking a digest.
+- **Code-owned fetchers are mirrored, not replaced.** trace-processor and
+  chrome-for-testing verify in Rust (`trace_fetch.rs`, `chrome_for_testing.rs`);
+  their registry digests must match those constants, which the validator checks.
+
 ## Uninstall safety (deleting is sensitive)
 
 `uninstall_tool` (`tool_registry.rs`) is the one place that calls

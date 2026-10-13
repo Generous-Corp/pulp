@@ -112,7 +112,7 @@ class WebclapRelevanceTests(unittest.TestCase):
         self.assertIn('*) exit "$relevance_status"', workflow)
         self.assertEqual(
             workflow.count("steps.relevance.outputs.run == 'true'"),
-            21,
+            24,
             "every expensive step after relevance classification must be guarded",
         )
 

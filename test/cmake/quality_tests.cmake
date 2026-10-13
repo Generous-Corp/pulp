@@ -133,6 +133,15 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(pulp-ui-build-contracts PROPERTIES
         LABELS "pr;design-import" TIMEOUT 60)
 
+    # The view-core Pulp-kept closure assertion (pulp.vellum-view-core-pulp-kept)
+    # reads a configured closure manifest; this self-test plants each violation
+    # it must catch against the checked-in D3 rules.
+    add_test(NAME vellum-view-core-pulp-kept-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_view_core_pulp_kept_check.py")
+    set_tests_properties(vellum-view-core-pulp-kept-negative-contract PROPERTIES
+        LABELS "pr" TIMEOUT 60)
+
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")
@@ -812,6 +821,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_binary_identity_shadow.py")
         set_tests_properties(binary-identity-shadow-selftest PROPERTIES TIMEOUT 120)
+        # The merge-group preamble's HOLD backstop (group decoding, trust rule,
+        # fail-open on unreadable input, build.yml wiring).
+        add_test(NAME merge-group-hold-check-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_hold_check.py")
+        set_tests_properties(merge-group-hold-check-selftest PROPERTIES TIMEOUT 60)
         # The one merge-group step that runs all four shadow instruments.
         add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")

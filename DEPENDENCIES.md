@@ -73,6 +73,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | Vellum D15 GPU provider | 0.1.7 (retired; pending v0.1.8) | MIT plus bundled third-party notices | Opt-in macOS development provider for coordinated Dawn GPU-audio execution. Vellum 0.1.7 is retired; D15 awaits v0.1.8. A D15-enabled SDK redistributes `libvellum-gpu.dylib` and the provider's exact LICENSE, NOTICE, and dependency inventory. Production release eligibility remains blocked until Vellum's renderer builder emits and attests an exhaustive transitive source/license manifest. | pulp-gpu-audio (development SDK only) | 2026-09-17 |
 | VST3 SDK | v3.8.0_build_66 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
 | WebGPU-distribution | 17dcd42a7683 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |
+| wgpu-native | v24.0.3.1 | MIT OR Apache-2.0 | Prebuilt WebGPU runtime (`libwgpu_native`) that WebGPU-distribution links on desktop GPU builds and Pulp stages beside each module. Every release asset is pinned by SHA-256 (archive and extracted tree) in `tools/deps/manifest.json`; `setup.sh` and configure refuse a mismatch. | pulp-render | 2026-10-12 |
 | yaml-cpp | 0.8.0 | MIT | YAML frontmatter parser for the DESIGN.md import source (FetchContent) | pulp-view | 2026-05-13 |
 | Yoga | 3.2.1 | MIT | CSS Flexbox/Grid layout engine (Meta, FetchContent) | pulp-view | 2026-03-29 |
 
@@ -116,6 +117,7 @@ directories and used under their own licenses. Intentionally absent from
 | fflate | MIT | Deflate/zip in the developer-only Figma plugin (`tools/figma-plugin`) | Same boundary. |
 | ffmpeg-static | Wrapper MIT; bundled FFmpeg binaries GPL/LGPL | Encodes captured frames into the MP4 used by the video-proof composer | `npm` devDependency in `tools/local-ci`; runtime also accepts a system `PULP_FFMPEG`/`PATH` ffmpeg. Same boundary. |
 | json-schema-to-typescript | MIT | Generates TypeScript types from JSON Schema for the Figma plugin | Same boundary. |
+| mise | MIT | Optional installer for the exact build-tool versions pinned in `tools/toolchain/manifest.toml` (CMake, Ninja, Python, Node.js, clang-format, Tart), plus the `.mise.toml` project tasks | Developer installs it independently; Pulp commits only its config (`.mise.toml`) and generated lock files. Never committed, bundled, exported by `cmake --install`, shipped in plugins, or required by `setup.sh`, `pulp build`, or public CI. |
 | numpy | BSD-3-Clause | Array ops for the Motion visual-analysis lane (`tools/motion/visual`) | `pip`, installed on demand; analysis-only, never bundled or shipped. |
 | opencv-python | Apache-2.0 (OpenCV); packaging MIT | Optional affine estimation for the Motion visual-analysis lane (graceful PIL/FFT fallback when absent) | `pip` (optional); analysis-only, never bundled or shipped. |
 | Pillow | HPND (BSD-style) | Image IO for the Motion visual-analysis lane | `pip`; analysis-only, never bundled or shipped. |

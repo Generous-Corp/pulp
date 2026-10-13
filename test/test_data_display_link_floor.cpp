@@ -11,7 +11,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/data_display.hpp>
 #include <pulp/view/design_import.hpp>
-#include <pulp/view/inspector.hpp>
+#include <pulp/view/inspector_facts.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -146,7 +146,7 @@ TEST_CASE("without the audio provider, imported data displays are diagnosed plac
         INFO(anchor);
         auto* view = find_anchor(*root, anchor);
         REQUIRE(view != nullptr);
-        CHECK(ViewInspector::type_name(*view) == "View");
+        CHECK(view_type_name(*view) == "View");
         CHECK(dynamic_cast<LevelDisplay*>(view) == nullptr);
         CHECK(dynamic_cast<SeriesDisplay*>(view) == nullptr);
         CHECK(dynamic_cast<BinDisplay*>(view) == nullptr);

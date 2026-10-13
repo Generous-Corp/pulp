@@ -318,6 +318,26 @@ failure on a merge group names a commit that is not in the ejected PR, read the
 `diff base:` line in the job log before touching the PR. Any new diff-scoped
 gate added to a merge_group workflow should reuse the same resolver.
 
+## A HOLD on a queued head fails the merge group
+
+On 2026-10-12/13 six pulp pull requests merged minutes after a `verdict: HOLD`
+naming their merge head: each was armed before the HOLD, and review before arm
+judges only the arm. Two layers stop that now. Shipyard's `verdict-hold-hook`
+dequeues or disarms the exact head when the HOLD posts through `ghapp` (on
+hosts that enable `hold-disarms`). Behind it, the merge-group classify job runs
+`tools/ci/merge_group_hold_check.py`, which fails `macos` closed, before any VM,
+when a queued pull request's latest trusted verdict on the head it lands is
+HOLD. Its error annotation names the pull request, the HOLD's URL and the fix:
+a new head plus an APPROVE, or an APPROVE on that head if the HOLD no longer
+applies, then re-queue. It fails closed: an "(unreadable)" error annotation
+means it could not read the group (a commit on the chain, a missing token) or a
+pull request's comments or reviews in full (a failed read, a GraphQL `errors`
+answer, a list short of its `totalCount`), and that fails the group too. A
+stalled queue is the deliberate lesser harm: re-run the group's classify job or
+re-queue. A failed fetch of the base branch fails the same way; only a base
+that does not carry the check yet passes, with a notice. A HOLD from the pull
+request's own author counts; their APPROVE never does.
+
 ## A failed batch's branch name is not the culprit
 
 A merge_group batch is NAMED for one pull request but CONTAINS every entry
@@ -673,7 +693,8 @@ summary/watch commands.
 > **If a PR's required `macos` check has been queued >30 min** or the
 > repo's PRs are all in `mergeable_state=blocked` with no movement,
 > jump to **"Self-hosted runner ops"** near the end of this file.
-> One-shot recovery is `shipyard rescue <PR>` (Shipyard v0.53.0+).
+> One-shot recovery of a queued run is `shipyard rescue <PR>` (Shipyard
+> v0.53.0+) (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 > Continuous prevention is `shipyard runner watch --kill-hung-workers`
 > (v0.54.0+). Keep Shipyard itself current with `shipyard update`
 > (v0.55.0+; Pulp currently pins v0.56.2+). All three replace the
@@ -4314,6 +4335,29 @@ so the starvation mechanism is real — but it is ~0.6 min of Mac time per run, 
 the `linux`/`windows` alias jobs are `needs: build`, not pollers, so they never hold
 a slot for a build's duration. Relocating them pushes four more jobs into the
 contended hosted pool to reclaim half a minute.
+## A cache that never restores still costs the whole budget
+
+The repository's Actions cache has a 10 GB cap and evicts the least recently
+used entries. On 2026-10-13 it sat at 9.997 GB, and 6.5 GB of that was two
+entries that never restored:
+- android.yml's `android/app/.cxx`: 0 of 10 sampled jobs restored it. Its key
+  could not track the sources, so every main push saved another 3 GB.
+- cross-platform-check's `Linux-gradle` entry, which bundled `.cxx` into 3.5 GB.
+  It was evicted before every nightly run (0 of 7).
+
+They pushed out the Windows build ccache that PRs restore. So:
+- Cache downloads (Gradle caches, archives keyed on their pin, ccache), never
+  build trees.
+- Split `actions/cache/restore` and `actions/cache/save`, and save only on a
+  push to main. PR and merge-queue refs can read main's entries but nothing else
+  can read theirs.
+- Guard both on `runner.environment == 'github-hosted'`. Self-hosted runners
+  keep these paths on local disk.
+
+Check the budget with `gh api repos/Generous-Corp/pulp/actions/cache/usage` and
+`actions/caches?per_page=100`. An entry whose `ref` is a PR or
+`gh-readonly-queue` ref is quota nothing else can read.
+
 ## A cache that looks configured can be saving nothing
 
 `actions/cache` reports success whether or not the path it was handed contains
@@ -5125,6 +5169,17 @@ bisectable.
   is not re-dispatched, because the frozen sources fail identically every time.
   Fix it on main and let the next tag publish; re-dispatching that tag by hand
   only burns another release matrix.
+- **Each incident entry carries a diagnosis: run, job › step, first error line,
+  cause class, fix, verify** (`tools/scripts/release_failure_diagnosis.py`). For
+  `ERROR: sha256 mismatch` it names the `tools/deps/manifest.json` line and both
+  digests; check the upstream asset's live `digest` and (Windows) its
+  `msvc-toolchain.json` before repinning. A mismatch the upstream asset confirms
+  opens the circuit at once. Re-dispatch release-cli with `--ref <tag>`, never
+  `--ref main`: the "Dispatch must run on the tag it publishes" step refuses a
+  non-tag commit, and that guard failure once masked a real digest mismatch as
+  the "failing leg" for five tags. Replay a past incident with
+  `release_reconcile.py --tag vX.Y.Z` (dry run; prints the body). A tag joining
+  the open incident posts a comment, since edits notify nobody.
 - **NEVER delete a GitHub release or draft — deletion of a once-published
   release permanently burns its tag name.** GitHub reserves an immutable
   release's `tag_name` forever; every later publish attempt 422s with
@@ -5208,11 +5263,15 @@ touched nothing:
   its own PR, and update `determinism.web_toolchain` in `tools/deps/manifest.json`
   in the same change.
 - **The Skia wasm slice is fetched from `tools/deps/manifest.json`, not a
-  hardcoded URL.** The lane reads the URL + sha256 out of the manifest, verifies
-  the checksum, and keys the `actions/cache` entry on `hashFiles('tools/deps/manifest.json')`
-  — so the CI lane and the dependency audit can never disagree about which binary
-  is in use, and a pin bump self-invalidates the cache. Do not paste a release URL
-  into the workflow. The lane then runs `tools/scripts/verify_wasm_skia_slice.py`
+  hardcoded URL.** The lane reads the URL + sha256 out of the manifest, so the CI
+  lane and the dependency audit can never disagree about which binary is in use.
+  The cache holds the release archive, named and keyed by that sha256. It is
+  checked against the digest on every run, cache hit or not, and unpacks into
+  `$RUNNER_TEMP` (`SKIA_WASM_ROOT`). Caching the unpacked tree skipped the digest
+  check on every hit. A host that kept `$HOME` between jobs also reused an
+  `~/skia-wasm` from an older pin. Only `wclap-cloudflare.yml` saves, on a push
+  to main; `web-plugins.yml` restores. Do not paste a release URL into the
+  workflow. The lane then runs `tools/scripts/verify_wasm_skia_slice.py`
   to assert the slice really is Ganesh/WebGL2 (no Dawn, no Graphite) — the
   invariant `FindSkia.cmake`'s Emscripten arm is built on. See the
   `skia-gpu-build` skill.
@@ -7033,8 +7092,8 @@ shipyard cleanup --ship-state --apply     # prune closed-PR + aged state
 shipyard run --targets windows --smoke    # fast Windows-only check
 shipyard run --resume-from test           # skip configure+build, run tests only
 shipyard cloud run build <branch>         # dispatch the GHA build workflow
-shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs
-shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs (not just cancelled), and — with --to omitted — RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This is the lever to recover a saturated/timed-out macOS leg (re-run it on a real local runner). Pass --to <provider> to force.
+shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs (a workflow_dispatch on the branch tip, not the merge ref)
+shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs (not just cancelled) as branch-tip workflow_dispatch replacements, not reruns; for a required pull_request run prefer `ghapp run rerun <run> --failed`. With --to omitted it RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This moves a saturated/timed-out macOS leg to a real local runner. Pass --to <provider> to force.
 shipyard rescue <PR> --rerun-failed --to local   # force a re-run onto the local runner
 shipyard ship --pr N --base main --adopt-head     # recover "ship state SHA drift" after a force-push (Shipyard #346): adopt the current branch head + re-validate, instead of re-shipping from scratch
 shipyard runner watch --kill-hung-workers # host-side prevention daemon for self-hosted runners
@@ -7244,22 +7303,28 @@ log is NOT in the GHA store (`run view --job <id> --log` returns 0 lines), so
 read a GitHub-hosted sanitizer leg's log instead — a recurring culprit is
 `extract_keyboard_shortcuts does not catastrophically backtrack on large
 embedded data` (a ReDoS-guard timing test that overruns under ASan / runner
-load). Recovery, once confirmed flaky — **reach for the one-liner first**: arm
-`ghapp pr merge <pr> --auto` (no strategy flag), then
-**`shipyard rescue <pr> --rerun-failed`**.
-`rescue` cancels stuck runs and, with `--rerun-failed`, re-dispatches completed
-failed/cancelled runs — "e.g. a flaky required leg" (its own help) — re-resolving
-the provider so the rerun lands local-first on the JIT pool; the armed
-auto-merge then fires when it goes green. Do NOT hand-crank the cancel+rerun
-unless `rescue` is unavailable. `shipyard ship` now also *detects* this exact
-wedge (validated green + a red required check that maps to a validated-green
-target) and prints the `shipyard rescue … --rerun-failed` line for you in its
-hand-back, so on a fresh block you usually just copy it. Manual fallback only if
-`rescue` is missing/older: `ghapp run cancel <run>` (advisory legs are
-expendable), wait ~20–60s for `status: completed`, then `ghapp run rerun <run>
---failed`; the per-run rerun lock is why the cancel must come first. (Or `ghapp
-workflow run build.yml --ref <branch>` for a fresh run whose newer `macos`
-context supersedes the stale failure — do one or the other, not both.)
+load). Recovery, once confirmed flaky, is to **re-run the `pull_request` run
+itself**: `ghapp run cancel <run>` while an advisory leg still holds it
+`in_progress` (advisory legs are expendable), wait ~20–60s for `status:
+completed`, then `ghapp run rerun <run> --failed`. The per-run rerun lock is why
+the cancel must come first. A re-run keeps the run's `pull_request` event and
+its `refs/pull/N/merge` checkout, so its `macos` is the proof strict protection
+asks for.
+
+Do not substitute a dispatch, by hand or through `rescue`.
+`ghapp workflow run build.yml --ref <branch>` starts a `workflow_dispatch` run,
+which checks out the branch tip rather than `refs/pull/N/merge`, so its `macos`
+is the wrong proof under strict protection. **`shipyard rescue <pr>
+--rerun-failed` does the same thing**: despite the name, it does not re-run the
+failed run. It dispatches a `workflow_dispatch` replacement of the workflow on
+the branch tip (`src/app/rescue_cmd.rs`, both for a terminal failed or cancelled
+run and for a queued-stuck one, which it then cancels). The `shipyard rescue …
+--rerun-failed` line `shipyard ship` prints in its hand-back has the same
+effect; use the cancel-then-rerun above instead until rescue re-runs
+`pull_request` runs. Over 2026-09-22..10-12, 26 dispatches on 13 pulp heads
+that already had a `pull_request` build went 0 green (13 failed, 13
+cancelled); the `pull_request` run before each had been cancelled (15), had
+failed (8) or had passed (3), so none was a missing trigger.
 
 **Prevention: retry transient flakes on the required leg.** `build.yml`'s
 non-Windows and Windows `ctest` steps run `--repeat until-pass:2` (mirroring
@@ -7951,13 +8016,20 @@ Shipyard's own `skills/ci/SKILL.md`; the commands surface from
 
 ### Recover: `shipyard rescue <PR>`
 
+**What rescue starts is a `workflow_dispatch` on the branch tip**, for queued and
+(with `--rerun-failed`) completed runs alike; it re-runs nothing. That moves an
+advisory or stuck queued run, but a required `pull_request` check it replaces is
+then proved on the branch tip rather than `refs/pull/N/merge`. For a required
+check, re-run the `pull_request` run instead (`ghapp run cancel <run>` if it is
+still running, then `ghapp run rerun <run> --failed`).
+
 When a PR's matrix is stuck behind a queue jam on the self-hosted local
 runner (the typical 5+ hour backlog scenario), cancel that PR's queued
 runs and redispatch them to GitHub-hosted runners:
 
 ```bash
 shipyard rescue 1920                  # cancel + redispatch queued runs to github-hosted
-shipyard rescue 1920 --rerun-failed   # also re-arm completed/cancelled runs (watchdog-cancelled case)
+shipyard rescue 1920 --rerun-failed   # also dispatch branch-tip replacements of completed/cancelled runs
 shipyard rescue 1920 --dry-run        # preview without acting
 shipyard rescue --all-stuck           # repo-wide
 shipyard rescue 1920 --to <provider>  # default: github-hosted
@@ -10014,8 +10086,12 @@ PY
    ```bash
    shipyard ship-state list
    shipyard ship
-   shipyard rescue PR --rerun-failed
    ```
+
+   For a failed or cancelled required run, re-run the `pull_request` run
+   (`ghapp run cancel <run>` if it is still running, then `ghapp run rerun
+   <run> --failed`) rather than `shipyard rescue PR --rerun-failed`
+   (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 
    Plain `shipyard ship` automatically resumes its durable state. Use
    `--resume-from <stage>` only when intentionally selecting a known stage; the
@@ -10099,11 +10175,18 @@ Pulp-specific gotchas.
 
 ### Recover — `shipyard rescue <PR>` (v0.53.0+)
 
+**What rescue starts is a `workflow_dispatch` on the branch tip**, for queued and
+(with `--rerun-failed`) completed runs alike; it re-runs nothing. That moves an
+advisory or stuck queued run, but a required `pull_request` check it replaces is
+then proved on the branch tip rather than `refs/pull/N/merge`. For a required
+check, re-run the `pull_request` run instead (`ghapp run cancel <run>` if it is
+still running, then `ghapp run rerun <run> --failed`).
+
 ```bash
 shipyard rescue <PR>                # cancel queued runs + redispatch
                                     # to github-hosted (default)
-shipyard rescue <PR> --rerun-failed # also re-arm completed/cancelled
-                                    # runs (watchdog-cancellation case)
+shipyard rescue <PR> --rerun-failed # also dispatch branch-tip replacements
+                                    # of completed/cancelled runs
 shipyard rescue <PR> --dry-run      # preview without acting
 shipyard rescue --all-stuck         # repo-wide sweep
 shipyard rescue <PR> --to github-hosted   # explicit provider
@@ -10175,7 +10258,8 @@ drift; humans run `shipyard update` to apply.
 - **PRs that touch CI/runner workflows need a manual handoff.** If the
   PR's macOS lane was cancelled by the wedge, even after `rescue` the
   PR may need a fresh push to retrigger the version-skill-sync check
-  too.
+  too. For the required `macos` run itself, re-run it rather than
+  rescue it (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 - **launchd agent exit 75 + "lease denied … rc=2" → check the plist PATH
   for `/usr/sbin` FIRST.** Before suspecting tart, network, or auth. A
   runner agent crash-looping under `KeepAlive` with last-exit **75**
@@ -10256,8 +10340,9 @@ unresponsive, not just the Worker), the machine-side recovery is:
    permanent daemon.
 
 Agents should NOT do step 1–4 themselves; ask the human via
-`PushNotification`. Agents CAN and SHOULD run `shipyard rescue` for
-the PR-side recovery without waiting.
+`PushNotification`. Agents CAN and SHOULD run the PR-side recovery
+without waiting: `shipyard rescue` for queued runs, and for a required
+`pull_request` run that failed or was cancelled, a re-run (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 
 ## Cobertura artifact verification (A2 first cut, 2026-05)
 
