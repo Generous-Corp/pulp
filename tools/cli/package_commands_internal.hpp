@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "package_pin.hpp"
 #include "package_registry.hpp"
 
 #include <string>
@@ -59,15 +60,23 @@ bool write_file(const fs::path& path, const std::string& content);
 
 std::string dots(const std::string& name, int width = 35);
 
+// ── Source pinning ──
+// Declared in package_pin.hpp (shared with tests); defined in
+// package_commands_util.cpp.
+
 // ── CMake generation ──
 // (definitions in package_commands_util.cpp; used by cmd_add /
 //  cmd_remove / cmd_update)
 
+// Blocks fetch the commit recorded in `locked`; an entry without a full
+// commit + integrity keeps a warned fetch-by-tag block.
 std::string generate_cmake_block(const PackageDescriptor& pkg,
+                                 const LockedPackage& locked,
                                  bool platform_guard = false,
                                  const std::string& guard_platform = "");
 
 std::string generate_cmake_block_for_condition(const PackageDescriptor& pkg,
+                                               const LockedPackage& locked,
                                                const std::string& guard_condition);
 
 std::string generate_packages_cmake(const LockFile& lock, const Registry& reg,

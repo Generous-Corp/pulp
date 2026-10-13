@@ -648,6 +648,8 @@ target_include_directories(pulp-test-cli-package-commands PRIVATE
 target_link_libraries(pulp-test-cli-package-commands PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cli-package-commands PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-cli-package-commands)
 
 # `pulp create` template tree: every placeholder is in the substitution map,

@@ -32,10 +32,12 @@ use std::cell::RefCell;
 use pulp_rs::cmd::{
     audit,
     pkg::{
-        parse_add_args, parse_search_args, parse_suggest_args, parse_target_sub, run_add, run_list,
-        run_remove, run_search, run_suggest, run_target, run_update, TargetSub,
+        parse_add_args, parse_search_args, parse_suggest_args, parse_target_sub, run_add,
+        run_add_with, run_list, run_remove, run_search, run_suggest, run_target, run_update,
+        run_update_with, TargetSub,
     },
 };
+use pulp_rs::pkg::pin::{Pin, SourcePinner};
 use pulp_rs::proc::{Invocation, Spawner};
 
 /// Local test spawner — records invocations without running them.
@@ -65,6 +67,21 @@ impl Spawner for RecordingSpawner {
     fn run(&self, inv: &Invocation) -> pulp_rs::Result<i32> {
         self.calls.borrow_mut().push(inv.clone());
         Ok(self.rc)
+    }
+}
+
+/// Pins every package to one fixed commit + integrity without touching git
+/// or the network. Real-git pinning is covered by `pkg_pin_test.rs`.
+struct FixedPinner;
+
+const FIXED_COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
+impl SourcePinner for FixedPinner {
+    fn pin(&self, _repository: &str, _git_ref: &str) -> pulp_rs::Result<Pin> {
+        Ok(Pin {
+            commit: FIXED_COMMIT.to_owned(),
+            integrity: format!("sha256-{}", "e3".repeat(32)),
+        })
     }
 }
 
@@ -244,16 +261,45 @@ fn add_allowed_license_writes_lock_and_cmake() {
     let rc = {
         let mut buf = Vec::new();
         let args = parse_add_args(&["alac".to_owned()]);
-        with_cwd(td.path(), || run_add(&args, &mut buf)).expect("add")
+        with_cwd(td.path(), || run_add_with(&args, &mut buf, &FixedPinner)).expect("add")
     };
     assert_eq!(rc, 0);
     let lock = fs::read_to_string(td.path().join("packages.lock.json")).expect("lock");
     assert!(lock.contains("\"alac\""));
     assert!(lock.contains("\"1.0\""));
+    assert!(lock.contains(FIXED_COMMIT), "lock must record the pinned commit: {lock}");
+    assert!(lock.contains("\"license\": \"Apache-2.0\""), "lock must record the license: {lock}");
     let cmake =
         fs::read_to_string(td.path().join("cmake").join("pulp-packages.cmake")).expect("cmake gen");
     assert!(cmake.contains("FetchContent_Declare(alac"));
-    assert!(cmake.contains("FetchContent_MakeAvailable(alac)"));
+    assert!(cmake.contains(&format!("GIT_TAG        {FIXED_COMMIT}")), "{cmake}");
+    assert!(cmake.contains("_pulp_package_make_available(alac "), "{cmake}");
+}
+
+/// Returns a tag where the commit should be, like the lock writer used to.
+struct TagAsCommitPinner;
+
+impl SourcePinner for TagAsCommitPinner {
+    fn pin(&self, _repository: &str, git_ref: &str) -> pulp_rs::Result<Pin> {
+        Ok(Pin {
+            commit: git_ref.to_owned(),
+            integrity: String::new(),
+        })
+    }
+}
+
+#[test]
+fn add_refuses_a_malformed_pin_and_writes_nothing() {
+    let td = copy_fixture("empty_project");
+    let mut buf = Vec::new();
+    let args = parse_add_args(&["alac".to_owned()]);
+    let rc =
+        with_cwd(td.path(), || run_add_with(&args, &mut buf, &TagAsCommitPinner)).expect("add");
+    let msg = String::from_utf8(buf).unwrap();
+    assert_eq!(rc, 1, "{msg}");
+    assert!(msg.contains("Could not pin"), "{msg}");
+    assert!(!td.path().join("packages.lock.json").exists());
+    assert!(!td.path().join("cmake").join("pulp-packages.cmake").exists());
 }
 
 #[test]
@@ -288,13 +334,17 @@ fn add_accepts_gpl_with_matching_override() {
             "GPL-3.0".to_owned(),
             "--platform-guard".to_owned(),
         ]);
-        let rc = with_cwd(td.path(), || run_add(&args, &mut buf)).expect("add");
+        let rc = with_cwd(td.path(), || run_add_with(&args, &mut buf, &FixedPinner)).expect("add");
         let msg = String::from_utf8(buf).unwrap();
         assert!(msg.contains("Added Aubio"));
         rc
     };
     assert_eq!(rc, 0);
-    assert!(td.path().join("packages.lock.json").exists());
+    let lock = fs::read_to_string(td.path().join("packages.lock.json")).expect("lock");
+    assert!(
+        lock.contains("\"license_acceptance\": \"accept-license:GPL-3.0\""),
+        "the accepted override must be reviewable in the lock: {lock}"
+    );
 }
 
 #[test]
@@ -302,7 +352,7 @@ fn remove_roundtrips_after_add() {
     let td = copy_fixture("empty_project");
     with_cwd(td.path(), || {
         let mut buf = Vec::new();
-        run_add(&parse_add_args(&["alac".to_owned()]), &mut buf).expect("add");
+        run_add_with(&parse_add_args(&["alac".to_owned()]), &mut buf, &FixedPinner).expect("add");
     });
     let rc = {
         let mut buf = Vec::new();
@@ -379,13 +429,43 @@ fn update_apply_writes_new_version_to_lock() {
 
     let rc = {
         let mut buf = Vec::new();
-        let rc =
-            with_cwd(td.path(), || run_update(&["--apply".to_owned()], &mut buf)).expect("update");
+        let rc = with_cwd(td.path(), || {
+            run_update_with(&["--apply".to_owned()], &mut buf, &FixedPinner)
+        })
+        .expect("update");
         rc
     };
     assert_eq!(rc, 0);
     let lock = fs::read_to_string(td.path().join("packages.lock.json")).unwrap();
     assert!(lock.contains("\"1.1\""));
+    assert!(lock.contains(FIXED_COMMIT), "update must re-pin the commit: {lock}");
+}
+
+#[test]
+fn update_flags_and_repins_a_legacy_unpinned_entry() {
+    let td = copy_fixture("one_package");
+    let lock_path = td.path().join("packages.lock.json");
+    let legacy = fs::read_to_string(&lock_path)
+        .unwrap()
+        .replace(&format!("sha256-{}", "5d".repeat(32)), "")
+        .replace("c38887c5c5e64a4b31108733bd79ca9b2496d987", "master");
+    fs::write(&lock_path, legacy).unwrap();
+
+    let out = render(td.path(), |buf| {
+        let _ = run_update(&[], buf).expect("update");
+    });
+    assert!(out.contains("is not pinned"), "legacy entry must be reported: {out}");
+
+    let rc = {
+        let mut buf = Vec::new();
+        with_cwd(td.path(), || {
+            run_update_with(&["--apply".to_owned()], &mut buf, &FixedPinner)
+        })
+        .expect("update")
+    };
+    assert_eq!(rc, 0);
+    let lock = fs::read_to_string(&lock_path).unwrap();
+    assert!(lock.contains(FIXED_COMMIT), "legacy entry must be re-pinned: {lock}");
 }
 
 // ── suggest ────────────────────────────────────────────────────────

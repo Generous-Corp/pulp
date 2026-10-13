@@ -32,6 +32,36 @@ REJECTED_LICENSES = {
 
 BUILD_STATUS_KEY_PATTERN = re.compile(r"^[A-Za-z]+-[a-z0-9]+$")
 
+# `fetch.git_tag` must name an immutable pin: a release tag or a full 40-hex
+# commit. `pulp add` resolves it to a full commit and records an archive digest
+# in packages.lock.json, so a moving branch would make the lock disagree with
+# the registry the moment upstream moves, and an abbreviated SHA cannot be
+# resolved by a shallow fetch and is ambiguous as the repository grows.
+FULL_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+# Mixed hex of any length below 40 is an abbreviated commit. An all-digit
+# string is let through because date- and number-style release tags
+# ("20240101") are common and indistinguishable from a digit-only prefix.
+SHORT_COMMIT_PATTERN = re.compile(r"^(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{4,39}$")
+BRANCH_NAMES = {"master", "main", "develop", "dev", "trunk", "head", "gh-pages", "latest"}
+
+
+def git_tag_pin_error(git_tag: object) -> str | None:
+    """Return why ``git_tag`` is not an immutable pin, or None when it is."""
+    if not isinstance(git_tag, str) or not git_tag.strip():
+        return "fetch.git_tag must be a non-empty release tag or full 40-hex commit"
+    tag = git_tag.strip()
+    if tag != git_tag:
+        return f"fetch.git_tag '{git_tag}' has surrounding whitespace"
+    if FULL_COMMIT_PATTERN.match(tag):
+        return None
+    if tag.lower() in BRANCH_NAMES or tag.startswith("refs/heads/"):
+        return (f"fetch.git_tag '{tag}' is a branch name; pin a release tag or a "
+                "full 40-hex commit instead")
+    if SHORT_COMMIT_PATTERN.match(tag):
+        return (f"fetch.git_tag '{tag}' is an abbreviated commit; use the full "
+                "40-hex commit")
+    return None
+
 
 def load_json(path: Path) -> dict:
     if not path.exists():
@@ -81,6 +111,12 @@ def validate_structural(registry: dict) -> tuple[list[str], list[str]]:
                 f"  {slug}: verification.verified_version ({ver.get('verified_version')}) "
                 f"!= version ({pkg.get('version')})"
             )
+
+        fetch = pkg.get("fetch")
+        if isinstance(fetch, dict):
+            pin_error = git_tag_pin_error(fetch.get("git_tag"))
+            if pin_error:
+                errors.append(f"  {slug}: {pin_error}")
 
         platforms = pkg.get("platforms", {})
         if not platforms:

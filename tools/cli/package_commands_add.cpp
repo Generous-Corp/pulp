@@ -220,9 +220,28 @@ int cmd_add(const std::vector<std::string>& args) {
         std::cout << "  " << green("Unique value:") << " " << pkg.unique_value << "\n";
     }
 
+    // Resolve the registry ref to a full commit + archive integrity before
+    // anything is written; a package that cannot be pinned is not added.
+    auto pin = pin_source(pkg.fetch.git_repository, pkg.fetch.git_tag);
+    if (!pin.error.empty() || !is_full_commit(pin.commit) || !is_integrity(pin.integrity)) {
+        print_fail("Could not pin " + pkg.name + " at " + pkg.fetch.git_tag + " (" +
+                   pkg.fetch.git_repository + "): " +
+                   (pin.error.empty() ? "malformed commit or integrity" : pin.error));
+        return 1;
+    }
+    LockedPackage locked;
+    locked.version = pkg.version;
+    locked.resolved = pkg.fetch.git_repository;
+    locked.integrity = pin.integrity;
+    locked.commit = pin.commit;
+    locked.license = pkg.license;
+    if (verdict == LicenseVerdict::rejected && license_override)
+        locked.license_acceptance =
+            accepted_license.empty() ? "commercial" : "accept-license:" + accepted_license;
+    lock.packages[package_id] = locked;
+
     if (!no_cmake) {
         // Generate/update cmake/pulp-packages.cmake
-        lock.packages[package_id] = {pkg.version, pkg.fetch.git_repository, "", pkg.fetch.git_tag};
 
         // If platform_guard is set and package doesn't support all targets,
         // write a guarded cmake block covering all supported desktop platforms
@@ -242,14 +261,14 @@ int cmd_add(const std::vector<std::string>& args) {
                     if (i > 0) guard_condition += " OR ";
                     guard_condition += conditions[i];
                 }
-                guard_cmake = generate_cmake_block_for_condition(pkg, guard_condition);
+                guard_cmake = generate_cmake_block_for_condition(pkg, locked, guard_condition);
             }
         }
 
         auto cmake_content = generate_packages_cmake(lock, reg, root);
         // If we have a guarded block, replace the unguarded one
         if (needs_guard && !guard_cmake.empty()) {
-            auto unguarded = generate_cmake_block(pkg);
+            auto unguarded = generate_cmake_block(pkg, locked);
             auto pos = cmake_content.find(unguarded);
             if (pos != std::string::npos)
                 cmake_content.replace(pos, unguarded.size(), guard_cmake);
@@ -265,7 +284,6 @@ int cmd_add(const std::vector<std::string>& args) {
     }
 
     // Update lock file
-    lock.packages[package_id] = {pkg.version, pkg.fetch.git_repository, "", pkg.fetch.git_tag};
     if (!save_lock_file(lock_path, lock)) {
         print_fail("Failed to write packages.lock.json");
         return 1;
@@ -276,7 +294,8 @@ int cmd_add(const std::vector<std::string>& args) {
     update_notice_md(root, pkg, true);
 
     // Print success
-    print_ok("Added " + pkg.name + " v" + pkg.version);
+    print_ok("Added " + pkg.name + " v" + pkg.version + " (commit " + pin.commit + ", " +
+             pin.integrity + ")");
 
     if (!no_cmake && !pkg.cmake.targets.empty()) {
         std::cout << "\n  Add to your CMakeLists.txt target:\n";
@@ -389,20 +408,39 @@ int cmd_update(const std::vector<std::string>& args) {
 
     auto lock = load_lock_file(lock_path);
     bool has_updates = false;
+    int pin_failures = 0;
 
+    // A package needs an update when the registry version moved or its lock
+    // entry has no full commit + integrity (written before packages were
+    // pinned). A package that cannot be re-pinned keeps its old entry.
     for (auto& [id, lp] : lock.packages) {
         auto it = reg.packages.find(id);
         if (it == reg.packages.end()) continue;
+        const auto& pkg = it->second;
+        const bool version_moved = lp.version != pkg.version;
+        if (!version_moved && is_pinned(lp)) continue;
 
-        if (lp.version != it->second.version) {
-            has_updates = true;
-            std::cout << "  " << it->second.name << ": "
-                      << dim(lp.version) << " → " << green(it->second.version) << "\n";
-            if (apply) {
-                lp.version = it->second.version;
-                lp.commit = it->second.fetch.git_tag;
-            }
+        has_updates = true;
+        if (version_moved)
+            std::cout << "  " << pkg.name << ": "
+                      << dim(lp.version) << " → " << green(pkg.version) << "\n";
+        else
+            std::cout << "  " << pkg.name << ": " << lp.version
+                      << " is not pinned (no full commit + integrity) → re-pin\n";
+        if (!apply) continue;
+
+        auto pin = pin_source(pkg.fetch.git_repository, pkg.fetch.git_tag);
+        if (!pin.error.empty() || !is_full_commit(pin.commit) || !is_integrity(pin.integrity)) {
+            ++pin_failures;
+            std::cout << "    could not pin " << pkg.name << ": "
+                      << (pin.error.empty() ? "malformed pin" : pin.error) << "\n";
+            continue;
         }
+        lp.version = pkg.version;
+        lp.resolved = pkg.fetch.git_repository;
+        lp.commit = pin.commit;
+        lp.integrity = pin.integrity;
+        lp.license = pkg.license;
     }
 
     if (!has_updates) {
@@ -414,6 +452,11 @@ int cmd_update(const std::vector<std::string>& args) {
         save_lock_file(lock_path, lock);
         auto cmake_content = generate_packages_cmake(lock, reg, root);
         write_file(root / "cmake" / "pulp-packages.cmake", cmake_content);
+        if (pin_failures > 0) {
+            print_fail(std::to_string(pin_failures) +
+                       " package(s) could not be pinned and were left unchanged");
+            return 1;
+        }
         print_ok("Updated packages and regenerated cmake/pulp-packages.cmake");
     } else {
         std::cout << "\nRun 'pulp update --apply' to apply these updates.\n";

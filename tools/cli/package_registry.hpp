@@ -102,8 +102,15 @@ RegistryLoadResult load_registry(const fs::path& registry_path);
 struct LockedPackage {
     std::string version;
     std::string resolved;
+    // "sha256-<hex>" of the deterministic `git archive` of `commit`; empty
+    // only in locks written before packages were pinned.
     std::string integrity;
+    // Full 40-hex commit (older locks may hold the registry tag).
     std::string commit;
+    // SPDX license recorded at add time.
+    std::string license;
+    // "accept-license:<SPDX>" or "commercial" when an override was used.
+    std::string license_acceptance;
 };
 
 struct LockFile {

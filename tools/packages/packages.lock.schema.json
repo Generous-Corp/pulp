@@ -22,8 +22,26 @@
       "properties": {
         "version":   { "type": "string", "minLength": 1 },
         "resolved":  { "type": "string", "format": "uri" },
-        "integrity": { "type": "string", "pattern": "^sha256-" },
-        "commit":    { "type": "string", "minLength": 7 }
+        "integrity": {
+          "type": "string",
+          "pattern": "^sha256-[0-9a-f]{64}$",
+          "description": "sha256 of `git -c core.autocrlf=false -c core.eol=lf -c tar.umask=0002 archive --format=tar <commit>`, lowercase hex"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Full commit the registry tag resolved to when the package was added"
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SPDX license id recorded when the package was added"
+        },
+        "license_acceptance": {
+          "type": "string",
+          "pattern": "^(accept-license:.+|commercial)$",
+          "description": "Override used to accept a license outside the allowed list"
+        }
       }
     }
   }

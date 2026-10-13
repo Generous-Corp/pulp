@@ -390,6 +390,56 @@ class ValidateRegistryTests(unittest.TestCase):
             self.assertIn("unupdatable", text)
 
 
+    def test_git_tag_pin_rejects_branches_and_abbreviated_commits(self) -> None:
+        for moving in ("master", "main", "Main", "develop", "trunk", "HEAD", "refs/heads/release"):
+            err = vr.git_tag_pin_error(moving)
+            self.assertIsNotNone(err, moving)
+            self.assertIn("branch", err)
+        for short in ("1fb1f075", "1FB1F075", "abc1", "1fb1f075a5d66e85bfc8f488c3f3626840cb3a1"):
+            err = vr.git_tag_pin_error(short)
+            self.assertIsNotNone(err, short)
+            self.assertIn("abbreviated", err)
+        for bad in ("", "   ", None, 7, " v1.0"):
+            self.assertIsNotNone(vr.git_tag_pin_error(bad), repr(bad))
+
+    def test_git_tag_pin_accepts_release_tags_and_full_commits(self) -> None:
+        for pinned in ("1.0.7", "v2.3.1", "release_1.1.0", "20240101",
+                       "1fb1f075a5d66e85bfc8f488c3f3626840cb3a1d"):
+            self.assertIsNone(vr.git_tag_pin_error(pinned), pinned)
+
+    def test_structural_validation_rejects_unpinned_fetch(self) -> None:
+        def registry(tag: str) -> dict:
+            return {
+                "registry_version": 2,
+                "packages": {
+                    "pkg": {
+                        "version": "1.0.0",
+                        "fetch": {"method": "FetchContent",
+                                  "git_repository": "https://example.com/pkg.git",
+                                  "git_tag": tag},
+                        "verification": {"verified_version": "1.0.0"},
+                        "platforms": {"macOS": {}, "iOS": {}},
+                    }
+                },
+            }
+
+        errors, _ = vr.validate_structural(registry("master"))
+        self.assertTrue(any("pkg" in e and "branch name" in e for e in errors), errors)
+        errors, _ = vr.validate_structural(registry("1fb1f075"))
+        self.assertTrue(any("pkg" in e and "abbreviated" in e for e in errors), errors)
+        errors, _ = vr.validate_structural(registry("v1.0.0"))
+        self.assertEqual(errors, [])
+
+    def test_shipped_registry_pins_every_package(self) -> None:
+        registry = json.loads((ROOT / "registry.json").read_text(encoding="utf-8"))
+        packages = registry["packages"]
+        self.assertGreater(len(packages), 0)
+        unpinned = {slug: vr.git_tag_pin_error(pkg["fetch"]["git_tag"])
+                    for slug, pkg in packages.items()
+                    if vr.git_tag_pin_error(pkg["fetch"]["git_tag"])}
+        self.assertEqual(unpinned, {})
+
+
 class FreshnessCheckTests(unittest.TestCase):
     def test_extract_owner_repo_accepts_github_urls(self) -> None:
         self.assertEqual(
