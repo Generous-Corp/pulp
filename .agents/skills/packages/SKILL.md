@@ -161,8 +161,11 @@ the last two also need `--verify-licenses` (both are in `gates.sh`):
 2. **Completeness** — every dep declared in a real manifest source
    (`requirements-docs.txt`, `mkdocs.yml`, `external/<dir>/`, and every fetch
    in any CMake file or setup/bootstrap script: `FetchContent_Declare`,
-   `ExternalProject_Add`, `file(DOWNLOAD)`, curl/wget/git-clone and the
-   `ensure_shared_*` helpers) must be represented in `manifest.json`. A fetch
+   `ExternalProject_Add`, `file(DOWNLOAD)`, `execute_process` running
+   curl/wget, curl/wget/git-clone and the `ensure_shared_*` helpers; and
+   curl/wget in any shell script under `tools/`) must be represented in
+   `manifest.json`, or be listed with a reason in `KNOWN_UNLISTED_FETCHES`
+   (printed every run as a follow-up; a stale entry fails `--strict`). A fetch
    that names its upstream is matched by URL (`repository` or an `artifacts`
    URL), never by its local FetchContent label, so `choc_wclap` is covered by
    CHOC's repository and a familiar name from a different repo is not. Keep

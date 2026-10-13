@@ -110,8 +110,15 @@ function(pulp_wgpu_native_fetch_verified asset version dest_root out_dir)
         file(READ "${_stamp}" _recorded)
         string(STRIP "${_recorded}" _recorded)
         if(_recorded STREQUAL "${_sha} ${_tree_sha}")
-            set(${out_dir} "${_dir}" PARENT_SCOPE)
-            return()
+            # The stamp says it was verified once; the files must still match.
+            pulp_wgpu_native_tree_sha256("${_dir}" _reused_tree)
+            if(_reused_tree STREQUAL _tree_sha)
+                set(${out_dir} "${_dir}" PARENT_SCOPE)
+                return()
+            endif()
+            message(STATUS
+                "wgpu-native: build-local copy ${_dir} changed since it was "
+                "verified (found tree ${_reused_tree}); fetching it again.")
         endif()
     endif()
     if(FETCHCONTENT_FULLY_DISCONNECTED)

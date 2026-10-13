@@ -32,6 +32,25 @@ if(DEFINED PULP_WGPU_TEST_CASE)
     elseif(PULP_WGPU_TEST_CASE STREQUAL "pin")
         pulp_wgpu_native_pin(wgpu-test-release "${PULP_WGPU_TEST_VERSION}" _u _s _t)
         message(STATUS "RESULT_SHA=${_s}")
+    elseif(PULP_WGPU_TEST_CASE STREQUAL "assert")
+        # FetchContent's population state is project-mode only, so this stands
+        # in for it with the values a populate would leave behind; the real
+        # integration is the configure that calls the assert after
+        # FetchContent_MakeAvailable(webgpu).
+        function(FetchContent_GetProperties name)
+            cmake_parse_arguments(A "" "SOURCE_DIR;POPULATED" "" ${ARGN})
+            if(name STREQUAL "${PULP_WGPU_TEST_POPULATED_NAME}")
+                set(${A_SOURCE_DIR} "${PULP_WGPU_TEST_POPULATED_DIR}" PARENT_SCOPE)
+                set(${A_POPULATED} TRUE PARENT_SCOPE)
+            else()
+                set(${A_SOURCE_DIR} "" PARENT_SCOPE)
+                set(${A_POPULATED} FALSE PARENT_SCOPE)
+            endif()
+        endfunction()
+        set(PULP_WGPU_NATIVE_ASSET wgpu-test-release)
+        set(PULP_WGPU_NATIVE_SOURCE_DIR "${PULP_WGPU_TEST_SOURCE}")
+        pulp_wgpu_native_assert_used_verified_source()
+        message(STATUS "RESULT_ASSERT=ok")
     elseif(PULP_WGPU_TEST_CASE STREQUAL "tree")
         pulp_wgpu_native_tree_sha256("${PULP_WGPU_TEST_SOURCE}" _t)
         message(STATUS "RESULT_TREE=${_t}")
@@ -165,6 +184,33 @@ _run(select "${_scratch}/good.json" "${_scratch}/b9" -DPULP_WGPU_TEST_DISCONNECT
     "-DPULP_WGPU_TEST_SOURCE=${_scratch}/shared/wgpu-test-release-v1.0.0" -DPULP_WGPU_TEST_SHARED=FALSE)
 string(FIND "${_out}" "explicit source override" _hit)
 _expect("_code EQUAL 0 AND NOT _hit EQUAL -1" "an explicit override stays developer-managed")
+
+# The post-populate check accepts only the verified tree WebGPU-distribution
+# populated under the asset's own name.
+set(_verified "${_scratch}/b1/verified/wgpu-test-release-v1.0.0")
+_run(assert "${_scratch}/good.json" "${_scratch}/b10" "-DPULP_WGPU_TEST_SOURCE=${_verified}"
+    -DPULP_WGPU_TEST_POPULATED_NAME=wgpu-test-release "-DPULP_WGPU_TEST_POPULATED_DIR=${_verified}/lib/..")
+string(FIND "${_out}" "RESULT_ASSERT=ok" _hit)
+_expect("_code EQUAL 0 AND NOT _hit EQUAL -1" "the populate check accepts the verified tree (path normalized)")
+_run(assert "${_scratch}/good.json" "${_scratch}/b11" "-DPULP_WGPU_TEST_SOURCE=${_verified}"
+    -DPULP_WGPU_TEST_POPULATED_NAME=wgpu-test-release "-DPULP_WGPU_TEST_POPULATED_DIR=${_scratch}/payload")
+string(FIND "${_out}" "did not use the digest-verified" _hit)
+_expect("NOT _code EQUAL 0 AND NOT _hit EQUAL -1" "the populate check refuses a different tree")
+_run(assert "${_scratch}/good.json" "${_scratch}/b12" "-DPULP_WGPU_TEST_SOURCE=${_verified}"
+    -DPULP_WGPU_TEST_POPULATED_NAME=wgpu-other-release "-DPULP_WGPU_TEST_POPULATED_DIR=${_verified}")
+string(FIND "${_out}" "did not use the digest-verified" _hit)
+_expect("NOT _code EQUAL 0 AND NOT _hit EQUAL -1"
+    "the populate check refuses when another asset name was populated")
+
+# A build-local copy whose files changed after extraction is re-verified, not
+# reused on the strength of its stamp.
+file(WRITE "${_verified}/lib/a.txt" "tampered\n")
+_run(fetch "${_scratch}/good.json" "${_scratch}/b1" -DPULP_WGPU_TEST_DISCONNECTED=ON)
+_expect("NOT _code EQUAL 0" "a tampered build-local copy is not reused offline")
+_run(fetch "${_scratch}/good.json" "${_scratch}/b1")
+_expect("_code EQUAL 0" "online, a tampered build-local copy is re-fetched")
+file(READ "${_verified}/lib/a.txt" _restored)
+_expect("_restored STREQUAL \"alpha\n\"" "the re-fetched build-local copy holds the verified bytes")
 
 file(REMOVE_RECURSE "${_scratch}")
 if(_failures GREATER 0)

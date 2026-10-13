@@ -369,6 +369,66 @@ class RepoFetchScanTests(unittest.TestCase):
                                  "repository": "https://github.com/acme/runtime"})
         self.assertEqual(audit.find_uncovered_declarations(listed, declared), [])
 
+    def test_execute_process_curl_in_cmake_is_reported(self) -> None:
+        root = self._tree({"tools/cmake/Fetcher.cmake": """\
+            set(_url "https://github.com/acme/blob/releases/download/v1/blob.tgz")
+            execute_process(
+                COMMAND /usr/bin/curl -fsSL "${_url}" -o blob.tgz)
+            execute_process(COMMAND git rev-parse HEAD)
+            """})
+        self.assertEqual(
+            [(d.location.split(" line")[0], d.url) for d in audit.scan_fetch_declarations(root)],
+            [("execute_process download",
+              "https://github.com/acme/blob/releases/download/v1/blob.tgz")],
+        )
+
+    def test_tools_shell_scripts_count_curl_and_wget_only(self) -> None:
+        root = self._tree({
+            "tools/ci/provision.sh": """\
+                # curl https://github.com/commented/out.sh
+                echo "Usage: curl -fsSL https://github.com/printed/hint/install.sh | sh"
+                curl -fsSL https://github.com/acme/tool/releases/download/v1/t.tgz -o t.tgz
+                wget https://downloads.example.org/thing.tar.gz
+                git clone https://github.com/acme/not-a-download-verb.git
+                curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
+                """,
+            "other/provision.sh": "curl -fsSL https://github.com/outside/tools/x.sh\n",
+        })
+        declared = audit.scan_fetch_declarations(root)
+        self.assertEqual(
+            sorted(d.url for d in declared),
+            ["https://downloads.example.org/thing.tar.gz",
+             "https://github.com/acme/tool/releases/download/v1/t.tgz",
+             "https://www.generouscorp.com/pulp/install.sh"],
+            msg="comments, printed hints, non-download verbs and scripts outside tools/ "
+                "are not fetches",
+        )
+        uncovered = audit.find_uncovered_declarations(self._manifest(), declared)
+        self.assertNotIn("https://www.generouscorp.com/pulp/install.sh",
+                         [d.url for d in uncovered], msg="Pulp fetching itself is not a dependency")
+        self.assertEqual(len(uncovered), 2)
+
+    def test_known_unlisted_fetches_are_split_out_and_go_stale(self) -> None:
+        root = self._tree({"tools/ci/provision.sh":
+                           "curl -fsSL https://github.com/acme/tool/x.sh | sh\n"})
+        uncovered = audit.find_uncovered_declarations(
+            self._manifest(), audit.scan_fetch_declarations(root))
+        known = {("tools/ci/provision.sh", "github.com/acme/tool"): "reason",
+                 ("tools/ci/gone.sh", "github.com/acme/gone"): "reason"}
+        unknown, tolerated, stale = audit.split_known_unlisted(uncovered, known)
+        self.assertEqual((len(unknown), len(tolerated)), (0, 1))
+        self.assertEqual(stale, [("tools/ci/gone.sh", "github.com/acme/gone")])
+        unknown, tolerated, _ = audit.split_known_unlisted(uncovered, {})
+        self.assertEqual((len(unknown), len(tolerated)), (1, 0))
+
+    def test_every_known_unlisted_fetch_still_exists_in_the_repo(self) -> None:
+        uncovered = audit.find_uncovered_declarations(
+            audit.load_manifest(), audit.collect_declared())
+        unknown, tolerated, stale = audit.split_known_unlisted(uncovered)
+        self.assertEqual(unknown, [])
+        self.assertEqual(stale, [])
+        self.assertTrue(tolerated, msg="control: the tools/ shell scan sees the CI-host fetches")
+
     def test_vendored_build_and_fixture_trees_are_not_scanned(self) -> None:
         planted = "FetchContent_Declare(hidden GIT_REPOSITORY https://github.com/h/hidden.git)\n"
         root = self._tree({
@@ -391,7 +451,9 @@ class RepoFetchScanTests(unittest.TestCase):
     def test_wgpu_native_download_needs_its_own_manifest_row(self) -> None:
         manifest = audit.load_manifest()
         declared = audit.collect_declared()
-        self.assertEqual(audit.find_uncovered_declarations(manifest, declared), [])
+        unknown, _known, _stale = audit.split_known_unlisted(
+            audit.find_uncovered_declarations(manifest, declared))
+        self.assertEqual(unknown, [])
         without = [d for d in manifest if d["name"] != "wgpu-native"]
         reported = audit.find_uncovered_declarations(without, declared)
         self.assertIn("setup.sh", {d.source for d in reported},
@@ -421,8 +483,8 @@ class WgpuNativePinTests(unittest.TestCase):
             self.assertIn(required, names)
 
     def test_manifest_version_matches_cmake_and_setup(self) -> None:
-        deps = (ROOT / "tools" / "cmake" / "PulpDependencies.cmake").read_text()
-        setup = (ROOT / "setup.sh").read_text()
+        deps = (ROOT / "tools" / "cmake" / "PulpDependencies.cmake").read_text(encoding="utf-8")
+        setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
         version = self.entry["version"]
         self.assertIn(f"set(PULP_WGPU_NATIVE_VERSION {version})", deps)
         self.assertIn(f'WGPU_NATIVE_VERSION="{version}"', setup)

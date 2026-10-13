@@ -1532,12 +1532,12 @@ class BaseInventoryTest(unittest.TestCase):
         self.assertNotEqual(refusal, -1, "PulpSparkle.cmake lost its disconnected refusal")
         self.assertLess(refusal, sparkle.index("file(DOWNLOAD"),
                         "the disconnected refusal must run before the download")
-        wgpu = (runner.REPO_ROOT / "tools/cmake/PulpWgpuNative.cmake").read_text()
+        wgpu = (runner.REPO_ROOT / "tools/cmake/PulpWgpuNative.cmake").read_text(encoding="utf-8")
         wgpu_refusal = wgpu.find("if(FETCHCONTENT_FULLY_DISCONNECTED)")
         self.assertNotEqual(wgpu_refusal, -1, "PulpWgpuNative.cmake lost its disconnected refusal")
         self.assertLess(wgpu_refusal, wgpu.index("file(DOWNLOAD"),
                         "the disconnected refusal must run before the download")
-        wgpu_fixture = (runner.REPO_ROOT / "test/cmake/test_wgpu_native_pin.cmake").read_text()
+        wgpu_fixture = (runner.REPO_ROOT / "test/cmake/test_wgpu_native_pin.cmake").read_text(encoding="utf-8")
         self.assertIn("disconnected configure refuses to download", wgpu_fixture)
         fixture = (runner.REPO_ROOT / "test/cmake/test_pulp_add_sparkle.cmake").read_text()
         for case in ("disconnected_refused", "disconnected_dist_dir_ok", "disconnected_archive_ok"):

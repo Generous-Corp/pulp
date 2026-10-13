@@ -606,8 +606,10 @@ SCAN_EXCLUDED_PREFIXES: dict[str, str] = {
 SCAN_EXCLUDED_FRAGMENTS: tuple[str, ...] = ("/tests/fixtures/", "/test/fixtures/")
 
 _SETUP_SCRIPT_RE = re.compile(r"(^|/)(setup|bootstrap)[^/]*\.(sh|ps1)$")
+# Any other shell script under tools/ is read for curl/wget downloads only.
+_TOOLS_SHELL_RE = re.compile(r"^tools/.*\.sh$")
 _CMAKE_FETCH_CALL_RE = re.compile(
-    r"\b(FetchContent_Declare|ExternalProject_Add|file)\s*\(", re.IGNORECASE)
+    r"\b(FetchContent_Declare|ExternalProject_Add|execute_process|file)\s*\(", re.IGNORECASE)
 _CMAKE_SET_RE = re.compile(
     r"\bset\s*\(\s*([A-Za-z0-9_]+)\s+(\"[^\"]*\"|[^\s\)\"]+)", re.IGNORECASE)
 _SHELL_ASSIGN_RE = re.compile(
@@ -617,6 +619,60 @@ _URL_RE = re.compile(r"(?:https?|git)://[^\s\"'()<>;]+|git@[A-Za-z0-9_.\-]+:[^\s
 _SHELL_FETCH_RE = re.compile(
     r"(^|[\s\"'(|;&])(curl|wget|git\s+clone|Invoke-WebRequest|iwr|Start-BitsTransfer"
     r"|ensure_shared_[a-z_]*source[a-z_]*)\b")
+_SHELL_HTTP_FETCH_RE = re.compile(r"(^|[\s\"'(|;&])(curl|wget)\b")
+_ECHO_LINE_RE = re.compile(r"^\s*(echo|printf)\b")
+
+# Pulp's own repository and site: a script that downloads Pulp (an installer,
+# a release helper) is not fetching a third-party dependency.
+SELF_URL_IDENTITIES: tuple[str, ...] = (
+    "github.com/generous-corp/pulp",
+    "github.com/danielraffel/pulp",
+    "www.generouscorp.com/pulp",
+)
+
+# Fetches the scan reports that have no manifest row yet, each with the reason
+# it is tolerated and what would resolve it. They are printed on every run and
+# do not fail --strict; an entry whose fetch no longer exists is an error, so
+# the list cannot quietly outlive what it excuses.
+KNOWN_UNLISTED_FETCHES: dict[tuple[str, str], str] = {
+    ("tools/ci/tart-provision.sh", "github.com/homebrew/install"):
+        "CI-host provisioning: installs Homebrew into a CI VM image; nothing it "
+        "fetches is redistributed. Follow-up: decide whether CI-host tooling "
+        "belongs in the manifest.",
+    ("tools/ci/tart-provision.sh", "github.com/actions/runner"):
+        "CI-host provisioning: GitHub Actions runner for a CI VM image, not "
+        "redistributed; fetched by an unpinned version variable without a "
+        "digest. Follow-up: pin by digest or record a manifest row.",
+    ("tools/ci/tart-provision.sh", "sh.rustup.rs"):
+        "CI-host provisioning: rustup installer piped to sh in a CI VM image, "
+        "not redistributed. Follow-up: same decision as the other CI-host tools.",
+    ("tools/install-shipyard.sh", "github.com/danielraffel/shipyard"):
+        "Developer tooling pinned in tools/shipyard.toml and governed by the "
+        "dependency-update workflow, not redistributed. Follow-up: give it a "
+        "manifest row so its pin is audited with the rest.",
+}
+
+
+def split_known_unlisted(
+    uncovered: list[DeclaredDep],
+    known: dict[tuple[str, str], str] | None = None,
+) -> tuple[list[DeclaredDep], list[DeclaredDep], list[tuple[str, str]]]:
+    """Split uncovered fetches into (unknown, known, stale known entries)."""
+    known = KNOWN_UNLISTED_FETCHES if known is None else known
+    unknown: list[DeclaredDep] = []
+    tolerated: list[DeclaredDep] = []
+    used: set[tuple[str, str]] = set()
+    for dep in uncovered:
+        identity = _url_identity(dep.url) if dep.url else ""
+        key = next((k for k in known if k[0] == dep.source and identity
+                    and (identity == k[1] or identity.startswith(k[1] + "/"))), None)
+        if key is None:
+            unknown.append(dep)
+        else:
+            tolerated.append(dep)
+            used.add(key)
+    stale = sorted(set(known) - used)
+    return unknown, tolerated, stale
 
 
 def _scan_excluded(rel: str) -> bool:
@@ -628,7 +684,7 @@ def _scan_excluded(rel: str) -> bool:
 def _is_scanned_file(rel: str) -> bool:
     name = rel.rsplit("/", 1)[-1]
     return (name == "CMakeLists.txt" or name.endswith(".cmake")
-            or bool(_SETUP_SCRIPT_RE.search(rel)))
+            or bool(_SETUP_SCRIPT_RE.search(rel)) or bool(_TOOLS_SHELL_RE.search(rel)))
 
 
 def fetch_scan_files(root: Path) -> list[Path]:
@@ -646,7 +702,7 @@ def fetch_scan_files(root: Path) -> list[Path]:
     )
     toplevel = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, encoding="utf-8", check=False,
     )
     in_repo = (listed.returncode == 0 and toplevel.returncode == 0
                and Path(toplevel.stdout.strip()).resolve() == root.resolve())
@@ -754,6 +810,18 @@ def parse_cmake_fetches(path: Path, root: Path) -> list[DeclaredDep]:
         if not tokens:
             continue
         line = text.count("\n", 0, match.start()) + 1
+        if command == "execute_process":
+            # A download run as a process at configure time.
+            words = [w.strip('"') for w in tokens]
+            if not any(os.path.basename(w) in {"curl", "wget"} for w in words):
+                continue
+            for url in _URL_RE.findall(_resolve_vars(body, variables)):
+                if "$" in _url_identity(url):
+                    continue
+                out.append(DeclaredDep(name=_name_from_url(url), source=rel,
+                                       location=f"execute_process download line {line}",
+                                       url=url))
+            continue
         if command == "file":
             if tokens[0].upper() != "DOWNLOAD" or len(tokens) < 2:
                 continue
@@ -774,8 +842,11 @@ def parse_cmake_fetches(path: Path, root: Path) -> list[DeclaredDep]:
     return out
 
 
-def parse_setup_script_fetches(path: Path, root: Path) -> list[DeclaredDep]:
-    """Downloads in a setup/bootstrap script with a statically known URL."""
+def parse_setup_script_fetches(path: Path, root: Path,
+                               fetch_re: re.Pattern = _SHELL_FETCH_RE) -> list[DeclaredDep]:
+    """Downloads in a shell script with a statically known URL. Setup and
+    bootstrap scripts count every fetch verb; other tools/ scripts pass
+    ``_SHELL_HTTP_FETCH_RE`` and count curl/wget only."""
     raw = path.read_text(encoding="utf-8", errors="replace")
     joined = re.sub(r"\\\r?\n", " ", raw)  # backslash continuations
     variables: dict[str, str] = {}
@@ -786,7 +857,9 @@ def parse_setup_script_fetches(path: Path, root: Path) -> list[DeclaredDep]:
     rel = path.relative_to(root).as_posix()
     out: list[DeclaredDep] = []
     for number, line in enumerate(joined.splitlines(), start=1):
-        if line.lstrip().startswith("#") or not _SHELL_FETCH_RE.search(line):
+        if line.lstrip().startswith("#") or _ECHO_LINE_RE.match(line):
+            continue  # a comment or a printed usage hint is not a fetch
+        if not fetch_re.search(line):
             continue
         for url in _URL_RE.findall(_resolve_vars(line, variables)):
             if "$" in _url_identity(url) or "example.invalid" in url:
@@ -801,8 +874,11 @@ def scan_fetch_declarations(root: Path | None = None) -> list[DeclaredDep]:
     root = root or ROOT
     out: list[DeclaredDep] = []
     for path in fetch_scan_files(root):
-        if _SETUP_SCRIPT_RE.search(path.relative_to(root).as_posix()):
+        rel = path.relative_to(root).as_posix()
+        if _SETUP_SCRIPT_RE.search(rel):
             out.extend(parse_setup_script_fetches(path, root))
+        elif _TOOLS_SHELL_RE.search(rel):
+            out.extend(parse_setup_script_fetches(path, root, _SHELL_HTTP_FETCH_RE))
         else:
             out.extend(parse_cmake_fetches(path, root))
     return out
@@ -897,6 +973,7 @@ def find_uncovered_declarations(
         ] + list(dep.get("upstream_urls", ())):
             if url and "://" in url:
                 covered_urls.add(_url_identity(url))
+    covered_urls.update(SELF_URL_IDENTITIES)
     # Multi-alias external dirs (e.g. external/fonts → Inter + JetBrains Mono)
     # collapse into the aliases of their represented entries.
     for dir_name, aliases in EXTERNAL_ALIASES.items():
@@ -1238,7 +1315,8 @@ def main() -> int:
     # (pip requirements, mkdocs.yml, FetchContent_Declare, external/, or a
     # recognized redistributed bootstrap binary) must be in manifest.json.
     declared = collect_declared()
-    uncovered = find_uncovered_declarations(manifest, declared)
+    uncovered, known_unlisted, stale_known = split_known_unlisted(
+        find_uncovered_declarations(manifest, declared))
 
     truncated_notices: list[tuple[str, list[str]]] = []
     license_problems: list[tuple[str, list[str]]] = []
@@ -1294,6 +1372,14 @@ def main() -> int:
                 where = f" ({dep.location})" if dep.location else ""
                 url = f" <{dep.url}>" if dep.url else ""
                 print(f"  - {dep.name} from {dep.source}{where}{url}")
+        if known_unlisted:
+            print("\nKnown unlisted fetches (follow-ups; see KNOWN_UNLISTED_FETCHES):")
+            for dep in known_unlisted:
+                print(f"  - {dep.source} ({dep.location}) <{dep.url}>")
+        if stale_known:
+            print("\nKNOWN_UNLISTED_FETCHES entries whose fetch no longer exists:")
+            for source, identity in stale_known:
+                print(f"  - {source}: {identity}")
         if args.verify_licenses:
             if license_problems:
                 print("\nLicense text contradicts the manifest:")
@@ -1329,7 +1415,7 @@ def main() -> int:
         print("\nOffline-fetch trees required but absent: " + ", ".join(offline_unverified))
         return 1
     if args.strict and (
-        missing_deps or missing_notice or missing_licensing or uncovered
+        missing_deps or missing_notice or missing_licensing or uncovered or stale_known
         or license_problems or truncated_notices or offline_problems
     ):
         return 1
