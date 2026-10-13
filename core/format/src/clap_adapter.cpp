@@ -7,8 +7,6 @@
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
-#if !defined(PULP_WASM)
-#endif
 #include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/quirk_apply.hpp>
