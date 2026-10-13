@@ -9,6 +9,25 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09580"></a>
+## [0.958.0] - 2026-10-13
+
+- release/version bump ([#10188](https://github.com/Generous-Corp/pulp/pull/10188))
+- fix/release failure watchdog ([#10173](https://github.com/Generous-Corp/pulp/pull/10173))
+- fix/vellum negative tests git lock ([#10174](https://github.com/Generous-Corp/pulp/pull/10174))
+- codex/forge effect extraction 20261012 ([#10155](https://github.com/Generous-Corp/pulp/pull/10155))
+- release/version bump ([#10185](https://github.com/Generous-Corp/pulp/pull/10185))
+- fix/aax runtime lifecycle 20261009 ([#10183](https://github.com/Generous-Corp/pulp/pull/10183))
+- codex/r14 m1 review ([#10144](https://github.com/Generous-Corp/pulp/pull/10144))
+
+<a id="v09570"></a>
+## [0.957.0] - 2026-10-13
+
+- codex/wgpu portability analysis 20261012 ([#10176](https://github.com/Generous-Corp/pulp/pull/10176))
+- release/version bump ([#10177](https://github.com/Generous-Corp/pulp/pull/10177))
+- codex/materialized hot region test split 20261012 ([#10164](https://github.com/Generous-Corp/pulp/pull/10164))
+- fix/skia win arm64 repin ([#10170](https://github.com/Generous-Corp/pulp/pull/10170))
+
 <a id="v09560"></a>
 ## [0.956.0] - 2026-10-13
 
@@ -10542,6 +10561,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.958.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.958.0
+[0.957.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.957.0
 [0.956.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.956.0
 [0.955.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.955.1
 [0.955.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.955.0
