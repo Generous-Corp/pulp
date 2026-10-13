@@ -306,7 +306,36 @@ TEST_CASE("design-import benchmark JSON report includes complete phase fields",
     REQUIRE(json.find("\"rss_peak_bytes\": 3000") != std::string::npos);
     REQUIRE(json.find("\"paint_commands_last\": 88") != std::string::npos);
     REQUIRE(json.find("\"js_evaluations_total\": 14") != std::string::npos);
+    REQUIRE(json.find("\"counters\": {") != std::string::npos);
+    REQUIRE(json.find("\"bridge_calls\": 0") != std::string::npos);
+    REQUIRE(json.find("\"layout_passes\": 0") != std::string::npos);
+    REQUIRE(json.find("\"paint_calls\": 0") != std::string::npos);
     REQUIRE(json.find("\"interaction_model\": \"value drag plus overflow-panel scroll offset;") != std::string::npos);
+}
+
+TEST_CASE("design-import benchmark counters reject a planted missing-counter report",
+          "[design-import][benchmark][negative-control]") {
+    Config config;
+    StartupMetrics startup;
+    PhaseMetrics idle;
+    PhaseMetrics interactive;
+    const auto report = make_json(config, startup, idle, interactive);
+    REQUIRE(report.find("\"counters\": {") != std::string::npos);
+
+    auto planted = report;
+    const auto begin = planted.find("    \"counters\": {");
+    REQUIRE(begin != std::string::npos);
+    const auto end_marker = "    }\n";
+    const auto end = planted.find(end_marker, begin);
+    REQUIRE(end != std::string::npos);
+    planted.erase(begin, end + std::string(end_marker).size() - begin);
+    CHECK(planted.find("\"counters\": {") != std::string::npos);
+    const auto second = planted.find("    \"counters\": {");
+    REQUIRE(second != std::string::npos);
+    const auto second_end = planted.find(end_marker, second);
+    REQUIRE(second_end != std::string::npos);
+    planted.erase(second, second_end + std::string(end_marker).size() - second);
+    CHECK(planted.find("\"counters\": {") == std::string::npos);
 }
 
 TEST_CASE("design-import benchmark write_file handles stdout sentinel and nested paths",
