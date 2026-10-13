@@ -66,6 +66,21 @@ managed copy is used only after explicit installation. Normal agent operation
 does not require a special enable switch: the user-visible `pulp tool install`
 command is the opt-in action.
 
+### Design-import inspiration and clean-room boundary
+
+Pulp's design-import refinements were informed by public architectural ideas
+studied in [Octane](https://github.com/Generous-Corp/octane) and
+[Inferno](https://github.com/infernojs/inferno), especially keyed identity,
+explicit child-shape lanes, and fail-closed update planning. Pulp's
+implementation is an independent reimplementation over its existing DesignIR,
+Skia, and Dawn paths. Pulp does not vendor, link, execute, or redistribute
+Octane or Inferno code, packages, runtime dependencies, or generated artifacts.
+
+The evidence and transfer decisions are recorded in
+[`docs/reports/2026-10-04-design-import-framework-comparison.md`](../reports/2026-10-04-design-import-framework-comparison.md)
+These references are architectural background only and do not add a
+redistributed dependency or a new licensing obligation.
+
 ### Design Formats and Test Fixtures
 
 Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) format as a first-class import source (`pulp import-design --from designmd`). The format specification is reimplemented in C++ (no upstream code vendored); the YAML frontmatter is parsed with `yaml-cpp` (see Core Dependencies above). One example file from upstream `examples/paws-and-paths/` is redistributed verbatim as the test fixture at `test/fixtures/imports/designmd/alpha/DESIGN.md`.
