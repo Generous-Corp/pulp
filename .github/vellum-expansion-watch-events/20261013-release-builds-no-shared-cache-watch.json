@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261013-release-builds-no-shared-cache-watch",
+  "created_at": "2026-10-13T17:13:22Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Release, signing and deploy workflows (release-cli build-cli, sign-and-release, wclap-cloudflare) now compile with ccache disabled and re-fetch every FetchContent dependency into a fresh job-local root instead of reading host caches that PR jobs can write; choc, the Skia wasm slice and wasi-sdk land in RUNNER_TEMP, choc at an exact commit and Skia verified against its manifest digest, and format-baseline-diff pins AudioUnitSDK-1.3.0. This changes only which build inputs these jobs trust, not what they build or package; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/test_release_cache_isolation.py",
+    "python3 tools/scripts/test_release_workflow_test_step.py",
+    "python3 tools/scripts/test_webclap_relevance.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
