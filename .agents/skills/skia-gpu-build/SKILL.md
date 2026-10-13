@@ -204,6 +204,15 @@ shipping artifact.
   `GetProcAddress` lookup would mean patching Dawn. It surfaces only in targets that pull in the D3D12 device path (GPU compute,
   headless surface, renderer3d), which is why other Windows targets link fine.
 
+- **Windows ARM64 Skia archives are nested one level deeper than x64.** The
+  `skia-builder` Windows ARM64 release stores `skia.lib` and
+  `dawn_combined.lib` under `build/win-gpu/lib/Release/arm64/`, while x64 keeps
+  them directly under `Release/`. `FindSkia.cmake` selects that directory from
+  the target architecture and deliberately leaves `SKIA_FOUND=FALSE` when the
+  ARM64 slice is absent; otherwise an ARM64 configure can silently become a
+  CPU-only build. The regression is
+  `tools/scripts/test_findskia_windows_arm64_slice.py`.
+
 - **A failed `fetch_skia_for_release.py` is not always a bad pin.** The pinned
   archive is a few hundred megabytes from a release CDN, fetched fresh on lanes
   with no warm cache, so a single transient 5xx or dropped connection there fails

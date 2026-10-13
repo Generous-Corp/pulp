@@ -188,6 +188,25 @@ endif()
 set(SKIA_LIBRARY "${_skia_lib_dir}/${_skia_lib_name}")
 set(DAWN_LIBRARY "${_skia_lib_dir}/${_dawn_lib_name}")
 
+# The Windows ARM64 skia-builder slice keeps its static archives under an
+# `arm64/` directory below the shared Release directory. x64 remains flat.
+# Select the slice from the target architecture before probing the archives so
+# an ARM64 configure cannot silently fall back to a missing flat path and then
+# build a CPU-only consumer.
+if(WIN32 AND (CMAKE_SYSTEM_PROCESSOR MATCHES "^[Aa][Rr][Mm]64$"
+        OR CMAKE_GENERATOR_PLATFORM MATCHES "^[Aa][Rr][Mm]64$"))
+    if(EXISTS "${_skia_lib_dir}/arm64/${_skia_lib_name}")
+        set(_skia_lib_dir "${_skia_lib_dir}/arm64")
+        set(SKIA_LIBRARY "${_skia_lib_dir}/${_skia_lib_name}")
+        set(DAWN_LIBRARY "${_skia_lib_dir}/${_dawn_lib_name}")
+        message(STATUS "Skia: selecting Windows ARM64 archive slice")
+    else()
+        set(SKIA_LIBRARY "SKIA_LIBRARY-NOTFOUND")
+        set(DAWN_LIBRARY "DAWN_LIBRARY-NOTFOUND")
+        message(STATUS "Skia: Windows ARM64 archive slice is missing")
+    endif()
+endif()
+
 if(NOT EXISTS "${SKIA_LIBRARY}")
     set(SKIA_LIBRARY "SKIA_LIBRARY-NOTFOUND")
 endif()
