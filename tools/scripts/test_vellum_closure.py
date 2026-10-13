@@ -671,10 +671,15 @@ def gpu_configure(gpu=True, skia=True, text_shaping=True, system="Darwin", proce
 
 
 def canvas_manifest(configure):
+    from vellum_closure import fetchcontent_pins
     defines = (["PULP_HAS_SKIA=1"] if configure["identity"]["skia"] else []) + \
               (["PULP_HAS_TEXT_SHAPING=1"] if configure["identity"]["text_shaping"] else [])
+    skia = fetchcontent_pins(REPO_ROOT)["skia"]
+    links = [{"dependency": "skia", "source": skia["source"], "pin": skia["pin"], "asset_sha256": skia["assets"][0]}] \
+        if configure["identity"]["skia"] else []
     return {"source_root": str(REPO_ROOT), "build_dir": None, "files": [], "external_inputs": [],
-            "targets": [{"name": "pulp-canvas", "link_targets": ["pulp-platform"], "compile_definitions": defines}],
+            "targets": [{"name": "pulp-canvas", "link_targets": ["pulp-platform"], "compile_definitions": defines,
+                         "external_link_inputs": links}],
             "transitive_link_targets": ["pulp-platform"], "generated_inputs": [], "configure": configure}
 
 
@@ -1024,6 +1029,25 @@ class ClosureMentionTests(unittest.TestCase):
                      "ci/x.yaml", "ci/x.yml", "core/x/CMakeLists.txt"):
             self.assertTrue(self.scan("uses pulp::audio here\n", name), name)
 
+    def test_every_source_suffix_main_scanned_is_still_scanned(self):
+        for name in ("core/x/a.hh", "core/x/a.hxx", "core/x/a.hpp.in", "tools/x.py", "ui/x.mjs"):
+            self.assertEqual(self.scan("uses pulp::audio here\n", name),
+                             [f"mirror-product-symbol mention {name}:1: pulp::audio"], name)
+
+    def test_an_unclassified_suffix_is_refused(self):
+        found = self.scan("int x;\n", "core/x/a.weird")
+        self.assertEqual(found, ["mirror-unclassified-suffix core/x/a.weird: .weird is neither scanned nor declared binary"])
+        self.assertEqual(self.scan("binary", "external/fonts/Inter.ttf"), [])
+
+    def test_a_scanned_file_that_is_not_utf8_is_still_scanned(self):
+        from vellum_closure import closure_mention_violations
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "core/x/a.cpp"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"\xff\xfe // pulp::audio\n")
+            self.assertEqual(closure_mention_violations({"source_root": td, "files": ["core/x/a.cpp"]}),
+                             ["mirror-product-symbol mention core/x/a.cpp:1: pulp::audio"])
+
     def test_pulp_kept_includes_and_files_are_refused(self):
         self.assertTrue(any(v.startswith("mirror-pulp-kept-include") for v in
                             self.scan('#include "pulp/view/widgets/eq_curve_view.hpp"\n', "core/view/src/x.cpp")))
@@ -1038,7 +1062,9 @@ class ClosureMentionTests(unittest.TestCase):
         self.assertEqual(set(table["content_patterns"]), {"mirror-product-include", "mirror-product-symbol",
                                                           "mirror-audio-framework-link", "mirror-pulp-kept-include"})
         self.assertEqual(set(table["path_patterns"]), {"mirror-pulp-kept-file"})
-        self.assertTrue({"", ".md", ".ps1", ".sh", ".ts", ".tsx", ".yaml", ".yml", ".txt"} <= set(table["suffixes"]))
+        self.assertTrue({"", ".md", ".ps1", ".sh", ".ts", ".tsx", ".yaml", ".yml", ".txt",
+                         ".hh", ".hxx", ".in", ".py", ".mjs"} <= set(table["suffixes"]))
+        self.assertEqual(set(table["suffixes"]) & set(table["binary_suffixes"]), set())
         loaded = vellum_closure.mirror_edge_table()
         self.assertEqual({k: v.pattern for k, v in loaded["content"].items()}, table["content_patterns"])
         self.assertFalse(hasattr(vellum_closure, "CLOSURE_MENTION_PATTERNS"))
@@ -1111,6 +1137,25 @@ class SkiaLinkInputTests(unittest.TestCase):
         self.assertTrue(external_link_violations({"targets": [{**canvas, "external_link_inputs": []}]}))
         self.assertTrue(external_link_violations({"targets": [{**canvas, "external_link_inputs": [{**link, "pin": "0" * 40}]}]}))
         self.assertTrue(external_link_violations({"targets": [{"name": "pulp-runtime", "compile_definitions": [], "external_link_inputs": [link]}]}))
+
+    def test_a_missing_link_key_does_not_skip_the_check(self):
+        from vellum_closure import external_link_violations
+        canvas = {"name": "pulp-canvas", "compile_definitions": ["PULP_HAS_SKIA=1"]}
+        self.assertEqual(external_link_violations({"targets": [canvas]}),
+                         ["pulp-canvas compiles against Skia but records no Skia link input"])
+        self.assertEqual(external_link_violations({"targets": [{"name": "pulp-runtime", "compile_definitions": []}]}), [])
+
+    def test_non_skia_and_repeated_link_inputs_are_refused(self):
+        from vellum_closure import external_link_violations, fetchcontent_pins
+        skia = fetchcontent_pins(REPO_ROOT)["skia"]
+        link = {"dependency": "skia", "source": skia["source"], "pin": skia["pin"], "asset_sha256": skia["assets"][0]}
+        canvas = {"name": "pulp-canvas", "compile_definitions": ["PULP_HAS_SKIA=1"]}
+        other = {**link, "dependency": "dawn"}
+        self.assertIn("pulp-canvas records a link input other than Skia",
+                      external_link_violations({"targets": [{**canvas, "external_link_inputs": [link, other]}]}))
+        self.assertIn("pulp-canvas records more than one Skia link input",
+                      external_link_violations({"targets": [{**canvas, "external_link_inputs": [link, link]}]}))
+        self.assertTrue(external_link_violations({"targets": [{**canvas, "external_link_inputs": {"skia": link}}]}))
 
 
 class AllowlistGateTests(unittest.TestCase):

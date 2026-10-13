@@ -1028,11 +1028,17 @@ def external_link_violations(data: dict) -> list[str]:
     skia = pins.get("skia") or {}
     violations: list[str] = []
     for target in data.get("targets", []):
-        if "external_link_inputs" not in target:
+        # An absent key is an empty list: omitting it must not skip the check.
+        links = target.get("external_link_inputs", [])
+        if not isinstance(links, list):
+            violations.append(f"{target.get('name')} external_link_inputs is not a list")
             continue
-        links = target["external_link_inputs"]
         uses_skia = "PULP_HAS_SKIA=1" in set(target.get("compile_definitions", []))
         skia_links = [link for link in links if isinstance(link, dict) and link.get("dependency") == "skia"]
+        if len(skia_links) != len(links):
+            violations.append(f"{target.get('name')} records a link input other than Skia")
+        if len(skia_links) > 1:
+            violations.append(f"{target.get('name')} records more than one Skia link input")
         if uses_skia and not skia_links:
             violations.append(f"{target.get('name')} compiles against Skia but records no Skia link input")
         if skia_links and not uses_skia:
@@ -1082,13 +1088,17 @@ def mirror_edge_table(path: Path = MIRROR_EDGE_TABLE) -> dict:
 
     ``content_patterns`` apply to the text of every file whose suffix is in
     ``suffixes`` (``""`` is a file with no suffix), comments included;
+    ``binary_suffixes`` name the only suffixes a closure may carry unscanned;
     ``path_patterns`` apply to a file's path relative to the mirror root.
     """
     table = json.loads(path.read_text(encoding="utf-8"))
     if table.get("schema") != "pulp.vellum.mirror-edge-patterns.v1":
         raise SystemExit(f"invalid mirror edge table schema: {path}")
+    if set(table["suffixes"]) & set(table["binary_suffixes"]):
+        raise SystemExit(f"mirror edge table lists a suffix as both scanned and binary: {path}")
     return {
         "suffixes": set(table["suffixes"]),
+        "binary_suffixes": set(table["binary_suffixes"]),
         "content": {name: re.compile(pattern) for name, pattern in table["content_patterns"].items()},
         "path": {name: re.compile(pattern) for name, pattern in table["path_patterns"].items()},
     }
@@ -1098,8 +1108,10 @@ def closure_mention_violations(data: dict, table: dict | None = None) -> list[st
     """Every file a closure carries is free of forbidden mirror edges.
 
     A file is checked by path (a Pulp-kept file may not be mirrored at all)
-    and, when its suffix is scanned, by content, comments included. The
-    patterns are the ones Vellum's extraction scan applies to the mirror.
+    and by content, comments included. A file whose suffix is neither
+    scanned nor declared binary is refused, so a new kind of file cannot
+    ride along unchecked. The patterns are the ones Vellum's extraction scan
+    applies to the mirror.
     """
     source = data.get("source_root")
     if not source:
@@ -1112,11 +1124,16 @@ def closure_mention_violations(data: dict, table: dict | None = None) -> list[st
             if pattern.search(rel):
                 violations.append(f"{name} {rel}")
         path = root / rel
-        if path.suffix.lower() not in table["suffixes"]:
+        suffix = path.suffix.lower()
+        if suffix in table["binary_suffixes"]:
+            continue
+        if suffix not in table["suffixes"]:
+            violations.append(f"mirror-unclassified-suffix {rel}: {suffix} is neither scanned nor declared binary")
             continue
         try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            violations.append(f"mirror-unreadable-file {rel}: {exc}")
             continue
         for name, pattern in table["content"].items():
             for match in pattern.finditer(text):

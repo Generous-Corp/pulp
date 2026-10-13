@@ -1,6 +1,6 @@
 {
   "schema": "pulp.vellum.mirror-edge-patterns.v1",
-  "description": "Forbidden mirror edges, shared by Pulp's closure gate and Vellum's extraction scan. Paths are relative to the mirror root.",
+  "description": "Forbidden mirror edges, shared by Pulp's closure gate and Vellum's extraction scan. Paths are relative to the mirror root. Every carried file's suffix is either scanned (suffixes) or declared binary (binary_suffixes).",
   "suffixes": [
     "",
     ".c",
@@ -9,21 +9,33 @@
     ".cpp",
     ".cxx",
     ".h",
+    ".hh",
     ".hpp",
+    ".hxx",
+    ".in",
     ".inl",
     ".ipp",
     ".js",
     ".json",
     ".m",
     ".md",
+    ".mjs",
     ".mm",
     ".ps1",
+    ".py",
     ".sh",
     ".ts",
     ".tsx",
     ".txt",
     ".yaml",
     ".yml"
+  ],
+  "binary_suffixes": [
+    ".otf",
+    ".png",
+    ".ttf",
+    ".woff",
+    ".woff2"
   ],
   "content_patterns": {
     "mirror-product-include": "#\\s*(?:include|import)\\s*[<\\\"](?:pulp/(?:audio|signal|midi|music|format|host|gpu_audio|content)/|pluginterfaces/|public\\.sdk/|clap/|lv2/|AudioUnitSDK/|oboe/|AudioToolbox/|AudioUnit/|CoreAudio/|CoreAudioKit/|CoreMIDI/|AVFAudio/)",
