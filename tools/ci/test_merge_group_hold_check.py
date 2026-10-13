@@ -12,7 +12,8 @@ What must hold:
 - on Shipyard's captured answer for #10114 (fixtures/merge_group_hold/, the
   same file Shipyard's scorecard tests read) the verdict is HOLD;
 - anything unreadable passes with a warning, never fails the queue;
-- build.yml runs it in the merge_group preamble with a token.
+- build.yml runs the protected base branch's copy in the merge_group
+  preamble, handing the token to that copy only.
 
 Run:
     python3 tools/ci/test_merge_group_hold_check.py
@@ -166,11 +167,15 @@ class MergeGroupHoldCheck(unittest.TestCase):
         classify = workflow[workflow.index("\n  classify:\n"):workflow.index("\n  protected-receipt-reuse:\n")]
         step = classify[classify.index("- name: Refuse a merge group whose pull request is held"):
                         classify.index("- id: classify")]
-        self.assertIn("python3 tools/ci/merge_group_hold_check.py", step)
         self.assertIn("if: ${{ github.event_name == 'merge_group' }}", step)
-        self.assertIn("GH_TOKEN: ${{ github.token }}", step)
         self.assertIn("github.event.merge_group.base_sha", step)
         self.assertNotIn("continue-on-error", step)
+        # The token reaches only the protected base branch's copy of the
+        # check, never the queue entry's checkout.
+        self.assertIn('git show "FETCH_HEAD:tools/ci/merge_group_hold_check.py"', step)
+        self.assertIn('GH_TOKEN="${{ github.token }}" python3 "$hold_check"', step)
+        self.assertNotIn("GH_TOKEN: ${{ github.token }}", step)
+        self.assertNotIn("python3 tools/ci/merge_group_hold_check.py", step)
 
 
 if __name__ == "__main__":

@@ -888,17 +888,30 @@ jobs:
       # Backstop for a HOLD that did not take its head out of the queue: fail
       # the group, before any VM, when a queued pull request's latest trusted
       # verdict on the head it lands is HOLD. A failed classify makes the
-      # macos-merge-group bootstrap fail `macos` closed. Unreadable input
+      # macos-merge-group bootstrap fail `macos` closed. The token reaches only
+      # the protected base branch's copy of the check, never code from a queue
+      # entry; a base without the check yet checks nothing. Unreadable input
       # passes with a warning; Shipyard's verdict-hold hook is the primary.
       - name: Refuse a merge group whose pull request is held
         if: ${{ github.event_name == 'merge_group' }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        run: >-
-          python3 tools/ci/merge_group_hold_check.py --repo "$GITHUB_REPOSITORY"
-          --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+        run: |
+          set -euo pipefail
+          hold_check=$(mktemp)
+          trap 'rm -f "$hold_check"' EXIT
+          if [[ "$MERGE_GROUP_BASE_REF" == refs/heads/* ]] \
+              && git fetch --no-tags --depth=1 origin "$MERGE_GROUP_BASE_REF" \
+              && git show "FETCH_HEAD:tools/ci/merge_group_hold_check.py" \
+                >"$hold_check" 2>/dev/null; then
+            GH_TOKEN="${{ github.token }}" python3 "$hold_check" \
+              --repo "$GITHUB_REPOSITORY" \
+              --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+          else
+            echo "::notice title=merge-group HOLD check::$MERGE_GROUP_BASE_REF has no HOLD check yet; not checked"
+          fi
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for

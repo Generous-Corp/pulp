@@ -3368,8 +3368,9 @@ both wait on classify; a failing in-job classifier fails closed.
 `tools/ci/test_macos_merge_group_bootstrap.py` runs the script against stub
 results.
 
-On a merge group, the classify job first runs
-`tools/ci/merge_group_hold_check.py`. It reads the group's pull requests from
+On a merge group, the classify job first runs the protected base branch's copy
+of `tools/ci/merge_group_hold_check.py` (fetched from
+`merge_group.base_ref`; the token never reaches a queue entry's code). It reads the group's pull requests from
 the first-parent chain of queue merge commits (each lands its second parent),
 and fails when one's latest trusted verdict on that head is
 `verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. "Trusted" means the
