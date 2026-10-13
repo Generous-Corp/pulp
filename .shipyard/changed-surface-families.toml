@@ -7027,6 +7027,9 @@ tests = [
   "pulp-materialized-runtime-conformance",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
+  "pulp.vellum-closure-edge-negative",
+  "pulp.vellum-closure-external-input-negative",
+  "pulp.vellum-closure-gate-negative",
   "pulp_bundle_threejs_for_jsc_smoke",
 ]
 build_targets = ["pulp-cli"]

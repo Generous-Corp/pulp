@@ -2,6 +2,11 @@
 
 Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) validation lanes before merging.
 
+On a pull-request head, the affected-test step runs tests selected from the
+diff and from binaries rebuilt by that head's governed build. A marker written
+just before the build bounds the warm Ninja log; older branch outputs do not
+add tests. Docs-only diffs add no rebuilt-binary tests.
+
 The macOS retarget lane keeps the untrusted-runner boundary for contributor
 code and invokes `tools/ci/governed-build.sh` inside that namespace for its
 build. This preserves the lane's runner isolation while applying the same

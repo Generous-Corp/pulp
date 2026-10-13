@@ -2080,7 +2080,9 @@ jobs:
           else
             # Bound rebuilt-test selection to this PR head's build. Warm
             # self-hosted Ninja logs retain previous branches' outputs.
-            date +%s.%N > "$PULP_BUILD_DIR/.pulp-build-start"
+            if [ -n "${PULP_BUILD_DIR:-}" ]; then
+              date +%s.%N > "$PULP_BUILD_DIR/.pulp-build-start"
+            fi
             tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
           fi
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
