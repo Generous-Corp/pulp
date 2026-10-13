@@ -610,6 +610,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
     set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")
     add_test(NAME pulp.vellum-closure-external-input-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
@@ -618,6 +619,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
     set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")
     add_test(NAME pulp.vellum-closure-edge-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
@@ -626,6 +628,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allow pulp::view-audio")
     set_tests_properties(pulp.vellum-closure-edge-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")
     add_test(NAME pulp.vellum-closure-policy-selftest
         COMMAND "${Python3_EXECUTABLE}"
