@@ -127,9 +127,14 @@ class Label : public View, public SelectableText {
         // readout that flipped between the captured basis and native placement
         // would visibly jump every time its value passed through the design's
         // original copy.
+        // The boxes themselves stay: the responsive reflow still reads their
+        // line count and wrap intent, and the line-break accounting still
+        // reports a reflow rather than an uncached shape. Only the basis is
+        // retired, so no later value can resurrect it.
         bool captured_basis_dropped = false;
-        if (!cached_line_boxes_.empty() && apply_text_transform(text_) != cached_line_basis_text_) {
-            cached_line_boxes_.clear();
+        if (!cached_line_boxes_.empty() && !cached_line_basis_retired_ &&
+            apply_text_transform(text_) != cached_line_basis_text_) {
+            cached_line_basis_retired_ = true;
             shaped_cache_valid_ = false;
             captured_basis_dropped = true;
         }
@@ -909,6 +914,9 @@ private:
     float cached_line_basis_width_ = 0.0f;
     std::string cached_line_basis_face_;
     std::string cached_line_basis_text_;
+    // Set once the label's copy diverged from the captured basis; the boxes
+    // are kept for reflow but never honored verbatim again.
+    bool cached_line_basis_retired_ = false;
     std::string cached_line_basis_font_variant_;
     float cached_line_basis_font_size_ = 0.0f;
     float cached_line_basis_letter_spacing_ = 0.0f;

@@ -792,7 +792,8 @@ TEST_CASE("Label keeps painting natively once its copy diverged from the capture
     REQUIRE(captured_fills.size() == 1);
 
     label.set_text("12 BANDS");
-    CHECK(label.cached_line_boxes().empty());
+    // The boxes stay for the responsive reflow; only the basis is retired.
+    CHECK_FALSE(label.cached_line_boxes().empty());
     RecordingCanvas native;
     label.paint(native);
     const auto native_fills = commands_of(native, DrawCommand::Type::fill_text);
