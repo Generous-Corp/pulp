@@ -107,7 +107,7 @@ def _run_isolation(body: str, extra_env: dict[str, str]) -> tuple[int, str, Path
         "GITHUB_RUN_ATTEMPT": "2",
         **extra_env,
     }
-    proc = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True)
+    proc = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True, encoding="utf-8")
     return proc.returncode, proc.stdout + proc.stderr, runner_temp, github_env
 
 
@@ -183,7 +183,7 @@ class SigningJobsReadNoSharedCache(unittest.TestCase):
                     env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tmp),
                          "RUNNER_TEMP": str(runner_temp), "GITHUB_ENV": str(github_env),
                          "GITHUB_RUN_ID": "1234", "GITHUB_RUN_ATTEMPT": "2"},
-                    capture_output=True, text=True)
+                    capture_output=True, text=True, encoding="utf-8")
                 self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
                 self.assertFalse(planted.exists(), "a planted source survived the step")
 
