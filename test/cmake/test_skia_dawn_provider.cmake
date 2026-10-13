@@ -17,10 +17,11 @@ links wgpu beside Skia's Dawn in `existing`, and a NOTFOUND-sentinel compare
 treats `stale` as a present Dawn. Every row also checks PULP_SKIA_DAWN_ARCHIVE
 names the archive exactly when the decision is TRUE.
 
-The static half scans every CMake file in the source tree (outside FindSkia,
-which resolves DAWN_LIBRARY) for a condition built on DAWN_LIBRARY: EXISTS on
-it, a STREQUAL compare of it, or its bare truthiness. The known consumers must
-also name the shared decision, so the scan is shown to be reading them.
+The static half scans every CMake file under the source root (outside
+external/, planning/, build trees and FindSkia, which resolves DAWN_LIBRARY)
+for a condition built on DAWN_LIBRARY: EXISTS on it, a STREQUAL compare of it,
+or its bare truthiness. It must reach a minimum number of files, and the known
+consumers must name the shared decision, so the scan is shown to be reading.
 ]]
 
 cmake_minimum_required(VERSION 3.24)
@@ -159,19 +160,29 @@ foreach(_fine
     endif()
 endforeach()
 
-set(_scan_files "${PULP_SOURCE_DIR}/CMakeLists.txt")
-foreach(_root core apple inspect ship tools test examples templates)
-    if(IS_DIRECTORY "${PULP_SOURCE_DIR}/${_root}")
-        file(GLOB_RECURSE _found LIST_DIRECTORIES false
-            "${PULP_SOURCE_DIR}/${_root}/CMakeLists.txt"
-            "${PULP_SOURCE_DIR}/${_root}/*.cmake"
-            "${PULP_SOURCE_DIR}/${_root}/*.cmake.in")
-        list(APPEND _scan_files ${_found})
-    endif()
+# Every CMake file under the source root, minus third-party, private and
+# generated trees (external/, planning/, build dirs, FetchContent sources,
+# node_modules) and nested checkouts (worktrees, .claude).
+file(GLOB_RECURSE _scan_rel LIST_DIRECTORIES false RELATIVE "${PULP_SOURCE_DIR}"
+    "${PULP_SOURCE_DIR}/CMakeLists.txt"
+    "${PULP_SOURCE_DIR}/*.cmake"
+    "${PULP_SOURCE_DIR}/*.cmake.in")
+list(FILTER _scan_rel EXCLUDE REGEX "^(external|planning)/")
+list(FILTER _scan_rel EXCLUDE REGEX "(^|/)(build[^/]*|_deps|node_modules|\\.claude|\\.git|worktrees|agent-worktrees)/")
+list(FILTER _scan_rel EXCLUDE REGEX "^tools/cmake/FindSkia\\.cmake$")
+list(FILTER _scan_rel EXCLUDE REGEX "^test/cmake/test_skia_dawn_provider\\.cmake$")
+set(_scan_files "")
+foreach(_rel IN LISTS _scan_rel)
+    list(APPEND _scan_files "${PULP_SOURCE_DIR}/${_rel}")
 endforeach()
-list(FILTER _scan_files EXCLUDE REGEX "/(build[^/]*|_deps|node_modules)/")
-list(FILTER _scan_files EXCLUDE REGEX "/tools/cmake/FindSkia\\.cmake$")
-list(FILTER _scan_files EXCLUDE REGEX "/test/cmake/test_skia_dawn_provider\\.cmake$")
+# The tree holds well over this many CMake files; fewer means the glob or an
+# exclude went blind, and an empty scan must never read as a clean one.
+set(_scan_floor 400)
+list(LENGTH _scan_files _scan_count)
+if(_scan_count LESS _scan_floor)
+    list(APPEND _failures
+        "tree scan reached ${_scan_count} CMake files, expected at least ${_scan_floor}")
+endif()
 set(_scanned 0)
 foreach(_file IN LISTS _scan_files)
     _cmake_code(_code "${_file}")

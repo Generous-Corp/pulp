@@ -535,7 +535,7 @@ add_test(NAME cmake-pulp-skia-dawn-provider
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_skia_dawn_provider.cmake)
 set_tests_properties(cmake-pulp-skia-dawn-provider PROPERTIES
     LABELS "cmake;render;link-contract"
-    TIMEOUT 60)
+    TIMEOUT 120)
 if(APPLE)
     add_test(NAME cmake-pulp-macos-archive-floor
         COMMAND ${CMAKE_COMMAND}
