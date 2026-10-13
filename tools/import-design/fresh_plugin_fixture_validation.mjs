@@ -50,6 +50,9 @@ async function main() {
   const negativeSelector = arg("--negative-selector", 'id="toggle"');
   const negativeId = arg("--negative-id", "toggle-mutated");
   const browser = browserPath();
+  const interactionPlan = JSON.parse(await readFile(interactions, "utf8"));
+  const interactionCount = Array.isArray(interactionPlan.actions) ? interactionPlan.actions.length : 0;
+  assert(interactionCount > 0, "interaction plan must contain a non-empty actions array");
   const source = await readFile(fixture);
   const sourceSha = sha256(source);
   const tmp = await mkdtemp(path.join(os.tmpdir(), "pulp-fresh-plugin-"));
@@ -59,7 +62,7 @@ async function main() {
     const browserPng = await readFile(path.join(browserOut, "browser.png"));
     const interactionReport = await readFile(path.join(browserOut, "interaction-report.json"));
     const envelope = JSON.parse(await readFile(path.join(browserOut, "capture.json"), "utf8"));
-    assert.equal(envelope.provenance.interactions.action_count, 2);
+    assert.equal(envelope.provenance.interactions.action_count, interactionCount);
     assert.equal(envelope.provenance.source.sha256, sourceSha);
 
     const nativeOut = path.join(tmp, "native.js");
@@ -88,7 +91,7 @@ async function main() {
         screenshot_sha256: sha256(browserPng),
         screenshot_bytes: browserPng.length,
         interaction_report_sha256: sha256(interactionReport),
-        interaction_count: 2,
+        interaction_count: interactionCount,
       },
       native: { backend: "skia", artifact_sha256: sha256(nativeBytes), artifact_bytes: nativeBytes.length },
       planted_negative: { mutated_id: negativeId, browser_capture_rejected: true },
