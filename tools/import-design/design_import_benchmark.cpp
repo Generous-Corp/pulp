@@ -188,7 +188,9 @@ public:
     virtual View& root() = 0;
     virtual void step(int frame) = 0;
     virtual int js_evaluation_count() const = 0;
-    virtual std::uint64_t bridge_call_count() const { return 0; }
+    virtual std::uint64_t bridge_call_count() const {
+        return 0;
+    }
 };
 
 void place_absolute(IRNode& node, float left, float top, float width, float height) {
@@ -587,7 +589,9 @@ public:
     }
 
     int js_evaluation_count() const override { return js_evaluations_; }
-    std::uint64_t bridge_call_count() const override { return bridge_->bridge_call_count(); }
+    std::uint64_t bridge_call_count() const override {
+        return bridge_->bridge_call_count();
+    }
 
 private:
     static std::string live_fixture_script() {
@@ -752,8 +756,7 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     metrics.bridge_calls = fixture.bridge_call_count() - bridge_calls_start;
     metrics.layout_passes = View::layout_pass_count() - layout_passes_start;
     metrics.invalidation_requests = View::damage_request_count() - invalidation_start;
-    metrics.unmarked_paint_mutations =
-        View::unmarked_paint_mutation_count() - unmarked_start;
+    metrics.unmarked_paint_mutations = View::unmarked_paint_mutation_count() - unmarked_start;
     metrics.js_evaluations = fixture.js_evaluation_count();
     return metrics;
 }

@@ -209,8 +209,10 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
         root.interactive_elements.push_back(readout);
         const auto slots = classify_design_slots(root);
         REQUIRE(slots.size() == 2);
-        CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, "geometry.route", "geometry.gain"});
-        CHECK(slots[1] == DesignSlot{DesignSlotKind::dynamic_text, "geometry.route", "geometry.display"});
+        CHECK(slots[0] ==
+              DesignSlot{DesignSlotKind::dynamic_scalar, "geometry.route", "geometry.gain"});
+        CHECK(slots[1] ==
+              DesignSlot{DesignSlotKind::dynamic_text, "geometry.route", "geometry.display"});
     }
 
     SECTION("module and parameter binding fallback remains typed") {
