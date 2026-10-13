@@ -606,8 +606,9 @@ SCAN_EXCLUDED_PREFIXES: dict[str, str] = {
 SCAN_EXCLUDED_FRAGMENTS: tuple[str, ...] = ("/tests/fixtures/", "/test/fixtures/")
 
 _SETUP_SCRIPT_RE = re.compile(r"(^|/)(setup|bootstrap)[^/]*\.(sh|ps1)$")
-# Any other shell script under tools/ is read for curl/wget downloads only.
-_TOOLS_SHELL_RE = re.compile(r"^tools/.*\.sh$")
+# Any other shell script under tools/ or hooks/ is read for curl/wget
+# downloads only.
+_TOOLS_SHELL_RE = re.compile(r"^(tools|hooks)/.*\.sh$")
 _CMAKE_FETCH_CALL_RE = re.compile(
     r"\b(FetchContent_Declare|ExternalProject_Add|execute_process|file)\s*\(", re.IGNORECASE)
 _CMAKE_SET_RE = re.compile(
@@ -620,7 +621,6 @@ _SHELL_FETCH_RE = re.compile(
     r"(^|[\s\"'(|;&])(curl|wget|git\s+clone|Invoke-WebRequest|iwr|Start-BitsTransfer"
     r"|ensure_shared_[a-z_]*source[a-z_]*)\b")
 _SHELL_HTTP_FETCH_RE = re.compile(r"(^|[\s\"'(|;&])(curl|wget)\b")
-_ECHO_LINE_RE = re.compile(r"^\s*(echo|printf)\b")
 
 # Pulp's own repository and site: a script that downloads Pulp (an installer,
 # a release helper) is not fetching a third-party dependency.
@@ -630,23 +630,29 @@ SELF_URL_IDENTITIES: tuple[str, ...] = (
     "www.generouscorp.com/pulp",
 )
 
-# Fetches the scan reports that have no manifest row yet, each with the reason
-# it is tolerated and what would resolve it. They are printed on every run and
+# Fetches the scan reports that have no manifest row yet, keyed by the script
+# and the exact URL the scan resolves (so another asset from the same upstream
+# in the same script is still reported), each with the reason it is tolerated
+# and what would resolve it. They are printed on every run and
 # do not fail --strict; an entry whose fetch no longer exists is an error, so
 # the list cannot quietly outlive what it excuses.
 KNOWN_UNLISTED_FETCHES: dict[tuple[str, str], str] = {
-    ("tools/ci/tart-provision.sh", "github.com/homebrew/install"):
+    ("tools/ci/tart-provision.sh",
+     "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"):
         "CI-host provisioning: installs Homebrew into a CI VM image; nothing it "
         "fetches is redistributed. Follow-up: decide whether CI-host tooling "
         "belongs in the manifest.",
-    ("tools/ci/tart-provision.sh", "github.com/actions/runner"):
+    ("tools/ci/tart-provision.sh",
+     "https://github.com/actions/runner/releases/download/v2.334.0/"
+     "actions-runner-osx-arm64-2.334.0.tar.gz"):
         "CI-host provisioning: GitHub Actions runner for a CI VM image, not "
         "redistributed; fetched by an unpinned version variable without a "
         "digest. Follow-up: pin by digest or record a manifest row.",
-    ("tools/ci/tart-provision.sh", "sh.rustup.rs"):
+    ("tools/ci/tart-provision.sh", "https://sh.rustup.rs"):
         "CI-host provisioning: rustup installer piped to sh in a CI VM image, "
         "not redistributed. Follow-up: same decision as the other CI-host tools.",
-    ("tools/install-shipyard.sh", "github.com/danielraffel/shipyard"):
+    ("tools/install-shipyard.sh",
+     "https://raw.githubusercontent.com/danielraffel/Shipyard/refs/tags/${VERSION}/install.sh"):
         "Developer tooling pinned in tools/shipyard.toml and governed by the "
         "dependency-update workflow, not redistributed. Follow-up: give it a "
         "manifest row so its pin is audited with the rest.",
@@ -663,9 +669,9 @@ def split_known_unlisted(
     tolerated: list[DeclaredDep] = []
     used: set[tuple[str, str]] = set()
     for dep in uncovered:
-        identity = _url_identity(dep.url) if dep.url else ""
-        key = next((k for k in known if k[0] == dep.source and identity
-                    and (identity == k[1] or identity.startswith(k[1] + "/"))), None)
+        key = (dep.source, dep.url)
+        if key not in known:
+            key = None
         if key is None:
             unknown.append(dep)
         else:
@@ -754,8 +760,11 @@ def _call_body(text: str, open_paren: int) -> str:
 
 def _resolve_vars(value: str, variables: dict[str, str]) -> str:
     for _ in range(5):
+        # ${VAR:-default}: the assigned value when known, else the default.
+        updated = re.sub(r"\$\{([A-Za-z0-9_]+):-([^}]*)\}",
+                         lambda m: variables.get(m.group(1), m.group(2)), value)
         updated = re.sub(r"\$\{([A-Za-z0-9_]+)\}",
-                         lambda m: variables.get(m.group(1), m.group(0)), value)
+                         lambda m: variables.get(m.group(1), m.group(0)), updated)
         updated = re.sub(r"\$([A-Za-z_][A-Za-z0-9_]*)",
                          lambda m: variables.get(m.group(1), m.group(0)), updated)
         if updated == value:
@@ -764,30 +773,47 @@ def _resolve_vars(value: str, variables: dict[str, str]) -> str:
     return value
 
 
-def _url_identity(url: str) -> str:
-    """Comparable identity for an upstream URL: ``github.com/<owner>/<repo>``
-    for GitHub (any of its hosts), otherwise host plus path."""
+def _url_key(url: str) -> tuple[str, ...]:
+    """Comparable identity for an upstream URL, as path components:
+    ``("github.com", owner, repo)`` for GitHub (any of its hosts), otherwise the
+    host followed by the path segments. Matching compares whole components,
+    so ``github.com/acme/tool`` never matches ``github.com/acme/toolkit``."""
     url = url.strip().strip("\"'").rstrip("/")
     url = re.sub(r"^git@([^:]+):", r"https://\1/", url)
     url = re.sub(r"^[a-z+]+://", "", url, flags=re.IGNORECASE)
     url = url.split("?", 1)[0].split("#", 1)[0]
     host, _, path = url.partition("/")
     host = host.lower().split("@")[-1]
-    parts = [p for p in path.split("/") if p]
+    parts = [p.lower() for p in path.split("/") if p]
+    if parts:
+        parts[-1] = parts[-1].removesuffix(".git")
     if host in {"github.com", "www.github.com", "codeload.github.com",
                 "raw.githubusercontent.com", "objects.githubusercontent.com"}:
         if len(parts) >= 2:
-            return f"github.com/{parts[0].lower()}/{parts[1].lower().removesuffix('.git')}"
+            return ("github.com", parts[0], parts[1].removesuffix(".git"))
     if host == "api.github.com" and len(parts) >= 3 and parts[0] == "repos":
-        return f"github.com/{parts[1].lower()}/{parts[2].lower().removesuffix('.git')}"
-    return "/".join([host] + parts).lower().removesuffix(".git")
+        return ("github.com", parts[1], parts[2].removesuffix(".git"))
+    return (host, *parts)
+
+
+def _key_from_identity(identity: str) -> tuple[str, ...]:
+    """A ``host/owner/repo`` constant written as text, as a component key."""
+    return tuple(identity.lower().split("/"))
+
+
+def _key_within(key: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
+    return key[:len(prefix)] == prefix
+
+
+def _url_is_static(url: str) -> bool:
+    return not any("$" in part for part in _url_key(url))
 
 
 def _name_from_url(url: str) -> str:
-    identity = _url_identity(url)
-    if identity.startswith("github.com/"):
-        return identity.split("/")[2]
-    return identity.rsplit("/", 1)[-1] or identity
+    key = _url_key(url)
+    if key[0] == "github.com" and len(key) == 3:
+        return key[2]
+    return key[-1]
 
 
 def _first_url(text: str) -> str:
@@ -816,7 +842,7 @@ def parse_cmake_fetches(path: Path, root: Path) -> list[DeclaredDep]:
             if not any(os.path.basename(w) in {"curl", "wget"} for w in words):
                 continue
             for url in _URL_RE.findall(_resolve_vars(body, variables)):
-                if "$" in _url_identity(url):
+                if not _url_is_static(url):
                     continue
                 out.append(DeclaredDep(name=_name_from_url(url), source=rel,
                                        location=f"execute_process download line {line}",
@@ -826,14 +852,14 @@ def parse_cmake_fetches(path: Path, root: Path) -> list[DeclaredDep]:
             if tokens[0].upper() != "DOWNLOAD" or len(tokens) < 2:
                 continue
             url = _resolve_vars(tokens[1].strip('"'), variables)
-            if not _URL_RE.match(url) or "$" in _url_identity(url):
+            if not _URL_RE.match(url) or not _url_is_static(url):
                 continue  # URL not statically known; nothing to attribute
             out.append(DeclaredDep(name=_name_from_url(url), source=rel,
                                    location=f"file(DOWNLOAD) line {line}", url=url))
             continue
         name = tokens[0].strip('"')
         url = _resolve_vars(_first_url(body), variables) if _first_url(body) else ""
-        if url and "$" in _url_identity(url):
+        if url and not _url_is_static(url):
             url = ""
         label = "FetchContent_Declare" if command == "fetchcontent_declare" else "ExternalProject_Add"
         if "SOURCE_DIR" in tokens and not url:
@@ -857,12 +883,10 @@ def parse_setup_script_fetches(path: Path, root: Path,
     rel = path.relative_to(root).as_posix()
     out: list[DeclaredDep] = []
     for number, line in enumerate(joined.splitlines(), start=1):
-        if line.lstrip().startswith("#") or _ECHO_LINE_RE.match(line):
-            continue  # a comment or a printed usage hint is not a fetch
-        if not fetch_re.search(line):
+        if line.lstrip().startswith("#") or not fetch_re.search(line):
             continue
         for url in _URL_RE.findall(_resolve_vars(line, variables)):
-            if "$" in _url_identity(url) or "example.invalid" in url:
+            if not _url_is_static(url) or "example.invalid" in url:
                 continue
             out.append(DeclaredDep(name=_name_from_url(url), source=rel,
                                    location=f"download line {number}", url=url))
@@ -965,15 +989,15 @@ def find_uncovered_declarations(
 ) -> list[DeclaredDep]:
     """Return declared deps that aren't backed by a manifest entry."""
     covered: set[str] = set()
-    covered_urls: set[str] = set()
+    covered_urls: set[tuple[str, ...]] = set()
     for dep in manifest:
         covered |= manifest_alias_set(dep)
         for url in [dep.get("repository", "")] + [
             art.get("url", "") for art in dep.get("artifacts", [])
         ] + list(dep.get("upstream_urls", ())):
             if url and "://" in url:
-                covered_urls.add(_url_identity(url))
-    covered_urls.update(SELF_URL_IDENTITIES)
+                covered_urls.add(_url_key(url))
+    covered_urls.update(_key_from_identity(identity) for identity in SELF_URL_IDENTITIES)
     # Multi-alias external dirs (e.g. external/fonts → Inter + JetBrains Mono)
     # collapse into the aliases of their represented entries.
     for dir_name, aliases in EXTERNAL_ALIASES.items():
@@ -996,9 +1020,8 @@ def find_uncovered_declarations(
             # upstream: a FetchContent name is a local label (choc_wclap,
             # moonbase_cpp), and a different repo under a familiar name is a
             # different dependency.
-            identity = _url_identity(dep.url)
-            if any(identity == known or identity.startswith(known + "/")
-                   for known in covered_urls):
+            key = _url_key(dep.url)
+            if any(_key_within(key, known) for known in covered_urls):
                 continue
             uncovered.append(dep)
             continue

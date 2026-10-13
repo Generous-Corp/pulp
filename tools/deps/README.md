@@ -18,7 +18,7 @@ setup/bootstrap script in the checkout (tracked plus untracked-but-not-ignored
 files, so build directories never count) for `FetchContent_Declare`,
 `ExternalProject_Add`, `file(DOWNLOAD)`, `execute_process(COMMAND curl|wget
 ...)`, and curl/wget/git-clone/setup-helper downloads, plus curl/wget in every
-other shell script under `tools/`. Downloads of Pulp itself
+other shell script under `tools/` or `hooks/`. Downloads of Pulp itself
 (`SELF_URL_IDENTITIES`) are not dependencies. Fetches that have no row yet and
 are tolerated for a stated reason live in `KNOWN_UNLISTED_FETCHES`: they print
 on every run as follow-ups, and an entry whose fetch disappears fails

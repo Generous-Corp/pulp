@@ -163,7 +163,7 @@ the last two also need `--verify-licenses` (both are in `gates.sh`):
    in any CMake file or setup/bootstrap script: `FetchContent_Declare`,
    `ExternalProject_Add`, `file(DOWNLOAD)`, `execute_process` running
    curl/wget, curl/wget/git-clone and the `ensure_shared_*` helpers; and
-   curl/wget in any shell script under `tools/`) must be represented in
+   curl/wget in any shell script under `tools/` or `hooks/`) must be represented in
    `manifest.json`, or be listed with a reason in `KNOWN_UNLISTED_FETCHES`
    (printed every run as a follow-up; a stale entry fails `--strict`). A fetch
    that names its upstream is matched by URL (`repository` or an `artifacts`
