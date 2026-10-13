@@ -23,6 +23,7 @@ def main() -> int:
     cmake_text = cmake.read_text(encoding="utf-8")
     require(cmake_text, "PULP_GPU_AUDIO_VELLUM_D15_PREFIX", cmake)
     require(cmake_text, "find_package(Vellum 0.1.7 EXACT CONFIG QUIET", cmake)
+    require(cmake_text, "Vellum 0.1.7 is retired; D15 awaits Vellum 0.1.8", cmake)
     require(cmake_text, "Vellum::Gpu", cmake)
     require(cmake_text, "Vellum::DawnHeaders", cmake)
     require(cmake_text, "PULP_GPU_AUDIO_HAS_VELLUM_D15=1", cmake)

@@ -924,7 +924,7 @@
       "version": "release-3.2.12",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/libsdl-org/SDL.git",
-      "upstream": { "kind": "git-tag", "ref": "release-3.2.12" },
+      "upstream": { "kind": "git-tag", "ref": "release-3.2.12", "commit": "5ac37a8ffcf89da390404c1016833d56e2d67ae4" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -938,7 +938,7 @@
       "version": "v3.0.0",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/Tehreer/SheenBidi.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.0.0" },
+      "upstream": { "kind": "git-tag", "ref": "v3.0.0", "commit": "cfe430e7375a7845b679adae9d51dac6deaa8858" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Unicode Bidirectional Algorithm engine backing core/canvas::BidiAnalyzer. Pulp-owned bidi pass for Arabic / Hebrew / mixed-direction text that does not depend on system ICU; consumed by TextRunPlanner as the canonical fallback for iOS / Android / headless / minimal-toolchain hosts. Item 6.8 of the 2026-05-24 macOS plugin-authoring plan.",
@@ -1021,7 +1021,7 @@
           },
           "win-arm64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-arm64-gpu-release.zip",
-            "sha256": "8e6fb2012ad026d8261eadfe3a9f638a165e82cefa2b896f8596dbaece9c6bde"
+            "sha256": "18e57481e84992fecccbc4ac0f8f283c4a68d90d7978a61ce2e68f21dd34a9c7"
           },
           "win-x64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-x64-gpu-release.zip",
@@ -1315,7 +1315,7 @@
       "version": "0.8.0",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/jbeder/yaml-cpp.git",
-      "upstream": { "kind": "git-tag", "ref": "0.8.0" },
+      "upstream": { "kind": "git-tag", "ref": "0.8.0", "commit": "f7320141120f720aecc4c32be25586e7da9eb978" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -1329,7 +1329,7 @@
       "version": "v3.2.1",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/facebook/yoga.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.2.1" },
+      "upstream": { "kind": "git-tag", "ref": "v3.2.1", "commit": "042f5013152eb81c1552dec945b88f7b95ca350f" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [

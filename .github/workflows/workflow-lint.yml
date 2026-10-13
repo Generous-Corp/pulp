@@ -46,6 +46,9 @@ on:
       - 'tools/scripts/test_windows_cli_compile_workflow.py'
       - 'tools/scripts/release_reconcile.py'
       - 'tools/scripts/test_release_reconcile.py'
+      - 'tools/scripts/release_failure_diagnosis.py'
+      - 'tools/scripts/test_release_failure_diagnosis.py'
+      - 'tools/scripts/fixtures/release_failure/**'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
       - 'tools/scripts/release_build_matrix.py'
@@ -167,6 +170,9 @@ on:
       - 'tools/scripts/test_windows_cli_compile_workflow.py'
       - 'tools/scripts/release_reconcile.py'
       - 'tools/scripts/test_release_reconcile.py'
+      - 'tools/scripts/release_failure_diagnosis.py'
+      - 'tools/scripts/test_release_failure_diagnosis.py'
+      - 'tools/scripts/fixtures/release_failure/**'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
       - 'tools/scripts/release_build_matrix.py'
@@ -417,6 +423,9 @@ jobs:
           python3 tools/scripts/test_windows_cli_release_precheck.py
           python3 tools/scripts/test_windows_cli_compile_workflow.py
           python3 tools/scripts/test_release_reconcile.py
+          # The incident's root-cause diagnosis, replayed over the recorded
+          # v0.955.1 pinned-asset digest-mismatch outage (v0.951.0 negative).
+          python3 tools/scripts/test_release_failure_diagnosis.py
           # auto-release.yml's bypass-trailer guard, run as the step body
           # extracted from the workflow: a quoted trailer must not
           # withhold a release tag, a declared one must.

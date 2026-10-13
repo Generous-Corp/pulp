@@ -4,8 +4,8 @@ add_library(pulp::gpu-audio ALIAS pulp-gpu-audio)
 target_include_directories(pulp-gpu-audio
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        # The public GPU-node headers (gpu_convolver.hpp, gpu_stft.hpp, ...)
-        # render::GpuCompute, so they #include <pulp/render/gpu_compute.hpp>. Those
+        # Some public GPU-toolkit headers (gpu_stft.hpp, spectral_stack.hpp, ...)
+        # use render::GpuCompute, so they #include <pulp/render/gpu_compute.hpp>. Those
         # render headers are Dawn-free (opaque void* device/queue handles), so
         # exposing render's include dir keeps the gpu_audio public headers
         # self-contained even in a GPU-off configure where pulp::gpu-device isn't
@@ -87,6 +87,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
     # absent or incomplete prefix leaves the established P1 provider (and the
     # CPU fallback available to callers) unchanged.
     if(PULP_GPU_AUDIO_VELLUM_D15_PREFIX)
+        message(WARNING
+            "Pulp GPU-audio: requested Vellum 0.1.7 is retired; D15 awaits Vellum 0.1.8")
         find_package(Vellum 0.1.7 EXACT CONFIG QUIET
             PATHS "${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}"
             PATH_SUFFIXES lib/cmake/Vellum

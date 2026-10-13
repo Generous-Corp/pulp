@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://www.generouscorp.com/pulp/schemas/pulp-materialized-browser-document-v1-v2.json",
+  "title": "Pulp materialized browser document",
+  "description": "The executable Chromium document and native replay metadata. Version 1 preserves positional binding arrays; version 2 adds the deterministic id-addressed bindings_by_id projection. State-atlas metadata may omit html and assets while retaining the same versioned contract.",
+  "$comment": "Unknown top-level fields are rejected. Additive fields require an explicit schema version and migration decision. A v2 document is a lossless projection of v1 arrays plus bindings_by_id.",
+  "type": "object",
+  "required": ["schema", "version"],
+  "properties": {
+    "schema": {
+      "enum": [
+        "pulp-materialized-browser-document-v1",
+        "pulp-materialized-browser-document-v2"
+      ]
+    },
+    "version": {"enum": [1, 2]},
+    "html": {"type": "string"},
+    "mime_type": {"type": "string", "minLength": 1, "maxLength": 256},
+    "assets": {
+      "type": "array", "maxItems": 256,
+      "items": {"$ref": "#/$defs/asset"}
+    },
+    "font_bindings": {
+      "type": "array", "maxItems": 256,
+      "items": {"$ref": "#/$defs/fontBinding"}
+    },
+    "surface_style": {"$ref": "#/$defs/surfaceStyle"},
+    "presentation_time_ms": {"type": "number", "minimum": 0},
+    "coordinate_space": {"$ref": "#/$defs/coordinateSpace"},
+    "semantic_bindings": {"$ref": "#/$defs/bindingList"},
+    "layout_bindings": {"$ref": "#/$defs/bindingList"},
+    "text_bindings": {"$ref": "#/$defs/bindingList"},
+    "paint_bindings": {"$ref": "#/$defs/bindingList"},
+    "canvas_bindings": {"$ref": "#/$defs/bindingList"},
+    "pseudo_bindings": {
+      "type": "array", "maxItems": 256,
+      "items": {"$ref": "#/$defs/pseudoBinding"}
+    },
+    "pseudo_diagnostics": {
+      "type": "array", "maxItems": 1024,
+      "items": {
+        "type": "object", "required": ["node", "reason"],
+        "properties": {
+          "node": {"type": "integer", "minimum": 0},
+          "reason": {"type": "string", "minLength": 1, "maxLength": 128}
+        },
+        "additionalProperties": false
+      }
+    },
+    "behavior_canvas_anchors": {
+      "type": "array", "maxItems": 16384,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "bindings_by_id": {"$ref": "#/$defs/bindingsById"},
+    "runtime_canonicalization": {
+      "type": "object",
+      "required": ["jsx_scripts_compiled", "browser_vendor_assets_removed"],
+      "properties": {
+        "jsx_scripts_compiled": {"type": "integer", "minimum": 0},
+        "browser_vendor_assets_removed": {"type": "integer", "minimum": 0},
+        "duplicate_asset_ids_preserved": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "schema": {"const": "pulp-materialized-browser-document-v1"},
+        "version": {"const": 1}
+      },
+      "not": {"required": ["bindings_by_id"]}
+    },
+    {
+      "required": ["bindings_by_id"],
+      "properties": {
+        "schema": {"const": "pulp-materialized-browser-document-v2"},
+        "version": {"const": 2}
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string", "pattern": "^[a-z][a-z0-9._:-]{1,127}$"
+    },
+    "path": {
+      "type": "array", "minItems": 0, "maxItems": 256,
+      "items": {
+        "type": "object", "required": ["tag", "index"],
+        "properties": {
+          "tag": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "index": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": false
+      }
+    },
+    "box": {
+      "type": "object", "required": ["left", "top", "width", "height"],
+      "properties": {
+        "left": {"type": "number"},
+        "top": {"type": "number"},
+        "width": {"type": "number", "minimum": 0},
+        "height": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "binding": {
+      "type": "object",
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "index": {"type": "integer", "minimum": 0},
+        "anchor": {"type": "string", "minLength": 1, "maxLength": 512},
+        "path": {"$ref": "#/$defs/path"},
+        "bounds": {"$ref": "#/$defs/box"},
+        "box": {"$ref": "#/$defs/box"},
+        "data_pulp_id": {"type": "string"},
+        "pulp_id": {"type": "string"},
+        "stable_id": {"type": "string"},
+        "source": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "bindingList": {
+      "type": "array", "maxItems": 16384,
+      "items": {"$ref": "#/$defs/binding"}
+    },
+    "bindingsMap": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z][a-z0-9._:-]{1,127}$": {"$ref": "#/$defs/binding"}
+      },
+      "additionalProperties": false
+    },
+    "bindingsById": {
+      "type": "object",
+      "required": ["semantic", "layout", "text", "paint", "canvas"],
+      "properties": {
+        "semantic": {"$ref": "#/$defs/bindingsMap"},
+        "layout": {"$ref": "#/$defs/bindingsMap"},
+        "text": {"$ref": "#/$defs/bindingsMap"},
+        "paint": {"$ref": "#/$defs/bindingsMap"},
+        "canvas": {"$ref": "#/$defs/bindingsMap"}
+      },
+      "additionalProperties": false
+    },
+    "pseudoBinding": {
+      "type": "object",
+      "required": [
+        "index", "anchor", "path", "pseudo", "box", "opacity",
+        "z_index", "pointer_events"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "index": {"type": "integer", "minimum": 0},
+        "anchor": {"enum": ["#root", "body"]},
+        "path": {"$ref": "#/$defs/path"},
+        "pseudo": {"enum": ["before", "after"]},
+        "box": {"$ref": "#/$defs/box"},
+        "background_gradient": {"type": "string", "maxLength": 4096},
+        "background_color": {"type": "string", "maxLength": 256},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "z_index": {"type": "integer"},
+        "pointer_events": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "asset": {
+      "type": "object",
+      "required": ["id", "mime_type", "byte_length", "data_base64", "sha256"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "mime_type": {"type": "string", "minLength": 1, "maxLength": 256},
+        "byte_length": {"type": "integer", "minimum": 0},
+        "data_base64": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "vendor_kind": {"type": "string", "maxLength": 64}
+      },
+      "additionalProperties": false
+    },
+    "fontBinding": {
+      "type": "object",
+      "required": [
+        "family", "asset_id", "weight", "style", "unicode_range",
+        "runtime_family"
+      ],
+      "properties": {
+        "family": {"type": "string", "minLength": 1},
+        "asset_id": {"type": "string", "minLength": 1},
+        "weight": {"type": "string", "minLength": 1},
+        "style": {"type": "string", "minLength": 1},
+        "unicode_range": {"type": "string"},
+        "runtime_family": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "surfaceStyle": {
+      "type": "object", "required": ["background_color"],
+      "properties": {"background_color": {"type": "string", "maxLength": 128}},
+      "additionalProperties": false
+    },
+    "coordinateSpace": {
+      "type": "object",
+      "required": ["schema", "authored_box", "captured_transform"],
+      "properties": {
+        "schema": {"const": "pulp-materialized-coordinate-space-v1"},
+        "authored_box": {
+          "type": "object", "required": ["width", "height"],
+          "properties": {
+            "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 65536},
+            "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 65536}
+          },
+          "additionalProperties": false
+        },
+        "captured_transform": {
+          "type": "object", "required": ["a", "b", "c", "d", "e", "f"],
+          "properties": {
+            "a": {"type": "number"}, "b": {"type": "number"},
+            "c": {"type": "number"}, "d": {"type": "number"},
+            "e": {"type": "number"}, "f": {"type": "number"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

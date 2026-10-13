@@ -46,14 +46,15 @@ function(pulp_add_reload_logic target)
         # Linux: a MODULE may keep undefined symbols, resolved from the host at
         # dlopen — no extra flag needed.
         #
-        # The thin logic MUST compile at the SAME C++ standard as the SDK/host or
-        # the build-fingerprint's cpp_standard field mismatches and the reload is
-        # rejected. A static logic links pulp::format (PUBLIC cxx_std_23) and so
-        # inherits C++23; a THIN logic links no archives, so it would fall back to
-        # the root CMAKE_CXX_STANDARD (20) → host=202302 vs logic=202002 mismatch.
-        # Match pulp-format, which sets CXX_STANDARD 23 authoritatively
-        # (core/format/CMakeLists.txt). Keep in lockstep if the SDK bumps standard.
-        set_target_properties(${target} PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+        # The thin logic MUST compile at the SAME C++ standard as the host that
+        # loads it, or the build fingerprint's cpp_standard field mismatches and
+        # the reload is rejected. A host gets its standard from the consumer
+        # project plus whatever the format target's usage requirements raise it
+        # to (C++23 where the AudioUnitSDK headers need <expected>, the project
+        # default elsewhere). A thin logic links no archives, so it takes those
+        # same compile features explicitly instead of a hard-coded standard.
+        target_compile_features(${target} PRIVATE
+            $<TARGET_PROPERTY:${_RL_FORMAT_TARGET},INTERFACE_COMPILE_FEATURES>)
     else()
         if(RL_RESOLVE_FROM_HOST AND WIN32)
             message(WARNING "pulp_add_reload_logic(${target}): RESOLVE_FROM_HOST is "

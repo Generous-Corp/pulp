@@ -1020,10 +1020,18 @@ IRNode view_to_ir_node(const View& view, std::string_view path) {
         node.attributes["value"] = std::to_string(fader->value());
         if (fader->orientation() == Fader::Orientation::horizontal)
             node.attributes["orientation"] = "horizontal";
-    } else if (const auto* meter = dynamic_cast<const Meter*>(&view)) {
+    } else if (dynamic_cast<const LevelDisplay*>(&view) != nullptr) {
         node.type = "meter";
         node.audio_widget = AudioWidgetType::meter;
-        node.attributes["value"] = std::to_string(meter->display_rms());
+        std::vector<InspectorFacts::Fact> facts;
+        if (const auto* facts_view = dynamic_cast<const InspectorFacts*>(&view))
+            facts_view->inspector_facts(facts);
+        for (const auto& fact : facts) {
+            if (fact.key == "rms") {
+                node.attributes["value"] = std::to_string(fact.value);
+                break;
+            }
+        }
     } else if (const auto* xy = dynamic_cast<const XYPad*>(&view)) {
         node.type = "xy_pad";
         node.audio_widget = AudioWidgetType::xy_pad;

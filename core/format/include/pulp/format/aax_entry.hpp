@@ -1,6 +1,8 @@
 #pragma once
 
+#if !defined(PULP_AAX_HEADLESS)
 #include <pulp/format/aax_effect_gui.hpp>
+#endif
 #include <pulp/format/aax_model.hpp>
 
 #include <AAX.h>
@@ -46,6 +48,15 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
 
 } // namespace pulp::format::aax
 
+#if defined(PULP_AAX_HEADLESS)
+#define PULP_AAX_GUI_THUNK
+#else
+#define PULP_AAX_GUI_THUNK                                                                         \
+    [[maybe_unused]] static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_gui() {              \
+        return ::pulp::format::aax::create_effect_gui();                                           \
+    }
+#endif
+
 #if !defined(PULP_MANUFACTURER_CODE)
 #error "PULP_MANUFACTURER_CODE must be defined for AAX targets"
 #endif
@@ -61,29 +72,22 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
 // Shared body of the AAX entry-point macros. @p gui_proc_expr is the value
 // handed to `get_effect_descriptions` as the editor's create proc: null selects
 // the host's parameter strip, a proc address selects the custom editor.
-#define PULP_AAX_PLUGIN_IMPL_(factory_fn, gui_proc_expr) \
-    namespace { \
-        static const ::pulp::format::aax::EntryConfig& _pulp_aax_entry_config() { \
-            static const auto config = ::pulp::format::aax::make_entry_config( \
-                factory_fn, \
-                PULP_MANUFACTURER_CODE, \
-                PULP_AAX_PRODUCT_CODE, \
-                PULP_AAX_NATIVE_CODE); \
-            return config; \
-        } \
-        static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_parameters() { \
-            return ::pulp::format::aax::create_effect_parameters(_pulp_aax_entry_config()); \
-        } \
-        [[maybe_unused]] static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_gui() { \
-            return ::pulp::format::aax::create_effect_gui(); \
-        } \
-    } \
-    AAX_Result GetEffectDescriptions(AAX_ICollection* outCollection) { \
-        return ::pulp::format::aax::get_effect_descriptions( \
-            outCollection, \
-            _pulp_aax_entry_config(), \
-            &_pulp_aax_create_effect_parameters, \
-            (gui_proc_expr)); \
+#define PULP_AAX_PLUGIN_IMPL_(factory_fn, gui_proc_expr)                                           \
+    namespace {                                                                                    \
+    static const ::pulp::format::aax::EntryConfig& _pulp_aax_entry_config() {                      \
+        static const auto config = ::pulp::format::aax::make_entry_config(                         \
+            factory_fn, PULP_MANUFACTURER_CODE, PULP_AAX_PRODUCT_CODE, PULP_AAX_NATIVE_CODE);      \
+        return config;                                                                             \
+    }                                                                                              \
+    static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_parameters() {                        \
+        return ::pulp::format::aax::create_effect_parameters(_pulp_aax_entry_config());            \
+    }                                                                                              \
+    PULP_AAX_GUI_THUNK                                                                             \
+    }                                                                                              \
+    AAX_Result GetEffectDescriptions(AAX_ICollection* outCollection) {                             \
+        return ::pulp::format::aax::get_effect_descriptions(                                       \
+            outCollection, _pulp_aax_entry_config(), &_pulp_aax_create_effect_parameters,          \
+            (gui_proc_expr));                                                                      \
     }
 
 // Generate an AAX entry point that leaves the host on its auto-generated

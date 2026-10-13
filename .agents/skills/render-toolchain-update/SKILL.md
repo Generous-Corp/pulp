@@ -217,6 +217,12 @@ retain those fields in the PR/landing evidence.
 
 ## Common traps
 
+- The Vellum closure gate identifies Skia inputs by `determinism.skia_commit` and
+  by the asset digest sealed in the cache generation's
+  `.skia-generation-manifest.json`, which must be one of
+  `determinism.release_assets[*].sha256`. Each closure file must match its digest
+  in that receipt. Bump `skia_commit` and the asset digests together, or every
+  Skia row in the closure goes unresolved.
 - `release-path-pr-gate.yml`'s darwin runner resolver runs
   `resolve_release_runners.py --apply-class-label pulp-release-pr-gate` after a
   sparse checkout. With `PULP_RELEASE_CLASS_TOKENS` unset the selector is
@@ -354,3 +360,16 @@ release assets in the manifest. Select the slice from the CMake target
 architecture (`CMAKE_GENERATOR_PLATFORM` when cross-compiling) and mirror each
 release digest in `external/skia-build/VERSION.md` before running the fetcher and
 host validation gates.
+
+Even a published fork release can be clobbered. A Windows backfill lane
+re-uploads its slice with `gh release upload --clobber` under the existing
+`chrome/mNNN` tag, so the pinned digest stops matching and the release CLI
+fails at `fetch_skia_for_release.py <platform>` with `sha256 mismatch`. Because
+the release job needs the whole build matrix, every platform's release stops
+publishing. Do not bump the digest blindly. Recover the superseded bytes from
+the fork's Actions artifact for the run that produced the old pin, unzip both,
+and compare the libraries member by member, ignoring COFF `TimeDateStamp`. A
+rebuild of the same source that differs only in timestamps can be repinned as
+is, and its provenance belongs in `VERSION.md`. Any other content difference is
+a toolchain change and needs a full Windows build and smoke before the pin
+moves.

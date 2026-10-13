@@ -42,6 +42,8 @@ class SegmentedControl;
 class Stepper;
 class Knob;
 class Fader;
+class LevelDisplay;
+class SeriesDisplay;
 class Meter;
 class ToggleButton;
 class TextButton;
@@ -241,6 +243,7 @@ public:
         (void)fader;
         (void)descriptor;
     }
+    [[deprecated("override bind_level_display instead")]]
     virtual void bind_meter(Meter& meter, const NativeImportMeterBindingDescriptor& descriptor) {
         (void)meter;
         (void)descriptor;
@@ -257,6 +260,7 @@ public:
         (void)pad;
         (void)descriptor;
     }
+    [[deprecated("override bind_series_display instead")]]
     virtual void bind_waveform_display(WaveformView& waveform,
                                        const NativeImportWaveformBindingDescriptor& descriptor) {
         (void)waveform;
@@ -296,7 +300,41 @@ public:
         (void)checkbox;
         (void)descriptor;
     }
+    // Provider-neutral display binders, appended after every earlier slot so
+    // existing virtuals keep their vtable positions. A context still has to be
+    // compiled against this SDK, which is how Pulp ships (static libraries).
+    virtual void bind_level_display(View& view, LevelDisplay& display,
+                                    const NativeImportMeterBindingDescriptor& descriptor) {
+        (void)view;
+        (void)display;
+        (void)descriptor;
+    }
+    virtual void bind_series_display(View& view, SeriesDisplay& display,
+                                     const NativeImportWaveformBindingDescriptor& descriptor) {
+        (void)view;
+        (void)display;
+        (void)descriptor;
+    }
 };
+
+using LegacyImportBinder = void (*)(NativeImportBindingContext&, View&,
+                                    const NativeImportMeterBindingDescriptor*,
+                                    const NativeImportWaveformBindingDescriptor*);
+void register_legacy_import_binder(std::string id, LegacyImportBinder binder);
+void invoke_legacy_import_binder(std::string_view id, NativeImportBindingContext&, View&,
+                                 const NativeImportMeterBindingDescriptor* meter,
+                                 const NativeImportWaveformBindingDescriptor* waveform);
+
+/// Bind an imported level or series display through both binder generations:
+/// the provider-neutral virtual, then the deprecated concrete one through the
+/// provider's registered legacy binder. The native materializer and generated
+/// C++ binding helpers both bind through these, so a context that overrides
+/// only bind_meter / bind_waveform_display is bound either way.
+void bind_imported_level_display(NativeImportBindingContext& ctx, View& view, LevelDisplay& display,
+                                 const NativeImportMeterBindingDescriptor& descriptor);
+void bind_imported_series_display(NativeImportBindingContext& ctx, View& view,
+                                  SeriesDisplay& display,
+                                  const NativeImportWaveformBindingDescriptor& descriptor);
 
 /// Optional capability for binding a collapsed selector. This is a separate
 /// interface rather than a new NativeImportBindingContext virtual so a current

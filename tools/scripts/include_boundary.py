@@ -67,6 +67,19 @@ BOUNDARIES: dict[str, Boundary] = {
 
 # boundary name -> {(file, include): reason}. Every entry must still match.
 ALLOWED: dict[str, dict[tuple[str, str], str]] = {name: {} for name in BOUNDARIES}
+# widgets.hpp's audio-widget include is guarded by the definition only
+# pulp-view-audio publishes; it is the recorded debt
+# vellum-header-audio-widgets-include (docs/status/view-audio-seam-debts.json).
+# The reload export TU retains the audio displays and their registration for
+# hot-reloaded editors, so it names the provider's headers on purpose.
+ALLOWED["view-core"].update({
+    ("core/view/include/pulp/view/widgets.hpp", "pulp/view/audio_widgets.hpp"):
+        "guarded compatibility include; debt vellum-header-audio-widgets-include",
+    ("core/view/src/reload_exports.cpp", "pulp/view/register_audio_widgets.hpp"):
+        "hot-reload export set retains audio display registration",
+    ("core/view/src/reload_exports.cpp", "pulp/view/audio_widgets.hpp"):
+        "hot-reload export set retains the audio displays",
+})
 
 
 def _inside(path: pathlib.Path, dirs: list[pathlib.Path]) -> bool:
