@@ -97,6 +97,24 @@ def git(root: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
 
 
+# The whole-machine entries EXCLUSIVE_SHARD_PLAN places, as (name, shard, lock).
+# `check` fails unless the manifest holds each one, so the fixture carries them.
+EXCLUSIVE = [
+    ("gpu-dpr-runner-selftest", 1, None),
+    ("gpu-first-visible-external-adapter-selftest", 1, None),
+    ("gpu-dpr-v2-evidence-selftest", 2, None),
+    ("agent-capability-manifest-selftest", 2, "agent-capability-manifest-source"),
+    ("agent-capability-rederive-selftest", 2, "agent-capability-manifest-source"),
+]
+# The three wiring lines `check` requires in the required lane's workflow.
+LANE_WORKFLOW = (
+    "jobs:\n  lane:\n    strategy:\n      matrix:\n        shard: [1, 2]\n    steps:\n"
+    "      - run: python3 tools/ci/source_selftests.py run --min-count 130 --part shared\n"
+    "      - run: python3 tools/ci/source_selftests.py run --min-count 130 --part exclusive "
+    "--shard ${{ matrix.shard }}/2\n"
+)
+
+
 class GatesScriptInputsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="gates-script-inputs-"))
@@ -116,8 +134,9 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.write("test/CMakeLists.txt", "# registrations\n")
         self.write("README.md", "readme\n")
         self.write("tools/scripts/changed_surface_script_families.py", FAKE_FAMILIES)
-        self.write(".github/workflows/version-skill-check.yml",
-                   "jobs:\n  lane:\n    steps:\n      - run: python3 tools/ci/source_selftests.py run\n")
+        self.write(".github/workflows/version-skill-check.yml", LANE_WORKFLOW)
+        for name, _, _ in EXCLUSIVE:
+            self.write(f"tools/ci/test_{name}.py", f"print('{name}')\n")
         self.write("tools/ci/test_beta.py", "print('beta')\n")
         self.write(
             "tools/ui-build/lint/fixtures/clean/FilterPanel.tsx",
@@ -134,14 +153,25 @@ class GatesScriptInputsTests(unittest.TestCase):
             "style={{color: tokens.text}}>{value}</button>;\n"
             "}\n",
         )
+        exclusive_entries = [
+            {"name": name, "argv": [f"{{repo}}/tools/ci/test_{name}.py"], "processors": 8,
+             **({"resource_lock": [lock]} if lock else {})}
+            for name, _, lock in EXCLUSIVE]
         self.write("tools/ci/source_selftests.json", json.dumps({"schema_version": 1, "tests": [
-            {"name": "beta", "argv": ["{repo}/tools/ci/test_beta.py"], "timeout": 120.0}]}) + "\n")
+            {"name": "beta", "argv": ["{repo}/tools/ci/test_beta.py"], "timeout": 120.0},
+            *exclusive_entries]}) + "\n")
         inventory = {"tests": [
             {"name": "alpha", "properties": [],
              "command": ["/usr/bin/python3", "@ROOT@/tools/scripts/test_alpha.py"]},
             {"name": "beta", "properties": [{"name": "LABELS", "value": ["source-selftest"]},
                                             {"name": "TIMEOUT", "value": 120.0}],
-             "command": ["/usr/bin/python3", "@ROOT@/tools/ci/test_beta.py"]}]}
+             "command": ["/usr/bin/python3", "@ROOT@/tools/ci/test_beta.py"]},
+            *({"name": name,
+               "properties": [{"name": "LABELS", "value": ["source-selftest"]},
+                              {"name": "PROCESSORS", "value": 8},
+                              *([{"name": "RESOURCE_LOCK", "value": [lock]}] if lock else [])],
+               "command": ["/usr/bin/python3", f"@ROOT@/tools/ci/test_{name}.py"]}
+              for name, _, lock in EXCLUSIVE)]}
         self.inventory = self.tmp / "inventory.json"
         self.inventory.write_text(json.dumps(inventory), encoding="utf-8")
         self.cmake_log = self.tmp / "cmake.log"
@@ -195,6 +225,15 @@ class GatesScriptInputsTests(unittest.TestCase):
 
     def configures(self) -> list[str]:
         return self.cmake_log.read_text().splitlines() if self.cmake_log.exists() else []
+
+    def test_fixture_matches_the_shard_plan(self) -> None:
+        sys.path.insert(0, str(REPO / "tools/ci"))
+        import source_selftests  # noqa: PLC0415
+        self.assertEqual(
+            [sorted(names) for names in source_selftests.EXCLUSIVE_SHARD_PLAN],
+            [sorted(n for n, shard, _ in EXCLUSIVE if shard == i)
+             for i in range(1, source_selftests.EXCLUSIVE_SHARDS + 1)],
+        )
 
     def test_touched_input_without_a_build_configures_build_gate_and_checks(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")

@@ -238,13 +238,24 @@ only when the PR grew it relative to the merge-base, which is the same
 rebase-stable rule the hotspot guard uses. A `Fanout-Grow: <path|all> reason="..."`
 trailer authorizes deliberate growth.
 
-The workflow's last step, **Source-only selftests**, runs every registration
-listed in `tools/ci/source_selftests.json` with
-`tools/ci/source_selftests.py run --min-count 130`. Those are Python ctests that
-read only the checkout; the required `macos` gate excludes their
-`source-selftest` label on gate events, so this required context is where they
-block a merge. The step needs the full-history checkout this job already does
-and nothing but the standard library. See
+The workflow runs every registration listed in
+`tools/ci/source_selftests.json` with `tools/ci/source_selftests.py run
+--min-count 130`. Those are Python ctests that read only the checkout; the
+required `macos` gate excludes their `source-selftest` label on gate events, so
+this workflow is where they block a merge. The run is split across jobs by
+`lane_parts()`:
+- The **Source-only selftests** step of the `Version & skill sync checks` job
+  runs `--part shared`, the entries that share the machine.
+- The `Exclusive source selftests 1/2` and `2/2` jobs run `--part exclusive
+  --shard N/2`. These are the entries with `PROCESSORS` above 1, each still
+  alone on its runner.
+
+The required context **`Enforce version & skill sync`** is a third job. It needs
+both, runs `if: always()`, and fails unless both concluded `success`, so a
+failed, cancelled or skipped part fails the check. Before the split, the
+whole-machine entries ran one after another at the end of a single job. That
+was about 70% of the selftest step and most of the check's ~10 min P50. Every
+job needs the full-history checkout and nothing but the standard library. See
 [test-lanes.md](test-lanes.md#the-source-selftest-lane) for how a test joins or
 leaves the lane.
 
