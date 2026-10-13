@@ -646,7 +646,7 @@ STUB
     check "$([ "$rc" -ne 0 ] && echo refused || echo accepted)" "refused" "a wrong digest is refused"
     check "$(printf '%s' "$err" | grep -c "expected: $wrong")" "1" "the refusal names the expected digest"
     check "$(printf '%s' "$err" | grep -c "found:    $good")" "1" "the refusal names the digest it found"
-    check "$(printf '%s' "$err" | grep -c 'tools/deps/manifest.json')" "1" "the refusal says where the pin lives"
+    check "$(printf '%s' "$err" | grep -c 'deps/manifest.json')" "1" "the refusal says where the pin lives"
     check "$([ -e "$FETCHCONTENT_CACHE_ROOT/pinned-v1" ] && echo present || echo absent)" "absent" \
         "a refused archive is never extracted (and the unverifiable seed is not used)"
     check "$([ -e "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete" ] && echo present || echo absent)" "absent" \

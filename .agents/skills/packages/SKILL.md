@@ -159,9 +159,17 @@ the last two also need `--verify-licenses` (both are in `gates.sh`):
 1. **Consistency** — every `manifest.json` entry must appear in
    `DEPENDENCIES.md`, `NOTICE.md`, and `docs/reference/licensing.md`.
 2. **Completeness** — every dep declared in a real manifest source
-   (`requirements-docs.txt`, `mkdocs.yml`, root + `bindings/python`
-   `FetchContent_Declare`, `external/<dir>/`) must be represented in
-   `manifest.json` via name or `external_names` alias.
+   (`requirements-docs.txt`, `mkdocs.yml`, `external/<dir>/`, and every fetch
+   in any CMake file or setup/bootstrap script: `FetchContent_Declare`,
+   `ExternalProject_Add`, `file(DOWNLOAD)`, curl/wget/git-clone and the
+   `ensure_shared_*` helpers) must be represented in `manifest.json`. A fetch
+   that names its upstream is matched by URL (`repository` or an `artifacts`
+   URL), never by its local FetchContent label, so `choc_wclap` is covered by
+   CHOC's repository and a familiar name from a different repo is not. Until
+   this scan read beyond the root `CMakeLists.txt`, setup.sh's unchecked
+   wgpu-native download had no row at all (and WebGPU-distribution's alias list
+   hid the name). A URL built at run time is invisible to it; say so in review
+   rather than assume coverage.
 3. **Truthfulness** — the attribution text must match the license actually on
    disk: no NOTICE entry may reproduce a truncated permission notice, and no
    checked-out tree may offer a copyleft alternative while the manifest
@@ -178,6 +186,20 @@ MIT without its warranty disclaimer for 21 entries, and the VST3 SDK was
 labeled MIT on all four surfaces while the pinned tree (v3.7.12) was
 "Steinberg VST3 License OR GPLv3". **A name being present says nothing about
 the text being right** — when a license claim matters, read the tree.
+
+### Digest-pinned release assets (`artifacts`)
+
+A dependency shipped as prebuilt release assets records each one in its
+manifest row: `{"name", "url", "sha256", "tree_sha256"}`. `sha256` is the
+archive; `tree_sha256` is the extracted tree (one `"<path> <sha256>"` line per
+file, sorted), which is what lets configure re-check a shared cache that holds
+only extracted files. wgpu-native is the first user:
+`tools/cmake/PulpWgpuNative.cmake` and `setup.sh` both read these pins and
+refuse a mismatch. Record new digests with
+`python3 -I tools/deps/wgpu_native_digests.py <fresh-empty-dir>/*.zip` after
+downloading the assets yourself; a release that publishes no digest of its own
+means the download you hash is the only evidence, so download twice into
+separate empty directories and compare.
 
 ### Writing a NOTICE entry
 
