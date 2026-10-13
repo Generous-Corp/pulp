@@ -4676,6 +4676,14 @@
    ],
    "kind": "python"
   },
+  "findskia-windows-arm64-slice-selftest": {
+   "entry": "tools/scripts/test_findskia_windows_arm64_slice.py",
+   "inputs": [
+    "tools/cmake/FindSkia.cmake",
+    "tools/scripts/test_findskia_windows_arm64_slice.py"
+   ],
+   "kind": "python"
+  },
   "flake-exoneration-shadow-selftest": {
    "entry": "tools/ci/test_flake_exoneration_shadow.py",
    "inputs": [
