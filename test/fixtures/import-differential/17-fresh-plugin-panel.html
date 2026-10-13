@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="pulp-fixture" content="fresh-plugin-panel-v1">
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    html, body { margin: 0; width: 480px; height: 320px; overflow: hidden; background: #10131a; }
+    #plugin { position: absolute; inset: 0; padding: 20px; box-sizing: border-box; background: #171c27; color: #edf2ff; }
+    #header { display: flex; align-items: center; justify-content: space-between; height: 32px; }
+    #title { margin: 0; font-size: 18px; letter-spacing: .02em; }
+    #status { color: #91a4c5; font: 12px ui-monospace, monospace; }
+    #controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
+    .control { height: 104px; padding: 12px; box-sizing: border-box; border: 1px solid #303b52; border-radius: 8px; background: #20283a; }
+    .control label { display: block; color: #aebbd2; font-size: 11px; text-transform: uppercase; }
+    .value { margin-top: 17px; color: #f0a35b; font: 22px ui-monospace, monospace; }
+    #footer { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; }
+    #toggle { border: 0; border-radius: 6px; padding: 9px 14px; background: #e58a45; color: #20140b; font-weight: 700; cursor: pointer; }
+    #toggle:focus-visible { outline: 2px solid #f5d6a6; outline-offset: 2px; }
+    #meter { width: 180px; height: 8px; border-radius: 4px; background: #303b52; overflow: hidden; }
+    #meter > span { display: block; width: 64%; height: 100%; background: #65d6a2; }
+    #plugin.active #meter > span { width: 86%; background: #f0a35b; }
+    #plugin.active #status { color: #65d6a2; }
+  </style>
+</head>
+<body>
+  <main id="plugin" data-pulp-id="fresh-plugin-root">
+    <header id="header" data-pulp-id="fresh-plugin-header">
+      <h1 id="title" data-pulp-id="fresh-plugin-title">Pulse Gate</h1>
+      <span id="status" data-pulp-id="fresh-plugin-status">IDLE</span>
+    </header>
+    <section id="controls" data-pulp-id="fresh-plugin-controls">
+      <article class="control" data-pulp-id="fresh-plugin-drive"><label>Drive</label><div class="value">64%</div></article>
+      <article class="control" data-pulp-id="fresh-plugin-tone"><label>Tone</label><div class="value">38%</div></article>
+      <article class="control" data-pulp-id="fresh-plugin-mix"><label>Mix</label><div class="value">52%</div></article>
+    </section>
+    <footer id="footer" data-pulp-id="fresh-plugin-footer">
+      <div id="meter" data-pulp-id="fresh-plugin-meter"><span></span></div>
+      <button id="toggle" data-pulp-id="fresh-plugin-toggle" type="button">Engage</button>
+    </footer>
+  </main>
+  <script>
+    const plugin = document.getElementById('plugin');
+    const toggle = document.getElementById('toggle');
+    toggle.addEventListener('click', () => {
+      const active = plugin.classList.toggle('active');
+      toggle.textContent = active ? 'Release' : 'Engage';
+      document.getElementById('status').textContent = active ? 'ACTIVE' : 'IDLE';
+    });
+  </script>
+</body>
+</html>
