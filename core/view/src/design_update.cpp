@@ -179,6 +179,12 @@ bool shape_compatible(const IRNode& old_node, const IRNode& new_node) {
 void append_update(DesignChildUpdatePlan& plan, DesignUpdateKind kind, std::string key,
                    std::size_t old_index, std::size_t new_index) {
     plan.updates.push_back({kind, std::move(key), old_index, new_index});
+    switch (kind) {
+    case DesignUpdateKind::retained: ++plan.work.retained; break;
+    case DesignUpdateKind::moved: ++plan.work.moved; break;
+    case DesignUpdateKind::inserted: ++plan.work.inserted; break;
+    case DesignUpdateKind::removed: ++plan.work.removed; break;
+    }
     const auto index = plan.updates.size() - 1;
     if (!plan.blocks.empty() && plan.blocks.back().kind == kind &&
         plan.blocks.back().first + plan.blocks.back().count == index) {

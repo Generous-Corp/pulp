@@ -26,9 +26,27 @@ struct DesignUpdateBlock {
     std::size_t first = 0;
     std::size_t count = 0;
 };
+struct DesignUpdateWorkCounters {
+    std::size_t retained = 0;
+    std::size_t moved = 0;
+    std::size_t inserted = 0;
+    std::size_t removed = 0;
+
+    std::size_t total() const noexcept {
+        return retained + moved + inserted + removed;
+    }
+
+    friend bool operator==(const DesignUpdateWorkCounters&,
+                           const DesignUpdateWorkCounters&) = default;
+};
+
 struct DesignChildUpdatePlan {
     std::vector<DesignChildUpdate> updates;
     std::vector<DesignUpdateBlock> blocks;
+    // Deterministic work census for import/runtime observability. These counts
+    // are derived from updates in emission order and are independent of the
+    // unordered IR attribute storage used by the compatibility checks.
+    DesignUpdateWorkCounters work;
     bool keyed = false;
     bool ambiguous_keys = false;
 };

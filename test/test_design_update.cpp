@@ -70,6 +70,8 @@ TEST_CASE("keyed design updates retain identity across reorder and batch blocks"
     REQUIRE(plan.keyed);
     REQUIRE_FALSE(plan.ambiguous_keys);
     REQUIRE(plan.updates.size() == 4);
+    CHECK(plan.work == DesignUpdateWorkCounters{1, 1, 1, 1});
+    CHECK(plan.work.total() == plan.updates.size());
     CHECK(plan.updates[0].kind == DesignUpdateKind::removed);
     CHECK(plan.updates[0].key == "b");
     CHECK(plan.updates[0].old_index == 1);
@@ -92,6 +94,10 @@ TEST_CASE("ambiguous anchors fail closed to positional planning", "[view][import
     CHECK_FALSE(plan.keyed);
     CHECK(plan.ambiguous_keys);
     REQUIRE(plan.updates.size() == 3);
+    // Planted negative control: duplicate anchors must produce no retained or
+    // moved work, so a caller cannot accidentally reuse an ambiguous view.
+    CHECK(plan.work == DesignUpdateWorkCounters{0, 0, 1, 2});
+    CHECK(plan.work.total() == plan.updates.size());
     CHECK(plan.updates[0].kind == DesignUpdateKind::removed);
     CHECK(plan.updates[0].old_index == 1);
     CHECK(plan.updates[1].kind == DesignUpdateKind::removed);
