@@ -7268,9 +7268,14 @@ target) and prints the `shipyard rescue … --rerun-failed` line for you in its
 hand-back, so on a fresh block you usually just copy it. Manual fallback only if
 `rescue` is missing/older: `ghapp run cancel <run>` (advisory legs are
 expendable), wait ~20–60s for `status: completed`, then `ghapp run rerun <run>
---failed`; the per-run rerun lock is why the cancel must come first. (Or `ghapp
-workflow run build.yml --ref <branch>` for a fresh run whose newer `macos`
-context supersedes the stale failure — do one or the other, not both.)
+--failed`; the per-run rerun lock is why the cancel must come first. Do not
+substitute `ghapp workflow run build.yml --ref <branch>`: a `workflow_dispatch`
+run checks out the branch tip rather than `refs/pull/N/merge`, so its `macos`
+is the wrong proof under strict protection. Re-running the `pull_request` run
+keeps the merge ref. Over 2026-09-22..10-12, 26 dispatches on 13 pulp heads
+that already had a `pull_request` build went 0 green (13 failed, 13
+cancelled); the `pull_request` run before each had been cancelled (15), had
+failed (8) or had passed (3), so none was a missing trigger.
 
 **Prevention: retry transient flakes on the required leg.** `build.yml`'s
 non-Windows and Windows `ctest` steps run `--repeat until-pass:2` (mirroring

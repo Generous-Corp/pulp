@@ -237,9 +237,13 @@ Push the branch, then `gh pr create`. Do **not** run `shipyard pr`, and do not
 arm auto-merge — that is the maintainer's call.
 
 If the PR opens but required checks show `MISSING` rather than pending, the
-workflows did not dispatch; say so rather than waiting it out. (A PR opened by an
-app token does not auto-trigger `pull_request` workflows — the maintainer can
-dispatch them.)
+workflows did not run on its head; say so rather than waiting it out. An
+App-opened PR does trigger `pull_request` workflows like any other: across the
+fleet's last 180 pull requests (165 opened by `shipyard-local[bot]`), every one
+targeting `main` had `pull_request` runs on its head. A missing check means the
+trigger refused (a base other than `main`, a path filter) or a run was
+cancelled; the CI skill's slow/stuck-PR steps say which, and the fix is never a
+`workflow_dispatch`, which checks out the branch tip rather than the merge ref.
 
 ### If you have READ access only (the common case)
 You cannot push a branch. Two good options:
