@@ -21,15 +21,30 @@ is not the pull request's distinguishable author. This is Shipyard's
 `head_approval::trusted_reviewer` rule; `test_merge_group_hold_check.py`
 reads the same captured answer Shipyard's scorecard tests read and must agree.
 
+One exception to that rule: a HOLD from the pull request's own author counts
+(the author asking to hold their own head is the conservative signal), while
+their APPROVE never does.
+
 A HOLD as the latest trusted verdict fails the step, naming the pull request,
-the HOLD's URL and the fix. Anything it cannot read passes with a warning
-annotation: the backstop must never stop the queue on an API hiccup, and the
-hook remains the primary layer.
+the HOLD's URL and the fix.
+
+**It fails closed.** Anything it cannot read fails the step too: a read that
+errors, a GraphQL answer with `errors`, a missing token, a chain that does not
+reach the base, or a comment or review list it could not read in full. That is
+a deliberate ruling: a stalled queue is the lesser harm, since a re-run of the
+merge group's `classify` job (or a re-queue) retries, while a pass on input it
+cannot judge is exactly how a held head lands. Each message names the pull
+request (or the group), the error and the fix.
+
+The chain is walked one commit at a time (`git/commits/<sha>`), so a group of
+any size is read in full; the compare API's 250-commit cap would hide the
+newest entries. Comments and reviews are paginated to their `totalCount`.
 
 Usage (in the merge_group preamble):
     python3 tools/ci/merge_group_hold_check.py --repo OWNER/REPO \\
         --base "$MERGE_GROUP_BASE_SHA" --head "$GITHUB_SHA"
-with GH_TOKEN (or GITHUB_TOKEN) in the environment. Exit 0 pass, 1 held.
+with GH_TOKEN (or GITHUB_TOKEN) in the environment. Exit 0 pass, 1 held or
+unreadable.
 """
 from __future__ import annotations
 
@@ -49,12 +64,29 @@ MARKER = re.compile(
 )
 TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
 FLEET_APP = "shipyard-local"
-VERDICTS_QUERY = (
-    "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name)"
-    "{pullRequest(number:$number){headRefOid author{login} comments(last:100){totalCount"
-    " nodes{author{login} authorAssociation body createdAt url}} reviews(last:100){totalCount"
+PAGE_SIZE = 100
+# One connection per query, paginated forward; `$after` is null on the first page.
+COMMENTS_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,"
+    "name:$name){pullRequest(number:$number){author{login} comments(first:100,after:$after)"
+    "{totalCount pageInfo{hasNextPage endCursor}"
+    " nodes{author{login} authorAssociation body createdAt url}}}}}"
+)
+REVIEWS_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,"
+    "name:$name){pullRequest(number:$number){author{login} reviews(first:100,after:$after)"
+    "{totalCount pageInfo{hasNextPage endCursor}"
     " nodes{author{login} authorAssociation state submittedAt url commit{oid}}}}}}"
 )
+# A merge queue builds at most 100 entries; anything longer is not a queue group.
+MAX_ENTRIES = 512
+FIX = ("re-run the merge group's classify job, or re-queue the pull requests; if the "
+       "HOLD check itself is wrong, dequeue the held pull request and re-queue it after "
+       "`verdict: APPROVE head:<sha>`")
+
+
+class Unreadable(Exception):
+    """Input the check cannot judge; the group fails closed."""
 
 # (method, path or "graphql", payload) -> decoded JSON
 Fetch = Callable[[str, str, Optional[Dict[str, Any]]], Any]
@@ -79,14 +111,17 @@ def normalized(login: str) -> str:
     return (login[: -len("[bot]")] if login.endswith("[bot]") else login).lower()
 
 
-def trusted(login: Optional[str], association: Optional[str], author: Optional[str]) -> bool:
+def trusted(login: Optional[str], association: Optional[str], author: Optional[str],
+            approve: bool = True) -> bool:
+    """Whether a verdict counts: the fleet App or OWNER/MEMBER/COLLABORATOR, never
+    the distinguishable author's APPROVE; the author's own HOLD always counts."""
     if not login:
         return False
     fleet = normalized(login) == FLEET_APP
-    if not (fleet or association in TRUSTED_ASSOCIATIONS):
-        return False
-    return author is None or normalized(author) != normalized(login) \
-        or normalized(author) == FLEET_APP
+    own = author is not None and normalized(author) == normalized(login) and not fleet
+    if own:
+        return not approve
+    return fleet or association in TRUSTED_ASSOCIATIONS
 
 
 def verdict_line(body: str) -> Optional[Tuple[bool, str]]:
@@ -108,7 +143,7 @@ def latest_verdict(pr: Dict[str, Any], head: str) -> Optional[Dict[str, Any]]:
         parsed = verdict_line(comment.get("body") or "")
         login = (comment.get("author") or {}).get("login")
         if parsed and parsed[1] == head.lower() \
-                and trusted(login, comment.get("authorAssociation"), author):
+                and trusted(login, comment.get("authorAssociation"), author, parsed[0]):
             found.append({"approve": parsed[0], "at": comment.get("createdAt") or "",
                           "url": comment.get("url")})
     for review in ((pr.get("reviews") or {}).get("nodes") or []):
@@ -117,50 +152,110 @@ def latest_verdict(pr: Dict[str, Any], head: str) -> Optional[Dict[str, Any]]:
             continue
         login = (review.get("author") or {}).get("login")
         if ((review.get("commit") or {}).get("oid") or "").lower() == head.lower() \
-                and trusted(login, review.get("authorAssociation"), author):
+                and trusted(login, review.get("authorAssociation"), author,
+                            state == "APPROVED"):
             found.append({"approve": state == "APPROVED", "at": review.get("submittedAt") or "",
                           "url": review.get("url")})
     # The newest wins; at the same time a HOLD wins.
     return max(found, key=lambda item: (item["at"], not item["approve"]), default=None)
 
 
+def read(fetch: Fetch, method: str, path: str,
+         payload: Optional[Dict[str, Any]] = None) -> Any:
+    """`fetch`, with every failure (and a GraphQL `errors` answer) as Unreadable."""
+    try:
+        answer = fetch(method, path, payload)
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        raise Unreadable(f"{method} {path} failed: {error}") from error
+    if path == "graphql" and (not isinstance(answer, dict) or answer.get("errors")
+                              or answer.get("data") is None):
+        errors = answer.get("errors") if isinstance(answer, dict) else answer
+        raise Unreadable(f"GraphQL answered with errors: {json.dumps(errors)[:300]}")
+    return answer
+
+
 def group_entries(fetch: Fetch, repo: str, base: str, head: str) -> List[Tuple[int, str]]:
-    """`(pull request, head it lands)` for each queued pull request in the group."""
-    compare = fetch("GET", f"repos/{repo}/compare/{base}...{head}", None)
-    commits = {commit["sha"]: commit for commit in compare.get("commits") or []}
+    """`(pull request, head it lands)` for each queued pull request in the group.
+
+    One `git/commits/<sha>` read per merge commit, from the group head back to
+    the base, so the group is read in full whatever its size."""
     entries: List[Tuple[int, str]] = []
     sha = head
-    while sha != base and sha in commits:
-        commit = commits[sha]
-        parents = [parent["sha"] for parent in commit.get("parents") or []]
-        subject = (commit.get("commit") or {}).get("message", "").split("\n", 1)[0]
+    while sha != base:
+        if len(entries) >= MAX_ENTRIES:
+            raise Unreadable(f"the group head does not reach {base[:12]} within "
+                             f"{MAX_ENTRIES} merge commits")
+        try:
+            commit = read(fetch, "GET", f"repos/{repo}/git/commits/{sha}")
+            parents = [parent["sha"].lower() for parent in commit.get("parents") or []]
+            subject = (commit.get("message") or "").split("\n", 1)[0]
+        except (KeyError, TypeError, AttributeError) as error:
+            raise Unreadable(f"commit {sha[:12]} could not be read ({error!r})") from error
         match = MERGE_SUBJECT.match(subject)
         if len(parents) != 2 or not match:
-            raise ValueError(f"commit {sha[:12]} on the group's first-parent chain is not a "
-                             f"queue merge commit ({subject!r})")
+            raise Unreadable(f"commit {sha[:12]} on the group's first-parent chain is not a "
+                             f"queue merge commit ({subject!r}), so the chain does not reach "
+                             f"{base[:12]}")
         entries.append((int(match.group(1)), parents[1]))
         sha = parents[0]
-    if sha != base:
-        raise ValueError(f"the group head does not reach {base[:12]} through its first parents")
     return entries
 
 
+def connection(fetch: Fetch, owner: str, name: str, number: int,
+               query: str, field: str) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+    """`(author, every node)` of one pull-request connection, read to its totalCount."""
+    nodes: List[Dict[str, Any]] = []
+    after: Optional[str] = None
+    author: Optional[str] = None
+    total = None
+    while True:
+        answer = read(fetch, "POST", "graphql", {"query": query, "variables": {
+            "owner": owner, "name": name, "number": number, "after": after}})
+        try:
+            pull = answer["data"]["repository"]["pullRequest"]
+            author = ((pull.get("author") or {}).get("login"))
+            page = pull[field]
+            nodes.extend(page["nodes"] or [])
+            total = page["totalCount"]
+            more = page["pageInfo"]["hasNextPage"]
+            after = page["pageInfo"]["endCursor"]
+        except (KeyError, TypeError, AttributeError) as error:
+            raise Unreadable(f"its {field} answer was malformed ({error!r})") from error
+        if not more:
+            break
+        if not after or len(nodes) > total:
+            raise Unreadable(f"its {field} pagination did not advance")
+    if total != len(nodes):
+        raise Unreadable(f"read {len(nodes)} of {total} {field}")
+    return author, nodes
+
+
+def pull_request(fetch: Fetch, repo: str, number: int) -> Dict[str, Any]:
+    """The pull request's author and every comment and review."""
+    owner, _, name = repo.partition("/")
+    author, comments = connection(fetch, owner, name, number, COMMENTS_QUERY, "comments")
+    _, reviews = connection(fetch, owner, name, number, REVIEWS_QUERY, "reviews")
+    return {"author": {"login": author} if author else None,
+            "comments": {"totalCount": len(comments), "nodes": comments},
+            "reviews": {"totalCount": len(reviews), "nodes": reviews}}
+
+
 def check(fetch: Fetch, repo: str, base: str, head: str) -> Tuple[List[str], List[str]]:
-    """`(holds, warnings)`: one message per held pull request, and what was unread."""
+    """`(holds, unreadable)`: one message per held pull request, and per input it
+    could not judge. Either fails the group."""
     holds: List[str] = []
-    warnings: List[str] = []
+    unreadable: List[str] = []
     try:
         entries = group_entries(fetch, repo, base, head)
-    except (ValueError, KeyError, OSError, urllib.error.URLError) as error:
-        return [], [f"the merge group's pull requests could not be read: {error}"]
-    owner, _, name = repo.partition("/")
+    except Unreadable as error:
+        return [], [f"merge group {head[:12]} (base {base[:12]}): its pull requests could "
+                    f"not be read: {error}. Fix: {FIX}"]
     for number, pr_head in entries:
         try:
-            answer = fetch("POST", "graphql", {"query": VERDICTS_QUERY, "variables": {
-                "owner": owner, "name": name, "number": number}})
-            pr = answer["data"]["repository"]["pullRequest"]
-        except (KeyError, TypeError, OSError, urllib.error.URLError) as error:
-            warnings.append(f"#{number}: its verdicts could not be read ({error})")
+            pr = pull_request(fetch, repo, number)
+        except Unreadable as error:
+            unreadable.append(f"#{number}: its verdicts could not be read: {error}. Fix: {FIX}. "
+                              f"https://github.com/{repo}/pull/{number}")
             continue
         verdict = latest_verdict(pr, pr_head)
         if verdict is not None and not verdict["approve"]:
@@ -171,7 +266,7 @@ def check(fetch: Fetch, repo: str, base: str, head: str) -> Tuple[List[str], Lis
                 f"if the HOLD no longer applies; then re-queue it. "
                 f"https://github.com/{repo}/pull/{number}"
             )
-    return holds, warnings
+    return holds, unreadable
 
 
 def main(argv: Optional[List[str]] = None, fetch: Optional[Fetch] = None) -> int:
@@ -183,18 +278,20 @@ def main(argv: Optional[List[str]] = None, fetch: Optional[Fetch] = None) -> int
     if fetch is None:
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
         if not token:
-            print("::warning title=merge-group HOLD check::no GH_TOKEN; not checked")
-            return 0
+            print(f"::error title=merge-group HOLD check::merge group {args.head[:12]}: no "
+                  f"GH_TOKEN or GITHUB_TOKEN in the environment, so nothing could be read. "
+                  f"Fix: hand the step the workflow token (GH_TOKEN=${{{{ github.token }}}}), "
+                  f"then {FIX}")
+            return 1
         fetch = github(token)
-    holds, warnings = check(fetch, args.repo, args.base.lower(), args.head.lower())
-    for warning in warnings:
-        print(f"::warning title=merge-group HOLD check::{warning}; not checked (the "
-              "verdict-hold hook is the primary layer)")
+    holds, unreadable = check(fetch, args.repo, args.base.lower(), args.head.lower())
+    for message in unreadable:
+        print(f"::error title=merge-group HOLD check (unreadable)::{message}")
     for hold in holds:
         print(f"::error title=merge-group HOLD check::{hold}")
-    if not holds:
+    if not holds and not unreadable:
         print("merge-group HOLD check: no queued pull request is held")
-    return 1 if holds else 0
+    return 1 if holds or unreadable else 0
 
 
 if __name__ == "__main__":
