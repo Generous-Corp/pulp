@@ -401,6 +401,13 @@ its `pinned_version` in the same change. Rule + rationale:
 The check runs anywhere `validate_registry.py` runs (its
 `test_package_validation_tools.py` unit suite covers the new rule).
 
+The same validator fails any `binary_sources` entry without a lowercase 64-hex
+`sha256` of its release asset at the pin, and fails a trace-processor or
+chrome-for-testing digest that no longer appears in the Rust fetcher that
+verifies it. A binary source therefore needs an immutable, versioned URL; a
+"latest" redirect cannot hold a digest. Recording digests and the
+unverified-version override behavior: the `installable-tools` skill.
+
 For `python_pip` tools, the managed venv manifest is also the installed-version
 authority. `pulp tool install` may reuse an existing venv only when its wrapper
 exists and `manifest.json` records the current registry pin; a missing or stale
