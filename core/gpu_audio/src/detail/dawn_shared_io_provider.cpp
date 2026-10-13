@@ -2482,7 +2482,12 @@ bool DawnSharedIoProvider::drain() noexcept {
             impl_->instance.ProcessEvents();
         }
     }
-    if (impl_->slots.empty() && impl_->reusable && !impl_->device_destroyed)
+    // A clean drain is also the provider's quiescent resume boundary. The
+    // arena owns epoch/slot retirement and will reject new submissions while
+    // it is retiring; once it explicitly reprimes, retaining these prepared
+    // Dawn resources is safe and avoids rebuilding resident model state.
+    if (impl_->reusable && !impl_->device_destroyed &&
+        !impl_->device_lost.load(std::memory_order_acquire))
         impl_->accepting = true;
     return physically_drained;
 }
@@ -2491,6 +2496,10 @@ bool DawnSharedIoProvider::device_lost() const noexcept {
     return impl_ &&
            (impl_->device_destroyed || impl_->device_lost.load(std::memory_order_acquire) ||
             dawn::native::IsDeviceLost(impl_->device.Get()));
+}
+
+bool DawnSharedIoProvider::can_resume_after_drain() const noexcept {
+    return impl_ && impl_->reusable && !impl_->device_destroyed && !device_lost();
 }
 
 std::uint32_t DawnSharedIoProvider::alignment() const noexcept {
