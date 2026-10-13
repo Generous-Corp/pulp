@@ -5,6 +5,7 @@ import hashlib
 import re
 import stat
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -29,7 +30,7 @@ class GenerateTests(unittest.TestCase):
         )
         (root / ".shipyard/vm-image.toml").write_text(body, encoding="utf-8")
         (root / ".shipyard/vm-image.intel.toml").write_text(body, encoding="utf-8")
-        for name in (generate.MISE_CONFIG, generate.MISE_LOCK):
+        for name in (generate.MISE_CONFIG, generate.MISE_TOOLS_CONFIG, generate.MISE_LOCK):
             (root / name).write_bytes((REPO / name).read_bytes())
 
     def test_five_runs_are_byte_identical(self) -> None:
@@ -120,13 +121,34 @@ class StrictPinTests(unittest.TestCase):
         GenerateTests.fixture(self, root)  # type: ignore[arg-type]
         generate.generate(root, None, False)
 
+    def manifest(self, root: Path) -> Path:
+        return root / "tools/toolchain/manifest.toml"
+
+    def forge_lock(self, root: Path, text: str) -> dict:
+        """A coordinated edit: change the lock AND record its new digest in the
+        manifest, as someone hand-editing both files would. The structural
+        checks must still refuse anything that is not a legitimate lock."""
+        lock = root / generate.MISE_LOCK
+        lock.write_text(text, encoding="utf-8")
+        generate.record_lock_digest(self.manifest(root), hashlib.sha256(lock.read_bytes()).hexdigest())
+        return generate.load(self.manifest(root))[0]
+
+    def assert_lock_refuses(self, root: Path, text: str, needle: str) -> None:
+        data = self.forge_lock(root, text)
+        with self.assertRaises(ValueError) as ctx:
+            generate.check_mise_lock(root / generate.MISE_LOCK, data)
+        self.assertIn(needle, str(ctx.exception))
+
+    def lock_text(self, root: Path) -> str:
+        return (root / generate.MISE_LOCK).read_text(encoding="utf-8")
+
     def assert_check_refuses(self, root: Path, needle: str) -> None:
         with self.assertRaises(ValueError) as ctx:
             generate.generate(root, None, True)
         self.assertIn(needle, str(ctx.exception))
 
     def test_checked_in_files_match_the_manifest(self) -> None:
-        # The drift test proper: the committed .mise.toml, mise.lock and VM
+        # The drift test proper: the committed mise configs, the lock and the VM
         # image files are exactly what the committed manifest generates.
         generate.generate(REPO, None, True)
 
@@ -143,25 +165,47 @@ class StrictPinTests(unittest.TestCase):
                     generate.load(path)
                 self.assertIn("non-exact", str(ctx.exception))
 
-    def test_hand_edited_mise_tools_refuses(self) -> None:
+    def test_every_pin_says_whether_it_is_observed_or_a_target(self) -> None:
+        source = generate.SOURCE.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "manifest.toml"
+            path.write_text(re.sub(r"(?m)^node = \{ status = .*$", "", source), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                generate.load(path)
+            self.assertIn("evidence.node", str(ctx.exception))
+
+    def test_rust_is_not_a_mise_tool(self) -> None:
+        source = generate.SOURCE.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "manifest.toml"
+            path.write_text(source.replace("[npm]", '[mise.tools.rust]\nbackend = "core:rust"\nurl_prefixes = ["https://static.rust-lang.org/"]\n\n[npm]', 1), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                generate.load(path)
+            self.assertIn("rust must not be a [mise.tools] entry", str(ctx.exception))
+        text = (REPO / generate.MISE_TOOLS_CONFIG).read_text(encoding="utf-8")
+        self.assertNotRegex(text, r"(?m)^rust\b")
+
+    def test_aqua_url_prefixes_must_name_the_backend_repository(self) -> None:
+        source = generate.SOURCE.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "manifest.toml"
+            path.write_text(
+                source.replace('"https://github.com/openai/tart/releases/download/"', '"https://github.com/evil/tart/releases/download/"'),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError) as ctx:
+                generate.load(path)
+            self.assertIn("is not the aqua:openai/tart repository", str(ctx.exception))
+
+    def test_hand_edited_tools_config_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             self.fixture(root)
-            path = root / generate.MISE_CONFIG
+            path = root / generate.MISE_TOOLS_CONFIG
             path.write_text(path.read_text(encoding="utf-8").replace('ninja = "1.13.2"', 'ninja = "1.13.1"'), encoding="utf-8")
-            self.assert_check_refuses(root, "generated mise block is stale or hand-edited")
+            self.assert_check_refuses(root, "stale or hand-edited")
 
-    def test_hand_edited_lock_version_refuses(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            self.fixture(root)
-            path = root / generate.MISE_LOCK
-            path.write_text(path.read_text(encoding="utf-8").replace('version = "4.3.3"', 'version = "4.3.4"', 1), encoding="utf-8")
-            self.assert_check_refuses(root, "cmake is locked at '4.3.4'")
-
-    def test_hand_edited_lock_checksum_refuses(self) -> None:
-        # A checksum edit keeps the lock structurally valid; only the lock
-        # digest recorded in .mise.toml can see it.
+    def test_any_lock_edit_without_the_manifest_digest_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             self.fixture(root)
@@ -169,44 +213,110 @@ class StrictPinTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             digest = re.search(r'checksum = "sha256:([0-9a-f]{64})"', text).group(1)
             path.write_text(text.replace(digest, "0" * 64, 1), encoding="utf-8")
-            generate.check_mise_lock(path, generate.load(root / "tools/toolchain/manifest.toml")[0])
-            self.assert_check_refuses(root, "generated mise block is stale or hand-edited")
+            self.assert_check_refuses(root, "but tools/toolchain/manifest.toml lock_sha256 is")
+
+    def test_forged_lock_url_outside_the_backend_refuses(self) -> None:
+        # The edit that survived the self-hash: a URL swap plus a recomputed digest.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            text = self.lock_text(root).replace(
+                "https://github.com/openai/tart/releases/download/2.38.0/tart.tar.gz",
+                "https://evil.example/tart.tar.gz", 1,
+            )
+            self.assert_lock_refuses(root, text, "https://evil.example/tart.tar.gz is outside its backend's repository")
+
+    def test_forged_lock_url_in_another_repository_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            text = self.lock_text(root).replace(
+                "https://github.com/ninja-build/ninja/releases/download/",
+                "https://github.com/Kitware/CMake/releases/download/", 1,
+            )
+            self.assert_lock_refuses(root, text, "is outside its backend's repository")
+
+    def test_forged_conda_dependency_url_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            text = self.lock_text(root).replace("https://conda.anaconda.org/conda-forge/", "https://evil.example/conda/", 1)
+            self.assert_lock_refuses(root, text, "conda-packages.")
+
+    def test_forged_lock_version_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            text = self.lock_text(root).replace('version = "4.3.3"', 'version = "4.3.4"', 1)
+            self.assert_lock_refuses(root, text, "cmake is locked at '4.3.4'")
 
     def test_lock_missing_a_platform_checksum_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             self.fixture(root)
-            path = root / generate.MISE_LOCK
-            text = path.read_text(encoding="utf-8")
-            text = re.sub(r'(\[tools\.node\."platforms\.windows-arm64"\]\n)checksum = "[^"]*"\n', r"\1", text)
-            path.write_text(text, encoding="utf-8")
-            data = generate.load(root / "tools/toolchain/manifest.toml")[0]
-            with self.assertRaises(ValueError) as ctx:
-                generate.check_mise_lock(path, data)
-            self.assertIn("node@26.10.0 has no checksum and url for windows-arm64", str(ctx.exception))
+            text = re.sub(
+                r'(\[tools\.node\."platforms\.windows-arm64"\]\n)checksum = "[^"]*"\n', r"\1", self.lock_text(root)
+            )
+            self.assert_lock_refuses(root, text, "node@26.10.0 has no checksum and url for windows-arm64")
+
+    def test_lock_missing_a_whole_platform_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            text = re.sub(r'\[tools\.cmake\."platforms\.linux-x64"\]\n(?:[a-z_]+ = .*\n)+', "", self.lock_text(root))
+            self.assert_lock_refuses(root, text, "cmake@4.3.3 has no checksum and url for linux-x64")
+
+    def test_lock_entry_on_a_declared_unlocked_platform_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            text = self.lock_text(root) + (
+                '\n[tools.tart."platforms.linux-x64"]\nchecksum = "sha256:' + "1" * 64 + '"\n'
+                'url = "https://github.com/openai/tart/releases/download/2.38.0/tart.tar.gz"\n'
+            )
+            self.assert_lock_refuses(root, text, "tart has entries for linux-x64")
 
     def test_lock_with_an_unmanifested_tool_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             self.fixture(root)
-            path = root / generate.MISE_LOCK
-            path.write_text(path.read_text(encoding="utf-8") + '\n[[tools.jq]]\nversion = "1.8.1"\nbackend = "aqua:jqlang/jq"\n', encoding="utf-8")
-            data = generate.load(root / "tools/toolchain/manifest.toml")[0]
-            with self.assertRaises(ValueError) as ctx:
-                generate.check_mise_lock(path, data)
-            self.assertIn("tools not in the manifest: jq", str(ctx.exception))
+            text = self.lock_text(root) + '\n[[tools.jq]]\nversion = "1.8.1"\nbackend = "aqua:jqlang/jq"\n'
+            self.assert_lock_refuses(root, text, "tools not in the manifest: jq")
+
+    def test_conda_dependency_without_a_locked_package_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            text = re.sub(r'\[conda-packages\.linux-x64\."libllvm21[^"]*"\]\n(?:[a-z_]+ = .*\n)+', "", self.lock_text(root))
+            self.assert_lock_refuses(root, text, "conda dependencies without a locked package on linux-x64")
+
+    def test_every_lock_platform_is_locked_or_declared_unlocked(self) -> None:
+        data, _ = generate.load()
+        lock = tomllib.loads((REPO / generate.MISE_LOCK).read_text(encoding="utf-8"))
+        for key, spec in data["mise"]["tools"].items():
+            entry = lock["tools"][generate.mise_name(key, spec)][0]
+            for platform in data["mise"]["lock_platforms"]:
+                with self.subTest(tool=key, platform=platform):
+                    row = entry.get(f"platforms.{platform}")
+                    if platform in spec.get("unlocked", {}):
+                        self.assertIsNone(row)
+                    else:
+                        self.assertTrue(row and row["checksum"].startswith("sha256:") and row["url"])
 
     def test_every_manifest_tool_is_in_the_generated_profile(self) -> None:
         data, _ = generate.load()
-        text = (REPO / generate.MISE_CONFIG).read_text(encoding="utf-8")
-        for key, (name, _backend, _checksum, _os) in generate.MISE_TOOLS.items():
+        text = (REPO / generate.MISE_TOOLS_CONFIG).read_text(encoding="utf-8")
+        for key, spec in data["mise"]["tools"].items():
+            name = generate.mise_name(key, spec)
             self.assertRegex(text, rf'(?m)^"?{re.escape(name)}"? = .*"{re.escape(data["toolchain"][key])}"')
-        self.assertIn(data["mise"]["version"], re.search(r"(?m)^min_version = (.*)$", text).group(1))
         if data["mise"]["enforcement"] == "warn":
-            self.assertIn("soft =", text)
+            # An older mise in an interactive shell must not print upgrade warnings.
+            self.assertNotIn("min_version", text)
+        base = (REPO / generate.MISE_CONFIG).read_text(encoding="utf-8")
+        self.assertNotIn("[tools]", base)
         for prefix in data["npm"]["prefixes"]:
             self.assertTrue((REPO / prefix / "package-lock.json").is_file(), prefix)
-            self.assertIn(f"npm ci --prefix {prefix}", text)
+            self.assertIn(f"npm ci --prefix {prefix}", base)
 
     def test_lock_is_written_only_by_the_pinned_mise(self) -> None:
         with tempfile.TemporaryDirectory() as td:

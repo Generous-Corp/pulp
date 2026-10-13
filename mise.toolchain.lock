@@ -439,16 +439,6 @@ checksum = "sha256:a976991dcd085c1bb5d9a8084823a6bc8b7f9b079d8c432574a6ddd68c3a6
 url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.14.4+20260414-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
 provenance = "github-attestations"
 
-[[tools.rust]]
-version = "1.97.1"
-backend = "core:rust"
-specifiers = ["1.97.1"]
-
-[tools.rust.options]
-components = "clippy,rustfmt"
-profile = "minimal"
-targets = "x86_64-apple-darwin"
-
 [[tools.tart]]
 version = "2.38.0"
 backend = "aqua:openai/tart"

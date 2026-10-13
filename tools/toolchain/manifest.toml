@@ -2,15 +2,13 @@
 schema = 1
 
 [toolchain]
-# Every value is an exact version. generate.py refuses a floating selector
-# ("homebrew", "stable", "latest", a bare major.minor) here; a platform that
-# still installs a tool from its own package manager declares that below as an
-# override, and generate.py lists it as an exception rather than a pin.
-# Each pin is the newest version the required macOS gate already ran on:
-#   python 3.14.4 and cmake 4.3.3 from the gate's CMake configure output,
-#   rust 1.97.1 from the macOS gate-VM release legs (and Shipyard's pin),
-#   clang-format 21.1.8 from the hosted format check's PyPI pin.
+# Every value is an exact version; generate.py refuses a floating selector
+# ("homebrew", "stable", "latest", a bare "3.12"). A platform that still takes
+# a tool from its own package manager says so below as an override. Whether a
+# pin is already true on the required gate or is a target the gate must still
+# reach is recorded per tool in [evidence]; a target is not an observation.
 xcode = "26.5"
+xcode_build = "17F42"
 cmake = "4.3.3"
 ninja = "1.13.2"
 python = "3.14.4"
@@ -21,6 +19,21 @@ rust_components = ["rustfmt", "clippy"]
 tart = "2.38.0"
 clang_format = "21.1.8"
 
+[evidence]
+# observed: the required gate already runs this exact version (source named).
+# target: chosen, not yet what the gate runs; the golden receipt must show it
+# before enforcement. The golden facts come from a read-only mount of m3's
+# pulp-build-runner:latest disk (2026-10-12): Xcode.app version.plist,
+# /opt/homebrew/Cellar, and the rustup channel manifest.
+xcode = { status = "observed", source = "golden /Applications/Xcode.app version.plist: 26.5 (17F42); gate compiler Apple clang 21.0.0 (clang-2100.1.1.101)" }
+cmake = { status = "observed", source = "gate setup.sh prints 'cmake 4.3.3' on m3, m5 and m5s gate VMs; golden Cellar/cmake/4.3.3" }
+ninja = { status = "observed", source = "golden Cellar/ninja/1.13.2; every host runs 1.13.2" }
+python = { status = "observed", source = "gate configure 'Found Python3 ... 3.14.4'; golden Cellar/python@3.14/3.14.4_1 is python3" }
+node = { status = "target", source = "golden runs Homebrew node 26.0.0; hosts run 26.7.0 to 26.10.0 (m5s nvm 24.21.0); 26.10.0 is the newest a host runs" }
+rust = { status = "observed", source = "golden rustup stable toolchain is rustc 1.97.1 with the x86_64-apple-darwin std; release-cli darwin legs print cargo 1.97.1. The golden got it from a floating 'stable' install, so a rebake can move it until rust-toolchain.toml pins it" }
+tart = { status = "target", source = "tart runs on the hosts, not in the VM: m5s runs gate VMs on 2.38.0, m3, m1 and m5 still run 2.36.0" }
+clang_format = { status = "target", source = "the hosted format check pins PyPI clang-format 21.1.8; the golden has no clang-format at all" }
+
 [mise]
 # The mise binary itself is part of the pin: built from source at this tag and
 # commit, installed by digest, never self-updated. The lock is only
@@ -30,8 +43,47 @@ clang_format = "21.1.8"
 version = "2026.10.8"
 source_commit = "b671d356aaf33b87e48e7469a77abb40c3553c68"
 lock_platforms = ["linux-arm64", "linux-x64", "macos-arm64", "macos-x64", "windows-arm64", "windows-x64"]
-# warn: report a mismatch and continue. enforce: refuse. See check_env.py.
+# warn: nothing refuses an environment yet. enforce: emits a hard min_version.
 enforcement = "warn"
+# sha256 of the committed mise.toolchain.lock. generate.py --lock writes it; the drift
+# test refuses a lock whose bytes do not hash to it, so a lock edit shows
+# up as a change to this reviewed file.
+lock_sha256 = "3e3d93b19c8ea8f1b8f034e5713bdae59c7c9552d1f26ab725e6309d53b39a05"
+
+# One table per tool mise installs. Rust is deliberately absent: rustup
+# installs it and cargo reads rust-toolchain.toml, so the lock never records
+# it (mise could only lock a version string, with no checksum). Every locked
+# URL must start with one of url_prefixes, which name the backend's own
+# repository or distribution; `unlocked` lists, with the reason, each lock
+# platform the tool deliberately has no entry for.
+[mise.tools.cmake]
+backend = "aqua:Kitware/CMake"
+url_prefixes = ["https://github.com/Kitware/CMake/releases/download/", "https://api.github.com/repos/Kitware/CMake/releases/assets/"]
+
+[mise.tools.ninja]
+backend = "aqua:ninja-build/ninja"
+url_prefixes = ["https://github.com/ninja-build/ninja/releases/download/", "https://api.github.com/repos/ninja-build/ninja/releases/assets/"]
+
+[mise.tools.python]
+backend = "core:python"
+url_prefixes = ["https://github.com/astral-sh/python-build-standalone/releases/download/", "https://api.github.com/repos/astral-sh/python-build-standalone/releases/assets/"]
+
+[mise.tools.node]
+backend = "core:node"
+url_prefixes = ["https://nodejs.org/dist/"]
+
+[mise.tools.tart]
+# Tart publishes from openai/tart (cirruslabs/tart redirects to the same repository).
+backend = "aqua:openai/tart"
+url_prefixes = ["https://github.com/openai/tart/releases/download/", "https://api.github.com/repos/openai/tart/releases/assets/"]
+unlocked = { linux-arm64 = "tart runs only on macOS hosts", linux-x64 = "tart runs only on macOS hosts", windows-arm64 = "tart runs only on macOS hosts", windows-x64 = "tart runs only on macOS hosts" }
+
+[mise.tools.clang_format]
+# The same LLVM 21.1.8 release CI installs from PyPI; the PyPI route cannot be
+# installed with `mise install --locked`.
+backend = "conda:clang-format"
+url_prefixes = ["https://conda.anaconda.org/conda-forge/"]
+unlocked = { windows-arm64 = "conda-forge publishes no windows-arm64 clang-format; that platform keeps its own" }
 
 [npm]
 # Project dependencies install with `npm ci` from these committed lockfiles,
@@ -43,11 +95,11 @@ rust = true
 rust_targets = ["x86_64-apple-darwin"]
 
 [platform.linux]
-cmake = "system" # exception: apt cmake until the tartci bake installs from mise.lock
+cmake = "system" # exception: apt cmake until the tartci bake installs from mise.toolchain.lock
 rust = "absent"
 
 [platform.windows]
-cmake = "system" # exception: choco cmake until the tartci bake installs from mise.lock
+cmake = "system" # exception: choco cmake until the tartci bake installs from mise.toolchain.lock
 rust = "absent"
 
 

@@ -19,6 +19,7 @@ disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
 [toolchain]
+xcode_build = "17F42"
 # Pin Xcode in-image so font/raster goldens are reproducible. Prefer copying a
 # host-installed Xcode (tart-provision PULP_HOST_XCODE_APP) over an in-guest
 # xcodes download (interactive 2FA).
@@ -54,7 +55,7 @@ packages = [
 # test otherwise hangs until its timeout on the VM golden.
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = d8e237c1c48d2ce6b9bb1a672a260242742177c439d219f59501cf99979f1e55
+# source_sha256 = 74f137062761c88fc638509e1fa340dcd4405b6772e83b630784d55c8b639abf
 # generated_platform = macos
 # END GENERATED PULP TOOLCHAIN
 
