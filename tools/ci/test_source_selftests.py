@@ -40,7 +40,12 @@ atexit.register(shutil.rmtree, REPO, True)
 (REPO / "tools" / "scripts" / "test_x.py").write_text("print('portable')\n")
 BUILD = REPO / "build"
 GATE = {"merge_group": "validation|slow|source-selftest"}
-WIRED = "run: python3 tools/ci/source_selftests.py run --min-count 130\n"
+WIRED = (
+    "run: python3 tools/ci/source_selftests.py run --min-count 130 --part shared\n"
+    "shard: [1, 2]\n"
+    "run: python3 tools/ci/source_selftests.py run --min-count 130 --part exclusive "
+    "--shard ${{ matrix.shard }}/2\n"
+)
 
 
 def registration(name, argv, labels=("source-selftest",), **props):
@@ -172,6 +177,14 @@ class CheckTests(unittest.TestCase):
     def test_lane_that_stops_running_the_manifest_is_reported(self) -> None:
         errors = run_check([], [], workflow="run: echo nothing\n")
         self.assertTrue(any("would run on no required lane" in e for e in errors), errors)
+
+    def test_lane_that_drops_one_part_of_the_split_is_reported(self) -> None:
+        for dropped in WIRED.splitlines():
+            workflow = WIRED.replace(dropped + "\n", "")
+            errors = run_check([], [], workflow=workflow)
+            self.assertTrue(
+                any("would run on no required lane" in e for e in errors), (dropped, errors)
+            )
 
 
 class PortabilityTests(unittest.TestCase):
@@ -373,6 +386,171 @@ class SkipAccountingTests(unittest.TestCase):
         self.assertIn("nothing was executed", out)
 
 
+def _locked(name, lock, **extra):
+    return entry(name, [f"{{repo}}/{name}.py"], resource_lock=[lock], **extra)
+
+
+class LanePartTests(unittest.TestCase):
+    """The split across the required lane's jobs drops and doubles nothing."""
+
+    ENTRIES = [
+        entry("a", ["{repo}/a.py"]),
+        entry("b", ["{repo}/b.py"], timeout=300.0),
+        entry("big1", ["{repo}/big1.py"], processors=8, timeout=300.0),
+        entry("big2", ["{repo}/big2.py"], processors=8, timeout=300.0),
+        _locked("big3", "shared-lock", processors=8),
+        _locked("small-locked", "shared-lock"),
+        entry("big4", ["{repo}/big4.py"], processors=8),
+    ]
+
+    def test_every_entry_lands_in_exactly_one_part(self) -> None:
+        parts = lane.lane_parts(self.ENTRIES)
+        names = [e["name"] for members in parts.values() for e in members]
+        self.assertEqual(sorted(names), sorted(e["name"] for e in self.ENTRIES))
+        self.assertEqual(lane.part_errors(self.ENTRIES), [])
+
+    def test_exclusive_entries_never_run_in_the_shared_part(self) -> None:
+        shared = lane.lane_parts(self.ENTRIES)[lane.SHARED_PART]
+        self.assertEqual([e["name"] for e in shared], ["a", "b"])
+
+    def test_a_resource_lock_never_spans_two_jobs(self) -> None:
+        parts = lane.lane_parts(self.ENTRIES)
+        holding = [key for key, members in parts.items()
+                   if {"big3", "small-locked"} & {e["name"] for e in members}]
+        self.assertEqual(len(holding), 1, parts)
+        members = {e["name"] for e in parts[holding[0]]}
+        self.assertLessEqual({"big3", "small-locked"}, members)
+
+    def test_the_split_is_a_function_of_the_manifest(self) -> None:
+        forward = lane.lane_parts(self.ENTRIES)
+        backward = lane.lane_parts(list(reversed(self.ENTRIES)))
+        self.assertEqual(
+            {k: sorted(e["name"] for e in v) for k, v in forward.items()},
+            {k: sorted(e["name"] for e in v) for k, v in backward.items()},
+        )
+
+    def test_a_doubled_entry_is_reported(self) -> None:
+        doubled = self.ENTRIES + [dict(self.ENTRIES[0])]
+        self.assertTrue(any("not exactly one" in e for e in lane.part_errors(doubled)))
+
+    def test_bad_selectors_are_refused(self) -> None:
+        for part, shard in (("exclusive", None), ("exclusive", "3/3"),
+                            ("exclusive", "0/2"), ("shared", "1/2"), ("all", "1/2")):
+            with self.assertRaises(ValueError, msg=(part, shard)):
+                lane.select_part(self.ENTRIES, part, shard)
+
+    def _run_part(self, root: pathlib.Path, entries, *argv) -> tuple[int, str]:
+        for item in entries:
+            (root / f"{item['name']}.py").write_text(
+                f"open({str(root / 'ran')!r}, 'a').write({item['name']!r} + '\\n')\n"
+            )
+        manifest = root / "m.json"
+        manifest.write_text(json.dumps({"schema_version": 1, "tests": [
+            {**item, "argv": [f"{root}/{item['name']}.py"]} for item in entries]}))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = lane.main(["run", "--manifest", str(manifest), *argv])
+        ran = (root / "ran").read_text().split() if (root / "ran").exists() else []
+        return code, sorted(ran)
+
+    def test_the_parts_run_every_entry_between_them(self) -> None:
+        ran: list[str] = []
+        for argv in (["--part", "shared"],
+                     ["--part", "exclusive", "--shard", "1/2"],
+                     ["--part", "exclusive", "--shard", "2/2"]):
+            with tempfile.TemporaryDirectory() as tmp:
+                code, names = self._run_part(pathlib.Path(tmp), self.ENTRIES, *argv)
+            self.assertEqual(code, 0, argv)
+            ran.extend(names)
+        self.assertEqual(sorted(ran), sorted(e["name"] for e in self.ENTRIES))
+
+    def test_min_count_still_counts_the_whole_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, ran = self._run_part(
+                pathlib.Path(tmp), self.ENTRIES,
+                "--part", "shared", "--min-count", str(len(self.ENTRIES) + 1))
+        self.assertEqual((code, ran), (1, []))
+
+    def test_an_empty_part_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, ran = self._run_part(
+                pathlib.Path(tmp), [entry("a", ["{repo}/a.py"])],
+                "--part", "exclusive", "--shard", "1/2")
+        self.assertEqual((code, ran), (1, []))
+
+
+def _workflow_job(text: str, job: str) -> str:
+    start = text.index(f"\n  {job}:\n")
+    rest = text[start + 1:]
+    following = [i for i in (rest.find(f"\n  {name}:\n") for name in _job_ids(text))
+                 if i > 0]
+    return rest[:min(following)] if following else rest
+
+
+def _job_ids(text: str) -> list[str]:
+    body = text[text.index("\njobs:\n"):]
+    return [line[2:-1] for line in body.splitlines()
+            if line.startswith("  ") and not line.startswith("   ")
+            and line.endswith(":") and not line.lstrip().startswith("#")]
+
+
+def _run_block(job_text: str) -> str:
+    lines = job_text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "run: |") + 1
+    block = []
+    for line in lines[start:]:
+        if line.strip() and not line.startswith(" " * 10):
+            break
+        block.append(line[10:])
+    return "\n".join(block) + "\n"
+
+
+def aggregator_verdicts(script: str) -> dict[tuple[str, str], int]:
+    """Exit code of the aggregator script for every pair of part results."""
+    outcomes = ("success", "failure", "cancelled", "skipped", "")
+    verdicts = {}
+    for checks in outcomes:
+        for exclusive in outcomes:
+            env = {**os.environ, "CHECKS_RESULT": checks, "EXCLUSIVE_RESULT": exclusive}
+            verdicts[(checks, exclusive)] = subprocess.run(
+                ["bash", "-e", "-c", script], env=env, capture_output=True
+            ).returncode
+    return verdicts
+
+
+class RequiredAggregatorTests(unittest.TestCase):
+    """The required context passes only when every part of the lane passed."""
+
+    TEXT = lane.LANE_WORKFLOW.read_text(encoding="utf-8")
+
+    def test_the_required_name_sits_on_an_always_run_job_needing_every_other(self) -> None:
+        job = _workflow_job(self.TEXT, "enforce")
+        self.assertIn("    name: Enforce version & skill sync\n", job)
+        self.assertEqual(self.TEXT.count("name: Enforce version & skill sync\n"), 1)
+        self.assertIn("    if: always()\n", job)
+        others = [name for name in _job_ids(self.TEXT) if name != "enforce"]
+        self.assertEqual(sorted(others), ["exclusive-selftests", "version-skill-check"])
+        self.assertIn(f"    needs: [{', '.join(others)}]\n", job)
+        self.assertIn("CHECKS_RESULT: ${{ needs.version-skill-check.result }}", job)
+        self.assertIn("EXCLUSIVE_RESULT: ${{ needs.exclusive-selftests.result }}", job)
+
+    def test_only_two_successes_pass(self) -> None:
+        verdicts = aggregator_verdicts(_run_block(_workflow_job(self.TEXT, "enforce")))
+        passing = [pair for pair, code in verdicts.items() if code == 0]
+        self.assertEqual(passing, [("success", "success")])
+
+    def test_control_a_script_that_lets_a_skipped_part_pass_is_caught(self) -> None:
+        script = _run_block(_workflow_job(self.TEXT, "enforce"))
+        guard = 'if [ "$result" = "success" ]; then'
+        self.assertIn(guard, script)
+        mutant = script.replace(
+            guard, 'if [ "$result" = "success" ] || [ "$result" = "skipped" ]; then')
+        verdicts = aggregator_verdicts(mutant)
+        self.assertEqual(verdicts[("success", "skipped")], 0)
+        self.assertNotEqual(
+            [pair for pair, code in verdicts.items() if code == 0], [("success", "success")])
+
+
 class RepositoryTests(unittest.TestCase):
     """The checked-in manifest and its two consumers agree."""
 
@@ -414,6 +592,17 @@ class RepositoryTests(unittest.TestCase):
             lane_workflow_text=lane.LANE_WORKFLOW.read_text(encoding="utf-8"),
         )
         self.assertEqual(errors, [])
+
+    def test_the_real_manifest_splits_into_nonempty_parts(self) -> None:
+        entries = lane.load_manifest()
+        parts = lane.lane_parts(entries)
+        self.assertEqual(lane.part_errors(entries), [])
+        self.assertEqual(
+            sum(len(members) for members in parts.values()), len(entries))
+        self.assertEqual(len(parts), lane.EXCLUSIVE_SHARDS + 1)
+        for key, members in parts.items():
+            self.assertTrue(members, key)
+        self.assertFalse(any(lane.is_exclusive(e) for e in parts[lane.SHARED_PART]))
 
     def test_lane_workflow_reports_on_merge_group(self) -> None:
         text = lane.LANE_WORKFLOW.read_text(encoding="utf-8")

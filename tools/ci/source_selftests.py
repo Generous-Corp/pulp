@@ -15,9 +15,13 @@ follow from one manifest, so they cannot drift apart:
 * ``tools/ci/ctest_gate_args.py`` excludes that label on the gate events
   (``pull_request``, ``workflow_dispatch``, ``merge_group``). Every other lane,
   including ``push`` to main, still runs them.
-* ``.github/workflows/version-skill-check.yml`` (the required
-  ``Enforce version & skill sync`` context, which reports on ``merge_group``)
-  runs every entry with ``run``, so each one stays on a REQUIRED check.
+* ``.github/workflows/version-skill-check.yml`` runs every entry with
+  ``run``, split into ``lane_parts``: the shared part beside the other version
+  and skill checks, and each whole-machine entry (``PROCESSORS`` above 1) in
+  one of ``EXCLUSIVE_SHARDS`` sibling jobs, where it still runs alone. The
+  required ``Enforce version & skill sync`` context (which reports on
+  ``merge_group``) needs every one of those jobs and fails unless all
+  succeeded, so each entry stays on a REQUIRED check.
 
 ``check`` is the guard. It runs on the macOS gate itself (it needs a configured
 build tree) and fails when a label and the manifest disagree, when a manifest
@@ -344,6 +348,131 @@ def run(
                 flush=True,
             )
     return results
+
+
+# --------------------------------------------------------------------------
+# lane parts: how the required lane splits the manifest across jobs
+
+# Whole-machine entries run in this many sibling jobs. version-skill-check.yml
+# lists the same shard numbers in its matrix; `check` fails if the two differ.
+EXCLUSIVE_SHARDS = 2
+SHARED_PART = "shared"
+EXCLUSIVE_PART = "exclusive"
+
+
+def is_exclusive(entry: dict[str, Any]) -> bool:
+    """An entry calibrated to have the machine to itself (``PROCESSORS`` > 1)."""
+    return int(entry.get("processors") or 1) > 1
+
+
+def lane_parts(
+    entries: list[dict[str, Any]], shards: int = EXCLUSIVE_SHARDS
+) -> dict[str, list[dict[str, Any]]]:
+    """Split the manifest into the shared part and ``shards`` exclusive shards.
+
+    Every entry lands in exactly one part. Entries that share a resource lock
+    with an exclusive entry travel with it, so a lock never spans two jobs.
+    Exclusive groups are placed longest-timeout first on the lightest shard, a
+    deterministic function of the manifest alone, so every job computes the
+    same split without coordinating.
+    """
+    if shards < 1:
+        raise ValueError("shards must be at least 1")
+    parent = {e["name"]: e["name"] for e in entries}
+
+    def find(name: str) -> str:
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    holders: dict[str, str] = {}
+    for item in entries:
+        for lock in item.get("resource_lock") or []:
+            if lock in holders:
+                parent[find(item["name"])] = find(holders[lock])
+            else:
+                holders[lock] = item["name"]
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in entries:
+        groups.setdefault(find(item["name"]), []).append(item)
+    exclusive = [g for g in groups.values() if any(is_exclusive(e) for e in g)]
+    in_exclusive = {e["name"] for g in exclusive for e in g}
+
+    def weight(group: list[dict[str, Any]]) -> float:
+        return sum(float(e.get("timeout") or DEFAULT_TIMEOUT) for e in group)
+
+    keys = [f"{EXCLUSIVE_PART}-{i}/{shards}" for i in range(1, shards + 1)]
+    load = {key: 0.0 for key in keys}
+    result: dict[str, list[dict[str, Any]]] = {SHARED_PART: [
+        e for e in entries if e["name"] not in in_exclusive]}
+    result.update({key: [] for key in keys})
+    for group in sorted(exclusive, key=lambda g: (-weight(g), min(e["name"] for e in g))):
+        key = min(keys, key=lambda k: (load[k], keys.index(k)))
+        load[key] += weight(group)
+        result[key].extend(group)
+    return result
+
+
+def part_errors(entries: list[dict[str, Any]], shards: int = EXCLUSIVE_SHARDS) -> list[str]:
+    """Ways the split could drop or double-run an entry."""
+    errors: list[str] = []
+    counts: dict[str, int] = {}
+    for members in lane_parts(entries, shards).values():
+        for item in members:
+            counts[item["name"]] = counts.get(item["name"], 0) + 1
+    for item in entries:
+        seen = counts.get(item["name"], 0)
+        if seen != 1:
+            errors.append(f"{item['name']}: runs in {seen} lane parts, not exactly one")
+    return errors
+
+
+def select_part(
+    entries: list[dict[str, Any]], part: str, shard: str | None
+) -> list[dict[str, Any]]:
+    """The entries one lane job runs; raises ValueError on a bad selector."""
+    if part == "all":
+        if shard:
+            raise ValueError("--shard needs --part exclusive")
+        return entries
+    if part == SHARED_PART:
+        if shard:
+            raise ValueError("--shard needs --part exclusive")
+        return lane_parts(entries)[SHARED_PART]
+    match = re.fullmatch(r"(\d+)/(\d+)", shard or "")
+    if not match:
+        raise ValueError("--part exclusive needs --shard I/N")
+    index, total = int(match.group(1)), int(match.group(2))
+    if total != EXCLUSIVE_SHARDS or not 1 <= index <= total:
+        raise ValueError(
+            f"--shard {shard} does not name one of the {EXCLUSIVE_SHARDS} "
+            "exclusive shards this script defines"
+        )
+    return lane_parts(entries)[f"{EXCLUSIVE_PART}-{index}/{total}"]
+
+
+def wiring_errors(lane_workflow_text: str) -> list[str]:
+    """The lane workflow must run every part of the split."""
+    errors: list[str] = []
+    workflow = LANE_WORKFLOW.relative_to(REPO_ROOT)
+    shared = "tools/ci/source_selftests.py run --min-count 130 --part shared"
+    exclusive = (
+        "tools/ci/source_selftests.py run --min-count 130 --part exclusive "
+        f"--shard ${{{{ matrix.shard }}}}/{EXCLUSIVE_SHARDS}"
+    )
+    matrix = "shard: [" + ", ".join(str(i) for i in range(1, EXCLUSIVE_SHARDS + 1)) + "]"
+    for needle, what in (
+        (shared, "the shared part"),
+        (exclusive, "the exclusive shards"),
+        (matrix, f"all {EXCLUSIVE_SHARDS} exclusive shards"),
+    ):
+        if needle not in lane_workflow_text:
+            errors.append(
+                f"{workflow} no longer runs {what} (`{needle}`); the {LABEL} tests "
+                "in it would run on no required lane"
+            )
+    return errors
 
 
 # --------------------------------------------------------------------------
@@ -1123,12 +1252,8 @@ def check(
                 f"gate event {event} does not exclude {LABEL}; the moved tests "
                 "would run twice (harmless) but the wiring has drifted"
             )
-    invocation = "tools/ci/source_selftests.py run"
-    if invocation not in lane_workflow_text:
-        errors.append(
-            f"{LANE_WORKFLOW.relative_to(REPO_ROOT)} no longer invokes "
-            f"`{invocation}`; the {LABEL} tests would run on no required lane"
-        )
+    errors.extend(wiring_errors(lane_workflow_text))
+    errors.extend(part_errors(entries))
     return errors
 
 
@@ -1237,6 +1362,18 @@ def main(argv: list[str] | None = None) -> int:
         help="fail when the manifest lists fewer entries (a shrunken lane)",
     )
     p_run.add_argument(
+        "--part",
+        choices=("all", SHARED_PART, EXCLUSIVE_PART),
+        default="all",
+        help="run one part of the manifest's split across the required lane's "
+        "jobs (see lane_parts); --min-count still counts the whole manifest",
+    )
+    p_run.add_argument(
+        "--shard",
+        metavar="I/N",
+        help="with --part exclusive: which exclusive shard to run",
+    )
+    p_run.add_argument(
         "--workflow",
         type=pathlib.Path,
         help="run the repo Python scripts a workflow file invokes instead of the "
@@ -1327,6 +1464,21 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+        if args.part != "all" or args.shard:
+            if args.workflow or args.ctest_python or args.changed_from:
+                parser.error("--part/--shard split the manifest; they take no other selector")
+            total = len(entries)
+            try:
+                entries = select_part(entries, args.part, args.shard)
+            except ValueError as exc:
+                parser.error(str(exc))
+            label = args.part + (f" {args.shard}" if args.shard else "")
+            print(f"source-selftests: lane part {label}: {len(entries)} of {total} entries",
+                  flush=True)
+            if not entries:
+                print(f"source-selftests: lane part {label} is empty; the split no longer "
+                      "matches the workflow", file=sys.stderr)
+                return 1
         if args.workflow or args.ctest_python:
             for entry in [e for e in entries if e["name"] in WORKFLOW_LOCAL_SKIPS]:
                 entries.remove(entry)
