@@ -149,6 +149,20 @@ set_tests_properties(pulp-simd-arm64ec-detect PROPERTIES
     LABELS "cmake;simd"
     TIMEOUT 30)
 
+add_test(NAME pulp-windows-target-arch
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_windows_target_arch.cmake)
+set_tests_properties(pulp-windows-target-arch PROPERTIES
+    LABELS "cmake;windows;packaging"
+    TIMEOUT 30)
+
+add_test(NAME pulp-gpu-provider-decision
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_gpu_provider_decision.cmake)
+set_tests_properties(pulp-gpu-provider-decision PROPERTIES
+    LABELS "cmake;gpu;provider"
+    TIMEOUT 30)
+
 # The Linux CLI's Scene3D archives need a render/scene rescan without placing
 # the higher-level recipe archive in that group. The latter depends back through
 # view and gpu-audio, which makes CMake reject the generated target graph.

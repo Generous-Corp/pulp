@@ -141,13 +141,8 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # copy_if_different so direct target builds and multi-config generators
     # remain deterministic.
     if(WIN32)
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
-            set(_pulp_vst3_windows_arch "arm64-win")
-        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$")
-            set(_pulp_vst3_windows_arch "x86_64-win")
-        else()
-            set(_pulp_vst3_windows_arch "x86-win")
-        endif()
+        include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpWindowsTargetArch.cmake")
+        pulp_windows_target_arch(_pulp_vst3_windows_arch)
         set(_pulp_vst3_windows_bundle
             "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
         set(_pulp_vst3_windows_contents
