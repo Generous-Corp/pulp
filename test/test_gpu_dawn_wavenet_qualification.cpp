@@ -62,6 +62,10 @@ struct Result {
     bool cpu_parity = false;
     bool cpu_fallback_parity = false;
     bool cpu_fallback_delivered = false;
+    // The forced-late branch is a harness shadow delivery. It proves oracle
+    // parity and disposition handling, but it is not physical provider
+    // fallback delivery evidence.
+    bool cpu_fallback_physical_proof = false;
     bool late_result_rejected = false;
     bool retired = false;
     bool reprimed = false;
@@ -87,6 +91,9 @@ void emit(const Result& result, std::string_view status) {
               << (result.cpu_parity ? "true" : "false") << R"(,"cpu_fallback_parity":)"
               << (result.cpu_fallback_parity ? "true" : "false") << R"(,"cpu_fallback_delivered":)"
               << (result.cpu_fallback_delivered ? "true" : "false")
+              << R"(,"cpu_fallback_physical_proof":)"
+              << (result.cpu_fallback_physical_proof ? "true" : "false")
+              << R"(,"cpu_fallback_delivery_mode":"shadow_only")"
               << R"(,"continuous_cpu_fallback":)" << (result.cpu_fallback != 0 ? "true" : "false")
               << R"(,"late_result_rejected":)" << (result.late_result_rejected ? "true" : "false")
               << R"(,"retired":)" << (result.retired ? "true" : "false") << R"(,"reprimed":)"
@@ -210,6 +217,9 @@ Result run() {
         return result;
     }
     result.cpu_fallback_parity = true;
+    // The first block is deliberately forced late; the remaining three are
+    // the GPU-delivered population and must all match the independent oracle.
+    result.cpu_parity = true;
 
     // The counter is constructed before any provider-owned Dawn object and is
     // destroyed after the provider, satisfying the process-global proc-table
@@ -325,13 +335,11 @@ Result run() {
                 return result;
             }
             result.cpu_parity =
-                result.cpu_parity ||
+                result.cpu_parity &&
                 compare_block({reinterpret_cast<const float*>(output->bytes.data()), 2}, expected);
             result.cpu_parity = result.cpu_parity && plan.release_output({output->token});
             ++result.gpu_delivered;
         }
-        if (sequence == 1)
-            result.cpu_parity = true;
         ++sequence;
     }
     result.cpu_parity = result.cpu_parity && result.gpu_delivered == 3;
@@ -343,7 +351,7 @@ Result run() {
     result.retired =
         result.retired &&
         std::all_of(first_receipts.begin(), first_receipts.end(), [](const auto& receipt) {
-            return receipt.terminal && receipt.submit_ns >= 0 &&
+            return receipt.terminal && receipt.submit_ns >= 0 && receipt.submit_ns != -1 &&
                    receipt.terminal_ns >= receipt.submit_ns &&
                    (receipt.output_released || receipt.discarded);
         });
@@ -402,7 +410,8 @@ Result run() {
     result.retired = result.retired && plan.release();
     run_device_loss_negative(result, fixture, transfer_counter.deferred_proc_table());
     if (result.device_loss_negative)
-        result.reason = result.retired ? "authenticated_one_stream_pass" : "release_failed";
+        result.reason = result.retired ? "authenticated_one_stream_pass_cpu_fallback_shadow_only"
+                                       : "release_failed";
     return result;
 }
 

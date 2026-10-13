@@ -2499,7 +2499,13 @@ bool DawnSharedIoProvider::device_lost() const noexcept {
 }
 
 bool DawnSharedIoProvider::can_resume_after_drain() const noexcept {
-    return impl_ && impl_->reusable && !impl_->device_destroyed && !device_lost();
+    if (!impl_ || !impl_->reusable || !impl_->accepting || impl_->device_destroyed || device_lost())
+        return false;
+    for (const auto* slot : impl_->slots) {
+        if (slot == nullptr || slot->submission.accepted)
+            return false;
+    }
+    return true;
 }
 
 std::uint32_t DawnSharedIoProvider::alignment() const noexcept {
