@@ -78,8 +78,8 @@ std::string encode_vector_key(std::string_view x, std::string_view y) {
 }
 
 std::string encode_pair_key(std::string_view first, std::string_view second) {
-    return std::to_string(first.size()) + ":" + std::string(first) +
-           std::to_string(second.size()) + ":" + std::string(second);
+    return std::to_string(first.size()) + ":" + std::string(first) + std::to_string(second.size()) +
+           ":" + std::string(second);
 }
 
 DesignSlotKind interactive_slot_kind(InteractiveElementKind kind) {
@@ -101,7 +101,8 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
     std::string scalar;
     const auto parameter = attributes.parameter;
     const bool has_vector_binding = !attributes.x.empty() || !attributes.y.empty() ||
-                                    !attributes.x_module.empty() || !attributes.x_parameter.empty() ||
+                                    !attributes.x_module.empty() ||
+                                    !attributes.x_parameter.empty() ||
                                     !attributes.y_module.empty() || !attributes.y_parameter.empty();
     const bool has_meter_binding = !attributes.meter.empty() || !attributes.meter_source.empty() ||
                                    !attributes.meter_channel.empty();
@@ -115,11 +116,11 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
         scalar = std::string(attributes.binding);
     }
     const auto x = attributes.x.empty()
-                      ? encode_pair_key(attributes.x_module, attributes.x_parameter)
-                      : std::string(attributes.x);
+                       ? encode_pair_key(attributes.x_module, attributes.x_parameter)
+                       : std::string(attributes.x);
     const auto y = attributes.y.empty()
-                      ? encode_pair_key(attributes.y_module, attributes.y_parameter)
-                      : std::string(attributes.y);
+                       ? encode_pair_key(attributes.y_module, attributes.y_parameter)
+                       : std::string(attributes.y);
     if (!scalar.empty()) {
         append_slot(slots, DesignSlotKind::dynamic_scalar, route, scalar);
         has_dynamic_slot = true;
