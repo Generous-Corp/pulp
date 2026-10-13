@@ -180,7 +180,8 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
         const auto slots = classify_design_slots(root);
         REQUIRE(slots.size() == 5);
         CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, "panel.route", "gain"});
-        CHECK(slots[1] == DesignSlot{DesignSlotKind::dynamic_vector, "panel.route", "pan.x|pan.y"});
+        CHECK(slots[1] ==
+              DesignSlot{DesignSlotKind::dynamic_vector, "panel.route", "5:pan.x5:pan.y"});
         CHECK(slots[2] == DesignSlot{DesignSlotKind::dynamic_meter, "panel.route", "meter.level"});
         CHECK(slots[3] == DesignSlot{DesignSlotKind::dynamic_text, "panel.route", "preset.name"});
         CHECK(slots[4] == DesignSlot{DesignSlotKind::dynamic_action, "panel.route", "next_preset"});
@@ -242,6 +243,22 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
         const auto slots = classify_design_slots(root);
         REQUIRE(slots.size() == 1);
         CHECK(slots.front() == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "synth::cutoff"});
+    }
+
+    SECTION("vector keys remain injective when parameter names contain delimiters") {
+        auto left = node("left");
+        left.attributes["pulpParamKeyX"] = "a|b";
+        left.attributes["pulpParamKeyY"] = "c";
+        auto right = node("right");
+        right.attributes["pulpParamKeyX"] = "a";
+        right.attributes["pulpParamKeyY"] = "b|c";
+        const auto left_slots = classify_design_slots(left);
+        const auto right_slots = classify_design_slots(right);
+        REQUIRE(left_slots.size() == 1);
+        REQUIRE(right_slots.size() == 1);
+        CHECK(left_slots.front().kind == DesignSlotKind::dynamic_vector);
+        CHECK(right_slots.front().kind == DesignSlotKind::dynamic_vector);
+        CHECK(left_slots.front().key != right_slots.front().key);
     }
 }
 

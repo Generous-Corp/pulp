@@ -15,6 +15,7 @@ const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const fixture = path.join(root, "test/fixtures/import-differential/17-fresh-plugin-panel.html");
 const interactions = path.join(root, "test/fixtures/import-differential/17-fresh-plugin-panel.interactions.json");
+const expectedReceiptDefault = path.join(root, "test/fixtures/import-differential/17-fresh-plugin-panel.receipt.json");
 const capture = path.join(root, "tools/import-design/browser_capture/capture.mjs");
 
 function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
@@ -83,12 +84,10 @@ async function main() {
       native: { backend: "skia", artifact_sha256: sha256(nativeBytes), artifact_bytes: nativeBytes.length },
       planted_negative: { mutated_id: "toggle-mutated", browser_capture_rejected: true },
     };
-    const expected = arg("--expected-receipt");
-    if (expected) {
-      const expectedReceipt = JSON.parse(await readFile(expected, "utf8"));
-      assert.deepEqual(receipt, expectedReceipt,
-        "fresh-plugin receipt differs from the committed deterministic baseline");
-    }
+    const expected = arg("--expected-receipt", expectedReceiptDefault);
+    const expectedReceipt = JSON.parse(await readFile(expected, "utf8"));
+    assert.deepEqual(receipt, expectedReceipt,
+      "fresh-plugin receipt differs from the committed deterministic baseline");
     const out = arg("--receipt", path.join(process.cwd(), "fresh-plugin-validation.receipt.json"));
     await writeFile(out, JSON.stringify(receipt, null, 2) + "\n");
     process.stdout.write(JSON.stringify(receipt, null, 2) + "\n");

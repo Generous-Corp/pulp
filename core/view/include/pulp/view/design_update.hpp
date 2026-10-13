@@ -24,10 +24,10 @@ enum class DesignSlotKind {
 struct DesignSlot {
     DesignSlotKind kind = DesignSlotKind::static_visual;
     std::string route_id;
-    // Canonical binding key (for a vector this is `x|y`; static slots are
-    // empty).  Keeping the key in the classification makes re-key updates
-    // observable and prevents a caller from accidentally treating two
-    // controls with different host routes as the same slot.
+    // Canonical binding key (for a vector this is a length-prefixed x/y pair;
+    // static slots are empty). Keeping the key in the classification makes
+    // re-key updates observable and prevents a caller from accidentally
+    // treating two controls with different host routes as the same slot.
     std::string key;
 
     friend bool operator==(const DesignSlot&, const DesignSlot&) = default;

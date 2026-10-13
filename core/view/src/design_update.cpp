@@ -9,14 +9,19 @@
 namespace pulp::view {
 namespace {
 
-std::string nonempty_attribute(const IRNode& node, std::string_view key) {
+std::string_view nonempty_attribute(const IRNode& node, std::string_view key) {
     const auto it = node.attributes.find(std::string(key));
-    return it == node.attributes.end() ? std::string{} : it->second;
+    return it == node.attributes.end() ? std::string_view{} : it->second;
 }
 
-void append_slot(std::vector<DesignSlot>& slots, DesignSlotKind kind, std::string route,
-                 std::string key) {
-    slots.push_back({kind, std::move(route), std::move(key)});
+void append_slot(std::vector<DesignSlot>& slots, DesignSlotKind kind, std::string_view route,
+                 std::string_view key) {
+    slots.push_back({kind, std::string(route), std::string(key)});
+}
+
+std::string encode_vector_key(std::string_view x, std::string_view y) {
+    return std::to_string(x.size()) + ":" + std::string(x) + std::to_string(y.size()) + ":" +
+           std::string(y);
 }
 
 DesignSlotKind interactive_slot_kind(InteractiveElementKind kind) {
@@ -33,29 +38,36 @@ DesignSlotKind interactive_slot_kind(InteractiveElementKind kind) {
 
 void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
     const auto route = nonempty_attribute(node, "pulpRouteId");
-    auto scalar = !nonempty_attribute(node, "binding").empty()
-                      ? nonempty_attribute(node, "binding")
-                      : nonempty_attribute(node, "pulpParamKey");
+    std::string scalar;
+    const auto binding = nonempty_attribute(node, "binding");
+    const auto parameter = nonempty_attribute(node, "pulpParamKey");
+    if (!binding.empty())
+        scalar = binding;
+    else if (!parameter.empty())
+        scalar = parameter;
     if (scalar.empty()) {
         const auto module = nonempty_attribute(node, "pulpBindingModule");
         const auto param = nonempty_attribute(node, "pulpBindingParam");
         if (!module.empty() || !param.empty())
-            scalar = module + "::" + param;
+            scalar = std::string(module) + "::" + std::string(param);
     }
     const auto x = nonempty_attribute(node, "pulpParamKeyX");
     const auto y = nonempty_attribute(node, "pulpParamKeyY");
     if (!scalar.empty())
         append_slot(slots, DesignSlotKind::dynamic_scalar, route, scalar);
     if (!x.empty() || !y.empty())
-        append_slot(slots, DesignSlotKind::dynamic_vector, route, x + "|" + y);
+        append_slot(slots, DesignSlotKind::dynamic_vector, route, encode_vector_key(x, y));
 
     const auto meter = nonempty_attribute(node, "pulpMeterValueKey");
-    if (!meter.empty() || !nonempty_attribute(node, "pulpMeterSource").empty() ||
-        !nonempty_attribute(node, "pulpMeterChannel").empty()) {
-        append_slot(slots, DesignSlotKind::dynamic_meter, route,
-                    meter.empty() ? nonempty_attribute(node, "pulpMeterSource") + "/" +
-                                        nonempty_attribute(node, "pulpMeterChannel")
-                                  : meter);
+    const auto meter_source = nonempty_attribute(node, "pulpMeterSource");
+    const auto meter_channel = nonempty_attribute(node, "pulpMeterChannel");
+    if (!meter.empty() || !meter_source.empty() || !meter_channel.empty()) {
+        std::string meter_key;
+        if (!meter.empty())
+            meter_key = meter;
+        else
+            meter_key = std::string(meter_source) + "/" + std::string(meter_channel);
+        append_slot(slots, DesignSlotKind::dynamic_meter, route, meter_key);
     }
 
     const auto text = nonempty_attribute(node, "pulpValueKey");
