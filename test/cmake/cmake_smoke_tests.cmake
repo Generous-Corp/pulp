@@ -1211,6 +1211,14 @@ set_tests_properties(cmake-pulp-add-sparkle PROPERTIES
     LABELS "cmake;ship" TIMEOUT 120
     SKIP_REGULAR_EXPRESSION "SKIP: pulp_add_sparkle is macOS-only")
 
+add_test(NAME cmake-pulp-cargo-staticlib-locked
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/pulp-cargo-staticlib-locked
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_cargo_staticlib_locked.cmake)
+set_tests_properties(cmake-pulp-cargo-staticlib-locked PROPERTIES
+    LABELS "cmake;rust" TIMEOUT 120)
+
 add_test(NAME cmake-build-defaults
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
