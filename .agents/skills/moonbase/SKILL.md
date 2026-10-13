@@ -35,6 +35,15 @@ target_link_libraries(MyPlugin PRIVATE moonbase::licensing)
 `MOONBASE_DISABLE_CURL_TRANSPORT` for you and drops libcurl. Inject a transport
 instead — the example supplies one over Pulp's `cpp-httplib`/mbedTLS stack.
 
+The example places its license cache under
+`ContentRegistry::platform_data_root()`, which lives in `pulp::content`. No
+format target links pulp-content, so every target that compiles
+`moonbase_activation_plugin.hpp` must link it explicitly: each
+`MoonbaseActivation_<fmt>`, the screenshot generator and the test. Without it
+they fail with an undefined `ContentRegistry::platform_data_root()`. The example
+is OFF by default (`PULP_BUILD_MOONBASE_EXAMPLE`), so a normal build never
+surfaces this; configure with it ON after changing anything it links.
+
 ## OpenSSL bolt-on (known upstream caveat)
 
 Moonbase documents OpenSSL as a system requirement (its README expects

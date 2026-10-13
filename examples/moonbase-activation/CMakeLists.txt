@@ -73,11 +73,13 @@ pulp_add_plugin(MoonbaseActivation
     MANUFACTURER_CODE "Genr")
 
 # The processor (and its editor) needs the Moonbase SDK + the Pulp HTTP transport
-# on every format target the plugin macro generated.
+# on every format target the plugin macro generated, and pulp-content for
+# ContentRegistry::platform_data_root(), which places the license cache
+# (moonbase_activation_plugin.hpp). The format adapters do not link pulp-content.
 foreach(_fmt VST3 CLAP AU Standalone)
     if(TARGET MoonbaseActivation_${_fmt})
         target_link_libraries(MoonbaseActivation_${_fmt}
-            PRIVATE moonbase::licensing pulp-cpp-httplib)
+            PRIVATE moonbase::licensing pulp-cpp-httplib pulp::content)
         target_include_directories(MoonbaseActivation_${_fmt}
             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     endif()
@@ -86,14 +88,14 @@ endforeach()
 # ── Headless screenshot generator (docs imagery; no window, no audio) ────────
 add_executable(moonbase-activation-screenshots capture_screens.cpp)
 target_link_libraries(moonbase-activation-screenshots
-    PRIVATE pulp::format pulp::view moonbase::licensing pulp-cpp-httplib)
+    PRIVATE pulp::format pulp::view pulp::content moonbase::licensing pulp-cpp-httplib)
 target_include_directories(moonbase-activation-screenshots PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # ── Tests (the validation proof) ────────────────────────────────────────────
 if(PULP_BUILD_TESTS)
     add_executable(pulp-moonbase-activation-test test_moonbase_activation.cpp)
     target_link_libraries(pulp-moonbase-activation-test
-        PRIVATE pulp::format pulp::view moonbase::licensing pulp-cpp-httplib
+        PRIVATE pulp::format pulp::view pulp::content moonbase::licensing pulp-cpp-httplib
                 Catch2::Catch2WithMain)
     target_include_directories(pulp-moonbase-activation-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(pulp-moonbase-activation-test)

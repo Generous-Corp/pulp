@@ -23,6 +23,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
+#include <pulp/render/gpu_compute.hpp>
 #include <pulp/signal/convolver.hpp>
 
 #include "super_convolver.hpp"

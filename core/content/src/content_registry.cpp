@@ -122,18 +122,6 @@ bool path_within(const fs::path& path, const fs::path& root) {
     return true;
 }
 
-bool all_in(const std::vector<std::string>& values, const std::vector<std::string>& allowed,
-            std::string* offending = nullptr) {
-    for (const auto& value : values) {
-        if (!contains(allowed, value)) {
-            if (offending)
-                *offending = value;
-            return false;
-        }
-    }
-    return true;
-}
-
 std::string json_escape(std::string_view s) {
     std::string out;
     for (char c : s) {
@@ -897,104 +885,6 @@ bool write_content_index(const fs::path& data_root) {
 }
 
 } // namespace
-
-std::optional<ContentCapabilityManifest> parse_content_capability_manifest(std::string_view text,
-                                                                           std::string* error) {
-    auto fail = [&](std::string message) -> std::optional<ContentCapabilityManifest> {
-        if (error)
-            *error = std::move(message);
-        return std::nullopt;
-    };
-
-    try {
-        auto json = choc::json::parse(std::string(text));
-        if (!json.isObject())
-            return fail("manifest root must be a JSON object");
-        const auto schema = string_member(json, "schema");
-        if (schema != "pulp.plugin-runtime.v1")
-            return fail("schema must be pulp.plugin-runtime.v1");
-
-        ContentCapabilityManifest manifest;
-        manifest.schema = schema;
-        manifest.plugin_id = string_member(json, "pluginId");
-        if (manifest.plugin_id.empty())
-            return fail("pluginId is required");
-
-        auto content = json["content"];
-        if (!content.isObject())
-            return fail("content object is required");
-
-        manifest.capabilities = string_array_member(content, "capabilities");
-        manifest.content_kinds = string_array_member(content, "kinds");
-        if (manifest.capabilities.empty())
-            return fail("content.capabilities must contain at least one capability");
-        if (manifest.content_kinds.empty())
-            return fail("content.kinds must contain at least one content kind");
-
-        auto reload = content["reload"];
-        if (reload.isObject()) {
-            manifest.hot_reload_kinds = string_array_member(reload, "hotReloadKinds");
-            manifest.manual_rescan_kinds = string_array_member(reload, "manualRescanKinds");
-
-            std::string unsupported;
-            if (!all_in(manifest.hot_reload_kinds, manifest.content_kinds, &unsupported))
-                return fail("content.reload.hotReloadKinds contains unsupported kind: " +
-                            unsupported);
-            if (!all_in(manifest.manual_rescan_kinds, manifest.content_kinds, &unsupported))
-                return fail("content.reload.manualRescanKinds contains unsupported kind: " +
-                            unsupported);
-        }
-
-        if (error)
-            error->clear();
-        return manifest;
-    } catch (const std::exception& e) {
-        return fail(std::string("invalid JSON: ") + e.what());
-    } catch (...) {
-        return fail("invalid JSON");
-    }
-}
-
-std::optional<ContentCapabilityManifest> load_content_capability_manifest(const fs::path& path,
-                                                                          std::string* error) {
-    auto text = read_text(path);
-    if (text.empty()) {
-        if (error)
-            *error = "manifest file is missing or empty";
-        return std::nullopt;
-    }
-    return parse_content_capability_manifest(text, error);
-}
-
-std::string content_capability_manifest_to_json(const ContentCapabilityManifest& manifest) {
-    auto obj = choc::value::createObject("PulpPluginRuntime");
-    obj.addMember("schema", manifest.schema.empty() ? "pulp.plugin-runtime.v1" : manifest.schema);
-    obj.addMember("pluginId", manifest.plugin_id);
-
-    auto content = choc::value::createObject("ContentCapabilities");
-    auto caps = choc::value::createEmptyArray();
-    for (const auto& capability : manifest.capabilities)
-        caps.addArrayElement(choc::value::Value(capability));
-    auto kinds = choc::value::createEmptyArray();
-    for (const auto& kind : manifest.content_kinds)
-        kinds.addArrayElement(choc::value::Value(kind));
-    content.addMember("capabilities", std::move(caps));
-    content.addMember("kinds", std::move(kinds));
-    if (!manifest.hot_reload_kinds.empty() || !manifest.manual_rescan_kinds.empty()) {
-        auto reload = choc::value::createObject("ContentReloadPolicy");
-        auto hot = choc::value::createEmptyArray();
-        for (const auto& kind : manifest.hot_reload_kinds)
-            hot.addArrayElement(choc::value::Value(kind));
-        auto manual = choc::value::createEmptyArray();
-        for (const auto& kind : manifest.manual_rescan_kinds)
-            manual.addArrayElement(choc::value::Value(kind));
-        reload.addMember("hotReloadKinds", std::move(hot));
-        reload.addMember("manualRescanKinds", std::move(manual));
-        content.addMember("reload", std::move(reload));
-    }
-    obj.addMember("content", std::move(content));
-    return choc::json::toString(obj, true);
-}
 
 ContentRegistry::ContentRegistry(fs::path data_root) : data_root_(std::move(data_root)) {}
 

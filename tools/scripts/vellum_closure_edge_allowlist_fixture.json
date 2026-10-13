@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum.closure.allowlist.v1",
+  "entries": [
+    {
+      "id": "fixture-design-import-view-audio",
+      "owner": "test",
+      "debt_id": "fixture",
+      "kind": "edge",
+      "match": "pulp-design-import->pulp-view-audio",
+      "exit_criterion": "Fixture for the edge negative control; covers only the view-audio edge."
+    }
+  ]
+}

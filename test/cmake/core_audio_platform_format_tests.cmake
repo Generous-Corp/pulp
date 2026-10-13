@@ -199,6 +199,29 @@ if(CMAKE_NM AND NOT MSVC)
     set_tests_properties(pulp-state-symbol-closure PROPERTIES LABELS "state;link-closure")
     unset(_pulp_state_symbol_forbidden)
     unset(_forbidden_type)
+
+    # The format archives the plugin adapters are built from link no
+    # pulp-content, so no object in them may call into it either: an adapter
+    # that installed ContentRegistry's preset source again would put pulp-content
+    # back in every plugin's link closure. pulp-state is the control, since the
+    # adapters and the validation harness call PresetManager and StateStore.
+    if(TARGET pulp-content)
+        foreach(_subject pulp-format-core pulp-format-view pulp-format-clap-core)
+            if(TARGET ${_subject})
+                add_test(
+                    NAME ${_subject}-symbol-closure
+                    COMMAND ${Python3_EXECUTABLE}
+                        "${CMAKE_SOURCE_DIR}/tools/scripts/archive_symbol_closure_check.py"
+                        --nm "${CMAKE_NM}"
+                        --subject "$<TARGET_FILE:${_subject}>"
+                        --forbidden "$<TARGET_FILE:pulp-content>"
+                        --control "$<TARGET_FILE:pulp-state>")
+                set_tests_properties(${_subject}-symbol-closure PROPERTIES
+                    LABELS "format;link-closure")
+            endif()
+        endforeach()
+        unset(_subject)
+    endif()
 endif()
 add_test(
     NAME archive-symbol-closure-selftest
