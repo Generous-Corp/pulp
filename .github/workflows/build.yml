@@ -2140,10 +2140,10 @@ jobs:
         # A pull-request head runs the fast tier below, and that is what its
         # required check means. A head that is ready to land (armed for
         # auto-merge, still the head, and merged onto the current tip of main)
-        # ALSO runs the full suite, as evidence only, so its exact-tree
-        # protected-validation receipt lets a merge group of that one pull
-        # request skip its own build and test. Every other push keeps only the
-        # fast tier. The rule and its fail-closed probe live in
+        # also runs the full suite as the required, queue-admission check. Its
+        # exact-tree protected-validation receipt lets a merge group of that
+        # one pull request skip its own build and test. Every other push keeps
+        # only the fast tier. The rule and its fail-closed probe live in
         # tools/ci/ctest_gate_args.py; an unreadable pull request means fast.
         id: pr_suite
         if: github.event_name == 'pull_request' && runner.os != 'Windows'
@@ -2473,9 +2473,9 @@ jobs:
       # --exclude-regex list, and configure-time absence remove tests from the
       # report entirely — a broader class this step measures but does not close.
       # An empty report provides no execution evidence; selection may be empty.
-      # The fast tier remains advisory; name its failed full-suite evidence in
-      # a warning annotation and job summary. Armed full-suite failures are
-      # already red on this job and still get the same diagnostic details.
+      # This step adds diagnostic details for a failed full-suite check. On an
+      # armed head the full-suite step is required and already makes this job
+      # red; on an ordinary head the full suite is not run.
       - name: Announce a failed PR-head full suite (diagnostic)
         if: >-
           always() && github.event_name == 'pull_request' && runner.os != 'Windows'
