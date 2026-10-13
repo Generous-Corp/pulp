@@ -98,7 +98,12 @@ pinned download whose digest differs. Watch out for:
   per-version URL (no `${version}` in `url_template`), an override to another
   version is refused rather than installing the pin under the wrong name. This
   is the one documented exception in `extending-pulp.md`. Prefer a templated
-  source when one exists.
+  source when one exists. The rule runs in two places: the Rust front end
+  (`refuse_unservable_version` in `cmd/tool.rs`) refuses `--version` before
+  `set_override`, so a refused version is never saved, and the C++ installer
+  refuses env and file overrides. Its fix text must match the override's
+  source: `pulp tool update` clears only `tool-overrides.json`, so an env
+  override has to be unset by name.
 - **Dated builds expire.** The ffmpeg Linux x64 pin is a BtbN monthly
   autobuild, which BtbN keeps for about two years (this one until roughly
   2028-07). Bump it before then, or the install fails on a 404.

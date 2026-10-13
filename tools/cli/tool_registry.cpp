@@ -659,13 +659,18 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
     // Fetching it for another version would install the pinned bytes under the
     // requested version's name, so the override cannot be honored here.
     if (!pinned && source.url_template.find("${version}") == std::string::npos) {
+        // Name the fix for where the override actually lives: `pulp tool
+        // update` clears only tool-overrides.json, never the env var.
+        const std::string drop =
+            active.source == "env override"
+                ? "unset " + tool_version_env_var(tool.id)
+                : "run `pulp tool update " + tool.id + "` to drop the saved override";
         result.error =
             tool.id + " " + version + " (" + active.source + ") cannot be installed on " +
             platform + ": this platform's source serves one fixed build, " + tool.id + " " +
             tool.pinned_version + ", and has no per-version download, so installing it as " +
-            version + " would mislabel it. Fix: drop the override with `pulp tool update " +
-            tool.id + "` to use " + tool.pinned_version + ", or install " + tool.id + " " +
-            version +
+            version + " would mislabel it. Fix: " + drop + " to use " + tool.pinned_version +
+            ", or install " + tool.id + " " + version +
             " yourself and put it on PATH (Pulp uses a PATH copy only when no "
             "managed copy is installed; `pulp tool uninstall " +
             tool.id + "` removes it).";

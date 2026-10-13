@@ -756,16 +756,30 @@ TEST_CASE("an override on a fixed-build source is refused, never mislabelled",
     for (const std::string& needle :
          {std::string("fixed-source 2.0.0 (env override)"), current_platform_key(),
           std::string("serves one fixed build, fixed-source 1.2.3"),
-          std::string("pulp tool update fixed-source"), std::string("Fix:")}) {
+          std::string("Fix: unset PULP_TOOL_FIXED_SOURCE_VERSION to use 1.2.3")}) {
         INFO(result.error);
         REQUIRE(result.error.find(needle) != std::string::npos);
     }
+    // `pulp tool update` cannot clear an env override, so it is not the advice.
+    REQUIRE(result.error.find("pulp tool update") == std::string::npos);
     REQUIRE_FALSE(fs::exists(fx.installed("2.0.0")));
     REQUIRE_FALSE(fs::exists(fx.installed("1.2.3")));
 
+    // A saved override is dropped with `pulp tool update`.
+    version.set("");
+    write_file(fx.tmp.path / "home" / "tool-overrides.json",
+               "{\"overrides\": {\"fixed-source\": \"2.0.0\"}}\n");
+    auto saved = install_binary_tool(fx.tool, /*force=*/true);
+    REQUIRE_FALSE(saved.ok);
+    INFO(saved.error);
+    REQUIRE(saved.error.find("fixed-source 2.0.0 (user override)") != std::string::npos);
+    REQUIRE(saved.error.find("Fix: run `pulp tool update fixed-source` to drop the saved "
+                             "override to use 1.2.3") != std::string::npos);
+    REQUIRE(saved.error.find("unset PULP_TOOL") == std::string::npos);
+    fs::remove(fx.tmp.path / "home" / "tool-overrides.json");
+
 #ifndef _WIN32
     // The same fixed source still installs its pin, verified.
-    version.set("");
     auto pinned = install_binary_tool(fx.tool, /*force=*/true);
     INFO(pinned.error);
     REQUIRE(pinned.ok);

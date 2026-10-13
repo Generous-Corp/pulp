@@ -174,8 +174,12 @@ fixed build. Some upstreams publish no per-version download (the source's
 `url_template` has no `${version}`), and installing their one build under
 another version's name would mislabel it. On such a platform an override to a
 version other than the pin is refused, naming the tool, the platform and the
-fix: drop the override with `pulp tool update <id>`, or install the version
-yourself and put it on `PATH`. ffmpeg on macOS arm64 and Linux x64 is this
+fix, or you can install the version yourself and put it on `PATH`. The fix
+matches where the override lives: unset `PULP_TOOL_<ID>_VERSION` for an
+environment override, or run `pulp tool update <id>` for a saved one.
+`pulp tool install <id> --version <v>` refuses such a version before saving it,
+so a refused version never becomes a stored override that breaks later
+installs. ffmpeg on macOS arm64 and Linux x64 is this
 case today; its Windows source is versioned, so overrides work there.
 
 ## See also
