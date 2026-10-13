@@ -549,8 +549,15 @@ source_cache_marker() {
 }
 
 # Written as the last step of a successful priming, never before.
+# An optional third argument records the verified archive digest.
 mark_source_cache_complete() {
-    printf 'ref=%s\ncompleted=%s\n' "$2" "$(date +%s)" > "$(source_cache_marker "$1").tmp" \
+    {
+        printf 'ref=%s\n' "$2"
+        if [ -n "${3:-}" ]; then
+            printf 'sha256=%s\n' "$3"
+        fi
+        printf 'completed=%s\n' "$(date +%s)"
+    } > "$(source_cache_marker "$1").tmp" \
         && mv -f "$(source_cache_marker "$1").tmp" "$(source_cache_marker "$1")"
 }
 
@@ -577,11 +584,82 @@ git_source_cache_is_complete() {
     git_worktree_is_complete "$dir"
 }
 
+# SHA-256 of a file, with whichever tool this host has.
+sha256_of_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 -r "$1" | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
+# Digest of an extracted archive tree: SHA-256 over one "<path> <sha256>" line
+# per regular file, sorted bytewise by path. Same value as
+# tools/deps/wgpu_native_digests.py and pulp_wgpu_native_tree_sha256 in
+# tools/cmake/PulpWgpuNative.cmake.
+tree_sha256_of_dir() {
+    local dir="$1" rel listing
+    listing="$(mktemp "${TMPDIR:-/tmp}/pulp-tree.XXXXXX")" || return 1
+    (
+        cd "$dir" || exit 1
+        find . -type f | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r rel; do
+            printf '%s %s\n' "$rel" "$(sha256_of_file "$rel")" || exit 1
+        done
+    ) > "$listing" || { rm -f "$listing"; return 1; }
+    sha256_of_file "$listing"
+    local rc=$?
+    rm -f "$listing"
+    return $rc
+}
+
+# The pinned digests of a wgpu-native release asset, read from
+# tools/deps/manifest.json (the wgpu-native entry's `artifacts`): prints
+# "<archive sha256> <tree sha256>". Prints nothing and fails when the manifest
+# has no pin for that asset and version.
+wgpu_native_pinned_sha256() {
+    local asset="$1" version="$2" py
+    py="$(command -v python3 || command -v python || true)"
+    [ -n "$py" ] || return 1
+    "$py" -I - "$REPO_ROOT/tools/deps/manifest.json" "$asset" "$version" <<'PY'
+import json, sys
+manifest, asset, version = sys.argv[1:4]
+for dep in json.load(open(manifest, encoding="utf-8"))["dependencies"]:
+    if dep["name"] != "wgpu-native" or dep.get("version") != version:
+        continue
+    for art in dep.get("artifacts", []):
+        if art.get("name") == asset:
+            print(art["sha256"].lower(), art["tree_sha256"].lower())
+            raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+fetchcontent_disconnected() {
+    case "$(printf '%s' "${FETCHCONTENT_FULLY_DISCONNECTED:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|on|yes|true|y) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Prime a shared cache directory from a release archive.
+#   expected_sha256 (optional) — when set, the download is refused unless its
+#   SHA-256 matches, an unverifiable local seed is never used, and the cache is
+#   reused only if its completion marker records that same digest.
+#   expected_tree_sha256 (optional) — lets a cache primed before the digest was
+#   pinned be adopted in place when its files match, instead of re-fetched.
+# FETCHCONTENT_FULLY_DISCONNECTED (ON/1/TRUE/YES in the environment) forbids the
+# download: a cache that is not already complete is an error instead.
 ensure_shared_archive_source() {
     local label="$1"
     local url="$2"
     local dir_name="$3"
     local seed_dir="$4"
+    local expected_sha256="${5:-}"
+    local expected_tree_sha256="${6:-}"
     local target="$FETCHCONTENT_CACHE_ROOT/$dir_name"
     local lockdir="$FETCHCONTENT_CACHE_ROOT/.${dir_name}.lock"
 
@@ -590,16 +668,33 @@ ensure_shared_archive_source() {
     (
         set -e
         acquire_source_cache_lock "$lockdir" "$label"
-        trap 'release_source_cache_lock "$lockdir"' EXIT
+        # Expanded now: the trap runs after this function's locals are gone.
+        # shellcheck disable=SC2064
+        trap "release_source_cache_lock '$lockdir'" EXIT
 
-        if [ -d "$target" ] && [ -e "$(source_cache_marker "$dir_name")" ]; then
-            return 0
+        local marker
+        marker="$(source_cache_marker "$dir_name")"
+        if [ -d "$target" ] && [ -e "$marker" ]; then
+            if [ -z "$expected_sha256" ] || grep -qx "sha256=$expected_sha256" "$marker"; then
+                return 0
+            fi
+            # Primed before its digest was pinned (or for another digest). Its
+            # extracted files can still be checked against the pinned tree;
+            # adopting a match in place keeps builds that read it undisturbed.
+            if [ -n "$expected_tree_sha256" ] \
+                && [ "$(tree_sha256_of_dir "$target" 2>/dev/null)" = "$expected_tree_sha256" ]; then
+                info "Shared $label source cache matches its pinned tree digest; recording it"
+                mark_source_cache_complete "$dir_name" "$url" "$expected_sha256" || exit 1
+                return 0
+            fi
+            warn "Shared $label source cache at $target does not match the pinned digest; re-fetching it"
+            rm -f "$marker"
         fi
         if [ -e "$target" ]; then
             discard_incomplete_source_cache "$target" "$label"
         fi
 
-        if [ -d "$seed_dir" ]; then
+        if [ -z "$expected_sha256" ] && [ -d "$seed_dir" ]; then
             info "Seeding shared $label source cache from local directory: $seed_dir"
             if ! dry "cp -R $seed_dir $target"; then
                 rm -rf "$target.partial"
@@ -610,14 +705,20 @@ ensure_shared_archive_source() {
             return 0
         fi
 
+        if fetchcontent_disconnected; then
+            echo "  ✗ FETCHCONTENT_FULLY_DISCONNECTED is set, but the shared $label cache ($target) is not primed. Unset it and re-run ./setup.sh --deps-only while online." >&2
+            exit 1
+        fi
+
         info "Downloading shared $label source cache..."
-        if dry "curl -L --fail --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 $url -o $target.zip && unzip -q $target.zip -d $target"; then
+        if dry "curl -L --fail --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 $url -o $target.zip && verify sha256=${expected_sha256:-none} && unzip -q $target.zip -d $target"; then
             return 0
         fi
 
         local tmpdir
         tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/pulp-${dir_name}.XXXXXX")"
-        trap 'rm -rf "$tmpdir" >/dev/null 2>&1 || true; release_source_cache_lock "$lockdir"' EXIT
+        # shellcheck disable=SC2064
+        trap "rm -rf '$tmpdir' >/dev/null 2>&1 || true; release_source_cache_lock '$lockdir'" EXIT
         # Release-asset hosts return transient 5xx and drop connections; one
         # such blip used to fail the whole bootstrap. --retry-all-errors also
         # retries HTTP errors that --fail turns into a non-zero exit, and each
@@ -627,13 +728,31 @@ ensure_shared_archive_source() {
         # failed download must never be followed by a completion marker.
         curl -L --fail --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 \
             "$url" -o "$tmpdir/archive.zip" || exit 1
+        if [ -n "$expected_sha256" ]; then
+            local found_sha256
+            found_sha256="$(sha256_of_file "$tmpdir/archive.zip")" || {
+                echo "  ✗ cannot verify $label: no sha256sum, shasum or openssl on PATH. Install one and re-run ./setup.sh." >&2
+                exit 1
+            }
+            if [ "$found_sha256" != "$expected_sha256" ]; then
+                {
+                    echo "  ✗ refusing $label archive from $url: its SHA-256 does not match the pin."
+                    echo "      expected: $expected_sha256"
+                    echo "      found:    $found_sha256"
+                    echo "    Nothing was extracted. If upstream legitimately republished the asset, verify it"
+                    echo "    independently and update its sha256 in tools/deps/manifest.json; otherwise treat"
+                    echo "    the download as compromised."
+                } >&2
+                exit 1
+            fi
+        fi
         # Extract beside the target and rename it into place, so a killed
         # extraction leaves only a .partial directory, never a half-filled cache.
         rm -rf "$target.partial"
         mkdir -p "$target.partial" || exit 1
         unzip -q "$tmpdir/archive.zip" -d "$target.partial" || exit 1
         mv "$target.partial" "$target" || exit 1
-        mark_source_cache_complete "$dir_name" "$url" || exit 1
+        mark_source_cache_complete "$dir_name" "$url" "$expected_sha256" || exit 1
         rm -rf "$tmpdir"
     )
 }
@@ -1294,10 +1413,19 @@ ensure_shared_git_source_with_retry "WebGPU-distribution" "https://github.com/el
 WGPU_NATIVE_VERSION="v24.0.3.1"
 WGPU_RUNTIME_NAME="$(wgpu_runtime_url_name || true)"
 if [ -n "$WGPU_RUNTIME_NAME" ]; then
-    ensure_shared_archive_source "wgpu-native runtime" \
-        "https://github.com/gfx-rs/wgpu-native/releases/download/${WGPU_NATIVE_VERSION}/${WGPU_RUNTIME_NAME}.zip" \
-        "$(fetchcontent_cache_dir_name "$WGPU_RUNTIME_NAME" "$WGPU_NATIVE_VERSION")" \
-        "$REPO_ROOT/build/_deps/${WGPU_RUNTIME_NAME}-src"
+    # Digest-pinned in tools/deps/manifest.json; configure verifies the same pin.
+    if WGPU_RUNTIME_PINS="$(wgpu_native_pinned_sha256 "$WGPU_RUNTIME_NAME" "$WGPU_NATIVE_VERSION")" \
+        && [ -n "$WGPU_RUNTIME_PINS" ]; then
+        read -r WGPU_RUNTIME_SHA256 WGPU_RUNTIME_TREE_SHA256 <<< "$WGPU_RUNTIME_PINS"
+        ensure_shared_archive_source "wgpu-native runtime" \
+            "https://github.com/gfx-rs/wgpu-native/releases/download/${WGPU_NATIVE_VERSION}/${WGPU_RUNTIME_NAME}.zip" \
+            "$(fetchcontent_cache_dir_name "$WGPU_RUNTIME_NAME" "$WGPU_NATIVE_VERSION")" \
+            "$REPO_ROOT/build/_deps/${WGPU_RUNTIME_NAME}-src" \
+            "$WGPU_RUNTIME_SHA256" "$WGPU_RUNTIME_TREE_SHA256"
+    else
+        echo "  ✗ no pinned sha256 for wgpu-native ${WGPU_RUNTIME_NAME} ${WGPU_NATIVE_VERSION} in tools/deps/manifest.json (reading it needs python3). wgpu-native may not publish this asset; if it does, add it to the wgpu-native artifacts list." >&2
+        exit 1
+    fi
 fi
 
 ensure_shared_git_source_with_retry "SDL3" "https://github.com/libsdl-org/SDL.git" \

@@ -7,10 +7,27 @@ This directory is the machine-readable dependency inventory and update-validatio
 - `manifest.json` — source of truth for tracked third-party dependencies, pins, licenses, and documentation requirements
 - `audit.py` — audits `DEPENDENCIES.md`, `NOTICE.md`, and `docs/reference/licensing.md` coverage against `manifest.json`; optionally checks upstream refs/tags
 - `validate_hosts.py` — runs outer-loop validation locally and on optional SSH targets
+- `wgpu_native_digests.py` — computes the `sha256` (archive) and `tree_sha256` (extracted tree) pinned for each wgpu-native release asset in the manifest's `artifacts` list
 
 The audit script covers all four attribution surfaces (`manifest.json`,
 `DEPENDENCIES.md`, `NOTICE.md`, `docs/reference/licensing.md`) so drift
 between them is caught at PR time rather than after release.
+
+Its completeness scan reads every CMake file (`CMakeLists.txt`, `*.cmake`) and
+setup/bootstrap script in the checkout (tracked plus untracked-but-not-ignored
+files, so build directories never count) for `FetchContent_Declare`,
+`ExternalProject_Add`, `file(DOWNLOAD)`, and curl/wget/git-clone/setup-helper
+downloads. Each fetch with a statically known URL must match a manifest row by
+upstream URL (`repository` or an `artifacts` URL), or by name when it names no
+URL. `external/`, `planning/`, `tools/packages/test-stubs/` and test-fixture
+trees are excluded (`SCAN_EXCLUDED_PREFIXES` in `audit.py` records why). A
+fetch whose URL is built at run time (for example from the manifest itself) is
+not attributable by a static scan and is not reported.
+
+A manifest row may carry a structured `artifacts` list for release assets:
+`{"name", "url", "sha256", "tree_sha256"}` per asset. wgpu-native uses it;
+`setup.sh` and `tools/cmake/PulpWgpuNative.cmake` refuse any archive whose
+digest does not match.
 
 ## Usage
 

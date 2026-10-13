@@ -235,8 +235,15 @@ retain those fields in the PR/landing evidence.
   VERSION.md lines turns the pins into `null`; the
   `cmake-bundle-build-info-contract` ctest compares them with the manifest's
   Skia version and Dawn notes (`DEPS file at <sha>`, `Dawn SHA1 <sha>`), so keep
-  those phrasings too. A wgpu-native bump now edits that one variable plus
-  `PulpWgpuUniversal.cmake`'s slice digests and `shared-source-contract.txt`.
+  those phrasings too. A wgpu-native bump edits that one variable,
+  `WGPU_NATIVE_VERSION` in `setup.sh`, `shared-source-contract.txt`, and the
+  `wgpu-native` row of `tools/deps/manifest.json`: its version and every
+  `artifacts` entry's `sha256` (the zip) and `tree_sha256` (the extracted tree).
+  Download each asset into a new empty directory and run
+  `python3 -I tools/deps/wgpu_native_digests.py <dir>/*.zip`. Configure and
+  `setup.sh` refuse any archive whose digest differs, and configure re-checks
+  the shared cache against `tree_sha256`, so a missed digest fails loudly
+  rather than fetching unpinned bytes.
 - `PulpDependencies.cmake` sets `CMAKE_DISABLE_PRECOMPILE_HEADERS ON` around
   SDL3's `FetchContent_MakeAvailable` only. SDL3 precompiles `src/SDL_internal.h`
   into every object, and ccache refuses to cache a TU compiled against a PCH

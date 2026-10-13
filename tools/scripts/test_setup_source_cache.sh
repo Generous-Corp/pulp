@@ -619,6 +619,106 @@ STUB
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== a digest-pinned archive is refused unless its SHA-256 matches"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    export FETCHCONTENT_CACHE_ROOT="$tmp/cache"
+    mkdir -p "$tmp/bin" "$tmp/seed/lib"
+    printf 'unverifiable\n' > "$tmp/seed/lib/runtime.txt"
+    python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1], "w").writestr("lib/runtime.txt", "ok\n")' \
+        "$tmp/fixture.zip"
+    good="$(sha256_of_file "$tmp/fixture.zip")"
+    wrong="0000000000000000000000000000000000000000000000000000000000000000"
+    cat > "$tmp/bin/curl" <<STUB
+#!/usr/bin/env bash
+echo call >> "$tmp/curl.calls"
+out=""
+while [ \$# -gt 0 ]; do [ "\$1" = "-o" ] && out="\$2"; shift; done
+cp "$tmp/fixture.zip" "\$out"
+STUB
+    chmod +x "$tmp/bin/curl"
+    check "$(printf '%s' "$good" | grep -cE '^[0-9a-f]{64}$')" "1" "control: sha256_of_file yields a digest"
+
+    err="$(PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$wrong" 2>&1 >/dev/null)"
+    rc=$?
+    check "$([ "$rc" -ne 0 ] && echo refused || echo accepted)" "refused" "a wrong digest is refused"
+    check "$(printf '%s' "$err" | grep -c "expected: $wrong")" "1" "the refusal names the expected digest"
+    check "$(printf '%s' "$err" | grep -c "found:    $good")" "1" "the refusal names the digest it found"
+    check "$(printf '%s' "$err" | grep -c 'tools/deps/manifest.json')" "1" "the refusal says where the pin lives"
+    check "$([ -e "$FETCHCONTENT_CACHE_ROOT/pinned-v1" ] && echo present || echo absent)" "absent" \
+        "a refused archive is never extracted (and the unverifiable seed is not used)"
+    check "$([ -e "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete" ] && echo present || echo absent)" "absent" \
+        "a refused archive never gets a completion marker"
+    check "$([ -e "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.lock" ] && echo held || echo released)" "released" \
+        "a refused archive releases its cache lock"
+
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" >/dev/null 2>&1
+    check "$?" "0" "the pinned digest is accepted"
+    check "$(cat "$FETCHCONTENT_CACHE_ROOT/pinned-v1/lib/runtime.txt" 2>/dev/null)" "ok" \
+        "the verified archive (not the seed) was unpacked"
+    check "$(grep -cx "sha256=$good" "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete")" "1" \
+        "the completion marker records the verified digest"
+
+    # A cache primed before the pin carries a marker with no digest; it is
+    # re-fetched rather than trusted.
+    printf 'ref=https://example.invalid/r.zip\ncompleted=1\n' > "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete"
+    rm -f "$tmp/curl.calls"
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" >/dev/null 2>&1
+    check "$?" "0" "a legacy cache is re-primed"
+    check "$(wc -l < "$tmp/curl.calls" 2>/dev/null | tr -d ' ')" "1" "a legacy marker forces a verified re-download"
+
+    # With the pinned tree digest, a legacy cache whose files match is adopted
+    # in place (no download, no directory churn under concurrent builds) and
+    # one whose files differ is re-fetched.
+    tree="$(tree_sha256_of_dir "$FETCHCONTENT_CACHE_ROOT/pinned-v1")"
+    check "$tree" "$(python3 -I "$REPO_ROOT/tools/deps/wgpu_native_digests.py" "$tmp/fixture.zip" \
+        | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["tree_sha256"])')" \
+        "setup's tree digest equals wgpu_native_digests.py's"
+    printf 'ref=https://example.invalid/r.zip\ncompleted=1\n' > "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete"
+    rm -f "$tmp/curl.calls"
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" "$tree" >/dev/null 2>&1
+    check "$?" "0" "a legacy cache with matching files is adopted"
+    check "$([ -e "$tmp/curl.calls" ] && echo downloaded || echo adopted)" "adopted" \
+        "a legacy cache with matching files is not downloaded again"
+    check "$(grep -cx "sha256=$good" "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete")" "1" \
+        "an adopted cache's marker now records the verified digest"
+    printf 'ref=https://example.invalid/r.zip\ncompleted=1\n' > "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete"
+    printf 'tampered\n' > "$FETCHCONTENT_CACHE_ROOT/pinned-v1/lib/runtime.txt"
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" "$tree" >/dev/null 2>&1
+    check "$(cat "$FETCHCONTENT_CACHE_ROOT/pinned-v1/lib/runtime.txt" 2>/dev/null)" "ok" \
+        "a legacy cache whose files differ is replaced by the verified archive"
+
+    rm -f "$tmp/curl.calls"
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" >/dev/null 2>&1
+    check "$?" "0" "a verified cache is reused"
+    check "$([ -e "$tmp/curl.calls" ] && echo downloaded || echo reused)" "reused" \
+        "a cache whose marker records the pin is not downloaded again"
+
+    err="$(FETCHCONTENT_FULLY_DISCONNECTED=ON PATH="$tmp/bin:$PATH" ensure_shared_archive_source \
+        "Runtime" "https://example.invalid/r.zip" "pinned-v2" "$tmp/seed" "$good" 2>&1 >/dev/null)"
+    rc=$?
+    check "$([ "$rc" -ne 0 ] && echo refused || echo accepted)" "refused" \
+        "FETCHCONTENT_FULLY_DISCONNECTED refuses to download an unprimed cache"
+    check "$([ -e "$tmp/curl.calls" ] && echo downloaded || echo offline)" "offline" \
+        "FETCHCONTENT_FULLY_DISCONNECTED never reaches the network"
+    check "$(printf '%s' "$err" | grep -c 'FETCHCONTENT_FULLY_DISCONNECTED')" "1" \
+        "the disconnected refusal names the setting"
+
+    check "$(wgpu_native_pinned_sha256 wgpu-macos-aarch64-release v24.0.3.1)" \
+        "$(python3 -I -c 'import json,sys; d=[x for x in json.load(open(sys.argv[1]))["dependencies"] if x["name"]=="wgpu-native"][0]; a=[a for a in d["artifacts"] if a["name"]=="wgpu-macos-aarch64-release"][0]; print(a["sha256"], a["tree_sha256"])' "$REPO_ROOT/tools/deps/manifest.json")" \
+        "setup reads the wgpu-native pins from the manifest"
+    wgpu_native_pinned_sha256 wgpu-macos-aarch64-release v0.0.0 >/dev/null 2>&1
+    check "$?" "1" "a version the manifest does not pin has no digest"
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo "== non-interactive setup never accepts an install prompt"
 (
     load_setup_lib

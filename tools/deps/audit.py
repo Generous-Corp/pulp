@@ -15,11 +15,15 @@ It verifies two classes of invariant:
    in #565.
 
 2. **Completeness** — every dependency declared in a real manifest source
-   (``requirements-docs.txt``, ``mkdocs.yml``, ``CMakeLists.txt``'s
-   ``FetchContent_Declare`` blocks, ``external/``, or a recognized
-   redistributed bootstrap binary) is represented by a manifest entry. This
+   (``requirements-docs.txt``, ``mkdocs.yml``, ``external/``, a recognized
+   redistributed bootstrap binary, or a fetch anywhere in the repo's CMake
+   files and setup scripts — ``FetchContent_Declare``, ``ExternalProject_Add``,
+   ``file(DOWNLOAD)``, and curl/wget/git-clone/setup-helper downloads) is
+   represented by a manifest entry, matched by name or by upstream URL. This
    class of check was missing, which is how #582 shipped MkDocs Material
-   without touching the four attribution files.
+   without touching the four attribution files, and how the wgpu-native
+   runtime archive setup.sh downloads went unlisted while only the root
+   CMakeLists.txt was read.
 
 3. **Truthfulness** (``--verify-licenses``) — the attribution surfaces must
    agree with the license text actually on disk. The checks above only ask
@@ -402,6 +406,7 @@ class DeclaredDep:
     name: str
     source: str  # human-readable source label, e.g. "requirements-docs.txt"
     location: str = ""  # optional extra path / line hint
+    url: str = ""  # upstream URL when the declaration names one
 
 
 def _normalise(name: str) -> str:
@@ -420,7 +425,7 @@ def _normalise(name: str) -> str:
 # ``external_names`` for their authoritative alias list.
 DEFAULT_ALIASES: dict[str, tuple[str, ...]] = {
     "CHOC": ("choc",),
-    "WebGPU-distribution": ("webgpu", "wgpu-native"),
+    "WebGPU-distribution": ("webgpu",),
     "Mbed TLS": ("mbedtls",),
     "three.js": ("threejs",),
     "Catch2": ("catch2",),
@@ -582,6 +587,226 @@ def parse_fetchcontent(cmake_file: Path) -> list[DeclaredDep]:
     return out
 
 
+# ── Repo-wide fetch scan ─────────────────────────────────────────────────────
+#
+# Every CMake file and setup script that can fetch something is read, not just
+# the root CMakeLists.txt: a FetchContent_Declare in tools/cmake/ or a curl in
+# setup.sh is as much a dependency as one in the root file.
+
+# Path prefixes that are never scanned, with the reason. Anything else that
+# fetches must have a manifest row.
+SCAN_EXCLUDED_PREFIXES: dict[str, str] = {
+    "external/": "vendored upstream trees; their own build logic is upstream's",
+    "planning/": "private planning submodule, not part of the build",
+    "tools/packages/test-stubs/": "stand-in projects for `pulp add` registry tests, "
+                                  "never built by Pulp",
+}
+# Path fragments (anywhere in the path) that mark test fixtures.
+SCAN_EXCLUDED_FRAGMENTS: tuple[str, ...] = ("/tests/fixtures/", "/test/fixtures/")
+
+_SETUP_SCRIPT_RE = re.compile(r"(^|/)(setup|bootstrap)[^/]*\.(sh|ps1)$")
+_CMAKE_FETCH_CALL_RE = re.compile(
+    r"\b(FetchContent_Declare|ExternalProject_Add|file)\s*\(", re.IGNORECASE)
+_CMAKE_SET_RE = re.compile(
+    r"\bset\s*\(\s*([A-Za-z0-9_]+)\s+(\"[^\"]*\"|[^\s\)\"]+)", re.IGNORECASE)
+_SHELL_ASSIGN_RE = re.compile(
+    r"^\s*(?:local\s+|export\s+|readonly\s+)?\$?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+    r"(\"[^\"]*\"|'[^']*'|[^\s;#]+)", re.MULTILINE)
+_URL_RE = re.compile(r"(?:https?|git)://[^\s\"'()<>;]+|git@[A-Za-z0-9_.\-]+:[^\s\"'()<>;]+")
+_SHELL_FETCH_RE = re.compile(
+    r"(^|[\s\"'(|;&])(curl|wget|git\s+clone|Invoke-WebRequest|iwr|Start-BitsTransfer"
+    r"|ensure_shared_[a-z_]*source[a-z_]*)\b")
+
+
+def _scan_excluded(rel: str) -> bool:
+    if any(rel.startswith(prefix) for prefix in SCAN_EXCLUDED_PREFIXES):
+        return True
+    return any(fragment in "/" + rel for fragment in SCAN_EXCLUDED_FRAGMENTS)
+
+
+def _is_scanned_file(rel: str) -> bool:
+    name = rel.rsplit("/", 1)[-1]
+    return (name == "CMakeLists.txt" or name.endswith(".cmake")
+            or bool(_SETUP_SCRIPT_RE.search(rel)))
+
+
+def fetch_scan_files(root: Path) -> list[Path]:
+    """CMake files and setup scripts under ``root`` that the scan reads.
+
+    In a git checkout this is the tracked plus untracked-but-not-ignored files,
+    so build directories (ignored) and nested worktrees (separate repos) never
+    count. Outside git (test fixtures) the tree is walked, skipping build dirs.
+    """
+    rels: list[str] = []
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+         "--exclude-standard"],
+        capture_output=True, check=False,
+    )
+    toplevel = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, check=False,
+    )
+    in_repo = (listed.returncode == 0 and toplevel.returncode == 0
+               and Path(toplevel.stdout.strip()).resolve() == root.resolve())
+    if in_repo:
+        rels = [p for p in listed.stdout.decode("utf-8", "replace").split("\0") if p]
+    else:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames
+                           if d != ".git" and d != "_deps" and not d.startswith("build")]
+            for filename in filenames:
+                rels.append((Path(dirpath) / filename).relative_to(root).as_posix())
+    out = []
+    for rel in sorted(set(rels)):
+        if _scan_excluded(rel) or not _is_scanned_file(rel):
+            continue
+        path = root / rel
+        if path.is_file():
+            out.append(path)
+    return out
+
+
+def _strip_cmake_comments(text: str) -> str:
+    lines = []
+    for line in text.splitlines():
+        in_quote = False
+        cut = len(line)
+        for index, char in enumerate(line):
+            if char == '"' and (index == 0 or line[index - 1] != "\\"):
+                in_quote = not in_quote
+            elif char == "#" and not in_quote:
+                cut = index
+                break
+        lines.append(line[:cut])
+    return "\n".join(lines)
+
+
+def _call_body(text: str, open_paren: int) -> str:
+    """The argument text of the call whose ``(`` is at ``open_paren``."""
+    depth = 0
+    for index in range(open_paren, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren + 1:index]
+    return text[open_paren + 1:]
+
+
+def _resolve_vars(value: str, variables: dict[str, str]) -> str:
+    for _ in range(5):
+        updated = re.sub(r"\$\{([A-Za-z0-9_]+)\}",
+                         lambda m: variables.get(m.group(1), m.group(0)), value)
+        updated = re.sub(r"\$([A-Za-z_][A-Za-z0-9_]*)",
+                         lambda m: variables.get(m.group(1), m.group(0)), updated)
+        if updated == value:
+            break
+        value = updated
+    return value
+
+
+def _url_identity(url: str) -> str:
+    """Comparable identity for an upstream URL: ``github.com/<owner>/<repo>``
+    for GitHub (any of its hosts), otherwise host plus path."""
+    url = url.strip().strip("\"'").rstrip("/")
+    url = re.sub(r"^git@([^:]+):", r"https://\1/", url)
+    url = re.sub(r"^[a-z+]+://", "", url, flags=re.IGNORECASE)
+    url = url.split("?", 1)[0].split("#", 1)[0]
+    host, _, path = url.partition("/")
+    host = host.lower().split("@")[-1]
+    parts = [p for p in path.split("/") if p]
+    if host in {"github.com", "www.github.com", "codeload.github.com",
+                "raw.githubusercontent.com", "objects.githubusercontent.com"}:
+        if len(parts) >= 2:
+            return f"github.com/{parts[0].lower()}/{parts[1].lower().removesuffix('.git')}"
+    if host == "api.github.com" and len(parts) >= 3 and parts[0] == "repos":
+        return f"github.com/{parts[1].lower()}/{parts[2].lower().removesuffix('.git')}"
+    return "/".join([host] + parts).lower().removesuffix(".git")
+
+
+def _name_from_url(url: str) -> str:
+    identity = _url_identity(url)
+    if identity.startswith("github.com/"):
+        return identity.split("/")[2]
+    return identity.rsplit("/", 1)[-1] or identity
+
+
+def _first_url(text: str) -> str:
+    match = _URL_RE.search(text)
+    return match.group(0) if match else ""
+
+
+def parse_cmake_fetches(path: Path, root: Path) -> list[DeclaredDep]:
+    """FetchContent_Declare / ExternalProject_Add / file(DOWNLOAD) in a CMake file."""
+    text = _strip_cmake_comments(path.read_text(encoding="utf-8", errors="replace"))
+    variables = {}
+    for match in _CMAKE_SET_RE.finditer(text):
+        variables.setdefault(match.group(1), match.group(2).strip('"'))
+    rel = path.relative_to(root).as_posix()
+    out: list[DeclaredDep] = []
+    for match in _CMAKE_FETCH_CALL_RE.finditer(text):
+        command = match.group(1).lower()
+        body = _call_body(text, match.end() - 1)
+        tokens = body.split()
+        if not tokens:
+            continue
+        line = text.count("\n", 0, match.start()) + 1
+        if command == "file":
+            if tokens[0].upper() != "DOWNLOAD" or len(tokens) < 2:
+                continue
+            url = _resolve_vars(tokens[1].strip('"'), variables)
+            if not _URL_RE.match(url) or "$" in _url_identity(url):
+                continue  # URL not statically known; nothing to attribute
+            out.append(DeclaredDep(name=_name_from_url(url), source=rel,
+                                   location=f"file(DOWNLOAD) line {line}", url=url))
+            continue
+        name = tokens[0].strip('"')
+        url = _resolve_vars(_first_url(body), variables) if _first_url(body) else ""
+        if url and "$" in _url_identity(url):
+            url = ""
+        label = "FetchContent_Declare" if command == "fetchcontent_declare" else "ExternalProject_Add"
+        if "SOURCE_DIR" in tokens and not url:
+            continue  # a local source override, not a fetch
+        out.append(DeclaredDep(name=name, source=rel, location=f"{label} line {line}", url=url))
+    return out
+
+
+def parse_setup_script_fetches(path: Path, root: Path) -> list[DeclaredDep]:
+    """Downloads in a setup/bootstrap script with a statically known URL."""
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    joined = re.sub(r"\\\r?\n", " ", raw)  # backslash continuations
+    variables: dict[str, str] = {}
+    for match in _SHELL_ASSIGN_RE.finditer(joined):
+        value = match.group(2).strip("\"'")
+        if "$(" not in value and "`" not in value:  # command output is not static
+            variables.setdefault(match.group(1), value)
+    rel = path.relative_to(root).as_posix()
+    out: list[DeclaredDep] = []
+    for number, line in enumerate(joined.splitlines(), start=1):
+        if line.lstrip().startswith("#") or not _SHELL_FETCH_RE.search(line):
+            continue
+        for url in _URL_RE.findall(_resolve_vars(line, variables)):
+            if "$" in _url_identity(url) or "example.invalid" in url:
+                continue
+            out.append(DeclaredDep(name=_name_from_url(url), source=rel,
+                                   location=f"download line {number}", url=url))
+    return out
+
+
+def scan_fetch_declarations(root: Path | None = None) -> list[DeclaredDep]:
+    """Every fetch the repo's CMake files and setup scripts declare."""
+    root = root or ROOT
+    out: list[DeclaredDep] = []
+    for path in fetch_scan_files(root):
+        if _SETUP_SCRIPT_RE.search(path.relative_to(root).as_posix()):
+            out.extend(parse_setup_script_fetches(path, root))
+        else:
+            out.extend(parse_cmake_fetches(path, root))
+    return out
+
+
 # external/ subdirectories that are documentation-only (no redistributed
 # source) and therefore need no manifest entry of their own.
 EXTERNAL_IGNORE = {"fonts"}  # covered by Inter / JetBrains Mono entries
@@ -620,13 +845,15 @@ def collect_declared(
     extra_requirements: Path | None = None,
     extra_mkdocs: Path | None = None,
     extra_cmake: list[Path] | None = None,
+    scan_root: Path | None = None,
 ) -> list[DeclaredDep]:
     """Aggregate declared deps across all manifest sources.
 
     ``extra_*`` are injection hooks for tests — they replace the default
     paths when provided. Tests pass synthetic fixtures to verify the
     completeness gate catches missing deps without touching real repo
-    files.
+    files. ``extra_cmake`` replaces the repo-wide fetch scan with exactly
+    those files; ``scan_root`` points the repo-wide scan at another tree.
     """
     global REQUIREMENTS_DOCS, MKDOCS_YML, EXTRA_CMAKELISTS, ROOT_CMAKELISTS
     saved = (REQUIREMENTS_DOCS, MKDOCS_YML, list(EXTRA_CMAKELISTS), ROOT_CMAKELISTS)
@@ -642,9 +869,12 @@ def collect_declared(
         declared: list[DeclaredDep] = []
         declared.extend(parse_requirements_docs())
         declared.extend(parse_mkdocs_yml())
-        declared.extend(parse_fetchcontent(ROOT_CMAKELISTS))
-        for cm in EXTRA_CMAKELISTS:
-            declared.extend(parse_fetchcontent(cm))
+        if extra_cmake is not None:
+            declared.extend(parse_fetchcontent(ROOT_CMAKELISTS))
+            for cm in EXTRA_CMAKELISTS:
+                declared.extend(parse_fetchcontent(cm))
+        else:
+            declared.extend(scan_fetch_declarations(scan_root or ROOT))
         declared.extend(parse_external_dirs())
         declared.extend(parse_redistributed_tooling())
         return declared
@@ -658,8 +888,14 @@ def find_uncovered_declarations(
 ) -> list[DeclaredDep]:
     """Return declared deps that aren't backed by a manifest entry."""
     covered: set[str] = set()
+    covered_urls: set[str] = set()
     for dep in manifest:
         covered |= manifest_alias_set(dep)
+        for url in [dep.get("repository", "")] + [
+            art.get("url", "") for art in dep.get("artifacts", [])
+        ] + list(dep.get("upstream_urls", ())):
+            if url and "://" in url:
+                covered_urls.add(_url_identity(url))
     # Multi-alias external dirs (e.g. external/fonts → Inter + JetBrains Mono)
     # collapse into the aliases of their represented entries.
     for dir_name, aliases in EXTERNAL_ALIASES.items():
@@ -675,7 +911,20 @@ def find_uncovered_declarations(
     uncovered: list[DeclaredDep] = []
     for dep in declared:
         key = _normalise(dep.name)
-        if key in ignored or key in covered:
+        if key in ignored:
+            continue
+        if dep.url:
+            # A declaration that names its upstream is matched by that
+            # upstream: a FetchContent name is a local label (choc_wclap,
+            # moonbase_cpp), and a different repo under a familiar name is a
+            # different dependency.
+            identity = _url_identity(dep.url)
+            if any(identity == known or identity.startswith(known + "/")
+                   for known in covered_urls):
+                continue
+            uncovered.append(dep)
+            continue
+        if key in covered:
             continue
         uncovered.append(dep)
     return uncovered
@@ -1042,7 +1291,8 @@ def main() -> int:
             print("\nDeclared but missing from manifest.json:")
             for dep in uncovered:
                 where = f" ({dep.location})" if dep.location else ""
-                print(f"  - {dep.name} from {dep.source}{where}")
+                url = f" <{dep.url}>" if dep.url else ""
+                print(f"  - {dep.name} from {dep.source}{where}{url}")
         if args.verify_licenses:
             if license_problems:
                 print("\nLicense text contradicts the manifest:")

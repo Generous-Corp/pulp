@@ -281,6 +281,172 @@ class ManifestSourceScannerTests(unittest.TestCase):
         )
 
 
+class RepoFetchScanTests(unittest.TestCase):
+    """The completeness scan reads every CMake file and setup script, not only
+    the root CMakeLists.txt. The wgpu-native runtime archive setup.sh downloads
+    went unlisted for months because nothing outside the root file was read."""
+
+    def _tree(self, files: dict[str, str]) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for rel, text in files.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(textwrap.dedent(text), encoding="utf-8")
+        return root
+
+    NESTED = {
+        "CMakeLists.txt": "project(x)\n",
+        "tools/cmake/sub/PulpPlanted.cmake": """\
+            include(FetchContent)
+            # FetchContent_Declare(commented GIT_REPOSITORY https://github.com/no/no.git)
+            FetchContent_Declare(planted_local_label
+                GIT_REPOSITORY https://github.com/planted-org/planted-dep.git
+                GIT_TAG v1.0.0)
+            """,
+    }
+
+    @staticmethod
+    def _manifest(*rows: dict) -> list[dict]:
+        base = {"category": "x", "license": "MIT", "version": "1", "source_kind": "x",
+                "upstream": {"kind": "none"}, "documented_in_dependencies_md": True,
+                "documented_in_notice_md": True}
+        return [dict(base, **row) for row in rows]
+
+    def test_unlisted_fetchcontent_in_a_nested_cmake_file_is_reported(self) -> None:
+        root = self._tree(self.NESTED)
+        self.assertIn("planted_local_label",
+                      {d.name for d in audit.collect_declared(scan_root=root)},
+                      msg="the completeness gate's own entry point runs the repo scan")
+        declared = audit.scan_fetch_declarations(root)
+        names = {d.name for d in declared}
+        self.assertIn("planted_local_label", names, msg="control: the nested file was read")
+        self.assertNotIn("commented", names, msg="a commented-out declaration is not a fetch")
+        uncovered = audit.find_uncovered_declarations(
+            self._manifest({"name": "Other", "repository": "https://github.com/o/other.git"}),
+            declared,
+        )
+        self.assertEqual(
+            [(d.name, d.source) for d in uncovered],
+            [("planted_local_label", "tools/cmake/sub/PulpPlanted.cmake")],
+        )
+
+    def test_listed_fetchcontent_in_a_nested_cmake_file_is_not_reported(self) -> None:
+        root = self._tree(self.NESTED)
+        declared = audit.scan_fetch_declarations(root)
+        # Matched by upstream URL even though the FetchContent label differs.
+        manifest = self._manifest(
+            {"name": "Planted Dep", "repository": "https://github.com/planted-org/planted-dep"})
+        self.assertEqual(audit.find_uncovered_declarations(manifest, declared), [])
+
+    def test_a_familiar_name_from_a_different_upstream_is_still_reported(self) -> None:
+        root = self._tree({"x.cmake": """\
+            FetchContent_Declare(choc GIT_REPOSITORY https://github.com/someone-else/choc.git)
+            """})
+        manifest = self._manifest(
+            {"name": "CHOC", "repository": "https://github.com/danielraffel/choc.git"})
+        uncovered = audit.find_uncovered_declarations(
+            manifest, audit.scan_fetch_declarations(root))
+        self.assertEqual([d.url for d in uncovered], ["https://github.com/someone-else/choc.git"])
+
+    def test_setup_script_downloads_are_reported_unless_listed(self) -> None:
+        root = self._tree({"setup.sh": """\
+            VERSION="v2.0"
+            # curl https://github.com/commented/out/releases/download/a.zip
+            curl -L --fail \\
+                "https://github.com/acme/runtime/releases/download/${VERSION}/runtime.zip" -o r.zip
+            """})
+        declared = audit.scan_fetch_declarations(root)
+        self.assertEqual(
+            [d.url for d in declared],
+            ["https://github.com/acme/runtime/releases/download/v2.0/runtime.zip"],
+            msg="the continued curl line is read, its variable resolved, and the comment skipped",
+        )
+        self.assertEqual(len(audit.find_uncovered_declarations(self._manifest(), declared)), 1)
+        listed = self._manifest({"name": "Acme Runtime",
+                                 "repository": "https://github.com/acme/runtime"})
+        self.assertEqual(audit.find_uncovered_declarations(listed, declared), [])
+
+    def test_vendored_build_and_fixture_trees_are_not_scanned(self) -> None:
+        planted = "FetchContent_Declare(hidden GIT_REPOSITORY https://github.com/h/hidden.git)\n"
+        root = self._tree({
+            "external/vendored/CMakeLists.txt": planted,
+            "build/_deps/x/CMakeLists.txt": planted,
+            "tools/packages/test-stubs/pkg/CMakeLists.txt": planted,
+            "experimental/tool/tests/fixtures/p/CMakeLists.txt": planted,
+            "tools/cmake/Seen.cmake": planted.replace("hidden", "seen"),
+        })
+        self.assertEqual({d.name for d in audit.scan_fetch_declarations(root)}, {"seen"})
+
+    def test_real_repo_scan_reads_nested_files(self) -> None:
+        """Control for every absence the audit reports: the real scan must see
+        declarations outside the root CMakeLists.txt."""
+        sources = {d.source for d in audit.scan_fetch_declarations()}
+        for expected in ("tools/cmake/PulpDependencies.cmake", "tools/cmake/PulpWclap.cmake",
+                         "bindings/python/CMakeLists.txt", "setup.sh"):
+            self.assertIn(expected, sources)
+
+    def test_wgpu_native_download_needs_its_own_manifest_row(self) -> None:
+        manifest = audit.load_manifest()
+        declared = audit.collect_declared()
+        self.assertEqual(audit.find_uncovered_declarations(manifest, declared), [])
+        without = [d for d in manifest if d["name"] != "wgpu-native"]
+        reported = audit.find_uncovered_declarations(without, declared)
+        self.assertIn("setup.sh", {d.source for d in reported},
+                      msg="without its row, setup.sh's wgpu-native download must be reported "
+                          "(WebGPU-distribution's row must not hide it)")
+
+
+class WgpuNativePinTests(unittest.TestCase):
+    """The wgpu-native manifest row is the single record of its asset digests."""
+
+    def setUp(self) -> None:
+        self.entry = next(d for d in audit.load_manifest() if d["name"] == "wgpu-native")
+
+    def test_every_asset_carries_both_digests_under_the_pinned_release(self) -> None:
+        version = self.entry["version"]
+        names = set()
+        for art in self.entry["artifacts"]:
+            names.add(art["name"])
+            self.assertRegex(art["sha256"], r"^[0-9a-f]{64}$")
+            self.assertRegex(art["tree_sha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(
+                art["url"],
+                f"https://github.com/gfx-rs/wgpu-native/releases/download/{version}/{art['name']}.zip")
+        for required in ("wgpu-macos-aarch64-release", "wgpu-macos-x86_64-release",
+                         "wgpu-linux-x86_64-release", "wgpu-linux-aarch64-release",
+                         "wgpu-windows-x86_64-msvc-release"):
+            self.assertIn(required, names)
+
+    def test_manifest_version_matches_cmake_and_setup(self) -> None:
+        deps = (ROOT / "tools" / "cmake" / "PulpDependencies.cmake").read_text()
+        setup = (ROOT / "setup.sh").read_text()
+        version = self.entry["version"]
+        self.assertIn(f"set(PULP_WGPU_NATIVE_VERSION {version})", deps)
+        self.assertIn(f'WGPU_NATIVE_VERSION="{version}"', setup)
+
+    def test_tree_digest_of_an_archive_equals_its_extracted_tree(self) -> None:
+        sys.path.insert(0, str(ROOT / "tools" / "deps"))
+        import wgpu_native_digests as digests
+        import zipfile
+        with tempfile.TemporaryDirectory() as td:
+            archive = Path(td) / "a.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("include/webgpu/b.h", "beta\n")
+                zf.writestr("lib/a.txt", "alpha\n")
+            out = Path(td) / "out"
+            with zipfile.ZipFile(archive) as zf:
+                zf.extractall(out)
+            self.assertEqual(digests.tree_sha256_from_zip(archive),
+                             digests.tree_sha256_from_dir(out))
+            # The same value test/cmake/test_wgpu_native_pin.cmake expects from
+            # CMake's implementation.
+            self.assertEqual(
+                digests.tree_sha256_from_zip(archive),
+                "73a352a8a1a8e3460abec64e8b536c0962580c281aec2d0301e8377cf40fc1ef")
+
+
 class StrictAuditTests(unittest.TestCase):
     """Running the real audit script with --strict against origin/main
     inventory should succeed. If this fails, something is missing from
