@@ -168,6 +168,19 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
         REQUIRE(slots == std::vector<DesignSlot>{{DesignSlotKind::static_visual, {}, {}}});
     }
 
+    SECTION("mixed trees retain static parents alongside dynamic descendants") {
+        auto root = node("static-parent");
+        root.attributes["pulpRouteId"] = "parent";
+        auto child = node("dynamic-child");
+        child.attributes["pulpRouteId"] = "child";
+        child.attributes["pulpParamKey"] = "gain";
+        root.children.push_back(child);
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, "child", "gain"});
+        CHECK(slots[1] == DesignSlot{DesignSlotKind::static_visual, "parent", {}});
+    }
+
     SECTION("scalar, vector, meter, text, and action routes are typed and sorted") {
         auto root = node("root");
         root.attributes["pulpRouteId"] = "panel.route";
@@ -193,8 +206,9 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
         child.attributes["pulpParamKey"] = "child.gain";
         root.children.push_back(child);
         const auto slots = classify_design_slots(root);
-        REQUIRE(slots.size() == 1);
-        CHECK(slots.front() == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "child.gain"});
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] == DesignSlot{DesignSlotKind::static_visual, {}, {}});
+        CHECK(slots[1] == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "child.gain"});
     }
 
     SECTION("geometry-detected interactive routes use their typed lanes") {

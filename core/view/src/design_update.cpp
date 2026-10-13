@@ -97,6 +97,7 @@ DesignSlotKind interactive_slot_kind(InteractiveElementKind kind) {
 void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
     const auto attributes = slot_attributes(node);
     const auto route = attributes.route;
+    bool has_dynamic_slot = false;
     std::string scalar;
     const auto binding = attributes.binding;
     const auto parameter = attributes.parameter;
@@ -116,12 +117,16 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
     const auto y = attributes.y.empty()
                       ? encode_pair_key(attributes.y_module, attributes.y_parameter)
                       : std::string(attributes.y);
-    if (!scalar.empty())
+    if (!scalar.empty()) {
         append_slot(slots, DesignSlotKind::dynamic_scalar, route, scalar);
+        has_dynamic_slot = true;
+    }
     if (!attributes.x.empty() || !attributes.y.empty() || !attributes.x_module.empty() ||
         !attributes.x_parameter.empty() || !attributes.y_module.empty() ||
-        !attributes.y_parameter.empty())
+        !attributes.y_parameter.empty()) {
         append_slot(slots, DesignSlotKind::dynamic_vector, route, encode_vector_key(x, y));
+        has_dynamic_slot = true;
+    }
 
     const auto meter = attributes.meter;
     const auto meter_source = attributes.meter_source;
@@ -133,15 +138,20 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
         else
             meter_key = encode_pair_key(meter_source, meter_channel);
         append_slot(slots, DesignSlotKind::dynamic_meter, route, meter_key);
+        has_dynamic_slot = true;
     }
 
     const auto text = attributes.text;
-    if (!text.empty())
+    if (!text.empty()) {
         append_slot(slots, DesignSlotKind::dynamic_text, route, text);
+        has_dynamic_slot = true;
+    }
 
     const auto action = attributes.action;
-    if (!action.empty())
+    if (!action.empty()) {
         append_slot(slots, DesignSlotKind::dynamic_action, route, action);
+        has_dynamic_slot = true;
+    }
 
     // Geometry-detected controls carry their host route on the interactive
     // element instead of the node-level pulp* attributes. Preserve the
@@ -151,10 +161,16 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
     for (const auto& element : node.interactive_elements) {
         if (!element.param_key.empty()) {
             append_slot(slots, interactive_slot_kind(element.kind), route, element.param_key);
+            has_dynamic_slot = true;
         }
-        if (!element.action.empty())
+        if (!element.action.empty()) {
             append_slot(slots, DesignSlotKind::dynamic_action, route, element.action);
+            has_dynamic_slot = true;
+        }
     }
+
+    if (!has_dynamic_slot)
+        append_slot(slots, DesignSlotKind::static_visual, route, {});
 
     for (const auto& child : node.children)
         append_node_slots(child, slots);
