@@ -66,6 +66,10 @@ def entry(name, argv, **extra):
     return {"name": name, "argv": argv, **extra}
 
 
+# Fixture manifests hold none of the real whole-machine entries.
+NO_PLAN = ((),) * lane.EXCLUSIVE_SHARDS
+
+
 def run_check(entries, tests, *, gate=GATE, workflow=WIRED, require_all=True):
     return lane.check(
         entries,
@@ -75,6 +79,7 @@ def run_check(entries, tests, *, gate=GATE, workflow=WIRED, require_all=True):
         require_all=require_all,
         gate_label_excludes=gate,
         lane_workflow_text=workflow,
+        shard_plan=NO_PLAN,
     )
 
 
@@ -402,19 +407,49 @@ class LanePartTests(unittest.TestCase):
         _locked("small-locked", "shared-lock"),
         entry("big4", ["{repo}/big4.py"], processors=8),
     ]
+    PLAN = (("big1", "big4"), ("big2", "big3"))
 
     def test_every_entry_lands_in_exactly_one_part(self) -> None:
-        parts = lane.lane_parts(self.ENTRIES)
+        parts = lane.lane_parts(self.ENTRIES, plan=self.PLAN)
         names = [e["name"] for members in parts.values() for e in members]
         self.assertEqual(sorted(names), sorted(e["name"] for e in self.ENTRIES))
-        self.assertEqual(lane.part_errors(self.ENTRIES), [])
+        self.assertEqual(lane.part_errors(self.ENTRIES, plan=self.PLAN), [])
+
+    def test_the_plan_decides_each_shard(self) -> None:
+        parts = lane.lane_parts(self.ENTRIES, plan=self.PLAN)
+        self.assertEqual(sorted(e["name"] for e in parts["exclusive-1/2"]), ["big1", "big4"])
+        self.assertEqual(sorted(e["name"] for e in parts["exclusive-2/2"]),
+                         ["big2", "big3", "small-locked"])
+
+    def test_an_unplanned_whole_machine_entry_still_runs_but_is_reported(self) -> None:
+        plan = (("big1",), ("big2", "big3"))
+        parts = lane.lane_parts(self.ENTRIES, plan=plan)
+        exclusive = {e["name"] for key, members in parts.items()
+                     if key != lane.SHARED_PART for e in members}
+        self.assertIn("big4", exclusive)
+        errors = lane.part_errors(self.ENTRIES, plan=plan)
+        self.assertTrue(any(e.startswith("big4:") and "does not place" in e
+                            for e in errors), errors)
+
+    def test_a_plan_naming_a_shared_entry_is_reported(self) -> None:
+        plan = (("big1", "big4", "a"), ("big2", "big3"))
+        errors = lane.part_errors(self.ENTRIES, plan=plan)
+        self.assertTrue(any(e.startswith("a:") and "not a whole-machine" in e
+                            for e in errors), errors)
+
+    def test_a_plan_that_splits_a_lock_group_is_reported(self) -> None:
+        locked = self.ENTRIES + [_locked("big5", "shared-lock", processors=8)]
+        plan = (("big1", "big4", "big5"), ("big2", "big3"))
+        errors = lane.part_errors(locked, plan=plan)
+        self.assertTrue(any(e.startswith("big3:") and "resource lock" in e
+                            for e in errors), errors)
 
     def test_exclusive_entries_never_run_in_the_shared_part(self) -> None:
-        shared = lane.lane_parts(self.ENTRIES)[lane.SHARED_PART]
+        shared = lane.lane_parts(self.ENTRIES, plan=self.PLAN)[lane.SHARED_PART]
         self.assertEqual([e["name"] for e in shared], ["a", "b"])
 
     def test_a_resource_lock_never_spans_two_jobs(self) -> None:
-        parts = lane.lane_parts(self.ENTRIES)
+        parts = lane.lane_parts(self.ENTRIES, plan=self.PLAN)
         holding = [key for key, members in parts.items()
                    if {"big3", "small-locked"} & {e["name"] for e in members}]
         self.assertEqual(len(holding), 1, parts)
@@ -422,8 +457,8 @@ class LanePartTests(unittest.TestCase):
         self.assertLessEqual({"big3", "small-locked"}, members)
 
     def test_the_split_is_a_function_of_the_manifest(self) -> None:
-        forward = lane.lane_parts(self.ENTRIES)
-        backward = lane.lane_parts(list(reversed(self.ENTRIES)))
+        forward = lane.lane_parts(self.ENTRIES, plan=self.PLAN)
+        backward = lane.lane_parts(list(reversed(self.ENTRIES)), plan=self.PLAN)
         self.assertEqual(
             {k: sorted(e["name"] for e in v) for k, v in forward.items()},
             {k: sorted(e["name"] for e in v) for k, v in backward.items()},
@@ -431,7 +466,8 @@ class LanePartTests(unittest.TestCase):
 
     def test_a_doubled_entry_is_reported(self) -> None:
         doubled = self.ENTRIES + [dict(self.ENTRIES[0])]
-        self.assertTrue(any("not exactly one" in e for e in lane.part_errors(doubled)))
+        self.assertTrue(any("not exactly one" in e
+                            for e in lane.part_errors(doubled, plan=self.PLAN)))
 
     def test_bad_selectors_are_refused(self) -> None:
         for part, shard in (("exclusive", None), ("exclusive", "3/3"),
@@ -590,6 +626,7 @@ class RepositoryTests(unittest.TestCase):
             require_all=False,
             gate_label_excludes=lane._gate_label_excludes(),
             lane_workflow_text=lane.LANE_WORKFLOW.read_text(encoding="utf-8"),
+            shard_plan=NO_PLAN,
         )
         self.assertEqual(errors, [])
 
@@ -603,6 +640,15 @@ class RepositoryTests(unittest.TestCase):
         for key, members in parts.items():
             self.assertTrue(members, key)
         self.assertFalse(any(lane.is_exclusive(e) for e in parts[lane.SHARED_PART]))
+        self.assertEqual(
+            {key: sorted(e["name"] for e in members)
+             for key, members in parts.items() if key != lane.SHARED_PART},
+            {"exclusive-1/2": ["gpu-dpr-runner-selftest",
+                               "gpu-first-visible-external-adapter-selftest"],
+             "exclusive-2/2": ["agent-capability-manifest-selftest",
+                               "agent-capability-rederive-selftest",
+                               "gpu-dpr-v2-evidence-selftest"]},
+        )
 
     def test_lane_workflow_reports_on_merge_group(self) -> None:
         text = lane.LANE_WORKFLOW.read_text(encoding="utf-8")

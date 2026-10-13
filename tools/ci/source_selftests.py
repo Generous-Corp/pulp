@@ -353,9 +353,23 @@ def run(
 # --------------------------------------------------------------------------
 # lane parts: how the required lane splits the manifest across jobs
 
-# Whole-machine entries run in this many sibling jobs. version-skill-check.yml
-# lists the same shard numbers in its matrix; `check` fails if the two differ.
-EXCLUSIVE_SHARDS = 2
+# Which sibling job runs each whole-machine entry, balanced on measured wall
+# time (hosted ubuntu-latest, fast-run seconds): dpr-runner 132.5 +
+# external-adapter 11.3 against v2-evidence 69.0 + manifest 60.9 +
+# rederive 26.6. The two agent-capability entries share a resource lock, so
+# they stay together. `check` fails when an exclusive entry is missing here,
+# a name here is not an exclusive entry, or a lock group is split; until it
+# is placed, an unplanned entry still runs, on the lightest shard.
+# version-skill-check.yml lists the same shard numbers in its matrix.
+EXCLUSIVE_SHARD_PLAN: tuple[tuple[str, ...], ...] = (
+    ("gpu-dpr-runner-selftest", "gpu-first-visible-external-adapter-selftest"),
+    (
+        "gpu-dpr-v2-evidence-selftest",
+        "agent-capability-manifest-selftest",
+        "agent-capability-rederive-selftest",
+    ),
+)
+EXCLUSIVE_SHARDS = len(EXCLUSIVE_SHARD_PLAN)
 SHARED_PART = "shared"
 EXCLUSIVE_PART = "exclusive"
 
@@ -366,18 +380,23 @@ def is_exclusive(entry: dict[str, Any]) -> bool:
 
 
 def lane_parts(
-    entries: list[dict[str, Any]], shards: int = EXCLUSIVE_SHARDS
+    entries: list[dict[str, Any]],
+    shards: int = EXCLUSIVE_SHARDS,
+    plan: tuple[tuple[str, ...], ...] = EXCLUSIVE_SHARD_PLAN,
 ) -> dict[str, list[dict[str, Any]]]:
     """Split the manifest into the shared part and ``shards`` exclusive shards.
 
     Every entry lands in exactly one part. Entries that share a resource lock
     with an exclusive entry travel with it, so a lock never spans two jobs.
-    Exclusive groups are placed longest-timeout first on the lightest shard, a
-    deterministic function of the manifest alone, so every job computes the
-    same split without coordinating.
+    An exclusive group goes to the shard ``plan`` names for its first planned
+    member; a group the plan does not name goes, longest-timeout first, to the
+    lightest shard, so it still runs. The result is a deterministic function of
+    the manifest and the plan, so every job computes the same split without
+    coordinating.
     """
     if shards < 1:
         raise ValueError("shards must be at least 1")
+    planned = {name: i for i, names in enumerate(plan[:shards]) for name in names}
     parent = {e["name"]: e["name"] for e in entries}
 
     def find(name: str) -> str:
@@ -407,18 +426,54 @@ def lane_parts(
     result: dict[str, list[dict[str, Any]]] = {SHARED_PART: [
         e for e in entries if e["name"] not in in_exclusive]}
     result.update({key: [] for key in keys})
-    for group in sorted(exclusive, key=lambda g: (-weight(g), min(e["name"] for e in g))):
+    unplanned = []
+    for group in sorted(exclusive, key=lambda g: min(e["name"] for e in g)):
+        slots = sorted({planned[e["name"]] for e in group if e["name"] in planned})
+        if slots:
+            key = keys[slots[0]]
+            load[key] += weight(group)
+            result[key].extend(group)
+        else:
+            unplanned.append(group)
+    for group in sorted(unplanned, key=lambda g: (-weight(g), min(e["name"] for e in g))):
         key = min(keys, key=lambda k: (load[k], keys.index(k)))
         load[key] += weight(group)
         result[key].extend(group)
     return result
 
 
-def part_errors(entries: list[dict[str, Any]], shards: int = EXCLUSIVE_SHARDS) -> list[str]:
-    """Ways the split could drop or double-run an entry."""
+def part_errors(
+    entries: list[dict[str, Any]],
+    shards: int = EXCLUSIVE_SHARDS,
+    plan: tuple[tuple[str, ...], ...] = EXCLUSIVE_SHARD_PLAN,
+) -> list[str]:
+    """Ways the split could drop or double-run an entry, or drift from the plan."""
     errors: list[str] = []
     counts: dict[str, int] = {}
-    for members in lane_parts(entries, shards).values():
+    parts = lane_parts(entries, shards, plan)
+    exclusive_names = {e["name"] for e in entries if is_exclusive(e)}
+    planned_names = [name for names in plan for name in names]
+    if len(plan) != shards:
+        errors.append(f"EXCLUSIVE_SHARD_PLAN lists {len(plan)} shards, not {shards}")
+    for name in sorted({n for n in planned_names if planned_names.count(n) > 1}):
+        errors.append(f"{name}: named in more than one EXCLUSIVE_SHARD_PLAN shard")
+    for name in sorted(set(planned_names) - exclusive_names):
+        errors.append(f"{name}: in EXCLUSIVE_SHARD_PLAN but not a whole-machine manifest entry")
+    for name in sorted(exclusive_names - set(planned_names)):
+        errors.append(
+            f"{name}: runs in an exclusive shard but EXCLUSIVE_SHARD_PLAN does not "
+            "place it; add it to the shard that keeps the two balanced"
+        )
+    for index, names in enumerate(plan[:shards]):
+        key = f"{EXCLUSIVE_PART}-{index + 1}/{shards}"
+        held = {e["name"] for e in parts[key]}
+        for name in names:
+            if name in exclusive_names and name not in held:
+                errors.append(
+                    f"{name}: EXCLUSIVE_SHARD_PLAN puts it in shard {index + 1} but a "
+                    "shared resource lock carries it to another shard"
+                )
+    for members in parts.values():
         for item in members:
             counts[item["name"]] = counts.get(item["name"], 0) + 1
     for item in entries:
@@ -1166,6 +1221,7 @@ def check(
     require_all: bool,
     gate_label_excludes: dict[str, str],
     lane_workflow_text: str,
+    shard_plan: tuple[tuple[str, ...], ...] = EXCLUSIVE_SHARD_PLAN,
 ) -> list[str]:
     """Every way the two lanes could disagree, as a list of error strings."""
     errors: list[str] = []
@@ -1253,7 +1309,7 @@ def check(
                 "would run twice (harmless) but the wiring has drifted"
             )
     errors.extend(wiring_errors(lane_workflow_text))
-    errors.extend(part_errors(entries))
+    errors.extend(part_errors(entries, plan=shard_plan))
     return errors
 
 

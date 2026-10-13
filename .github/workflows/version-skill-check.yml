@@ -53,9 +53,7 @@ jobs:
     # branch JSON — including the hosted fallbacks, hence the quoted form — so
     # setting a local selector can never turn this required gate into a silent
     # black hole.
-    # The self-hosted branches match only when workflow_ref names this file on
-    # main, i.e. a dispatch from main: automatic pull_request and merge_group
-    # runs carry their own ref there and run on ubuntu-latest by design.
+    # workflow_ref is main only on a dispatch from main; PR and queue runs always land on ubuntu-latest.
     runs-on: >-
       ${{ fromJSON(
         github.workflow_ref == format('{0}/.github/workflows/version-skill-check.yml@refs/heads/main', github.repository) &&
@@ -403,7 +401,8 @@ jobs:
     # is lane_parts() in tools/ci/source_selftests.py; `check` fails if this
     # matrix and EXCLUSIVE_SHARDS disagree. Same runner selection, checkout
     # and interpreter as the checks job, so the entries see the environment
-    # they always ran in.
+    # they always ran in. EXCLUSIVE_SHARD_PLAN says which entry runs in which
+    # shard, balanced on measured wall time.
     runs-on: >-
       ${{ fromJSON(
         github.workflow_ref == format('{0}/.github/workflows/version-skill-check.yml@refs/heads/main', github.repository) &&

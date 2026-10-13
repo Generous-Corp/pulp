@@ -1151,10 +1151,12 @@ consequences worth knowing before you debug:
   each alone on its own runner. The required `Enforce version & skill sync`
   job only collects the result of the other two. When it is red, open the
   needed job that failed: the aggregator's log names it but holds no test
-  output. A new `PROCESSORS` > 1 entry lands on a shard automatically
-  (`lane_parts()`, longest timeout first). Changing the shard count means
-  changing `EXCLUSIVE_SHARDS` and the workflow matrix together, or the
-  contract fails.
+  output. `EXCLUSIVE_SHARD_PLAN` in `tools/ci/source_selftests.py` names the
+  shard for each `PROCESSORS` > 1 entry, balanced on measured wall time, not
+  on manifest timeouts (the timeouts are all 300 s and put the two GPU DPR
+  tests together, a 200 s shard). A new such entry still runs, on the lightest
+  shard, but the contract fails until the plan places it. Changing the shard
+  count means changing the plan and the workflow matrix together.
 - Editing a moved registration's arguments without refreshing the manifest
   fails `source-selftest-lane-contract` on the gate; run
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
