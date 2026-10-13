@@ -55,6 +55,29 @@ UNCLASSIFIED = "unclassified"
 
 PIN_FILE = "tools/deps/manifest.json"
 
+# Archives whose msvc-toolchain.json is known broken but which were accepted
+# deliberately, keyed by (repo, release tag, asset, sha256). The provenance
+# rule ("do not repin to an archive with unknown/error provenance") still holds
+# for every other archive; an entry here only stops the incident from telling
+# an agent to undo an accepted pin. Each entry says why it was accepted.
+PROVENANCE_EXCEPTIONS: dict[tuple[str, str, str, str], str] = {
+    (
+        "danielraffel/skia-builder",
+        "chrome/m153",
+        "skia-build-win-arm64-gpu-release.zip",
+        "18e57481e84992fecccbc4ac0f8f283c4a68d90d7978a61ce2e68f21dd34a9c7",
+    ): (
+        "Documented exception: this is the chrome/m153 win-arm64 archive pinned "
+        "by Pulp PR 10170 (sha256 "
+        "18e57481e84992fecccbc4ac0f8f283c4a68d90d7978a61ce2e68f21dd34a9c7). Its "
+        "msvc-toolchain.json is known broken (toolset and SDK `unknown`, "
+        "clang-cl version `error: no input files`); its contents were verified "
+        "by archive comparison instead; and it is Skia 37c5ad6a, not the release "
+        "lock's 8b8c3872. Keep this pin — do not revert PR 10170 over the "
+        "provenance file. The provenance rule still applies to any other archive."
+    ),
+}
+
 
 def strip_timestamp(line: str) -> str:
     return _TIMESTAMP.sub("", line.rstrip("\r\n"))
@@ -299,7 +322,11 @@ def _digest_mismatch(
             f"(`gh api {api} --jq .body`) for an asset-replacement entry naming the "
             f"old and new digest and why the bytes changed."
         ))
-        if "-win-" in asset:
+        exception = PROVENANCE_EXCEPTIONS.get((repo, rel_tag, asset, new))
+        if exception:
+            details["provenance_exception"] = True
+            fix.insert(1, exception)
+        elif "-win-" in asset:
             fix.insert(1, (
                 f"Windows archive: `gh release download {rel_tag} --repo {repo} "
                 f"--pattern {asset}` then `unzip -p {asset} 'build/*/msvc-toolchain.json'` "

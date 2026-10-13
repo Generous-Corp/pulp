@@ -254,6 +254,22 @@ and is invisible to every published/unpublished check. The reconciler reads each
 tag's newest `Sign and Release` run and lists a failed one with the same
 diagnosis.
 
+**Accepted archives with broken provenance.** The "do not repin to an archive
+whose `msvc-toolchain.json` has `unknown`/`error` values" step holds for every
+future repin, except archives listed in `PROVENANCE_EXCEPTIONS` in
+`release_failure_diagnosis.py`, keyed by repo, release tag, asset and digest.
+The one entry is the chrome/m153 win-arm64 archive pinned by Pulp PR 10170
+(sha256 `18e57481…a9c7`): its provenance file is known broken, its contents were
+verified by archive comparison, and it is Skia 37c5ad6a rather than the release
+lock's 8b8c3872. For that archive the incident names the exception instead of
+the rule, so it never tells an agent to undo the repin.
+
+**The incident body is bounded.** GitHub rejects an issue body over 65,536
+characters, and a rejected edit would fail every sweep. `incident_body()` keeps
+the newest five tags' diagnoses in full (each capped at 8,000 characters),
+collapses older tags to one line, and folds the oldest one-liners into a single
+line that still names every tag if needed, staying under 60,000 characters.
+
 **A tag joining the incident posts a comment.** The incident is one issue,
 edited in place, and an edit notifies nobody — which is how five broken
 releases sat in an already-open incident. Each sweep that adds a tag to an open

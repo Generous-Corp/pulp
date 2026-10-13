@@ -963,13 +963,24 @@ def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> No
             print(f"  closed incident #{match['number']} — all clear")
         return
 
-    body = (
-        "Tags the release reconciler could not get published on its own: each "
-        "one exhausted its retry budget, failed in a way a rebuild cannot fix, "
-        "or is still unpublished long after it was cut. Every entry names the "
-        "release legs that failed.\n\n"
-        + "\n".join(f"- `{tag}` — {why}" for tag, why in report)
-        + "\n\nOpen the failing `release-cli.yml` run and land the fix on `main`. "
+    body = incident_body(report)
+    if dry_run:
+        print(f"  DRY RUN: would report {len(report)} unresolved tag(s)")
+        print("  DRY RUN: incident body follows\n" + body)
+        return
+    _write_incident(repo, match, report, body)
+
+
+# GitHub rejects an issue body over 65,536 characters, and a rejected edit fails
+# every sweep. Stay well under it.
+INCIDENT_BODY_LIMIT = 60_000
+# The newest tags keep their full diagnosis; older ones get one line each.
+INCIDENT_FULL_ENTRIES = 5
+_ENTRY_DETAIL_LIMIT = 8_000
+_SUMMARY_LIMIT = 240
+
+_INCIDENT_FOOTER = (
+    "\n\nOpen the failing `release-cli.yml` run and land the fix on `main`. "
         "A product-validation circuit stays open until a later run passes the "
         "failed gate: manually dispatch the repaired workflow for the same tag "
         "when a pipeline overlay can fix it, or ship a new patch tag when product "
@@ -978,11 +989,58 @@ def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> No
         "in place by "
         "`.github/workflows/release-reconcile.yml`; it closes itself once every "
         "recent tag is published and complete."
-    )
-    if dry_run:
-        print(f"  DRY RUN: would report {len(report)} unresolved tag(s)")
-        print("  DRY RUN: incident body follows\n" + body)
-        return
+)
+_INCIDENT_HEADER = (
+    "Tags the release reconciler could not get published on its own: each "
+    "one exhausted its retry budget, failed in a way a rebuild cannot fix, "
+    "or is still unpublished long after it was cut. Every entry names the "
+    "release legs that failed.\n\n"
+)
+
+
+def incident_body(
+    report: list[tuple[str, str]],
+    *,
+    full_entries: int = INCIDENT_FULL_ENTRIES,
+    limit: int = INCIDENT_BODY_LIMIT,
+) -> str:
+    """Render the incident, bounded so GitHub always accepts the edit.
+
+    `report` is newest-first. The newest `full_entries` tags keep their full
+    diagnosis (each still capped); older tags collapse to one line. If even
+    that overflows, the oldest one-liners are folded into a single line that
+    still names every tag, so `newly_reported` never mistakes them for new.
+    """
+    entries: list[str] = []
+    for index, (tag, why) in enumerate(report):
+        if index < full_entries:
+            text = why if len(why) <= _ENTRY_DETAIL_LIMIT else (
+                why[:_ENTRY_DETAIL_LIMIT].rsplit("\n", 1)[0]
+                + "\n  - _(diagnosis truncated; open the linked run)_"
+            )
+        else:
+            first = why.split("\n", 1)[0]
+            text = first if len(first) <= _SUMMARY_LIMIT else first[:_SUMMARY_LIMIT] + "…"
+            text += " _(older tag: summarised)_"
+        entries.append(f"- `{tag}` — {text}")
+
+    def assemble(kept: list[str], folded: list[str]) -> str:
+        lines = list(kept)
+        if folded:
+            lines.append("- older tags folded to save space: "
+                         + ", ".join(f"`{t}`" for t in folded))
+        return _INCIDENT_HEADER + "\n".join(lines) + _INCIDENT_FOOTER
+
+    kept, folded = entries, []
+    body = assemble(kept, folded)
+    while len(body) > limit and len(kept) > min(full_entries, len(kept)) and len(kept) > 1:
+        kept = kept[:-1]
+        folded = [report[len(kept)][0]] + folded
+        body = assemble(kept, folded)
+    return body
+
+
+def _write_incident(repo: str, match: dict | None, report: list[tuple[str, str]], body: str) -> None:
     if match:
         # Editing a long-open issue notifies nobody, which is how five broken
         # releases sat in an already-open incident unnoticed. Comment whenever
@@ -1025,12 +1083,23 @@ def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> No
         print(f"  opened incident ({len(report)} unresolved)")
 
 
-_REPORTED_TAG = re.compile(r"^- `(v\d+\.\d+\.\d+)`", re.MULTILINE)
+_TAG_IN_ENTRY = re.compile(r"`(v\d+\.\d+\.\d+)`")
 
 
 def newly_reported(previous_body: str, report: list[tuple[str, str]]) -> list[str]:
-    """Tags in `report` that the incident body did not already list."""
-    seen = set(_REPORTED_TAG.findall(previous_body))
+    """Tags in `report` that the incident body did not already list.
+
+    Only column-0 entry lines count (indented diagnosis lines mention tags in
+    commands); an entry's own tag comes first, and the folded line lists many.
+    """
+    seen: set[str] = set()
+    for line in previous_body.splitlines():
+        if line.startswith("- older tags folded"):
+            seen.update(_TAG_IN_ENTRY.findall(line))
+        elif line.startswith("- `"):
+            found = _TAG_IN_ENTRY.search(line)
+            if found:
+                seen.add(found.group(1))
     return [tag for tag, _ in report if tag not in seen]
 
 

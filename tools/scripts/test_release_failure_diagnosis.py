@@ -214,5 +214,173 @@ class IncidentNotifies(unittest.TestCase):
         self.assertEqual(rr.newly_reported("", report), ["v0.952.0", "v0.955.1"])
 
 
+
+class ConfirmedMismatchStopsRedispatchEndToEnd(unittest.TestCase):
+    """collect() -> main(): an upstream-confirmed mismatch must not be rebuilt.
+
+    Drives the real collect() over the recorded runs, jobs, log and upstream
+    asset with only the GitHub transport stubbed, then feeds its states to the
+    sweep. The tag has one prior re-dispatch, so without the tag-immutable
+    circuit it would sit on the retry path and be re-dispatched.
+    """
+
+    def collect_outage(self, upstream_digest: str) -> list[rr.TagState]:
+        import subprocess
+
+        push_job_id = failed_job(FIXTURE["push_jobs"])["id"]
+        jobs = {FIXTURE["push_run"]["id"]: FIXTURE["push_jobs"],
+                FIXTURE["guard_run"]["id"]: FIXTURE["guard_jobs"]}
+
+        def fake_gh_json(args):
+            path = args[-1] if args[0] == "api" else ""
+            if "/releases?" in path:
+                return [[]]
+            if "release-cli.yml/runs" in path:
+                return [{"workflow_runs": [FIXTURE["push_run"], FIXTURE["guard_run"]]}]
+            if "sign-and-release.yml/runs" in path:
+                return [{"workflow_runs": []}]
+            if "/jobs?" in path:
+                run_id = int(path.split("/runs/")[1].split("/")[0])
+                return {"jobs": jobs.get(run_id, [])}
+            if path == "repos/danielraffel/skia-builder/releases/tags/chrome/m153":
+                return {"assets": [{"name": "skia-build-win-arm64-gpu-release.zip",
+                                    "digest": f"sha256:{upstream_digest}"}]}
+            raise AssertionError(f"unexpected gh call: {args}")
+
+        def fake_run(cmd, *a, **kw):
+            if cmd[:2] == ["gh", "workflow"]:
+                raise AssertionError("collect must never dispatch")
+            log = LOG if cmd[-1].endswith(f"/jobs/{push_job_id}/logs") else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout=log, stderr="")
+
+        saved = (rr.gh_json, rr.subprocess.run, rr.read_pin_file)
+        try:
+            rr.gh_json = fake_gh_json
+            rr.subprocess.run = fake_run
+            rr.read_pin_file = lambda *_: MANIFEST
+            return rr.collect("example/repo", [("v0.955.1", NOW - timedelta(hours=7))],
+                              NOW - timedelta(days=4))
+        finally:
+            rr.gh_json, rr.subprocess.run, rr.read_pin_file = saved
+
+    def test_confirmed_mismatch_opens_the_circuit_and_is_not_redispatched(self) -> None:
+        states = self.collect_outage(OBSERVED)
+        self.assertEqual(states[0].dispatch_attempts, 1, "fixture: one prior re-dispatch")
+        report, rebuilt = sweep(states)
+        self.assertEqual(rebuilt, [], "a confirmed mismatch must never be re-dispatched")
+        self.assertIn("tag-immutable", report["v0.955.1"])
+        self.assertIn("circuit open", report["v0.955.1"])
+
+    def test_unconfirmed_mismatch_stays_on_the_retry_path(self) -> None:
+        """Control: the same history with a non-matching upstream digest."""
+        report, rebuilt = sweep(self.collect_outage("0" * 64))
+        self.assertEqual(rebuilt, ["v0.955.1"])
+        self.assertNotIn("tag-immutable", report.get("v0.955.1", ""))
+
+
+class IncidentLifecycle(unittest.TestCase):
+    def run_sync(self, report, existing):
+        import subprocess
+
+        calls: list[list[str]] = []
+
+        def fake_gh_json(args):
+            if args[:2] == ["issue", "list"]:
+                return existing
+            if args[:2] == ["issue", "view"]:
+                return {"body": ""}
+            raise AssertionError(args)
+
+        def fake_run(cmd, *a, **kw):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        saved = (rr.gh_json, rr.subprocess.run)
+        try:
+            rr.gh_json, rr.subprocess.run = fake_gh_json, fake_run
+            with contextlib.redirect_stdout(io.StringIO()):
+                rr.sync_incident("example/repo", report, dry_run=False)
+        finally:
+            rr.gh_json, rr.subprocess.run = saved
+        return calls
+
+    def test_recovery_closes_the_open_incident(self) -> None:
+        open_issue = [{"number": 6880, "title": rr.INCIDENT_TITLE, "state": "OPEN"}]
+        calls = self.run_sync([], open_issue)
+        self.assertEqual([c[:3] for c in calls], [["gh", "issue", "close"]])
+        self.assertIn("6880", calls[0])
+
+    def test_recovery_with_no_open_incident_does_nothing(self) -> None:
+        closed = [{"number": 6880, "title": rr.INCIDENT_TITLE, "state": "CLOSED"}]
+        self.assertEqual(self.run_sync([], closed), [])
+
+
+class IncidentBodyIsBounded(unittest.TestCase):
+    """GitHub rejects a body over 65,536 characters; a rejected edit would fail
+    every sweep. Build a worst case: many tags, each with long diagnoses."""
+
+    GITHUB_LIMIT = 65_536
+
+    def long_report(self, tags: int) -> list[tuple[str, str]]:
+        # Three full diagnoses per tag: the most one Release CLI entry carries.
+        detail = "\n".join(DigestMismatch().diag().render())
+        why = "failed immutable product validation" + ("\n" + detail) * 3
+        return [(f"v1.{999 - i}.0", f"{why} [entry {i}]") for i in range(tags)]
+
+    def test_many_long_entries_stay_under_the_cap_and_keep_the_newest_in_full(self) -> None:
+        report = self.long_report(300)
+        raw = sum(len(why) for _, why in report)
+        body = rr.incident_body(report)
+        print(f"\n  incident body at the limit: {len(report)} tags, raw {raw} chars "
+              f"-> body {len(body)} chars (cap {rr.INCIDENT_BODY_LIMIT}, GitHub {self.GITHUB_LIMIT})")
+        self.assertGreater(raw, self.GITHUB_LIMIT * 10, "fixture must be far over the limit")
+        self.assertLessEqual(len(body), rr.INCIDENT_BODY_LIMIT)
+        self.assertLess(len(body), self.GITHUB_LIMIT)
+        for tag, why in report[: rr.INCIDENT_FULL_ENTRIES]:
+            with self.subTest(tag=tag):
+                self.assertIn(f"- `{tag}` — {why}", body, "newest tags keep the full diagnosis")
+        older_tag, older_why = report[rr.INCIDENT_FULL_ENTRIES]
+        self.assertNotIn(older_why, body, "older tags are summarised")
+        self.assertIn(f"`{older_tag}`", body)
+        # Every tag is still named, so none re-triggers a "newly unresolved" comment.
+        self.assertEqual(rr.newly_reported(body, report), [])
+
+    def test_a_small_report_is_rendered_in_full(self) -> None:
+        report = self.long_report(2)
+        body = rr.incident_body(report)
+        for _, why in report:
+            self.assertIn(why, body)
+
+    def test_one_oversized_entry_is_truncated_not_dropped(self) -> None:
+        body = rr.incident_body([("v1.0.0", "x\n" + "  - line\n" * 20_000)])
+        self.assertLess(len(body), rr.INCIDENT_BODY_LIMIT)
+        self.assertIn("diagnosis truncated", body)
+
+
+class AcceptedArchiveIsNotUndone(unittest.TestCase):
+    """The m153 win-arm64 archive repinned by PR 10170 has a broken provenance
+    file but was accepted on archive comparison; the alert must not tell an
+    agent to undo that repin."""
+
+    def test_the_accepted_archive_names_the_exception(self) -> None:
+        d = DigestMismatch().diag(manifest_text=MANIFEST.replace(PINNED, OBSERVED))
+        text = "\n".join(d.render())
+        for needle in ("PR 10170", OBSERVED, "known broken", "archive comparison",
+                       "37c5ad6a", "8b8c3872", "do not revert"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
+        self.assertNotIn("Do not repin to an archive whose provenance is broken", text)
+        self.assertNotIn(f"→ `{PINNED}`", text, "must never tell an agent to restore the old pin")
+        self.assertIn("already pins the new digest", text)
+
+    def test_any_other_windows_archive_keeps_the_provenance_rule(self) -> None:
+        other = "a" * 64
+        log = LOG.replace(OBSERVED, other)
+        d = DigestMismatch().diag(log_text=log, upstream_digest=other)
+        text = "\n".join(d.render())
+        self.assertIn("Do not repin to an archive whose provenance is broken", text)
+        self.assertNotIn("PR 10170", text)
+
+
 if __name__ == "__main__":
     unittest.main()
