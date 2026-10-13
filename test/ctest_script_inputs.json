@@ -6628,13 +6628,9 @@
    "inputs": [
     ".githooks/lib",
     ".githooks/pre-push",
-    "tools/scripts",
     "tools/scripts/gate_host_policy.sh",
     "tools/scripts/local_diff_cover.sh",
-    "tools/scripts/skill_sync_check.py",
-    "tools/scripts/test_local_diff_cover.py",
-    "tools/scripts/version_bump_check.py",
-    "tools/scripts/versioning.json"
+    "tools/scripts/test_local_diff_cover.py"
    ],
    "kind": "python"
   },
