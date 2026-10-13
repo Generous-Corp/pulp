@@ -38,6 +38,11 @@ CI_SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
 CTEST_POLICY = REPO_ROOT / "scripts" / "coverage_ctest_policy.sh"
 GOVERNED_BUILD = REPO_ROOT / "tools" / "ci" / "governed-build.sh"
 
+# The test suite itself exercises ordinary diff-cover behavior. On a developer
+# machine that serves the hosted gate, opt its subprocess fixtures into the
+# explicit build path; GateHostSkipTests removes this opt-in for the real skip.
+os.environ.setdefault("PULP_GATE_HOST_ALLOW_BUILD", "1")
+
 
 class ConfigTests(unittest.TestCase):
     """coverage_config.json is well-formed and exposes the expected keys."""
@@ -1255,6 +1260,10 @@ def _fake_worktree(tmp: pathlib.Path, name: str) -> pathlib.Path:
     governor = root / "tools" / "ci" / "governed-build.sh"
     governor.write_text(GOVERNED_BUILD.read_text())
     governor.chmod(0o755)
+    (root / "tools" / "scripts" / "gate_host_policy.sh").write_text(
+        (SCRIPT.parent / "gate_host_policy.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     return root
 
 
@@ -1263,6 +1272,9 @@ def _lib_eval(root: pathlib.Path, snippet: str, timeout: float = 30,
     """Source the script in lib-only mode and run `snippet` against its helpers."""
     env = os.environ.copy()
     env["PULP_DIFF_COVER_LIB_ONLY"] = "1"
+    # Tests exercise ordinary/non-gate behavior even when the developer host
+    # itself serves the macOS gate; the gate-host branch has dedicated tests.
+    env["PULP_GATE_HOST_ALLOW_BUILD"] = "1"
     env.pop("PULP_DIFF_COVER_HTML_REPORT", None)
     if env_extra:
         env.update(env_extra)
@@ -1324,6 +1336,51 @@ class StarvedHostSkipTests(unittest.TestCase):
         self.assertIn("PULP_DIFF_COVER_SKIP_WHEN_STARVED=1", hook)
         self.assertIn('if [ "$_diff_cover_rc" -eq 4 ]; then', hook)
         self.assertIn("DIFF COVERAGE SKIPPED (host starved)", hook)
+
+
+class GateHostSkipTests(unittest.TestCase):
+    """Gate-serving tartci profiles skip local configure/build work."""
+
+    def _profile(self, serves_gate: bool) -> tuple[pathlib.Path, pathlib.Path]:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = _fake_worktree(pathlib.Path(tmp.name), "wt")
+        tartci = root / "tartci"
+        tartci.write_text(
+            "#!/bin/sh\n"
+            + ("echo TARTCI_SERVES_GATE=1\n" if serves_gate else "echo TARTCI_SERVES_GATE=0\n"),
+            encoding="utf-8",
+        )
+        tartci.chmod(0o755)
+        return root, tartci
+
+    def test_gate_profile_is_detected(self) -> None:
+        root, tartci = self._profile(True)
+        env = os.environ.copy()
+        env["PULP_TARTCI_BIN"] = str(tartci)
+        env.pop("PULP_GATE_HOST_ALLOW_BUILD", None)
+        result = subprocess.run(["bash", str(root / "tools/scripts/local_diff_cover.sh")],
+                                cwd=root, env=env, capture_output=True, text=True,
+                                encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("gate=1", result.stdout)
+        self.assertIn("TARTCI_SERVES_GATE=1", result.stderr)
+
+    def test_non_gate_profile_does_not_skip(self) -> None:
+        root, tartci = self._profile(False)
+        result = _lib_eval(root, "if pulp_gate_host_serves_gate; then echo gate=1; else echo gate=0; fi",
+                           env_extra={"PULP_TARTCI_BIN": str(tartci)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("gate=0", result.stdout)
+
+    def test_hook_and_gates_use_profile_guard(self) -> None:
+        hook = (REPO_ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
+        gates = (REPO_ROOT / "tools/scripts/gates.sh").read_text(encoding="utf-8")
+        for source in (hook, gates):
+            self.assertIn("gate_host_policy.sh", source)
+            self.assertIn("pulp_gate_host_serves_gate", source)
+        self.assertIn("pulp_gate_host_skip_line", hook)
+        self.assertIn("pulp_gate_host_skip_line", gates)
 
 
 class CoverageBuildGovernorTests(unittest.TestCase):

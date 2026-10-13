@@ -65,6 +65,17 @@ BUILD_ID_FILE="${BUILD_DIR}/.pulp-diff-cover-build-id"
 COVERAGE_BUILD_IDENTITY_START=""
 GOVERNED_BUILD="${REPO_ROOT}/tools/ci/governed-build.sh"
 
+# Gate-serving tartci hosts are reserved for the hosted macOS gate. Never
+# start a local configure or coverage build there; the profile is authoritative
+# even when macOS renames the machine. PULP_GATE_HOST_ALLOW_BUILD=1 is the
+# explicit operator path on m1/a disposable VM.
+# shellcheck source=gate_host_policy.sh
+source "${SCRIPT_DIR}/gate_host_policy.sh"
+if pulp_gate_host_serves_gate; then
+    pulp_gate_host_skip_line "local diff-coverage configure/build" "tools/scripts/local_diff_cover.sh"
+    exit 0
+fi
+
 # shellcheck source=../../scripts/coverage_ctest_policy.sh
 source "${REPO_ROOT}/scripts/coverage_ctest_policy.sh"
 

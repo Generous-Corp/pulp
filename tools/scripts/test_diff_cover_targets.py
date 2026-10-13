@@ -26,6 +26,9 @@ HELPER = SCRIPTS / "diff_cover_targets.py"
 SHELL = SCRIPTS / "local_diff_cover.sh"
 CTEST_POLICY = SCRIPTS.parent.parent / "scripts" / "coverage_ctest_policy.sh"
 GOVERNED_BUILD = SCRIPTS.parent / "ci" / "governed-build.sh"
+# Keep fixture subprocesses on the ordinary path when the developer machine
+# itself is a tartci gate host; the gate-host branch has dedicated coverage.
+os.environ.setdefault("PULP_GATE_HOST_ALLOW_BUILD", "1")
 sys.path.insert(0, str(SCRIPTS))
 import diff_cover_targets  # noqa: E402
 
@@ -345,6 +348,10 @@ class ShellWiringTests(unittest.TestCase):
                              (CTEST_POLICY, "scripts/coverage_ctest_policy.sh"),
                              (GOVERNED_BUILD, "tools/ci/governed-build.sh")):
                 (root / dst).write_text(src.read_text())
+            (root / "tools/scripts/gate_host_policy.sh").write_text(
+                (SHELL.parent / "gate_host_policy.sh").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
             (root / "tools" / "scripts" / "coverage_config.json").write_text(json.dumps({
                 "diff_coverage_fail_under": 75, "compare_branch": "base",
                 "min_free_disk_gib": 0, "diff_cover_excludes": [],

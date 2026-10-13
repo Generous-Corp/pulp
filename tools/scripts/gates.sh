@@ -85,6 +85,16 @@ if [ -z "$ROOT" ]; then
 fi
 cd "$ROOT" || exit 2
 
+# Gate-serving tartci hosts must not spend their reserved machine on local
+# configure/build work. The profile is authoritative; hostname is not.
+# shellcheck source=gate_host_policy.sh
+source "$ROOT/tools/scripts/gate_host_policy.sh"
+gate_host_builds_skipped=0
+if pulp_gate_host_serves_gate; then
+    gate_host_builds_skipped=1
+    pulp_gate_host_skip_line "build-backed gates (setup.sh, configure, generated-manifest checks, and pr-fast self-tests)"
+fi
+
 PYTHON="${PYTHON:-python3}"
 BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 
@@ -557,7 +567,9 @@ fi
 # NOT CHECKED instead of configuring. The families check runs a build-free
 # prediction first and, when its configured half cannot run on a change to a
 # surface it blocks, FAILS instead of NOT CHECKED (the required gate checks it).
-if [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
+if [ "$gate_host_builds_skipped" -eq 1 ]; then
+    : # The profile-serving host is reserved for the hosted gate; cheap gates continue below.
+elif [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
     echo "" >&2
     echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (configures build-gate when the diff can drift them)" >&2
     sti_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-script-inputs.XXXXXX")"
@@ -592,15 +604,16 @@ if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTEST
         echo "" >&2
         src_lane_args=()
         case "$src_lane" in
+            pr-fast)
+                if [ "$gate_host_builds_skipped" -eq 1 ]; then
+                    continue
+                fi
+                echo "▸ ctest pr-fast tier (whole tier; from a configured build when one is usable, else the manifests)" >&2
+                src_lane_args=(--ctest-label pr-fast --build-dir auto) ;;
             workflow-lint)
                 [ -f "$ROOT/.github/workflows/workflow-lint.yml" ] || continue
                 echo "▸ workflow-lint Python contracts (diff-scoped; read from workflow-lint.yml)" >&2
                 src_lane_args=(--workflow "$ROOT/.github/workflows/workflow-lint.yml") ;;
-            pr-fast)
-                # `auto`: PULP_GATES_BUILD_DIR, else the newest current Ninja
-                # build*/ in the checkout; the lane names the one it chose.
-                echo "▸ ctest pr-fast tier (whole tier; from a configured build when one is usable, else the manifests)" >&2
-                src_lane_args=(--ctest-label pr-fast --build-dir auto) ;;
             ctest-python)
                 echo "▸ other ctest-registered Python contracts (diff-scoped; merge-group only in CI)" >&2
                 src_lane_args=(--ctest-python) ;;

@@ -49,6 +49,7 @@ COPIED = [
     "tools/ci/source_selftests.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ui-build/lint/clean_output_lint.py",
+    "tools/scripts/gate_host_policy.sh",
 ]
 
 # Stands in for changed_surface_script_families.py: its own suite covers what it
@@ -149,6 +150,10 @@ class GatesScriptInputsTests(unittest.TestCase):
             p = self.bin / name
             p.write_text(text, encoding="utf-8")
             p.chmod(0o755)
+        tartci = self.bin / "tartci"
+        tartci.write_text("#!/bin/sh\n" "echo TARTCI_SERVES_GATE=${FAKE_SERVES_GATE:-0}\n",
+                          encoding="utf-8")
+        tartci.chmod(0o755)
         git(self.root, "init", "-q", "-b", "main")
         git(self.root, "config", "user.email", "t@example.com")
         git(self.root, "config", "user.name", "t")
@@ -177,6 +182,7 @@ class GatesScriptInputsTests(unittest.TestCase):
         env.update(PATH=f"{self.bin}{os.pathsep}{env.get('PATH', '')}", FAKE_ROOT=str(self.root.resolve()),
                    FAKE_CTEST_INVENTORY=str(self.inventory), FAKE_CMAKE_LOG=str(self.cmake_log),
                    PYTHON=str(self.bin / "python"), PULP_GATES_SETUP="",
+                   PULP_TARTCI_BIN=str(self.bin / "tartci"),
                    PULP_SKIP_SOURCE_SELFTESTS="1")
         env.update(extra)
         return env
@@ -208,6 +214,16 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.configures(), [])
         self.assertIn("nothing to check", r.stderr)
+
+    def test_gate_host_skips_configure_and_prints_actionable_reason(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_SERVES_GATE="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.configures(), [])
+        self.assertIn("skipped build-backed gates", r.stderr)
+        self.assertIn("TARTCI_SERVES_GATE=1", r.stderr)
+        self.assertIn("ssh m1", r.stderr)
 
     def test_a_current_configured_build_is_reused(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
