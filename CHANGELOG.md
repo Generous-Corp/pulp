@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09590"></a>
+## [0.959.0] - 2026-10-13
+
+- release/version bump ([#10200](https://github.com/Generous-Corp/pulp/pull/10200))
+- codex/r15 m1m3 20261012 ([#10142](https://github.com/Generous-Corp/pulp/pull/10142))
+- fix/super convolver bench gpu include ([#10166](https://github.com/Generous-Corp/pulp/pull/10166))
+- docs/inferno credit ([#10193](https://github.com/Generous-Corp/pulp/pull/10193))
+- fix/vellum p17 format content edge ([#10179](https://github.com/Generous-Corp/pulp/pull/10179))
+- feat/strict mise toolchain phase1 ([#10172](https://github.com/Generous-Corp/pulp/pull/10172))
+- release/version bump ([#10191](https://github.com/Generous-Corp/pulp/pull/10191))
+- fix/confirm failure index free restore ([#10178](https://github.com/Generous-Corp/pulp/pull/10178))
+- fix/skia win arm64 provenance ([#10184](https://github.com/Generous-Corp/pulp/pull/10184))
+
 <a id="v09580"></a>
 ## [0.958.0] - 2026-10-13
 
@@ -10561,6 +10574,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.959.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.959.0
 [0.958.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.958.0
 [0.957.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.957.0
 [0.956.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.956.0
