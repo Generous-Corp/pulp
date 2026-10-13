@@ -134,6 +134,17 @@ consumer-ready target can set `cmake.add_subdirectory=false`; the generated
 tools/tests, then creates the declared interface target. `sst-tuning-library`
 is the reference pattern for source-only SCL/KBM parsing.
 
+### Tag-pinned FetchContent dependencies need a checked-in commit
+
+The Vellum closure gate (`tools/scripts/vellum_closure.py`) refuses any input
+whose dependency has no checked-in 40-hex commit, and compares every row against
+that commit. A dependency fetched by tag (SDL3, yaml-cpp, Yoga, SheenBidi) records
+the peeled commit as `upstream.commit` in `tools/deps/manifest.json`; it wins
+over the `setup.sh` hash, which may be an annotated-tag object rather than a
+commit. When you bump such a tag, update `upstream.commit` in the same change
+(`git ls-remote <repo> 'refs/tags/<tag>^{}'` gives the peeled commit), or the
+gate fails on every row from that dependency.
+
 ## Overlap Awareness
 
 Before suggesting a package, check if Pulp's built-in `core/signal/` already covers the need:

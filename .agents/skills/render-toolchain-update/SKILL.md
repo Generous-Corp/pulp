@@ -217,6 +217,12 @@ retain those fields in the PR/landing evidence.
 
 ## Common traps
 
+- The Vellum closure gate identifies Skia inputs by `determinism.skia_commit` and
+  by the asset digest sealed in the cache generation's
+  `.skia-generation-manifest.json`, which must be one of
+  `determinism.release_assets[*].sha256`. Each closure file must match its digest
+  in that receipt. Bump `skia_commit` and the asset digests together, or every
+  Skia row in the closure goes unresolved.
 - `release-path-pr-gate.yml`'s darwin runner resolver runs
   `resolve_release_runners.py --apply-class-label pulp-release-pr-gate` after a
   sparse checkout. With `PULP_RELEASE_CLASS_TOKENS` unset the selector is
