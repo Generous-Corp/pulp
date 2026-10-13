@@ -121,6 +121,18 @@ class Label : public View, public SelectableText {
         const float ink_before =
             has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
         text_ = std::move(text);
+        // A captured browser line box describes ONE string. Once the copy
+        // diverges from it the Label paints natively, and it must keep doing
+        // so even when a later value equals the captured string again: a live
+        // readout that flipped between the captured basis and native placement
+        // would visibly jump every time its value passed through the design's
+        // original copy.
+        bool captured_basis_dropped = false;
+        if (!cached_line_boxes_.empty() && apply_text_transform(text_) != cached_line_basis_text_) {
+            cached_line_boxes_.clear();
+            shaped_cache_valid_ = false;
+            captured_basis_dropped = true;
+        }
         // The text IS the accessible name for a label — the two-arg ctor set it
         // and set_text() did not, so every Label built by the JS bridge
         // (<span>, <p>, <label>) or by set_text() carried an empty name. It is
@@ -141,10 +153,10 @@ class Label : public View, public SelectableText {
         // PreText-style shaper cache is keyed by (text, family, size), so the
         // new text simply hits a different cache entry — no algorithm change,
         // just cache-correct re-measurement.
-        const bool text_geometry_is_fixed =
-            has_explicit_width && single_line_simple &&
-            ((has_explicit_height && !baseline_aligned) ||
-             (probe_height && intrinsic_height() == height_before));
+        const bool text_geometry_is_fixed = !captured_basis_dropped && has_explicit_width &&
+                                            single_line_simple &&
+                                            ((has_explicit_height && !baseline_aligned) ||
+                                             (probe_height && intrinsic_height() == height_before));
         if (!text_geometry_is_fixed) invalidate_layout();
         // selectable_text() already exposes the new source bytes, so geometry
         // from the previous paint can no longer describe it honestly. Keep

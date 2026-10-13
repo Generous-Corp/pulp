@@ -770,6 +770,46 @@ TEST_CASE("Label honors Chromium captured vertical line positions",
     CHECK(fills[0].f[1] - em_fills[0].f[1] == Catch::Approx(2.0f));
 }
 
+TEST_CASE("Label keeps painting natively once its copy diverged from the captured basis",
+          "[view][widget][label-cache][readout]") {
+    // A modulated readout cycles through values that include the design's
+    // original copy. The captured line box is honored only while the text
+    // equals that copy, so without dropping it the label would flip between
+    // captured and native placement every time the value passed through it.
+    Label label("8 BANDS");
+    label.set_font_family("Inter");
+    label.set_font_size(12.0f);
+    label.set_bounds({0, 0, 100, 40});
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    label.set_cached_line_boxes({{7, 9, 50, 16, 0, 7}}, 100.0f, face, false);
+    if (face.empty()) {
+        CHECK(label.cached_line_boxes().empty());
+        return;
+    }
+    RecordingCanvas captured;
+    label.paint(captured);
+    const auto captured_fills = commands_of(captured, DrawCommand::Type::fill_text);
+    REQUIRE(captured_fills.size() == 1);
+
+    label.set_text("12 BANDS");
+    CHECK(label.cached_line_boxes().empty());
+    RecordingCanvas native;
+    label.paint(native);
+    const auto native_fills = commands_of(native, DrawCommand::Type::fill_text);
+    REQUIRE(native_fills.size() == 1);
+    // Control: the two placements differ, so the equality below is a
+    // measurement of the drop and not of two paths that already agreed.
+    CHECK(native_fills[0].f[1] != Catch::Approx(captured_fills[0].f[1]));
+
+    label.set_text("8 BANDS");
+    RecordingCanvas again;
+    label.paint(again);
+    const auto again_fills = commands_of(again, DrawCommand::Type::fill_text);
+    REQUIRE(again_fills.size() == 1);
+    CHECK(again_fills[0].f[0] == Catch::Approx(native_fills[0].f[0]));
+    CHECK(again_fills[0].f[1] == Catch::Approx(native_fills[0].f[1]));
+}
+
 TEST_CASE("Attributed Label honors each Chromium captured line position",
           "[view][widget][label-cache][alignment][attributed]") {
     Label label("TOP BOTTOM");
