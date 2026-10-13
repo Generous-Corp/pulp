@@ -598,8 +598,9 @@ def parse_fetchcontent(cmake_file: Path) -> list[DeclaredDep]:
 SCAN_EXCLUDED_PREFIXES: dict[str, str] = {
     "external/": "vendored upstream trees; their own build logic is upstream's",
     "planning/": "private planning submodule, not part of the build",
-    "tools/packages/test-stubs/": "stand-in projects for `pulp add` registry tests, "
-                                  "never built by Pulp",
+    "tools/packages/test-stubs/": "freshness-check consumers of `pulp add` registry "
+                                  "packages (tools/packages/registry.json); built only "
+                                  "by freshness-check.yml, never part of Pulp",
 }
 # Path fragments (anywhere in the path) that mark test fixtures.
 SCAN_EXCLUDED_FRAGMENTS: tuple[str, ...] = ("/tests/fixtures/", "/test/fixtures/")
