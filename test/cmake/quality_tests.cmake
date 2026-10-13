@@ -133,6 +133,15 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(pulp-ui-build-contracts PROPERTIES
         LABELS "pr;design-import" TIMEOUT 60)
 
+    # The view-core Pulp-kept closure assertion (pulp.vellum-view-core-pulp-kept)
+    # reads a configured closure manifest; this self-test plants each violation
+    # it must catch against the checked-in D3 rules.
+    add_test(NAME vellum-view-core-pulp-kept-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_view_core_pulp_kept_check.py")
+    set_tests_properties(vellum-view-core-pulp-kept-negative-contract PROPERTIES
+        LABELS "pr" TIMEOUT 60)
+
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")

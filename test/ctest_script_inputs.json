@@ -7479,6 +7479,14 @@
    ],
    "kind": "python"
   },
+  "pulp.vellum-view-core-pulp-kept": {
+   "entry": "tools/scripts/vellum_view_core_pulp_kept_check.py",
+   "inputs": [
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_view_core_pulp_kept_check.py"
+   ],
+   "kind": "python"
+  },
   "pulp_bundle_threejs_for_jsc_offline": {
    "entry": "tools/scripts/test_bundle_threejs_offline.mjs",
    "inputs": [
@@ -10013,6 +10021,16 @@
    "entry": "tools/scripts/test_vellum_trusted_merge.py",
    "inputs": [
     "tools/scripts/test_vellum_trusted_merge.py"
+   ],
+   "kind": "python"
+  },
+  "vellum-view-core-pulp-kept-negative-contract": {
+   "entry": "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
+   "inputs": [
+    "core/view/include/pulp/view/host_surfaces.hpp",
+    "core/view/src/view.cpp",
+    "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
+    "tools/scripts/vellum_d3_units.json"
    ],
    "kind": "python"
   },

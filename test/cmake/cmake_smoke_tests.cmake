@@ -499,8 +499,11 @@ if(PULP_ENABLE_INSPECTOR)
                 "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
                 "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_sdk_consumer.cmake)
+        # The installed control Standalone's runtime evaluator registers only
+        # when its generated factory installs the script-inspector bridge, so
+        # this test is also that install's end-to-end coverage.
         set_tests_properties(cmake-control-sdk-consumer PROPERTIES
-            LABELS "cmake;sdk;inspect;control;headless"
+            LABELS "cmake;sdk;inspect;control;headless;runtime-eval"
             COST 60
             TIMEOUT 300)
     endif()

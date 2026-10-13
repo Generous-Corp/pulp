@@ -2496,6 +2496,29 @@ and `pulp::midi` but never `pulp::host`:
 Both view umbrellas link `pulp::view-audio`. A target that links only
 `pulp::view-core` and uses one of those widgets adds `pulp::view-audio`.
 
+Pulp's plug-in host and editor tooling is in `pulp::view-tooling`, which links
+`pulp::view-core` (and `pulp::view-script` when JS is enabled):
+- the component inspector (`ViewInspector`, `InspectorWindow`);
+- `EditorBridge`;
+- `StateStoreHostParamSurface`, the StateStore adapter behind
+  `HostParamSurface`;
+- `ScriptInspectorBridge`, the runtime-inspector bridge.
+
+`pulp::view` and `pulp::format-view` link it; `pulp::view-core`,
+`pulp::view-script` and `pulp::view-native` do not. The abstract
+`HostParamSurface` and `HostActionSurface` contracts are in
+`<pulp/view/host_surfaces.hpp>` in `pulp::view-core`;
+`<pulp/view/host_param_surface.hpp>` re-exports them alongside the StateStore
+adapter. `view_type_name()` (`<pulp/view/inspector_facts.hpp>`, view-core) is the
+type classification `ViewInspector::type_name()` reports.
+
+A `ScriptedUiSession` carries a runtime-inspector port only when one was
+installed before it was constructed. Call
+`pulp::view::install_script_inspector_bridge()` before building the UI, then
+read the bridge with `pulp::view::script_inspector(session)`; both are in
+`<pulp/view/script_inspector_bridge.hpp>`. A Standalone built with the
+`dev.pulp.runtime/evaluate@1` control capability installs it automatically.
+
 `GraphEditorView` (`<pulp/view/widgets/graph_editor_view.hpp>`), which draws and
 edits a host `SignalGraph`, is the one view widget that depends on
 `pulp::host`. It lives in its own target, `pulp::view-graph-editor`, which none

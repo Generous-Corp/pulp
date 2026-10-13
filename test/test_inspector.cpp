@@ -5,6 +5,7 @@
 #include <pulp/platform/clipboard.hpp>  // WYSIWYG T2 — paste test
 #include <pulp/render/atlas_inventory.hpp>
 #include <pulp/view/inspector.hpp>
+#include <pulp/view/inspector_facts.hpp>
 #include <pulp/view/lock_to_source.hpp>  // WYSIWYG T5 — reparent → source rewrite
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>  // Viewport-scale test: compute_design_viewport_transform
@@ -193,6 +194,71 @@ TEST_CASE("ViewInspector type_name", "[view][inspector]") {
     REQUIRE(ViewInspector::type_name(xy) == "XYPad");
     REQUIRE(ViewInspector::type_name(wf) == "WaveformView");
     REQUIRE(ViewInspector::type_name(sp) == "SpectrumView");
+}
+
+namespace {
+
+class DescribedProbeView : public View, public InspectorFacts {
+  public:
+    std::string_view inspector_type_name() const override {
+        return "DescribedProbe";
+    }
+    void inspector_facts(std::vector<Fact>& out) const override {
+        out.push_back({"gain", "Gain", 0.5, false, true});
+        out.push_back({"hidden", "Hidden", 9.0, false, false});
+    }
+};
+
+bool tree_has_label_text(const View& view, const std::string& needle) {
+    if (auto* label = dynamic_cast<const Label*>(&view);
+        label && label->text().find(needle) != std::string::npos)
+        return true;
+    for (std::size_t i = 0; i < view.child_count(); ++i)
+        if (tree_has_label_text(*view.child_at(i), needle))
+            return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("view_type_name is the classification ViewInspector reports", "[view][inspector]") {
+    View v;
+    Knob k;
+    Label l;
+    Meter m;
+    DescribedProbeView described;
+
+    // view-core's own classifier, reachable without the Pulp inspector.
+    REQUIRE(view_type_name(v) == "View");
+    REQUIRE(view_type_name(k) == "Knob");
+    REQUIRE(view_type_name(l) == "Label");
+    REQUIRE(view_type_name(m) == "Meter");
+    REQUIRE(view_type_name(described) == "DescribedProbe");
+    for (const View* view :
+         {static_cast<const View*>(&v), static_cast<const View*>(&k), static_cast<const View*>(&l),
+          static_cast<const View*>(&m), static_cast<const View*>(&described)})
+        REQUIRE(ViewInspector::type_name(*view) == view_type_name(*view));
+}
+
+TEST_CASE("InspectorWindow shows InspectorFacts rows for widgets it does not name",
+          "[view][inspector][window]") {
+    View root;
+    root.set_bounds({0, 0, 640, 480});
+    auto described_owner = std::make_unique<DescribedProbeView>();
+    auto* described = described_owner.get();
+    root.add_child(std::move(described_owner));
+    auto meter_owner = std::make_unique<Meter>();
+    auto* meter = meter_owner.get();
+    root.add_child(std::move(meter_owner));
+
+    InspectorWindow window(root);
+    window.select_view(described);
+    REQUIRE(tree_has_label_text(window, "Gain: 0.500"));
+    REQUIRE_FALSE(tree_has_label_text(window, "Hidden:"));
+
+    window.select_view(meter);
+    REQUIRE(tree_has_label_text(window, "RMS: "));
+    REQUIRE(tree_has_label_text(window, "Peak: "));
 }
 
 TEST_CASE("InspectorWindow public controls clamp and toggle deterministic state",

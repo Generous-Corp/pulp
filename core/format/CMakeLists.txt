@@ -142,6 +142,7 @@ target_link_libraries(pulp-format-view
         pulp::format-core
         # Public ViewBridge headers expose native View types, not WebView.
         pulp::view-core
+        pulp::view-tooling
     PRIVATE
         pulp::view-audio
 )

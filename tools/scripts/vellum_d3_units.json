@@ -10,7 +10,36 @@
     {"name": "state-core", "targets": ["pulp-state"]},
     {"name": "design-ir", "targets": ["pulp-design-import"]},
     {"name": "design-import", "targets": ["pulp-design-import"]},
-    {"name": "view-core", "targets": ["pulp-view-core"]},
+    {"name": "view-core", "targets": ["pulp-view-core"], "pulp_kept": {
+      "targets": ["pulp-view-tooling"],
+      "files": [
+        "core/view/src/inspector.cpp",
+        "core/view/include/pulp/view/inspector.hpp",
+        "core/view/src/inspector_window.cpp",
+        "core/view/include/pulp/view/inspector_window.hpp",
+        "core/view/src/editor_bridge.cpp",
+        "core/view/include/pulp/view/editor_bridge.hpp",
+        "core/view/src/host_param_surface.cpp",
+        "core/view/include/pulp/view/host_param_surface.hpp",
+        "core/view/src/script_inspector_bridge.cpp",
+        "core/view/include/pulp/view/script_inspector_bridge.hpp",
+        "core/view/src/waveform_editor_primitives.cpp",
+        "core/view/include/pulp/view/waveform_editor_primitives.hpp"
+      ],
+      "seam_headers": [
+        {"path": "core/view/include/pulp/view/host_surfaces.hpp", "forbidden_include_prefixes": ["pulp/state/", "pulp/runtime/alive_token"]},
+        {"path": "core/view/include/pulp/view/inspector_facts.hpp", "forbidden_include_prefixes": ["pulp/view/inspector.hpp", "pulp/view/inspector_window.hpp"]},
+        {"path": "core/view/include/pulp/view/script_inspector_port.hpp", "forbidden_include_prefixes": ["pulp/view/script_inspector_bridge.hpp"]}
+      ],
+      "deferred": [
+        {"path": "core/view/src/plugin_frame_renderer.cpp", "owner": "PluginViewHost carve (format-view embedding glue, DECISIONS G6/G7 amendment)", "deferral_ruling": "DECISIONS.md TEAM-LEAD RULING 2026-10-12 — R14 M2 carve boundaries for two listed files: the Linux and Windows PluginViewHost natives in pulp-view-core call it"},
+        {"path": "core/view/include/pulp/view/plugin_frame_renderer.hpp", "owner": "PluginViewHost carve (format-view embedding glue, DECISIONS G6/G7 amendment)", "deferral_ruling": "DECISIONS.md TEAM-LEAD RULING 2026-10-12 — R14 M2 carve boundaries for two listed files: the Linux and Windows PluginViewHost natives in pulp-view-core call it"}
+      ],
+      "view_core_collaborators": [
+        {"path": "core/view/src/design_param_binding.cpp", "ruling": "DECISIONS.md TEAM-LEAD RULING 2026-10-12 — R14 M2 carve boundaries for two listed files: DesignFrameView's own param, bind-grid and scalar-source collaborator; only the StateStore adapter is Pulp-kept"},
+        {"path": "core/view/include/pulp/view/design_param_binding.hpp", "ruling": "DECISIONS.md TEAM-LEAD RULING 2026-10-12 — R14 M2 carve boundaries for two listed files: DesignFrameView's own param, bind-grid and scalar-source collaborator; only the StateStore adapter is Pulp-kept"}
+      ]
+    }},
     {"name": "view-platform", "targets": ["pulp-view-native", "pulp-platform"]},
     {"name": "view-script", "targets": ["pulp-view-script"]},
     {"name": "ui-js-packages", "targets": ["pulp-jsx-runtime-materialized-contract", "pulp-jsx-runtime-materialized-emitter"]}
