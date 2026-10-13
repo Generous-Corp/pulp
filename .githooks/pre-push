@@ -33,7 +33,7 @@ cd "$ROOT" || exit 0
 # shellcheck source=../tools/scripts/gate_host_policy.sh
 source "$ROOT/tools/scripts/gate_host_policy.sh"
 _prepush_gate_host=0
-if pulp_gate_host_serves_gate; then
+if pulp_gate_host_builds_reserved; then
     _prepush_gate_host=1
 fi
 

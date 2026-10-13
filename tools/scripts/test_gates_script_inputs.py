@@ -151,7 +151,9 @@ class GatesScriptInputsTests(unittest.TestCase):
             p.write_text(text, encoding="utf-8")
             p.chmod(0o755)
         tartci = self.bin / "tartci"
-        tartci.write_text("#!/bin/sh\n" "echo TARTCI_SERVES_GATE=${FAKE_SERVES_GATE:-0}\n",
+        tartci.write_text("#!/bin/sh\n"
+                          "echo TARTCI_ROLE=${FAKE_TARTCI_ROLE:-light}\n"
+                          "echo TARTCI_SERVES_GATE=${FAKE_SERVES_GATE:-0}\n",
                           encoding="utf-8")
         tartci.chmod(0o755)
         git(self.root, "init", "-q", "-b", "main")
@@ -218,13 +220,21 @@ class GatesScriptInputsTests(unittest.TestCase):
     def test_gate_host_skips_configure_and_prints_actionable_reason(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
         self.commit()
-        r = self.gates(FAKE_SERVES_GATE="1")
+        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="dedicated-builder")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.configures(), [])
         self.assertIn("skipped local configure/build", r.stderr)
-        self.assertIn("TARTCI_SERVES_GATE=1", r.stderr)
-        self.assertIn("on m1 or a disposable VM", r.stderr)
+        self.assertIn("dedicated-builder", r.stderr)
+        self.assertIn("non-reserved Pulp build host or disposable VM", r.stderr)
         self.assertIn("tools/scripts/gates.sh origin/main", r.stderr)
+
+    def test_gate_serving_light_profile_keeps_local_build_path(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="light")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.configures()), 1)
+        self.assertNotIn("skipped local configure/build", r.stderr)
 
     def test_a_current_configured_build_is_reused(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")

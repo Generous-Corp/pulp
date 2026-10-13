@@ -90,7 +90,7 @@ cd "$ROOT" || exit 2
 # shellcheck source=gate_host_policy.sh
 source "$ROOT/tools/scripts/gate_host_policy.sh"
 gate_host_builds_skipped=0
-if pulp_gate_host_serves_gate; then
+if pulp_gate_host_builds_reserved; then
     gate_host_builds_skipped=1
     pulp_gate_host_skip_line "local configure/build and multi-minute selftest lanes (generated manifests and source selftests)"
 fi

@@ -70,7 +70,7 @@ GOVERNED_BUILD="${REPO_ROOT}/tools/ci/governed-build.sh"
 # even when macOS renames the machine.
 # shellcheck source=gate_host_policy.sh
 source "${SCRIPT_DIR}/gate_host_policy.sh"
-if pulp_gate_host_serves_gate; then
+if pulp_gate_host_builds_reserved; then
     pulp_gate_host_skip_line "local diff-coverage configure/build" "tools/scripts/local_diff_cover.sh"
     exit 0
 fi
