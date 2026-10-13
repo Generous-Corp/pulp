@@ -587,6 +587,55 @@ class RequiredAggregatorTests(unittest.TestCase):
             [pair for pair, code in verdicts.items() if code == 0], [("success", "success")])
 
 
+class NeutralizerTests(unittest.TestCase):
+    """A wired part must not be skippable or softened in place."""
+
+    TEXT = lane.LANE_WORKFLOW.read_text(encoding="utf-8")
+    EXCLUSIVE_RUN = "      - name: Exclusive source selftests\n"
+    SHARED_RUN = "--part shared"
+
+    def test_real_workflow_is_clean(self) -> None:
+        self.assertEqual(lane.wiring_errors(self.TEXT), [])
+
+    def test_step_level_if_false_on_the_exclusive_run_is_caught(self) -> None:
+        self.assertIn(self.EXCLUSIVE_RUN, self.TEXT)
+        for inserted in ("        if: false\n", "        continue-on-error: true\n"):
+            with self.subTest(inserted=inserted):
+                mutant = self.TEXT.replace(self.EXCLUSIVE_RUN, self.EXCLUSIVE_RUN + inserted, 1)
+                self.assertNotEqual(mutant, self.TEXT)
+                errors = lane.wiring_errors(mutant)
+                self.assertTrue(any("--part exclusive" in e and inserted.strip() in e
+                                    for e in errors), errors)
+
+    def test_if_as_the_first_key_of_the_step_is_caught(self) -> None:
+        mutant = self.TEXT.replace(self.EXCLUSIVE_RUN,
+                                   "      - if: false\n        name: Exclusive source selftests\n", 1)
+        self.assertNotEqual(mutant, self.TEXT)
+        self.assertTrue(any("if: false" in e for e in lane.wiring_errors(mutant)))
+
+    def test_step_level_if_on_the_shared_run_is_caught(self) -> None:
+        lines = self.TEXT.splitlines(keepends=True)
+        index = next(i for i, line in enumerate(lines) if self.SHARED_RUN in line)
+        while not lines[index].lstrip().startswith("- "):
+            index -= 1
+        mutant = "".join(lines[:index + 1] + ["        if: github.event_name == 'push'\n"]
+                         + lines[index + 1:])
+        errors = lane.wiring_errors(mutant)
+        self.assertTrue(any("--part shared" in e for e in errors), errors)
+
+    def test_continue_on_error_on_a_lane_job_is_caught(self) -> None:
+        for job, anchor in (("enforce", "    needs: [version-skill-check, exclusive-selftests]\n"),
+                            ("exclusive-selftests", "    name: Exclusive source selftests ${{ matrix.shard }}/2\n")):
+            with self.subTest(job=job):
+                self.assertIn(anchor, self.TEXT)
+                mutant = self.TEXT.replace(anchor, anchor + "    continue-on-error: true\n", 1)
+                errors = lane.wiring_errors(mutant)
+                self.assertTrue(any(f"job {job} sets" in e for e in errors), errors)
+
+    def test_an_unrelated_step_may_still_use_continue_on_error(self) -> None:
+        self.assertIn("continue-on-error: true", self.TEXT)
+
+
 class RepositoryTests(unittest.TestCase):
     """The checked-in manifest and its two consumers agree."""
 

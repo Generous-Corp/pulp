@@ -507,6 +507,65 @@ def select_part(
     return lane_parts(entries)[f"{EXCLUSIVE_PART}-{index}/{total}"]
 
 
+def _step_lines(lines: list[str], index: int) -> list[str]:
+    """The lines of the workflow step whose body holds ``lines[index]``."""
+    start = index
+    while start > 0 and not lines[start].lstrip().startswith("- "):
+        start -= 1
+    if not lines[start].lstrip().startswith("- "):
+        return [lines[index]]
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        end += 1
+    return lines[start:end]
+
+
+def _job_lines(lines: list[str], job: str) -> list[str]:
+    """A top-level job's own lines (two-space job ids under ``jobs:``)."""
+    try:
+        start = lines.index(f"  {job}:")
+    except ValueError:
+        return []
+    end = start + 1
+    while end < len(lines) and not (lines[end].startswith("  ") and lines[end][2:3].strip()
+                                    and not lines[end].startswith("   ")):
+        end += 1
+    return lines[start:end]
+
+
+def neutralizer_errors(lane_workflow_text: str, needles: tuple[str, ...]) -> list[str]:
+    """Ways to keep a lane part wired yet stop it from deciding the check.
+
+    A step-level ``if:`` can skip a part's run step while its job still
+    succeeds, and ``continue-on-error`` turns a red step or job into a green
+    one, so the required aggregator would read success for work that never
+    passed.
+    """
+    errors: list[str] = []
+    lines = lane_workflow_text.splitlines()
+    for needle in needles:
+        for index, line in enumerate(lines):
+            if needle not in line:
+                continue
+            step = _step_lines(lines, index)
+            # The first key of a step sits after its "- " marker.
+            for key in [step[0].replace("- ", "  ", 1), *step[1:]]:
+                stripped = key.strip()
+                if stripped.startswith(("if:", "continue-on-error:")):
+                    errors.append(f"the step running `{needle}` carries `{stripped}`; "
+                                  "it could skip or soften that part of the required lane")
+    for job in ("version-skill-check", "exclusive-selftests", "enforce"):
+        for line in _job_lines(lines, job):
+            if line.startswith("    continue-on-error:"):
+                errors.append(f"job {job} sets `{line.strip()}`; a failing part would "
+                              "conclude success and pass the required aggregator")
+    return errors
+
+
 def wiring_errors(lane_workflow_text: str) -> list[str]:
     """The lane workflow must run every part of the split."""
     errors: list[str] = []
@@ -527,6 +586,8 @@ def wiring_errors(lane_workflow_text: str) -> list[str]:
                 f"{workflow} no longer runs {what} (`{needle}`); the {LABEL} tests "
                 "in it would run on no required lane"
             )
+    errors.extend(f"{workflow}: {error}"
+                  for error in neutralizer_errors(lane_workflow_text, (shared, exclusive)))
     return errors
 
 
