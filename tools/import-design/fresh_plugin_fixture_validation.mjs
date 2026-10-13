@@ -13,8 +13,8 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const fixture = path.join(root, "test/fixtures/import-differential/17-fresh-plugin-panel.html");
-const interactions = path.join(root, "test/fixtures/import-differential/17-fresh-plugin-panel.interactions.json");
+const fixtureDefault = path.join(root, "test/fixtures/import-differential/17-fresh-plugin-panel.html");
+const interactionsDefault = path.join(root, "test/fixtures/import-differential/17-fresh-plugin-panel.interactions.json");
 const expectedReceiptDefault = path.join(root, "test/fixtures/import-differential/17-fresh-plugin-panel.receipt.json");
 const capture = path.join(root, "tools/import-design/browser_capture/capture.mjs");
 
@@ -32,24 +32,30 @@ function browserPath() {
   assert.equal(typeof record.executable, "string");
   return path.join(path.dirname(current), record.executable);
 }
-async function runCapture(input, output, browser, withInteractions) {
+async function runCapture(input, output, browser, withInteractions, interactionFile) {
   const args = [capture, "capture", "--browser", browser, "--input", input,
     "--root", path.dirname(input), "--output", output,
     "--initial-width", "480", "--initial-height", "320", "--dpr", "2",
     "--timeout-ms", "30000"];
-  if (withInteractions) args.push("--interactions", interactions);
+  if (withInteractions) args.push("--interactions", interactionFile);
   return exec(process.execPath, args, { maxBuffer: 1024 * 1024 });
 }
 async function main() {
   const importer = arg("--importer");
   assert(importer, "--importer /absolute/path/to/pulp-import-design is required");
+  const fixture = arg("--fixture", fixtureDefault);
+  const interactions = arg("--interactions", interactionsDefault);
+  const expectedReceiptDefaultForFixture = path.join(path.dirname(fixture), `${path.basename(fixture, path.extname(fixture))}.receipt.json`);
+  const expectedReceiptPath = arg("--expected-receipt", fixture === fixtureDefault ? expectedReceiptDefault : expectedReceiptDefaultForFixture);
+  const negativeSelector = arg("--negative-selector", 'id="toggle"');
+  const negativeId = arg("--negative-id", "toggle-mutated");
   const browser = browserPath();
   const source = await readFile(fixture);
   const sourceSha = sha256(source);
   const tmp = await mkdtemp(path.join(os.tmpdir(), "pulp-fresh-plugin-"));
   try {
     const browserOut = path.join(tmp, "browser");
-    await runCapture(fixture, browserOut, browser, true);
+    await runCapture(fixture, browserOut, browser, true, interactions);
     const browserPng = await readFile(path.join(browserOut, "browser.png"));
     const interactionReport = await readFile(path.join(browserOut, "interaction-report.json"));
     const envelope = JSON.parse(await readFile(path.join(browserOut, "capture.json"), "utf8"));
@@ -64,13 +70,16 @@ async function main() {
     const nativeBytes = await readFile(nativeOut);
     assert(nativeBytes.length > 0);
     const negative = path.join(tmp, "negative.html");
-    const mutated = source.toString().replace('id="toggle"', 'id="toggle-mutated"');
+    const sourceText = source.toString();
+    assert(sourceText.includes(negativeSelector), `negative selector not found: ${negativeSelector}`);
+    const mutated = sourceText.replace(negativeSelector, `id="${negativeId}"`);
+    assert.notEqual(mutated, sourceText);
     await writeFile(negative, mutated);
-    await assert.rejects(runCapture(negative, path.join(tmp, "negative-browser"), browser, true));
+    await assert.rejects(runCapture(negative, path.join(tmp, "negative-browser"), browser, true, interactions));
 
     const receipt = {
       schema: "pulp-fresh-plugin-validation-v1",
-      fixture: "17-fresh-plugin-panel.html",
+      fixture: path.basename(fixture),
       source_sha256: sourceSha,
       source_bytes: source.length,
       browser: {
@@ -82,10 +91,9 @@ async function main() {
         interaction_count: 2,
       },
       native: { backend: "skia", artifact_sha256: sha256(nativeBytes), artifact_bytes: nativeBytes.length },
-      planted_negative: { mutated_id: "toggle-mutated", browser_capture_rejected: true },
+      planted_negative: { mutated_id: negativeId, browser_capture_rejected: true },
     };
-    const expected = arg("--expected-receipt", expectedReceiptDefault);
-    const expectedReceipt = JSON.parse(await readFile(expected, "utf8"));
+    const expectedReceipt = JSON.parse(await readFile(expectedReceiptPath, "utf8"));
     assert.deepEqual(receipt, expectedReceipt,
       "fresh-plugin receipt differs from the committed deterministic baseline");
     const out = arg("--receipt", path.join(process.cwd(), "fresh-plugin-validation.receipt.json"));

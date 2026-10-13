@@ -242,7 +242,19 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
         root.attributes["pulpBindingParam"] = "cutoff";
         const auto slots = classify_design_slots(root);
         REQUIRE(slots.size() == 1);
-        CHECK(slots.front() == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "synth::cutoff"});
+        CHECK(slots.front() == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "5:synth6:cutoff"});
+    }
+
+    SECTION("module-bound XY attributes remain typed") {
+        auto root = node("module-xy");
+        root.attributes["pulpBindingModuleX"] = "synth";
+        root.attributes["pulpBindingParamX"] = "pan";
+        root.attributes["pulpBindingModuleY"] = "synth";
+        root.attributes["pulpBindingParamY"] = "tilt";
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 1);
+        CHECK(slots.front().kind == DesignSlotKind::dynamic_vector);
+        CHECK(slots.front().key == "12:5:synth3:pan13:5:synth4:tilt");
     }
 
     SECTION("vector keys remain injective when parameter names contain delimiters") {
@@ -259,6 +271,25 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
         CHECK(left_slots.front().kind == DesignSlotKind::dynamic_vector);
         CHECK(right_slots.front().kind == DesignSlotKind::dynamic_vector);
         CHECK(left_slots.front().key != right_slots.front().key);
+    }
+
+    SECTION("module and meter fallback keys remain injective") {
+        auto left = node("left");
+        left.attributes["pulpBindingModule"] = "a::b";
+        left.attributes["pulpBindingParam"] = "c";
+        left.attributes["pulpMeterSource"] = "a/b";
+        left.attributes["pulpMeterChannel"] = "c";
+        auto right = node("right");
+        right.attributes["pulpBindingModule"] = "a";
+        right.attributes["pulpBindingParam"] = "b::c";
+        right.attributes["pulpMeterSource"] = "a";
+        right.attributes["pulpMeterChannel"] = "b/c";
+        const auto left_slots = classify_design_slots(left);
+        const auto right_slots = classify_design_slots(right);
+        REQUIRE(left_slots.size() == 2);
+        REQUIRE(right_slots.size() == 2);
+        CHECK(left_slots[0].key != right_slots[0].key);
+        CHECK(left_slots[1].key != right_slots[1].key);
     }
 }
 

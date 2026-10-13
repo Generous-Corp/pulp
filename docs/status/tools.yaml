@@ -186,7 +186,7 @@ tools:
   path: tools/import-design/fresh_plugin_fixture_validation.mjs
   category: design-import
   use_when: Validate a fresh authored HTML fixture's Chromium receipt, native import receipt, and planted negative interaction.
-  invocation: node tools/import-design/fresh_plugin_fixture_validation.mjs --fixture <fixture.html> --interactions <interactions.json> --receipt <receipt.json>
+  invocation: node tools/import-design/fresh_plugin_fixture_validation.mjs --importer <pulp-import-design> --fixture <fixture.html> --interactions <interactions.json> --expected-receipt <receipt.json> --receipt <out.json>
   inputs: A fresh authored HTML fixture, its bounded browser interaction plan, a managed Chromium executable, and the importer executable.
   outputs: A fail-closed receipt containing source and native hashes, interaction evidence, and the expected rejected-selector negative control.
   caveat: Acceptance evidence for a named fixture only; it does not prove general HTML importer coverage or semantic native-widget reconstruction.

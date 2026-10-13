@@ -17,6 +17,10 @@ struct SlotAttributeView {
     std::string_view module_parameter;
     std::string_view x;
     std::string_view y;
+    std::string_view x_module;
+    std::string_view x_parameter;
+    std::string_view y_module;
+    std::string_view y_parameter;
     std::string_view meter;
     std::string_view meter_source;
     std::string_view meter_channel;
@@ -41,6 +45,14 @@ SlotAttributeView slot_attributes(const IRNode& node) {
             view.x = value;
         else if (key == "pulpParamKeyY")
             view.y = value;
+        else if (key == "pulpBindingModuleX")
+            view.x_module = value;
+        else if (key == "pulpBindingParamX")
+            view.x_parameter = value;
+        else if (key == "pulpBindingModuleY")
+            view.y_module = value;
+        else if (key == "pulpBindingParamY")
+            view.y_parameter = value;
         else if (key == "pulpMeterValueKey")
             view.meter = value;
         else if (key == "pulpMeterSource")
@@ -63,6 +75,11 @@ void append_slot(std::vector<DesignSlot>& slots, DesignSlotKind kind, std::strin
 std::string encode_vector_key(std::string_view x, std::string_view y) {
     return std::to_string(x.size()) + ":" + std::string(x) + std::to_string(y.size()) + ":" +
            std::string(y);
+}
+
+std::string encode_pair_key(std::string_view first, std::string_view second) {
+    return std::to_string(first.size()) + ":" + std::string(first) +
+           std::to_string(second.size()) + ":" + std::string(second);
 }
 
 DesignSlotKind interactive_slot_kind(InteractiveElementKind kind) {
@@ -91,13 +108,19 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
         const auto module = attributes.module;
         const auto param = attributes.module_parameter;
         if (!module.empty() || !param.empty())
-            scalar = std::string(module) + "::" + std::string(param);
+            scalar = encode_pair_key(module, param);
     }
-    const auto x = attributes.x;
-    const auto y = attributes.y;
+    const auto x = attributes.x.empty()
+                      ? encode_pair_key(attributes.x_module, attributes.x_parameter)
+                      : std::string(attributes.x);
+    const auto y = attributes.y.empty()
+                      ? encode_pair_key(attributes.y_module, attributes.y_parameter)
+                      : std::string(attributes.y);
     if (!scalar.empty())
         append_slot(slots, DesignSlotKind::dynamic_scalar, route, scalar);
-    if (!x.empty() || !y.empty())
+    if (!attributes.x.empty() || !attributes.y.empty() || !attributes.x_module.empty() ||
+        !attributes.x_parameter.empty() || !attributes.y_module.empty() ||
+        !attributes.y_parameter.empty())
         append_slot(slots, DesignSlotKind::dynamic_vector, route, encode_vector_key(x, y));
 
     const auto meter = attributes.meter;
@@ -108,7 +131,7 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
         if (!meter.empty())
             meter_key = meter;
         else
-            meter_key = std::string(meter_source) + "/" + std::string(meter_channel);
+            meter_key = encode_pair_key(meter_source, meter_channel);
         append_slot(slots, DesignSlotKind::dynamic_meter, route, meter_key);
     }
 
