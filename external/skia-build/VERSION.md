@@ -178,7 +178,20 @@ every header and every other file is byte-identical. All 11 `arm64/*.lib`
 archives have the same members and sizes, and the only differences are the
 COFF `TimeDateStamp` fields. The new archive also adds a
 `build/win-gpu/msvc-toolchain.json` receipt that records the static `/MT`
-MSVC runtime ABI. The pin above is the re-published digest. GitHub release
+MSVC runtime ABI; its toolset, Windows SDK and clang-cl fields read "unknown"
+or an error string, so it is not usable as compiler provenance. The pin above
+is the re-published digest.
+
+Both Windows ARM64 uploads (runs 37596862943 and 38178800952) built Skia
+`37c5ad6a22943a966c60500fbe9b9b261d12247a`, the branch head at backfill time,
+not the release's `8b8c3872fbc03f025855db96ce683f34ec98a815` that the other
+slices carry (the resolve-skia step of each run, and the shipped headers,
+confirm it). The two revisions are 8 commits and 65 files apart, including a
+public Ganesh change: `GrDirectContext::flush` and `flushAndSubmit` return
+`FlushResult` on the ARM64 slice, and `SkSurfaceGanesh.h` differs. Code that calls those APIs can therefore behave
+differently on Windows ARM64 until every slice moves to one revision together.
+Rebuilding the ARM64 slice at `8b8c3872` would change its headers under this
+pin, so it is not done in place. GitHub release
 tags are mutable, so any future change to an asset digest under the same tag
 needs the same content comparison before the pin moves.
 
