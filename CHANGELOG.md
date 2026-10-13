@@ -9,6 +9,25 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09600"></a>
+## [0.960.0] - 2026-10-13
+
+- release/version bump ([#10210](https://github.com/Generous-Corp/pulp/pull/10210))
+- fix/link floor scan cmp0057 ([#10204](https://github.com/Generous-Corp/pulp/pull/10204))
+
+<a id="v09591"></a>
+## [0.959.1] - 2026-10-13
+
+- fix/label captured basis readout ([#10186](https://github.com/Generous-Corp/pulp/pull/10186))
+- release/version bump ([#10208](https://github.com/Generous-Corp/pulp/pull/10208))
+- fix/release failure watchdog followup ([#10190](https://github.com/Generous-Corp/pulp/pull/10190))
+- docs/mise guide ([#10192](https://github.com/Generous-Corp/pulp/pull/10192))
+- fix/cargo locked ([#10194](https://github.com/Generous-Corp/pulp/pull/10194))
+- fix/ffmpeg tool licence ([#10196](https://github.com/Generous-Corp/pulp/pull/10196))
+- fix/wgpu native pin and audit scan ([#10198](https://github.com/Generous-Corp/pulp/pull/10198))
+- ci/vellum closure negative readers ([#10202](https://github.com/Generous-Corp/pulp/pull/10202))
+- release/version bump ([#10201](https://github.com/Generous-Corp/pulp/pull/10201))
+
 <a id="v09590"></a>
 ## [0.959.0] - 2026-10-13
 
@@ -10574,6 +10593,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.960.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.960.0
+[0.959.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.959.1
 [0.959.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.959.0
 [0.958.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.958.0
 [0.957.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.957.0
