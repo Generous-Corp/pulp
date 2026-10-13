@@ -7158,6 +7158,27 @@
    ],
    "kind": "node"
   },
+  "pulp-format-clap-core-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-format-core-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-format-view-symbol-closure": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
    "inputs": [
@@ -7343,12 +7364,23 @@
    "inputs": [
     "core/canvas",
     "core/canvas/src/bundled_fonts.cpp",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
     "core/runtime/CMakeLists.txt",
+    "core/runtime/include",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/simd",
+    "core/simd/include",
     "core/view",
+    "core/view/audio",
     "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
+    "core/view/src/reload_exports.cpp",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_d3_units.json"
    ],
@@ -7375,12 +7407,23 @@
    "inputs": [
     "core/canvas",
     "core/canvas/src/bundled_fonts.cpp",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
     "core/runtime/CMakeLists.txt",
+    "core/runtime/include",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/simd",
+    "core/simd/include",
     "core/view",
+    "core/view/audio",
     "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
+    "core/view/src/reload_exports.cpp",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
     "tools/scripts/vellum_d3_units.json"
@@ -7399,13 +7442,26 @@
    "entry": "tools/scripts/test_vellum_closure.py",
    "inputs": [
     "core/canvas",
+    "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
     "core/runtime/CMakeLists.txt",
+    "core/runtime/include",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/simd",
+    "core/simd/include",
     "core/view",
+    "core/view/audio",
     "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
+    "core/view/src/reload_exports.cpp",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/import-design/jsx-runtime/package-lock.json",
+    "tools/scripts/include_boundary.py",
     "tools/scripts/test_vellum_closure.py",
     "tools/scripts/vellum_closure.py"
    ],
