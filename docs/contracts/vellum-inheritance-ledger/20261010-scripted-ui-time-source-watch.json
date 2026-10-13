@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261010-scripted-ui-time-source-watch",
+  "slices": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the injectable scripted UI timer clock and deterministic frame-time behavior into the Vellum runtime unit.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261010-scripted-ui-time-source-watch.json",
+    "planning ledger row M-matrix-2"
+  ]
+}

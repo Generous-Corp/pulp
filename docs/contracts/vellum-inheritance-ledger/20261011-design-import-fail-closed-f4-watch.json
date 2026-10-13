@@ -1,0 +1,16 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261011-design-import-fail-closed-f4-watch",
+  "slices": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the fail-closed design-import validation and diagnostics into the Vellum importer.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261011-design-import-fail-closed-f4-watch.json",
+    "planning ledger row I-integration-7"
+  ]
+}

@@ -95,11 +95,15 @@ if(Python3_Interpreter_FOUND)
 
     # Inheritance entries are one file per change event so concurrent pull
     # requests do not conflict; the checker keeps the older single-file ledger
-    # frozen and requires an entry for every event carrying the inheritance
-    # prefix. The self-test plants each violation and must turn red.
+    # frozen, requires an entry for every change or expansion-watch event that
+    # claims Vellum inherits it, and with --base rejects editing or deleting an
+    # existing entry. --base auto compares against the GitHub event's base
+    # commit in CI (merge-group checkouts carry no origin/main) and against
+    # origin/main locally. The self-test plants each violation and must turn red.
     add_test(NAME vellum-inheritance-ledger
         COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_inheritance_ledger_check.py")
+            "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_inheritance_ledger_check.py"
+            --base auto)
     add_test(NAME vellum-inheritance-ledger-negative-contract
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_inheritance_ledger_check.py")

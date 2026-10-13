@@ -30,6 +30,24 @@ concurrent pull requests conflict, so `vellum_inheritance_ledger_check.py` (ctes
 without an entry. Do not use
 `emergency-exception` or `framework-backport` for this planned program.
 
+Watch events count too. An expansion-watch or change event whose rationale says
+"Vellum inherits" or "inherited by Vellum" owes an entry exactly as a prefixed
+change event does; the entry's `slices` then equals the watch event's
+`capability_families`. A NEW event whose rationale so much as mentions Vellum
+and inheritance must state its intent with the optional boolean
+`"vellum_inherits": true|false`, which both event schemas accept. Without it the
+ledger check fails, even for wording like "records an inheritance obligation
+for Vellum" that claims nothing. Free-text detection only backstops events
+already on main. The trusted "Vellum freeze" job validates a PR's events with
+the BASE branch's schema, so a pull request cannot use an event field that the
+same pull request adds to the schema; word the rationale so it needs no field
+instead.
+
+The ctest runs with `--base auto`. In CI that is the base commit the GitHub
+event names, because a merge-group checkout has no `origin/main`; a gate that
+hard-codes `--base origin/main` goes red on every merge group that runs the
+full suite.
+
 Run from the Pulp repository root. Treat the projection as authority; do not
 infer ownership from similar directory names or broad path prefixes.
 
