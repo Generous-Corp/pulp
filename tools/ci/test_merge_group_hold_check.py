@@ -306,7 +306,7 @@ class MergeGroupHoldCheck(unittest.TestCase):
                        MERGE_GROUP_BASE_REF="refs/heads/main", MERGE_GROUP_BASE_SHA=BASE,
                        MERGE_GROUP_HEAD_SHA=MERGE_B, GITHUB_REPOSITORY="o/r")
             return subprocess.run(["bash", "-c", script], env=env, capture_output=True,
-                                  text=True, timeout=60)
+                                  text=True, encoding="utf-8", timeout=60)
 
     def test_the_step_fails_closed_unless_the_base_has_no_check(self) -> None:
         fetch_failed = self.run_step(git_fetch=1, has_check=True)
