@@ -73,8 +73,12 @@ PROVENANCE_EXCEPTIONS: dict[tuple[str, str, str, str], str] = {
         "msvc-toolchain.json is known broken (toolset and SDK `unknown`, "
         "clang-cl version `error: no input files`); its contents were verified "
         "by archive comparison instead; and it is Skia 37c5ad6a, not the release "
-        "lock's 8b8c3872. Keep this pin — do not revert PR 10170 over the "
-        "provenance file. The provenance rule still applies to any other archive."
+        "lock's 8b8c3872. That also holds for the old pin: both arm64 uploads "
+        "built 37c5ad6a (`built_skia` in the resolve-skia logs of skia-builder "
+        "runs 37596862943 and 38178800952; finding: "
+        "https://github.com/danielraffel/skia-builder/pull/32#issuecomment-6135800920). "
+        "Keep this pin — do not revert PR 10170 over the provenance file. The "
+        "provenance rule still applies to any other archive."
     ),
 }
 
