@@ -789,7 +789,7 @@ and fails before the hour-long Debug build if neither exists.
 shipyard run --targets mac                # validate current branch on the opt-in local lane
 shipyard pr                               # create/track the PR and arm auto-merge; required checks decide
 shipyard cloud run build <branch>         # dispatch to Namespace
-shipyard rescue <PR>                      # recover a wedged PR
+shipyard rescue <PR>                      # recover a wedged PR's queued runs (dispatches a branch-tip replacement; re-run a required pull_request run instead)
 shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges
 shipyard update --check --json            # report installed vs latest
 ```
@@ -4118,7 +4118,7 @@ The next PR's `resolve-provider` keeps the macOS leg on the local selector.
 gh run view <run-id> --log --repo Generous-Corp/pulp | grep "macOS route"
 ```
 
-**Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in. With Plan B in place, manual rescue should be needed much less frequently.
+**Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`). With Plan B in place, manual rescue should be needed much less frequently.
 
 ### `pulp overflow` — operator surface
 
@@ -4311,7 +4311,9 @@ commands are discoverable from `shipyard --help` and replace the legacy
 ```bash
 # Recover one PR whose required macOS check is wedged or stale
 shipyard rescue <PR>                      # cancel queued runs + redispatch to github-hosted
-shipyard rescue <PR> --rerun-failed       # also re-arm cancelled/failed runs
+shipyard rescue <PR> --rerun-failed       # also dispatch branch-tip replacements of cancelled/failed runs
+                                          # (not reruns: for a required pull_request run, use
+                                          # `ghapp run rerun <run> --failed` instead)
 shipyard rescue <PR> --dry-run            # preview without acting
 shipyard rescue --all-stuck               # repo-wide stuck-run sweep
 shipyard rescue <PR> --to github-hosted   # explicit destination provider
@@ -4804,7 +4806,8 @@ around real CI, coverage, sanitizer, or review failures.
 Use `shipyard rescue` when a PR is otherwise ready but blocked by queued,
 cancelled, or failed runner contexts caused by a self-hosted-runner wedge. It is
 the PR-side recovery path and avoids the old failure mode where cancelling
-queued runs left required checks stuck as `failure`.
+queued runs left required checks stuck as `failure`. For a required check, mind
+what it starts (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 
 Use `shipyard runner watch --kill-hung-workers` on the runner host itself. It
 auto-cancels stale queued runs and kills hung `Runner.Worker` processes through
