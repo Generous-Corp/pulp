@@ -236,6 +236,22 @@ class StrictPinTests(unittest.TestCase):
             )
             self.assert_lock_refuses(root, text, "is outside its backend's repository")
 
+    def test_forged_lock_url_for_another_version_refuses(self) -> None:
+        # Inside the allowed prefix, but the wrong release.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            text = self.lock_text(root).replace(
+                "https://github.com/openai/tart/releases/download/2.38.0/tart.tar.gz",
+                "https://github.com/openai/tart/releases/download/2.37.0/tart.tar.gz", 1,
+            )
+            self.assert_lock_refuses(root, text, "is not version 2.38.0")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            text = self.lock_text(root).replace("node-v26.10.0-", "node-v26.1.0-", 1)
+            self.assert_lock_refuses(root, text, "is not version 26.10.0")
+
     def test_forged_conda_dependency_url_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

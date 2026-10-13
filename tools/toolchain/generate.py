@@ -395,6 +395,15 @@ def check_mise_lock(path: Path, data: dict) -> None:
                     f"{path}: {name}@{want} has no checksum and url for {platform}; lock it with "
                     f"generate.py --lock, or add {platform} to mise.tools.{key}.unlocked with a reason"
                 )
+            # The download must be the pinned release, not another version in
+            # the same repository. url_api names a release asset by numeric id,
+            # so only `url` can carry the version.
+            versions = set(re.findall(r"(?<![0-9.])[0-9]+\.[0-9]+\.[0-9]+(?![0-9])", row["url"]))
+            if versions != {want}:
+                raise ValueError(
+                    f"{path}: {name} {platform} url {row['url']} is not version {want}; "
+                    "regenerate with generate.py --lock, never edit by hand"
+                )
             if spec["backend"].startswith("conda:"):
                 conda_needed.setdefault(platform, set()).update(row.get("conda_deps", []))
         if spec["backend"].startswith("conda:"):
@@ -416,7 +425,7 @@ def check_mise_lock(path: Path, data: dict) -> None:
 
 def require_pinned_mise(mise: Path, data: dict) -> None:
     try:
-        out = subprocess.run([str(mise), "--version"], capture_output=True, text=True, check=False)
+        out = subprocess.run([str(mise), "--version"], capture_output=True, text=True, encoding="utf-8", check=False)
     except OSError as exc:
         raise ValueError(f"cannot run {mise}: {exc}") from exc
     words = out.stdout.split()
@@ -462,7 +471,7 @@ def write_mise_lock(pulp_root: Path, data: dict, mise: Path) -> str:
         for platforms, names in groups.items():
             result = subprocess.run(
                 [str(mise), "lock", "--platform", ",".join(platforms), *names],
-                cwd=pulp_root, env=env, capture_output=True, text=True, check=False,
+                cwd=pulp_root, env=env, capture_output=True, text=True, encoding="utf-8", check=False,
             )
             if result.returncode != 0:
                 raise ValueError(f"mise lock {' '.join(names)} failed:\n" + result.stderr[-4000:])
