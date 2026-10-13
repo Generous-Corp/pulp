@@ -121,6 +121,23 @@ class Label : public View, public SelectableText {
         const float ink_before =
             has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
         text_ = std::move(text);
+        // A captured browser line box describes ONE string. Once the copy
+        // diverges from it the Label paints natively, and it must keep doing
+        // so even when a later value equals the captured string again: a live
+        // readout that flipped between the captured basis and native placement
+        // would visibly jump every time its value passed through the design's
+        // original copy.
+        // The boxes themselves stay: the responsive reflow still reads their
+        // line count and wrap intent, and the line-break accounting still
+        // reports a reflow rather than an uncached shape. Only the basis is
+        // retired, so no later value can resurrect it.
+        bool captured_basis_dropped = false;
+        if (!cached_line_boxes_.empty() && !cached_line_basis_retired_ &&
+            apply_text_transform(text_) != cached_line_basis_text_) {
+            cached_line_basis_retired_ = true;
+            shaped_cache_valid_ = false;
+            captured_basis_dropped = true;
+        }
         // The text IS the accessible name for a label — the two-arg ctor set it
         // and set_text() did not, so every Label built by the JS bridge
         // (<span>, <p>, <label>) or by set_text() carried an empty name. It is
@@ -141,10 +158,10 @@ class Label : public View, public SelectableText {
         // PreText-style shaper cache is keyed by (text, family, size), so the
         // new text simply hits a different cache entry — no algorithm change,
         // just cache-correct re-measurement.
-        const bool text_geometry_is_fixed =
-            has_explicit_width && single_line_simple &&
-            ((has_explicit_height && !baseline_aligned) ||
-             (probe_height && intrinsic_height() == height_before));
+        const bool text_geometry_is_fixed = !captured_basis_dropped && has_explicit_width &&
+                                            single_line_simple &&
+                                            ((has_explicit_height && !baseline_aligned) ||
+                                             (probe_height && intrinsic_height() == height_before));
         if (!text_geometry_is_fixed) invalidate_layout();
         // selectable_text() already exposes the new source bytes, so geometry
         // from the previous paint can no longer describe it honestly. Keep
@@ -897,6 +914,9 @@ private:
     float cached_line_basis_width_ = 0.0f;
     std::string cached_line_basis_face_;
     std::string cached_line_basis_text_;
+    // Set once the label's copy diverged from the captured basis; the boxes
+    // are kept for reflow but never honored verbatim again.
+    bool cached_line_basis_retired_ = false;
     std::string cached_line_basis_font_variant_;
     float cached_line_basis_font_size_ = 0.0f;
     float cached_line_basis_letter_spacing_ = 0.0f;

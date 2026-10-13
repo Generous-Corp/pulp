@@ -138,6 +138,7 @@ void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
         previous_end = start + length;
     }
     cached_line_boxes_ = std::move(boxes);
+    cached_line_basis_retired_ = false;
     cached_line_basis_width_ = basis_width;
     cached_line_basis_face_ = std::move(basis_face);
     cached_line_basis_text_ = apply_text_transform(text_);
@@ -212,6 +213,8 @@ bool Label::cached_line_layout_usable(
     const std::string& display_text, float effective_font_size,
     float effective_letter_spacing, float layout_width) const {
     if (cached_line_boxes_.empty()) return false;
+    if (cached_line_basis_retired_)
+        return false;
 
     if (display_text != cached_line_basis_text_ ||
         font_variant() != cached_line_basis_font_variant_ ||
