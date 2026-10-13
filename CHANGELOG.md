@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09620"></a>
+## [0.962.0] - 2026-10-13
+
+- release/version bump ([#10215](https://github.com/Generous-Corp/pulp/pull/10215))
+- fix/skia dawn provider decision ([#10206](https://github.com/Generous-Corp/pulp/pull/10206))
+- release/version bump ([#10213](https://github.com/Generous-Corp/pulp/pull/10213))
+- docs/app pr trigger guidance ([#10203](https://github.com/Generous-Corp/pulp/pull/10203))
+
 <a id="v09610"></a>
 ## [0.961.0] - 2026-10-13
 
@@ -10599,6 +10607,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.962.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.962.0
 [0.961.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.961.0
 [0.960.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.960.0
 [0.959.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.959.1
