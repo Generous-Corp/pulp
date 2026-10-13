@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261013-skia-win-arm64-provenance-watch",
+  "created_at": "2026-10-13T01:44:26Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Documentation-only correction to external/skia-build/VERSION.md: records that the chrome/m153 Windows ARM64 Skia slice was built from Skia 37c5ad6a rather than the release's 8b8c3872, and that its msvc-toolchain.json is not usable provenance. No pin, digest, build input or rendering behaviour changes, so no authority moves.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
