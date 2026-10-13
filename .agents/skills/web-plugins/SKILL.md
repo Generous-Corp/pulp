@@ -877,6 +877,9 @@ The `WAMv2 + WebCLAP (Linux, headless Chrome)` lane
 The lane pins emsdk (never `latest`) and fetches the Skia wasm slice from
 `tools/deps/manifest.json` — see the `ci` skill's `web-plugins.yml` section
 before touching either.
+The unpacked slice lives at `$SKIA_WASM_ROOT` (under `$RUNNER_TEMP`), never
+`~/skia-wasm`. A build step that needs it reads that variable, after the
+"Fetch and verify the Skia wasm slice" step has run in the same job.
 
 ### A native/WASM semantic oracle must share the production object closure
 

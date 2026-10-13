@@ -4344,6 +4344,29 @@ so the starvation mechanism is real — but it is ~0.6 min of Mac time per run, 
 the `linux`/`windows` alias jobs are `needs: build`, not pollers, so they never hold
 a slot for a build's duration. Relocating them pushes four more jobs into the
 contended hosted pool to reclaim half a minute.
+## A cache that never restores still costs the whole budget
+
+The repository's Actions cache has a 10 GB cap and evicts the least recently
+used entries. On 2026-10-13 it sat at 9.997 GB, and 6.5 GB of that was two
+entries that never restored:
+- android.yml's `android/app/.cxx`: 0 of 10 sampled jobs restored it. Its key
+  could not track the sources, so every main push saved another 3 GB.
+- cross-platform-check's `Linux-gradle` entry, which bundled `.cxx` into 3.5 GB.
+  It was evicted before every nightly run (0 of 7).
+
+They pushed out the Windows build ccache that PRs restore. So:
+- Cache downloads (Gradle caches, archives keyed on their pin, ccache), never
+  build trees.
+- Split `actions/cache/restore` and `actions/cache/save`, and save only on a
+  push to main. PR and merge-queue refs can read main's entries but nothing else
+  can read theirs.
+- Guard both on `runner.environment == 'github-hosted'`. Self-hosted runners
+  keep these paths on local disk.
+
+Check the budget with `gh api repos/Generous-Corp/pulp/actions/cache/usage` and
+`actions/caches?per_page=100`. An entry whose `ref` is a PR or
+`gh-readonly-queue` ref is quota nothing else can read.
+
 ## A cache that looks configured can be saving nothing
 
 `actions/cache` reports success whether or not the path it was handed contains
@@ -5249,11 +5272,15 @@ touched nothing:
   its own PR, and update `determinism.web_toolchain` in `tools/deps/manifest.json`
   in the same change.
 - **The Skia wasm slice is fetched from `tools/deps/manifest.json`, not a
-  hardcoded URL.** The lane reads the URL + sha256 out of the manifest, verifies
-  the checksum, and keys the `actions/cache` entry on `hashFiles('tools/deps/manifest.json')`
-  — so the CI lane and the dependency audit can never disagree about which binary
-  is in use, and a pin bump self-invalidates the cache. Do not paste a release URL
-  into the workflow. The lane then runs `tools/scripts/verify_wasm_skia_slice.py`
+  hardcoded URL.** The lane reads the URL + sha256 out of the manifest, so the CI
+  lane and the dependency audit can never disagree about which binary is in use.
+  The cache holds the release archive, named and keyed by that sha256. It is
+  checked against the digest on every run, cache hit or not, and unpacks into
+  `$RUNNER_TEMP` (`SKIA_WASM_ROOT`). Caching the unpacked tree skipped the digest
+  check on every hit. A host that kept `$HOME` between jobs also reused an
+  `~/skia-wasm` from an older pin. Only `wclap-cloudflare.yml` saves, on a push
+  to main; `web-plugins.yml` restores. Do not paste a release URL into the
+  workflow. The lane then runs `tools/scripts/verify_wasm_skia_slice.py`
   to assert the slice really is Ganesh/WebGL2 (no Dawn, no Graphite) — the
   invariant `FindSkia.cmake`'s Emscripten arm is built on. See the
   `skia-gpu-build` skill.
