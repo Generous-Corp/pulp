@@ -44,6 +44,11 @@ docs:
     kind: guide
     summary: Build requirements, options, and platform notes
 
+  - slug: mise
+    path: guides/mise.md
+    kind: guide
+    summary: Optional pinned build-tool versions with mise and the toolchain manifest
+
   - slug: testing
     path: guides/testing.md
     kind: guide

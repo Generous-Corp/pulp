@@ -187,6 +187,9 @@ Options:
 - `powershell -ExecutionPolicy Bypass -File .\setup.ps1 --ci` — Windows non-interactive bootstrap
 - `powershell -ExecutionPolicy Bypass -File .\setup.ps1 --deps-only` — Windows dependency-only bootstrap
 
+Optional: to build with the exact CMake, Ninja, Python, Node.js and clang-format
+versions Pulp pins, use mise. See [Pinned Build Tools with mise](mise.md).
+
 ## Prerequisites
 
 - **git**
