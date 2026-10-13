@@ -673,7 +673,8 @@ summary/watch commands.
 > **If a PR's required `macos` check has been queued >30 min** or the
 > repo's PRs are all in `mergeable_state=blocked` with no movement,
 > jump to **"Self-hosted runner ops"** near the end of this file.
-> One-shot recovery is `shipyard rescue <PR>` (Shipyard v0.53.0+).
+> One-shot recovery of a queued run is `shipyard rescue <PR>` (Shipyard
+> v0.53.0+) (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 > Continuous prevention is `shipyard runner watch --kill-hung-workers`
 > (v0.54.0+). Keep Shipyard itself current with `shipyard update`
 > (v0.55.0+; Pulp currently pins v0.56.2+). All three replace the
@@ -7045,7 +7046,7 @@ shipyard run --targets windows --smoke    # fast Windows-only check
 shipyard run --resume-from test           # skip configure+build, run tests only
 shipyard cloud run build <branch>         # dispatch the GHA build workflow
 shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs (a workflow_dispatch on the branch tip, not the merge ref)
-shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs as branch-tip workflow_dispatch replacements, not reruns; for a required pull_request run prefer `ghapp run rerun <run> --failed` (not just cancelled), and — with --to omitted — RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This is the lever to recover a saturated/timed-out macOS leg (re-run it on a real local runner). Pass --to <provider> to force.
+shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs (not just cancelled) as branch-tip workflow_dispatch replacements, not reruns; for a required pull_request run prefer `ghapp run rerun <run> --failed`. With --to omitted it RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This moves a saturated/timed-out macOS leg to a real local runner. Pass --to <provider> to force.
 shipyard rescue <PR> --rerun-failed --to local   # force a re-run onto the local runner
 shipyard ship --pr N --base main --adopt-head     # recover "ship state SHA drift" after a force-push (Shipyard #346): adopt the current branch head + re-validate, instead of re-shipping from scratch
 shipyard runner watch --kill-hung-workers # host-side prevention daemon for self-hosted runners
@@ -10038,8 +10039,12 @@ PY
    ```bash
    shipyard ship-state list
    shipyard ship
-   shipyard rescue PR --rerun-failed
    ```
+
+   For a failed or cancelled required run, re-run the `pull_request` run
+   (`ghapp run cancel <run>` if it is still running, then `ghapp run rerun
+   <run> --failed`) rather than `shipyard rescue PR --rerun-failed`
+   (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 
    Plain `shipyard ship` automatically resumes its durable state. Use
    `--resume-from <stage>` only when intentionally selecting a known stage; the
@@ -10206,7 +10211,8 @@ drift; humans run `shipyard update` to apply.
 - **PRs that touch CI/runner workflows need a manual handoff.** If the
   PR's macOS lane was cancelled by the wedge, even after `rescue` the
   PR may need a fresh push to retrigger the version-skill-sync check
-  too.
+  too. For the required `macos` run itself, re-run it rather than
+  rescue it (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 - **launchd agent exit 75 + "lease denied … rc=2" → check the plist PATH
   for `/usr/sbin` FIRST.** Before suspecting tart, network, or auth. A
   runner agent crash-looping under `KeepAlive` with last-exit **75**
@@ -10287,8 +10293,9 @@ unresponsive, not just the Worker), the machine-side recovery is:
    permanent daemon.
 
 Agents should NOT do step 1–4 themselves; ask the human via
-`PushNotification`. Agents CAN and SHOULD run `shipyard rescue` for
-the PR-side recovery without waiting.
+`PushNotification`. Agents CAN and SHOULD run the PR-side recovery
+without waiting: `shipyard rescue` for queued runs, and for a required
+`pull_request` run that failed or was cancelled, a re-run (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 
 ## Cobertura artifact verification (A2 first cut, 2026-05)
 
