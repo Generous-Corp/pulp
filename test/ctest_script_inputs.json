@@ -7385,7 +7385,7 @@
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
     "core/canvas",
-    "core/canvas/src/bundled_fonts.cpp",
+    "core/canvas/CMakeLists.txt",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7401,7 +7401,8 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
     "core/view/src/reload_exports.cpp",
-    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake",
+    "tools/cmake/PulpEmbedData.cmake",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_d3_units.json"
@@ -7428,7 +7429,7 @@
    "entry": "tools/scripts/vellum_closure.py",
    "inputs": [
     "core/canvas",
-    "core/canvas/src/bundled_fonts.cpp",
+    "core/canvas/CMakeLists.txt",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7444,7 +7445,8 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
     "core/view/src/reload_exports.cpp",
-    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake",
+    "tools/cmake/PulpEmbedData.cmake",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
@@ -7464,8 +7466,10 @@
    "entry": "tools/scripts/test_vellum_closure.py",
    "inputs": [
     "core/canvas",
+    "core/canvas/CMakeLists.txt",
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
+    "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7481,11 +7485,18 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
     "core/view/src/reload_exports.cpp",
+    "external/fonts/Inter-Regular.ttf",
+    "external/fonts/NotoColorEmoji.ttf",
+    "tools/cmake",
+    "tools/cmake/PulpEmbedData.cmake",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpPatchChoc.cmake",
     "tools/import-design/jsx-runtime/package-lock.json",
     "tools/scripts/include_boundary.py",
     "tools/scripts/test_vellum_closure.py",
-    "tools/scripts/vellum_closure.py"
+    "tools/scripts/vellum_closure.py",
+    "tools/scripts/vellum_closure_allowlist.json",
+    "tools/scripts/vellum_d3_units.json"
    ],
    "kind": "python"
   },

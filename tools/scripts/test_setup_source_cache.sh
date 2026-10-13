@@ -810,6 +810,95 @@ EOF
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== a reconfigure with another cache root never exposes the previous shared selection"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache-a/choc-v1" "$tmp/cache-b" "$tmp/src"
+    printf 'v1\n' > "$tmp/cache-a/choc-v1/value.txt"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(shared_root_change NONE)
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF v1)
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY fixture)
+file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+EOF
+    PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$tmp/cache-a" cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1
+    PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$tmp/cache-b" cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1
+    check "$(cat "$tmp/build/selected.txt")" "$tmp/build/_deps/pulp-mutable-choc-src" \
+        "the patched dependency stays build-local after the cache root changes"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== a git shared cache is copied from its object store, not its working tree"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache/choc-v1" "$tmp/src"
+    printf 'v1\n' > "$tmp/cache/choc-v1/value.txt"
+    git init -q "$tmp/cache/choc-v1"
+    git -C "$tmp/cache/choc-v1" config user.email fixture@pulp.audio
+    git -C "$tmp/cache/choc-v1" config user.name fixture
+    git -C "$tmp/cache/choc-v1" add value.txt
+    git -C "$tmp/cache/choc-v1" commit -qm fixture
+    printf 'patched in place\n' > "$tmp/cache/choc-v1/value.txt"
+    printf 'junk\n' > "$tmp/cache/choc-v1/.DS_Store"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(shared_object_store NONE)
+set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF v1)
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY fixture)
+file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+EOF
+    cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1
+    selected="$(cat "$tmp/build/selected.txt")"
+    check "$(cat "$selected/value.txt")" "v1" "the copy holds the committed bytes, not a working-tree edit"
+    check "$([ -e "$selected/.DS_Store" ] && echo present || echo absent)" "absent" \
+        "an untracked file in the shared cache does not reach the copy"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== the CHOC patch set is idempotent on its own output"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/choc/choc/javascript" "$tmp/choc/choc/text"
+    cat > "$tmp/choc/choc/javascript/choc_javascript_V8.h" <<'EOF'
+#include "choc_javascript.h"
+    std::string v8StringToStd (v8::String& s)
+    {
+        std::string result;
+        auto len = s.Utf8Length (isolate);
+        result.resize (static_cast<std::string::size_type> (len));
+        s.WriteUtf8 (isolate, result.data(), len);
+        return result;
+    }
+EOF
+    cat > "$tmp/choc/choc/text/choc_JSON.h" <<'EOF'
+                    hadExponent = true;
+                    popIf ('-');
+                    continue;
+EOF
+    cat > "$tmp/patch.cmake" <<EOF
+include("$REPO_ROOT/tools/cmake/PulpPatchChoc.cmake")
+pulp_patch_choc_v8("$tmp/choc")
+pulp_patch_choc_json_number_exponent("$tmp/choc")
+EOF
+    cmake -P "$tmp/patch.cmake" >/dev/null 2>&1
+    once="$(cat "$tmp/choc/choc/javascript/choc_javascript_V8.h" "$tmp/choc/choc/text/choc_JSON.h" | cksum)"
+    cmake -P "$tmp/patch.cmake" >/dev/null 2>&1
+    twice="$(cat "$tmp/choc/choc/javascript/choc_javascript_V8.h" "$tmp/choc/choc/text/choc_JSON.h" | cksum)"
+    check "$twice" "$once" "a second configure leaves the patched headers unchanged"
+    check "$(grep -c 'Utf8LengthV2' "$tmp/choc/choc/javascript/choc_javascript_V8.h")" "1" \
+        "the V8 string patch is applied exactly once"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo "== shared dependency links are location-independent"
 (
     load_setup_lib
