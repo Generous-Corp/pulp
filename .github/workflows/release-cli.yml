@@ -80,8 +80,10 @@ jobs:
   #      `actions/checkout` default `clean: true` (git clean -ffdx) wipes the
   #      untracked build dirs each run, so a release build on the persistent
   #      self-hosted disk is clean-by-construction (no warm-dir ODR). The
-  #      host-shared ccache IS reused there; build-cli pins the same
-  #      correctness settings the PR gate uses and prints per-job hit counts.
+  #      host-shared ccache and FetchContent source cache are NOT read there:
+  #      PR jobs can write both, so build-cli disables ccache and re-fetches
+  #      every dependency into a job-local root ("Isolate the build from
+  #      shared caches").
   #   3. PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON — Namespace cloud (off for cost).
   #   4. GitHub-hosted macos-15 — last-resort fallback.
   #
@@ -305,15 +307,12 @@ jobs:
       contents: read
       id-token: write
       attestations: write
-    # The same ccache correctness settings the required macOS gate uses
-    # (build.yml's macos job env). The self-hosted macOS release VMs share the
-    # host's ccache with the gate, so without them a release inherits the
-    # runner service's depend mode and mtime compiler keying — the settings
-    # behind the stale-object poisoning the gate pins these against.
+    # Signed, attested artifacts never read a cache an untrusted run can
+    # write. The self-hosted release VMs mount the host's ccache writable, and
+    # PR gate VMs run PR code with the same mount, so a cached object could be
+    # planted by any PR. Every object in a release is compiled here.
     env:
-      CCACHE_COMPILERCHECK: content
-      CCACHE_NODEPEND: "true"
-      CCACHE_SLOPPINESS: time_macros
+      CCACHE_DISABLE: "1"
 
     steps:
       - name: Container pre-setup (ubuntu:22.04 — build toolchain the bare image lacks)
@@ -422,10 +421,6 @@ jobs:
             fi
           done
 
-      - name: Set up Namespace macOS cache
-        if: matrix.os == 'macos-15' && contains(needs.resolve-macos-runner.outputs.runs_on_json, 'namespace-profile')
-        uses: ./.github/actions/setup-namespace-macos-cache
-
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         uses: ./.github/actions/install-linux-build-deps
@@ -450,17 +445,30 @@ jobs:
             fi
           done
 
-      - name: Bootstrap dependencies
-        run: ./setup.sh --ci --deps-only
-        shell: bash
-
-      - name: Compiler cache environment
+      # The host's FetchContent source cache is mounted writable into PR jobs
+      # too, so this job points setup.sh and CMake at a fresh job-local root
+      # and re-fetches every dependency at its pin. The Windows subbuild base
+      # moves with it. tools/scripts/test_release_cache_isolation.py holds every
+      # signing or publishing job to this step and to CCACHE_DISABLE.
+      - name: Isolate the build from shared caches
         shell: bash
         run: |
           set -euo pipefail
-          # Per-job counters. The self-hosted macOS cache is shared by every
-          # job on the host, so its own totals say nothing about this build.
-          echo "CCACHE_STATSLOG=${RUNNER_TEMP}/ccache-stats.log" >> "$GITHUB_ENV"
+          # A per-dependency source override would bypass the fresh root.
+          if overrides="$(env | grep '^PULP_FETCHCONTENT_SOURCE_DIR_' | cut -d= -f1)"; then
+            echo "::error::runner environment overrides dependency sources: ${overrides//$'\n'/ }"
+            exit 1
+          fi
+          root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -m "$root")"; fi
+          rm -rf "$root"
+          mkdir -p "$root/src" "$root/fc"
+          echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src" >> "$GITHUB_ENV"
+          echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc" >> "$GITHUB_ENV"
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
 
       # Fetch Skia prebuilt binaries — the root fix for pulp #1817.
       #
@@ -1432,25 +1440,6 @@ jobs:
       # artifact. A workflow_dispatch backfill may build an old tag while the
       # release job itself runs from current main, so the release job must not
       # read compatibility metadata from its own checkout.
-      # The proof that the cache is configured the way the gate's is, and how
-      # much of this build it served. Per-job numbers come from CCACHE_STATSLOG.
-      - name: Ccache stats
-        if: always()
-        shell: bash
-        run: |
-          if ! command -v ccache >/dev/null 2>&1; then
-            echo "ccache not available; skipping stats"
-            exit 0
-          fi
-          ccache --version | head -1
-          ccache --show-config 2>/dev/null \
-            | grep -iE 'compiler_check|depend_mode|direct_mode|sloppiness|cache_dir|base_dir|stats_log' || true
-          if [ -s "${CCACHE_STATSLOG:-}" ]; then
-            ccache --show-log-stats -v || ccache --show-stats
-          else
-            echo "no compile in this job went through ccache (empty stats log)"
-          fi
-
       - name: Record macOS release floor
         if: runner.os == 'macOS'
         env:

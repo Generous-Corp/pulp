@@ -162,12 +162,19 @@ jobs:
           probe --enable-unsafe-swiftshader
           probe --enable-unsafe-swiftshader --use-angle=swiftshader
 
+      # choc at an exact commit (the pulp-webview-dnd-poc1 tag), cloned fresh.
       - name: Vendor choc for the WAM build
+        env:
+          CHOC_COMMIT: df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch pulp-webview-dnd-poc1 \
-            https://github.com/danielraffel/choc.git "$HOME/choc-src"
-          echo "PULP_WAM_CHOC_INCLUDE=$HOME/choc-src" >> "$GITHUB_ENV"
+          dest="${RUNNER_TEMP:?}/choc-src"
+          rm -rf "$dest"
+          git init -q "$dest"
+          git -C "$dest" fetch -q --depth 1 https://github.com/danielraffel/choc.git "$CHOC_COMMIT"
+          git -C "$dest" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$dest" rev-parse HEAD)" = "$CHOC_COMMIT"
+          echo "PULP_WAM_CHOC_INCLUDE=$dest" >> "$GITHUB_ENV"
 
       - name: Install playwright-core
         run: npm install --no-save playwright-core
@@ -496,10 +503,12 @@ jobs:
           set -euo pipefail
           ver=25
           url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${ver}/wasi-sdk-${ver}.0-arm64-macos.tar.gz"
-          curl -fsSL "$url" -o /tmp/wasi-sdk.tar.gz
-          mkdir -p "$HOME/wasi-sdk-macos"
-          tar -xzf /tmp/wasi-sdk.tar.gz -C "$HOME/wasi-sdk-macos" --strip-components=1
-          echo "WASI_SDK_PREFIX=$HOME/wasi-sdk-macos" >> "$GITHUB_ENV"
+          dest="${RUNNER_TEMP:?}/wasi-sdk-macos"
+          rm -rf "$dest" "${RUNNER_TEMP}/wasi-sdk.tar.gz"
+          curl -fsSL "$url" -o "${RUNNER_TEMP}/wasi-sdk.tar.gz"
+          mkdir -p "$dest"
+          tar -xzf "${RUNNER_TEMP}/wasi-sdk.tar.gz" -C "$dest" --strip-components=1
+          echo "WASI_SDK_PREFIX=$dest" >> "$GITHUB_ENV"
 
       - name: Install playwright-core
         run: npm install --no-save playwright-core
@@ -548,13 +557,6 @@ jobs:
       # It has to run HERE and not in the Cloudflare deploy lane, which is where the site
       # is normally assembled: that lane is Linux, has no WebGPU adapter, and the fixture
       # would skip. A real GPU is the whole point.
-      - name: Cache the Skia wasm slice
-        id: skia-cache-macos
-        uses: actions/cache@v4
-        with:
-          path: ~/skia-wasm
-          key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
-
       # The gallery's other 23 plugins live in two separate public repos, and
       # assemble-gallery.mjs hard-fails on the first missing wasm — so the page cannot be
       # assembled without them, even though this job only cares about SuperConvolver.
@@ -572,20 +574,28 @@ jobs:
       # looks in build/_deps) finds nothing. The Linux lane vendors it; this lane did
       # not, and configured build-webui without the flag, so it failed at CMake time
       # long before it could prove anything about the GPU.
+      # Self-hosted runners keep $HOME between jobs, and PR jobs run there too, so a
+      # copy left in $HOME is not trusted: choc is fetched at an exact commit (the
+      # pulp-webview-dnd-poc1 tag) into this job's own temp dir.
       - name: Vendor choc for the UI build
+        env:
+          CHOC_COMMIT: df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60
         run: |
           set -euo pipefail
-          # Self-hosted runners keep $HOME between jobs — a bare clone would fail on the
-          # second run.
-          [ -d "$HOME/choc-src" ] || git clone --depth 1 --branch pulp-webview-dnd-poc1 \
-            https://github.com/danielraffel/choc.git "$HOME/choc-src"
-          echo "PULP_WAM_CHOC_INCLUDE=$HOME/choc-src" >> "$GITHUB_ENV"
+          dest="${RUNNER_TEMP:?}/choc-src"
+          rm -rf "$dest"
+          git init -q "$dest"
+          git -C "$dest" fetch -q --depth 1 https://github.com/danielraffel/choc.git "$CHOC_COMMIT"
+          git -C "$dest" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$dest" rev-parse HEAD)" = "$CHOC_COMMIT"
+          echo "PULP_WAM_CHOC_INCLUDE=$dest" >> "$GITHUB_ENV"
 
       - name: Assemble the GPU demo page (the real one, from the real modules)
         run: |
           set -euo pipefail
-          if [ ! -d "$HOME/skia-wasm" ]; then
-            read -r url sha < <(python3 - <<'PY'
+          # Downloaded and verified every run into this job's temp dir: a tree left
+          # in $HOME on a self-hosted runner could not be checked against the pin.
+          read -r url sha < <(python3 - <<'PY'
           import json
           dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
                      if d["name"] == "Skia")
@@ -593,16 +603,17 @@ jobs:
           print(a["url"], a["sha256"])
           PY
           )
-            curl -fsSL "$url" -o /tmp/skia-wasm.zip
-            echo "$sha  /tmp/skia-wasm.zip" | shasum -a 256 -c -
-            mkdir -p "$HOME/skia-wasm"
-            unzip -q /tmp/skia-wasm.zip -d "$HOME/skia-wasm"
-          fi
+          skia_dir="${RUNNER_TEMP:?}/skia-wasm"
+          rm -rf "$skia_dir" "${RUNNER_TEMP}/skia-wasm.zip"
+          curl -fsSL "$url" -o "${RUNNER_TEMP}/skia-wasm.zip"
+          echo "$sha  ${RUNNER_TEMP}/skia-wasm.zip" | shasum -a 256 -c -
+          mkdir -p "$skia_dir"
+          unzip -q "${RUNNER_TEMP}/skia-wasm.zip" -d "$skia_dir"
 
           # The page's status strip is a Label in Pulp's own view tree, so the GPU page
           # cannot be assembled without the UI module — there is nothing to report into.
           emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
-            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm" \
+            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$skia_dir" \
             -DPULP_WEBUI_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
           tools/ci/governed-build.sh cmake --build build-webui
 

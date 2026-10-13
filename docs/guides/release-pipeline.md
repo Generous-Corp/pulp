@@ -256,21 +256,32 @@ labelset gives you no M3-then-M5-then-M1 ordering; tartci's supervisor-side
 `priority_demand` / yield knobs are where real ordering would live. Until then,
 `pin` is the deterministic lever.
 
-### Compiler cache
+### No shared caches in a signed or published build
 
-Every `build-cli` leg sets the required gate's ccache correctness settings
-(`CCACHE_COMPILERCHECK=content`, `CCACHE_NODEPEND=true`,
-`CCACHE_SLOPPINESS=time_macros`, copied from `build.yml`'s `macos` job) and ends
-with an always-run **Ccache stats** step that prints the effective config and
-this job's hit counts from `CCACHE_STATSLOG`. The self-hosted darwin VMs mount
-the host-shared cache, so a release reuses objects the gate compiled, and the
-host cache's own totals span every job on the host; the per-job log is the only
-number that describes one release build.
+A signed, notarized, attested or deployed artifact never reads a cache an
+untrusted run can write. The self-hosted VMs mount the host's ccache and
+FetchContent source cache writable into every job, and PR gate VMs run PR code
+with the same mounts, so an object or dependency source planted by any PR could
+otherwise end up in a release. Every job that signs or publishes and also
+compiles (`release-cli.yml` `build-cli`, `sign-and-release.yml`
+`build-and-sign-macos`, `wclap-cloudflare.yml` `build-prove-deploy`):
 
-Still on the table (deferred while the focus is macOS): a Windows compiler cache
-(the Visual Studio generator ignores compiler launchers, and an `actions/cache`
-entry written on one tag is invisible to the next), and ccache on the Linux legs,
-which compile the tree twice (CLI with WebView OFF, then the SDK with it ON).
+- sets `CCACHE_DISABLE=1` for the whole job, so every object is compiled in it;
+- runs **Isolate the build from shared caches** before its first build step,
+  which points `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` and
+  `PULP_FETCHCONTENT_BASE_DIR` at a fresh root under `RUNNER_TEMP`, so
+  `setup.sh` and CMake re-fetch every dependency at its pin, and refuses a
+  runner that sets a per-dependency `PULP_FETCHCONTENT_SOURCE_DIR_<NAME>`;
+- uses neither `actions/cache` nor the Namespace cache volumes.
+
+The WebCLAP deploy also fetches its Skia wasm slice (verified against the
+manifest digest), wasi-sdk and choc (at an exact commit) into `RUNNER_TEMP`
+on every run instead of reusing a `$HOME` directory an earlier job could have
+written. Release builds are rare, so the cold-compile minutes are the accepted
+price. `tools/scripts/test_release_cache_isolation.py` (run by
+`workflow-lint.yml`) finds every such job by its signing or deploy capability
+and fails if one drops either setting, so a new release job is held to the same
+rule.
 
 ## Why publication lives in one job
 
