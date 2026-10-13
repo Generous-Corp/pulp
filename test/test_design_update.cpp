@@ -397,6 +397,21 @@ TEST_CASE("native binding contract changes recreate keyed nodes", "[view][import
     SECTION("route identity") {
         require_contract_recreated("route", "pulpRouteId");
     }
+    SECTION("binding module is immutable after installation") {
+        // NativeImportBindingContext receives the module while installing the
+        // callback; there is no setter on a retained native control. This is
+        // a planted negative control for accidentally treating every binding
+        // string as a re-keyable value.
+        auto old_node = node("binding-module");
+        auto new_node = old_node;
+        old_node.attributes["pulpParamKey"] = "gain";
+        old_node.attributes["pulpBindingModule"] = "voice-a";
+        new_node.attributes["pulpParamKey"] = "gain";
+        new_node.attributes["pulpBindingModule"] = "voice-b";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "binding-module");
+    }
     SECTION("choice value") {
         require_contract_recreated("choice-value", "pulpChoiceValue");
     }

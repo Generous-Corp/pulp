@@ -53,13 +53,15 @@ struct BindingShape {
 
 bool is_rekeyable_binding_attribute(std::string_view key) {
     // These are names/payloads that an update consumer can change in place.
+    // Binding module/param values are deliberately absent: NativeImportBindingContext
+    // consumes them when installing the callback and has no re-key setter. Retaining
+    // a view across either change would leave the stable anchor pointing at the old route.
     // The planner must still compare their presence through the topology bits
     // above so bound↔unbound transitions recreate the native control.
     for (const auto candidate :
-         {"pulpParamKey", "pulpBindingModule", "pulpBindingParam", "pulpParamKeyX",
-          "pulpBindingModuleX", "pulpBindingParamX", "pulpParamKeyY", "pulpBindingModuleY",
-          "pulpBindingParamY", "pulpMeterSource", "pulpMeterChannel", "pulpMeterValueKey",
-          "pulpValueKey", "pulpInitialValue", "pulpPlaceholder"}) {
+         {"pulpParamKey", "pulpParamKeyX", "pulpParamKeyY", "pulpMeterSource",
+          "pulpMeterChannel", "pulpMeterValueKey", "pulpValueKey", "pulpInitialValue",
+          "pulpPlaceholder"}) {
         if (key == candidate)
             return true;
     }
