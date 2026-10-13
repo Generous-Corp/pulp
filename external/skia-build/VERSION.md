@@ -187,8 +187,12 @@ Both Windows ARM64 uploads (runs 37596862943 and 38178800952) built Skia
 not the release's `8b8c3872fbc03f025855db96ce683f34ec98a815` that the other
 slices carry (the resolve-skia step of each run, and the shipped headers,
 confirm it). The two revisions are 8 commits and 65 files apart, including a
-public Ganesh change: `GrDirectContext::flush` and `flushAndSubmit` return
-`FlushResult` on the ARM64 slice, and `SkSurfaceGanesh.h` differs. Code that calls those APIs can therefore behave
+public Ganesh change: on the ARM64 slice every `GrDirectContext::flushAndSubmit`
+overload and the `GrFlushInfo` overloads of `flush` return `FlushResult` (the
+no-argument and image `flush` still return `void`), and `SkSurfaceGanesh`
+`Flush`/`FlushAndSubmit` likewise return `FlushResult`. `FlushResult` converts
+to `GrSemaphoresSubmitted`, but its meaning there is success, not semaphore
+submission. Code that calls those APIs can therefore behave
 differently on Windows ARM64 until every slice moves to one revision together.
 Rebuilding the ARM64 slice at `8b8c3872` would change its headers under this
 pin, so it is not done in place. GitHub release
