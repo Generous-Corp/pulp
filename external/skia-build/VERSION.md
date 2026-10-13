@@ -146,7 +146,7 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-mac-universal-gpu-release.zip` | `0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9` |
 | `skia-build-mac-x86_64-gpu-release.zip` | `0aeb3a4879d59bf42bb4a42a21cda292b6c5401fa24377b241623a600664471d` |
 | `skia-build-wasm-wasm32-gpu-release.zip` | `a5218b84266b0d79dd9c1ce514be6d06f8898085aaa9309a9830442f29ca4887` |
-| `skia-build-win-arm64-gpu-release.zip` | `8e6fb2012ad026d8261eadfe3a9f638a165e82cefa2b896f8596dbaece9c6bde` |
+| `skia-build-win-arm64-gpu-release.zip` | `18e57481e84992fecccbc4ac0f8f283c4a68d90d7978a61ce2e68f21dd34a9c7` |
 | `skia-build-win-x64-gpu-release.zip` | `9480972c67f07d0762183e962ec3483210eb446ff10ca4e9ddf83ad188f0d11b` |
 
 The manifest's `mac-arm64` selector uses the universal archive, so its cache
@@ -165,6 +165,22 @@ The `mac-arm64` manifest key intentionally selects the mac-universal archive,
 whose arm64 Skia/Dawn slices measure macOS 13.0. This preserves the verified
 universal provider used by Pulp and keeps arm64/universal cache generations
 identical; the standalone asset remains recorded above for release coverage.
+
+### Windows ARM64 asset provenance
+
+The fork re-published `skia-build-win-arm64-gpu-release.zip` in place under the
+`chrome/m153` tag at 2026-10-11T22:53:43Z (backfill run 38178800952 at fork
+commit `2ced411d58`, `gh release upload --clobber`). The superseded digest
+`8e6fb2012ad026d8261eadfe3a9f638a165e82cefa2b896f8596dbaece9c6bde` came from
+fork run 37596862943 (commit `62d6ba4ebb`) and is still retrievable as Actions
+artifact 11472775168 until 2027-01-05. Comparing the two archives showed that
+every header and every other file is byte-identical. All 11 `arm64/*.lib`
+archives have the same members and sizes, and the only differences are the
+COFF `TimeDateStamp` fields. The new archive also adds a
+`build/win-gpu/msvc-toolchain.json` receipt that records the static `/MT`
+MSVC runtime ABI. The pin above is the re-published digest. GitHub release
+tags are mutable, so any future change to an asset digest under the same tag
+needs the same content comparison before the pin moves.
 
 ## Libraries Per Platform
 
