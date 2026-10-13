@@ -584,6 +584,15 @@ struct InstanceState {
     /// Processor: the editor may be bound to this object, and a re-prepare
     /// leaves the DSP exactly as clean as the first block did.
     void reset_for_reuse() {
+        // Keep the configuration the host already negotiated so the clean
+        // start happens HERE, on the host's control thread, instead of in the
+        // next render callback: a reset while audio runs must not make the
+        // audio thread pay a full Processor::prepare.
+        const double sample_rate = prepared_sample_rate;
+        const int block = prepared_max_buffer;
+        const int inputs = prepared_input_channels;
+        const int outputs = prepared_output_channels;
+        const bool was_prepared = prepared;
         if (prepared && processor) {
             processor->release();
         }
@@ -594,6 +603,9 @@ struct InstanceState {
         prepared_output_channels = 0;
         midi_in.clear();
         midi_out.clear();
+        if (was_prepared && sample_rate > 0.0) {
+            ensure_prepared(sample_rate, block, inputs, outputs);
+        }
     }
 
     EntryConfig config;
@@ -1161,9 +1173,11 @@ int32_t AAX_CALLBACK instance_init(const AlgorithmContext* context,
 
     switch (action) {
         case AAX_eComponentInstanceInitAction_RemovingInstance:
+            runtime::log_info("AAX host: instance_init RemovingInstance");
             destroy_instance(context->private_data);
             break;
         case AAX_eComponentInstanceInitAction_AddingNewInstance:
+            runtime::log_info("AAX host: instance_init AddingNewInstance");
             // ResetFieldData normally constructs this before the callback;
             // retain that state and repair hosts that skip the reset hook.
             if (!construct_instance(context->private_data)) {
@@ -1171,6 +1185,7 @@ int32_t AAX_CALLBACK instance_init(const AlgorithmContext* context,
             }
             break;
         case AAX_eComponentInstanceInitAction_ResetInstance:
+            runtime::log_info("AAX host: instance_init ResetInstance");
             // AAX reuses the same private block for reset. Re-prepare the DSP
             // object in place rather than recreating it: the editor may be
             // bound to this Processor, and release()+prepare() is the same
