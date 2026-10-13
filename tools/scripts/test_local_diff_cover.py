@@ -1446,6 +1446,7 @@ class GateHostSkipTests(unittest.TestCase):
         self.assertFalse(ran, result.stderr)
         self.assertIn("[gate-host] REFUSED pre-push diff-coverage configure/build", result.stderr)
         self.assertIn("TARTCI_ROLE=dedicated-builder", result.stderr)
+        self.assertIn("Run tools/scripts/local_diff_cover.sh from", result.stderr)
 
     def test_control_prepush_hook_reaches_diff_cover_on_a_light_host(self) -> None:
         # Proves the fixture reaches the diff-cover call at all, so the refusal
