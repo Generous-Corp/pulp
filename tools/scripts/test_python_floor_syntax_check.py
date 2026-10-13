@@ -22,6 +22,10 @@ REJECTED = {
     "backslash in a field": "xs = ['a']\ny = f\"{'\\n'.join(xs)}\"\n",
     "comment in a field": 'x = 1\ny = f"""{x  # note\n}"""\n',
     "line break in a single-quoted field": 'x = 1\ny = f"{x\n}"\n',
+    "backslash in a nested f-string's text": "x = 1\ny = f\"{f'a\\\\n{x}'}\"\n",
+    "continuation in a single-quoted field": 'x = 1\ny = f"{x + \\\n 1}"\n',
+    "continuation in a triple-quoted field": 'x = 1\ny = f"""{x + \\\n 1}"""\n',
+    "continuation right after the brace": 'x = 1\ny = f"""{\\\nx}"""\n',
 }
 # Both versions accept each of these.
 ACCEPTED = {
@@ -32,6 +36,11 @@ ACCEPTED = {
     "backslash in the literal part": 'x = 1\ny = f"a\\tb{x}"\n',
     "line break in a triple-quoted field": 'x = 1\ny = f"""{x\n}"""\n',
     "plain string with a backslash": 'y = "a\\nb"\n',
+    "backslash in a top-level format spec": "x = 1\ny = f'{x:\\\\n}'\n",
+    "nested f-string without a backslash": "x = 1\ny = f\"{f'a{x}'}\"\n",
+    "continuation outside the f-string": 'x = 1\ny = f"{x}" + \\\n  "a"\n',
+    "continuation in the literal of a dedent block": 'x = 1\ny = f"""\\\n{x}\n"""\n',
+    "line break in parens in a triple-quoted field": 'x = 1\ny = f"""{(x +\n 1)}"""\n',
 }
 
 
@@ -106,7 +115,7 @@ class CommandLineTests(unittest.TestCase):
             result = self.run_check(str(good))
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_the_tracked_tools_tree_is_clean(self) -> None:
+    def test_the_tracked_tree_is_clean(self) -> None:
         result = self.run_check()
         self.assertEqual(result.returncode, 0, result.stderr)
         # Control: the scan really covered the tree.

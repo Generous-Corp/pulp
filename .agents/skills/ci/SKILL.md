@@ -12118,7 +12118,7 @@ that prints non-ASCII marks, reconfigure its own stdout at its entry point
 defaults to the ANSI code page. `PYTHONIOENCODING=cp1252` reproduces that pipe
 on macOS.
 
-## tools/ Python parses on 3.11: the floor-syntax check
+## Tracked Python parses on 3.11: the floor-syntax check
 
 The gate tooling needs Python 3.11 (`tomllib`, `enterContext`), and 3.11 is
 what CMake finds on a stock Homebrew Mac, so ctest's Python suites often run
@@ -12127,11 +12127,18 @@ the enclosing quote (`f"{row["a"]}"`) or hold a backslash, comment or line
 break. On 3.11 one such file makes `gate-python-imports` and
 `script-test-inputs-drift` fail for everyone ("f-string: unmatched '['"),
 while CI stays green. `tools/scripts/python_floor_syntax_check.py` (in
-`gates.sh` and `version-skill-check.yml`) scans every tracked
-`tools/**/*.py`. `ast.parse(feature_version=(3, 11))` does not catch these on
-3.12, so on 3.12+ the check walks the f-string tokens; on an older Python it
-compiles the file. Fix a hit with the other quote character, or bind the
-expression to a local first.
+`gates.sh` and `version-skill-check.yml`) scans every tracked `*.py`, not
+only `tools/`, because `test/` runs under the same floor.
+`ast.parse(feature_version=(3, 11))` does not catch these on 3.12, so on 3.12+
+the check walks the f-string tokens; on an older Python it compiles the file.
+Two cases leave no token of their own:
+- a backslash line continuation inside a field. The check reads the source
+  line the previous field token ends on;
+- the literal text of an f-string nested in another's field. That text is part
+  of the outer field, so a backslash in it is rejected.
+
+Fix a hit with the other quote character, or bind the expression to a local
+first.
 
 ## Hosted macOS advisory cadence
 

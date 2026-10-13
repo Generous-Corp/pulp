@@ -788,7 +788,7 @@ fi
 # parses it, while the 3.12 CI runner stays green.
 if [ -f "$PYTHON_FLOOR_SYNTAX" ]; then
     echo "" >&2
-    echo "▸ Python floor syntax (every tools/**/*.py parses on Python 3.11)" >&2
+    echo "▸ Python floor syntax (every tracked *.py parses on Python 3.11)" >&2
     if ! "$PYTHON" "$PYTHON_FLOOR_SYNTAX" >&2; then
         fail=1
     fi
