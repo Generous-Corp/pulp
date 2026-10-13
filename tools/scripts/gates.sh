@@ -121,6 +121,7 @@ WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
 FOUNDATION_INCLUDE_LINT="$ROOT/tools/scripts/foundation_include_lint.py"
 SAFE_PATH_LINT="$ROOT/tools/scripts/safe_path_guard_lint.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
+PYTHON_FLOOR_SYNTAX="$ROOT/tools/scripts/python_floor_syntax_check.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 SCHEDULE_BACKSTOP="$ROOT/tools/scripts/schedule_backstop_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
@@ -778,6 +779,17 @@ if [ -f "$TEXT_ENCODING_LINT" ]; then
     echo "" >&2
     echo "▸ text-encoding lint (Python text I/O names its encoding; per-file ratchet)" >&2
     if ! "$PYTHON" "$TEXT_ENCODING_LINT" --root "$ROOT" --base "$(git -C "$ROOT" merge-base "$BASE" HEAD)" >&2; then
+        fail=1
+    fi
+fi
+
+# Whole-tree, a few seconds. Python 3.12 accepts f-strings that 3.11, the
+# gates' floor, rejects; one such file breaks every 3.11 run of a gate that
+# parses it, while the 3.12 CI runner stays green.
+if [ -f "$PYTHON_FLOOR_SYNTAX" ]; then
+    echo "" >&2
+    echo "▸ Python floor syntax (every tools/**/*.py parses on Python 3.11)" >&2
+    if ! "$PYTHON" "$PYTHON_FLOOR_SYNTAX" >&2; then
         fail=1
     fi
 fi
