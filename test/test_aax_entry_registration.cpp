@@ -331,6 +331,113 @@ pulp::format::aax::EntryConfig binding_config() {
 
 } // namespace
 
+namespace {
+
+/// Records what the render callback hands it. Declares Stereo BEFORE Mono so a
+/// mono instance is only correct when the callback honours the instance's own
+/// layout rather than the first component's.
+struct TwoLayoutGain final : pulp::format::Processor {
+    static inline int prepare_calls = 0;
+    static inline int prepared_outputs = 0;
+    static inline std::size_t last_output_channels = 0;
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d{
+            .name = "TwoLayoutGain",
+            .manufacturer = "Pulp",
+            .bundle_id = "com.pulp.two-layout-gain",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2, false}},
+            .output_buses = {{"Main Out", 2, false}},
+        };
+        d.supported_bus_layouts = {
+            {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
+            {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+        };
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter(
+            {.id = 1, .name = "Gain", .unit = "dB", .range = {-24.0f, 24.0f, 0.0f, 0.1f}});
+    }
+    void prepare(const pulp::format::PrepareContext& ctx) override {
+        ++prepare_calls;
+        prepared_outputs = ctx.output_channels;
+    }
+    void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        last_output_channels = out.num_channels();
+        for (std::size_t ch = 0; ch < out.num_channels(); ++ch) {
+            auto dst = out.channel(ch);
+            for (std::size_t i = 0; i < out.num_samples(); ++i)
+                dst[i] = 0.25f;
+        }
+    }
+};
+std::unique_ptr<pulp::format::Processor> make_two_layout_gain() {
+    return std::make_unique<TwoLayoutGain>();
+}
+pulp::format::aax::EntryConfig two_layout_config() {
+    return pulp::format::aax::make_entry_config(&make_two_layout_gain, "PulP", "TwLy", "TwLt");
+}
+
+} // namespace
+
+TEST_CASE("AAX layout selection follows the host's stem formats", "[aax][entry][layout]") {
+    using namespace pulp::format::aax;
+    using namespace pulp::format::aax::testing;
+    std::vector<ComponentLayout> components(2);
+    components[0].input_stem = StemKind::stereo;
+    components[0].output_stem = StemKind::stereo;
+    components[1].input_stem = StemKind::mono;
+    components[1].output_stem = StemKind::mono;
+    CHECK(select_layout_for_test(components, StemKind::mono, StemKind::mono) == 1);
+    CHECK(select_layout_for_test(components, StemKind::stereo, StemKind::stereo) == 0);
+    // An unknown pairing falls back on the output stem, then on the first.
+    CHECK(select_layout_for_test(components, StemKind::lcr, StemKind::mono) == 1);
+    CHECK(select_layout_for_test(components, StemKind::none, StemKind::none) == 0);
+}
+
+TEST_CASE("AAX mono instance renders through the mono layout even when stereo is declared first",
+          "[aax][entry][layout]") {
+    using namespace pulp::format::aax;
+    using namespace pulp::format::aax::testing;
+    TwoLayoutGain::prepare_calls = 0;
+    TwoLayoutGain::prepared_outputs = 0;
+    TwoLayoutGain::last_output_channels = 0;
+    const auto config = two_layout_config();
+    const auto definition = build_plugin_definition(config.factory, config.codes);
+    INFO(definition.error);
+    REQUIRE(definition.ok);
+    REQUIRE(definition.definition.components.size() == 2);
+    ModelHandle model(config);
+    std::vector<std::byte> block(private_data_block_size());
+    REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+    REQUIRE(algorithm_processor(block.data()) != nullptr);
+    CHECK(instance_component_index(block.data()) == 0);
+
+    // The host says mono: the instance adopts the second component and is
+    // prepared for it on the control thread, before any render callback.
+    adopt_layout_for_test(block.data(), StemKind::mono, StemKind::mono, 48000.0);
+    CHECK(instance_component_index(block.data()) == 1);
+    CHECK(TwoLayoutGain::prepare_calls == 1);
+    CHECK(TwoLayoutGain::prepared_outputs == 1);
+
+    // Host-shaped pointer arrays: a mono instance owns ONE channel. The second
+    // slot is null, which is what a stereo-count read would dereference.
+    constexpr int frames = 64;
+    std::vector<float> in(frames, 1.0f), out(frames, 0.0f);
+    float* inputs[2] = {in.data(), nullptr};
+    float* outputs[2] = {out.data(), nullptr};
+    REQUIRE(render_for_test(block.data(), inputs, outputs, frames, 48000.0));
+    CHECK(TwoLayoutGain::last_output_channels == 1);
+    CHECK(out[0] == 0.25f);
+    CHECK(out[frames - 1] == 0.25f);
+    // The render did not re-prepare: the control-thread prepare covered it.
+    CHECK(TwoLayoutGain::prepare_calls == 1);
+}
+
 TEST_CASE("AAX editor binds to the processor that renders audio", "[aax][entry][view-bridge]") {
     using namespace pulp::format::aax::testing;
     ModelHandle model(binding_config());

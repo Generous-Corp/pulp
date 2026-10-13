@@ -189,6 +189,57 @@ AAX_EStemFormat stem_to_aax(StemKind stem) {
     return AAX_eStemFormat_None;
 }
 
+StemKind stem_from_aax(AAX_EStemFormat stem) {
+    switch (stem) {
+    case AAX_eStemFormat_Mono:
+        return StemKind::mono;
+    case AAX_eStemFormat_Stereo:
+        return StemKind::stereo;
+    case AAX_eStemFormat_LCR:
+        return StemKind::lcr;
+    case AAX_eStemFormat_LCRS:
+        return StemKind::lcrs;
+    case AAX_eStemFormat_Quad:
+        return StemKind::quad;
+    case AAX_eStemFormat_5_0:
+        return StemKind::surround_5_0;
+    case AAX_eStemFormat_5_1:
+        return StemKind::surround_5_1;
+    case AAX_eStemFormat_6_0:
+        return StemKind::surround_6_0;
+    case AAX_eStemFormat_6_1:
+        return StemKind::surround_6_1;
+    case AAX_eStemFormat_7_0_DTS:
+        return StemKind::surround_7_0;
+    case AAX_eStemFormat_7_1_DTS:
+        return StemKind::surround_7_1;
+    default:
+        return StemKind::none;
+    }
+}
+
+// Every declared bus layout is registered as its own AAX component, and the
+// host tells an instance which one it chose only through its stem formats.
+// The render callback must build its channel pointers from THAT layout: the
+// first component's counts are wrong for every other stem, and a mono
+// instance read through the stereo counts dereferences a second input the
+// host never provided.
+std::size_t select_component_layout(const std::vector<ComponentLayout>& components,
+                                    StemKind input_stem, StemKind output_stem) {
+    for (std::size_t index = 0; index < components.size(); ++index) {
+        if (components[index].input_stem == input_stem &&
+            components[index].output_stem == output_stem) {
+            return index;
+        }
+    }
+    for (std::size_t index = 0; index < components.size(); ++index) {
+        if (components[index].output_stem == output_stem) {
+            return index;
+        }
+    }
+    return 0;
+}
+
 uint32_t category_to_aax(PluginCategory category) {
     switch (category) {
         case PluginCategory::Instrument: return AAX_ePlugInCategory_SWGenerators;
@@ -419,6 +470,28 @@ struct InstanceState {
     ~InstanceState() {
         if (processor) {
             processor->release();
+        }
+    }
+
+    /// The component the host instantiated, resolved from its stem formats at
+    /// construction; index 0 until the host has said.
+    std::size_t component_index = 0;
+
+    const ComponentLayout& layout() const {
+        return definition.components[std::min(component_index, definition.components.size() - 1)];
+    }
+
+    /// Adopt the host's stem choice and prepare on the control thread, so the
+    /// render callback never pays a first-block prepare on the audio thread.
+    void adopt_host_layout(StemKind input_stem, StemKind output_stem, double sample_rate) {
+        if (definition.components.empty()) {
+            return;
+        }
+        component_index = select_component_layout(definition.components, input_stem, output_stem);
+        const auto& component = layout();
+        if (sample_rate > 0.0) {
+            ensure_prepared(sample_rate, kAaxPreparedMaxBlock, component.main_input_channels,
+                            component.main_output_channels);
         }
     }
 
@@ -833,6 +906,30 @@ public:
             static_cast<uint32_t>(packet.size() * sizeof(float)));
     }
 
+    // The controller knows which stem formats the host instantiated and the
+    // session sample rate. Without a controller (a unit test's bare model)
+    // the instance keeps component 0 and prepares lazily, as before.
+    void adopt_controller_layout(InstanceState& instance) const {
+        const AAX_IController* controller = Controller();
+        if (!controller) {
+            return;
+        }
+        AAX_EStemFormat input_stem = AAX_eStemFormat_None;
+        AAX_EStemFormat output_stem = AAX_eStemFormat_None;
+        AAX_CSampleRate sample_rate = 0.0f;
+        if (controller->GetInputStemFormat(&input_stem) != AAX_SUCCESS)
+            input_stem = AAX_eStemFormat_None;
+        if (controller->GetOutputStemFormat(&output_stem) != AAX_SUCCESS)
+            output_stem = AAX_eStemFormat_None;
+        if (controller->GetSampleRate(&sample_rate) != AAX_SUCCESS)
+            sample_rate = 0.0f;
+        instance.adopt_host_layout(stem_from_aax(input_stem), stem_from_aax(output_stem),
+                                   static_cast<double>(sample_rate));
+        runtime::log_info("AAX host: instance layout {} ({} in / {} out) at {} Hz",
+                          instance.component_index, instance.layout().main_input_channels,
+                          instance.layout().main_output_channels, static_cast<double>(sample_rate));
+    }
+
     AAX_Result ResetFieldData(AAX_CFieldIndex field_index, void* data, uint32_t data_size) const override {
         if (field_index == kPrivateDataField && data && data_size >= sizeof(PrivateDataBlock)) {
             auto* block = static_cast<PrivateDataBlock*>(data);
@@ -854,6 +951,7 @@ public:
                 return AAX_ERROR_NULL_OBJECT;
             }
             const_cast<EffectParameters*>(this)->bind_algorithm(*block->instance);
+            adopt_controller_layout(*block->instance);
             return AAX_SUCCESS;
         }
         return AAX_CEffectParameters::ResetFieldData(field_index, data, data_size);
@@ -1121,7 +1219,7 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
         const int sample_count = context->buffer_length ? std::max(0, *context->buffer_length) : 0;
         const double sample_rate = context->sample_rate ? static_cast<double>(*context->sample_rate) : 48000.0;
 
-        const auto& component = definition.components.front();
+        const auto& component = state.layout();
         state.sync_from_packet(definition, context->parameter_packet);
         state.ensure_prepared(sample_rate,
                               sample_count,
@@ -1415,6 +1513,44 @@ state::StateStore* algorithm_store(void* block) {
     if (!data || data->magic != PrivateDataBlock::kMagic || !data->instance)
         return nullptr;
     return &data->instance->store;
+}
+
+std::size_t select_layout_for_test(const std::vector<ComponentLayout>& components,
+                                   StemKind input_stem, StemKind output_stem) {
+    return select_component_layout(components, input_stem, output_stem);
+}
+
+void adopt_layout_for_test(void* block, StemKind input_stem, StemKind output_stem,
+                           double sample_rate) {
+    auto* data = static_cast<PrivateDataBlock*>(block);
+    if (data && data->magic == PrivateDataBlock::kMagic && data->instance) {
+        data->instance->adopt_host_layout(input_stem, output_stem, sample_rate);
+    }
+}
+
+std::size_t instance_component_index(void* block) {
+    auto* data = static_cast<PrivateDataBlock*>(block);
+    return (data && data->magic == PrivateDataBlock::kMagic && data->instance)
+               ? data->instance->component_index
+               : 0;
+}
+
+bool render_for_test(void* block, float** inputs, float** outputs, int frames, double sample_rate) {
+    auto* data = static_cast<PrivateDataBlock*>(block);
+    if (!data || data->magic != PrivateDataBlock::kMagic || !data->instance) {
+        return false;
+    }
+    int32_t length = frames;
+    AAX_CSampleRate rate = static_cast<AAX_CSampleRate>(sample_rate);
+    AlgorithmContext context;
+    context.audio_input = inputs;
+    context.audio_output = outputs;
+    context.buffer_length = &length;
+    context.sample_rate = &rate;
+    context.private_data = data;
+    AlgorithmContext* contexts[1] = {&context};
+    process_callback(contexts, contexts + 1);
+    return true;
 }
 
 EditorHost* editor_host(IACFUnknown* model) {

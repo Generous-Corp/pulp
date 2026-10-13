@@ -671,6 +671,38 @@ Notes:
 
 ## Gotchas
 
+### Every declared layout is its own component; render through the instance's
+
+`supported_bus_layouts` becomes one AAX component per layout (its own
+ProcessProc, stem formats and native ID). The host picks one when it
+instantiates, and the only way the plug-in learns which is
+`Controller()->GetInputStemFormat()` / `GetOutputStemFormat()`. The render
+callback used to take `definition.components.front()` for its channel counts,
+so a mono-track instance of a plug-in that declares Stereo first built TWO
+input pointers from a context that carries ONE: Pro Tools logged a storm of
+CoreAudio `-9173` deadline misses, then `Found stuck plugin` and DAE `-9004`
+five seconds after `InstantiatePlugIn` (no crash report; it is a stall). With
+Mono first the same bug made a stereo instance process one channel, which is
+easy to miss by ear.
+
+`ResetFieldData` now resolves `InstanceState::component_index` from the
+controller's stems (`select_component_layout`, exact pair first, then output
+stem, then 0) and the callback reads `state.layout()`. It also prepares there,
+on the control thread, with `Controller()->GetSampleRate()` and the
+`kAaxPreparedMaxBlock` ceiling, so the first block never runs a heavy
+`Processor::prepare` on the audio thread. A bare model with no controller (a
+unit test) keeps component 0 and the lazy prepare.
+
+Tests: "AAX layout selection follows the host's stem formats" and "AAX mono
+instance renders through the mono layout even when stereo is declared first"
+(`render_for_test` drives `process_callback` with host-shaped pointer arrays
+whose second slot is null). Field checks: the Pro Tools cache
+`Spectr.aaxplugin_pluginrunner.plugincache.txt` lists `numPlugIns: N` (one per
+stem format registered) and `strings <bundle>/Contents/MacOS/<name> | grep -c
+'^Stereo$'` proves a layout name made it into the binary. The AAX Validator's
+only processing test, `test.cycle_counts`, reports `E_LOST` on this host, so
+an AAX render path is proven by the unit seam or by Pro Tools, never by `dsh`.
+
 ### MIDI sysex accumulator
 
 AAX splits multi-byte sysex (F0 … F7) across sequential `AAX_CMidiPacket`
