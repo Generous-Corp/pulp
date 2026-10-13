@@ -478,15 +478,17 @@ class LanePartTests(unittest.TestCase):
     def _run_part(self, root: pathlib.Path, entries, *argv) -> tuple[int, str]:
         for item in entries:
             (root / f"{item['name']}.py").write_text(
-                f"open({str(root / 'ran')!r}, 'a').write({item['name']!r} + '\\n')\n"
+                f"open({str(root / 'ran')!r}, 'a', encoding='utf-8').write({item['name']!r} + '\\n')\n",
+                encoding="utf-8",
             )
         manifest = root / "m.json"
         manifest.write_text(json.dumps({"schema_version": 1, "tests": [
-            {**item, "argv": [f"{root}/{item['name']}.py"]} for item in entries]}))
+            {**item, "argv": [f"{root}/{item['name']}.py"]} for item in entries]}),
+            encoding="utf-8")
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             code = lane.main(["run", "--manifest", str(manifest), *argv])
-        ran = (root / "ran").read_text().split() if (root / "ran").exists() else []
+        ran = (root / "ran").read_text(encoding="utf-8").split() if (root / "ran").exists() else []
         return code, sorted(ran)
 
     def test_the_parts_run_every_entry_between_them(self) -> None:
