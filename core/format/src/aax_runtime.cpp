@@ -1,9 +1,11 @@
 #include <pulp/format/aax_entry.hpp>
 #include <pulp/format/aax_editor.hpp>
+#include <pulp/format/aax_runtime_testing.hpp>
 #include <pulp/format/aax_midi_node.hpp>
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/runtime/trace_session.hpp>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/format/aax_midi_packets.hpp>
@@ -30,6 +32,7 @@
 #include <AAX_ITransport.h>
 
 #include <algorithm>
+#include <mutex>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -37,6 +40,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -49,9 +53,21 @@ namespace pulp::format::aax {
 namespace {
 
 struct InstanceState;
+class EffectParameters;
+
+/// Guards the model <-> algorithm-instance link (`InstanceState::owner_model`,
+/// `EffectParameters::algorithm_`). AAX gives no ordering guarantee between
+/// the two objects' lifetimes, so whichever dies first unhooks under this.
+std::mutex& binding_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
 
 struct PrivateDataBlock {
+    static constexpr std::uint32_t kMagic = 0x50414158; // "PAAX"
+    std::uint32_t magic = 0;
     InstanceState* instance = nullptr;
+    const EntryConfig* config = nullptr;
 };
 
 struct AlgorithmContext {
@@ -476,13 +492,35 @@ struct InstanceState {
         return true;
     }
 
+    /// Host-driven parameter values, on the render thread. The RT store path
+    /// queues the change for `pump_listeners()` instead of running a
+    /// main-thread listener inline here: once the editor is bound to this
+    /// store its parameter mirror listens on it, and that mirror talks to the
+    /// AAX parameter manager, which must never happen under the no-alloc
+    /// render guard.
     void sync_from_packet(const PluginDefinition& definition, const float* packet) {
         if (!packet) {
             return;
         }
         for (std::size_t index = 0; index < definition.parameters.size(); ++index) {
-            store.set_value(definition.parameters[index].id, packet[index + 1]);
+            store.set_value_rt(definition.parameters[index].id, packet[index + 1]);
         }
+    }
+
+    /// `AAX_eComponentInstanceInitAction_ResetInstance` without destroying the
+    /// Processor: the editor may be bound to this object, and a re-prepare
+    /// leaves the DSP exactly as clean as the first block did.
+    void reset_for_reuse() {
+        if (prepared && processor) {
+            processor->release();
+        }
+        prepared = false;
+        prepared_sample_rate = 0.0;
+        prepared_max_buffer = 0;
+        prepared_input_channels = 0;
+        prepared_output_channels = 0;
+        midi_in.clear();
+        midi_out.clear();
     }
 
     EntryConfig config;
@@ -493,6 +531,9 @@ struct InstanceState {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    /// The data model whose editor is bound to `processor`, or null. Written
+    /// and read under `binding_mutex()`.
+    EffectParameters* owner_model = nullptr;
     PluginDescriptor descriptor;
     std::vector<const float*> input_ptrs;
     std::vector<float*> output_ptrs;
@@ -517,12 +558,42 @@ static_assert(offsetof(InstanceState, store) < offsetof(InstanceState, processor
               "InstanceState::store must be declared before ::processor so the "
               "store outlives the Processor that points at it");
 
+void on_algorithm_instance_destroyed(EffectParameters& model, InstanceState& instance);
+
 void destroy_instance(PrivateDataBlock* block) {
-    if (!block || !block->instance) {
+    if (!block || block->magic != PrivateDataBlock::kMagic) {
         return;
+    }
+    if (auto* instance = block->instance) {
+        EffectParameters* model = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(binding_mutex());
+            model = instance->owner_model;
+        }
+        if (model) {
+            on_algorithm_instance_destroyed(*model, *instance);
+        }
     }
     delete block->instance;
     block->instance = nullptr;
+    block->config = nullptr;
+    block->magic = 0;
+}
+
+bool construct_instance(PrivateDataBlock* block) noexcept {
+    if (!block || block->magic != PrivateDataBlock::kMagic || !block->config) {
+        return false;
+    }
+    if (block->instance) {
+        return true;
+    }
+    try {
+        block->instance = new InstanceState(*block->config);
+    } catch (...) {
+        block->instance = nullptr;
+        return false;
+    }
+    return block->instance != nullptr;
 }
 
 class EffectParameters final : public AAX_CEffectParameters, public EditorHost {
@@ -538,6 +609,70 @@ public:
         }
     }
 
+    ~EffectParameters() override {
+        // The algorithm instance may outlive this model. Unhook from its store
+        // (gesture callbacks capture `this`; the listener token must not
+        // outlive the model) and from the instance itself.
+        drop_editor_binding();
+        std::lock_guard<std::mutex> lock(binding_mutex());
+        if (algorithm_) {
+            algorithm_->owner_model = nullptr;
+            algorithm_ = nullptr;
+        }
+    }
+
+    // ── Algorithm binding ──────────────────────────────────────────────────
+    //
+    // AAX Native runs the algorithm in this process, and this model constructs
+    // its instance itself (ResetFieldData below), so the Processor that renders
+    // audio is reachable here. Binding the editor to it is what makes every
+    // non-parameter state — published meter/analysis frames, modulation phase,
+    // transport, a renderer or GPU choice — behave as it does in every other
+    // format, where editor and audio share one Processor. A separate model-side
+    // Processor remains the fallback for an editor opened before any instance
+    // exists.
+
+    void bind_algorithm(InstanceState& instance) {
+        std::lock_guard<std::mutex> lock(binding_mutex());
+        if (algorithm_ == &instance)
+            return;
+        if (algorithm_) {
+            runtime::log_info("AAX editor: a second algorithm instance registered; "
+                              "the editor stays with the first");
+            return;
+        }
+        algorithm_ = &instance;
+        instance.owner_model = this;
+        if (editor_ && !editor_->bound) {
+            runtime::log_info("AAX editor: opened before the audio-owner processor "
+                              "existed; the next editor open binds to it");
+        }
+    }
+
+    /// The instance is about to be deleted: tear the bound editor down first
+    /// and forget the instance.
+    void on_algorithm_destroyed(InstanceState& instance) {
+        {
+            std::lock_guard<std::mutex> lock(binding_mutex());
+            if (algorithm_ != &instance)
+                return;
+        }
+        if (editor_ && editor_->bound) {
+            if (editor_invalidation_) {
+                auto handler = editor_invalidation_;
+                handler();
+            }
+            drop_editor_binding();
+        }
+        std::lock_guard<std::mutex> lock(binding_mutex());
+        instance.owner_model = nullptr;
+        algorithm_ = nullptr;
+    }
+
+    void set_editor_invalidation_handler(std::function<void()> handler) override {
+        editor_invalidation_ = std::move(handler);
+    }
+
     // ── EditorHost ─────────────────────────────────────────────────────────
     //
     // The editor model is built on first use rather than in EffectInit(): a
@@ -546,12 +681,12 @@ public:
 
     Processor* editor_processor() override {
         ensure_editor_model();
-        return editor_ ? editor_->processor.get() : nullptr;
+        return editor_ ? editor_->processor : nullptr;
     }
 
     state::StateStore* editor_store() override {
         ensure_editor_model();
-        return editor_ ? &editor_->store : nullptr;
+        return editor_ ? editor_->store : nullptr;
     }
 
     std::optional<ViewSize> editor_view_size() override {
@@ -626,15 +761,41 @@ public:
                                               double value,
                                               AAX_EUpdateSource source) override
     {
+        // One span per host write, with the source, so a trace shows the
+        // cadence Pro Tools delivers automation at against the editor's frames.
+        PULP_TRACE_SCOPE_NAMED_ARGS("state", "aax_host_param_update", "source",
+                                    static_cast<int64_t>(source));
         const auto result =
             AAX_CEffectParameters::UpdateParameterNormalizedValue(parameter_id, value, source);
         if (result == AAX_SUCCESS) {
             push_to_editor_store(parameter_id, value);
+            log_host_value_update(parameter_id, value, source);
         }
         return result;
     }
 
+    /// Host receipt for automation: which parameter the host wrote, with what
+    /// value, and from where. AAX_eUpdateSource does not separate a playing
+    /// automation lane from a GUI or control-surface edit (both arrive as
+    /// Unspecified; Parameter marks a re-entrant write, Chunk a preset load),
+    /// so playback is proven by value updates that arrive with no
+    /// touch/release around them. Dense after the first writes so a lane
+    /// cannot flood the log.
+    void log_host_value_update(AAX_CParamID parameter_id, double value, AAX_EUpdateSource source) {
+        constexpr uint32_t kDenseWrites = 64;
+        constexpr uint32_t kSparseEvery = 64;
+        const auto index = static_cast<std::size_t>(source) < host_update_counts_.size()
+                               ? static_cast<std::size_t>(source)
+                               : host_update_counts_.size() - 1;
+        const uint32_t n = ++host_update_counts_[index];
+        if (n > kDenseWrites && (n % kSparseEvery) != 0)
+            return;
+        runtime::log_info("AAX host: value update #{} {}={:.4f} source={}", n,
+                          parameter_id ? parameter_id : "?", value, static_cast<int>(source));
+    }
+
     AAX_Result GenerateCoefficients() override {
+        PULP_TRACE_SCOPE_NAMED("state", "aax_generate_coefficients");
         auto* controller = Controller();
         if (!controller) {
             return AAX_SUCCESS;
@@ -674,7 +835,26 @@ public:
 
     AAX_Result ResetFieldData(AAX_CFieldIndex field_index, void* data, uint32_t data_size) const override {
         if (field_index == kPrivateDataField && data && data_size >= sizeof(PrivateDataBlock)) {
-            destroy_instance(static_cast<PrivateDataBlock*>(data));
+            auto* block = static_cast<PrivateDataBlock*>(data);
+            // AAX may pass freshly allocated, non-zeroed private storage here;
+            // never inspect or delete an uninitialised pointer. Reset the
+            // storage first, then construct the processor model off-thread.
+            if (block->magic == PrivateDataBlock::kMagic) {
+                destroy_instance(block);
+            } else {
+                block->magic = 0;
+                block->instance = nullptr;
+                block->config = nullptr;
+            }
+            block->magic = PrivateDataBlock::kMagic;
+            block->config = &config_;
+            if (!construct_instance(block)) {
+                block->magic = 0;
+                block->config = nullptr;
+                return AAX_ERROR_NULL_OBJECT;
+            }
+            const_cast<EffectParameters*>(this)->bind_algorithm(*block->instance);
+            return AAX_SUCCESS;
         }
         return AAX_CEffectParameters::ResetFieldData(field_index, data, data_size);
     }
@@ -688,65 +868,94 @@ public:
     }
 
 private:
-    /// Model-side editor state. AAX keeps the data model and the real-time
-    /// algorithm apart — the algorithm's Processor lives in its private data
-    /// block and is unreachable from here — so the editor needs its own
-    /// Processor to call create_view() on. The parameter manager stays the
-    /// value authority; this store is a mirror kept in sync both ways.
-    struct EditorModel {
-        // Declaration order is destruction order reversed, and every line below
-        // depends on it.
-        //
-        // The store is declared before the Processor so it is destroyed after
-        // it. `Processor::state()` dereferences a pointer to this store, and a
-        // Processor may read it from its destructor or from a worker thread that
-        // destructor is about to join. Reversing these two lines hands that
-        // thread a freed store. Every other adapter declares the pair this way.
-        //
-        // The router sits between them for the same reason one step further out:
-        // a parameter write from `~Processor` reaches the store's gesture
-        // callbacks, which route through the router.
-        //
-        // The listener token is last so it is destroyed first, unsubscribing
-        // from the store before anything the callback touches goes away.
-        state::StateStore store;
-        std::unique_ptr<GestureRouter> gestures;
-        std::unique_ptr<ParameterMirror> mirror;
-        std::unique_ptr<Processor> processor;
-        state::ListenerToken value_listener;
-    };
+  /// The editor's Processor and store. Bound to the algorithm instance's
+  /// pair when one exists (see bind_algorithm); otherwise a model-side pair
+  /// owned here, so an editor opened before any instance still works. The
+  /// parameter manager stays the value authority either way; the store is a
+  /// mirror kept in sync both ways.
+  struct EditorBinding {
+      // Declaration order is destruction order reversed, and every line below
+      // depends on it.
+      //
+      // The owned store is declared before the owned Processor so it is
+      // destroyed after it. `Processor::state()` dereferences a pointer to
+      // that store, and a Processor may read it from its destructor or from a
+      // worker thread that destructor is about to join. Reversing these two
+      // lines hands that thread a freed store. Every other adapter declares
+      // the pair this way.
+      //
+      // The router sits between them for the same reason one step further
+      // out: a parameter write from `~Processor` reaches the store's gesture
+      // callbacks, which route through the router.
+      //
+      // The listener token is last so it is destroyed first, unsubscribing
+      // from the store before anything the callback touches goes away.
+      std::unique_ptr<state::StateStore> owned_store;
+      std::unique_ptr<GestureRouter> gestures;
+      std::unique_ptr<ParameterMirror> mirror;
+      std::unique_ptr<Processor> owned_processor;
+      state::StateStore* store = nullptr; ///< owned_store or the instance's
+      Processor* processor = nullptr;     ///< owned_processor or the instance's
+      bool bound = false;                 ///< true when on the instance's pair
+      state::ListenerToken value_listener;
+  };
 
     // Members are destroyed in reverse declaration order, and declaration order
     // is the only thing holding the lifetimes above together. Fail the build
     // rather than the teardown if someone reorders them.
-    static_assert(offsetof(EditorModel, store) < offsetof(EditorModel, processor),
-                  "EditorModel::store must be declared before ::processor so the "
-                  "store outlives the Processor that points at it");
-    static_assert(offsetof(EditorModel, gestures) < offsetof(EditorModel, processor),
-                  "EditorModel::gestures must be declared before ::processor: a "
-                  "parameter write from ~Processor routes through the gesture "
-                  "callbacks");
-    static_assert(offsetof(EditorModel, value_listener) > offsetof(EditorModel, processor),
-                  "EditorModel::value_listener must be declared last so it is "
-                  "destroyed first, unsubscribing from the store before the "
-                  "mirror and Processor the callback touches go away");
+  static_assert(offsetof(EditorBinding, owned_store) < offsetof(EditorBinding, owned_processor),
+                "EditorBinding::owned_store must be declared before ::owned_processor so "
+                "the store outlives the Processor that points at it");
+  static_assert(offsetof(EditorBinding, gestures) < offsetof(EditorBinding, owned_processor),
+                "EditorBinding::gestures must be declared before ::owned_processor: a "
+                "parameter write from ~Processor routes through the gesture "
+                "callbacks");
+  static_assert(offsetof(EditorBinding, value_listener) > offsetof(EditorBinding, owned_processor),
+                "EditorBinding::value_listener must be declared last so it is "
+                "destroyed first, unsubscribing from the store before the "
+                "mirror and Processor the callback touches go away");
+
+  /// Forget the editor pair. A bound store belongs to the instance and keeps
+  /// living, so the callbacks that capture `this` are removed from it first.
+  void drop_editor_binding() {
+      if (!editor_)
+          return;
+      if (editor_->bound && editor_->store) {
+          editor_->store->set_gesture_callbacks({}, {});
+      }
+      editor_.reset();
+  }
 
     void ensure_editor_model() {
         if (editor_ || editor_init_failed_ || !init_error_.empty() || !config_.factory) {
             return;
         }
 
-        auto processor = config_.factory();
-        if (!processor) {
-            editor_init_failed_ = true;
-            runtime::log_error("AAX editor: processor factory returned null");
-            return;
+        auto model = std::make_unique<EditorBinding>();
+        {
+            std::lock_guard<std::mutex> lock(binding_mutex());
+            if (algorithm_ && algorithm_->processor) {
+                model->store = &algorithm_->store;
+                model->processor = algorithm_->processor.get();
+                model->bound = true;
+            }
         }
-
-        auto model = std::make_unique<EditorModel>();
-        model->processor = std::move(processor);
-        model->processor->set_state_store(&model->store);
-        model->processor->define_parameters(model->store);
+        if (!model->bound) {
+            auto processor = config_.factory();
+            if (!processor) {
+                editor_init_failed_ = true;
+                runtime::log_error("AAX editor: processor factory returned null");
+                return;
+            }
+            model->owned_store = std::make_unique<state::StateStore>();
+            model->owned_processor = std::move(processor);
+            model->owned_processor->set_state_store(model->owned_store.get());
+            model->owned_processor->define_parameters(*model->owned_store);
+            model->store = model->owned_store.get();
+            model->processor = model->owned_processor.get();
+        }
+        runtime::log_info("AAX editor: {} processor",
+                          model->bound ? "bound to the audio-owner" : "model-side fallback");
 
         // Seed the mirror from the parameter manager so an editor opened after
         // automation or a session recall shows the current values, not defaults.
@@ -754,7 +963,7 @@ private:
             if (auto* parameter = mParameterManager.GetParameterByID(binding.aax_id.c_str())) {
                 float value = binding.range.default_value;
                 parameter->GetValueAsFloat(&value);
-                model->store.set_value(binding.id, value);
+                model->store->set_value(binding.id, value);
             }
         }
 
@@ -763,14 +972,23 @@ private:
         // every edit lands as an isolated point instead of a stroke.
         model->gestures = std::make_unique<GestureRouter>(
             definition_,
-            [this](const char* aax_id) { TouchParameter(aax_id); },
-            [this](const char* aax_id) { ReleaseParameter(aax_id); });
-        model->store.set_gesture_callbacks(
+            [this](const char* aax_id) {
+                const auto result = TouchParameter(aax_id);
+                runtime::log_info("AAX host: touch {} -> {}", aax_id, static_cast<int32_t>(result));
+            },
+            [this](const char* aax_id) {
+                const auto result = ReleaseParameter(aax_id);
+                runtime::log_info("AAX host: release {} -> {}", aax_id,
+                                  static_cast<int32_t>(result));
+            });
+        model->store->set_gesture_callbacks(
             [this](state::ParamID id) {
-                if (editor_) editor_->gestures->begin(id);
+                if (editor_)
+                    editor_->gestures->begin(id);
             },
             [this](state::ParamID id) {
-                if (editor_) editor_->gestures->end(id);
+                if (editor_)
+                    editor_->gestures->end(id);
             });
 
         // Editor edit → AAX parameter. Avid's contract is that a GUI updates
@@ -796,9 +1014,10 @@ private:
                 // parameter: report the refusal instead of claiming the write.
                 return parameter->SetValueWithFloat(value);
             });
-        model->value_listener = model->store.add_listener(
+        model->value_listener = model->store->add_listener(
             [this](state::ParamID id, float value) {
-                if (editor_) editor_->mirror->on_store_value_changed(id, value);
+                if (editor_)
+                    editor_->mirror->on_store_value_changed(id, value);
             },
             state::ListenerThread::Main);
 
@@ -816,15 +1035,24 @@ private:
         if (!param_id_for_aax_id(definition_, parameter_id, id)) {
             return;  // AAX's own master-bypass control has no store parameter
         }
-        editor_->store.set_normalized(id, static_cast<float>(normalized));
+        editor_->store->set_normalized(id, static_cast<float>(normalized));
     }
 
     EntryConfig config_{};
     PluginDefinition definition_{};
     std::string init_error_;
-    std::unique_ptr<EditorModel> editor_;
+    std::unique_ptr<EditorBinding> editor_;
     bool editor_init_failed_ = false;
+    InstanceState* algorithm_ = nullptr;           ///< under binding_mutex()
+    std::array<uint32_t, 8> host_update_counts_{}; ///< per AAX_EUpdateSource
+    std::function<void()> editor_invalidation_;    ///< EditorHost hook
+
+    friend void on_algorithm_instance_destroyed(EffectParameters&, InstanceState&);
 };
+
+void on_algorithm_instance_destroyed(EffectParameters& model, InstanceState& instance) {
+    model.on_algorithm_destroyed(instance);
+}
 
 int32_t AAX_CALLBACK instance_init(const AlgorithmContext* context,
                                    AAX_EComponentInstanceInitAction action)
@@ -834,10 +1062,26 @@ int32_t AAX_CALLBACK instance_init(const AlgorithmContext* context,
     }
 
     switch (action) {
-        case AAX_eComponentInstanceInitAction_AddingNewInstance:
-        case AAX_eComponentInstanceInitAction_ResetInstance:
         case AAX_eComponentInstanceInitAction_RemovingInstance:
             destroy_instance(context->private_data);
+            break;
+        case AAX_eComponentInstanceInitAction_AddingNewInstance:
+            // ResetFieldData normally constructs this before the callback;
+            // retain that state and repair hosts that skip the reset hook.
+            if (!construct_instance(context->private_data)) {
+                return -1;
+            }
+            break;
+        case AAX_eComponentInstanceInitAction_ResetInstance:
+            // AAX reuses the same private block for reset. Re-prepare the DSP
+            // object in place rather than recreating it: the editor may be
+            // bound to this Processor, and release()+prepare() is the same
+            // clean start every other format gives a reset.
+            if (auto* instance = context->private_data->instance) {
+                instance->reset_for_reuse();
+            } else if (!construct_instance(context->private_data)) {
+                return -1;
+            }
             break;
         default:
             break;
@@ -1076,9 +1320,8 @@ AAX_Result add_component_ports(AAX_IComponentDescriptor* component,
 }
 
 AAX_Result add_component_process(AAX_IComponentDescriptor* component,
-                                 const PluginDefinition& definition,
-                                 const ComponentLayout& layout)
-{
+                                 const PluginDefinition& definition, const ComponentLayout& layout,
+                                 bool has_client_gui) {
     auto* properties = component->NewPropertyMap();
     if (!properties) {
         return AAX_ERROR_UNIMPLEMENTED;
@@ -1109,6 +1352,19 @@ AAX_Result add_component_process(AAX_IComponentDescriptor* component,
         result != AAX_SUCCESS) return result;
     if (auto result = add(AAX_eProperty_CanBypass, 1); result != AAX_SUCCESS) return result;
     if (auto result = add(AAX_eProperty_Constraint_MultiMonoSupport, 0); result != AAX_SUCCESS) return result;
+    // Tell Pro Tools where the AAX process object must live.  In particular,
+    // custom-editor components need the data model and process proc on the
+    // same host location; omitting this leaves host placement ambiguous and
+    // can make editor attach/resize behavior host-version dependent.
+    if (auto result = add(AAX_eProperty_Constraint_Location, AAX_eConstraintLocationMask_DataModel);
+        result != AAX_SUCCESS)
+        return result;
+    // AAX's UsesClientGUI flag belongs to the component property map.  Keep
+    // it explicit for both lanes so a GUI build cannot be mistaken for a
+    // host-generated parameter strip (and vice versa).
+    if (auto result = add(AAX_eProperty_UsesClientGUI, has_client_gui ? 0 : 1);
+        result != AAX_SUCCESS)
+        return result;
     if (definition.supports_sidechain) {
         if (auto result = add(AAX_eProperty_SupportsSideChainInput, 1); result != AAX_SUCCESS) return result;
         if (auto result = add(AAX_eProperty_SideChainStemFormat,
@@ -1127,6 +1383,45 @@ AAX_Result add_component_process(AAX_IComponentDescriptor* component,
 IACFUnknown* create_effect_parameters(const EntryConfig& config) {
     return static_cast<IACFUnknown*>(new EffectParameters(config));
 }
+
+namespace testing {
+
+std::size_t private_data_block_size() {
+    return sizeof(PrivateDataBlock);
+}
+
+AAX_Result reset_private_data(IACFUnknown* model, void* block, std::size_t size) {
+    auto* parameters = static_cast<EffectParameters*>(model);
+    if (!parameters)
+        return AAX_ERROR_NULL_OBJECT;
+    return parameters->ResetFieldData(kPrivateDataField, block, static_cast<uint32_t>(size));
+}
+
+int32_t instance_init_for_test(void* block, AAX_EComponentInstanceInitAction action) {
+    AlgorithmContext context;
+    context.private_data = static_cast<PrivateDataBlock*>(block);
+    return instance_init(&context, action);
+}
+
+Processor* algorithm_processor(void* block) {
+    auto* data = static_cast<PrivateDataBlock*>(block);
+    if (!data || data->magic != PrivateDataBlock::kMagic || !data->instance)
+        return nullptr;
+    return data->instance->processor.get();
+}
+
+state::StateStore* algorithm_store(void* block) {
+    auto* data = static_cast<PrivateDataBlock*>(block);
+    if (!data || data->magic != PrivateDataBlock::kMagic || !data->instance)
+        return nullptr;
+    return &data->instance->store;
+}
+
+EditorHost* editor_host(IACFUnknown* model) {
+    return static_cast<EffectParameters*>(model);
+}
+
+} // namespace testing
 
 AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
                                    const EntryConfig& config,
@@ -1218,6 +1513,18 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
         {
             return status;
         }
+        // A no-GUI entry deliberately uses Pro Tools' host-generated
+        // parameter strip. The property is a request for the host-generated
+        // GUI (despite its historical name), so it must be true when the
+        // custom EffectGUI proc is absent. A custom-editor entry leaves this
+        // effect-level property unset and advertises UsesClientGUI = 0 on its
+        // process property map below.
+        if (!create_gui_proc) {
+            if (auto status = effect_properties->AddProperty(AAX_eProperty_UsesClientGUI, 1);
+                status != AAX_SUCCESS) {
+                return status;
+            }
+        }
         if (auto status = effect->SetProperties(effect_properties); status != AAX_SUCCESS) {
             return status;
         }
@@ -1231,7 +1538,9 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
         if (auto status = add_component_ports(component, definition, component_layout); status != AAX_SUCCESS) {
             return status;
         }
-        if (auto status = add_component_process(component, definition, component_layout); status != AAX_SUCCESS) {
+        if (auto status = add_component_process(component, definition, component_layout,
+                                                create_gui_proc != nullptr);
+            status != AAX_SUCCESS) {
             return status;
         }
         if (auto status = effect->AddComponent(component); status != AAX_SUCCESS) {

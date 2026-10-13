@@ -21,6 +21,13 @@ TEST_CASE("AAX effect-GUI factory returns a live editor object", "[aax][view-bri
     IACFUnknown* unknown = pulp::format::aax::create_effect_gui();
     REQUIRE(unknown != nullptr);
 
+    // AAX object factories return an unowned pointer whose initial ACF
+    // reference is zero (the host takes its first reference through
+    // QueryInterface). Retain one explicit owner for this test so releasing
+    // the queried interface does not destroy the object before the factory
+    // pointer is released below.
+    unknown->AddRef();
+
     // The host reaches the editor through ACF, not the C++ type: the object must
     // answer the AAX_IEffectGUI interface or Pro Tools cannot drive it.
     IACFUnknown* gui = nullptr;

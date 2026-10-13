@@ -1319,8 +1319,14 @@ void WidgetBridge::service_frame_callbacks() {
     if (!pending_frame_ids_.empty()) {
         PULP_TRACE_SCOPE_NAMED_ARGS("js", "raf_flush", "callbacks",
                                     pending_frame_ids_.size());
-        engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
-        engine_.pump_message_loop();
+        {
+            PULP_TRACE_SCOPE_NAMED("js", "raf_callbacks");
+            engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
+        }
+        {
+            PULP_TRACE_SCOPE_NAMED("js", "raf_microtasks");
+            engine_.pump_message_loop();
+        }
         // Tell the next poll this tick's frames are already drawn. Set only on
         // an actual drain, so a service pass with nothing pending never
         // suppresses a later poll.

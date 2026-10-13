@@ -444,6 +444,7 @@ std::unique_ptr<view::View> ViewBridge::release_view() {
 
 void ViewBridge::pump_store_listeners() {
     if (!owner_is_alive()) return;
+    PULP_TRACE_SCOPE_NAMED("state", "editor_pump_listeners");
     store_.pump_listeners();
     sync_design_frames_from_host();
 }

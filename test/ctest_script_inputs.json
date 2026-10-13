@@ -2314,6 +2314,7 @@
   "pulp-sampler-cli-sidecar-probe",
   "pulp-sampler-heritage-render-wav",
   "pulp-sampler-render-wav",
+  "pulp-test-aax-native-view",
   "pulp-test-aax-rt-safety",
   "pulp-test-ableton-link-sdk",
   "pulp-test-adapter-audio-parity",
