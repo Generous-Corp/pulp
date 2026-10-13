@@ -11,24 +11,27 @@ pulp_gate_host_profile() {
     "$tartci_bin" host-profile 2>/dev/null
 }
 
-pulp_gate_host_serves_gate() {
-    local profile
-    profile="$(pulp_gate_host_profile)" || return 1
-    awk -F= '$1 == "TARTCI_SERVES_GATE" && $2 == "1" { found=1 } END { exit(found ? 0 : 1) }' <<<"$profile"
+pulp_gate_host_profile_value() {
+    awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' <<<"$2"
 }
 
-# A host may serve a TartCI gate lane and still have an explicit non-gate
-# capacity budget for sandboxed local work. Only the dedicated runner has no
-# safe local build budget. Keep this profile based; hostnames are mutable.
+# Every fleet host reports TARTCI_SERVES_GATE=1, so that field alone cannot
+# pick the hosts to protect. TARTCI_ROLE does: `light` hosts lend spare
+# capacity to the gate and keep room for local suites, while
+# `dedicated-builder` and `dev-overflow` hosts carry the required gate VMs and
+# a local suite competes with them. An unknown role on a gate-serving host is
+# treated as reserved, so a new role fails closed. No tartci, or no profile,
+# means this is not a fleet host.
 pulp_gate_host_builds_reserved() {
     local profile role
     profile="$(pulp_gate_host_profile)" || return 1
-    role="$(awk -F= '$1 == "TARTCI_ROLE" { print $2; exit }' <<<"$profile")"
-    [ "$role" = "dedicated-builder" ] || return 1
-    awk -F= '$1 == "TARTCI_SERVES_GATE" && $2 == "1" { found=1 } END { exit(found ? 0 : 1) }' <<<"$profile"
+    [ "$(pulp_gate_host_profile_value TARTCI_SERVES_GATE "$profile")" = "1" ] || return 1
+    role="$(pulp_gate_host_profile_value TARTCI_ROLE "$profile")"
+    PULP_GATE_HOST_ROLE="${role:-unknown}"
+    [ "$role" != "light" ]
 }
 
 pulp_gate_host_skip_line() {
     local skipped="$1"
-    echo "[gate-host] skipped ${skipped}: tartci host-profile reserves this dedicated-builder for gate lanes; run ${2:-tools/scripts/gates.sh origin/main} on a non-reserved Pulp build host or disposable VM." >&2
+    echo "[gate-host] REFUSED ${skipped}: tartci host-profile says this host serves the required gate (TARTCI_ROLE=${PULP_GATE_HOST_ROLE:-unknown}), and a local suite here starves its gate VMs. Run ${2:-tools/scripts/gates.sh origin/main} from a Pulp worktree on a TARTCI_ROLE=light host (m1) or a disposable VM; CI runs these suites on the PR either way." >&2
 }

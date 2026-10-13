@@ -26,7 +26,18 @@ on a real PR. Do them in order.
 
 1. **Run `tools/scripts/gates.sh origin/main` before every push.** It runs the
    offline gates CI runs, including both halves of the required `Vellum freeze`
-   check, over the merge-base range:
+   check, over the merge-base range. **On a host that carries the required gate
+   VMs it refuses its heavy half.** `tools/scripts/gate_host_policy.sh` reads
+   `tartci host-profile`, not the hostname: when `TARTCI_SERVES_GATE=1` and
+   `TARTCI_ROLE` is anything but `light` (today m3 `dedicated-builder`, m5 and
+   m5s `dev-overflow`), `gates.sh` skips the generated-manifest configure and
+   every source-selftest lane. It lists them as NOT CHECKED, so the verdict
+   reads "not a full pass" rather than "safe to push". The cheap gates still run.
+   The pre-push hook and `local_diff_cover.sh` (exit 4) refuse the diff-coverage
+   build the same way. Run the full set on m1 (`light`) or a disposable VM;
+   there is no override on a gate host. Every fleet host reports
+   `TARTCI_SERVES_GATE=1`, so that field alone would refuse m1 too, and an
+   unknown role fails closed. The gate run covers:
    - **watch events** — a range touching a watched capability-family path
      without a committed `.github/vellum-expansion-watch-events/` event FAILS
      (exit 10) and prints the exact JSON; or run

@@ -85,18 +85,20 @@ if [ -z "$ROOT" ]; then
 fi
 cd "$ROOT" || exit 2
 
-# Gate-serving tartci hosts must not spend their reserved machine on local
-# configure/build work. The profile is authoritative; hostname is not.
+PYTHON="${PYTHON:-python3}"
+BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
+
+# A tartci host that carries the required gate VMs refuses the heavy local
+# lanes (gate_host_policy.sh); the cheap gates below still run. The profile
+# decides, not the hostname.
 # shellcheck source=gate_host_policy.sh
 source "$ROOT/tools/scripts/gate_host_policy.sh"
 gate_host_builds_skipped=0
+gate_host_skipped_what="the generated-manifest configure/build and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python)"
 if pulp_gate_host_builds_reserved; then
     gate_host_builds_skipped=1
-    pulp_gate_host_skip_line "local configure/build and multi-minute selftest lanes (generated manifests and source selftests)"
+    pulp_gate_host_skip_line "$gate_host_skipped_what" "tools/scripts/gates.sh $BASE"
 fi
-
-PYTHON="${PYTHON:-python3}"
-BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
@@ -175,6 +177,10 @@ fi
 fail=0
 # Every suite a lane could not run locally, collected for the summary.
 not_checked_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-not-checked.XXXXXX")"
+if [ "$gate_host_builds_skipped" -eq 1 ]; then
+    # Listed in the summary, so the verdict reads "not a full pass" here.
+    echo "[gate-host] NOT CHECKED: $gate_host_skipped_what — refused on this gate host (TARTCI_ROLE=${PULP_GATE_HOST_ROLE:-unknown}); run tools/scripts/gates.sh $BASE on a TARTCI_ROLE=light host (m1) or a disposable VM" >>"$not_checked_log"
+fi
 trap 'rm -f "$not_checked_log"' EXIT
 
 echo "gates: base = $BASE" >&2
@@ -568,7 +574,7 @@ fi
 # prediction first and, when its configured half cannot run on a change to a
 # surface it blocks, FAILS instead of NOT CHECKED (the required gate checks it).
 if [ "$gate_host_builds_skipped" -eq 1 ]; then
-    : # The profile-serving host is reserved for the hosted gate; cheap gates continue below.
+    : # Refused on a gate host (recorded as NOT CHECKED); the cheap gates continue below.
 elif [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
     echo "" >&2
     echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (configures build-gate when the diff can drift them)" >&2
@@ -604,16 +610,15 @@ if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/source_selftest
         echo "" >&2
         src_lane_args=()
         case "$src_lane" in
-            pr-fast)
-                if [ "$gate_host_builds_skipped" -eq 1 ]; then
-                    continue
-                fi
-                echo "▸ ctest pr-fast tier (whole tier; from a configured build when one is usable, else the manifests)" >&2
-                src_lane_args=(--ctest-label pr-fast --build-dir auto) ;;
             workflow-lint)
                 [ -f "$ROOT/.github/workflows/workflow-lint.yml" ] || continue
                 echo "▸ workflow-lint Python contracts (diff-scoped; read from workflow-lint.yml)" >&2
                 src_lane_args=(--workflow "$ROOT/.github/workflows/workflow-lint.yml") ;;
+            pr-fast)
+                # `auto`: PULP_GATES_BUILD_DIR, else the newest current Ninja
+                # build*/ in the checkout; the lane names the one it chose.
+                echo "▸ ctest pr-fast tier (whole tier; from a configured build when one is usable, else the manifests)" >&2
+                src_lane_args=(--ctest-label pr-fast --build-dir auto) ;;
             ctest-python)
                 echo "▸ other ctest-registered Python contracts (diff-scoped; merge-group only in CI)" >&2
                 src_lane_args=(--ctest-python) ;;

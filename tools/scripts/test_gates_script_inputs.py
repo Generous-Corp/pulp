@@ -217,24 +217,40 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertEqual(self.configures(), [])
         self.assertIn("nothing to check", r.stderr)
 
-    def test_gate_host_skips_configure_and_prints_actionable_reason(self) -> None:
+    def test_gate_host_refuses_heavy_lanes_and_says_where_to_run_them(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
         self.commit()
-        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="dedicated-builder")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.configures(), [])
-        self.assertIn("skipped local configure/build", r.stderr)
-        self.assertIn("dedicated-builder", r.stderr)
-        self.assertIn("non-reserved Pulp build host or disposable VM", r.stderr)
-        self.assertIn("tools/scripts/gates.sh origin/main", r.stderr)
+        for role in ("dedicated-builder", "dev-overflow", "a-role-tartci-adds-later"):
+            with self.subTest(role=role):
+                self.cmake_log.write_text("", encoding="utf-8")
+                # Source selftests left enabled: the refusal, not the opt-out, must stop them.
+                r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE=role,
+                               PULP_SKIP_SOURCE_SELFTESTS="")
+                self.assertEqual(self.configures(), [])
+                self.assertNotIn("▸ generated test manifests", r.stderr)
+                self.assertNotIn("▸ source-only selftests", r.stderr)
+                self.assertNotIn("▸ ctest pr-fast tier", r.stderr)
+                self.assertIn("[gate-host] REFUSED", r.stderr)
+                self.assertIn(f"TARTCI_ROLE={role}", r.stderr)
+                self.assertIn("TARTCI_ROLE=light host (m1) or a disposable VM", r.stderr)
+                self.assertIn("Run tools/scripts/gates.sh main from", r.stderr)
+                # The cheap gates still run, and the verdict is not a full pass.
+                self.assertIn("▸ skill-sync check", r.stderr)
+                self.assertIn("▸ version-bump check", r.stderr)
+                self.assertIn("[gate-host] NOT CHECKED", r.stderr)
+                self.assertNotIn("all gates pass — safe to push", r.stderr)
 
-    def test_gate_serving_light_profile_keeps_local_build_path(self) -> None:
+    def test_light_and_non_gate_profiles_keep_local_build_path(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
         self.commit()
-        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="light")
-        self.assertEqual(r.returncode, 0, r.stderr)
+        for serves, role in (("1", "light"), ("0", "dedicated-builder")):
+            with self.subTest(serves=serves, role=role):
+                r = self.gates(FAKE_SERVES_GATE=serves, FAKE_TARTCI_ROLE=role)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("▸ generated test manifests", r.stderr)
+                self.assertNotIn("[gate-host]", r.stderr)
+        # The first run configured build-gate; the second reused it.
         self.assertEqual(len(self.configures()), 1)
-        self.assertNotIn("skipped local configure/build", r.stderr)
 
     def test_a_current_configured_build_is_reused(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")

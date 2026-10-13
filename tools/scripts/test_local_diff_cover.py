@@ -1339,89 +1339,120 @@ class StarvedHostSkipTests(unittest.TestCase):
         self.assertIn("DIFF COVERAGE SKIPPED (host starved)", hook)
 
 
+def _fake_tartci(directory: pathlib.Path, *lines: str) -> pathlib.Path:
+    tartci = directory / "tartci"
+    body = "".join(f"echo {line}\n" for line in lines)
+    tartci.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    tartci.chmod(0o755)
+    return tartci
+
+
+def _policy_reserved(tartci: pathlib.Path | None) -> bool:
+    """Source gate_host_policy.sh alone and ask whether local builds are refused."""
+    env = dict(os.environ, PULP_TARTCI_BIN=str(tartci) if tartci else "/nonexistent/tartci",
+               PATH="/usr/bin:/bin")
+    result = subprocess.run(
+        ["bash", "-c", 'source "$1"; if pulp_gate_host_builds_reserved; then echo R; else echo L; fi',
+         "_", str(SCRIPT.parent / "gate_host_policy.sh")],
+        env=env, capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
+    return result.stdout.strip() == "R"
+
+
 class GateHostSkipTests(unittest.TestCase):
-    """Gate-serving tartci profiles skip local configure/build work."""
+    """tartci gate hosts refuse local configure/build work; light hosts keep it."""
 
-    def _profile(self, serves_gate: bool, role: str = "light") -> tuple[pathlib.Path, pathlib.Path]:
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        root = _fake_worktree(pathlib.Path(tmp.name), "wt")
-        tartci = root / "tartci"
-        tartci.write_text(
-            "#!/bin/sh\n"
-            + f"echo TARTCI_ROLE={role}\n"
-            + ("echo TARTCI_SERVES_GATE=1\n" if serves_gate else "echo TARTCI_SERVES_GATE=0\n"),
-            encoding="utf-8",
-        )
-        tartci.chmod(0o755)
-        return root, tartci
+    def test_policy_reads_role_and_serves_gate_from_the_profile(self) -> None:
+        cases = {
+            ("dedicated-builder", "1"): True,     # m3
+            ("dev-overflow", "1"): True,          # m5, m5s
+            ("a-role-tartci-adds-later", "1"): True,
+            ("", "1"): True,
+            ("light", "1"): False,                # m1
+            ("dedicated-builder", "0"): False,
+        }
+        with tempfile.TemporaryDirectory() as td:
+            for (role, serves), reserved in cases.items():
+                with self.subTest(role=role, serves=serves):
+                    lines = ([f"TARTCI_ROLE={role}"] if role else []) + [f"TARTCI_SERVES_GATE={serves}"]
+                    self.assertEqual(_policy_reserved(_fake_tartci(pathlib.Path(td), *lines)), reserved)
 
-    def test_gate_profile_is_detected(self) -> None:
-        root, tartci = self._profile(True, "dedicated-builder")
-        env = os.environ.copy()
-        env["PULP_TARTCI_BIN"] = str(tartci)
-        result = subprocess.run(["bash", str(root / "tools/scripts/local_diff_cover.sh")],
-                                cwd=root, env=env, capture_output=True, text=True,
-                                encoding="utf-8", timeout=30)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("gate=1", result.stdout)
-        self.assertIn("dedicated-builder", result.stderr)
+    def test_no_tartci_is_not_a_gate_host(self) -> None:
+        self.assertFalse(_policy_reserved(None))
 
-    def test_gate_serving_light_profile_does_not_skip(self) -> None:
-        root, tartci = self._profile(True, "light")
-        result = _lib_eval(root, "if pulp_gate_host_builds_reserved; then echo skip=1; else echo skip=0; fi",
-                           env_extra={"PULP_TARTCI_BIN": str(tartci)})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("skip=0", result.stdout)
+    def test_hostname_does_not_decide(self) -> None:
+        source = "\n".join(
+            line for line in (SCRIPT.parent / "gate_host_policy.sh").read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("#"))
+        for probe in ("hostname", "scutil", "uname -n", "HOSTNAME"):
+            self.assertNotIn(probe, source)
 
-    def test_non_gate_profile_does_not_skip(self) -> None:
-        root, tartci = self._profile(False)
-        result = _lib_eval(root, "if pulp_gate_host_serves_gate; then echo gate=1; else echo gate=0; fi",
-                           env_extra={"PULP_TARTCI_BIN": str(tartci)})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("gate=0", result.stdout)
-
-    def test_real_prepush_hook_skips_reserved_profile_without_configuring(self) -> None:
+    def test_local_diff_cover_refuses_with_exit_4_on_a_gate_host(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = _fake_worktree(pathlib.Path(td), "wt")
+            tartci = _fake_tartci(root, "TARTCI_ROLE=dev-overflow", "TARTCI_SERVES_GATE=1")
+            env = dict(os.environ, PULP_TARTCI_BIN=str(tartci))
+            env.pop("PULP_SKIP_DIFF_COVER", None)
+            result = subprocess.run(["bash", str(root / "tools/scripts/local_diff_cover.sh")],
+                                    cwd=root, env=env, capture_output=True, text=True,
+                                    encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("[gate-host] REFUSED local diff-coverage configure/build", result.stderr)
+        self.assertIn("TARTCI_ROLE=dev-overflow", result.stderr)
+        self.assertIn("TARTCI_ROLE=light host (m1) or a disposable VM", result.stderr)
+
+    def _run_hook(self, role: str) -> tuple[subprocess.CompletedProcess, bool]:
+        """Run the real pre-push hook in a fixture whose diff-cover script is a sentinel."""
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "wt"
+            (root / "tools/scripts").mkdir(parents=True)
             (root / ".githooks/lib").mkdir(parents=True)
             shutil.copy2(REPO_ROOT / ".githooks/pre-push", root / ".githooks/pre-push")
             shutil.copy2(REPO_ROOT / ".githooks/lib/gate-output.sh", root / ".githooks/lib/gate-output.sh")
-            (root / ".git").mkdir()
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
-            subprocess.run(["git", "-C", str(root), "config", "user.email", "t@example.invalid"], check=True)
-            subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
-            (root / "README.md").write_text("fixture\n", encoding="utf-8")
-            subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True)
-            subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+            shutil.copy2(SCRIPT.parent / "gate_host_policy.sh", root / "tools/scripts/gate_host_policy.sh")
+            marker = pathlib.Path(td) / "diff-cover-ran"
+            sentinel = root / "tools/scripts/local_diff_cover.sh"
+            sentinel.write_text(f"#!/bin/sh\necho ran >> '{marker}'\nexit 0\n", encoding="utf-8")
+            sentinel.chmod(0o755)
             (root / "tools/scripts/versioning.json").write_text("{}\n", encoding="utf-8")
             (root / "tools/scripts/version_bump_check.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
             (root / "tools/scripts/skill_sync_check.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
-            tartci = root / "tartci"
-            tartci.write_text("#!/bin/sh\nprintf '%s\\n' TARTCI_ROLE=dedicated-builder TARTCI_SERVES_GATE=1\n", encoding="utf-8")
-            tartci.chmod(0o755)
-            cmake = root / "cmake"
-            cmake.write_text("#!/bin/sh\necho cmake-invoked >&2\nexit 99\n", encoding="utf-8")
-            cmake.chmod(0o755)
-            env = dict(os.environ, PATH=f"{root}:{os.environ.get('PATH', '')}",
-                       PULP_TARTCI_BIN=str(tartci), PULP_DISABLE_PREPUSH_GATES="1",
-                       PULP_SKIP_PR_BATCH_ADVICE="1", PULP_SKIP_DIFF_COVER="1")
-            sha = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True, encoding="utf-8").strip()
-            result = subprocess.run(["bash", str(root / ".githooks/pre-push"), "origin", "none"], cwd=root,
-                                    input=f"refs/heads/topic {sha} refs/heads/topic {sha}\n",
-                                    env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
-            self.assertNotIn("cmake-invoked", result.stderr)
-            self.assertIn("dedicated-builder", result.stderr)
-            self.assertIn("skipped pre-push diff-coverage configure/build", result.stderr)
+            git = ["git", "-C", str(root)]
+            subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+            subprocess.run([*git, "config", "user.email", "t@example.invalid"], check=True)
+            subprocess.run([*git, "config", "user.name", "test"], check=True)
+            (root / "README.md").write_text("fixture\n", encoding="utf-8")
+            subprocess.run([*git, "add", "-A"], check=True)
+            subprocess.run([*git, "commit", "-qm", "base"], check=True)
+            subprocess.run([*git, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+            subprocess.run([*git, "checkout", "-qb", "topic"], check=True)
+            (root / "core").mkdir()
+            (root / "core/a.cpp").write_text("int a() { return 1; }\n", encoding="utf-8")
+            subprocess.run([*git, "add", "core/a.cpp"], check=True)
+            subprocess.run([*git, "commit", "-qm", "change"], check=True)
+            tartci = _fake_tartci(pathlib.Path(td), f"TARTCI_ROLE={role}", "TARTCI_SERVES_GATE=1")
+            env = dict(os.environ, PULP_TARTCI_BIN=str(tartci), PULP_DISABLE_PREPUSH_GATES="1",
+                       PULP_SKIP_PR_BATCH_ADVICE="1")
+            for key in ("PULP_SKIP_DIFF_COVER", "PULP_SKIP_PREPUSH", "GIT_DIR", "GIT_WORK_TREE"):
+                env.pop(key, None)
+            sha = subprocess.check_output([*git, "rev-parse", "HEAD"], text=True, encoding="utf-8").strip()
+            result = subprocess.run(
+                ["bash", str(root / ".githooks/pre-push"), "origin", "none"], cwd=root,
+                input=f"refs/heads/topic {sha} refs/heads/topic {'0' * 40}\n",
+                env=env, capture_output=True, text=True, encoding="utf-8", timeout=120)
+            return result, marker.exists()
 
-    def test_hook_and_gates_use_profile_guard(self) -> None:
-        hook = (REPO_ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
-        gates = (REPO_ROOT / "tools/scripts/gates.sh").read_text(encoding="utf-8")
-        for source in (hook, gates):
-            self.assertIn("gate_host_policy.sh", source)
-            self.assertIn("pulp_gate_host_builds_reserved", source)
-        self.assertIn("pulp_gate_host_skip_line", hook)
-        self.assertIn("pulp_gate_host_skip_line", gates)
+    def test_prepush_hook_refuses_diff_cover_on_a_gate_host(self) -> None:
+        result, ran = self._run_hook("dedicated-builder")
+        self.assertFalse(ran, result.stderr)
+        self.assertIn("[gate-host] REFUSED pre-push diff-coverage configure/build", result.stderr)
+        self.assertIn("TARTCI_ROLE=dedicated-builder", result.stderr)
+
+    def test_control_prepush_hook_reaches_diff_cover_on_a_light_host(self) -> None:
+        # Proves the fixture reaches the diff-cover call at all, so the refusal
+        # test above cannot pass because the hook stopped earlier.
+        result, ran = self._run_hook("light")
+        self.assertTrue(ran, result.stderr)
+        self.assertNotIn("[gate-host]", result.stderr)
 
 
 class CoverageBuildGovernorTests(unittest.TestCase):
