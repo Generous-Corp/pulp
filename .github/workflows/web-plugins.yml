@@ -175,19 +175,16 @@ jobs:
       # ── Skia wasm slice (Ganesh/WebGL2) — the Pulp UI module's one binary
       #    dependency. URL + sha256 come from tools/deps/manifest.json, so the
       #    lane and the dependency audit can never disagree about which slice is
-      #    in use; the cache is keyed on that manifest.
-      - name: Cache the Skia wasm slice
-        id: skia-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/skia-wasm
-          key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
-
-      - name: Fetch the Skia wasm slice
-        if: steps.skia-cache.outputs.cache-hit != 'true'
+      #    in use. This PR-only workflow restores the archive that
+      #    wclap-cloudflare.yml saves on pushes to main.
+      # The slice is kept as its release archive, named and keyed by the pinned
+      # sha256 from tools/deps/manifest.json, and checked against that digest on
+      # every run, cache hit or not. It unpacks into this job's temp dir, so a
+      # host that keeps $HOME between jobs never builds against an older pin.
+      - name: Resolve the Skia wasm slice pin
+        id: skia-pin
         run: |
-          set -euo pipefail
-          read -r url sha < <(python3 - <<'PY'
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
                      if d["name"] == "Skia")
@@ -196,18 +193,43 @@ jobs:
           # slice follows and the one check_manifest_mirrors.py enforces against
           # external/skia-build/VERSION.md.
           a = dep["determinism"]["release_assets"]["wasm-wasm32"]
-          print(a["url"], a["sha256"])
+          print(f"url={a['url']}")
+          print(f"sha256={a['sha256']}")
           PY
-          )
-          curl -fsSL "$url" -o /tmp/skia-wasm.zip
-          echo "$sha  /tmp/skia-wasm.zip" | sha256sum -c -
-          mkdir -p "$HOME/skia-wasm"
-          unzip -q /tmp/skia-wasm.zip -d "$HOME/skia-wasm"
+
+      - name: Restore the Skia wasm archive (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        id: skia-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/pulp/skia-wasm/${{ steps.skia-pin.outputs.sha256 }}.zip
+          key: skia-wasm-archive-${{ steps.skia-pin.outputs.sha256 }}
+
+      - name: Fetch and verify the Skia wasm slice
+        env:
+          SKIA_WASM_URL: ${{ steps.skia-pin.outputs.url }}
+          SKIA_WASM_SHA256: ${{ steps.skia-pin.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          archive="$HOME/.cache/pulp/skia-wasm/$SKIA_WASM_SHA256.zip"
+          mkdir -p "$(dirname "$archive")"
+          trap 'rm -f "$archive.$$"' EXIT
+          verify() { echo "$SKIA_WASM_SHA256  $1" | shasum -a 256 -c -; }
+          if [ ! -f "$archive" ] || ! verify "$archive"; then
+            curl -fsSL "$SKIA_WASM_URL" -o "$archive.$$"
+            verify "$archive.$$"
+            mv -f "$archive.$$" "$archive"
+          fi
+          root="$RUNNER_TEMP/skia-wasm"
+          rm -rf "$root"
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          echo "SKIA_WASM_ROOT=$root" >> "$GITHUB_ENV"
 
       - name: Locate + verify the Skia wasm slice
         run: |
           set -euo pipefail
-          lib="$(find "$HOME/skia-wasm" -path '*build/wasm-gpu/lib/Release/libskia.a' | head -1)"
+          lib="$(find "$SKIA_WASM_ROOT" -path '*build/wasm-gpu/lib/Release/libskia.a' | head -1)"
           [ -n "$lib" ] || { echo "no wasm-gpu libskia.a in the fetched slice"; exit 1; }
           root="${lib%/build/wasm-gpu/lib/Release/libskia.a}"
           echo "SKIA_DIR=$root" >> "$GITHUB_ENV"
@@ -548,12 +570,48 @@ jobs:
       # It has to run HERE and not in the Cloudflare deploy lane, which is where the site
       # is normally assembled: that lane is Linux, has no WebGPU adapter, and the fixture
       # would skip. A real GPU is the whole point.
-      - name: Cache the Skia wasm slice
-        id: skia-cache-macos
-        uses: actions/cache@v4
-        with:
-          path: ~/skia-wasm
-          key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
+      # The slice is kept as its release archive, named and keyed by the pinned
+      # sha256 from tools/deps/manifest.json, and checked against that digest on
+      # every run, cache hit or not. It unpacks into this job's temp dir, so a
+      # host that keeps $HOME between jobs never builds against an older pin.
+      - name: Resolve the Skia wasm slice pin
+        id: skia-pin
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
+                     if d["name"] == "Skia")
+          # Key matches the release asset's platform segment
+          # (skia-build-<platform>-gpu-release.zip), the convention every other
+          # slice follows and the one check_manifest_mirrors.py enforces against
+          # external/skia-build/VERSION.md.
+          a = dep["determinism"]["release_assets"]["wasm-wasm32"]
+          print(f"url={a['url']}")
+          print(f"sha256={a['sha256']}")
+          PY
+
+      # No actions/cache here: this job runs on self-hosted Macs, which keep the
+      # verified archive on local disk, so a GitHub cache round-trip only adds time.
+      - name: Fetch and verify the Skia wasm slice
+        env:
+          SKIA_WASM_URL: ${{ steps.skia-pin.outputs.url }}
+          SKIA_WASM_SHA256: ${{ steps.skia-pin.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          archive="$HOME/.cache/pulp/skia-wasm/$SKIA_WASM_SHA256.zip"
+          mkdir -p "$(dirname "$archive")"
+          trap 'rm -f "$archive.$$"' EXIT
+          verify() { echo "$SKIA_WASM_SHA256  $1" | shasum -a 256 -c -; }
+          if [ ! -f "$archive" ] || ! verify "$archive"; then
+            curl -fsSL "$SKIA_WASM_URL" -o "$archive.$$"
+            verify "$archive.$$"
+            mv -f "$archive.$$" "$archive"
+          fi
+          root="$RUNNER_TEMP/skia-wasm"
+          rm -rf "$root"
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          echo "SKIA_WASM_ROOT=$root" >> "$GITHUB_ENV"
 
       # The gallery's other 23 plugins live in two separate public repos, and
       # assemble-gallery.mjs hard-fails on the first missing wasm — so the page cannot be
@@ -584,25 +642,10 @@ jobs:
       - name: Assemble the GPU demo page (the real one, from the real modules)
         run: |
           set -euo pipefail
-          if [ ! -d "$HOME/skia-wasm" ]; then
-            read -r url sha < <(python3 - <<'PY'
-          import json
-          dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
-                     if d["name"] == "Skia")
-          a = dep["determinism"]["release_assets"]["wasm-wasm32"]
-          print(a["url"], a["sha256"])
-          PY
-          )
-            curl -fsSL "$url" -o /tmp/skia-wasm.zip
-            echo "$sha  /tmp/skia-wasm.zip" | shasum -a 256 -c -
-            mkdir -p "$HOME/skia-wasm"
-            unzip -q /tmp/skia-wasm.zip -d "$HOME/skia-wasm"
-          fi
-
           # The page's status strip is a Label in Pulp's own view tree, so the GPU page
           # cannot be assembled without the UI module — there is nothing to report into.
           emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
-            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm" \
+            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$SKIA_WASM_ROOT" \
             -DPULP_WEBUI_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
           tools/ci/governed-build.sh cmake --build build-webui
 
