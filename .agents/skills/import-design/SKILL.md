@@ -7610,6 +7610,13 @@ build receipt. This applies to the seven Pulp harnesses (`v0`, `figma`, `pencil`
 
 ## Captured canvas authority
 
+Benchmark and fixture receipts must carry a versioned counter schema when they
+report bridge, layout, paint, invalidation, or mutation work. Validate both
+idle and interactive phases and include a planted missing-counter rejection so
+an omitted production seam cannot look like a zero-cost result. Fresh-plugin
+fixtures must start from authored HTML and keep browser capture, native Skia
+import, and the mutated-selector negative control as separate receipts.
+
 Reference-paint state atlases must opt into `--canvas-authority` when a captured
 canvas image is intended to be the native visual authority. The transformer's
 canonical match is the registered `canvas` element; broad DOM selectors such as

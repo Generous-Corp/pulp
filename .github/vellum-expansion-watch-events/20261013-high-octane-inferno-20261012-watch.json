@@ -6,11 +6,13 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
+    "chromium-authoring-frontend",
     "design-ir-contract",
+    "design-output-and-packaging",
     "design-source-ingest",
     "render-assets-and-backends"
   ],
-  "rationale": "The importer update planner now exposes deterministic retained/moved/inserted/removed work counts and recreates native controls when binding module or parameter routes change. This is a Pulp-owned compatibility fix over the existing Skia/Dawn path; no renderer, Chromium, packaging, or design-import authority moves.",
+  "rationale": "The importer update planner now exposes deterministic retained/moved/inserted/removed work counts, typed dynamic slot classification, additive benchmark counters, and a fresh authored-plugin fixture with Chromium and Skia receipts. These are Pulp-owned compatibility and observability changes over the existing Skia/Dawn path; the Chromium, packaging, and design-import families are watch-only and no authority moves to or from Vellum.",
   "tests": [
     "ctest --test-dir build -R pulp-test-design-update",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
