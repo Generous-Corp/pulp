@@ -1161,7 +1161,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def tag_created_at(tag: str) -> datetime:
     out = subprocess.run(
         ["git", "for-each-ref", "--format=%(creatordate:iso-strict)", f"refs/tags/{tag}"],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout.strip()
     if not out:
         raise SystemExit(f"release_reconcile: unknown tag {tag} (fetch tags first)")

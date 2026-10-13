@@ -5125,6 +5125,17 @@ bisectable.
   is not re-dispatched, because the frozen sources fail identically every time.
   Fix it on main and let the next tag publish; re-dispatching that tag by hand
   only burns another release matrix.
+- **Each incident entry carries a diagnosis: run, job › step, first error line,
+  cause class, fix, verify** (`tools/scripts/release_failure_diagnosis.py`). For
+  `ERROR: sha256 mismatch` it names the `tools/deps/manifest.json` line and both
+  digests; check the upstream asset's live `digest` and (Windows) its
+  `msvc-toolchain.json` before repinning. A mismatch the upstream asset confirms
+  opens the circuit at once. Re-dispatch release-cli with `--ref <tag>`, never
+  `--ref main`: the "Dispatch must run on the tag it publishes" step refuses a
+  non-tag commit, and that guard failure once masked a real digest mismatch as
+  the "failing leg" for five tags. Replay a past incident with
+  `release_reconcile.py --tag vX.Y.Z` (dry run; prints the body). A tag joining
+  the open incident posts a comment, since edits notify nobody.
 - **NEVER delete a GitHub release or draft — deletion of a once-published
   release permanently burns its tag name.** GitHub reserves an immutable
   release's `tag_name` forever; every later publish attempt 422s with
