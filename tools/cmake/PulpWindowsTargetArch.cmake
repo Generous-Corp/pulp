@@ -24,8 +24,7 @@ function(pulp_windows_target_arch out_var)
         set(_arch "arm64ec-win")
     elseif(_compiler_arch STREQUAL "ARM64X")
         set(_arch "arm64x-win")
-    elseif(_compiler_arch STREQUAL "ARM64"
-            OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+    elseif(_compiler_arch STREQUAL "ARM64")
         set(_arch "arm64-win")
     elseif(_compiler_arch MATCHES "^(X64|AMD64)$"
             OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$")
