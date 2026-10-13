@@ -1,0 +1,294 @@
+{
+ "_source": "Recorded from the live GitHub API on 2026-10-13 for the v0.952.0-v0.955.1 release outage: Release CLI push run 38214661512 (v0.955.1) failed CLI windows-arm64 > Fetch Skia binaries on a pinned-asset digest mismatch; reconciler re-dispatches from main (e.g. 38230869411) failed only the dispatch-ref guard. v0.951.0 is the published negative control. Job steps are trimmed to the first step and the failed steps; the log is the failing step's excerpt.",
+ "push_run": {
+  "id": 38214661512,
+  "name": "Release CLI",
+  "event": "push",
+  "head_branch": "v0.955.1",
+  "status": "completed",
+  "conclusion": "failure",
+  "created_at": "2026-10-12T06:52:04Z",
+  "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512",
+  "run_attempt": 1
+ },
+ "push_jobs": [
+  {
+   "id": 114696480306,
+   "name": "Resolve macOS runner — v0.955.1",
+   "status": "completed",
+   "conclusion": "success",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114696480306",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1
+    }
+   ]
+  },
+  {
+   "id": 114696544131,
+   "name": "iOS compile gate — v0.955.1",
+   "status": "completed",
+   "conclusion": "success",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114696544131",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1
+    }
+   ]
+  },
+  {
+   "id": 114696544188,
+   "name": "CLI darwin-x64",
+   "status": "completed",
+   "conclusion": "success",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114696544188",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1
+    }
+   ]
+  },
+  {
+   "id": 114696544190,
+   "name": "CLI linux-arm64",
+   "status": "completed",
+   "conclusion": "success",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114696544190",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1
+    }
+   ]
+  },
+  {
+   "id": 114696544200,
+   "name": "CLI darwin-arm64",
+   "status": "completed",
+   "conclusion": "success",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114696544200",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1
+    }
+   ]
+  },
+  {
+   "id": 114696544233,
+   "name": "CLI windows-x64",
+   "status": "completed",
+   "conclusion": "success",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114696544233",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1
+    }
+   ]
+  },
+  {
+   "id": 114696544236,
+   "name": "CLI windows-arm64",
+   "status": "completed",
+   "conclusion": "failure",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114696544236",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1
+    },
+    {
+     "name": "Fetch Skia binaries",
+     "status": "completed",
+     "conclusion": "failure",
+     "number": 14
+    }
+   ]
+  },
+  {
+   "id": 114696544294,
+   "name": "CLI linux-x64",
+   "status": "completed",
+   "conclusion": "success",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114696544294",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1
+    }
+   ]
+  },
+  {
+   "id": 114710944360,
+   "name": "release",
+   "status": "completed",
+   "conclusion": "skipped",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114710944360",
+   "steps": []
+  },
+  {
+   "id": 114710944392,
+   "name": "Smoke ${{ matrix.platform }}",
+   "status": "completed",
+   "conclusion": "skipped",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38214661512/job/114710944392",
+   "steps": []
+  }
+ ],
+ "guard_run": {
+  "id": 38230869411,
+  "name": "Release CLI",
+  "event": "workflow_dispatch",
+  "head_branch": "main",
+  "status": "completed",
+  "conclusion": "failure",
+  "created_at": "2026-10-12T09:35:26Z",
+  "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38230869411",
+  "run_attempt": 1
+ },
+ "guard_jobs": [
+  {
+   "id": 114749734711,
+   "name": "Resolve macOS runner — v0.955.1",
+   "status": "completed",
+   "conclusion": "failure",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38230869411/job/114749734711",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1
+    },
+    {
+     "name": "Dispatch must run on the tag it publishes",
+     "status": "completed",
+     "conclusion": "failure",
+     "number": 3
+    }
+   ]
+  },
+  {
+   "id": 114749808877,
+   "name": "iOS compile gate — ${{ (((github.event_name == 'workflow_dispatch') && inputs.version) || github.ref_name) }}",
+   "status": "completed",
+   "conclusion": "skipped",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38230869411/job/114749808877",
+   "steps": []
+  },
+  {
+   "id": 114749809353,
+   "name": "CLI ${{ matrix.platform }}",
+   "status": "completed",
+   "conclusion": "skipped",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38230869411/job/114749809353",
+   "steps": []
+  },
+  {
+   "id": 114749809956,
+   "name": "Smoke ${{ matrix.platform }}",
+   "status": "completed",
+   "conclusion": "skipped",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38230869411/job/114749809956",
+   "steps": []
+  },
+  {
+   "id": 114749810406,
+   "name": "release",
+   "status": "completed",
+   "conclusion": "skipped",
+   "run_attempt": 1,
+   "html_url": "https://github.com/Generous-Corp/pulp/actions/runs/38230869411/job/114749810406",
+   "steps": []
+  }
+ ],
+ "push_failed_job_log": "2026-10-12T06:56:14.0836068Z ##[group]Run python3 tools/scripts/fetch_skia_for_release.py windows-arm64\n2026-10-12T06:56:14.0836705Z python3 tools/scripts/fetch_skia_for_release.py windows-arm64\n2026-10-12T06:56:14.0855422Z shell: C:\\Program Files\\Git\\bin\\bash.EXE --noprofile --norc -e -o pipefail {0}\n2026-10-12T06:56:14.0855854Z env:\n2026-10-12T06:56:14.0856030Z   CCACHE_COMPILERCHECK: content\n2026-10-12T06:56:14.0856247Z   CCACHE_NODEPEND: true\n2026-10-12T06:56:14.0856446Z   CCACHE_SLOPPINESS: time_macros\n2026-10-12T06:56:14.0856691Z   CCACHE_STATSLOG: C:\\a\\_temp/ccache-stats.log\n2026-10-12T06:56:14.0857074Z   PULP_RELEASE_CONTENT_VERIFIER: tools/scripts/release_artifact_contents.py\n2026-10-12T06:56:14.0857488Z   PULP_SDK_PROVENANCE_HELPER: tools/scripts/sdk_provenance.py\n2026-10-12T06:56:14.0857833Z   PULP_RELEASE_PACKAGER: tools/scripts/package_cli.py\n2026-10-12T06:56:14.0858552Z   PULP_SDK_PROVENANCE_CMAKE: tools/cmake/PulpSdkProvenance.cmake\n2026-10-12T06:56:14.0858943Z   PULP_CONTROL_BROKER_FLOOR: 0.795.0\n2026-10-12T06:56:14.0859199Z   PULP_CONTROL_STANDALONE_HOST_FLOOR: 0.803.1\n2026-10-12T06:56:14.0859470Z ##[endgroup]\n2026-10-12T06:56:17.3798741Z ERROR: sha256 mismatch\n2026-10-12T06:56:17.3799174Z   expected: 8e6fb2012ad026d8261eadfe3a9f638a165e82cefa2b896f8596dbaece9c6bde\n2026-10-12T06:56:17.3799664Z   actual:   18e57481e84992fecccbc4ac0f8f283c4a68d90d7978a61ce2e68f21dd34a9c7\n2026-10-12T06:56:17.3828701Z Skia fetch: matrix=windows-arm64, manifest=win-arm64\n2026-10-12T06:56:17.3829329Z   url: https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-arm64-gpu-release.zip\n2026-10-12T06:56:17.3829956Z   sha256: 8e6fb2012ad026d8261eadfe3a9f638a165e82cefa2b896f8596dbaece9c6bde\n2026-10-12T06:56:17.3830400Z   expected lib: external\\skia-build\\build\\win-gpu\\lib\\Release\\skia.lib\n2026-10-12T06:56:17.3830815Z Downloading -> C:\\a\\pulp\\pulp\\.skia-release-asset-uzx4j431.zip\n2026-10-12T06:56:17.3831535Z Downloaded 39579816 bytes from https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-arm64-gpu-release.zip\n2026-10-12T06:56:17.7431262Z ##[error]Process completed with exit code 1.\n2026-10-12T06:56:17.7768693Z ##[group]Run if ! command -v ccache >/dev/null 2>&1; then\n2026-10-12T06:56:17.7775838Z if ! command -v ccache >/dev/null 2>&1; then\n2026-10-12T06:56:17.7776168Z   echo \"ccache not available; skipping stats\"\n2026-10-12T06:56:17.7776438Z   exit 0\n2026-10-12T06:56:17.7776604Z fi\n2026-10-12T06:56:17.7776782Z ccache --version | head -1\n2026-10-12T06:56:17.7777032Z ccache --show-config 2>/dev/null \\",
+ "release_v0_951_0": {
+  "tag_name": "v0.951.0",
+  "draft": false,
+  "published_at": "2026-10-11T23:03:19Z",
+  "assets": [
+   {
+    "name": "appcast.xml"
+   },
+   {
+    "name": "pulp-darwin-arm64.tar.gz"
+   },
+   {
+    "name": "pulp-darwin-x64.tar.gz"
+   },
+   {
+    "name": "pulp-linux-arm64.tar.gz"
+   },
+   {
+    "name": "pulp-linux-x64.tar.gz"
+   },
+   {
+    "name": "pulp-sdk-darwin-arm64.tar.gz"
+   },
+   {
+    "name": "pulp-sdk-darwin-x64.tar.gz"
+   },
+   {
+    "name": "pulp-sdk-linux-arm64.tar.gz"
+   },
+   {
+    "name": "pulp-sdk-linux-x64.tar.gz"
+   },
+   {
+    "name": "pulp-sdk-windows-arm64.tar.gz"
+   },
+   {
+    "name": "pulp-sdk-windows-x64.tar.gz"
+   },
+   {
+    "name": "pulp-windows-arm64.zip"
+   },
+   {
+    "name": "pulp-windows-x64.zip"
+   },
+   {
+    "name": "SHA256SUMS"
+   }
+  ]
+ },
+ "skia_m153_win_arm64_asset": {
+  "name": "skia-build-win-arm64-gpu-release.zip",
+  "digest": "sha256:18e57481e84992fecccbc4ac0f8f283c4a68d90d7978a61ce2e68f21dd34a9c7",
+  "updated_at": "2026-10-11T22:53:45Z"
+ }
+}
