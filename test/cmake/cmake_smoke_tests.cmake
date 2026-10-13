@@ -538,6 +538,16 @@ add_test(NAME cmake-pulp-minos-linux-arch
 set_tests_properties(cmake-pulp-minos-linux-arch PROPERTIES
     LABELS "cmake;min-os;linux"
     TIMEOUT 60)
+# The one Skia-supplies-Dawn decision core/render and the link-floor fixtures
+# read: wgpu-native is linked exactly when Skia's Dawn archive is absent.
+add_test(NAME cmake-pulp-skia-dawn-provider
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/skia-dawn-provider
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_skia_dawn_provider.cmake)
+set_tests_properties(cmake-pulp-skia-dawn-provider PROPERTIES
+    LABELS "cmake;render;link-contract"
+    TIMEOUT 120)
 if(APPLE)
     add_test(NAME cmake-pulp-macos-archive-floor
         COMMAND ${CMAKE_COMMAND}

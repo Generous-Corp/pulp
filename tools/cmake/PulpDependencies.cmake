@@ -348,6 +348,10 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
 endif()
 
 set(PULP_HAS_SKIA FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+# A GPU-off configure never reaches FindSkia, so clear its provider decision
+# here as well rather than leave one cached from an earlier GPU configure.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake)
+pulp_record_skia_dawn_provider(SKIA_FOUND FALSE)
 if(PULP_ENABLE_GPU)
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake)
     if(SKIA_FOUND)
