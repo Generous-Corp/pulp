@@ -682,14 +682,14 @@ TEST_CASE("install_binary_tool refuses a registry pin whose sha256 differs",
     auto result = install_binary_tool(fx.tool, /*force=*/true);
     REQUIRE_FALSE(result.ok);
     for (const std::string& needle :
-         {std::string("SHA-256 mismatch for verified-bad 1.2.3"),
-          current_platform_key(), "expected " + expected, "found " + digest, std::string("Fix:")}) {
+         {std::string("SHA-256 mismatch for verified-bad 1.2.3"), current_platform_key(),
+          "expected " + expected, "found " + digest, std::string("Fix:")}) {
         INFO(result.error);
         REQUIRE(result.error.find(needle) != std::string::npos);
     }
     REQUIRE_FALSE(fs::exists(fx.installed("1.2.3")));
-    REQUIRE_FALSE(fs::exists(fx.tmp.path / "home" / "tools" / ".downloads" /
-                             "verified-bad-1.2.3.tar.gz"));
+    REQUIRE_FALSE(
+        fs::exists(fx.tmp.path / "home" / "tools" / ".downloads" / "verified-bad-1.2.3.tar.gz"));
 }
 
 TEST_CASE("install_binary_tool refuses a registry pin with no recorded sha256",

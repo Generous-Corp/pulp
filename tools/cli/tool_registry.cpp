@@ -179,7 +179,8 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
                     if (auto v = src.get("url_template")) s.url_template = v->as_string();
                     if (auto v = src.get("archive_format")) s.archive_format = v->as_string();
                     if (auto v = src.get("binary_name")) s.binary_name = v->as_string();
-                    if (auto v = src.get("sha256")) s.sha256 = v->as_string();
+                    if (auto v = src.get("sha256"))
+                        s.sha256 = v->as_string();
                     tool.binary_sources[platform] = s;
                 }
             }
@@ -544,20 +545,22 @@ ActiveToolVersion resolve_active_tool_version(const ToolDescriptor& tool) {
         if (root.type == JsonValue::Object) {
             if (auto overrides = root.get("overrides");
                 overrides && overrides->type == JsonValue::Object) {
-                if (auto v = overrides->get(tool.id); v && v->type == JsonValue::String &&
-                                                      !v->as_string().empty())
+                if (auto v = overrides->get(tool.id);
+                    v && v->type == JsonValue::String && !v->as_string().empty())
                     return {v->as_string(), "user override"};
             }
         }
     }
-    if (!tool.pinned_version.empty()) return {tool.pinned_version, "registry pin"};
+    if (!tool.pinned_version.empty())
+        return {tool.pinned_version, "registry pin"};
     return {{}, "unset"};
 }
 
 // A version names a directory and a download URL, so it may only carry the
 // characters real release versions use.
 static bool safe_version_string(const std::string& v) {
-    if (v.empty() || v == "." || v.find("..") != std::string::npos) return false;
+    if (v.empty() || v == "." || v.find("..") != std::string::npos)
+        return false;
     return std::all_of(v.begin(), v.end(), [](char c) {
         const auto u = static_cast<unsigned char>(c);
         return std::isalnum(u) || c == '.' || c == '-' || c == '_' || c == '+';
@@ -565,7 +568,8 @@ static bool safe_version_string(const std::string& v) {
 }
 
 static std::string lowercase(std::string s) {
-    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (auto& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
 }
 
@@ -577,7 +581,9 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
     if (!safe_version_string(version)) {
         result.error = tool.display_name + ": version '" + version + "' (" + active.source +
                        ") is not a valid release version; use letters, digits, '.', '-', "
-                       "'_' or '+'. Fix: `pulp tool update " + tool.id + "` returns to the "
+                       "'_' or '+'. Fix: `pulp tool update " +
+                       tool.id +
+                       "` returns to the "
                        "registry pin.";
         return result;
     }
@@ -638,8 +644,8 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
                        " has no recorded sha256 in the tool registry, so Pulp cannot "
                        "verify its download and refuses to install it. Fix: add the "
                        "release asset's sha256 to tools/packages/tool-registry.json, or "
-                       "choose a version yourself with `pulp tool install " + tool.id +
-                       " --version <v>` (installed as unverified-version).";
+                       "choose a version yourself with `pulp tool install " +
+                       tool.id + " --version <v>` (installed as unverified-version).";
         return result;
     }
 
@@ -680,14 +686,13 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
         if (observed != expected) {
             std::error_code ec;
             fs::remove(archive_path, ec);
-            result.error =
-                "SHA-256 mismatch for " + tool.id + " " + version + " (" + platform +
-                "): expected " + expected + ", found " + observed + " from " + url +
-                ". The download was deleted and nothing was installed. Fix: retry "
-                "(a truncated download or an intercepting proxy causes this); if it "
-                "persists the upstream asset changed, so report it, or install a "
-                "version you choose with `pulp tool install " + tool.id +
-                " --version <v>` (installed as unverified-version).";
+            result.error = "SHA-256 mismatch for " + tool.id + " " + version + " (" + platform +
+                           "): expected " + expected + ", found " + observed + " from " + url +
+                           ". The download was deleted and nothing was installed. Fix: retry "
+                           "(a truncated download or an intercepting proxy causes this); if it "
+                           "persists the upstream asset changed, so report it, or install a "
+                           "version you choose with `pulp tool install " +
+                           tool.id + " --version <v>` (installed as unverified-version).";
             return result;
         }
         result.verification = "sha256-verified";
@@ -695,8 +700,7 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
         result.verification = "unverified-version";
         std::cout << "  " << yellow("note:") << " " << tool.id << " " << version << " ("
                   << active.source << ") has no sha256 Pulp reviewed; installing it as "
-                  << "unverified-version and recording the observed sha256 " << observed
-                  << ".\n";
+                  << "unverified-version and recording the observed sha256 " << observed << ".\n";
     }
     result.sha256 = observed;
 

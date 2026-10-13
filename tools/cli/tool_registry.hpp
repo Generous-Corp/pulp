@@ -141,7 +141,7 @@ struct ToolInstallResult {
     // digest for the pinned version, "unverified-version" when a user override
     // selected a version Pulp has no reviewed digest for. Empty otherwise.
     std::string verification;
-    std::string sha256;  // observed digest of the downloaded archive
+    std::string sha256; // observed digest of the downloaded archive
 };
 
 // The version a managed tool should install, with its provenance. Precedence
@@ -151,7 +151,7 @@ struct ToolInstallResult {
 // Rust front-end's resolver, so a delegated install honors the same override.
 struct ActiveToolVersion {
     std::string version;
-    std::string source;  // "env override", "user override", "registry pin", "unset"
+    std::string source; // "env override", "user override", "registry pin", "unset"
 };
 std::string tool_version_env_var(const std::string& tool_id);
 ActiveToolVersion resolve_active_tool_version(const ToolDescriptor& tool);
