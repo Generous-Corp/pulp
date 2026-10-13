@@ -161,10 +161,10 @@
           "sha256": "fa7d4d7e795db0e2503f49f105f46ed5852386f0cfdd819899be3b65ebde24fc"
         },
         "Linux-x64": {
-          "url_template": "https://ffmpeg.martin-riedl.de/download/linux/amd64/1737141359_7.1/ffmpeg.zip",
-          "archive_format": "zip",
+          "url_template": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/ffmpeg-n7.1.5-12-g1fdbca85aa-linux64-gpl-7.1.tar.xz",
+          "archive_format": "tar.xz",
           "binary_name": "ffmpeg",
-          "sha256": "ffa849f89b305d7947b802370bee98c952f069aa6f0d1575de1dcf53e1a4d546"
+          "sha256": "c1e6caf48923dd8e6bc5e54d51ba70c321175b8162ae9c414c392990e72f0e79"
         }
       },
       "pinned_version": "7.1",
