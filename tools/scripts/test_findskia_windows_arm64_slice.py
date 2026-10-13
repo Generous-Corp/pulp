@@ -56,7 +56,8 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
                 "endif()\n"
                 if expect_found
                 else ""
-            )
+            ),
+            encoding="utf-8",
         )
         build = project / "build"
         result = subprocess.run(
@@ -72,6 +73,7 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
