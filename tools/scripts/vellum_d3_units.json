@@ -1,15 +1,13 @@
 {
   "schema": "pulp.vellum.d3-units.v1",
   "units": [
-    {"name": "foundation", "targets": ["pulp-runtime", "pulp-simd"]},
-    {"name": "gpu-device-api", "targets": ["pulp-gpu-device"]},
+    {"name": "foundation", "targets": ["pulp-events", "pulp-platform", "pulp-runtime", "pulp-simd"]},
+    {"name": "gpu-device-api", "targets": ["pulp-gpu-device"], "optional_targets": [{"name": "pulp-skia-chromium-raw-ptr-compat", "platforms": ["Linux"]}], "owned_files": ["core/canvas/src/skia_chromium_raw_ptr_compat.cpp"]},
     {"name": "gpu-device", "targets": ["pulp-gpu-device"]},
-    {"name": "canvas", "targets": ["pulp-canvas"]},
+    {"name": "canvas", "targets": ["pulp-canvas", "pulp-bundled-fonts"], "optional_targets": ["pulp-bundled-noto-color-emoji"]},
     {"name": "render-2d", "targets": ["pulp-render"]},
     {"name": "render-3d", "targets": ["pulp-render"]},
     {"name": "state-core", "targets": ["pulp-state"]},
-    {"name": "design-ir", "targets": ["pulp-design-import"]},
-    {"name": "design-import", "targets": ["pulp-design-import"]},
     {"name": "view-core", "targets": ["pulp-view-core"], "pulp_kept": {
       "targets": ["pulp-view-tooling"],
       "files": [
@@ -40,8 +38,10 @@
         {"path": "core/view/include/pulp/view/design_param_binding.hpp", "ruling": "DECISIONS.md TEAM-LEAD RULING 2026-10-12 — R14 M2 carve boundaries for two listed files: DesignFrameView's own param, bind-grid and scalar-source collaborator; only the StateStore adapter is Pulp-kept"}
       ]
     }},
-    {"name": "view-platform", "targets": ["pulp-view-native", "pulp-platform"]},
+    {"name": "design-ir", "targets": ["pulp-design-import"]},
+    {"name": "design-import", "targets": ["pulp-design-import"]},
     {"name": "view-script", "targets": ["pulp-view-script"]},
+    {"name": "view-platform", "targets": ["pulp-view-native"]},
     {"name": "ui-js-packages", "targets": ["pulp-jsx-runtime-materialized-contract", "pulp-jsx-runtime-materialized-emitter"]}
   ]
 }
