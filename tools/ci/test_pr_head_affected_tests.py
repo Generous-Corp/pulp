@@ -118,6 +118,11 @@ class SelectionTests(unittest.TestCase):
                          rebuilt=["pulp-test-cli-migration-index"])
         self.assertEqual(plan["tests"], ["pulp-test-cli-migration-index"])
 
+    def test_docs_only_diff_does_not_add_warm_build_rebuilt_tests(self) -> None:
+        plan = self.plan(["docs/a.md"], selection("focused", []),
+                         rebuilt=["pulp-test-cli-migration-index"])
+        self.assertEqual(plan["tests"], [])
+
     def test_an_unrelated_tools_change_does_not_reach_the_families(self) -> None:
         plan = self.plan(["tools/scripts/other.py"], selection("focused", ["other"]))
         self.assertEqual(plan["tests"], ["other"])
@@ -208,6 +213,10 @@ class DirectEdgeTests(unittest.TestCase):
             (build / ".ninja_log").write_text(
                 "# ninja log v5\n0\t12\t0\tbin/pulp-test-cli-migration-index\t1\n",
                 encoding="utf-8")
+            (build / ".pulp-build-start").write_text("start\n", encoding="utf-8")
+            output = build / "bin/pulp-test-cli-migration-index"
+            output.parent.mkdir()
+            output.write_text("binary\n", encoding="utf-8")
             model = step.inventory.CodeModel(
                 targets={"pulp-test-cli-migration-index": step.inventory.Target(
                     "pulp-test-cli-migration-index", "EXECUTABLE", "", "",
@@ -218,7 +227,22 @@ class DirectEdgeTests(unittest.TestCase):
             with mock.patch.object(step.inventory, "codemodel_reply_available", return_value=True), \
                     mock.patch.object(step.inventory, "load_codemodel_targets", return_value=model), \
                     mock.patch.object(step.inventory, "load_projection_ctest_entries", return_value=entries):
-                self.assertEqual(step.rebuilt_binary_tests(build), ["migration-round-trip"])
+                    self.assertEqual(step.rebuilt_binary_tests(build), ["migration-round-trip"])
+
+    def test_rebuilt_binary_from_a_previous_warm_build_is_not_claimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            (build / "bin").mkdir(parents=True)
+            (build / ".ninja_log").write_text(
+                "# ninja log v5\n0\t12\t0\tbin/pulp-test-cli-migration-index\t1\n",
+                encoding="utf-8")
+            output = build / "bin/pulp-test-cli-migration-index"
+            output.write_text("old\n", encoding="utf-8")
+            marker = build / ".pulp-build-start"
+            marker.write_text("start\n", encoding="utf-8")
+            os.utime(marker, (output.stat().st_mtime + 10, output.stat().st_mtime + 10))
+            with mock.patch.object(step.inventory, "codemodel_reply_available", return_value=True):
+                self.assertEqual(step.rebuilt_binary_tests(build), [])
 
     def test_rebuilt_binary_without_a_ninja_log_is_not_claimed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

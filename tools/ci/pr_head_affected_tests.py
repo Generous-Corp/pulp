@@ -232,7 +232,8 @@ def rebuilt_binary_tests(build: Path) -> list[str]:
     back through the CTest command inventory.
     """
     log = build / ".ninja_log"
-    if not log.is_file() or not inventory.codemodel_reply_available(build):
+    build_start = build / ".pulp-build-start"
+    if not log.is_file() or not build_start.is_file() or not inventory.codemodel_reply_available(build):
         return []
     try:
         runs = build_time_report.parse_ninja_log(log.read_text(encoding="utf-8", errors="replace"))
@@ -249,7 +250,17 @@ def rebuilt_binary_tests(build: Path) -> list[str]:
             value = build / value
         return os.path.normpath(str(value))
 
-    built = {key(entry.output) for entry in runs[-1]}
+    try:
+        build_start_mtime = build_start.stat().st_mtime
+    except OSError:
+        return []
+    # Ninja logs are cumulative on warm self-hosted runners. The marker is
+    # written immediately before this PR head's build, so only artifacts whose
+    # mtime belongs to this invocation may be treated as rebuilt. Without this
+    # proof, a previous branch's output could select unrelated tests.
+    built = {key(entry.output) for entry in runs[-1]
+             if Path(key(entry.output)).is_file() and
+             Path(key(entry.output)).stat().st_mtime >= build_start_mtime}
     executable_artifacts = {
         key(artifact)
         for target in model.targets.values()
@@ -373,7 +384,8 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
         plan["reason"] = "the diff is empty"
         return plan
     chosen: list[str] = []
-    rebuilt = rebuilt_binary_tests(build)
+    docs_only = all(is_non_test_path(p) for p in paths)
+    rebuilt = [] if docs_only else rebuilt_binary_tests(build)
     plan["rebuilt_binaries"] = len(rebuilt)
     chosen.extend(rebuilt)
     # Declared script inputs are exact, so they apply even where the build

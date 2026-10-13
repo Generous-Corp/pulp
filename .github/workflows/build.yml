@@ -2078,6 +2078,9 @@ jobs:
           if [ "${RUNNER_OS}" = "Windows" ]; then
             cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4
           else
+            # Bound rebuilt-test selection to this PR head's build. Warm
+            # self-hosted Ninja logs retain previous branches' outputs.
+            date +%s.%N > "$PULP_BUILD_DIR/.pulp-build-start"
             tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
           fi
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
