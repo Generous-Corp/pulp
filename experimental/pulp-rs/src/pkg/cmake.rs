@@ -275,9 +275,14 @@ mod tests {
         assert!(s.contains(VERIFY_PREAMBLE));
         assert!(VERIFY_PREAMBLE.contains("function(_pulp_package_verify"));
         assert!(VERIFY_PREAMBLE.contains("integrity mismatch"));
-        let listing = pin::TREE_LISTING_ARGS.join(" ");
+        // Bound to lowercase names first: the inspector-protocol registry
+        // check reads a capitalised name, a dot and a lowercase name as an
+        // inspector wire method.
+        let listing_args = pin::TREE_LISTING_ARGS;
+        let preamble = VERIFY_PREAMBLE;
+        let listing = listing_args.join(" ");
         assert!(
-            VERIFY_PREAMBLE.contains(&listing),
+            preamble.contains(&listing),
             "verifier must hash `git {listing}` like the CLI does"
         );
     }
