@@ -215,6 +215,26 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
               DesignSlot{DesignSlotKind::dynamic_text, "geometry.route", "geometry.display"});
     }
 
+    SECTION("geometry text fields and XY pads retain their setter lanes") {
+        IRNode root;
+        root.stable_anchor_id = "root";
+        root.attributes["pulpRouteId"] = "geometry.route";
+        IRInteractiveElement text_field;
+        text_field.kind = InteractiveElementKind::text_field;
+        text_field.param_key = "geometry.label";
+        IRInteractiveElement xy_pad;
+        xy_pad.kind = InteractiveElementKind::xy_pad;
+        xy_pad.param_key = "geometry.xy";
+        root.interactive_elements = {text_field, xy_pad};
+
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] ==
+              DesignSlot{DesignSlotKind::dynamic_vector, "geometry.route", "geometry.xy"});
+        CHECK(slots[1] ==
+              DesignSlot{DesignSlotKind::dynamic_text, "geometry.route", "geometry.label"});
+    }
+
     SECTION("module and parameter binding fallback remains typed") {
         auto root = node("module-route");
         root.attributes["pulpBindingModule"] = "synth";

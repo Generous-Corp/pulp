@@ -19,6 +19,18 @@ void append_slot(std::vector<DesignSlot>& slots, DesignSlotKind kind, std::strin
     slots.push_back({kind, std::move(route), std::move(key)});
 }
 
+DesignSlotKind interactive_slot_kind(InteractiveElementKind kind) {
+    switch (kind) {
+    case InteractiveElementKind::text_field:
+    case InteractiveElementKind::value_label:
+        return DesignSlotKind::dynamic_text;
+    case InteractiveElementKind::xy_pad:
+        return DesignSlotKind::dynamic_vector;
+    default:
+        return DesignSlotKind::dynamic_scalar;
+    }
+}
+
 void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
     const auto route = nonempty_attribute(node, "pulpRouteId");
     auto scalar = !nonempty_attribute(node, "binding").empty()
@@ -61,10 +73,7 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
     // record.
     for (const auto& element : node.interactive_elements) {
         if (!element.param_key.empty()) {
-            const auto kind = element.kind == InteractiveElementKind::value_label
-                                  ? DesignSlotKind::dynamic_text
-                                  : DesignSlotKind::dynamic_scalar;
-            append_slot(slots, kind, route, element.param_key);
+            append_slot(slots, interactive_slot_kind(element.kind), route, element.param_key);
         }
         if (!element.action.empty())
             append_slot(slots, DesignSlotKind::dynamic_action, route, element.action);
