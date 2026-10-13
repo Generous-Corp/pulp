@@ -253,8 +253,9 @@ std::vector<RegistrationSite> widget_bridge_registrations(const std::string& sou
         });
     }
 
-    const std::regex registry_pattern(
-        "register_bridge_(function|host_object|promise_function)\\s*\\(\\s*[^,]+,\\s*\"([^\"]+)\"");
+    const std::regex registry_pattern("register_(?:bridge|trace_seam)_(function|host_object|"
+                                      "promise_function)\\s*\\(\\s*[^,]+,\\s*"
+                                      "\"([^\"]+)\"");
 
     for (std::sregex_iterator it(source.begin(), source.end(), registry_pattern), end; it != end; ++it) {
         out.push_back({

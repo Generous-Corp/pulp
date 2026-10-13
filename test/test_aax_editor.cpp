@@ -4,6 +4,7 @@
 // SDK. The thin AAX_CEffectGUI shell they back is covered by the SDK-gated
 // suite.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/aax_editor.hpp>
@@ -365,6 +366,68 @@ TEST_CASE("AAX editor size plan lets a free-resize editor reflow",
     // A resizable editor reports the plugin's own floor, not its design size.
     CHECK(plan.min_width == 320);
     CHECK(plan.min_height == 240);
+}
+
+TEST_CASE("AAX editor size plan pins an authored design at its design box",
+          "[aax][view-bridge][resize]") {
+    // An imported 1320x860 design that opens in a 990x645 host frame: the
+    // host size is what GetViewSize reports, but the root must lay out in the
+    // authored box so paint scales it 0.75x into the frame. Pinning the
+    // preferred size instead paints the authored tree at scale 1 and shows
+    // only its top-left corner.
+    ViewSize hints;
+    hints.preferred_width = 990;
+    hints.preferred_height = 645;
+    hints.min_width = 792;
+    hints.min_height = 516;
+    hints.max_width = 2640;
+    hints.max_height = 1720;
+    hints.aspect_ratio = 1320.0 / 860.0;
+    hints.design_width = 1320;
+    hints.design_height = 860;
+
+    const auto plan = plan_editor_size(hints);
+    CHECK(plan.width == 990);
+    CHECK(plan.height == 645);
+    CHECK(plan.resizable);
+    CHECK(plan.pin_viewport);
+    CHECK(plan.design_width == 1320);
+    CHECK(plan.design_height == 860);
+    CHECK(plan.aspect_ratio == Catch::Approx(1320.0f / 860.0f));
+    // The same numbers every other adapter hands set_design_viewport.
+    CHECK(plan.design_width == design_viewport_width(hints));
+    CHECK(plan.design_height == design_viewport_height(hints));
+    CHECK(plan.pin_viewport == should_pin_design_viewport(hints));
+}
+
+TEST_CASE("AAX editor size plan falls back to the preferred box without an authored design",
+          "[aax][view-bridge][resize]") {
+    ViewSize hints;
+    hints.preferred_width = 800;
+    hints.preferred_height = 400;
+
+    const auto plan = plan_editor_size(hints);
+    CHECK(plan.pin_viewport);
+    CHECK(plan.design_width == 800);
+    CHECK(plan.design_height == 400);
+}
+
+TEST_CASE("AAX editor size plan leaves a free-resize editor without a design box",
+          "[aax][view-bridge][resize]") {
+    ViewSize hints;
+    hints.preferred_width = 640;
+    hints.preferred_height = 480;
+    hints.min_width = 320;
+    hints.min_height = 240;
+    hints.aspect_ratio = 0.0;
+    hints.design_width = 1280;
+    hints.design_height = 960;
+
+    const auto plan = plan_editor_size(hints);
+    CHECK_FALSE(plan.pin_viewport);
+    CHECK(plan.design_width == 0);
+    CHECK(plan.design_height == 0);
+    CHECK(plan.aspect_ratio == 0.0f);
 }
 
 TEST_CASE("AAX editor size plan never divides by a zero design size",
@@ -752,4 +815,14 @@ TEST_CASE("AAX mirror reports a write the manager refused", "[aax][view-bridge]"
         [](const char*, float) { return false; }};  // AAX_IParameter refused
 
     CHECK_FALSE(mirror.on_store_value_changed(kGain, 0.75f));
+}
+
+TEST_CASE("AAX host dimensions stay in logical points on Retina hosts",
+          "[aax][view-bridge][resize]") {
+    CHECK(aax_host_dimension(990, 1.0f) == 990);
+    CHECK(aax_host_dimension(990, 2.0f) == 990);
+    CHECK(aax_host_dimension(645, 2.0f) == 645);
+    CHECK(aax_host_dimension(101, 1.5f) == 101);
+    CHECK(aax_host_dimension(0, 2.0f) == 0);
+    CHECK(aax_host_dimension(990, 0.0f) == 990);
 }
