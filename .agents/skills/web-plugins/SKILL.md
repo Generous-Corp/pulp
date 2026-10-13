@@ -27,6 +27,21 @@ and WebCLAP steps run from nested working directories, so those two calls must
 use `bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`; a relative
 `tools/ci/` path resolves inside the demo tree and fails before compilation.
 
+## Web lanes fetch their inputs fresh, never from `$HOME`
+
+The WebCLAP deploy (`wclap-cloudflare.yml`) publishes a site, and the GPU-audio
+proof runs on shared self-hosted Macs where PR jobs also run. Neither may build
+from anything an earlier job could have written. choc is fetched at an exact
+commit (`CHOC_COMMIT`, the `pulp-webview-dnd-poc1` tag's commit) into
+`RUNNER_TEMP`, and the step checks the checked-out HEAD equals it. The Skia wasm
+slice is downloaded and checked against the manifest digest on every run, and
+wasi-sdk is unpacked fresh, also into `RUNNER_TEMP`. Do not reintroduce
+`[ -d "$HOME/choc-src" ] ||`, `if [ ! -d "$HOME/skia-wasm" ]` or an
+`actions/cache` restore of an extracted tree: a reused tree cannot be checked
+against its pin. The deploy job also disables ccache and re-fetches FetchContent
+sources (see the `ship` skill); `test_release_cache_isolation.py` holds it to
+that.
+
 ## wasm DSP builds get `pulp::simd` as inline scalar code
 
 Signal headers (`fir_filter.hpp`, `oversampling*.hpp`, `zero_latency_convolver.hpp`,
