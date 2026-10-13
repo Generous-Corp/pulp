@@ -21,9 +21,15 @@ void append_slot(std::vector<DesignSlot>& slots, DesignSlotKind kind,
 
 void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
     const auto route = nonempty_attribute(node, "pulpRouteId");
-    const auto scalar = !nonempty_attribute(node, "binding").empty()
+    auto scalar = !nonempty_attribute(node, "binding").empty()
         ? nonempty_attribute(node, "binding")
         : nonempty_attribute(node, "pulpParamKey");
+    if (scalar.empty()) {
+        const auto module = nonempty_attribute(node, "pulpBindingModule");
+        const auto param = nonempty_attribute(node, "pulpBindingParam");
+        if (!module.empty() || !param.empty())
+            scalar = module + "::" + param;
+    }
     const auto x = nonempty_attribute(node, "pulpParamKeyX");
     const auto y = nonempty_attribute(node, "pulpParamKeyY");
     if (!scalar.empty())

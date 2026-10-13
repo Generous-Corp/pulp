@@ -212,6 +212,15 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
         CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, "geometry.route", "geometry.gain"});
         CHECK(slots[1] == DesignSlot{DesignSlotKind::dynamic_text, "geometry.route", "geometry.display"});
     }
+
+    SECTION("module and parameter binding fallback remains typed") {
+        auto root = node("module-route");
+        root.attributes["pulpBindingModule"] = "synth";
+        root.attributes["pulpBindingParam"] = "cutoff";
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 1);
+        CHECK(slots.front() == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "synth::cutoff"});
+    }
 }
 
 TEST_CASE("slot classification mutation control preserves changed binding identity",
