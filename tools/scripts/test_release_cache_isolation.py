@@ -10,8 +10,11 @@ job that signs, notarizes, attests or publishes AND compiles must therefore:
 * run the "Isolate the build from shared caches" step before its first build
   step, pointing PULP_SHARED_FETCHCONTENT_SOURCE_DIR and
   PULP_FETCHCONTENT_BASE_DIR at a fresh RUNNER_TEMP root so every dependency is
-  re-fetched at its pin;
-* restore no actions/cache and mount no Namespace cache volume. Saving with
+  re-fetched at its pin, and PULP_CONFIGURE_CHECK_CACHE_DIR at an empty one,
+  because PulpConfigureCheckCache.cmake include()s the files it finds there;
+* restore no actions/cache, no Namespace cache action or volume, and no
+  setup-action cache (`with: cache:`, setup-emsdk `actions-cache-folder`,
+  setup-go unless `cache: false`). Saving with
   actions/cache/save is allowed: it only publishes what this trusted job
   produced, for other lanes to verify before use.
 
@@ -57,15 +60,28 @@ EXPECTED = {
     ("sign-and-release.yml", "build-and-sign-macos"),
     ("wclap-cloudflare.yml", "build-prove-deploy"),
 }
-SHARED_CACHE_ACTIONS = ("actions/cache", "setup-namespace-macos-cache")
+SHARED_CACHE_ACTIONS = ("actions/cache", "setup-namespace-macos-cache",
+                        "namespacelabs/nscloud-cache-action")
+# `with:` inputs through which a setup action restores its own cache
+# (setup-python/-node/-java `cache: pip`, setup-emsdk `actions-cache-folder`).
+CACHE_INPUTS = ("cache", "actions-cache-folder")
+# Actions that restore a cache unless told not to: `cache` must be false.
+CACHE_BY_DEFAULT = ("actions/setup-go@",)
 # Write-only: a job that saves a cache reads nothing back from it.
 WRITE_ONLY_CACHE_ACTIONS = ("actions/cache/save@",)
 
 
-def reads_shared_cache(uses: str) -> bool:
+def reads_shared_cache(uses: str, with_inputs: dict | None = None) -> bool:
     if uses.startswith(WRITE_ONLY_CACHE_ACTIONS):
         return False
-    return any(action in uses for action in SHARED_CACHE_ACTIONS)
+    if any(action in uses for action in SHARED_CACHE_ACTIONS):
+        return True
+    inputs = with_inputs or {}
+    for key in CACHE_INPUTS:
+        if key in inputs and str(inputs[key]).strip().lower() not in ("", "false"):
+            return True
+    return (uses.startswith(CACHE_BY_DEFAULT)
+            and str(inputs.get("cache", "")).strip().lower() != "false")
 
 
 def _load(path: Path) -> dict:
@@ -159,12 +175,48 @@ class SigningJobsReadNoSharedCache(unittest.TestCase):
                     for line in github_env.read_text(encoding="utf-8").splitlines()
                 )
                 for name in ("PULP_SHARED_FETCHCONTENT_SOURCE_DIR",
-                             "PULP_FETCHCONTENT_BASE_DIR"):
+                             "PULP_FETCHCONTENT_BASE_DIR",
+                             "PULP_CONFIGURE_CHECK_CACHE_DIR"):
                     self.assertIn(name, written)
                     target = Path(written[name])
                     self.assertTrue(target.is_relative_to(runner_temp), target)
                     self.assertTrue(target.is_dir(), target)
                     self.assertEqual(list(target.iterdir()), [], f"{target} is not fresh")
+
+    def test_nothing_else_points_configure_checks_at_a_shared_dir(self) -> None:
+        # The configure-check cache include()s CMake; only the isolation step
+        # may choose its directory, and nothing may re-enable a host path.
+        for key, job in self.jobs.items():
+            with self.subTest(job=key):
+                self.assertNotIn("PULP_CONFIGURE_CHECK_CACHE_DIR", job.get("env") or {})
+                for step in job.get("steps") or []:
+                    if step.get("name") == ISOLATION_STEP:
+                        continue
+                    text = _commands(step) + yaml.safe_dump(step.get("env") or {})
+                    self.assertNotIn("PULP_CONFIGURE_CHECK_CACHE_DIR", text,
+                                     f"step {step.get('name')!r} re-points the configure-check cache")
+
+    def test_isolation_step_clears_a_leftover_configure_check_file(self) -> None:
+        for key, job in self.jobs.items():
+            with self.subTest(job=key):
+                step = next(s for s in job["steps"] if s.get("name") == ISOLATION_STEP)
+                tmp = Path(tempfile.mkdtemp(prefix="isolation-cc-"))
+                runner_temp = tmp / "runner-temp"
+                planted = runner_temp / "pulp-isolated-1234-2" / "cc" / "SDL3-planted.cmake"
+                planted.parent.mkdir(parents=True)
+                planted.write_text("message(FATAL_ERROR planted)\n", encoding="utf-8")
+                github_env = tmp / "github-env"
+                github_env.write_text("", encoding="utf-8")
+                proc = subprocess.run(
+                    ["bash", "-c", step["run"]],
+                    env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tmp),
+                         "RUNNER_TEMP": str(runner_temp), "GITHUB_ENV": str(github_env),
+                         "GITHUB_RUN_ID": "1234", "GITHUB_RUN_ATTEMPT": "2"},
+                    capture_output=True, text=True, encoding="utf-8")
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertFalse(planted.exists(), "a planted configure-check file survived")
+                self.assertIn(f"PULP_CONFIGURE_CHECK_CACHE_DIR={planted.parent}",
+                              github_env.read_text(encoding="utf-8"))
 
     def test_isolation_step_clears_a_leftover_root(self) -> None:
         for key, job in self.jobs.items():
@@ -200,15 +252,39 @@ class SigningJobsReadNoSharedCache(unittest.TestCase):
         for key, job in self.jobs.items():
             with self.subTest(job=key):
                 for step in job.get("steps") or []:
-                    self.assertFalse(reads_shared_cache(step.get("uses") or ""),
+                    self.assertFalse(reads_shared_cache(step.get("uses") or "", step.get("with")),
                                      f"step {step.get('name')!r} restores a shared cache")
 
     def test_only_a_save_is_exempt(self) -> None:
         for uses in ("actions/cache@v4", "actions/cache/restore@v4",
-                     "./.github/actions/setup-namespace-macos-cache"):
+                     "./.github/actions/setup-namespace-macos-cache",
+                     "namespacelabs/nscloud-cache-action@v1"):
             self.assertTrue(reads_shared_cache(uses), uses)
         self.assertFalse(reads_shared_cache("actions/cache/save@v4"))
         self.assertFalse(reads_shared_cache("actions/checkout@v7"))
+
+    def test_a_setup_action_cache_input_is_refused(self) -> None:
+        for uses, inputs in (("actions/setup-python@v6", {"cache": "pip"}),
+                             ("actions/setup-node@v4", {"cache": "npm"}),
+                             ("mymindstorm/setup-emsdk@v14", {"actions-cache-folder": "emsdk"}),
+                             ("actions/setup-go@v5", {}),
+                             ("actions/setup-go@v5", {"cache": True})):
+            with self.subTest(uses=uses, inputs=inputs):
+                self.assertTrue(reads_shared_cache(uses, inputs))
+        for uses, inputs in (("actions/setup-python@v6", {"python-version": "3.12"}),
+                             ("actions/setup-node@v4", {"cache": ""}),
+                             ("actions/setup-go@v5", {"cache": False})):
+            with self.subTest(uses=uses, inputs=inputs):
+                self.assertFalse(reads_shared_cache(uses, inputs))
+
+    def test_a_cache_input_in_a_real_signing_job_is_caught(self) -> None:
+        # Control on the real detector path: plant `cache: pip` on a step of a
+        # job the detector found, and the job-level check must refuse it.
+        key = ("wclap-cloudflare.yml", "build-prove-deploy")
+        job = self.jobs[key]
+        node = next(s for s in job["steps"] if (s.get("uses") or "").startswith("actions/setup-node@"))
+        self.assertFalse(reads_shared_cache(node["uses"], node.get("with")))
+        self.assertTrue(reads_shared_cache(node["uses"], {**(node.get("with") or {}), "cache": "npm"}))
 
 
 class ThirdPartyClonesArePinned(unittest.TestCase):

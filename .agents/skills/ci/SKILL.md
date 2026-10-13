@@ -5024,13 +5024,21 @@ bisectable.
   p50 (max 115) for 0.4-1.5 min of work. Do not index `smoke-cli`'s `runs-on`
   back into `map`.
 - **A signed or published build reads no shared cache.** The self-hosted VMs
-  mount the host ccache and FetchContent source cache writable, and PR gate VMs
-  run PR code with the same mounts, so a release that read them could link an
-  object or source any PR planted. Every job that signs, notarizes, attests or
-  deploys and also compiles sets job-level `CCACHE_DISABLE: "1"`, runs
-  "Isolate the build from shared caches" (fresh `RUNNER_TEMP` root for
-  `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` / `PULP_FETCHCONTENT_BASE_DIR`) before
-  its first build step, and uses no `actions/cache` or Namespace cache volume.
+  mount the host ccache and configure-check cache writable (tartci
+  `runner.sh`, `ccache:` and `configure-checks:`), and PR gate VMs run PR code
+  with the same mounts. The FetchContent seed is mounted read-only, but host
+  jobs write it. A release that read any of these could link an object or
+  source a PR planted. The configure-check cache is the sharpest of them:
+  `PulpConfigureCheckCache.cmake` `include()`s its files (SDL3 always calls it
+  on Apple), so a planted file runs CMake inside the release configure. Every
+  job that signs, notarizes, attests or deploys and also compiles sets
+  job-level `CCACHE_DISABLE: "1"` and runs "Isolate the build from shared
+  caches" before its first build step. That step uses a fresh `RUNNER_TEMP`
+  root for `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` / `PULP_FETCHCONTENT_BASE_DIR`
+  / `PULP_CONFIGURE_CHECK_CACHE_DIR`, and no other step may re-point the last.
+  These jobs also restore no `actions/cache`, no Namespace cache action or
+  volume, and no setup-action cache (`with: cache:`, setup-emsdk
+  `actions-cache-folder`, setup-go without `cache: false`).
   Do not "speed up" a release by re-adding ccache; the cold compile is the
   accepted price. `test_release_cache_isolation.py` detects such jobs by their
   signing/deploy capability, so a new release job is held to it too. Third-party

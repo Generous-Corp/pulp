@@ -74,9 +74,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The host's FetchContent source cache is shared with PR jobs on a
-      # self-hosted pool, so CMake fetches every dependency at its pin into a
-      # fresh job-local root. Toolchains, choc and the Skia slice below also
+      # The FetchContent seed and the configure-check cache are shared with PR
+      # jobs on a self-hosted pool, so CMake fetches every dependency at its
+      # pin into a fresh job-local root and include()s no cached
+      # configure-check file. Toolchains, choc and the Skia slice below also
       # land under RUNNER_TEMP, never a $HOME directory an earlier job could
       # have left behind. tools/scripts/test_release_cache_isolation.py holds
       # every signing or publishing job to this step and to CCACHE_DISABLE.
@@ -92,9 +93,12 @@ jobs:
           root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -m "$root")"; fi
           rm -rf "$root"
-          mkdir -p "$root/src" "$root/fc"
+          mkdir -p "$root/src" "$root/fc" "$root/cc"
           echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src" >> "$GITHUB_ENV"
           echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc" >> "$GITHUB_ENV"
+          # PulpConfigureCheckCache.cmake include()s the files it finds here,
+          # so a shared directory would run CMake an earlier job wrote.
+          echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc" >> "$GITHUB_ENV"
 
       - name: Resolve WebCLAP relevance
         id: relevance

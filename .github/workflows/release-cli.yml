@@ -445,10 +445,11 @@ jobs:
             fi
           done
 
-      # The host's FetchContent source cache is mounted writable into PR jobs
-      # too, so this job points setup.sh and CMake at a fresh job-local root
-      # and re-fetches every dependency at its pin. The Windows subbuild base
-      # moves with it. tools/scripts/test_release_cache_isolation.py holds every
+      # The FetchContent seed and the configure-check cache on a self-hosted
+      # host can be written by earlier jobs, PR gate jobs included, so this job
+      # points setup.sh and CMake at a fresh job-local root: every dependency
+      # is re-fetched at its pin, and no cached configure-check file is
+      # include()d. The Windows subbuild base moves with it. tools/scripts/test_release_cache_isolation.py holds every
       # signing or publishing job to this step and to CCACHE_DISABLE.
       - name: Isolate the build from shared caches
         shell: bash
@@ -462,9 +463,12 @@ jobs:
           root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -m "$root")"; fi
           rm -rf "$root"
-          mkdir -p "$root/src" "$root/fc"
+          mkdir -p "$root/src" "$root/fc" "$root/cc"
           echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src" >> "$GITHUB_ENV"
           echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc" >> "$GITHUB_ENV"
+          # PulpConfigureCheckCache.cmake include()s the files it finds here,
+          # so a shared directory would run CMake an earlier job wrote.
+          echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc" >> "$GITHUB_ENV"
 
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
