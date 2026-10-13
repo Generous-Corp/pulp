@@ -261,7 +261,10 @@ future repin, except archives listed in `PROVENANCE_EXCEPTIONS` in
 The one entry is the chrome/m153 win-arm64 archive pinned by Pulp PR 10170
 (sha256 `18e57481…a9c7`): its provenance file is known broken, its contents were
 verified by archive comparison, and it is Skia 37c5ad6a rather than the release
-lock's 8b8c3872. For that archive the incident names the exception instead of
+lock's 8b8c3872. The same is true of the old pin: both arm64 uploads built
+37c5ad6a, per `built_skia` in the resolve-skia logs of skia-builder runs
+37596862943 and 38178800952 (provenance finding:
+https://github.com/danielraffel/skia-builder/pull/32#issuecomment-6135800920). For that archive the incident names the exception instead of
 the rule, so it never tells an agent to undo the repin.
 
 **The incident body is bounded.** GitHub rejects an issue body over 65,536

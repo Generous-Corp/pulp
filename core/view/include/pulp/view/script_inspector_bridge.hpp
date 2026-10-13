@@ -2,6 +2,8 @@
 // inspector and the single-threaded scripted-UI JS engine.
 #pragma once
 
+#include <pulp/view/script_inspector_port.hpp>
+
 #include <chrono>
 #include <condition_variable>
 #include <functional>
@@ -32,8 +34,8 @@ class ScriptEngine;
 // engine) exposes no source-line breakpoint / stepping / local-scope API, so
 // capabilities() reports can_break/can_step/can_inspect_locals = false. It is
 // an honest runtime inspector: evaluate, capability reporting, and interrupt.
-class ScriptInspectorBridge {
-public:
+class ScriptInspectorBridge final : public ScriptInspectorPort {
+  public:
     struct EvalResult {
         bool ok = false;          ///< evaluation completed without throwing
         bool timed_out = false;   ///< the request exceeded its deadline
@@ -58,7 +60,7 @@ public:
     static constexpr std::chrono::milliseconds kDefaultTimeout{2000};
 
     ScriptInspectorBridge() = default;
-    ~ScriptInspectorBridge();
+    ~ScriptInspectorBridge() override;
 
     ScriptInspectorBridge(const ScriptInspectorBridge&) = delete;
     ScriptInspectorBridge& operator=(const ScriptInspectorBridge&) = delete;
@@ -66,11 +68,11 @@ public:
     // [engine thread] Attach the engine and capture its capability snapshot.
     // Passing a new engine replaces the previous one; the calling thread is
     // recorded as the engine thread for inline-eval detection.
-    void attach(ScriptEngine* engine);
+    void attach(ScriptEngine* engine) override;
 
     // [engine thread] Detach the engine. Queued work fails with `detached`;
     // running work is interrupted and detach waits for engine quiescence.
-    void detach();
+    void detach() override;
 
     // [engine thread] Install the host-owned realm reset owed after evaluated
     // code has stopped. A completed evaluation records the debt; the host
@@ -78,9 +80,7 @@ public:
     // run_pending_post_evaluation_reset(). The reset does NOT run inside the
     // request, so an evaluation leaves the caller's view of the realm intact
     // until the host returns to its run loop.
-    using EvaluationDeadline = std::chrono::steady_clock::time_point;
-    void set_post_evaluation_reset(
-        std::function<std::string(EvaluationDeadline)> reset);
+    void set_post_evaluation_reset(std::function<std::string(EvaluationDeadline)> reset) override;
 
     // [any thread] Whether a completed evaluation still owes a realm reset.
     bool post_evaluation_reset_pending() const;
@@ -90,7 +90,7 @@ public:
     // failure text, empty on success. The host MUST call this before any frame
     // pump that could execute what evaluated code left behind, and again at
     // teardown so a caller that never pumps cannot drop a reset failure.
-    std::string run_pending_post_evaluation_reset();
+    std::string run_pending_post_evaluation_reset() override;
 
     // [any thread] Evaluate `code`, marshaled to the engine thread. Blocks up
     // to `timeout`. On timeout the running evaluation is interrupted (if the
@@ -108,7 +108,7 @@ public:
 
     // [engine thread] Drain the pending evaluate request, if any. Returns true
     // when a request was serviced. Host calls this once per frame.
-    bool pump();
+    bool pump() override;
 
     // [any thread] Whether an evaluation is currently queued or executing.
     bool is_busy() const;
@@ -176,5 +176,16 @@ private:
     std::shared_ptr<Request> running_;  // engine remains attached until this clears
     std::function<std::string(EvaluationDeadline)> post_evaluation_reset_;
 };
+
+class ScriptedUiSession;
+
+/// Make every ScriptedUiSession constructed afterwards carry a
+/// ScriptInspectorBridge as its inspector port. Process-wide and idempotent; a
+/// host that serves Runtime.* calls installs it before building its UI.
+void install_script_inspector_bridge() noexcept;
+
+/// The session's ScriptInspectorBridge, or nullptr when the session was built
+/// without one (install_script_inspector_bridge() had not run).
+ScriptInspectorBridge* script_inspector(ScriptedUiSession& session) noexcept;
 
 } // namespace pulp::view

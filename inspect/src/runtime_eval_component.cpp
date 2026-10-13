@@ -103,8 +103,10 @@ private:
             return;
         if (visit_session_) {
             visit_session_([&](view::ScriptedUiSession* session) {
-                if (session)
-                    visitor(*session->script_inspector());
+                if (!session)
+                    return;
+                if (auto* bridge = view::script_inspector(*session))
+                    visitor(*bridge);
             });
             return;
         }

@@ -2751,8 +2751,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/skia-gpu-build/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "1b5c1713e9a8439a26028443dff12cc368a9b250",
-          "object_id": "3e836d06c5c22cdfcd61de2071d12536fb610007",
+          "revision": "8ab88285392cf013a512fea724aa88a95d8011af",
+          "object_id": "daad860b50261db15cdcc67738eedf7e7b0ca590",
           "object_type": "blob"
         },
         {
@@ -3058,8 +3058,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "0bf8fdd33bf9319300d4bd8ecd51fd5e0eb6faef",
-          "object_id": "79391689c7bd8648d195157ba91936238214d4d7",
+          "revision": "1208b80bc9ce1688174023430ac4fa1bfa639261",
+          "object_id": "cd20c87273562f32d50517fbac5a61d12c4d0c7a",
           "object_type": "blob"
         },
         {

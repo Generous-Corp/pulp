@@ -357,6 +357,73 @@ class IncidentBodyIsBounded(unittest.TestCase):
         self.assertIn("diagnosis truncated", body)
 
 
+class FoldedTagsAreNotReannounced(unittest.TestCase):
+    """Once enough old tags exist, the oldest fold into one line. A folded tag
+    must still count as already reported, or every sweep would comment on it
+    again — the spam the comment-on-join rule must never produce."""
+
+    def folding_report(self) -> list[tuple[str, str]]:
+        # One-line summaries keep up to 240 chars of an entry's first line, so
+        # long first lines make the one-liners alone overflow the cap.
+        reason = "still unpublished after 3 re-dispatches; failing leg(s): " + "x" * 300
+        return [(f"v2.{999 - i}.0", f"{reason}\n  - detail {i}") for i in range(400)]
+
+    def test_the_oldest_tags_really_fold_and_every_tag_is_still_named(self) -> None:
+        report = self.folding_report()
+        body = rr.incident_body(report)
+        folded = [l for l in body.splitlines() if l.startswith("- older tags folded")]
+        self.assertEqual(len(folded), 1, "fixture must be large enough to fold")
+        self.assertIn(f"`{report[-1][0]}`", folded[0], "the oldest tag is folded")
+        self.assertNotIn(f"- `{report[-1][0]}` —", body)
+        self.assertLessEqual(len(body), rr.INCIDENT_BODY_LIMIT)
+        for tag, _ in report:
+            with self.subTest(tag=tag):
+                self.assertIn(f"`{tag}`", body)
+
+    def test_a_second_sweep_over_a_folded_body_reports_nothing_new(self) -> None:
+        report = self.folding_report()
+        first = rr.incident_body(report)
+        self.assertEqual(rr.newly_reported(first, report), [])
+        # Next sweep: one genuinely new tag joins; only it is announced.
+        second = [("v3.0.0", "new failure")] + report
+        self.assertEqual(rr.newly_reported(first, second), ["v3.0.0"])
+        self.assertEqual(rr.newly_reported(rr.incident_body(second), second), [])
+
+    def test_two_sweeps_through_sync_incident_comment_once(self) -> None:
+        """End to end through sync_incident: the second sweep posts no comment."""
+        import subprocess
+
+        report = self.folding_report()
+        state = {"body": ""}
+        comments: list[list[str]] = []
+
+        def fake_gh_json(args):
+            if args[:2] == ["issue", "list"]:
+                return [{"number": 1, "title": rr.INCIDENT_TITLE, "state": "OPEN"}]
+            if args[:2] == ["issue", "view"]:
+                return {"body": state["body"]}
+            raise AssertionError(args)
+
+        def fake_run(cmd, *a, **kw):
+            if cmd[:3] == ["gh", "issue", "edit"]:
+                state["body"] = cmd[cmd.index("--body") + 1]
+            elif cmd[:3] == ["gh", "issue", "comment"]:
+                comments.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        saved = (rr.gh_json, rr.subprocess.run)
+        try:
+            rr.gh_json, rr.subprocess.run = fake_gh_json, fake_run
+            with contextlib.redirect_stdout(io.StringIO()):
+                rr.sync_incident("example/repo", report, dry_run=False)
+                self.assertEqual(len(comments), 1, "first sweep announces the tags once")
+                rr.sync_incident("example/repo", report, dry_run=False)
+        finally:
+            rr.gh_json, rr.subprocess.run = saved
+        self.assertIn("- older tags folded", state["body"])
+        self.assertEqual(len(comments), 1, "second sweep over the same tags must not comment")
+
+
 class AcceptedArchiveIsNotUndone(unittest.TestCase):
     """The m153 win-arm64 archive repinned by PR 10170 has a broken provenance
     file but was accepted on archive comparison; the alert must not tell an
@@ -366,7 +433,9 @@ class AcceptedArchiveIsNotUndone(unittest.TestCase):
         d = DigestMismatch().diag(manifest_text=MANIFEST.replace(PINNED, OBSERVED))
         text = "\n".join(d.render())
         for needle in ("PR 10170", OBSERVED, "known broken", "archive comparison",
-                       "37c5ad6a", "8b8c3872", "do not revert"):
+                       "37c5ad6a", "8b8c3872", "do not revert",
+                       "both arm64 uploads built 37c5ad6a", "37596862943", "38178800952",
+                       "https://github.com/danielraffel/skia-builder/pull/32#issuecomment-6135800920"):
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
         self.assertNotIn("Do not repin to an archive whose provenance is broken", text)

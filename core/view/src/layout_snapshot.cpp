@@ -1,7 +1,7 @@
 #include <pulp/view/layout_snapshot.hpp>
 
 #include <pulp/view/buttons.hpp>
-#include <pulp/view/inspector.hpp>
+#include <pulp/view/inspector_facts.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -52,7 +52,7 @@ std::string snapshot_kind(const View& view) {
     if (dynamic_cast<const TextEditor*>(&view)) return "TextEditor";
     if (dynamic_cast<const TextButton*>(&view)) return "TextButton";
     if (dynamic_cast<const HyperlinkButton*>(&view)) return "HyperlinkButton";
-    return ViewInspector::type_name(view);
+    return view_type_name(view);
 }
 
 void add_text_box(choc::value::Value& boxes,

@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.958.0
+    VERSION 0.962.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -586,6 +586,15 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
         set_tests_properties(pulp.vellum-closure-gate PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
+        add_test(NAME pulp.vellum-view-core-pulp-kept
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_view_core_pulp_kept_check.py"
+                --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
     else()
         # Register the gate as an explicit skip so a CPU-only configuration
         # reports it as not run rather than dropping it silently.
@@ -600,6 +609,12 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             COMMAND "${Python3_EXECUTABLE}" -c
                 "import sys; print('SKIP: Vellum closure gate needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
         set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-view-core-pulp-kept
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum view-core Pulp-kept check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
             SKIP_RETURN_CODE 77
             LABELS "pr")
     endif()
@@ -626,7 +641,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json"
             --break "perl -0pi -e 's/pulp::view-audio/pulp::audio/'"
             --no-build
-            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allow pulp::view-audio")
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allowlist ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_allowlist_fixture.json")
     set_tests_properties(pulp.vellum-closure-edge-negative PROPERTIES
         RESOURCE_LOCK pulp-source-git-index
         LABELS "pr")

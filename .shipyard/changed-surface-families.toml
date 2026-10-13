@@ -5033,6 +5033,36 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-d52662541e54"
+paths = ["tools/scripts/test_vellum_view_core_pulp_kept_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "vellum-view-core-pulp-kept-negative-contract",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-ae43167caa31"
 paths = ["tools/scripts/test_vellum_watch_preflight.py"]
 tests = [
@@ -5567,6 +5597,36 @@ tests = [
   "pulp.vellum-closure-boundary",
   "pulp.vellum-closure-gate",
   "pulp.vellum-closure-policy-selftest",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-db3af3b79581"
+paths = ["tools/scripts/vellum_view_core_pulp_kept_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "pulp.vellum-view-core-pulp-kept",
   "reuse-policy-replay-selftest",
 ]
 build_targets = ["pulp-cli"]
@@ -6379,6 +6439,7 @@ paths = [
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_inheritance_ledger_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
+  "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
   "tools/scripts/test_vellum_watch_preflight.py",
   "tools/scripts/test_vellum_workflow_dispatch.py",
   "tools/scripts/test_verify_cobertura_xml.py",
@@ -6414,6 +6475,7 @@ paths = [
   "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",
@@ -6923,6 +6985,7 @@ paths = [
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_inheritance_ledger_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
+  "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
   "tools/scripts/test_vellum_watch_preflight.py",
   "tools/scripts/test_vellum_workflow_dispatch.py",
   "tools/scripts/test_verify_cobertura_xml.py",
@@ -6958,6 +7021,7 @@ paths = [
   "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",

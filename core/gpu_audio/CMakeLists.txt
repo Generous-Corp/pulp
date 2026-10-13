@@ -77,8 +77,7 @@ set(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE FALSE CACHE INTERNAL
 set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO FALSE CACHE INTERNAL
     "Pulp GPU-audio includes the Dawn shared-I/O provider" FORCE)
 
-if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
-   AND EXISTS "${DAWN_LIBRARY}")
+if(APPLE AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
     set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO TRUE CACHE INTERNAL
         "Pulp GPU-audio includes the Dawn shared-I/O provider" FORCE)
     # D15 is deliberately an opt-in installed-prefix integration.  The Vellum

@@ -885,6 +885,42 @@ jobs:
           # .git directory before this cheap preamble could report.
           fetch-depth: 1
           lfs: false
+      # Backstop for a HOLD that did not take its head out of the queue: fail
+      # the group, before any VM, when a queued pull request's latest trusted
+      # verdict on the head it lands is HOLD. A failed classify makes the
+      # macos-merge-group bootstrap fail `macos` closed. The token reaches only
+      # the protected base branch's copy of the check, never code from a queue
+      # entry. It fails closed: a base it cannot fetch, or input the check
+      # cannot read, fails the group (a re-run retries). Only a base that does
+      # not carry the check yet passes, with a notice.
+      - name: Refuse a merge group whose pull request is held
+        if: ${{ github.event_name == 'merge_group' }}
+        env:
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          title="merge-group HOLD check"
+          fix="re-run this merge group's classify job, or re-queue its pull requests"
+          if [[ "$MERGE_GROUP_BASE_REF" != refs/heads/* ]]; then
+            echo "::error title=$title::base ref '$MERGE_GROUP_BASE_REF' is not a branch, so the protected copy of the check cannot be read. Fix: $fix"
+            exit 1
+          fi
+          if ! git fetch --no-tags --depth=1 origin "$MERGE_GROUP_BASE_REF"; then
+            echo "::error title=$title::could not fetch $MERGE_GROUP_BASE_REF to read the protected copy of the check. Fix: $fix"
+            exit 1
+          fi
+          if ! git cat-file -e "FETCH_HEAD:tools/ci/merge_group_hold_check.py" 2>/dev/null; then
+            echo "::notice title=$title::$MERGE_GROUP_BASE_REF has no HOLD check yet; not checked"
+            exit 0
+          fi
+          hold_check=$(mktemp)
+          trap 'rm -f "$hold_check"' EXIT
+          git show "FETCH_HEAD:tools/ci/merge_group_hold_check.py" >"$hold_check"
+          GH_TOKEN="${{ github.token }}" python3 "$hold_check" \
+            --repo "$GITHUB_REPOSITORY" \
+            --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for

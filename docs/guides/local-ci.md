@@ -789,7 +789,7 @@ and fails before the hour-long Debug build if neither exists.
 shipyard run --targets mac                # validate current branch on the opt-in local lane
 shipyard pr                               # create/track the PR and arm auto-merge; required checks decide
 shipyard cloud run build <branch>         # dispatch to Namespace
-shipyard rescue <PR>                      # recover a wedged PR
+shipyard rescue <PR>                      # recover a wedged PR's queued runs (dispatches a branch-tip replacement; re-run a required pull_request run instead)
 shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges
 shipyard update --check --json            # report installed vs latest
 ```
@@ -3368,6 +3368,26 @@ both wait on classify; a failing in-job classifier fails closed.
 `tools/ci/test_macos_merge_group_bootstrap.py` runs the script against stub
 results.
 
+On a merge group, the classify job first runs the protected base branch's copy
+of `tools/ci/merge_group_hold_check.py` (fetched from
+`merge_group.base_ref`; the token never reaches a queue entry's code). It reads the group's pull requests from
+the first-parent chain of queue merge commits (each lands its second parent),
+and fails when one's latest trusted verdict on that head is
+`verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. "Trusted" means the
+fleet App or an OWNER, MEMBER or COLLABORATOR who is not the author,
+Shipyard's rule, except that the author's own HOLD counts (never their
+APPROVE). The chain is read one commit at a time and comments and reviews are
+paginated, so a large group or a long pull request is read in full. The failure names the pull request, the HOLD's URL and the
+fix, and a failed classify fails `macos` closed through the bootstrap above,
+before any VM. It is the backstop for a HOLD on a head that was already armed
+or queued, which Shipyard's `verdict-hold-hook` otherwise dequeues or disarms
+when the HOLD posts. It fails closed: anything it cannot read (a commit on
+the chain, a pull request's comments or reviews, a missing token, a failed
+fetch of the base branch) fails the group with an error naming the pull request
+or group, the error and the fix (re-run the classify job, or re-queue). A
+stalled queue is the deliberate lesser harm. Only a base branch that does not
+carry the check yet passes, with a notice.
+
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
 stdin script, so a wedged checkout volume can freeze the routing probe even
@@ -4118,7 +4138,7 @@ The next PR's `resolve-provider` keeps the macOS leg on the local selector.
 gh run view <run-id> --log --repo Generous-Corp/pulp | grep "macOS route"
 ```
 
-**Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in. With Plan B in place, manual rescue should be needed much less frequently.
+**Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`). With Plan B in place, manual rescue should be needed much less frequently.
 
 ### `pulp overflow` — operator surface
 
@@ -4311,7 +4331,9 @@ commands are discoverable from `shipyard --help` and replace the legacy
 ```bash
 # Recover one PR whose required macOS check is wedged or stale
 shipyard rescue <PR>                      # cancel queued runs + redispatch to github-hosted
-shipyard rescue <PR> --rerun-failed       # also re-arm cancelled/failed runs
+shipyard rescue <PR> --rerun-failed       # also dispatch branch-tip replacements of cancelled/failed runs
+                                          # (not reruns: for a required pull_request run, use
+                                          # `ghapp run rerun <run> --failed` instead)
 shipyard rescue <PR> --dry-run            # preview without acting
 shipyard rescue --all-stuck               # repo-wide stuck-run sweep
 shipyard rescue <PR> --to github-hosted   # explicit destination provider
@@ -4804,7 +4826,8 @@ around real CI, coverage, sanitizer, or review failures.
 Use `shipyard rescue` when a PR is otherwise ready but blocked by queued,
 cancelled, or failed runner contexts caused by a self-hosted-runner wedge. It is
 the PR-side recovery path and avoids the old failure mode where cancelling
-queued runs left required checks stuck as `failure`.
+queued runs left required checks stuck as `failure`. For a required check, mind
+what it starts (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 
 Use `shipyard runner watch --kill-hung-workers` on the runner host itself. It
 auto-cancels stale queued runs and kills hung `Runner.Worker` processes through

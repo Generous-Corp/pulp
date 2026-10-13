@@ -1508,13 +1508,17 @@ class BaseInventoryTest(unittest.TestCase):
         # (a hash-pinned release for a standalone app's updater) refuses to
         # download under FETCHCONTENT_FULLY_DISCONNECTED; its behavior is
         # exercised by the cmake-pulp-add-sparkle fixture. No in-tree target
-        # calls pulp_add_sparkle() without a DIST_DIR either.
+        # calls pulp_add_sparkle() without a DIST_DIR either. The digest-pinned
+        # wgpu-native runtime (PulpWgpuNative.cmake) downloads only on a cache
+        # miss and refuses under FETCHCONTENT_FULLY_DISCONNECTED; the
+        # cmake-wgpu-native-pin fixture exercises that refusal.
         listed = subprocess.run(["git", "-C", str(runner.REPO_ROOT), "grep", "-l", "file(DOWNLOAD",
                                  "--", "*.cmake", "*CMakeLists.txt"],
                                 capture_output=True, text=True)
         self.assertEqual(
             sorted(listed.stdout.split()),
-            ["tools/cmake/PulpSparkle.cmake", "tools/cmake/PulpWgpuUniversal.cmake"],
+            ["tools/cmake/PulpSparkle.cmake", "tools/cmake/PulpWgpuNative.cmake",
+             "tools/cmake/PulpWgpuUniversal.cmake"],
             "a new raw file(DOWNLOAD) can reach the network during a bounded run's "
             "disconnected base configure: fetch it through FetchContent instead, or gate "
             "it like PulpWgpuUniversal.cmake and make base_projection refuse that "
@@ -1528,6 +1532,13 @@ class BaseInventoryTest(unittest.TestCase):
         self.assertNotEqual(refusal, -1, "PulpSparkle.cmake lost its disconnected refusal")
         self.assertLess(refusal, sparkle.index("file(DOWNLOAD"),
                         "the disconnected refusal must run before the download")
+        wgpu = (runner.REPO_ROOT / "tools/cmake/PulpWgpuNative.cmake").read_text(encoding="utf-8")
+        wgpu_refusal = wgpu.find("if(FETCHCONTENT_FULLY_DISCONNECTED)")
+        self.assertNotEqual(wgpu_refusal, -1, "PulpWgpuNative.cmake lost its disconnected refusal")
+        self.assertLess(wgpu_refusal, wgpu.index("file(DOWNLOAD"),
+                        "the disconnected refusal must run before the download")
+        wgpu_fixture = (runner.REPO_ROOT / "test/cmake/test_wgpu_native_pin.cmake").read_text(encoding="utf-8")
+        self.assertIn("disconnected configure refuses to download", wgpu_fixture)
         fixture = (runner.REPO_ROOT / "test/cmake/test_pulp_add_sparkle.cmake").read_text()
         for case in ("disconnected_refused", "disconnected_dist_dir_ok", "disconnected_archive_ok"):
             self.assertIn(f"_fixture({case}", fixture)

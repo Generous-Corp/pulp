@@ -5,7 +5,7 @@ Compared against the refactor plan in `planning/2026-10-04-design-import-refacto
 | Reference | Evidence at studied commit | Transfer decision |
 |---|---|---|
 | Octane `322162cb79e72a322783d8765c97ec8ab0947bbe` | `packages/octane/src/compiler/compile-universal.js` lowers child blocks and preserves keyed identity; its benchmark corpus measures compiled templates and keyed updates. | Adopted the identity and block-planning idea, using Pulp's existing `stable_anchor_id` rather than introducing a second key field or compiler. |
-| Inferno `5c343f5f3` | `packages/inferno-create-element/src/patching.ts` and `patchKeyedChildren.spec.ts` keep keyed and non-keyed paths explicit; tests cover reorder, insert, remove, and mixed lists. | Adopted a fail-closed split: unique anchors use keyed matching; missing or duplicate anchors use a conservative positional plan and surface `ambiguous_keys`. |
+| Inferno `5c343f5f3` | `packages/inferno-create-element/src/patching.ts` and `patchKeyedChildren.spec.ts` keep keyed and non-keyed paths explicit; tests cover reorder, insert, remove, and mixed lists. | Adopted a fail-closed split: unique anchors use keyed matching; missing or duplicate anchors report `ambiguous_keys` and replace the sibling set wholesale rather than reusing anything by position. |
 | React Native Skia `e72c9647a` | `packages/skia/src/sksg/Reconciler.ts` turns commits into Skia pictures; `RNSkPictureRenderer::applyUpdatesTo` applies recorder values without rebuilding the picture. | Deferred retained picture ownership. Pulp's native materializer does not yet expose a safe recorder/picture lifetime seam, so adding one here would exceed a safe importer slice. |
 
 ## Adopted slice
