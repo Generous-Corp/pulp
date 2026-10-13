@@ -442,10 +442,12 @@ staged the dylib still has it in each bundle until that target relinks;
 rather than trusting an old one. Gotcha: whether Skia supplies Dawn is ONE
 recorded decision, the cache variable `PULP_SKIA_PROVIDES_DAWN` that FindSkia
 sets through `tools/cmake/PulpSkiaDawnProvider.cmake`; choose wgpu-native with
-`pulp_gpu_links_wgpu_native()`. Never re-derive it from `DAWN_LIBRARY`: that is a
+`pulp_gpu_links_wgpu_native()`, and take the archive path from
+`PULP_SKIA_DAWN_ARCHIVE`. Never re-derive either from `DAWN_LIBRARY`: that is a
 normal variable a nested scope may not see (an `EXISTS` test then links
 wgpu-native beside Skia's Dawn), and a NOTFOUND-sentinel compare treats a stale
-path as a present Dawn. `cmake-pulp-skia-dawn-provider` pins both. The rpath
+path as a present Dawn. `cmake-pulp-skia-dawn-provider` scans every CMake file
+for such a condition. The rpath
 guidance below still applies
 to a no-Skia (wgpu-native fallback) build and to any other bundled runtime dylib
 (V8).
