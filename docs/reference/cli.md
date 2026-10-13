@@ -3114,6 +3114,8 @@ pulp add dr-libs --no-cmake                        # metadata only, skip CMake w
 
 Performs license checking, platform compatibility analysis, overlap detection, CMake generation (`cmake/pulp-packages.cmake`), and updates `packages.lock.json`, `DEPENDENCIES.md`, and `NOTICE.md`. Restricted licenses require `--accept-license <SPDX>` after review. `--license-override commercial` is a project-owned assertion that separate commercial terms cover a package the registry policy would otherwise block.
 
+Before writing anything, `pulp add` pins the package: the registry tag is resolved to a full commit and the lock records that `commit`, an `integrity` (`sha256-` digest of `git archive --format=tar <commit>` with `core.autocrlf=false`, `core.eol=lf`, `tar.umask=0002`), the `license`, and any `license_acceptance`. A package that cannot be pinned is not added. The generated CMake fetches by that commit and stops the configure on an integrity mismatch. See [the package guide](../guides/packages/README.md#lock-file) for the exact method.
+
 ### remove
 
 **Status**: usable
@@ -3161,9 +3163,11 @@ the default text output.
 Check for and apply package updates.
 
 ```bash
-pulp update            # dry-run: show available updates
-pulp update --apply    # apply updates and regenerate CMake
+pulp update            # dry-run: show available updates and unpinned lock entries
+pulp update --apply    # re-pin (new commit + integrity) and regenerate CMake
 ```
+
+A lock entry written before packages were pinned (registry tag in `commit`, empty `integrity`) counts as needing an update. A package that cannot be re-pinned keeps its entry and the command exits 1.
 
 ### suggest
 
