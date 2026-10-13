@@ -1262,6 +1262,12 @@ def main(argv: list[str]) -> int:
         return SKIP_EXIT
     current = build_list(inventory, root, build_dir)
     off_profile = outside_gate_profile_build(build_dir, inventory, root)
+    # A stale configure blocks writes, but --check must still judge the
+    # inventory against the current CTest evidence. Returning SKIP (77) here
+    # would hide a real compiled-entry deletion from the required drift gate.
+    if not a.write:
+        off_profile = [reason for reason in off_profile
+                       if "cause_class=STALE_BUILD" not in reason]
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
                         os.path.basename(t["command"][0]).startswith(INTERPRETERS))
     if a.write and off_profile:

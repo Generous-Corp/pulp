@@ -1015,6 +1015,23 @@ class GateProfileTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
 
+    def test_a_stale_build_check_reports_compiled_drift_instead_of_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.cache(repo, PULP_BUILD_EXAMPLES="OFF", CMAKE_BUILD_TYPE="Release",
+                       PULP_SANITIZER="", PULP_HAS_VST3="TRUE", PULP_HAS_AUSDK="TRUE")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            compiled_evidence(repo, declare_b=True)
+            cache = repo.build / "CMakeCache.txt"
+            old = cache.stat().st_mtime - 10
+            os.utime(cache, (old, old))
+            source = repo.root / "test/test_b.cpp"
+            os.utime(source, (old + 20, old + 20))
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
+            self.assertNotIn("SKIPPED the compiled entries", proc.stdout)
+
     def test_an_off_profile_build_skips_the_compiled_half_by_name(self) -> None:
         for values, reason in ((dict(PULP_BUILD_EXAMPLES="ON"), "PULP_BUILD_EXAMPLES=ON"),
                                (dict(PULP_SANITIZER="address", CMAKE_BUILD_TYPE="Debug"), "PULP_SANITIZER=address"),
