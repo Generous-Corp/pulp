@@ -7067,6 +7067,7 @@
     "tools/import-design/jsx-runtime/materialized_metadata_contract.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_canvas_owner.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_hot_region.test.mjs",
     "tools/import-design/jsx-runtime/materialized_source_emitter.test.mjs",
     "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
     "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
@@ -9925,6 +9926,7 @@
    "entry": "tools/scripts/vellum_inheritance_ledger_check.py",
    "inputs": [
     ".github/vellum-change-events",
+    ".github/vellum-expansion-watch-events",
     "tools/scripts/vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"
@@ -9932,6 +9934,7 @@
   "vellum-inheritance-ledger-negative-contract": {
    "entry": "tools/scripts/test_vellum_inheritance_ledger_check.py",
    "inputs": [
+    "test/cmake/quality_tests.cmake",
     "tools/scripts/test_vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"

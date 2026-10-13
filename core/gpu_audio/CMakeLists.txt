@@ -87,6 +87,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
     # absent or incomplete prefix leaves the established P1 provider (and the
     # CPU fallback available to callers) unchanged.
     if(PULP_GPU_AUDIO_VELLUM_D15_PREFIX)
+        message(WARNING
+            "Pulp GPU-audio: requested Vellum 0.1.7 is retired; D15 awaits Vellum 0.1.8")
         find_package(Vellum 0.1.7 EXACT CONFIG QUIET
             PATHS "${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}"
             PATH_SUFFIXES lib/cmake/Vellum
