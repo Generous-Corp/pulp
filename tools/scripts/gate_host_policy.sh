@@ -12,7 +12,6 @@ pulp_gate_host_profile() {
 }
 
 pulp_gate_host_serves_gate() {
-    [ "${PULP_GATE_HOST_ALLOW_BUILD:-0}" != "1" ] || return 1
     local profile
     profile="$(pulp_gate_host_profile)" || return 1
     awk -F= '$1 == "TARTCI_SERVES_GATE" && $2 == "1" { found=1 } END { exit(found ? 0 : 1) }' <<<"$profile"
@@ -20,5 +19,5 @@ pulp_gate_host_serves_gate() {
 
 pulp_gate_host_skip_line() {
     local skipped="$1"
-    echo "[gate-host] skipped ${skipped}: tartci host-profile reports TARTCI_SERVES_GATE=1; run on m1 or a disposable VM with: ssh m1 'cd /Volumes/Workshop/Code/pulp && PULP_GATE_HOST_ALLOW_BUILD=1 ${2:-tools/scripts/gates.sh origin/main}'" >&2
+    echo "[gate-host] skipped ${skipped}: tartci host-profile reports TARTCI_SERVES_GATE=1; in an active Pulp worktree on m1 or a disposable VM run: ${2:-tools/scripts/gates.sh origin/main}" >&2
 }

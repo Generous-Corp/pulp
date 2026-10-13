@@ -92,7 +92,7 @@ source "$ROOT/tools/scripts/gate_host_policy.sh"
 gate_host_builds_skipped=0
 if pulp_gate_host_serves_gate; then
     gate_host_builds_skipped=1
-    pulp_gate_host_skip_line "build-backed gates (setup.sh, configure, generated-manifest checks, and pr-fast self-tests)"
+    pulp_gate_host_skip_line "local configure/build and multi-minute selftest lanes (generated manifests and source selftests)"
 fi
 
 PYTHON="${PYTHON:-python3}"
@@ -599,7 +599,7 @@ fi
 # test it fails also fails there, it prints PRE-EXISTING ON BASE and does not
 # fail this script, so a red main is not chased as the branch's fault. A new
 # failing test inside that suite still fails. PULP_SKIP_SOURCE_SELFTESTS=1 skips both.
-if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
+if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
     for src_lane in manifest workflow-lint pr-fast ctest-python; do
         echo "" >&2
         src_lane_args=()

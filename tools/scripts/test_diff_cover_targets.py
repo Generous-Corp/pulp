@@ -28,7 +28,11 @@ CTEST_POLICY = SCRIPTS.parent.parent / "scripts" / "coverage_ctest_policy.sh"
 GOVERNED_BUILD = SCRIPTS.parent / "ci" / "governed-build.sh"
 # Keep fixture subprocesses on the ordinary path when the developer machine
 # itself is a tartci gate host; the gate-host branch has dedicated coverage.
-os.environ.setdefault("PULP_GATE_HOST_ALLOW_BUILD", "1")
+_NON_GATE_PROFILE_DIR = tempfile.TemporaryDirectory()
+_NON_GATE_PROFILE = pathlib.Path(_NON_GATE_PROFILE_DIR.name) / "tartci"
+_NON_GATE_PROFILE.write_text("#!/bin/sh\necho TARTCI_SERVES_GATE=0\n", encoding="utf-8")
+_NON_GATE_PROFILE.chmod(0o755)
+os.environ["PULP_TARTCI_BIN"] = str(_NON_GATE_PROFILE)
 sys.path.insert(0, str(SCRIPTS))
 import diff_cover_targets  # noqa: E402
 
@@ -347,7 +351,7 @@ class ShellWiringTests(unittest.TestCase):
                              (HELPER, "tools/scripts/diff_cover_targets.py"),
                              (CTEST_POLICY, "scripts/coverage_ctest_policy.sh"),
                              (GOVERNED_BUILD, "tools/ci/governed-build.sh")):
-                (root / dst).write_text(src.read_text())
+                (root / dst).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
             (root / "tools/scripts/gate_host_policy.sh").write_text(
                 (SHELL.parent / "gate_host_policy.sh").read_text(encoding="utf-8"),
                 encoding="utf-8",

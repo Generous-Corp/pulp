@@ -221,9 +221,10 @@ class GatesScriptInputsTests(unittest.TestCase):
         r = self.gates(FAKE_SERVES_GATE="1")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.configures(), [])
-        self.assertIn("skipped build-backed gates", r.stderr)
+        self.assertIn("skipped local configure/build", r.stderr)
         self.assertIn("TARTCI_SERVES_GATE=1", r.stderr)
-        self.assertIn("ssh m1", r.stderr)
+        self.assertIn("on m1 or a disposable VM", r.stderr)
+        self.assertIn("tools/scripts/gates.sh origin/main", r.stderr)
 
     def test_a_current_configured_build_is_reused(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")

@@ -67,8 +67,7 @@ GOVERNED_BUILD="${REPO_ROOT}/tools/ci/governed-build.sh"
 
 # Gate-serving tartci hosts are reserved for the hosted macOS gate. Never
 # start a local configure or coverage build there; the profile is authoritative
-# even when macOS renames the machine. PULP_GATE_HOST_ALLOW_BUILD=1 is the
-# explicit operator path on m1/a disposable VM.
+# even when macOS renames the machine.
 # shellcheck source=gate_host_policy.sh
 source "${SCRIPT_DIR}/gate_host_policy.sh"
 if pulp_gate_host_serves_gate; then

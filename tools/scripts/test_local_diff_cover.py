@@ -38,10 +38,14 @@ CI_SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
 CTEST_POLICY = REPO_ROOT / "scripts" / "coverage_ctest_policy.sh"
 GOVERNED_BUILD = REPO_ROOT / "tools" / "ci" / "governed-build.sh"
 
-# The test suite itself exercises ordinary diff-cover behavior. On a developer
-# machine that serves the hosted gate, opt its subprocess fixtures into the
-# explicit build path; GateHostSkipTests removes this opt-in for the real skip.
-os.environ.setdefault("PULP_GATE_HOST_ALLOW_BUILD", "1")
+# The test suite exercises ordinary behavior even when the developer host
+# serves the gate. Each child sees this fake non-gate profile unless a test
+# explicitly supplies a gate-serving one.
+_NON_GATE_PROFILE_DIR = tempfile.TemporaryDirectory()
+_NON_GATE_PROFILE = pathlib.Path(_NON_GATE_PROFILE_DIR.name) / "tartci"
+_NON_GATE_PROFILE.write_text("#!/bin/sh\necho TARTCI_SERVES_GATE=0\n", encoding="utf-8")
+_NON_GATE_PROFILE.chmod(0o755)
+os.environ["PULP_TARTCI_BIN"] = str(_NON_GATE_PROFILE)
 
 
 class ConfigTests(unittest.TestCase):
@@ -1258,7 +1262,7 @@ def _fake_worktree(tmp: pathlib.Path, name: str) -> pathlib.Path:
         CTEST_POLICY.read_text()
     )
     governor = root / "tools" / "ci" / "governed-build.sh"
-    governor.write_text(GOVERNED_BUILD.read_text())
+    governor.write_text(GOVERNED_BUILD.read_text(encoding="utf-8"), encoding="utf-8")
     governor.chmod(0o755)
     (root / "tools" / "scripts" / "gate_host_policy.sh").write_text(
         (SCRIPT.parent / "gate_host_policy.sh").read_text(encoding="utf-8"),
@@ -1272,9 +1276,6 @@ def _lib_eval(root: pathlib.Path, snippet: str, timeout: float = 30,
     """Source the script in lib-only mode and run `snippet` against its helpers."""
     env = os.environ.copy()
     env["PULP_DIFF_COVER_LIB_ONLY"] = "1"
-    # Tests exercise ordinary/non-gate behavior even when the developer host
-    # itself serves the macOS gate; the gate-host branch has dedicated tests.
-    env["PULP_GATE_HOST_ALLOW_BUILD"] = "1"
     env.pop("PULP_DIFF_COVER_HTML_REPORT", None)
     if env_extra:
         env.update(env_extra)
@@ -1358,7 +1359,6 @@ class GateHostSkipTests(unittest.TestCase):
         root, tartci = self._profile(True)
         env = os.environ.copy()
         env["PULP_TARTCI_BIN"] = str(tartci)
-        env.pop("PULP_GATE_HOST_ALLOW_BUILD", None)
         result = subprocess.run(["bash", str(root / "tools/scripts/local_diff_cover.sh")],
                                 cwd=root, env=env, capture_output=True, text=True,
                                 encoding="utf-8", timeout=30)
