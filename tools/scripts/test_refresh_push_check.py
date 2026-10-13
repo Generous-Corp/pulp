@@ -392,7 +392,7 @@ def case_merge_tree_conflict_refuses(fx: Fixture) -> None:
     res = subprocess.run([sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(repo),
                           "--base", base, "--head", "HEAD"], cwd=repo, env=env,
                          capture_output=True, text=True, encoding="utf-8")
-    assert res.returncode == 1, (res.returncode, res.stdout, res.stderr)
+    assert res.returncode == merge_tree_state.CONFLICT, (res.returncode, res.stdout, res.stderr)
     assert "your branch is stale against main; merge origin/main and regenerate" in res.stderr
 
 

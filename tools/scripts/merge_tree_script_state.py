@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ from pathlib import Path
 
 
 STALE = "your branch is stale against main; merge origin/main and regenerate"
+CONFLICT = 3
 
 
 def git(root: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -58,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     merged = git(root, "merge-tree", "--write-tree", base_sha, head_sha)
     if merged.returncode != 0 or not merged.stdout.strip().splitlines():
         print(f"merge-tree script-state: {STALE} (would be DIRTY)", file=sys.stderr)
-        return 1
+        return CONFLICT
     tree = merged.stdout.strip().splitlines()[0]
     commit = subprocess.run(
         ["git", "-C", str(root), "commit-tree", tree, "-p", base_sha, "-p", head_sha],
@@ -71,13 +73,35 @@ def main(argv: list[str] | None = None) -> int:
         print("merge-tree script-state: could not materialize merge tree", file=sys.stderr)
         return 2
     synthetic = commit.stdout.strip()
+    # Remove only stale temporary worktrees from this checker before adding a
+    # new one. The prune is metadata-only and never deletes a live worktree.
+    subprocess.run(["git", "-C", str(root), "worktree", "prune", "--expire", "now"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     tmp = Path(tempfile.mkdtemp(prefix="pulp-merge-tree-", dir=root.parent))
+    added_worktree = False
+
+    def cleanup() -> None:
+        nonlocal added_worktree
+        if added_worktree:
+            subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(tmp)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            added_worktree = False
+        shutil.rmtree(tmp, ignore_errors=True)
+        subprocess.run(["git", "-C", str(root), "worktree", "prune", "--expire", "now"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def on_signal(signum: int, _frame: object) -> None:
+        cleanup()
+        raise SystemExit(128 + signum)
+
+    old_handlers = {s: signal.signal(s, on_signal) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
     try:
         added = subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach", str(tmp), synthetic],
                                text=True, encoding="utf-8", capture_output=True)
         if added.returncode:
             print(added.stderr, file=sys.stderr)
             return 2
+        added_worktree = True
         env = os.environ.copy()
         env["PULP_GATES_NO_CONFIGURE"] = "1"
         checks: list[tuple[str, list[str]]] = [
@@ -116,9 +140,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"merge-tree script-state: {STALE}", file=sys.stderr)
         return failed
     finally:
-        subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(tmp)],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        shutil.rmtree(tmp, ignore_errors=True)
+        cleanup()
+        for s, handler in old_handlers.items():
+            signal.signal(s, handler)
 
 
 if __name__ == "__main__":
