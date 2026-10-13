@@ -712,6 +712,14 @@ def main(argv: list[str]) -> int:
     fix = ("regenerate with\n  python3 tools/scripts/changed_surface_script_families.py "
            "--build-dir <dir> --write")
     base = script_test_inputs.resolve_base(root, args.base)
+    removed = globally_removed_registered_tests(root, base, current, updated)
+    if removed:
+        print("changed-surface script families: committed inventory removed tests still "
+              "registered on main: " + ", ".join(removed), file=sys.stderr)
+        print("This is always blocking on pull-request heads; regenerate from a complete "
+              "gate-profile configure.", file=sys.stderr)
+        if not script_test_inputs.advisory_here():
+            return 1
     touched = sorted(script_test_inputs.changed_files(root, base)) if base else None
     if touched is not None and not any(blocks_on(path) for path in touched):
         print(f"changed-surface script families: note: {FAMILIES_FILE} drifted, but this change touches "
@@ -763,6 +771,34 @@ def describe_drift(current: str, regenerated: str) -> list[str]:
             added, dropped = sorted(new[path] - old[path]), sorted(old[path] - new[path])
             lines.append(f"{path}: readers +{added[:3]} -{dropped[:3]}")
     return lines
+
+
+def family_tests(text: str) -> set[str]:
+    """Return the tests represented by a generated families file."""
+    import tomllib
+    try:
+        body = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return set()
+    return {test for family in body.get("families", [])
+            for test in family.get("tests", [])}
+
+
+def globally_removed_registered_tests(root: Path, base: str | None,
+                                      committed: str, regenerated: str) -> list[str]:
+    """Find tests still represented on main and current CTest output but
+    absent from the committed generated inventory, independent of diff paths."""
+    if not base:
+        return []
+    try:
+        proc = subprocess.run(["git", "-C", str(root), "show", f"{base}:{FAMILIES_FILE.as_posix()}"],
+                              capture_output=True, text=True, encoding="utf-8", check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    baseline = family_tests(proc.stdout)
+    current = family_tests(regenerated)
+    present = family_tests(committed)
+    return sorted((baseline & current) - present)
 
 
 def blocks_on(path: str) -> bool:

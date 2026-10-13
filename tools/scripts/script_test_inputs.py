@@ -173,7 +173,8 @@ def _jsx_runtime_registration_reason(build_dir: Path, cache: dict[str, str],
 
 
 def outside_gate_profile_build(build_dir: Path | None,
-                               inventory: dict | list[dict] | None = None) -> list[str]:
+                               inventory: dict | list[dict] | None = None,
+                               root: Path | None = None) -> list[str]:
     """Why this build's compiled entries cannot stand for the gate's: each
     switch whose value differs from the gate's configure (examples off, a
     Release build, no sanitizer, the exact-provider proof off). Empty for a gate-shaped build, and for one
@@ -205,7 +206,53 @@ def outside_gate_profile_build(build_dir: Path | None,
     jsx_reason = _jsx_runtime_registration_reason(build_dir, cache, inventory)
     if jsx_reason:
         reasons.append(jsx_reason)
+    stale_reason = stale_build_reason(build_dir, root)
+    if stale_reason:
+        reasons.append(stale_reason)
     return reasons
+
+
+def stale_build_reason(build_dir: Path | None, root: Path | None) -> str | None:
+    """Reject a configure whose cache predates a tracked source file.
+
+    A stale build can have a plausible CTest listing while silently omitting
+    registrations added after its last configure.  The mtime comparison is a
+    conservative write guard; callers without a checkout root retain the
+    historical behavior.
+    """
+    if build_dir is None or root is None:
+        return None
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.is_file():
+        return None
+    try:
+        cache_mtime = cache.stat().st_mtime
+        replies = list((build_dir / ".cmake/api/v1/reply").glob("index-*.json"))
+        configure_mtime = max([cache_mtime] + [p.stat().st_mtime for p in replies])
+        newest_path, newest_mtime = None, configure_mtime
+        rels = tracked_paths(root)
+        if not rels:
+            rels = [str(path.relative_to(root)) for path in root.rglob("*")
+                    if path.is_file() and build_dir not in path.parents]
+        for rel in rels:
+            # These are the outputs being regenerated; their fresh mtime must
+            # not make the configure appear stale on the next check.
+            if rel in (DEFAULT_LIST.as_posix(), ".shipyard/changed-surface-families.toml"):
+                continue
+            path = root / rel
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > newest_mtime:
+                newest_path, newest_mtime = path, mtime
+        if newest_path is None:
+            return None
+        rel = _rel(newest_path, root) or str(newest_path)
+        return (f"build directory is older than the source tree: CMakeCache.txt predates {rel}; "
+                "reconfigure this build before regenerating inventory files")
+    except OSError:
+        return None
 
 
 def configured_system(build_dir: Path) -> str | None:
@@ -970,6 +1017,19 @@ def base_list(root: Path, base: str | None) -> dict | None:
     return doc if "executables" in doc else None
 
 
+def base_test_names(root: Path, base: str | None) -> set[str]:
+    """Test names recorded by the base inventory, including pre-executable lists."""
+    if not base:
+        return set()
+    try:
+        proc = subprocess.run(["git", "-C", str(root), "show", f"{base}:{DEFAULT_LIST.as_posix()}"],
+                              capture_output=True, text=True, encoding="utf-8", check=True)
+        doc = json.loads(proc.stdout)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        return set()
+    return set((doc.get("tests") or {}).keys())
+
+
 def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> dict:
     tests = {}
     excluded = outside_gate_profile(inventory, root)
@@ -1191,7 +1251,7 @@ def main(argv: list[str]) -> int:
               "this is a skip, not a pass.")
         return SKIP_EXIT
     current = build_list(inventory, root, build_dir)
-    off_profile = outside_gate_profile_build(build_dir, inventory)
+    off_profile = outside_gate_profile_build(build_dir, inventory, root)
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
                         os.path.basename(t["command"][0]).startswith(INTERPRETERS))
     if a.write and off_profile:
@@ -1244,6 +1304,12 @@ def main(argv: list[str]) -> int:
             return True
         if kind == "missing from list":
             entry = current["tests"][name].get("entry") or ""
+            baseline = base_test_names(root, base)
+            # A deletion from the committed inventory is globally unsafe when
+            # main still registered that test; do not hide it behind
+            # diff-scoping (a stale generated inventory can hide a live test).
+            if name in baseline:
+                return True
             return bool(entry) and entry in changed
         if kind == "unscanned executable":
             return bool(paths & changed)
