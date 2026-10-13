@@ -595,6 +595,19 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
         set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
+        # The units the first export carries hold no mention of a Pulp-owned
+        # subsystem in any file, comments included; export refuses one.
+        add_test(NAME pulp.vellum-closure-export-mentions
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                mentions
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --unit foundation --unit canvas)
+        set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
     else()
         # Register the gate as an explicit skip so a CPU-only configuration
         # reports it as not run rather than dropping it silently.
@@ -615,6 +628,12 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             COMMAND "${Python3_EXECUTABLE}" -c
                 "import sys; print('SKIP: Vellum view-core Pulp-kept check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
         set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-export-mentions
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum export mention check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
             SKIP_RETURN_CODE 77
             LABELS "pr")
     endif()
