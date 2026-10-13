@@ -142,7 +142,8 @@ class MergeGroupHoldCheck(unittest.TestCase):
         self.assertFalse(hold.latest_verdict(tie, PR_B)["approve"])
 
     def test_shipyards_captured_10114_reads_hold(self) -> None:
-        answer = json.loads((HERE / "fixtures/merge_group_hold/pr-10114-verdicts.json")
+        # Spelled as one repository path so test/ctest_script_inputs.json records it.
+        answer = json.loads((ROOT / "tools/ci/fixtures/merge_group_hold/pr-10114-verdicts.json")
                             .read_text(encoding="utf-8"))
         pull = answer["data"]["repository"]["pullRequest"]
         verdict = hold.latest_verdict(pull, pull["headRefOid"])
