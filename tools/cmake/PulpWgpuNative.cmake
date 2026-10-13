@@ -207,3 +207,34 @@ function(pulp_wgpu_native_select_source asset version out_dir)
         "${CMAKE_BINARY_DIR}/_deps/pulp-wgpu-native" _dir)
     set(${out_dir} "${_dir}" PARENT_SCOPE)
 endfunction()
+
+# Call after WebGPU-distribution is made available. The archive it populated
+# must be the verified tree pulp_register_wgpu_native_precompiled_source chose:
+# if its asset selection (OS, ARCH, compiler) ever diverges from Pulp's, it
+# names a different FetchContent entry, fetched an unpinned archive, and
+# configure stops here.
+function(pulp_wgpu_native_assert_used_verified_source)
+    if(NOT PULP_WGPU_NATIVE_ASSET)
+        return()  # no wgpu-native prebuilt on this platform
+    endif()
+    string(TOLOWER "${PULP_WGPU_NATIVE_ASSET}" _name)
+    FetchContent_GetProperties(${_name} SOURCE_DIR _source POPULATED _populated)
+    set(_ok FALSE)
+    if(_populated AND EXISTS "${_source}" AND EXISTS "${PULP_WGPU_NATIVE_SOURCE_DIR}")
+        file(REAL_PATH "${_source}" _source_real)
+        file(REAL_PATH "${PULP_WGPU_NATIVE_SOURCE_DIR}" _verified_real)
+        if(_source_real STREQUAL _verified_real)
+            set(_ok TRUE)
+        endif()
+    endif()
+    if(NOT _ok)
+        message(FATAL_ERROR
+            "wgpu-native: WebGPU-distribution did not use the digest-verified "
+            "runtime archive ${PULP_WGPU_NATIVE_ASSET} "
+            "(${PULP_WGPU_NATIVE_SOURCE_DIR}); populated='${_populated}' "
+            "source='${_source}'. Its asset selection (OS, ARCH, compiler) no "
+            "longer matches pulp_register_wgpu_native_precompiled_source in "
+            "tools/cmake/PulpFetchContent.cmake; align the two so the pinned "
+            "asset is the one fetched.")
+    endif()
+endfunction()

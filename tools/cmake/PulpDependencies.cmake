@@ -140,31 +140,8 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     # unverified URL download never runs. See PulpWgpuNative.cmake.
     pulp_register_wgpu_native_precompiled_source(${PULP_WGPU_NATIVE_VERSION} ARCH "${ARCH}")
     FetchContent_MakeAvailable(webgpu)
-    # Prove it: the archive WebGPU-distribution populated must be the verified
-    # one. If its asset selection ever diverges from Pulp's, the name differs,
-    # FetchContent downloaded an unpinned archive, and configure stops here.
-    string(TOLOWER "${PULP_WGPU_NATIVE_ASSET}" _pulp_wgpu_fc_name)
-    FetchContent_GetProperties(${_pulp_wgpu_fc_name}
-        SOURCE_DIR _pulp_wgpu_fc_source POPULATED _pulp_wgpu_fc_populated)
-    if(_pulp_wgpu_fc_populated)
-        file(REAL_PATH "${_pulp_wgpu_fc_source}" _pulp_wgpu_fc_source)
-        file(REAL_PATH "${PULP_WGPU_NATIVE_SOURCE_DIR}" _pulp_wgpu_verified_source)
-    endif()
-    if(NOT _pulp_wgpu_fc_populated
-       OR NOT _pulp_wgpu_fc_source STREQUAL _pulp_wgpu_verified_source)
-        message(FATAL_ERROR
-            "wgpu-native: WebGPU-distribution did not use the digest-verified "
-            "runtime archive ${PULP_WGPU_NATIVE_ASSET} "
-            "(${PULP_WGPU_NATIVE_SOURCE_DIR}); populated='${_pulp_wgpu_fc_populated}' "
-            "source='${_pulp_wgpu_fc_source}'. Its asset selection (OS, ARCH, "
-            "compiler) no longer matches pulp_register_wgpu_native_precompiled_source "
-            "in tools/cmake/PulpFetchContent.cmake; align the two so the pinned "
-            "asset is the one fetched.")
-    endif()
-    unset(_pulp_wgpu_fc_name)
-    unset(_pulp_wgpu_fc_source)
-    unset(_pulp_wgpu_fc_populated)
-    unset(_pulp_wgpu_verified_source)
+    # Fails configure unless WebGPU-distribution populated the verified tree.
+    pulp_wgpu_native_assert_used_verified_source()
     if(_pulp_restore_arch)
         if(DEFINED _pulp_saved_arch)
             set(ARCH "${_pulp_saved_arch}")
