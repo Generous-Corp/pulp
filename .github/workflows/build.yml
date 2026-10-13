@@ -885,6 +885,20 @@ jobs:
           # .git directory before this cheap preamble could report.
           fetch-depth: 1
           lfs: false
+      # Backstop for a HOLD that did not take its head out of the queue: fail
+      # the group, before any VM, when a queued pull request's latest trusted
+      # verdict on the head it lands is HOLD. A failed classify makes the
+      # macos-merge-group bootstrap fail `macos` closed. Unreadable input
+      # passes with a warning; Shipyard's verdict-hold hook is the primary.
+      - name: Refuse a merge group whose pull request is held
+        if: ${{ github.event_name == 'merge_group' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: >-
+          python3 tools/ci/merge_group_hold_check.py --repo "$GITHUB_REPOSITORY"
+          --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for
