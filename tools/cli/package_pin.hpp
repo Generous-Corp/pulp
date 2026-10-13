@@ -27,7 +27,7 @@ namespace pulp::cli::pkg {
 struct SourcePin {
     std::string commit;
     std::string integrity;
-    std::string error;  // non-empty when pinning failed
+    std::string error; // non-empty when pinning failed
 };
 
 using SourcePinner =
@@ -42,8 +42,7 @@ std::string commit_for_tag(const std::string& ls_remote, const std::string& tag)
 
 // Archive integrity of `commit` in the repository at `repo_dir`; "" on
 // failure, with the reason in `error` when given.
-std::string archive_integrity(const std::filesystem::path& repo_dir,
-                              const std::string& commit,
+std::string archive_integrity(const std::filesystem::path& repo_dir, const std::string& commit,
                               std::string* error = nullptr);
 
 // Production pinner: shells out to git.
@@ -60,4 +59,4 @@ void set_source_pinner_for_testing(SourcePinner pinner);
 // tools/packages/pulp-packages-verify.cmake (enforced by tests).
 extern const char* const kPackagesVerifyCmake;
 
-}  // namespace pulp::cli::pkg
+} // namespace pulp::cli::pkg

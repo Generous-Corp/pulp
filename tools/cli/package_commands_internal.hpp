@@ -70,8 +70,7 @@ std::string dots(const std::string& name, int width = 35);
 
 // Blocks fetch the commit recorded in `locked`; an entry without a full
 // commit + integrity keeps a warned fetch-by-tag block.
-std::string generate_cmake_block(const PackageDescriptor& pkg,
-                                 const LockedPackage& locked,
+std::string generate_cmake_block(const PackageDescriptor& pkg, const LockedPackage& locked,
                                  bool platform_guard = false,
                                  const std::string& guard_platform = "");
 

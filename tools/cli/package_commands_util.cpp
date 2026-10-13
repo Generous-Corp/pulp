@@ -41,25 +41,22 @@ std::string include_dir_expr(const PackageDescriptor& pkg) {
     return path;
 }
 
-void emit_fetchcontent(std::ostringstream& os,
-                       const PackageDescriptor& pkg,
-                       const LockedPackage& locked,
-                       const std::string& indent) {
+void emit_fetchcontent(std::ostringstream& os, const PackageDescriptor& pkg,
+                       const LockedPackage& locked, const std::string& indent) {
     if (is_pinned(locked)) {
         const auto& repository =
             locked.resolved.empty() ? pkg.fetch.git_repository : locked.resolved;
         os << indent << "if(COMMAND pulp_register_fetchcontent_source)\n";
-        os << indent << "  pulp_register_fetchcontent_source(" << pkg.id << " REF "
-           << locked.commit << ")\n";
+        os << indent << "  pulp_register_fetchcontent_source(" << pkg.id << " REF " << locked.commit
+           << ")\n";
         os << indent << "endif()\n";
         os << indent << "FetchContent_Declare(" << pkg.id << "\n";
         os << indent << "  GIT_REPOSITORY " << repository << "\n";
         os << indent << "  GIT_TAG        " << locked.commit << "\n";
         os << indent << "  SOURCE_SUBDIR  pulp-package-populate-only\n";
         os << indent << ")\n";
-        os << indent << "_pulp_package_make_available(" << pkg.id << " " << locked.commit
-           << " " << locked.integrity << " "
-           << (pkg.cmake.add_subdirectory ? "ON" : "OFF") << ")\n";
+        os << indent << "_pulp_package_make_available(" << pkg.id << " " << locked.commit << " "
+           << locked.integrity << " " << (pkg.cmake.add_subdirectory ? "ON" : "OFF") << ")\n";
         return;
     }
     os << indent << "message(WARNING \"Pulp package " << pkg.id
@@ -225,7 +222,8 @@ GitResult run_git(const fs::path& dir, const std::vector<std::string>& args) {
     g.ok = r.exit_code == 0 && !r.timed_out;
     g.out = r.stdout_output;
     g.err = r.stderr_output;
-    while (!g.err.empty() && (g.err.back() == '\n' || g.err.back() == '\r')) g.err.pop_back();
+    while (!g.err.empty() && (g.err.back() == '\n' || g.err.back() == '\r'))
+        g.err.pop_back();
     return g;
 }
 
@@ -236,19 +234,25 @@ struct ScratchDir {
         std::error_code ec;
         auto base = fs::temp_directory_path(ec);
         for (unsigned attempt = 0; attempt < 16; ++attempt) {
-            auto candidate = base / ("pulp-pkg-pin-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-                "-" + std::to_string(seq.fetch_add(1)));
-            if (fs::create_directory(candidate, ec)) { path = candidate; return; }
+            auto candidate =
+                base /
+                ("pulp-pkg-pin-" +
+                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
+                 std::to_string(seq.fetch_add(1)));
+            if (fs::create_directory(candidate, ec)) {
+                path = candidate;
+                return;
+            }
         }
     }
     ~ScratchDir() {
         std::error_code ec;
-        if (!path.empty()) fs::remove_all(path, ec);
+        if (!path.empty())
+            fs::remove_all(path, ec);
     }
 };
 
-}  // namespace
+} // namespace
 
 bool is_full_commit(const std::string& s) {
     return s.size() == 40 && is_lower_hex(s);
@@ -256,7 +260,8 @@ bool is_full_commit(const std::string& s) {
 
 bool is_integrity(const std::string& s) {
     static const std::string prefix = "sha256-";
-    if (s.rfind(prefix, 0) != 0) return false;
+    if (s.rfind(prefix, 0) != 0)
+        return false;
     auto hex = s.substr(prefix.size());
     return hex.size() == 64 && is_lower_hex(hex);
 }
@@ -274,12 +279,16 @@ std::string commit_for_tag(const std::string& ls_remote, const std::string& tag)
     while (std::getline(lines, line)) {
         std::istringstream fields(line);
         std::string sha, name;
-        if (!(fields >> sha >> name)) continue;
+        if (!(fields >> sha >> name))
+            continue;
         std::transform(sha.begin(), sha.end(), sha.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (!is_full_commit(sha)) continue;
-        if (name == peeled) return sha;
-        if (name == plain) plain_hit = sha;
+        if (!is_full_commit(sha))
+            continue;
+        if (name == peeled)
+            return sha;
+        if (name == plain)
+            plain_hit = sha;
     }
     return plain_hit;
 }
@@ -288,20 +297,23 @@ std::string archive_integrity(const fs::path& repo_dir, const std::string& commi
                               std::string* error) {
     ScratchDir work;
     if (work.path.empty()) {
-        if (error) *error = "could not create a scratch directory";
+        if (error)
+            *error = "could not create a scratch directory";
         return {};
     }
     auto tar = work.path / "source.tar";
-    auto r = run_git(repo_dir, {"-c", "core.autocrlf=false", "-c", "core.eol=lf",
-                                "-c", "tar.umask=0002", "archive", "--format=tar",
-                                "-o", tar.string(), commit});
+    auto r =
+        run_git(repo_dir, {"-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "tar.umask=0002",
+                           "archive", "--format=tar", "-o", tar.string(), commit});
     if (!r.ok) {
-        if (error) *error = "git archive failed: " + r.err;
+        if (error)
+            *error = "git archive failed: " + r.err;
         return {};
     }
     auto hex = pulp::cli::tools::sha256_file_hex(tar);
     if (hex.size() != 64) {
-        if (error) *error = "could not hash the source archive";
+        if (error)
+            *error = "could not hash the source archive";
         return {};
     }
     return "sha256-" + hex;
@@ -339,11 +351,11 @@ SourcePin git_pin_source(const std::string& repository, const std::string& git_r
         // Some servers refuse a fetch by commit id; fall back to the tag,
         // then to every head and tag.
         bool fetched = !is_full_commit(git_ref) &&
-            run_git(work.path, {"fetch", "-q", repository, "refs/tags/" + git_ref}).ok;
+                       run_git(work.path, {"fetch", "-q", repository, "refs/tags/" + git_ref}).ok;
         if (!fetched) {
-            auto all = run_git(work.path, {"fetch", "-q", repository,
-                                           "+refs/heads/*:refs/remotes/origin/*",
-                                           "+refs/tags/*:refs/tags/*"});
+            auto all = run_git(work.path,
+                               {"fetch", "-q", repository, "+refs/heads/*:refs/remotes/origin/*",
+                                "+refs/tags/*:refs/tags/*"});
             if (!all.ok) {
                 pin.error = "git fetch failed: " + all.err;
                 return pin;
@@ -367,7 +379,8 @@ SourcePin git_pin_source(const std::string& repository, const std::string& git_r
 }
 
 SourcePin pin_source(const std::string& repository, const std::string& git_ref) {
-    if (auto& pinner = active_pinner(); pinner) return pinner(repository, git_ref);
+    if (auto& pinner = active_pinner(); pinner)
+        return pinner(repository, git_ref);
     return git_pin_source(repository, git_ref);
 }
 
@@ -449,10 +462,8 @@ endmacro()
 
 // ── CMake Generation ──
 
-std::string generate_cmake_block(const PackageDescriptor& pkg,
-                                 const LockedPackage& locked,
-                                 bool platform_guard,
-                                 const std::string& guard_platform) {
+std::string generate_cmake_block(const PackageDescriptor& pkg, const LockedPackage& locked,
+                                 bool platform_guard, const std::string& guard_platform) {
     std::ostringstream os;
     os << "# ── " << pkg.id << " (" << pkg.version << ")";
     if (platform_guard) os << " [" << guard_platform << " only]";

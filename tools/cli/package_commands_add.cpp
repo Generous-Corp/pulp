@@ -225,8 +225,8 @@ int cmd_add(const std::vector<std::string>& args) {
     auto pin = pin_source(pkg.fetch.git_repository, pkg.fetch.git_tag);
     if (!pin.error.empty() || !is_full_commit(pin.commit) || !is_integrity(pin.integrity)) {
         print_fail("Could not pin " + pkg.name + " at " + pkg.fetch.git_tag + " (" +
-                   pkg.fetch.git_repository + "): " +
-                   (pin.error.empty() ? "malformed commit or integrity" : pin.error));
+                   pkg.fetch.git_repository +
+                   "): " + (pin.error.empty() ? "malformed commit or integrity" : pin.error));
         return 1;
     }
     LockedPackage locked;
@@ -418,16 +418,18 @@ int cmd_update(const std::vector<std::string>& args) {
         if (it == reg.packages.end()) continue;
         const auto& pkg = it->second;
         const bool version_moved = lp.version != pkg.version;
-        if (!version_moved && is_pinned(lp)) continue;
+        if (!version_moved && is_pinned(lp))
+            continue;
 
         has_updates = true;
         if (version_moved)
-            std::cout << "  " << pkg.name << ": "
-                      << dim(lp.version) << " → " << green(pkg.version) << "\n";
+            std::cout << "  " << pkg.name << ": " << dim(lp.version) << " → " << green(pkg.version)
+                      << "\n";
         else
             std::cout << "  " << pkg.name << ": " << lp.version
                       << " is not pinned (no full commit + integrity) → re-pin\n";
-        if (!apply) continue;
+        if (!apply)
+            continue;
 
         auto pin = pin_source(pkg.fetch.git_repository, pkg.fetch.git_tag);
         if (!pin.error.empty() || !is_full_commit(pin.commit) || !is_integrity(pin.integrity)) {
