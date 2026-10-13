@@ -9,6 +9,31 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09560"></a>
+## [0.956.0] - 2026-10-13
+
+- release/version bump ([#10168](https://github.com/Generous-Corp/pulp/pull/10168))
+- codex/gpu adversarial 20261012 ([#10146](https://github.com/Generous-Corp/pulp/pull/10146))
+- codex/p19 audio widget seam 20261011 ([#10139](https://github.com/Generous-Corp/pulp/pull/10139))
+- fix/vellum closure gate skip ([#10165](https://github.com/Generous-Corp/pulp/pull/10165))
+- fix/windows dawn arm64 ([#10159](https://github.com/Generous-Corp/pulp/pull/10159))
+- release/version bump ([#10160](https://github.com/Generous-Corp/pulp/pull/10160))
+- codex/sanitizer lane repair 20261012 ([#10154](https://github.com/Generous-Corp/pulp/pull/10154))
+- docs/skills macos outage lessons 20261012 ([#10156](https://github.com/Generous-Corp/pulp/pull/10156))
+- codex/materialized hot region counters 20261012 ([#10158](https://github.com/Generous-Corp/pulp/pull/10158))
+- codex/materialized document schema contract 20261012 ([#10157](https://github.com/Generous-Corp/pulp/pull/10157))
+- codex/refactor resume 20261012 ([#10153](https://github.com/Generous-Corp/pulp/pull/10153))
+- codex/signalgraph swap contract 20261012 ([#10151](https://github.com/Generous-Corp/pulp/pull/10151))
+- codex/r15 m4 20261012 ([#10143](https://github.com/Generous-Corp/pulp/pull/10143))
+- release/version bump ([#10150](https://github.com/Generous-Corp/pulp/pull/10150))
+- codex/signalgraph next audit 20261012 ([#10133](https://github.com/Generous-Corp/pulp/pull/10133))
+- release/version bump ([#10147](https://github.com/Generous-Corp/pulp/pull/10147))
+- codex/build governance fix 20261012 ([#10137](https://github.com/Generous-Corp/pulp/pull/10137))
+- fix/migration guard canonical applies if ([#10115](https://github.com/Generous-Corp/pulp/pull/10115))
+- fix/vellum closure branch tests ([#10135](https://github.com/Generous-Corp/pulp/pull/10135))
+- release/version bump ([#10141](https://github.com/Generous-Corp/pulp/pull/10141))
+- codex/governed sanitizer scripts 20261012 ([#10138](https://github.com/Generous-Corp/pulp/pull/10138))
+
 <a id="v09551"></a>
 ## [0.955.1] - 2026-10-12
 
@@ -10517,6 +10542,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.956.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.956.0
 [0.955.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.955.1
 [0.955.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.955.0
 [0.954.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.954.0
