@@ -631,6 +631,14 @@ target_link_libraries(MyPlugin_Core PRIVATE MyGain_Core)
   the next build (cargo is itself incremental, so a no-op re-invoke is cheap).
   Without this, the `OUTPUT` rule would only fire when the archive was missing and
   could silently link a stale archive.
+- cargo runs with `--locked`: the build uses the crate's committed `Cargo.lock`
+  exactly and fails rather than rewriting it or resolving a crate version nobody
+  reviewed. The crate must commit a `Cargo.lock` next to its `Cargo.toml`;
+  configure refuses a crate without one (create it with
+  `cargo generate-lockfile --manifest-path <Cargo.toml>`). With
+  `FETCHCONTENT_FULLY_DISCONNECTED` ON, cargo also runs `--offline` and resolves
+  only from the local Cargo registry cache. The Rust CLI (`experimental/pulp-rs`)
+  follows the same rule for its build and its `cargo test` ctests.
 - On Linux/Android the IMPORTED target's `INTERFACE_LINK_LIBRARIES` pulls in the
   system libraries the Rust `std` archive needs (`Threads::Threads`,
   `${CMAKE_DL_LIBS}`, `m`); macOS resolves these through `libSystem`
