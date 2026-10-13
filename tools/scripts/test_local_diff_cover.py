@@ -1367,7 +1367,7 @@ def _policy_reserved(tartci: pathlib.Path | None, home: pathlib.Path | None = No
         result = subprocess.run(
             ["/bin/bash", "--noprofile", "--norc", "-c",
              'source "$1"; if pulp_gate_host_builds_reserved; then echo "R $PULP_GATE_HOST_ROLE"; else echo L; fi',
-             "_", strGATE_HOST_POLICY],
+             "_", str(GATE_HOST_POLICY)],
             env=env, capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
     return result.stdout.startswith("R")
 
