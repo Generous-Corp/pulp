@@ -99,17 +99,20 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
     const auto route = attributes.route;
     bool has_dynamic_slot = false;
     std::string scalar;
-    const auto binding = attributes.binding;
     const auto parameter = attributes.parameter;
-    if (!binding.empty())
-        scalar = binding;
-    else if (!parameter.empty())
+    const bool has_vector_binding = !attributes.x.empty() || !attributes.y.empty() ||
+                                    !attributes.x_module.empty() || !attributes.x_parameter.empty() ||
+                                    !attributes.y_module.empty() || !attributes.y_parameter.empty();
+    const bool has_meter_binding = !attributes.meter.empty() || !attributes.meter_source.empty() ||
+                                   !attributes.meter_channel.empty();
+    if (!parameter.empty())
         scalar = parameter;
-    if (scalar.empty()) {
+    else if (!attributes.module.empty() || !attributes.module_parameter.empty()) {
         const auto module = attributes.module;
         const auto param = attributes.module_parameter;
-        if (!module.empty() || !param.empty())
-            scalar = encode_pair_key(module, param);
+        scalar = encode_pair_key(module, param);
+    } else if (!has_vector_binding && !has_meter_binding && !attributes.binding.empty()) {
+        scalar = std::string(attributes.binding);
     }
     const auto x = attributes.x.empty()
                       ? encode_pair_key(attributes.x_module, attributes.x_parameter)
@@ -121,9 +124,7 @@ void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
         append_slot(slots, DesignSlotKind::dynamic_scalar, route, scalar);
         has_dynamic_slot = true;
     }
-    if (!attributes.x.empty() || !attributes.y.empty() || !attributes.x_module.empty() ||
-        !attributes.x_parameter.empty() || !attributes.y_module.empty() ||
-        !attributes.y_parameter.empty()) {
+    if (has_vector_binding) {
         append_slot(slots, DesignSlotKind::dynamic_vector, route, encode_vector_key(x, y));
         has_dynamic_slot = true;
     }

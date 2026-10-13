@@ -200,6 +200,20 @@ TEST_CASE("typed slot classification separates static and dynamic updates",
         CHECK(slots[4] == DesignSlot{DesignSlotKind::dynamic_action, "panel.route", "next_preset"});
     }
 
+    SECTION("canonical lanes take precedence over the legacy binding fallback") {
+        auto scalar = node("scalar");
+        scalar.attributes["binding"] = "legacy";
+        scalar.attributes["pulpParamKey"] = "canonical";
+        auto meter = node("meter");
+        meter.attributes["binding"] = "legacy-meter";
+        meter.attributes["pulpMeterValueKey"] = "meter.level";
+        scalar.children.push_back(meter);
+        const auto slots = classify_design_slots(scalar);
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "canonical"});
+        CHECK(slots[1] == DesignSlot{DesignSlotKind::dynamic_meter, {}, "meter.level"});
+    }
+
     SECTION("descendants remain observable") {
         auto root = node("root");
         auto child = node("child");
