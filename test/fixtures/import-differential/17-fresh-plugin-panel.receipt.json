@@ -1,0 +1,27 @@
+{
+  "schema": "pulp-fresh-plugin-validation-v1",
+  "fixture": "17-fresh-plugin-panel.html",
+  "source_sha256": "b39adabbe9f66819c4b43d67bad8b9bd4db56bebd9baf3fa11f4e94213743b11",
+  "source_bytes": 3093,
+  "browser": {
+    "backend": "chromium",
+    "viewport": {
+      "width": 480,
+      "height": 320,
+      "dpr": 2
+    },
+    "screenshot_sha256": "b1afc4342ba2689cf2ed9a85a519eaa7672321751f2007d6ca232fee941aec02",
+    "screenshot_bytes": 24657,
+    "interaction_report_sha256": "b40332273adaed7a8250a4b0bc7b9aeb23462452d74f6d0fd1c6060353bdd2e3",
+    "interaction_count": 2
+  },
+  "native": {
+    "backend": "skia",
+    "artifact_sha256": "5fec00ff037425db487bcd1595c54ec60c7ec1dadae92b1c94205c975cbfec26",
+    "artifact_bytes": 649
+  },
+  "planted_negative": {
+    "mutated_id": "toggle-mutated",
+    "browser_capture_rejected": true
+  }
+}

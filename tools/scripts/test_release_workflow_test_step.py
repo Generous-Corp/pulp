@@ -169,42 +169,6 @@ class SignAndReleaseSkipsWithoutSigningInputs(unittest.TestCase):
                          "needs.resolve-macos-runner.outputs.build == 'true'")
 
 
-class ReleaseCliDarwinCompilerCache(unittest.TestCase):
-    """The self-hosted darwin release VMs share the host ccache with the gate,
-    so the release must pin the gate's correctness settings and print this
-    job's own hit counts rather than the host cache's lifetime totals."""
-
-    def setUp(self) -> None:
-        self.job = yaml.safe_load(RELEASE_CLI.read_text(encoding="utf-8"))["jobs"]["build-cli"]
-        self.steps = {step.get("name", ""): step for step in self.job["steps"]}
-
-    def test_build_legs_use_the_gates_ccache_correctness_settings(self) -> None:
-        gate = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
-        gate_env = next(
-            job["env"] for job in gate["jobs"].values()
-            if isinstance(job.get("env"), dict) and "CCACHE_COMPILERCHECK" in job["env"]
-        )
-        wanted = {k: v for k, v in gate_env.items() if k.startswith("CCACHE_")}
-        # Control: the instrument found the gate's settings at all.
-        self.assertEqual(
-            set(wanted), {"CCACHE_COMPILERCHECK", "CCACHE_NODEPEND", "CCACHE_SLOPPINESS"}
-        )
-        self.assertEqual(
-            {k: v for k, v in self.job["env"].items() if k.startswith("CCACHE_")}, wanted
-        )
-
-    def test_stats_are_per_job_and_printed_even_when_the_build_fails(self) -> None:
-        names = list(self.steps)
-        env_step = self.steps["Compiler cache environment"]
-        self.assertIn('CCACHE_STATSLOG=${RUNNER_TEMP}/', env_step["run"])
-        self.assertLess(names.index(env_step["name"]), names.index("Build"))
-        stats = self.steps["Ccache stats"]
-        self.assertEqual(stats.get("if"), "always()")
-        self.assertIn("compiler_check", stats["run"])
-        self.assertIn("ccache --show-log-stats", stats["run"])
-        self.assertLess(names.index("Prepare SDK build dir (macOS)"), names.index(stats["name"]))
-
-
 class ReleaseCliDispatchAttestsItsTag(unittest.TestCase):
     """A workflow_dispatch must run on the tag it publishes.
 

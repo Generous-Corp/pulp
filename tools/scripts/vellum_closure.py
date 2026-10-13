@@ -980,6 +980,47 @@ def generated_input_violations(data: dict) -> list[str]:
     return violations
 
 
+# A mirrored file may not name or reach a Pulp-owned subsystem: audio, DSP,
+# MIDI, music theory, plug-in formats, hosting, GPU audio or product content.
+# The patterns match the Vellum mirror's own extraction scan, and they apply to
+# comments as well as code.
+_PULP_PRODUCT_SUBSYSTEMS = r"(?:audio|signal|midi|music|format|host|gpu_audio|content)"
+CLOSURE_MENTION_PATTERNS = {
+    "product-include": re.compile(
+        r"#\s*(?:include|import)\s*[<\"](?:pulp/" + _PULP_PRODUCT_SUBSYSTEMS + r"/"
+        r"|pluginterfaces/|public\.sdk/|clap/|lv2/|AudioUnitSDK/|oboe/"
+        r"|AudioToolbox/|AudioUnit/|CoreAudio/|CoreAudioKit/|CoreMIDI/|AVFAudio/)"),
+    "product-symbol": re.compile(
+        r"\bpulp::" + _PULP_PRODUCT_SUBSYSTEMS + r"\b"
+        r"|\bpulp[-_](?:audio|signal|midi|music|format|host|gpu[-_]audio|content)\b"),
+    "audio-framework-link": re.compile(
+        r"\b(?:AudioToolbox|AudioUnit|CoreAudio|CoreAudioKit|CoreMIDI|AVFAudio)\.framework\b"
+        r"|-framework\s+(?:AudioToolbox|AudioUnit|CoreAudio|CoreAudioKit|CoreMIDI|AVFAudio)\b"),
+}
+MENTION_SUFFIXES = TEXT_EXTS | {".inl", ".ipp", ".txt", ".py", ".json", ".in", ".js", ".mjs"}
+
+
+def closure_mention_violations(data: dict) -> list[str]:
+    """Every text file a closure carries is free of Pulp-owned subsystem mentions."""
+    source = data.get("source_root")
+    if not source:
+        return []
+    root = Path(__file__).resolve().parents[2] if source == "." else Path(source)
+    violations: list[str] = []
+    for rel in data.get("files", []):
+        path = root / rel
+        if path.suffix.lower() not in MENTION_SUFFIXES and path.name != "CMakeLists.txt":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for name, pattern in CLOSURE_MENTION_PATTERNS.items():
+            for match in pattern.finditer(text):
+                violations.append(f"{name} mention {rel}:{text.count(chr(10), 0, match.start()) + 1}: {match.group(0)[:80]}")
+    return violations
+
+
 def cmake_reference_violations(data: dict, allowlist: list[dict] | None, used: set[str]) -> list[str]:
     """No CMake file in a closure may reference a forbidden Pulp target."""
     source = data.get("source_root")
@@ -1584,8 +1625,9 @@ def exportable_closure(manifest: dict, unit_name: str, cpu_only_units: Iterable[
     """Return the closure export writes for one manifest, or refuse it.
 
     Export never writes a closure whose inputs fail provenance, that still
-    names a host path, that does not record its configure, or whose generated
-    inputs name the wrong producer. The canvas is the GPU/Skia-backed graph:
+    names a host path, that does not record its configure, whose generated
+    inputs name the wrong producer, or whose files mention a Pulp-owned
+    subsystem. The canvas is the GPU/Skia-backed graph:
     a canvas closure from any other configure is refused unless the unit is
     explicitly labelled ``cpu-only``, and the label travels with the closure.
     """
@@ -1593,7 +1635,7 @@ def exportable_closure(manifest: dict, unit_name: str, cpu_only_units: Iterable[
     normalized["source_root"] = None
     normalized["build_dir"] = None
     violations = receipt_path_violations(normalized) + external_input_violations(manifest)
-    violations += configure_violations(manifest) + generated_input_violations(manifest)
+    violations += configure_violations(manifest) + generated_input_violations(manifest) + closure_mention_violations(manifest)
     for row in manifest.get("external_inputs", []):
         if isinstance(row, dict) and row.get("patched") and row.get("base_modification"):
             # The patch set can only be replayed onto an unmodified base.
@@ -1729,6 +1771,20 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mentions(args: argparse.Namespace) -> int:
+    """Scan the named D3 units' closures for Pulp-owned subsystem mentions."""
+    ensure_codemodel_reply(args.source_root, args.build_dir)
+    source, build, units = Path(args.source_root).resolve(), Path(args.build_dir).resolve(), Path(args.unit_manifest)
+    problems: list[str] = []
+    for unit in args.unit:
+        manifest = target_manifest(source, build, unit_manifest_targets(units, unit))
+        problems += [f"{unit}: {violation}" for violation in closure_mention_violations(manifest)]
+    print(f"mentions {' '.join(args.unit)}: {'FAIL' if problems else 'PASS'}")
+    for problem in problems:
+        print(f"  {problem}")
+    return 1 if problems else 0
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     receipt = json.loads(Path(args.receipt).read_text(encoding="utf-8"))
     repo = Path(args.mirror).resolve()
@@ -1763,6 +1819,7 @@ def main() -> int:
     p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=False)
     p = sub.add_parser("report"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=True)
     p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.add_argument("--cpu-only-unit", action="append", default=[]); p.set_defaults(func=cmd_export)
+    p = sub.add_parser("mentions"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--unit-manifest", required=True); p.add_argument("--unit", action="append", required=True); p.set_defaults(func=cmd_mentions)
     p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
     args = parser.parse_args()
     return args.func(args)

@@ -37,3 +37,28 @@ observed the reorder test fail, restored the source, and observed the test pass
 again. The comparison itself found no evidence that a compiled-template
 compiler or Skia retained recorder should be copied into Pulp before a measured
 runtime seam exists.
+
+## 2026-10-13 importer refinements
+
+The follow-up slice applies the reference ideas at Pulp's existing Skia/Dawn
+boundary. It does not vendor, link, or execute Octane or Inferno.
+
+| Refinement | Pulp behavior | Evidence |
+|---|---|---|
+| Octane-style keyed identity and block planning | `stable_anchor_id` drives deterministic retained/moved/inserted/removed work; duplicate or missing anchors fail closed to positional replacement. | `DesignUpdateWorkCounters`, `[update]` tests, and the duplicate-anchor negative control. |
+| Inferno-style explicit child and value lanes | Static visuals and scalar, vector, meter, text, and action slots are classified explicitly; geometry text fields and XY pads retain their typed setter lanes. | `[slots]` tests, including the delimiter-collision negative control. |
+| Bounded observability instead of a second runtime | The existing benchmark emits bridge, layout, paint, invalidation, mutation, RSS, and paint-command counters under `pulp-design-import-benchmark-counters-v1`. | One-second live/baked lane receipts recorded in the execution plan. |
+| Agent-safe import validation | A fresh authored HTML fixture records Chromium and native Skia hashes, two interactions, and a rejected selector mutation. The committed receipt is a mandatory validator baseline. | [`17-fresh-plugin-panel.receipt.json`](../../test/fixtures/import-differential/17-fresh-plugin-panel.receipt.json) and the validator's expected-receipt check. |
+
+The measured interactive comparison is deliberately bounded: the live lane
+recorded 420 bridge calls, 120 layouts, 420 invalidations, and 14,820 paint
+commands; the baked C++ lane recorded zero bridge calls, 120 layouts, 360
+invalidations, and 13,920 paint commands. These numbers describe the existing
+benchmark fixture, not a general plugin-host or DAW guarantee. Stable identity,
+resource-lifetime stress, canonical recording/replay byte counters, and host
+validation remain explicit follow-up work in the execution plan.
+
+The exact receipt and validator baseline are committed under
+`test/fixtures/import-differential/`; review limitations remain documented in
+the validation output and are not promoted to a general plugin-host or DAW
+guarantee.
