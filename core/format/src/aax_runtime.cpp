@@ -791,6 +791,30 @@ public:
         if (editor_) editor_->gestures->release_all();
     }
 
+    // The latency a renderer switch changes at run time reaches the host the
+    // same way CLAP/VST3/AU deliver it: the processor raises its flag, the
+    // model consumes it off the audio thread and republishes. Without this
+    // Pro Tools kept compensating for the latency reported at load.
+    int pending_latency_report() {
+        std::lock_guard<std::mutex> lock(binding_mutex());
+        Processor* processor = algorithm_ ? algorithm_->processor.get() : nullptr;
+        if (!processor || !processor->consume_latency_changed_flag()) {
+            return -1;
+        }
+        return aax_reported_latency(processor->latency_samples());
+    }
+
+    AAX_Result TimerWakeup() override {
+        const int latency = pending_latency_report();
+        if (latency >= 0) {
+            if (auto* controller = Controller()) {
+                controller->SetSignalLatency(latency);
+            }
+            runtime::log_info("AAX host: latency changed, reported {} samples", latency);
+        }
+        return AAX_CEffectParameters::TimerWakeup();
+    }
+
     AAX_Result EffectInit() override {
         if (!init_error_.empty()) {
             return AAX_ERROR_UNIMPLEMENTED;
@@ -1566,6 +1590,11 @@ bool render_for_test(void* block, float** inputs, float** outputs, int frames, d
     AlgorithmContext* contexts[1] = {&context};
     process_callback(contexts, contexts + 1);
     return true;
+}
+
+int pending_latency_report_for_test(IACFUnknown* model) {
+    auto* parameters = static_cast<EffectParameters*>(model);
+    return parameters ? parameters->pending_latency_report() : -1;
 }
 
 EditorHost* editor_host(IACFUnknown* model) {

@@ -340,6 +340,10 @@ struct TwoLayoutGain final : pulp::format::Processor {
     static inline int prepare_calls = 0;
     static inline int prepared_outputs = 0;
     static inline std::size_t last_output_channels = 0;
+    static inline int latency = 0;
+    int latency_samples() const override {
+        return latency;
+    }
     pulp::format::PluginDescriptor descriptor() const override {
         pulp::format::PluginDescriptor d{
             .name = "TwoLayoutGain",
@@ -436,6 +440,26 @@ TEST_CASE("AAX mono instance renders through the mono layout even when stereo is
     CHECK(out[frames - 1] == 0.25f);
     // The render did not re-prepare: the control-thread prepare covered it.
     CHECK(TwoLayoutGain::prepare_calls == 1);
+}
+
+TEST_CASE("AAX model republishes a latency the processor changed at run time",
+          "[aax][entry][latency]") {
+    using namespace pulp::format::aax::testing;
+    TwoLayoutGain::latency = 0;
+    ModelHandle model(two_layout_config());
+    std::vector<std::byte> block(private_data_block_size());
+    REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+    auto* processor = algorithm_processor(block.data());
+    REQUIRE(processor != nullptr);
+    // Nothing pending until the processor raises its flag.
+    CHECK(pending_latency_report_for_test(model.unknown) == -1);
+    // A renderer switch: new latency, flag raised the way every format expects.
+    TwoLayoutGain::latency = 512;
+    processor->flag_latency_changed();
+    const int reported = pending_latency_report_for_test(model.unknown);
+    CHECK(reported >= 512);
+    // Consumed once; the next wakeup reports nothing.
+    CHECK(pending_latency_report_for_test(model.unknown) == -1);
 }
 
 TEST_CASE("AAX editor binds to the processor that renders audio", "[aax][entry][view-bridge]") {

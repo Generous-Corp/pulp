@@ -37,6 +37,9 @@ state::StateStore* algorithm_store(void* block);
 
 /// The model's editor-facing surface.
 EditorHost* editor_host(IACFUnknown* model);
+/// The latency the model would republish on its next TimerWakeup, or -1 when
+/// the bound processor has not raised its latency-changed flag.
+int pending_latency_report_for_test(IACFUnknown* model);
 
 /// Layout selection as the model performs it from the controller's stems.
 std::size_t select_layout_for_test(const std::vector<ComponentLayout>& components,

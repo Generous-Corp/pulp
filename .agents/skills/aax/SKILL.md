@@ -671,6 +671,19 @@ Notes:
 
 ## Gotchas
 
+### A run-time latency change reaches Pro Tools through TimerWakeup
+
+`EffectInit` reports `definition_.latency_samples` once. A processor that
+changes its latency later (a renderer switch, a lookahead toggle) raises
+`flag_latency_changed()` the way every other format expects; the AAX model
+consumes it in `TimerWakeup()` (`pending_latency_report()`, off the audio
+thread, under the binding mutex) and calls `SetSignalLatency` again, logging
+`AAX host: latency changed, reported N samples`. Before this the AAX adapter
+never consumed the flag, so Pro Tools kept compensating for the load-time
+latency after a Mixing GPU/CPU switch while AU, VST3 and CLAP re-aligned.
+Test: "AAX model republishes a latency the processor changed at run time"
+(`pending_latency_report_for_test`).
+
 ### Every declared layout is its own component; render through the instance's
 
 `supported_bus_layouts` becomes one AAX component per layout (its own
