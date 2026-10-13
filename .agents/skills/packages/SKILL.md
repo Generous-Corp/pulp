@@ -87,9 +87,27 @@ This will:
 1. Check license compatibility and require explicit review for restricted licenses
 2. Check platform support against project targets
 3. Warn about overlaps with Pulp built-ins
-4. Generate `cmake/pulp-packages.cmake` with FetchContent declarations
-5. Update `packages.lock.json`, `DEPENDENCIES.md`, `NOTICE.md`
-6. Print usage instructions (target_link_libraries + #include)
+4. Pin the registry `git_tag` to a full commit and an archive integrity (fails
+   closed: a package it cannot pin is not added)
+5. Generate `cmake/pulp-packages.cmake` with FetchContent declarations by commit
+6. Update `packages.lock.json`, `DEPENDENCIES.md`, `NOTICE.md`
+7. Print usage instructions (target_link_libraries + #include)
+
+### Registry pins and the lock
+
+- `fetch.git_tag` must be a release tag or a full 40-hex commit.
+  `validate_registry.py` rejects branch names (`master`, `main`, ...) and
+  abbreviated commits; a repo with no tags is pinned by full commit, and the
+  short form goes in `version` (see `alac`, `tinysoundfont`). Verify against the
+  upstream with `git ls-remote` before pinning: `tinysoundfont`'s old `master`
+  pin had silently stopped resolving when upstream renamed the branch to `main`.
+- `packages.lock.json` records `commit` (full), `integrity`
+  (`sha256-` + sha256 of `git -c core.autocrlf=false -c core.eol=lf -c
+  tar.umask=0002 archive --format=tar <commit>`), `license`, and
+  `license_acceptance` when an override was used. The generated CMake re-runs the
+  same archive digest after populate and refuses a mismatch.
+- Locks written before pinning (tag in `commit`, empty `integrity`) still
+  configure, with a warning; `pulp update --apply` re-pins them.
 
 ### Source-backed FetchContent packages
 
