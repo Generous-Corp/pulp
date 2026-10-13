@@ -6,7 +6,7 @@
 // with that lane for the PDC/latency passes.
 
 #include <pulp/host/signal_graph.hpp>
-#include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/host/signal_graph_executor_contract.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

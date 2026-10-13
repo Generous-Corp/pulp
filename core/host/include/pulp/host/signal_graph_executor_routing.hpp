@@ -3,6 +3,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/host/custom_node_events.hpp>
+#include <pulp/host/signal_graph_executor_contract.hpp>
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/parameter_event_queue.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -26,33 +27,6 @@ class PluginSlot;
 class SignalGraph;
 struct GraphNode;
 struct Connection;
-
-// The single, authoritative classification of a host Connection into a runtime
-// lane. EVERY surface that needs to know whether a Connection is audio / MIDI /
-// automation — the executor-routing gather, the legacy reference-walk edge
-// bucketer, and the latency/PDC passes — routes through classify() so the three
-// can never drift apart. `kind` is the lane discriminator carried onto the
-// runtime connection structs; `feedback` is the orthogonal back-edge flag;
-// `audio_rate` distinguishes a dense audio-rate modulation edge from a sparse
-// two-point automation edge (both have kind == Automation). A sidechain edge is
-// plain audio too, but its marker is carried separately so runtime adjacency
-// canonicalization never reorders sidechain edges.
-struct ConnectionClass {
-    graph::GraphRuntimeConnectionKind kind = graph::GraphRuntimeConnectionKind::Audio;
-    bool feedback = false;
-    bool audio_rate = false;
-    bool sidechain = false;
-};
-
-ConnectionClass classify(const Connection& c);
-
-// True iff this connection carries latency-aligned audio that participates in
-// plug-in delay compensation: a plain feedforward audio edge or a dense
-// audio-rate modulation edge (its source is sampled per block-position and
-// time-aligned like audio). Feedback back-edges, MIDI edges, and sparse two-
-// point automation edges carry no latency-aligned audio. Single-sourced from
-// classify() so the latency/PDC passes can't drift from the lane bucketing.
-bool connection_affects_latency(const Connection& c);
 
 // Fallback scratch a routed Plugin-node binding hands to PluginSlot::process
 // when the routed call does not need per-node MIDI or automation buffers.
@@ -199,36 +173,6 @@ struct SignalGraphExecutorRouting {
 // No prepared check.
 bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
                                               std::span<const Connection> connections);
-
-enum class ExecutorTopologyValidationCode : std::uint8_t {
-    Accepted,
-    TopologyIneligible,
-    NodeLimitExceeded,
-    ConnectionLimitExceeded,
-    PerNodePortLimitExceeded,
-    TotalPortLimitExceeded,
-    PlanRejected,
-};
-
-/// Admission result for the exact routed-executor plan shape derived from a
-/// SignalGraph candidate. Capacity failures report `actual` and `limit`; plan
-/// failures additionally identify the rejected spec `index` and `node`.
-struct ExecutorTopologyValidation {
-    ExecutorTopologyValidationCode code = ExecutorTopologyValidationCode::Accepted;
-    std::uint64_t actual = 0;
-    std::uint64_t limit = 0;
-    std::size_t index = 0;
-    NodeId node = 0;
-    constexpr explicit operator bool() const noexcept {
-        return code == ExecutorTopologyValidationCode::Accepted;
-    }
-};
-
-/// Validates the same node/connection projection consumed by
-/// build_executor_snapshot(), without preparing or publishing a graph.
-ExecutorTopologyValidation validate_signal_graph_executor_topology(
-    std::span<const GraphNode> nodes, std::span<const Connection> connections,
-    graph::GraphRuntimeLimits limits = {});
 
 // As above, plus requiring the graph be prepared (a live snapshot exists).
 bool signal_graph_executor_eligible(const SignalGraph& graph);
