@@ -27,23 +27,28 @@
       "binary_sources": {
         "macOS-arm64": {
           "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/mac-arm64/trace_processor_shell",
-          "binary_name": "trace_processor_shell"
+          "binary_name": "trace_processor_shell",
+          "sha256": "98a41b80e9f60da0373d64aff6455681f8c26b7c391ae5736324a5b11e3dacc2"
         },
         "macOS-x64": {
           "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/mac-amd64/trace_processor_shell",
-          "binary_name": "trace_processor_shell"
+          "binary_name": "trace_processor_shell",
+          "sha256": "c0f61397901da47cbe1bb9a0843624f7c2038ac92176ce15e3736ce9aa0afef0"
         },
         "Linux-x64": {
           "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/linux-amd64/trace_processor_shell",
-          "binary_name": "trace_processor_shell"
+          "binary_name": "trace_processor_shell",
+          "sha256": "55ba613fc6d4f71df81eee2dbfc293020063655c241b3e314bff75345b802684"
         },
         "Linux-arm64": {
           "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/linux-arm64/trace_processor_shell",
-          "binary_name": "trace_processor_shell"
+          "binary_name": "trace_processor_shell",
+          "sha256": "1dcc1d9aaff2eb92e8bc58f1957e4e445600294bd61dbc09345c1018c5ff0868"
         },
         "Windows-x64": {
           "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/windows-amd64/trace_processor_shell.exe",
-          "binary_name": "trace_processor_shell.exe"
+          "binary_name": "trace_processor_shell.exe",
+          "sha256": "100334b6091596fbc97f872556849a5747bf47a7f7190c485ba8cea8d2409c7b"
         }
       },
       "pinned_version": "v57.2",
@@ -65,22 +70,26 @@
         "macOS-arm64": {
           "url_template": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip",
           "archive_format": "zip",
-          "binary_name": "Google Chrome for Testing"
+          "binary_name": "Google Chrome for Testing",
+          "sha256": "9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee"
         },
         "macOS-x64": {
           "url_template": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-x64/chrome-mac-x64.zip",
           "archive_format": "zip",
-          "binary_name": "Google Chrome for Testing"
+          "binary_name": "Google Chrome for Testing",
+          "sha256": "90f49258b8929867640ca59cf138191d25b4b34759e1509687e59a66be9ac99b"
         },
         "Linux-x64": {
           "url_template": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/linux64/chrome-linux64.zip",
           "archive_format": "zip",
-          "binary_name": "chrome"
+          "binary_name": "chrome",
+          "sha256": "14ac03a67e154e3f8bbc57e03ef03315fda8fedff8e045eee8b31500283a33f4"
         },
         "Windows-x64": {
           "url_template": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/win64/chrome-win64.zip",
           "archive_format": "zip",
-          "binary_name": "chrome.exe"
+          "binary_name": "chrome.exe",
+          "sha256": "fc77bb98b550b7da23b14edfa282b59a022e7fdb075ac7625d2a5152ceb22396"
         }
       },
       "pinned_version": "151.0.7922.47",
@@ -103,22 +112,26 @@
         "macOS-arm64": {
           "url_template": "https://github.com/astral-sh/uv/releases/download/${version}/uv-aarch64-apple-darwin.tar.gz",
           "archive_format": "tar.gz",
-          "binary_name": "uv"
+          "binary_name": "uv",
+          "sha256": "4ea4731010fbd1bc8e790e07f199f55a5c7c2c732e9b77f85e302b0bee61b756"
         },
         "Windows-x64": {
           "url_template": "https://github.com/astral-sh/uv/releases/download/${version}/uv-x86_64-pc-windows-msvc.zip",
           "archive_format": "zip",
-          "binary_name": "uv.exe"
+          "binary_name": "uv.exe",
+          "sha256": "93b29fc234758e381df461d7638ff73d0f08bdf3a0dc37923b1ee0b9e442ca3f"
         },
         "Linux-x64": {
           "url_template": "https://github.com/astral-sh/uv/releases/download/${version}/uv-x86_64-unknown-linux-gnu.tar.gz",
           "archive_format": "tar.gz",
-          "binary_name": "uv"
+          "binary_name": "uv",
+          "sha256": "0aaf451c391d3913823bfb8ed354b446dcfd0553a32ed8266611e4181c61fd51"
         },
         "Linux-arm64": {
           "url_template": "https://github.com/astral-sh/uv/releases/download/${version}/uv-aarch64-unknown-linux-gnu.tar.gz",
           "archive_format": "tar.gz",
-          "binary_name": "uv"
+          "binary_name": "uv",
+          "sha256": "ea25597354af186bdd55aee0de431e16d45d82951a4f41f065a8e4dc27885265"
         }
       },
       "pinned_version": "0.6.14",
@@ -136,19 +149,22 @@
       "install_method": "binary_download",
       "binary_sources": {
         "macOS-arm64": {
-          "url_template": "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip",
+          "url_template": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1737140319_7.1/ffmpeg.zip",
           "archive_format": "zip",
-          "binary_name": "ffmpeg"
+          "binary_name": "ffmpeg",
+          "sha256": "3d57f8032cb6ac8550e3abf41e74f15fd52865523d16c14fe3c55b31a07ecd6f"
         },
         "Windows-x64": {
-          "url_template": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+          "url_template": "https://github.com/GyanD/codexffmpeg/releases/download/${version}/ffmpeg-${version}-essentials_build.zip",
           "archive_format": "zip",
-          "binary_name": "ffmpeg.exe"
+          "binary_name": "ffmpeg.exe",
+          "sha256": "fa7d4d7e795db0e2503f49f105f46ed5852386f0cfdd819899be3b65ebde24fc"
         },
         "Linux-x64": {
-          "url_template": "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz",
-          "archive_format": "tar.xz",
-          "binary_name": "ffmpeg"
+          "url_template": "https://ffmpeg.martin-riedl.de/download/linux/amd64/1737141359_7.1/ffmpeg.zip",
+          "archive_format": "zip",
+          "binary_name": "ffmpeg",
+          "sha256": "ffa849f89b305d7947b802370bee98c952f069aa6f0d1575de1dcf53e1a4d546"
         }
       },
       "pinned_version": "7.1",
@@ -196,17 +212,20 @@
         "macOS-arm64": {
           "url_template": "https://github.com/denoland/deno/releases/download/v${version}/deno-aarch64-apple-darwin.zip",
           "archive_format": "zip",
-          "binary_name": "deno"
+          "binary_name": "deno",
+          "sha256": "a0aff1d56948f030d0596085f2db0374670331c848bb642b25e21fab986b6c9f"
         },
         "Windows-x64": {
           "url_template": "https://github.com/denoland/deno/releases/download/v${version}/deno-x86_64-pc-windows-msvc.zip",
           "archive_format": "zip",
-          "binary_name": "deno.exe"
+          "binary_name": "deno.exe",
+          "sha256": "643cf97229887e497c48166ceb4bb3d2762f3567528fd7c9a76e065f8d90c721"
         },
         "Linux-x64": {
           "url_template": "https://github.com/denoland/deno/releases/download/v${version}/deno-x86_64-unknown-linux-gnu.zip",
           "archive_format": "zip",
-          "binary_name": "deno"
+          "binary_name": "deno",
+          "sha256": "391ab8245b594efc71f80aa29191e3799807650b25d098038fbdb6a4b37a5b3b"
         }
       },
       "pinned_version": "2.2.0",

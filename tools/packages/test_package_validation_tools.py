@@ -331,6 +331,62 @@ class ValidateRegistryTests(unittest.TestCase):
         )
         self.assertEqual(errors, [])
 
+    def test_validate_tool_registry_requires_sha256_on_every_binary_source(self) -> None:
+        good = "a" * 64
+        errors = vr.validate_tool_registry(
+            {
+                "tools": {
+                    "tool": {
+                        "managed_by_pulp": True,
+                        "pinned_version": "1.0.0",
+                        "binary_sources": {
+                            "macOS-arm64": {"url_template": "https://e/x.zip", "sha256": good},
+                            "Linux-x64": {"url_template": "https://e/x.tar.gz"},
+                            "Windows-x64": {"url_template": "https://e/x.zip", "sha256": "A" * 64},
+                            "Linux-arm64": {"url_template": "https://e/x.zip", "sha256": "ab12"},
+                        },
+                    }
+                }
+            }
+        )
+        joined = "\n".join(errors)
+        self.assertEqual(len(errors), 3, joined)
+        self.assertIn("binary_sources.Linux-x64 must declare 'sha256'", joined)
+        self.assertIn("binary_sources.Windows-x64", joined)
+        self.assertIn("binary_sources.Linux-arm64", joined)
+        self.assertNotIn("macOS-arm64", joined)
+
+    def test_binary_source_digest_rule_applies_to_unmanaged_tools_too(self) -> None:
+        errors = vr.validate_tool_registry(
+            {"tools": {"external": {"managed_by_pulp": False,
+                                    "binary_sources": {"Linux-x64": {"url_template": "u"}}}}}
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("external: binary_sources.Linux-x64", errors[0])
+
+    def test_code_owned_digests_must_match_the_owning_fetcher(self) -> None:
+        digest = "b" * 64
+        with tempfile.TemporaryDirectory() as td:
+            owner = pathlib.Path(td) / "fetch.rs"
+            owner.write_text(f'sha256: "{digest}",\n', encoding="utf-8")
+            registry = {"tools": {"fetched": {"binary_sources": {
+                "Linux-x64": {"sha256": digest}}}}}
+            with module_attr(vr, "ROOT", pathlib.Path(td)), \
+                    module_attr(vr, "CODE_OWNED_DIGESTS", {"fetched": owner}):
+                self.assertEqual(vr.validate_code_owned_digests(registry), [])
+                registry["tools"]["fetched"]["binary_sources"]["Linux-x64"]["sha256"] = "c" * 64
+                errors = vr.validate_code_owned_digests(registry)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("does not appear in fetch.rs", errors[0])
+
+    def test_shipped_tool_registry_digests_are_complete_and_match_code(self) -> None:
+        shipped = json.loads((ROOT / "tool-registry.json").read_text(encoding="utf-8"))
+        sources = [s for t in shipped["tools"].values()
+                   for s in (t.get("binary_sources") or {}).values()]
+        self.assertTrue(sources, "control: the shipped registry has binary sources")
+        self.assertEqual(vr.validate_tool_registry(shipped), [])
+        self.assertEqual(vr.validate_code_owned_digests(shipped), [])
+
     def test_main_reports_tool_registry_update_override_error(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)

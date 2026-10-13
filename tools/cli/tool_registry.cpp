@@ -5,6 +5,7 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -178,6 +179,7 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
                     if (auto v = src.get("url_template")) s.url_template = v->as_string();
                     if (auto v = src.get("archive_format")) s.archive_format = v->as_string();
                     if (auto v = src.get("binary_name")) s.binary_name = v->as_string();
+                    if (auto v = src.get("sha256")) s.sha256 = v->as_string();
                     tool.binary_sources[platform] = s;
                 }
             }
@@ -521,24 +523,80 @@ ToolLocateResult locate_tool(const ToolDescriptor& tool) {
 
 // ── Binary Tool Install ──
 
+std::string tool_version_env_var(const std::string& tool_id) {
+    std::string name = "PULP_TOOL_";
+    for (char c : tool_id) {
+        const auto u = static_cast<unsigned char>(c);
+        name += std::isalnum(u) ? static_cast<char>(std::toupper(u)) : '_';
+    }
+    return name + "_VERSION";
+}
+
+ActiveToolVersion resolve_active_tool_version(const ToolDescriptor& tool) {
+    if (const char* env = std::getenv(tool_version_env_var(tool.id).c_str()); env && *env)
+        return {env, "env override"};
+    // Best effort, like the Rust resolver: a missing or malformed override
+    // file never wedges an install, it just falls through to the pin.
+    auto content = read_file(tools_install_home() / "tool-overrides.json");
+    if (!content.empty()) {
+        JsonParser parser{content};
+        auto root = parser.parse();
+        if (root.type == JsonValue::Object) {
+            if (auto overrides = root.get("overrides");
+                overrides && overrides->type == JsonValue::Object) {
+                if (auto v = overrides->get(tool.id); v && v->type == JsonValue::String &&
+                                                      !v->as_string().empty())
+                    return {v->as_string(), "user override"};
+            }
+        }
+    }
+    if (!tool.pinned_version.empty()) return {tool.pinned_version, "registry pin"};
+    return {{}, "unset"};
+}
+
+// A version names a directory and a download URL, so it may only carry the
+// characters real release versions use.
+static bool safe_version_string(const std::string& v) {
+    if (v.empty() || v == "." || v.find("..") != std::string::npos) return false;
+    return std::all_of(v.begin(), v.end(), [](char c) {
+        const auto u = static_cast<unsigned char>(c);
+        return std::isalnum(u) || c == '.' || c == '-' || c == '_' || c == '+';
+    });
+}
+
+static std::string lowercase(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
 ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
     ToolInstallResult result;
+
+    const auto active = resolve_active_tool_version(tool);
+    const std::string& version = active.version;
+    if (!safe_version_string(version)) {
+        result.error = tool.display_name + ": version '" + version + "' (" + active.source +
+                       ") is not a valid release version; use letters, digits, '.', '-', "
+                       "'_' or '+'. Fix: `pulp tool update " + tool.id + "` returns to the "
+                       "registry pin.";
+        return result;
+    }
 
     if (!force) {
         auto existing = locate_tool(tool);
         if (existing.found && existing.source == "pulp-managed") {
-            // Check if installed version matches pinned version
+            // Check if installed version matches the active version
             auto manifest = existing.path.parent_path() / "manifest.json";
             bool version_ok = true;
             if (fs::exists(manifest)) {
                 auto content = read_file(manifest);
-                // Simple check: does manifest contain the pinned version?
-                version_ok = content.find(tool.pinned_version) != std::string::npos;
+                // Simple check: does manifest contain the active version?
+                version_ok = content.find(version) != std::string::npos;
             }
             if (version_ok) {
                 result.ok = true;
                 result.binary_path = existing.path;
-                result.installed_version = tool.pinned_version;
+                result.installed_version = version;
                 return result;
             }
             // Version mismatch — reinstall
@@ -557,9 +615,9 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
     // Bare, un-archived binaries (a source with no `archive_format`, e.g.
     // Perfetto's `trace_processor_shell`) are installed by the SHA-256-verified
     // fetcher behind `pulp tool install <id>` / `pulp trace fetch`, which the
-    // Rust front-end routes to directly. This generic path neither verifies the
-    // download nor matches that fetcher's platform-nested cache layout, and
-    // `extract_archive` below would fail trying to untar a raw binary. Defer
+    // Rust front-end routes to directly. This generic path does not match that
+    // fetcher's platform-nested cache layout, and `extract_archive` below would
+    // fail trying to untar a raw binary. Defer
     // rather than install a divergent, unverified copy — so an `--all` sweep
     // that reaches here (e.g. via `pulp-cpp` directly) skips it cleanly instead
     // of erroring.
@@ -572,17 +630,30 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
         return result;
     }
 
-    auto url = expand_url(source.url_template, tool.pinned_version);
+    // The registry digest covers exactly the pinned version. Any other version
+    // is a user override: it installs, honestly marked unverified-version.
+    const bool pinned = version == tool.pinned_version;
+    if (pinned && source.sha256.empty()) {
+        result.error = tool.display_name + " " + version + " for " + platform +
+                       " has no recorded sha256 in the tool registry, so Pulp cannot "
+                       "verify its download and refuses to install it. Fix: add the "
+                       "release asset's sha256 to tools/packages/tool-registry.json, or "
+                       "choose a version yourself with `pulp tool install " + tool.id +
+                       " --version <v>` (installed as unverified-version).";
+        return result;
+    }
+
+    auto url = expand_url(source.url_template, version);
     auto download_dir = tools_dir() / ".downloads";
     fs::create_directories(download_dir);
 
     // Determine download filename
     std::string ext = source.archive_format == "zip" ? ".zip" :
                       source.archive_format == "tar.gz" ? ".tar.gz" : ".tar.xz";
-    auto archive_path = download_dir / (tool.id + "-" + tool.pinned_version + ext);
+    auto archive_path = download_dir / (tool.id + "-" + version + ext);
 
     // Download
-    std::cout << "  Downloading " << tool.display_name << " " << tool.pinned_version << "...\n";
+    std::cout << "  Downloading " << tool.display_name << " " << version << "...\n";
 #ifdef _WIN32
     auto dl = pulp::platform::exec("powershell", {"-Command",
         "Invoke-WebRequest -Uri '" + url + "' -OutFile '" + archive_path.string() + "'"}, 300000);
@@ -594,6 +665,40 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
         result.error = "Download failed: " + url;
         return result;
     }
+
+    // Verify before anything is extracted or installed.
+    const std::string observed = lowercase(sha256_file_hex(archive_path));
+    if (observed.empty()) {
+        std::error_code ec;
+        fs::remove(archive_path, ec);
+        result.error = "Cannot read the downloaded " + tool.display_name +
+                       " archive to compute its sha256: " + archive_path.string();
+        return result;
+    }
+    if (pinned) {
+        const std::string expected = lowercase(source.sha256);
+        if (observed != expected) {
+            std::error_code ec;
+            fs::remove(archive_path, ec);
+            result.error =
+                "SHA-256 mismatch for " + tool.id + " " + version + " (" + platform +
+                "): expected " + expected + ", found " + observed + " from " + url +
+                ". The download was deleted and nothing was installed. Fix: retry "
+                "(a truncated download or an intercepting proxy causes this); if it "
+                "persists the upstream asset changed, so report it, or install a "
+                "version you choose with `pulp tool install " + tool.id +
+                " --version <v>` (installed as unverified-version).";
+            return result;
+        }
+        result.verification = "sha256-verified";
+    } else {
+        result.verification = "unverified-version";
+        std::cout << "  " << yellow("note:") << " " << tool.id << " " << version << " ("
+                  << active.source << ") has no sha256 Pulp reviewed; installing it as "
+                  << "unverified-version and recording the observed sha256 " << observed
+                  << ".\n";
+    }
+    result.sha256 = observed;
 
     // Extract
     auto extract_dir = download_dir / (tool.id + "-extract");
@@ -618,7 +723,7 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
     }
 
     // Install to managed directory
-    auto install_dir = tools_dir() / tool.id / tool.pinned_version;
+    auto install_dir = tools_dir() / tool.id / version;
     fs::create_directories(install_dir);
     auto dest_path = install_dir / source.binary_name;
     fs::copy_file(binary_path, dest_path, fs::copy_options::overwrite_existing);
@@ -634,10 +739,13 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
     // Write manifest
     std::ostringstream manifest;
     manifest << "{\n"
-             << "  \"tool_id\": \"" << tool.id << "\",\n"
-             << "  \"version\": \"" << tool.pinned_version << "\",\n"
-             << "  \"platform\": \"" << platform << "\",\n"
-             << "  \"binary_path\": \"" << dest_path.string() << "\"\n"
+             << "  \"tool_id\": \"" << json_escape(tool.id) << "\",\n"
+             << "  \"version\": \"" << json_escape(version) << "\",\n"
+             << "  \"version_source\": \"" << json_escape(active.source) << "\",\n"
+             << "  \"platform\": \"" << json_escape(platform) << "\",\n"
+             << "  \"binary_path\": \"" << json_escape(dest_path.string()) << "\",\n"
+             << "  \"verification\": \"" << result.verification << "\",\n"
+             << "  \"sha256\": \"" << observed << "\"\n"
              << "}\n";
     write_file(install_dir / "manifest.json", manifest.str());
 
@@ -647,7 +755,7 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
 
     result.ok = true;
     result.binary_path = dest_path;
-    result.installed_version = tool.pinned_version;
+    result.installed_version = version;
     return result;
 }
 

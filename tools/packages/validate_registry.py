@@ -31,6 +31,14 @@ REJECTED_LICENSES = {
 }
 
 BUILD_STATUS_KEY_PATTERN = re.compile(r"^[A-Za-z]+-[a-z0-9]+$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+# Tools whose binary download is verified by a code-owned Rust fetcher. Their
+# registry digests mirror that code and must not drift from it.
+CODE_OWNED_DIGESTS = {
+    "trace-processor": ROOT / "experimental" / "pulp-rs" / "src" / "cmd" / "trace_fetch.rs",
+    "chrome-for-testing": ROOT / "experimental" / "pulp-rs" / "src" / "cmd" / "chrome_for_testing.rs",
+}
 
 
 def load_json(path: Path) -> dict:
@@ -126,6 +134,7 @@ def validate_tool_registry(tool_registry: dict) -> list[str]:
     """
     errors: list[str] = []
     for tool_id, tool in tool_registry.get("tools", {}).items():
+        errors.extend(validate_binary_source_digests(tool_id, tool))
         if not tool.get("managed_by_pulp"):
             continue
         pinned = tool.get("pinned_version", "")
@@ -136,6 +145,47 @@ def validate_tool_registry(tool_registry: dict) -> list[str]:
                 "user version overrides. A managed tool with no update/override "
                 "path must not ship."
             )
+    return errors
+
+
+def validate_binary_source_digests(tool_id: str, tool: dict) -> list[str]:
+    """Every downloadable binary source must carry the sha256 of its asset.
+
+    `pulp tool install` refuses a registry-pinned download whose digest does
+    not match, so a source without one is a download nobody can verify. A
+    user override to another version is the only unverified path, and it is
+    recorded as such at install time, never here.
+    """
+    errors: list[str] = []
+    for platform, source in (tool.get("binary_sources") or {}).items():
+        digest = source.get("sha256") if isinstance(source, dict) else None
+        if not isinstance(digest, str) or not SHA256_PATTERN.match(digest):
+            errors.append(
+                f"  {tool_id}: binary_sources.{platform} must declare 'sha256' as 64 "
+                "lowercase hex characters (the digest of the published release asset "
+                "at pinned_version). Download the asset into an empty directory, "
+                "compare it with the upstream checksum when one is published, and "
+                "record it."
+            )
+    return errors
+
+
+def validate_code_owned_digests(tool_registry: dict) -> list[str]:
+    """Registry digests for code-verified tools must match the owning code."""
+    errors: list[str] = []
+    for tool_id, owner in CODE_OWNED_DIGESTS.items():
+        tool = tool_registry.get("tools", {}).get(tool_id)
+        if not tool or not owner.exists():
+            continue
+        code = owner.read_text(encoding="utf-8")
+        for platform, source in (tool.get("binary_sources") or {}).items():
+            digest = source.get("sha256", "") if isinstance(source, dict) else ""
+            if SHA256_PATTERN.match(digest or "") and f'"{digest}"' not in code:
+                errors.append(
+                    f"  {tool_id}: binary_sources.{platform}.sha256 {digest} does not "
+                    f"appear in {owner.relative_to(ROOT)}, the fetcher that verifies "
+                    "this tool. Update both together."
+                )
     return errors
 
 
@@ -173,9 +223,10 @@ def main() -> int:
         tool_count = len(tool_registry.get("tools", {}))
         print(
             f"Validating tool-registry.json ({tool_count} tools) — "
-            "managed tools must declare an update/override path..."
+            "managed tools must declare an update/override path, binary sources a sha256..."
         )
         tool_errors = validate_tool_registry(tool_registry)
+        tool_errors.extend(validate_code_owned_digests(tool_registry))
         all_errors.extend(tool_errors)
 
     if args.check_licenses:
