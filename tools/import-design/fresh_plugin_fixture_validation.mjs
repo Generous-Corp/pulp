@@ -80,12 +80,17 @@ async function main() {
         interaction_report_sha256: sha256(interactionReport),
         interaction_count: 2,
       },
-      native: { backend: "skia", artifact_sha256: sha256(nativeBytes), artifact_bytes: nativeBytes.length,
-        command: native.cmd },
+      native: { backend: "skia", artifact_sha256: sha256(nativeBytes), artifact_bytes: nativeBytes.length },
       planted_negative: { mutated_id: "toggle-mutated", browser_capture_rejected: true },
     };
     const out = arg("--receipt", path.join(process.cwd(), "fresh-plugin-validation.receipt.json"));
     await writeFile(out, JSON.stringify(receipt, null, 2) + "\n");
+    const expected = arg("--expected-receipt");
+    if (expected) {
+      const expectedReceipt = JSON.parse(await readFile(expected, "utf8"));
+      assert.deepEqual(receipt, expectedReceipt,
+        "fresh-plugin receipt differs from the committed deterministic baseline");
+    }
     process.stdout.write(JSON.stringify(receipt, null, 2) + "\n");
   } finally {
     await rm(tmp, { recursive: true, force: true });
