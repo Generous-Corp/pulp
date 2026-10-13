@@ -64,11 +64,10 @@ The registry `git_tag` must be a release tag or a full commit. A tag is resolved
 The integrity is reproducible by hand in any clone that contains the commit (shallow or full):
 
 ```bash
-git -c core.autocrlf=false -c core.eol=lf -c tar.umask=0002 \
-    archive --format=tar <commit> | shasum -a 256
+git ls-tree -r -z --full-tree <commit> | shasum -a 256
 ```
 
-The archive covers the commit's tree only (no `.git`, no submodule contents); the three `-c` settings pin the only user configuration that changes the bytes. The lock file schema is defined in `tools/packages/packages.lock.schema.json`.
+That is one NUL-terminated `<mode> <type> <object id><TAB><path>` record per file, symlink and submodule of the commit's tree, in git's tree order. It is computed from the commit's tree objects alone, so nothing on the machine computing it changes the value: no `.gitattributes` entry (`export-subst`, `export-ignore`, `eol`), no personal or system git configuration (`core.autocrlf`, `core.attributesFile`, `tar.umask`), no checkout filter, and not whether the clone is shallow. File contents are bound through git's object ids. (`git archive` output is deliberately not used: a personal attributes file, CRLF settings, or an upstream `export-subst` placeholder that expands differently in a shallow and a full clone all change its bytes.) The lock file schema is defined in `tools/packages/packages.lock.schema.json`.
 
 Locks written before packages were pinned hold the registry tag in `commit` and an empty `integrity`. `pulp update` reports those entries as not pinned and `pulp update --apply` re-pins them.
 
@@ -78,9 +77,9 @@ Locks written before packages were pinned hold the registry tag in `commit` and 
 
 1. Registers the package with `pulp_register_fetchcontent_source(<id> REF <commit>)` when that function is available (Pulp's own build), so a populated shared source cache is used.
 2. Declares it with `FetchContent_Declare(<id> GIT_REPOSITORY <resolved> GIT_TAG <commit>)`. It fetches by the locked commit, never by the tag, and does not use `GIT_SHALLOW` (a shallow clone cannot check out an arbitrary commit).
-3. Populates it, re-runs the archive command above against the fetched checkout, and stops the configure with `integrity mismatch` if the digest differs from the lock. Only then is the package's own CMake project added. A successful check is cached per build directory.
+3. Populates it, then proves the checkout is the locked commit before the package's own CMake project is added. The configure stops if the source dir is not a git checkout, if its `HEAD` is not the locked commit, if it has modified, staged or untracked files (`git status --porcelain --untracked-files=all`), or if the tree listing above does not hash to the locked `integrity` (`integrity mismatch`). Each message names the source dir and the fix: delete it (or the build dir) to re-fetch, or run `pulp update --apply` if the pin changed on purpose. The checks run on every configure, so a stale or edited source dir reused under `FETCHCONTENT_FULLY_DISCONNECTED` is caught too.
 
-`FETCHCONTENT_FULLY_DISCONNECTED` and `FETCHCONTENT_SOURCE_DIR_<NAME>` are honoured by FetchContent itself; the verification needs no network. A source override that is not a git checkout cannot be verified and gets a configure warning instead. A lock entry that is not pinned yet keeps the old fetch-by-tag block behind a configure warning until it is re-pinned.
+The checks need no network. A developer override, `FETCHCONTENT_SOURCE_DIR_<NAME>`, is the one exception to "stop the configure": the configure always prints a warning naming the override, runs the same checks, and reports any failure as a warning instead of an error. (Pulp's own shared source cache also sets that variable; it is recognised and gets the full checks.) A lock entry that is not pinned yet keeps the old fetch-by-tag block behind a configure warning until it is re-pinned.
 
 For header-only packages, the generated CMake uses `target_include_directories` after fetching.
 

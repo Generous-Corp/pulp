@@ -7,13 +7,14 @@
 // with the peeled `^{}` line preferred; branches and abbreviated commits are
 // refused) and recorded with
 //
-//   integrity = "sha256-" + sha256(git -c core.autocrlf=false -c core.eol=lf
-//                                  -c tar.umask=0002 archive --format=tar <commit>)
+//   integrity = "sha256-" + sha256(git ls-tree -r -z --full-tree <commit>)
 //
-// The archive covers the commit's tree only, so shallow and full clones give
-// the same digest. The Rust CLI (experimental/pulp-rs/src/pkg/pin.rs)
-// computes the identical value, and the generated cmake/pulp-packages.cmake
-// re-runs it against the fetched checkout and refuses a mismatch.
+// The listing is computed from the commit's tree objects only, so no
+// .gitattributes entry (export-subst, export-ignore, eol), checkout filter,
+// git configuration, clone depth or git version changes it. The Rust CLI
+// (experimental/pulp-rs/src/pkg/pin.rs) computes the identical value, and the
+// generated cmake/pulp-packages.cmake re-runs it against the fetched checkout
+// after proving HEAD is the locked commit and the working tree is clean.
 #pragma once
 
 #include "package_registry.hpp"
@@ -40,10 +41,10 @@ bool is_pinned(const LockedPackage& lp);
 // Commit a tag points at in `git ls-remote` output, or "" when absent.
 std::string commit_for_tag(const std::string& ls_remote, const std::string& tag);
 
-// Archive integrity of `commit` in the repository at `repo_dir`; "" on
+// Tree-listing integrity of `commit` in the repository at `repo_dir`; "" on
 // failure, with the reason in `error` when given.
-std::string archive_integrity(const std::filesystem::path& repo_dir, const std::string& commit,
-                              std::string* error = nullptr);
+std::string tree_integrity(const std::filesystem::path& repo_dir, const std::string& commit,
+                           std::string* error = nullptr);
 
 // Production pinner: shells out to git.
 SourcePin git_pin_source(const std::string& repository, const std::string& git_ref);

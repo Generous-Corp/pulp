@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -1420,6 +1421,10 @@ std::string trimmed(std::string s) {
 std::pair<std::string, std::string> make_upstream(const fs::path& dir) {
     write_file(dir / "include" / "pkg.h", "#pragma once\nint pkg_version();\n");
     write_file(dir / "LICENSE", "MIT (fixture)\n");
+    // A ref-dependent export-subst placeholder: archive output differs between
+    // a shallow fetch and a full clone, the tree listing does not.
+    write_file(dir / ".gitattributes", "VERSION export-subst\n");
+    write_file(dir / "VERSION", "$Format:%d$\n");
     REQUIRE(run_git_in(dir, {"init", "-q", "-b", "main"}).exit_code == 0);
     REQUIRE(run_git_in(dir, {"add", "."}).exit_code == 0);
     REQUIRE(run_git_in(dir, {"commit", "-q", "-m", "fixture"}).exit_code == 0);
@@ -1457,7 +1462,7 @@ TEST_CASE("generated cmake embeds the shared verifier byte for byte",
     REQUIRE(shared == kPackagesVerifyCmake);
 }
 
-TEST_CASE("git_pin_source pins a tag to its commit and the documented archive digest",
+TEST_CASE("git_pin_source pins a tag to its commit and the documented tree digest",
           "[cli][package-commands][pin][git]") {
     TempDir up;
     auto [url, commit] = make_upstream(up.path);
@@ -1469,12 +1474,37 @@ TEST_CASE("git_pin_source pins a tag to its commit and the documented archive di
     // Recompute with the documented recipe in the upstream itself (a
     // different clone than the pinner's scratch fetch).
     TempDir out;
-    const auto tar = out.path / "reference.tar";
-    REQUIRE(run_git_in(up.path,
-                       {"-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "tar.umask=0002",
-                        "archive", "--format=tar", "-o", tar.string(), commit})
-                .exit_code == 0);
-    REQUIRE(pin.integrity == "sha256-" + pulp::cli::tools::sha256_file_hex(tar));
+    const auto listing = out.path / "reference.tree";
+    {
+        auto ls = run_git_in(up.path, {"ls-tree", "-r", "-z", "--full-tree", commit});
+        REQUIRE(ls.exit_code == 0);
+        std::ofstream f(listing, std::ios::binary);
+        f.write(ls.stdout_output.data(), static_cast<std::streamsize>(ls.stdout_output.size()));
+    }
+    const auto reference = "sha256-" + pulp::cli::tools::sha256_file_hex(listing);
+    REQUIRE(pin.integrity == reference);
+    REQUIRE(tree_integrity(up.path, commit) == reference);
+
+#ifndef _WIN32
+    // A personal attributes file and CRLF/umask settings change `git archive`
+    // output; the tree listing must not move.
+    {
+        write_file(out.path / "attributes", "* export-ignore\n*.h eol=crlf\n");
+        write_file(out.path / "gitconfig",
+                   "[core]\n\tautocrlf = true\n\teol = crlf\n\tattributesFile = " +
+                       (out.path / "attributes").string() + "\n[tar]\n\tumask = 0077\n");
+        const char* previous = std::getenv("GIT_CONFIG_GLOBAL");
+        const std::string saved = previous ? previous : "";
+        ::setenv("GIT_CONFIG_GLOBAL", (out.path / "gitconfig").c_str(), 1);
+        auto hostile = git_pin_source(url, "v1.0");
+        if (previous)
+            ::setenv("GIT_CONFIG_GLOBAL", saved.c_str(), 1);
+        else
+            ::unsetenv("GIT_CONFIG_GLOBAL");
+        REQUIRE(hostile.error.empty());
+        REQUIRE(hostile.integrity == reference);
+    }
+#endif
     REQUIRE(is_integrity(pin.integrity));
 
     auto by_commit = git_pin_source(url, commit);
@@ -1494,6 +1524,20 @@ TEST_CASE("git_pin_source pins a tag to its commit and the documented archive di
     REQUIRE(tag_object != commit);
     auto by_tag_object = git_pin_source(url, tag_object);
     REQUIRE(by_tag_object.error.find("does not contain commit") != std::string::npos);
+}
+
+TEST_CASE("cmd_add writes the lock before the generated cmake", "[cli][package-commands][pin]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+    // A directory where the generated file should go makes the CMake write
+    // fail; the lock that CMake is derived from must already be on disk.
+    fs::create_directories(tmp.path / "cmake" / "pulp-packages.cmake");
+    auto added = run_in_project(tmp.path, [&] { return cmd_add({"signalsmith-dsp"}); });
+    REQUIRE(added.exit_code == 1);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages["signalsmith-dsp"].commit ==
+            kFixedCommit);
 }
 
 TEST_CASE("cmd_add refuses a package it cannot pin and writes nothing",

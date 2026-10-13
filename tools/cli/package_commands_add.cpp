@@ -240,6 +240,14 @@ int cmd_add(const std::vector<std::string>& args) {
             accepted_license.empty() ? "commercial" : "accept-license:" + accepted_license;
     lock.packages[package_id] = locked;
 
+    // The lock is written first: generated CMake is derived from it, so a
+    // failed CMake write leaves a lock that regenerates the same file rather
+    // than CMake that names a pin no lock records.
+    if (!save_lock_file(lock_path, lock)) {
+        print_fail("Failed to write packages.lock.json");
+        return 1;
+    }
+
     if (!no_cmake) {
         // Generate/update cmake/pulp-packages.cmake
 
@@ -281,12 +289,6 @@ int cmd_add(const std::vector<std::string>& args) {
 
         // Ensure CMakeLists.txt includes the packages file
         ensure_cmake_include(root);
-    }
-
-    // Update lock file
-    if (!save_lock_file(lock_path, lock)) {
-        print_fail("Failed to write packages.lock.json");
-        return 1;
     }
 
     // Update metadata files

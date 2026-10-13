@@ -1118,6 +1118,11 @@ both or neither. Gotchas:
   an annotated tag resolves to the TAG OBJECT id, not the commit. List all tags
   (`ls-remote --tags <url>`) and filter in code. The `rev-parse <id>^{commit}`
   equality check after the fetch is what catches this; keep it.
+- The integrity hashes `git ls-tree -r -z --full-tree <commit>`, never `git
+  archive` (attributes, CRLF config and `export-subst` change archive bytes). The
+  CMake side writes the listing with `OUTPUT_FILE` because CMake strings cannot
+  hold the NUL separators. Never cache a passing verification: the checkout can
+  be edited between configures.
 - The CMake verifier text exists once, in `tools/packages/pulp-packages-verify.cmake`.
   Rust `include_str!`s it; the C++ raw string is asserted byte-for-byte equal to
   it by `test_cli_package_commands.cpp`. Edit the file, then paste into C++.

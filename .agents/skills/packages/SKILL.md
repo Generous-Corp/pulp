@@ -102,10 +102,14 @@ This will:
   upstream with `git ls-remote` before pinning: `tinysoundfont`'s old `master`
   pin had silently stopped resolving when upstream renamed the branch to `main`.
 - `packages.lock.json` records `commit` (full), `integrity`
-  (`sha256-` + sha256 of `git -c core.autocrlf=false -c core.eol=lf -c
-  tar.umask=0002 archive --format=tar <commit>`), `license`, and
-  `license_acceptance` when an override was used. The generated CMake re-runs the
-  same archive digest after populate and refuses a mismatch.
+  (`sha256-` + sha256 of `git ls-tree -r -z --full-tree <commit>`), `license`,
+  and `license_acceptance` when an override was used. The generated CMake
+  requires `HEAD == commit`, a clean `git status`, and the same digest, and
+  refuses otherwise (a `FETCHCONTENT_SOURCE_DIR_<NAME>` override downgrades
+  failures to loud warnings).
+- Do not go back to a `git archive` digest: a personal `core.attributesFile`,
+  `core.autocrlf`/`tar.umask`, or an upstream `export-subst` placeholder (which
+  expands differently in a shallow fetch and a full clone) all change its bytes.
 - Locks written before pinning (tag in `commit`, empty `integrity`) still
   configure, with a warning; `pulp update --apply` re-pins them.
 

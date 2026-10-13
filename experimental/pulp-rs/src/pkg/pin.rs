@@ -8,21 +8,23 @@
 //!   upstream repository (resolved with `git ls-remote`, preferring the
 //!   peeled `^{}` line of an annotated tag). Branch names and abbreviated
 //!   commits are refused.
-//! - `integrity` — `sha256-<lowercase hex>` of the tar stream produced by
+//! - `integrity` — `sha256-<lowercase hex>` of the byte stream printed by
 //!
 //!   ```sh
-//!   git -c core.autocrlf=false -c core.eol=lf -c tar.umask=0002 \
-//!       archive --format=tar <commit>
+//!   git ls-tree -r -z --full-tree <commit>
 //!   ```
 //!
-//!   run in any clone that contains `<commit>`. The archive covers the
-//!   commit's tree only (no `.git`, no submodule contents), its headers carry
-//!   the commit time and the commit id, and the three `-c` settings pin the
-//!   only user configuration that changes the bytes. Shallow and full clones
-//!   produce the same digest, so the value is reproducible by hand with
+//!   run in any clone that contains `<commit>`: one NUL-terminated
+//!   `<mode> <type> <object id>\t<path>` record per file, symlink and
+//!   submodule of the commit's tree, in git's tree order. It is computed from
+//!   the commit's tree objects alone, so no checkout filter, `.gitattributes`
+//!   entry (`export-subst`, `export-ignore`, `eol`), user or system git
+//!   configuration, shallow-versus-full clone, or git version changes it.
+//!   File content is bound through git's object ids. Reproduce by hand with
 //!   `... | shasum -a 256`. The generated `cmake/pulp-packages.cmake` runs the
-//!   same command against the fetched checkout and refuses to configure on a
-//!   mismatch.
+//!   same command against the fetched checkout, after proving the checkout's
+//!   `HEAD` is the locked commit and its working tree is clean, and refuses to
+//!   configure otherwise.
 //!
 //! The git CLI is the only tool used; it is already required by the
 //! `FetchContent` `GIT_REPOSITORY` lane this lock feeds.
@@ -36,23 +38,16 @@ use crate::error::{CliError, Result};
 /// Prefix of every lock-file integrity value.
 pub const INTEGRITY_PREFIX: &str = "sha256-";
 
-/// The `-c` overrides that make `git archive` output independent of user
-/// configuration. Shared with the `CMake` verifier text in [`crate::pkg::cmake`].
-pub const ARCHIVE_CONFIG: [&str; 6] = [
-    "-c",
-    "core.autocrlf=false",
-    "-c",
-    "core.eol=lf",
-    "-c",
-    "tar.umask=0002",
-];
+/// The git arguments whose output the integrity hashes. Shared with the
+/// `CMake` verifier text in [`crate::pkg::cmake`].
+pub const TREE_LISTING_ARGS: [&str; 4] = ["ls-tree", "-r", "-z", "--full-tree"];
 
 /// An immutable source pin for one package.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pin {
     /// Full 40-hex commit.
     pub commit: String,
-    /// `sha256-<hex>` of the deterministic archive of `commit`.
+    /// `sha256-<hex>` of the canonical tree listing of `commit`.
     pub integrity: String,
 }
 
@@ -179,7 +174,7 @@ impl SourcePinner for GitPinner {
                 resolved.trim()
             )));
         }
-        let integrity = archive_integrity(dir, &commit)?;
+        let integrity = tree_integrity(dir, &commit)?;
         Ok(Pin { commit, integrity })
     }
 }
@@ -189,19 +184,23 @@ impl SourcePinner for GitPinner {
 ///
 /// # Errors
 ///
-/// `git archive` failure or no available SHA-256 hasher.
-pub fn archive_integrity(repo_dir: &Path, commit: &str) -> Result<String> {
+/// `git ls-tree` failure or no available SHA-256 hasher.
+pub fn tree_integrity(repo_dir: &Path, commit: &str) -> Result<String> {
+    let mut args: Vec<&str> = TREE_LISTING_ARGS.to_vec();
+    args.push(commit);
+    let listing = git_bytes(Some(repo_dir), &args)?;
     let work = ScratchDir::new()?;
-    let tar = work.path().join("source.tar");
-    let tar_arg = tar.to_string_lossy().into_owned();
-    let mut args: Vec<&str> = ARCHIVE_CONFIG.to_vec();
-    args.extend(["archive", "--format=tar", "-o", &tar_arg, commit]);
-    git(Some(repo_dir), &args)?;
-    let hex = crate::cmd::trace_fetch::sha256_hex(&tar)?;
+    let file = work.path().join("tree-listing");
+    std::fs::write(&file, &listing).map_err(|e| CliError::io(file.clone(), e))?;
+    let hex = crate::cmd::trace_fetch::sha256_hex(&file)?;
     Ok(format!("{INTEGRITY_PREFIX}{hex}"))
 }
 
 fn git(dir: Option<&Path>, args: &[&str]) -> Result<String> {
+    git_bytes(dir, args).map(|b| String::from_utf8_lossy(&b).into_owned())
+}
+
+fn git_bytes(dir: Option<&Path>, args: &[&str]) -> Result<Vec<u8>> {
     let mut cmd = Command::new("git");
     if let Some(d) = dir {
         cmd.arg("-C").arg(d);
@@ -219,7 +218,7 @@ fn git(dir: Option<&Path>, args: &[&str]) -> Result<String> {
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok(out.stdout)
 }
 
 /// A uniquely named temp directory removed on drop.

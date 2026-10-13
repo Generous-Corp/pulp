@@ -275,12 +275,11 @@ mod tests {
         assert!(s.contains(VERIFY_PREAMBLE));
         assert!(VERIFY_PREAMBLE.contains("function(_pulp_package_verify"));
         assert!(VERIFY_PREAMBLE.contains("integrity mismatch"));
-        for setting in pin::ARCHIVE_CONFIG.iter().filter(|a| **a != "-c") {
-            assert!(
-                VERIFY_PREAMBLE.contains(setting),
-                "verifier must pin {setting} like the CLI does"
-            );
-        }
+        let listing = pin::TREE_LISTING_ARGS.join(" ");
+        assert!(
+            VERIFY_PREAMBLE.contains(&listing),
+            "verifier must hash `git {listing}` like the CLI does"
+        );
     }
 
     #[test]

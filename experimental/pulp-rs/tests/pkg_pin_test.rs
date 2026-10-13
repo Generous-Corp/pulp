@@ -2,10 +2,11 @@
 //!
 //! The upstream is a throwaway repo served over `file://`, so these tests
 //! exercise the production [`GitPinner`] (ls-remote, fetch by commit,
-//! `git archive`) without the network. The integrity is recomputed here
+//! `git ls-tree`) without the network. The integrity is recomputed here
 //! with an independent shell pipeline, the written lock is checked against
 //! `tools/packages/packages.lock.schema.json`, and the generated CMake is
-//! configured for real to prove a tampered integrity stops the configure.
+//! configured for real to prove it refuses a tampered integrity, a dirty or
+//! moved checkout, and a source dir that is not a git checkout.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,7 +45,10 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
-/// A local upstream with a `main` branch and an annotated `v1.0` tag.
+/// A local upstream with an annotated `v1.0` tag and a `main` branch one
+/// commit ahead of it. The tagged tree carries an `export-subst` file whose
+/// placeholder expands differently in a shallow and a full clone, and a
+/// non-ASCII path.
 fn make_upstream(dir: &Path) -> (String, String) {
     fs::create_dir_all(dir.join("include")).unwrap();
     fs::write(
@@ -53,24 +57,35 @@ fn make_upstream(dir: &Path) -> (String, String) {
     )
     .unwrap();
     fs::write(dir.join("LICENSE"), "Apache License 2.0 (fixture)\n").unwrap();
+    fs::write(dir.join(".gitattributes"), "VERSION export-subst\n").unwrap();
+    fs::write(dir.join("VERSION"), "$Format:%d$\n").unwrap();
+    fs::write(dir.join("na\u{ef}ve.txt"), "line one\nline two\n").unwrap();
     git(dir, &["init", "-q", "-b", "main"]);
     git(dir, &["add", "."]);
     git(dir, &["commit", "-q", "-m", "fixture"]);
     git(dir, &["tag", "-a", "v1.0", "-m", "release"]);
     let commit = git(dir, &["rev-parse", "v1.0^{commit}"]);
+    fs::write(dir.join("NEXT"), "after the release\n").unwrap();
+    git(dir, &["add", "NEXT"]);
+    git(dir, &["commit", "-q", "-m", "after release"]);
     let url = format!("file://{}", dir.display());
     (url, commit)
 }
 
 /// Integrity recomputed with the documented shell recipe, independent of
-/// `pulp_rs::pkg::pin`.
+/// `pulp_rs::pkg::pin`, with no user or system git configuration.
 fn reference_integrity(repo: &Path, commit: &str) -> String {
     let script = format!(
-        "git -C '{}' -c core.autocrlf=false -c core.eol=lf -c tar.umask=0002 \
-         archive --format=tar {commit} | (sha256sum 2>/dev/null || shasum -a 256)",
+        "git -C '{}' ls-tree -r -z --full-tree {commit} | (sha256sum 2>/dev/null || shasum -a 256)",
         repo.display()
     );
-    let out = Command::new("sh").arg("-c").arg(&script).output().unwrap();
+    let out = Command::new("sh")
+        .arg("-c")
+        .arg(&script)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let hex = String::from_utf8_lossy(&out.stdout)
         .split_whitespace()
@@ -271,13 +286,16 @@ fn configure(src: &Path, build: &Path, extra: &[&str]) -> (bool, String) {
         .args(extra)
         .output()
         .unwrap();
+    // CMake wraps long messages; collapse whitespace so assertions can match
+    // a phrase regardless of where the line breaks fell.
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     (
         out.status.success(),
-        format!(
-            "{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        ),
+        text.split_whitespace().collect::<Vec<_>>().join(" "),
     )
 }
 
@@ -325,12 +343,73 @@ fn generated_cmake_verifies_integrity_and_refuses_a_mismatch() {
 
     // A reconfigure with FetchContent fully disconnected reuses the
     // populated checkout; nothing in the verifier needs the network.
+    let offline = ["-DFETCHCONTENT_FULLY_DISCONNECTED=ON"];
+    let (ok, log) = configure(consumer.path(), &good_build, &offline);
+    assert!(ok, "disconnected reconfigure must succeed:\n{log}");
+
+    // The reused checkout is what gets built, so it must still BE the
+    // locked commit: a tracked edit, an untracked file, or a moved HEAD all
+    // stop the configure even though the commit is still in its history.
+    let src = good_build.join("_deps").join("alac-src");
+    assert!(
+        src.join(".git").exists(),
+        "expected a git checkout at {}",
+        src.display()
+    );
+    let header = src.join("include/alac.h");
+    let pristine = fs::read_to_string(&header).unwrap();
+    fs::write(&header, format!("{pristine}int injected();\n")).unwrap();
+    let (ok, log) = configure(consumer.path(), &good_build, &offline);
+    assert!(!ok, "a modified checkout must stop the configure:\n{log}");
+    assert!(log.contains("local changes or untracked files"), "{log}");
+    fs::write(&header, &pristine).unwrap();
+
+    fs::write(src.join("extra.c"), "int extra;\n").unwrap();
+    let (ok, log) = configure(consumer.path(), &good_build, &offline);
+    assert!(!ok, "an untracked file must stop the configure:\n{log}");
+    assert!(log.contains("extra.c"), "{log}");
+    fs::remove_file(src.join("extra.c")).unwrap();
+
+    git(&src, &["checkout", "-q", "--detach", "origin/main"]);
+    let (ok, log) = configure(consumer.path(), &good_build, &offline);
+    assert!(
+        !ok,
+        "a checkout at another commit must stop the configure:\n{log}"
+    );
+    assert!(log.contains("but packages.lock.json pins"), "{log}");
+    git(&src, &["checkout", "-q", "--detach", &commit]);
+    let (ok, log) = configure(consumer.path(), &good_build, &offline);
+    assert!(
+        ok,
+        "restoring the locked commit must configure again:\n{log}"
+    );
+
+    // Control for the override case below: a plain directory with the same
+    // files, used as the source WITHOUT an override, is refused.
+    fs::rename(src.join(".git"), consumer.path().join("alac.git")).unwrap();
+    let (ok, log) = configure(consumer.path(), &good_build, &offline);
+    assert!(
+        !ok,
+        "a source dir that is not a git checkout must stop the configure:\n{log}"
+    );
+    assert!(log.contains("is not a git checkout"), "{log}");
+
+    // With a developer override the same plain directory is accepted, loudly.
+    let override_arg = format!("-DFETCHCONTENT_SOURCE_DIR_ALAC={}", src.display());
     let (ok, log) = configure(
         consumer.path(),
-        &good_build,
-        &["-DFETCHCONTENT_FULLY_DISCONNECTED=ON"],
+        &consumer.path().join("build-override"),
+        &[override_arg.as_str()],
     );
-    assert!(ok, "disconnected reconfigure must succeed:\n{log}");
+    assert!(ok, "an explicit override is the developer's call:\n{log}");
+    assert!(
+        log.contains("FETCHCONTENT_SOURCE_DIR_ALAC="),
+        "the override must be named:\n{log}"
+    );
+    assert!(
+        log.contains("is not a git checkout"),
+        "the skipped check must be reported:\n{log}"
+    );
 
     fs::write(&gen, &bad).unwrap();
     let (ok, log) = configure(consumer.path(), &consumer.path().join("build-bad"), &[]);

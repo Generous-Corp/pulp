@@ -102,7 +102,7 @@ RegistryLoadResult load_registry(const fs::path& registry_path);
 struct LockedPackage {
     std::string version;
     std::string resolved;
-    // "sha256-<hex>" of the deterministic `git archive` of `commit`; empty
+    // "sha256-<hex>" of `git ls-tree -r -z --full-tree <commit>`; empty
     // only in locks written before packages were pinned.
     std::string integrity;
     // Full 40-hex commit (older locks may hold the registry tag).

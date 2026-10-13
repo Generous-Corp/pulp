@@ -629,14 +629,17 @@ pub fn run_add_with(
         },
     );
 
+    // The lock is written first: generated CMake is derived from it, so a
+    // failed CMake write leaves a lock that regenerates the same file rather
+    // than CMake that names a pin no lock records.
+    registry::save_lock(&lock_path, &lock)?;
+
     if !args.no_cmake {
         let cmake_path = root.join("cmake").join("pulp-packages.cmake");
         let cmake_content = cmake::generate_packages_cmake(&lock, &reg);
         write_atomic(&cmake_path, cmake_content.as_bytes())?;
         ensure_cmake_include(&root)?;
     }
-
-    registry::save_lock(&lock_path, &lock)?;
 
     metadata::update_dependencies_md(&root, &pkg, true)?;
     metadata::update_notice_md(&root, &pkg, true)?;

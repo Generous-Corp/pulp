@@ -303,6 +303,24 @@ fn add_refuses_a_malformed_pin_and_writes_nothing() {
 }
 
 #[test]
+fn add_writes_the_lock_before_the_generated_cmake() {
+    let td = copy_fixture("empty_project");
+    // A directory where the generated file should go makes the CMake write
+    // fail; the lock that CMake is derived from must already be on disk.
+    fs::create_dir_all(td.path().join("cmake").join("pulp-packages.cmake")).unwrap();
+    let mut buf = Vec::new();
+    let args = parse_add_args(&["alac".to_owned()]);
+    let res = with_cwd(td.path(), || run_add_with(&args, &mut buf, &FixedPinner));
+    assert!(
+        res.is_err() || res.as_ref().is_ok_and(|rc| *rc != 0),
+        "the CMake write must fail in this fixture"
+    );
+    let lock = fs::read_to_string(td.path().join("packages.lock.json"))
+        .expect("the lock is written before the generated CMake");
+    assert!(lock.contains(FIXED_COMMIT), "{lock}");
+}
+
+#[test]
 fn add_rejects_gpl_without_override() {
     let td = copy_fixture("license_conflict");
     // The fixture ships with aubio already in the lock file (for the
