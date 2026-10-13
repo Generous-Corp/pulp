@@ -255,6 +255,12 @@ Things that bite:
   `Foo.component/Contents/MacOS/Foo` → `Foo.component/Contents/Resources/Presets`.
   Outside a bundle (any unit-test binary) it resolves to nothing, which is why
   a preset test must stage a directory through `factory_preset_table()`.
+- **The table lists no installed content-pack presets.** `bind` installs no
+  content-preset source and sets no content plugin id, so `PresetManager`
+  returns factory and user presets only. Do not "fix" that by installing
+  `content_registry_preset_source()` here: it puts pulp-content back into
+  pulp-format-core and every plugin's link closure, which
+  `pulp-format-core-symbol-closure` and the plugin link floors reject.
 - **Loading is the point; listing is not.** `NewFactoryPresetSet` must actually
   call `FactoryPresetTable::load` before `SetAFactoryPresetAsCurrent`. Without
   the load the host relabels its menu and the plug-in keeps its old parameters,
