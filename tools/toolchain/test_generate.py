@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import stat
 import tempfile
 import unittest
 from pathlib import Path
 
 import generate
+
+REPO = generate.ROOT
 
 
 class GenerateTests(unittest.TestCase):
@@ -25,6 +29,8 @@ class GenerateTests(unittest.TestCase):
         )
         (root / ".shipyard/vm-image.toml").write_text(body, encoding="utf-8")
         (root / ".shipyard/vm-image.intel.toml").write_text(body, encoding="utf-8")
+        for name in (generate.MISE_CONFIG, generate.MISE_LOCK):
+            (root / name).write_bytes((REPO / name).read_bytes())
 
     def test_five_runs_are_byte_identical(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -88,7 +94,7 @@ class GenerateTests(unittest.TestCase):
             generate.generate(root, None, False)
             path = root / ".shipyard/vm-image.toml"
             path.write_text(
-                path.read_text(encoding="utf-8").replace('cmake = "homebrew"', 'cmake = "brew-current"'),
+                path.read_text(encoding="utf-8").replace('cmake = "4.3.3"', 'cmake = "4.3.4"'),
                 encoding="utf-8",
             )
             with self.assertRaises(ValueError):
@@ -104,6 +110,116 @@ class GenerateTests(unittest.TestCase):
             ).hexdigest()
             text = (root / ".shipyard/vm-image.toml").read_text(encoding="utf-8")
             self.assertIn(f"source_sha256 = {digest}", text)
+
+
+
+class StrictPinTests(unittest.TestCase):
+    """The manifest pins exact versions, and every generated file agrees."""
+
+    def fixture(self, root: Path) -> None:
+        GenerateTests.fixture(self, root)  # type: ignore[arg-type]
+        generate.generate(root, None, False)
+
+    def assert_check_refuses(self, root: Path, needle: str) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            generate.generate(root, None, True)
+        self.assertIn(needle, str(ctx.exception))
+
+    def test_checked_in_files_match_the_manifest(self) -> None:
+        # The drift test proper: the committed .mise.toml, mise.lock and VM
+        # image files are exactly what the committed manifest generates.
+        generate.generate(REPO, None, True)
+
+    def test_floating_selectors_are_refused(self) -> None:
+        source = generate.SOURCE.read_text(encoding="utf-8")
+        for key, floating in (("cmake", "homebrew"), ("rust", "stable"), ("python", "3.12"), ("tart", "latest")):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "manifest.toml"
+                path.write_text(
+                    re.sub(rf'^{key} = "[^"]*"', f'{key} = "{floating}"', source, count=1, flags=re.M),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    generate.load(path)
+                self.assertIn("non-exact", str(ctx.exception))
+
+    def test_hand_edited_mise_tools_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            path = root / generate.MISE_CONFIG
+            path.write_text(path.read_text(encoding="utf-8").replace('ninja = "1.13.2"', 'ninja = "1.13.1"'), encoding="utf-8")
+            self.assert_check_refuses(root, "generated mise block is stale or hand-edited")
+
+    def test_hand_edited_lock_version_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            path = root / generate.MISE_LOCK
+            path.write_text(path.read_text(encoding="utf-8").replace('version = "4.3.3"', 'version = "4.3.4"', 1), encoding="utf-8")
+            self.assert_check_refuses(root, "cmake is locked at '4.3.4'")
+
+    def test_hand_edited_lock_checksum_refuses(self) -> None:
+        # A checksum edit keeps the lock structurally valid; only the lock
+        # digest recorded in .mise.toml can see it.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            path = root / generate.MISE_LOCK
+            text = path.read_text(encoding="utf-8")
+            digest = re.search(r'checksum = "sha256:([0-9a-f]{64})"', text).group(1)
+            path.write_text(text.replace(digest, "0" * 64, 1), encoding="utf-8")
+            generate.check_mise_lock(path, generate.load(root / "tools/toolchain/manifest.toml")[0])
+            self.assert_check_refuses(root, "generated mise block is stale or hand-edited")
+
+    def test_lock_missing_a_platform_checksum_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            path = root / generate.MISE_LOCK
+            text = path.read_text(encoding="utf-8")
+            text = re.sub(r'(\[tools\.node\."platforms\.windows-arm64"\]\n)checksum = "[^"]*"\n', r"\1", text)
+            path.write_text(text, encoding="utf-8")
+            data = generate.load(root / "tools/toolchain/manifest.toml")[0]
+            with self.assertRaises(ValueError) as ctx:
+                generate.check_mise_lock(path, data)
+            self.assertIn("node@26.10.0 has no checksum and url for windows-arm64", str(ctx.exception))
+
+    def test_lock_with_an_unmanifested_tool_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            path = root / generate.MISE_LOCK
+            path.write_text(path.read_text(encoding="utf-8") + '\n[[tools.jq]]\nversion = "1.8.1"\nbackend = "aqua:jqlang/jq"\n', encoding="utf-8")
+            data = generate.load(root / "tools/toolchain/manifest.toml")[0]
+            with self.assertRaises(ValueError) as ctx:
+                generate.check_mise_lock(path, data)
+            self.assertIn("tools not in the manifest: jq", str(ctx.exception))
+
+    def test_every_manifest_tool_is_in_the_generated_profile(self) -> None:
+        data, _ = generate.load()
+        text = (REPO / generate.MISE_CONFIG).read_text(encoding="utf-8")
+        for key, (name, _backend, _checksum, _os) in generate.MISE_TOOLS.items():
+            self.assertRegex(text, rf'(?m)^"?{re.escape(name)}"? = .*"{re.escape(data["toolchain"][key])}"')
+        self.assertIn(data["mise"]["version"], re.search(r"(?m)^min_version = (.*)$", text).group(1))
+        if data["mise"]["enforcement"] == "warn":
+            self.assertIn("soft =", text)
+        for prefix in data["npm"]["prefixes"]:
+            self.assertTrue((REPO / prefix / "package-lock.json").is_file(), prefix)
+            self.assertIn(f"npm ci --prefix {prefix}", text)
+
+    def test_lock_is_written_only_by_the_pinned_mise(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            fake = root / "mise"
+            fake.write_text("#!/bin/sh\necho 2026.5.16 macos-arm64\n", encoding="utf-8")
+            fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+            before = (root / generate.MISE_LOCK).read_bytes()
+            with self.assertRaises(ValueError) as ctx:
+                generate.generate(root, None, False, mise=fake)
+            self.assertIn("must be written by mise", str(ctx.exception))
+            self.assertEqual(before, (root / generate.MISE_LOCK).read_bytes())
 
 
 if __name__ == "__main__":

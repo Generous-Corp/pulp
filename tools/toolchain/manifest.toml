@@ -2,30 +2,52 @@
 schema = 1
 
 [toolchain]
+# Every value is an exact version. generate.py refuses a floating selector
+# ("homebrew", "stable", "latest", a bare major.minor) here; a platform that
+# still installs a tool from its own package manager declares that below as an
+# override, and generate.py lists it as an exception rather than a pin.
+# Each pin is the newest version the required macOS gate already ran on:
+#   python 3.14.4 and cmake 4.3.3 from the gate's CMake configure output,
+#   rust 1.97.1 from the macOS gate-VM release legs (and Shipyard's pin),
+#   clang-format 21.1.8 from the hosted format check's PyPI pin.
 xcode = "26.5"
-cmake = "homebrew" # Homebrew formula; observed version is receipt data, not an installer pin
-ninja = "homebrew"
-python = "3.12"
+cmake = "4.3.3"
+ninja = "1.13.2"
+python = "3.14.4"
 node = "26.10.0"
-rust = "stable" # rustup channel; exact observed rustc is recorded in the golden receipt
+rust = "1.97.1"
 rust_targets = ["x86_64-apple-darwin"]
-tart = "homebrew" # Homebrew formula; observed version is receipt data, not an installer pin
-clang_format = "required"
+rust_components = ["rustfmt", "clippy"]
+tart = "2.38.0"
+clang_format = "21.1.8"
+
+[mise]
+# The mise binary itself is part of the pin: built from source at this tag and
+# commit, installed by digest, never self-updated. The lock is only
+# reproducible with the same mise: releases before this one select aqua
+# version-prefix overrides and percent-encoded release URLs differently, so
+# the same [tools] table can lock to different URLs.
+version = "2026.10.8"
+source_commit = "b671d356aaf33b87e48e7469a77abb40c3553c68"
+lock_platforms = ["linux-arm64", "linux-x64", "macos-arm64", "macos-x64", "windows-arm64", "windows-x64"]
+# warn: report a mismatch and continue. enforce: refuse. See check_env.py.
+enforcement = "warn"
+
+[npm]
+# Project dependencies install with `npm ci` from these committed lockfiles,
+# never `npm install`, so a configure cannot run against a partial tree.
+prefixes = ["tools/import-design/jsx-runtime", "tools/scripts"]
 
 [platform.intel]
 rust = true
 rust_targets = ["x86_64-apple-darwin"]
 
 [platform.linux]
-cmake = "system"
-python = "3.12"
-node = "26.10.0"
+cmake = "system" # exception: apt cmake until the tartci bake installs from mise.lock
 rust = "absent"
 
 [platform.windows]
-cmake = "system"
-python = "3.12"
-node = "26.10.0"
+cmake = "system" # exception: choco cmake until the tartci bake installs from mise.lock
 rust = "absent"
 
 

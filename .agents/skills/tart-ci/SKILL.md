@@ -79,6 +79,8 @@ A new repo adds one `.shipyard/vm-image.toml` and the same `tart-provision.sh ma
 
 Fields: `base`, `disk_gb`, `auto_login`, `[toolchain].xcode` (omit → no Xcode tier), `[toolchain].rust` + `.rust_targets` + `.rosetta` (Intel cross-build layer — omit → not installed), `[brew].packages`, `[pip].packages`, `[caches].ccache_max`, `[[mounts]]`. See `.shipyard/vm-image.toml` (Pulp: Xcode+Skia), `.shipyard/vm-image.intel.toml` (Intel cross-build layer), and `tools/ci/examples/vm-image.rust-repo.toml` (a light Rust profile, no Xcode — proves generalization).
 
+**Pulp's `[toolchain]` fields and `[brew].packages` are generated, not hand-edited.** `tools/toolchain/manifest.toml` is the authority; `python3 tools/toolchain/generate.py` rewrites the owned keys in both vm-image files plus `.mise.toml` and `mise.lock`, and the `toolchain-test_generate-selftest` drift test fails on any hand edit. The `[toolchain]` values are exact pins (cmake 4.3.3, python 3.14.4, rust 1.97.1, ...), but `tart-provision.sh` still installs the unversioned Homebrew `[brew].packages` and `rustup ... stable`, so a fresh bake does NOT yet produce those versions: the golden's real versions are whatever the bake resolved that day. Read them from a gate log (`✓ cmake`, `Found Python3`, release-cli `rust: using cargo`) or a golden receipt, never from the manifest, until the bake installs from `mise.lock`.
+
 ## Intel (x86_64) cross-build lane — no native Intel hardware needed
 Pulp's required `darwin-x64` release leg **cross-compiles on Apple Silicon and
 runs under Rosetta 2**. It routes through `PULP_RELEASE_MACOS_RUNS_ON_JSON`,

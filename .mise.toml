@@ -1,5 +1,32 @@
-# Optional, locked task profile. No Shipyard, tartci, gate, or release lane uses mise.
-# Host-tool pins remain refused until a deterministic multi-platform mise.lock exists.
+# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
+# source_sha256 = d8e237c1c48d2ce6b9bb1a672a260242742177c439d219f59501cf99979f1e55
+# mise_lock_sha256 = 15230d49429194691bfc3c199989f40511c5ddb31e514aef952765a91192f5b7
+# Edit tools/toolchain/manifest.toml, then run
+#   python3 tools/toolchain/generate.py --lock --mise <pinned mise>
+min_version = { soft = "2026.10.8" }
+
+[tools]
+cmake = "4.3.3"
+ninja = "1.13.2"
+python = "3.14.4"
+node = "26.10.0"
+rust = { version = "1.97.1", targets = "x86_64-apple-darwin", components = "rustfmt,clippy", profile = "minimal" }
+tart = { version = "2.38.0", os = ["macos"] }
+"conda:clang-format" = { version = "21.1.8", os = ["linux", "macos", "windows/x64"] }
+
+[tasks.npm-deps]
+description = "Install project npm dependencies from the committed lockfiles (npm ci)"
+run = [
+  "npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund",
+  "npm ci --prefix tools/scripts --no-audit --no-fund",
+]
+# END GENERATED PULP TOOLCHAIN
+
+# Pulp's pinned toolchain. The generated block above is written by
+# tools/toolchain/generate.py from tools/toolchain/manifest.toml and locked, with
+# per-platform checksums, in mise.lock; never edit it by hand. No Shipyard,
+# tartci, gate, or release lane runs `mise` yet: enforcement is staged
+# (manifest [mise].enforcement), and the tasks below remain optional.
 [settings]
 auto_install = false
 locked = true
