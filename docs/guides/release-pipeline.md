@@ -274,10 +274,10 @@ compiles (`release-cli.yml` `build-cli`, `sign-and-release.yml`
   runner that sets a per-dependency `PULP_FETCHCONTENT_SOURCE_DIR_<NAME>`;
 - uses neither `actions/cache` nor the Namespace cache volumes.
 
-The WebCLAP deploy also fetches its Skia wasm slice (verified against the
-manifest digest), wasi-sdk and choc (at an exact commit) into `RUNNER_TEMP`
-on every run instead of reusing a `$HOME` directory an earlier job could have
-written. Release builds are rare, so the cold-compile minutes are the accepted
+The WebCLAP deploy also unpacks its Skia wasm slice, wasi-sdk and choc (at an
+exact commit) into `RUNNER_TEMP` on every run instead of reusing a `$HOME`
+directory an earlier job could have written. The Skia archive itself may be
+reused from the host, but only after it matches the manifest digest on that run. Release builds are rare, so the cold-compile minutes are the accepted
 price. `tools/scripts/test_release_cache_isolation.py` (run by
 `workflow-lint.yml`) finds every such job by its signing or deploy capability
 and fails if one drops either setting, so a new release job is held to the same

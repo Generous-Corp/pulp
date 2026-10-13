@@ -356,6 +356,60 @@ jobs:
           test "$(git -C "$dest" rev-parse HEAD)" = "$CHOC_COMMIT"
           echo "PULP_WAM_CHOC_INCLUDE=$dest" >> "$GITHUB_ENV"
 
+      # The slice is kept as its release archive, named by the pinned sha256
+      # from tools/deps/manifest.json, and checked against that digest on every
+      # run, whether it was downloaded now or left on the host. It unpacks into
+      # this job's temp dir, so a host that keeps $HOME between jobs never
+      # builds against an older pin. This job deploys, so it restores no
+      # actions/cache; it only saves one (test_release_cache_isolation.py).
+      - name: Resolve the Skia wasm slice pin
+        if: steps.relevance.outputs.run == 'true'
+        id: skia-pin
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
+                     if d["name"] == "Skia")
+          # Key matches the release asset's platform segment
+          # (skia-build-<platform>-gpu-release.zip), the convention every other
+          # slice follows and the one check_manifest_mirrors.py enforces against
+          # external/skia-build/VERSION.md.
+          a = dep["determinism"]["release_assets"]["wasm-wasm32"]
+          print(f"url={a['url']}")
+          print(f"sha256={a['sha256']}")
+          PY
+
+      - name: Fetch and verify the Skia wasm slice
+        if: steps.relevance.outputs.run == 'true'
+        env:
+          SKIA_WASM_URL: ${{ steps.skia-pin.outputs.url }}
+          SKIA_WASM_SHA256: ${{ steps.skia-pin.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          archive="$HOME/.cache/pulp/skia-wasm/$SKIA_WASM_SHA256.zip"
+          mkdir -p "$(dirname "$archive")"
+          trap 'rm -f "$archive.$$"' EXIT
+          verify() { echo "$SKIA_WASM_SHA256  $1" | shasum -a 256 -c -; }
+          if [ ! -f "$archive" ] || ! verify "$archive"; then
+            curl -fsSL "$SKIA_WASM_URL" -o "$archive.$$"
+            verify "$archive.$$"
+            mv -f "$archive.$$" "$archive"
+          fi
+          root="$RUNNER_TEMP/skia-wasm"
+          rm -rf "$root"
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          echo "SKIA_WASM_ROOT=$root" >> "$GITHUB_ENV"
+
+      # Write-only: publishes the verified archive from main for web-plugins.yml's
+      # PR runs to restore (and re-verify). This job never restores it.
+      - name: Save the Skia wasm archive (main push, GitHub-hosted)
+        if: steps.relevance.outputs.run == 'true' && runner.environment == 'github-hosted' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/pulp/skia-wasm/${{ steps.skia-pin.outputs.sha256 }}.zip
+          key: skia-wasm-archive-${{ steps.skia-pin.outputs.sha256 }}
+
       - name: Build the WAM, Pulp-UI and WebGPU-DSP modules
         if: steps.relevance.outputs.run == 'true'
         run: |
@@ -367,28 +421,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release -DPULP_WAM_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
           bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build examples/web-demos/wasm-build/build
 
-          # Skia wasm slice (Ganesh/WebGL2) — the Pulp UI module's one binary dependency.
-          # URL + sha256 come from the manifest, so this lane and the dependency audit
-          # cannot disagree about which slice is in use. Downloaded and verified on
-          # every run: a restored or leftover tree could not be checked against it.
-          read -r url sha < <(python3 - <<'PY'
-          import json
-          dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
-                     if d["name"] == "Skia")
-          a = dep["determinism"]["release_assets"]["wasm-wasm32"]
-          print(a["url"], a["sha256"])
-          PY
-          )
-          skia_dir="${RUNNER_TEMP:?}/skia-wasm"
-          rm -rf "$skia_dir" "${RUNNER_TEMP}/skia-wasm.zip"
-          curl -fsSL "$url" -o "${RUNNER_TEMP}/skia-wasm.zip"
-          echo "$sha  ${RUNNER_TEMP}/skia-wasm.zip" | sha256sum -c -
-          mkdir -p "$skia_dir"
-          unzip -q "${RUNNER_TEMP}/skia-wasm.zip" -d "$skia_dir"
-
           # Pulp's own GPU UI, compiled to wasm. Both SuperConvolver pages mount it.
           emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
-            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$skia_dir"
+            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$SKIA_WASM_ROOT"
           bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh" cmake --build build-webui
 
           # The Skia-free WebGPU DSP module the GPU page's worker instantiates. Guarded:

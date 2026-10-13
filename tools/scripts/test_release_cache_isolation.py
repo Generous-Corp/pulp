@@ -11,7 +11,9 @@ job that signs, notarizes, attests or publishes AND compiles must therefore:
   step, pointing PULP_SHARED_FETCHCONTENT_SOURCE_DIR and
   PULP_FETCHCONTENT_BASE_DIR at a fresh RUNNER_TEMP root so every dependency is
   re-fetched at its pin;
-* use neither actions/cache nor the Namespace cache volumes.
+* restore no actions/cache and mount no Namespace cache volume. Saving with
+  actions/cache/save is allowed: it only publishes what this trusted job
+  produced, for other lanes to verify before use.
 
 The step body is also executed here, so the contract is checked by behaviour
 and not only by text. Third-party sources these lanes clone (choc,
@@ -56,6 +58,14 @@ EXPECTED = {
     ("wclap-cloudflare.yml", "build-prove-deploy"),
 }
 SHARED_CACHE_ACTIONS = ("actions/cache", "setup-namespace-macos-cache")
+# Write-only: a job that saves a cache reads nothing back from it.
+WRITE_ONLY_CACHE_ACTIONS = ("actions/cache/save@",)
+
+
+def reads_shared_cache(uses: str) -> bool:
+    if uses.startswith(WRITE_ONLY_CACHE_ACTIONS):
+        return False
+    return any(action in uses for action in SHARED_CACHE_ACTIONS)
 
 
 def _load(path: Path) -> dict:
@@ -190,10 +200,15 @@ class SigningJobsReadNoSharedCache(unittest.TestCase):
         for key, job in self.jobs.items():
             with self.subTest(job=key):
                 for step in job.get("steps") or []:
-                    uses = step.get("uses") or ""
-                    for action in SHARED_CACHE_ACTIONS:
-                        self.assertNotIn(action, uses,
-                                         f"step {step.get('name')!r} restores a shared cache")
+                    self.assertFalse(reads_shared_cache(step.get("uses") or ""),
+                                     f"step {step.get('name')!r} restores a shared cache")
+
+    def test_only_a_save_is_exempt(self) -> None:
+        for uses in ("actions/cache@v4", "actions/cache/restore@v4",
+                     "./.github/actions/setup-namespace-macos-cache"):
+            self.assertTrue(reads_shared_cache(uses), uses)
+        self.assertFalse(reads_shared_cache("actions/cache/save@v4"))
+        self.assertFalse(reads_shared_cache("actions/checkout@v7"))
 
 
 class ThirdPartyClonesArePinned(unittest.TestCase):
