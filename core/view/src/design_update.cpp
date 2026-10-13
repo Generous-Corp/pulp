@@ -465,7 +465,6 @@ std::vector<DesignSlot> classify_design_slots(const IRNode& node) {
             return slot_kind_rank(lhs.kind) < slot_kind_rank(rhs.kind);
         return lhs.key < rhs.key;
     });
-    slots.erase(std::unique(slots.begin(), slots.end()), slots.end());
     return slots;
 }
 } // namespace pulp::view
