@@ -1146,6 +1146,17 @@ consequences worth knowing before you debug:
   and still exits 0, which is a pass it never earned. Reproduce with
   `python3.12 tools/ci/source_selftests.py run` after temporarily renaming
   `build/`, which is the lane's condition.
+- The lane is three jobs. `Version & skill sync checks` runs the shared part.
+  `Exclusive source selftests 1/2` and `2/2` run the `PROCESSORS` > 1 entries,
+  each alone on its own runner. The required `Enforce version & skill sync`
+  job only collects the result of the other two. When it is red, open the
+  needed job that failed: the aggregator's log names it but holds no test
+  output. `EXCLUSIVE_SHARD_PLAN` in `tools/ci/source_selftests.py` names the
+  shard for each `PROCESSORS` > 1 entry, balanced on measured wall time, not
+  on manifest timeouts (the timeouts are all 300 s and put the two GPU DPR
+  tests together, a 200 s shard). A new such entry still runs, on the lightest
+  shard, but the contract fails until the plan places it. Changing the shard
+  count means changing the plan and the workflow matrix together.
 - Editing a moved registration's arguments without refreshing the manifest
   fails `source-selftest-lane-contract` on the gate; run
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
