@@ -150,6 +150,38 @@ This convention is enforced: `tools/packages/validate_registry.py` fails if any
 a tool users cannot update. Add the pin (and any user-facing update note) in the
 same change that registers the tool.
 
+### Downloads are SHA-256 verified at the pin; overrides are recorded honestly
+
+Every `binary_sources` entry carries the `sha256` of the published release
+asset for `pinned_version`, per platform. `pulp tool install` hashes the
+download before extracting it and refuses a pinned download whose digest
+differs, naming the tool, platform, expected and found digests, and the fix;
+nothing is installed. `validate_registry.py` fails a binary source without a
+`sha256`, so the URL must name an immutable, versioned asset (a "latest"
+redirect cannot be pinned). Record a digest by downloading the asset into an
+empty directory and comparing it with the upstream checksum when one is
+published.
+
+A user override is never refused for lacking a digest. When the active version
+comes from `PULP_TOOL_<ID>_VERSION` or `tool-overrides.json` and differs from
+the pin, Pulp has reviewed no digest for it: the tool installs, and its
+`~/.pulp/tools/<id>/<version>/manifest.json` records `"verification":
+"unverified-version"`, the observed `sha256`, and the `version_source`. A pinned
+install records `"verification": "sha256-verified"`.
+
+The one exception to the override contract is a source that serves a single
+fixed build. Some upstreams publish no per-version download (the source's
+`url_template` has no `${version}`), and installing their one build under
+another version's name would mislabel it. On such a platform an override to a
+version other than the pin is refused, naming the tool, the platform and the
+fix, or you can install the version yourself and put it on `PATH`. The fix
+matches where the override lives: unset `PULP_TOOL_<ID>_VERSION` for an
+environment override, or run `pulp tool update <id>` for a saved one.
+`pulp tool install <id> --version <v>` refuses such a version before saving it,
+so a refused version never becomes a stored override that breaks later
+installs. ffmpeg on macOS arm64 and Linux x64 is this
+case today; its Windows source is versioned, so overrides work there.
+
 ## See also
 
 - [skills.md](skills.md) — the agent-skills catalog; the `packages`, `kits`,
