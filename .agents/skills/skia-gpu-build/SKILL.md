@@ -540,6 +540,11 @@ wrong for a cross/Intel build on Apple Silicon).
   the per-slice adhoc linker signatures don't merge, and an unsigned arm64
   dylib is **killed at load**. `LC_ID_DYLIB` is already `@rpath/…` and the dylib
   has no `LC_RPATH`, so the `@loader_path` relocatable contract above still holds.
+  The two slice digests are not in that file: it reads them from the
+  `wgpu-native` row of `tools/deps/manifest.json` (`artifacts`), the same pins
+  the single-slice path verifies through `PulpWgpuNative.cmake`. A missing or
+  stale slice digest there fails configure for universal builds only, so a
+  wgpu-native bump must re-record every asset, not just the host's.
 - **No universal libv8.** `PULP_JS_ENGINE=v8` + a universal target is a hard
   `FindV8.cmake` FATAL (v8-builder ships only thin mac slices). Use quickjs/jsc
   for universal, or lipo two thin V8 builds yourself.

@@ -3582,6 +3582,7 @@
     "docs/status",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/test_pulp_add_sparkle.cmake",
+    "test/cmake/test_wgpu_native_pin.cmake",
     "test/fixtures",
     "test/support",
     "tools/ci",
@@ -3598,6 +3599,7 @@
     "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpSparkle.cmake",
     "tools/cmake/PulpTestData.cmake",
+    "tools/cmake/PulpWgpuNative.cmake",
     "tools/cmake/PulpWgpuUniversal.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/gate_common.py",
@@ -4371,23 +4373,35 @@
   "deps-audit-extra-selftest": {
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
+    "tools/ci/tart-provision.sh",
     "tools/deps/audit.py",
-    "tools/deps/test_audit_extra.py"
+    "tools/deps/test_audit_extra.py",
+    "tools/install-shipyard.sh",
+    "tools/packages/test-stubs"
    ],
    "kind": "python"
   },
   "deps-audit-selftest": {
    "entry": "tools/deps/test_audit.py",
    "inputs": [
+    "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpWclap.cmake",
     "tools/deps/audit.py",
-    "tools/deps/test_audit.py"
+    "tools/deps/test_audit.py",
+    "tools/deps/wgpu_native_digests.py",
+    "tools/install-shipyard.sh",
+    "tools/packages/test-stubs"
    ],
    "kind": "python"
   },
   "deps-offline-fetch-contract": {
    "entry": "tools/deps/audit.py",
    "inputs": [
-    "tools/deps/audit.py"
+    "tools/ci/tart-provision.sh",
+    "tools/deps/audit.py",
+    "tools/install-shipyard.sh",
+    "tools/packages/test-stubs"
    ],
    "kind": "python"
   },

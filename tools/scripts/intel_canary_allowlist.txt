@@ -34,7 +34,6 @@ tools/cmake/FindV8.cmake :: MATCHES "aarch64|arm64"
 
 # PulpWgpuUniversal fabricates the fat dylib by iterating BOTH slices.
 tools/cmake/PulpWgpuUniversal.cmake :: foreach(_slice aarch64 x86_64)
-tools/cmake/PulpWgpuUniversal.cmake :: _slice STREQUAL "aarch64"
 
 # PulpFetchContent maps the selected arch (already TARGET-aware, see class 4
 # exemption below) to wgpu-native's URL arch token.

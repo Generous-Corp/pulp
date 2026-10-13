@@ -199,6 +199,15 @@ add_test(NAME cmake-fetchcontent-base-dir
 set_tests_properties(cmake-fetchcontent-base-dir PROPERTIES
     LABELS "cmake;fetchcontent;windows;issue-4039"
     TIMEOUT 30)
+# wgpu-native runtime archives are used only when their SHA-256 matches the
+# manifest pin: a wrong digest, a tampered shared cache, or a download under
+# FETCHCONTENT_FULLY_DISCONNECTED is refused. file:// fixtures, no network.
+add_test(NAME cmake-wgpu-native-pin
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_wgpu_native_pin.cmake)
+set_tests_properties(cmake-wgpu-native-pin PROPERTIES
+    LABELS "cmake;fetchcontent;deps"
+    TIMEOUT 60)
 # IMPLEMENTATION LINT ONLY — deliberately not the runtime proof.
 #
 # This reads the TEXT of PulpWebGpuImportedTarget.cmake and asserts the

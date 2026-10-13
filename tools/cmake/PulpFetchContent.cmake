@@ -243,7 +243,16 @@ function(pulp_materialize_mutable_fetchcontent_source name)
     message(STATUS "Pulp: using build-local mutable copy for ${name}: ${local_source}")
 endfunction()
 
+include("${CMAKE_CURRENT_LIST_DIR}/PulpWgpuNative.cmake")
+
+# Register the wgpu-native runtime archive FetchContent will consume, and point
+# it at a digest-verified tree (see PulpWgpuNative.cmake). Sets
+# PULP_WGPU_NATIVE_ASSET and PULP_WGPU_NATIVE_SOURCE_DIR in the caller's scope.
+#   ARCH — the architecture WebGPU-distribution will request (its ARCH
+#          variable). Passing it keeps the asset Pulp verifies identical to the
+#          one the upstream script would download.
 function(pulp_register_wgpu_native_precompiled_source version)
+    cmake_parse_arguments(PWN "" "ARCH" "" ${ARGN})
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         set(url_os "windows")
         if(MSVC)
@@ -260,6 +269,11 @@ function(pulp_register_wgpu_native_precompiled_source version)
     endif()
 
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
+    # WebGPU-distribution maps a 64-bit-processor host building 32-bit code to
+    # i686 (its detect_system_architecture()); mirror it.
+    if((arch STREQUAL "amd64" OR arch STREQUAL "x86_64") AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+        set(arch "i686")
+    endif()
     # On Apple, CMAKE_SYSTEM_PROCESSOR reports the HOST arch. Select the wgpu
     # slice from the TARGET arch (CMAKE_OSX_ARCHITECTURES) instead, so a cross
     # or Intel-thin build caches/fetches the matching slice rather than the
@@ -284,6 +298,9 @@ function(pulp_register_wgpu_native_precompiled_source version)
             set(arch "arm64")
         endif()
     endif()
+    if(PWN_ARCH)
+        string(TOLOWER "${PWN_ARCH}" arch)
+    endif()
     if(arch STREQUAL "amd64")
         set(url_arch "x86_64")
     elseif(arch STREQUAL "x86_64")
@@ -307,4 +324,12 @@ function(pulp_register_wgpu_native_precompiled_source version)
     set(url_name "${url_name}-release")
 
     pulp_register_fetchcontent_source("${url_name}" DIR "${url_name}" REF "${version}")
+
+    pulp_wgpu_native_select_source("${url_name}" "${version}" _verified_dir)
+    string(TOUPPER "${url_name}" _upper)
+    # A normal variable shadows the cache entry pulp_register_fetchcontent_source
+    # may have written, so FetchContent sees only the verified tree.
+    set(FETCHCONTENT_SOURCE_DIR_${_upper} "${_verified_dir}" PARENT_SCOPE)
+    set(PULP_WGPU_NATIVE_ASSET "${url_name}" PARENT_SCOPE)
+    set(PULP_WGPU_NATIVE_SOURCE_DIR "${_verified_dir}" PARENT_SCOPE)
 endfunction()

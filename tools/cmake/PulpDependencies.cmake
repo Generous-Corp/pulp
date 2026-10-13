@@ -54,11 +54,11 @@ pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
 # PULP_WGPU_NATIVE_VERSION is the single CMake-side source of truth for the
 # wgpu-native runtime: the precompiled-source registration, the universal-dylib
 # lipo, and the runtime-pins record the SDK installs (PulpRuntimePins.cmake)
-# all read it.
+# all read it. The per-asset digests live in tools/deps/manifest.json, whose
+# wgpu-native version must equal it (PulpWgpuNative.cmake checks).
 set(PULP_WGPU_NATIVE_VERSION v24.0.3.1)
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     pulp_register_fetchcontent_source(webgpu REF 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab)
-    pulp_register_wgpu_native_precompiled_source(${PULP_WGPU_NATIVE_VERSION})
     FetchContent_Declare(
         webgpu
         GIT_REPOSITORY https://github.com/eliemichel/WebGPU-distribution.git
@@ -135,7 +135,13 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
         unset(_pulp_osx_arm64)
         unset(_pulp_osx_x86_64)
     endif()
+    # Resolve the wgpu-native runtime archive WebGPU-distribution is about to
+    # request (same ARCH it reads) to a digest-verified tree, so its own
+    # unverified URL download never runs. See PulpWgpuNative.cmake.
+    pulp_register_wgpu_native_precompiled_source(${PULP_WGPU_NATIVE_VERSION} ARCH "${ARCH}")
     FetchContent_MakeAvailable(webgpu)
+    # Fails configure unless WebGPU-distribution populated the verified tree.
+    pulp_wgpu_native_assert_used_verified_source()
     if(_pulp_restore_arch)
         if(DEFINED _pulp_saved_arch)
             set(ARCH "${_pulp_saved_arch}")
