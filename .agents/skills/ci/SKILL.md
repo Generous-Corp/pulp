@@ -30,14 +30,26 @@ on a real PR. Do them in order.
    VMs it refuses its heavy half.** `tools/scripts/gate_host_policy.sh` reads
    `tartci host-profile`, not the hostname: when `TARTCI_SERVES_GATE=1` and
    `TARTCI_ROLE` is anything but `light` (today m3 `dedicated-builder`, m5 and
-   m5s `dev-overflow`), `gates.sh` skips the generated-manifest configure and
-   every source-selftest lane. It lists them as NOT CHECKED, so the verdict
-   reads "not a full pass" rather than "safe to push". The cheap gates still run.
-   The pre-push hook and `local_diff_cover.sh` (exit 4) refuse the diff-coverage
-   build the same way. Run the full set on m1 (`light`) or a disposable VM;
-   there is no override on a gate host. Every fleet host reports
-   `TARTCI_SERVES_GATE=1`, so that field alone would refuse m1 too, and an
-   unknown role fails closed. The gate run covers:
+   m5s `dev-overflow`), `gates.sh` never configures and skips every
+   source-selftest lane. The generated-manifest lane still runs build-free
+   (`PULP_GATES_NO_CONFIGURE=1`), so its families prediction can still fail.
+   The skipped lanes are listed as NOT CHECKED, so the verdict reads "not a full
+   pass" rather than "safe to push". The cheap gates still run.
+   The pre-push hook and `local_diff_cover.sh` (exit 4) refuse the
+   diff-coverage build the same way, and the hook ends "gates clean except
+   diff coverage: NOT CHECKED". Run the full set on m1 (`light`) or a
+   disposable VM.
+   The policy fails closed:
+   - tartci is found on PATH or in `~/.local/bin`;
+   - a tartci whose `host-profile` fails, or that prints no
+     `TARTCI_SERVES_GATE`, counts as a gate host;
+   - an unknown role is refused;
+   - only a machine with no tartci at all is treated as a non-fleet host.
+
+   Every fleet host reports `TARTCI_SERVES_GATE=1`, so that field alone would
+   refuse m1 too. `PULP_TARTCI_BIN` is a test hook that names a fake profile.
+   Do not point it at a fake light profile to dodge the refusal. The gate run
+   covers:
    - **watch events** — a range touching a watched capability-family path
      without a committed `.github/vellum-expansion-watch-events/` event FAILS
      (exit 10) and prints the exact JSON; or run

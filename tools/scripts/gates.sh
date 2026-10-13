@@ -94,7 +94,7 @@ BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 # shellcheck source=gate_host_policy.sh
 source "$ROOT/tools/scripts/gate_host_policy.sh"
 gate_host_builds_skipped=0
-gate_host_skipped_what="the generated-manifest configure/build and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python)"
+gate_host_skipped_what="the build-gate configure and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python)"
 if pulp_gate_host_builds_reserved; then
     gate_host_builds_skipped=1
     pulp_gate_host_skip_line "$gate_host_skipped_what" "tools/scripts/gates.sh $BASE"
@@ -573,13 +573,21 @@ fi
 # NOT CHECKED instead of configuring. The families check runs a build-free
 # prediction first and, when its configured half cannot run on a change to a
 # surface it blocks, FAILS instead of NOT CHECKED (the required gate checks it).
-if [ "$gate_host_builds_skipped" -eq 1 ]; then
-    : # Refused on a gate host (recorded as NOT CHECKED); the cheap gates continue below.
-elif [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
+# On a gate host the lane still runs, but never configures: the build-free
+# families prediction can still FAIL, and the configured halves report NOT
+# CHECKED unless a current build already exists.
+if [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
     echo "" >&2
-    echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (configures build-gate when the diff can drift them)" >&2
+    sti_no_configure="${PULP_GATES_NO_CONFIGURE:-}"
+    if [ "$gate_host_builds_skipped" -eq 1 ]; then
+        sti_no_configure=1
+        echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (gate host: build-free checks only, never configures)" >&2
+    else
+        echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (configures build-gate when the diff can drift them)" >&2
+    fi
     sti_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-script-inputs.XXXXXX")"
-    if ! "$PYTHON" "$ROOT/tools/scripts/gates_script_inputs.py" --base "$BASE" --repo-root "$ROOT" >"$sti_log" 2>&1; then
+    if ! PULP_GATES_NO_CONFIGURE="$sti_no_configure" \
+            "$PYTHON" "$ROOT/tools/scripts/gates_script_inputs.py" --base "$BASE" --repo-root "$ROOT" >"$sti_log" 2>&1; then
         fail=1
     fi
     grep -v "^NOT CHECKED locally: " "$sti_log" >&2
@@ -1093,6 +1101,15 @@ EOF
 fi
 
 # ── Summary ────────────────────────────────────────────────────────────────
+diff_cover_hint() {
+    if [ "$gate_host_builds_skipped" -eq 1 ]; then
+        echo "  Diff-coverage NOT run, and refused on this gate host. Run it on a" >&2
+        echo "  TARTCI_ROLE=light host (m1) or a disposable VM:" >&2
+    else
+        echo "  Diff-coverage NOT run (slow). When you want it:" >&2
+    fi
+    echo "    tools/scripts/local_diff_cover.sh [test_target ...]" >&2
+}
 echo "" >&2
 not_checked=0
 if [ -s "$not_checked_log" ]; then
@@ -1109,14 +1126,12 @@ if [ "$fail" -eq 0 ] && { [ "$not_checked" -gt 0 ] || [ -n "$no_build" ]; }; the
         echo "       Configure one with Ninja (pulp build), or set PULP_GATES_BUILD_DIR." >&2
     fi
     echo "" >&2
-    echo "  Diff-coverage NOT run (slow). When you want it:" >&2
-    echo "    tools/scripts/local_diff_cover.sh [test_target ...]" >&2
+    diff_cover_hint
     exit 0
 elif [ "$fail" -eq 0 ]; then
     echo "gates: ✓ all gates pass — safe to push." >&2
     echo "" >&2
-    echo "  Diff-coverage NOT run (slow). When you want it:" >&2
-    echo "    tools/scripts/local_diff_cover.sh [test_target ...]" >&2
+    diff_cover_hint
     exit 0
 else
     echo "gates: ✗ one or more gates failed (see above)." >&2

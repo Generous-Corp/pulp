@@ -227,7 +227,10 @@ class GatesScriptInputsTests(unittest.TestCase):
                 r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE=role,
                                PULP_SKIP_SOURCE_SELFTESTS="")
                 self.assertEqual(self.configures(), [])
-                self.assertNotIn("▸ generated test manifests", r.stderr)
+                # The manifest lane still runs, build-free: its static families
+                # prediction is a cheap gate that can fail.
+                self.assertIn("gate host: build-free checks only, never configures", r.stderr)
+                self.assertIn("changed-surface script families (static): OK", r.stderr)
                 self.assertNotIn("▸ source-only selftests", r.stderr)
                 self.assertNotIn("▸ ctest pr-fast tier", r.stderr)
                 self.assertIn("[gate-host] REFUSED", r.stderr)
@@ -239,6 +242,25 @@ class GatesScriptInputsTests(unittest.TestCase):
                 self.assertIn("▸ version-bump check", r.stderr)
                 self.assertIn("[gate-host] NOT CHECKED", r.stderr)
                 self.assertNotIn("all gates pass — safe to push", r.stderr)
+
+    def test_gate_host_still_fails_a_families_flip_without_configuring(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="dedicated-builder",
+                       FAKE_STATIC_RC="1",
+                       FAKE_STATIC_SAYS="  tools/scripts/test_alpha.py: newly mapped")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertEqual(self.configures(), [])
+        self.assertIn("tools/scripts/test_alpha.py: newly mapped", r.stderr)
+        self.assertIn("one or more gates failed", r.stderr)
+
+    def test_gate_host_summary_points_diff_coverage_off_the_host(self) -> None:
+        self.write("README.md", "readme, edited\n")
+        self.commit()
+        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="dev-overflow")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Diff-coverage NOT run, and refused on this gate host", r.stderr)
+        self.assertNotIn("Diff-coverage NOT run (slow)", r.stderr)
 
     def test_light_and_non_gate_profiles_keep_local_build_path(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")

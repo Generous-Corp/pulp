@@ -1339,23 +1339,32 @@ class StarvedHostSkipTests(unittest.TestCase):
         self.assertIn("DIFF COVERAGE SKIPPED (host starved)", hook)
 
 
-def _fake_tartci(directory: pathlib.Path, *lines: str) -> pathlib.Path:
+def _fake_tartci(directory: pathlib.Path, *lines: str, exit_code: int = 0) -> pathlib.Path:
+    directory.mkdir(parents=True, exist_ok=True)
     tartci = directory / "tartci"
     body = "".join(f"echo {line}\n" for line in lines)
-    tartci.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    tartci.write_text(f"#!/bin/sh\n{body}exit {exit_code}\n", encoding="utf-8")
     tartci.chmod(0o755)
     return tartci
 
 
-def _policy_reserved(tartci: pathlib.Path | None) -> bool:
-    """Source gate_host_policy.sh alone and ask whether local builds are refused."""
-    env = dict(os.environ, PULP_TARTCI_BIN=str(tartci) if tartci else "/nonexistent/tartci",
-               PATH="/usr/bin:/bin")
-    result = subprocess.run(
-        ["bash", "-c", 'source "$1"; if pulp_gate_host_builds_reserved; then echo R; else echo L; fi',
-         "_", str(SCRIPT.parent / "gate_host_policy.sh")],
-        env=env, capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
-    return result.stdout.strip() == "R"
+def _policy_reserved(tartci: pathlib.Path | None, home: pathlib.Path | None = None,
+                     path: str = "/usr/bin:/bin") -> bool:
+    """Source gate_host_policy.sh alone and ask whether local builds are refused.
+
+    HOME defaults to an empty directory, so a real ~/.local/bin/tartci on the
+    machine running the tests never answers for the fixture.
+    """
+    with tempfile.TemporaryDirectory() as empty_home:
+        env = {"PATH": path, "HOME": str(home or empty_home)}
+        if tartci is not None:
+            env["PULP_TARTCI_BIN"] = str(tartci)
+        result = subprocess.run(
+            ["/bin/bash", "--noprofile", "--norc", "-c",
+             'source "$1"; if pulp_gate_host_builds_reserved; then echo "R $PULP_GATE_HOST_ROLE"; else echo L; fi',
+             "_", str(SCRIPT.parent / "gate_host_policy.sh")],
+            env=env, capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
+    return result.stdout.startswith("R")
 
 
 class GateHostSkipTests(unittest.TestCase):
@@ -1378,6 +1387,40 @@ class GateHostSkipTests(unittest.TestCase):
 
     def test_no_tartci_is_not_a_gate_host(self) -> None:
         self.assertFalse(_policy_reserved(None))
+
+    def test_a_tartci_whose_profile_fails_is_reserved(self) -> None:
+        # Fail closed: a broken tartci on a gate host must not unlock the builds.
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            cases = {
+                "gate output, exit 1": _fake_tartci(
+                    base / "a", "TARTCI_ROLE=dedicated-builder", "TARTCI_SERVES_GATE=1", exit_code=1),
+                "light output, exit 1": _fake_tartci(
+                    base / "b", "TARTCI_ROLE=light", "TARTCI_SERVES_GATE=1", exit_code=1),
+                "no output, exit 3": _fake_tartci(base / "c", exit_code=3),
+                "no SERVES_GATE line": _fake_tartci(base / "d", "TARTCI_ROLE=light"),
+            }
+            for name, tartci in cases.items():
+                with self.subTest(name=name):
+                    self.assertTrue(_policy_reserved(tartci))
+
+    def test_tartci_in_local_bin_is_found_without_path(self) -> None:
+        # tartci installs to ~/.local/bin; a stripped PATH must still find it.
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            _fake_tartci(home / ".local" / "bin", "TARTCI_ROLE=dev-overflow", "TARTCI_SERVES_GATE=1")
+            self.assertTrue(_policy_reserved(None, home=home))
+            # A PULP_TARTCI_BIN that does not exist cannot hide it.
+            self.assertTrue(_policy_reserved(pathlib.Path("/nonexistent/tartci"), home=home))
+            # Control: the same HOME with a light profile is allowed.
+            _fake_tartci(home / ".local" / "bin", "TARTCI_ROLE=light", "TARTCI_SERVES_GATE=1")
+            self.assertFalse(_policy_reserved(None, home=home))
+
+    def test_tartci_on_path_is_found(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            bindir = pathlib.Path(td) / "bin"
+            _fake_tartci(bindir, "TARTCI_ROLE=dedicated-builder", "TARTCI_SERVES_GATE=1")
+            self.assertTrue(_policy_reserved(None, path=f"{bindir}:/usr/bin:/bin"))
 
     def test_hostname_does_not_decide(self) -> None:
         source = "\n".join(
@@ -1407,7 +1450,8 @@ class GateHostSkipTests(unittest.TestCase):
             (root / "tools/scripts").mkdir(parents=True)
             (root / ".githooks/lib").mkdir(parents=True)
             shutil.copy2(REPO_ROOT / ".githooks/pre-push", root / ".githooks/pre-push")
-            shutil.copy2(REPO_ROOT / ".githooks/lib/gate-output.sh", root / ".githooks/lib/gate-output.sh")
+            for lib in (REPO_ROOT / ".githooks/lib").iterdir():
+                shutil.copy2(lib, root / ".githooks/lib" / lib.name)
             shutil.copy2(SCRIPT.parent / "gate_host_policy.sh", root / "tools/scripts/gate_host_policy.sh")
             marker = pathlib.Path(td) / "diff-cover-ran"
             sentinel = root / "tools/scripts/local_diff_cover.sh"
@@ -1447,6 +1491,8 @@ class GateHostSkipTests(unittest.TestCase):
         self.assertIn("[gate-host] REFUSED pre-push diff-coverage configure/build", result.stderr)
         self.assertIn("TARTCI_ROLE=dedicated-builder", result.stderr)
         self.assertIn("Run tools/scripts/local_diff_cover.sh from", result.stderr)
+        self.assertIn("[pre-push] gates clean except diff coverage: NOT CHECKED", result.stderr)
+        self.assertNotIn("[pre-push] gates clean.", result.stderr)
 
     def test_control_prepush_hook_reaches_diff_cover_on_a_light_host(self) -> None:
         # Proves the fixture reaches the diff-cover call at all, so the refusal
@@ -1454,6 +1500,7 @@ class GateHostSkipTests(unittest.TestCase):
         result, ran = self._run_hook("light")
         self.assertTrue(ran, result.stderr)
         self.assertNotIn("[gate-host]", result.stderr)
+        self.assertNotIn("NOT CHECKED (gate host", result.stderr)
 
 
 class CoverageBuildGovernorTests(unittest.TestCase):
