@@ -37,6 +37,11 @@ CONFIG = REPO_ROOT / "tools" / "scripts" / "coverage_config.json"
 CI_SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
 CTEST_POLICY = REPO_ROOT / "scripts" / "coverage_ctest_policy.sh"
 GOVERNED_BUILD = REPO_ROOT / "tools" / "ci" / "governed-build.sh"
+# Real inputs this suite reads, named once so script_test_inputs.py infers
+# exactly these and not the fixture paths below.
+GATE_HOST_POLICY = REPO_ROOT / "tools/scripts/gate_host_policy.sh"
+PRE_PUSH = REPO_ROOT / ".githooks/pre-push"
+HOOK_LIB = REPO_ROOT / ".githooks/lib"
 
 # The test suite exercises ordinary behavior even when the developer host
 # serves the gate. Each child sees this fake non-gate profile unless a test
@@ -1265,7 +1270,7 @@ def _fake_worktree(tmp: pathlib.Path, name: str) -> pathlib.Path:
     governor.write_text(GOVERNED_BUILD.read_text(encoding="utf-8"), encoding="utf-8")
     governor.chmod(0o755)
     (root / "tools" / "scripts" / "gate_host_policy.sh").write_text(
-        (SCRIPT.parent / "gate_host_policy.sh").read_text(encoding="utf-8"),
+        GATE_HOST_POLICY.read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     return root
@@ -1362,7 +1367,7 @@ def _policy_reserved(tartci: pathlib.Path | None, home: pathlib.Path | None = No
         result = subprocess.run(
             ["/bin/bash", "--noprofile", "--norc", "-c",
              'source "$1"; if pulp_gate_host_builds_reserved; then echo "R $PULP_GATE_HOST_ROLE"; else echo L; fi',
-             "_", str(SCRIPT.parent / "gate_host_policy.sh")],
+             "_", strGATE_HOST_POLICY],
             env=env, capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
     return result.stdout.startswith("R")
 
@@ -1424,7 +1429,7 @@ class GateHostSkipTests(unittest.TestCase):
 
     def test_hostname_does_not_decide(self) -> None:
         source = "\n".join(
-            line for line in (SCRIPT.parent / "gate_host_policy.sh").read_text(encoding="utf-8").splitlines()
+            line for line in GATE_HOST_POLICY.read_text(encoding="utf-8").splitlines()
             if not line.lstrip().startswith("#"))
         for probe in ("hostname", "scutil", "uname -n", "HOSTNAME"):
             self.assertNotIn(probe, source)
@@ -1446,20 +1451,24 @@ class GateHostSkipTests(unittest.TestCase):
     def _run_hook(self, role: str) -> tuple[subprocess.CompletedProcess, bool]:
         """Run the real pre-push hook in a fixture whose diff-cover script is a sentinel."""
         with tempfile.TemporaryDirectory() as td:
+            # Fixture paths are built from single components: a "tools/..."
+            # literal would read to script_test_inputs.py as a repo input.
             root = pathlib.Path(td) / "wt"
-            (root / "tools/scripts").mkdir(parents=True)
-            (root / ".githooks/lib").mkdir(parents=True)
-            shutil.copy2(REPO_ROOT / ".githooks/pre-push", root / ".githooks/pre-push")
-            for lib in (REPO_ROOT / ".githooks/lib").iterdir():
-                shutil.copy2(lib, root / ".githooks/lib" / lib.name)
-            shutil.copy2(SCRIPT.parent / "gate_host_policy.sh", root / "tools/scripts/gate_host_policy.sh")
+            scripts = root / "tools" / "scripts"
+            hooks = root / ".githooks"
+            scripts.mkdir(parents=True)
+            (hooks / "lib").mkdir(parents=True)
+            shutil.copy2(PRE_PUSH, hooks / PRE_PUSH.name)
+            for lib in HOOK_LIB.iterdir():
+                shutil.copy2(lib, hooks / "lib" / lib.name)
+            shutil.copy2(GATE_HOST_POLICY, scripts / GATE_HOST_POLICY.name)
             marker = pathlib.Path(td) / "diff-cover-ran"
-            sentinel = root / "tools/scripts/local_diff_cover.sh"
+            sentinel = scripts / SCRIPT.name
             sentinel.write_text(f"#!/bin/sh\necho ran >> '{marker}'\nexit 0\n", encoding="utf-8")
             sentinel.chmod(0o755)
-            (root / "tools/scripts/versioning.json").write_text("{}\n", encoding="utf-8")
-            (root / "tools/scripts/version_bump_check.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
-            (root / "tools/scripts/skill_sync_check.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
+            (scripts / "versioning.json").write_text("{}\n", encoding="utf-8")
+            for stub in ("version_bump_check.py", "skill_sync_check.py"):
+                (scripts / stub).write_text("raise SystemExit(0)\n", encoding="utf-8")
             git = ["git", "-C", str(root)]
             subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
             subprocess.run([*git, "config", "user.email", "t@example.invalid"], check=True)
@@ -1480,7 +1489,7 @@ class GateHostSkipTests(unittest.TestCase):
                 env.pop(key, None)
             sha = subprocess.check_output([*git, "rev-parse", "HEAD"], text=True, encoding="utf-8").strip()
             result = subprocess.run(
-                ["bash", str(root / ".githooks/pre-push"), "origin", "none"], cwd=root,
+                ["bash", str(hooks / PRE_PUSH.name), "origin", "none"], cwd=root,
                 input=f"refs/heads/topic {sha} refs/heads/topic {'0' * 40}\n",
                 env=env, capture_output=True, text=True, encoding="utf-8", timeout=120)
             return result, marker.exists()
