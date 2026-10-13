@@ -315,10 +315,13 @@ array**, when the plug-in ships none — an empty array makes a host
 draw an empty menu. The table is discovered from the loaded bundle, so
 it is empty in any unit-test binary; a test stages a folder through
 the Pulp-private `pulpFactoryPresetTable` accessor.
-`FactoryPresetTable::bind` installs `state::content_registry_preset_source()`
-on its `PresetManager`; pulp-state has no content-pack reader of its own, so a
-`PresetManager` built elsewhere lists no content-pack presets until a source is
-installed.
+`FactoryPresetTable::bind` installs no content-preset source on its
+`PresetManager` and sets no content plugin id, so the table lists factory and
+user presets only. That keeps pulp-format free of a pulp-content link
+(`PULP_LINK_FLOOR_DEBT_*` in `tools/cmake/PulpLinkFloor.cmake` would fail on
+the edge); content-pack presets need both
+`set_content_preset_source(state::content_registry_preset_source())` and a
+plugin id, installed by code that links pulp-content.
 
 `setCurrentPreset:` implements Apple's documented split, and getting
 it wrong is the trap here:
