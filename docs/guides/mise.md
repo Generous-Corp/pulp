@@ -78,16 +78,55 @@ versions the toolchain manifest describes.
 The lock is generated with mise **2026.10.8**, and only that version is
 guaranteed to read it the same way: mise releases differ in how they resolve
 some download URLs, so an older mise can read the same config differently or
-reject rows of the lock. The official installer accepts an exact version:
+reject rows of the lock.
+
+Install it from the release archive and verify it before use. mise publishes a
+`SHASUMS256.txt` for each release, signed with
+[minisign](https://jedisct1.github.io/minisign/). Its public key is in the
+[mise installation docs](https://mise.jdx.dev/installing-mise.html) and in the
+repository's [`minisign.pub`](https://github.com/jdx/mise/blob/main/minisign.pub).
+You need `minisign` installed (for example `brew install minisign` or your
+Linux package manager). On macOS (on Linux use `linux-x64` or `linux-arm64`, and
+`sha256sum -c` in place of `shasum -a 256 -c`):
 
 ```bash
-curl https://mise.run | MISE_VERSION=v2026.10.8 sh
+mise_version=2026.10.8
+mise_platform=macos-arm64   # or macos-x64
+base="https://github.com/jdx/mise/releases/download/v${mise_version}"
+curl -fL -O "$base/SHASUMS256.txt" -O "$base/SHASUMS256.txt.minisig" \
+     -O "$base/mise-v${mise_version}-${mise_platform}.tar.gz"
+
+# 1. The checksum file is signed by the mise release key.
+minisign -Vm SHASUMS256.txt -P RWTC3g8W3z4RZK3V3qv7fa1QY4JEWyBtqIHW+85QlJpZc5yG+uNYNBSZ
+# 2. The archive matches the signed checksum file.
+grep " ./mise-v${mise_version}-${mise_platform}.tar.gz$" SHASUMS256.txt | shasum -a 256 -c
+# 3. Only then install it.
+tar -xzf "mise-v${mise_version}-${mise_platform}.tar.gz"
+mkdir -p ~/.local/bin && install -m 755 mise/bin/mise ~/.local/bin/mise
+mise --version
 ```
 
-It installs to `~/.local/bin/mise` by default (override with
-`MISE_INSTALL_PATH`). See the
-[mise installation docs](https://mise.jdx.dev/installing-mise.html) for other
-platforms, including Windows. Check the result with `mise --version`.
+Stop if either check fails. As a cross-check, the 2026.10.8 archives have
+these sha256 digests:
+
+| Archive | sha256 |
+|---------|--------|
+| `mise-v2026.10.8-macos-arm64.tar.gz` | `8228699f316dc17931beb86f7a1aac70e4685535430441492ff4e857c72535ad` |
+| `mise-v2026.10.8-macos-x64.tar.gz` | `28c924c5703c6344489bc73227c59da2194eaf7fd962c5f3d233b9524b7419e9` |
+| `mise-v2026.10.8-linux-arm64.tar.gz` | `88aea77e41c2a3c45a9cbd64df9516ba887017442846213b3de178acbd3c9a46` |
+| `mise-v2026.10.8-linux-x64.tar.gz` | `e908ea27810ae358c9a9a7d897ea10197bdc38d39839243e1b36acc31cbef868` |
+| `mise-v2026.10.8-windows-x64.zip` | `2548132f9e8b8dc29027933e47a98582557b448dfec791dbecad66e9c760582b` |
+| `mise-v2026.10.8-windows-arm64.zip` | `c38a2353088896894df4a2e9c4ea4a9d1b2bee290c0dba9ea5a10e43646d41e1` |
+
+On Windows, compare `(Get-FileHash <archive> -Algorithm SHA256).Hash` with the
+table (PowerShell prints it in upper case).
+
+The convenience installer `curl https://mise.run | MISE_VERSION=v2026.10.8 sh`
+checks the archive's sha256, against digests embedded in the script when you
+ask for the script's own current release and against the release's
+`SHASUMS256.txt` otherwise. It does not check the minisign or GPG signature
+(the script marks that as a to-do), and the script itself, including those
+embedded digests, is served unpinned from `mise.run`. Prefer the steps above.
 
 ### 2. Trust the checkout and install the locked tools
 
