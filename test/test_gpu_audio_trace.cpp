@@ -1375,6 +1375,8 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     context.watchdog_ns = 2000;
     context.transfer_counters_direct = context.timing_provenance_direct = true;
     set_authenticated_test_provider_identity(context);
+    CHECK(qualify_gpu_convolver_trial_context(context) ==
+          GpuConvolverTrialQualification::Qualified);
     REQUIRE(valid_gpu_convolver_trial_context(context));
     auto tampered_digest = context;
     tampered_digest.immutable_receipt_digest[0] =
@@ -1386,10 +1388,19 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     auto forged_authentication = context;
     forged_authentication.provider_identity.authenticated = false;
     CHECK_FALSE(valid_gpu_convolver_trial_context(forged_authentication));
-    auto forged_runtime_authentication = context;
-    forged_runtime_authentication.provider_identity.native_runtime_authenticated = false;
-    CHECK_FALSE(valid_gpu_convolver_trial_context(forged_runtime_authentication));
+    auto unavailable_native_identity = context;
+    unavailable_native_identity.provider_identity.native_runtime_authenticated = false;
+    CHECK(qualify_gpu_convolver_trial_context(unavailable_native_identity) ==
+          GpuConvolverTrialQualification::UnavailableNativeIdentity);
+    CHECK_FALSE(valid_gpu_convolver_trial_context(unavailable_native_identity));
+    auto missing_native_backend = context;
+    missing_native_backend.provider_identity.native_runtime_backend.clear();
+    CHECK(qualify_gpu_convolver_trial_context(missing_native_backend) ==
+          GpuConvolverTrialQualification::UnavailableNativeIdentity);
+    CHECK_FALSE(valid_gpu_convolver_trial_context(missing_native_backend));
     context.max_inflight = 3;
+    CHECK(qualify_gpu_convolver_trial_context(context) ==
+          GpuConvolverTrialQualification::InvalidContext);
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
     context.max_inflight = 2;
     context.thermal_state = static_cast<GpuConvolverThermalState>(255);
