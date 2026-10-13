@@ -249,7 +249,9 @@ fn pin_refuses_an_annotated_tag_object_id_in_place_of_a_commit() {
 
     let err = GitPinner.pin(&url, &tag_object).unwrap_err().to_string();
     assert!(err.contains("does not contain commit"), "{err}");
-    let ok = GitPinner.pin(&url, &commit).expect("the commit itself pins");
+    let ok = GitPinner
+        .pin(&url, &commit)
+        .expect("the commit itself pins");
     assert_eq!(ok.commit, commit);
 }
 
