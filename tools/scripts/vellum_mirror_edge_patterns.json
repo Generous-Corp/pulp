@@ -1,0 +1,37 @@
+{
+  "schema": "pulp.vellum.mirror-edge-patterns.v1",
+  "description": "Forbidden mirror edges, shared by Pulp's closure gate and Vellum's extraction scan. Paths are relative to the mirror root.",
+  "suffixes": [
+    "",
+    ".c",
+    ".cc",
+    ".cmake",
+    ".cpp",
+    ".cxx",
+    ".h",
+    ".hpp",
+    ".inl",
+    ".ipp",
+    ".js",
+    ".json",
+    ".m",
+    ".md",
+    ".mm",
+    ".ps1",
+    ".sh",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".yaml",
+    ".yml"
+  ],
+  "content_patterns": {
+    "mirror-product-include": "#\\s*(?:include|import)\\s*[<\\\"](?:pulp/(?:audio|signal|midi|music|format|host|gpu_audio|content)/|pluginterfaces/|public\\.sdk/|clap/|lv2/|AudioUnitSDK/|oboe/|AudioToolbox/|AudioUnit/|CoreAudio/|CoreAudioKit/|CoreMIDI/|AVFAudio/)",
+    "mirror-product-symbol": "\\bpulp::(?:audio|signal|midi|music|format|host|gpu_audio|content)\\b|\\bpulp[-_](?:audio|signal|midi|music|format|host|gpu[-_]audio|content)\\b",
+    "mirror-audio-framework-link": "\\b(?:AudioToolbox|AudioUnit|CoreAudio|CoreAudioKit|CoreMIDI|AVFAudio)\\.framework\\b|-framework\\s+(?:AudioToolbox|AudioUnit|CoreAudio|CoreAudioKit|CoreMIDI|AVFAudio)\\b",
+    "mirror-pulp-kept-include": "#\\s*(?:include|import)\\s*[<\\\"](?:pulp/view/(?:audio/|(?:widgets/)?(?:audio_bridge|audio_inspector_\\w+|eq_curve_view|midi_binding|midi_keyboard|musical_typing_keyboard\\w*|plugin_manager_panel|sample_asset_drop_target|step_grid_view|waveform_\\w+|graph_editor_view)\\.h)|pulp/state/content_registry\\.h)"
+  },
+  "path_patterns": {
+    "mirror-pulp-kept-file": "\\Acore/(?:view/(?:audio/|(?:.*/)?(?:audio_bridge|audio_inspector_\\w+|eq_curve_view|midi_binding|midi_keyboard|musical_typing_keyboard\\w*|plugin_manager_panel|sample_asset_drop_target|step_grid_view|waveform_\\w+|graph_editor_view)\\.)|host/|state/(?:.*/)?content_registry\\.)"
+  }
+}
