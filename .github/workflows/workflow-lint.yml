@@ -21,6 +21,7 @@ on:
     paths:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
+      - 'tools/scripts/test_release_cache_isolation.py'
       - 'tools/scripts/action_pin_lint.py'
       - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
@@ -145,6 +146,7 @@ on:
     paths:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
+      - 'tools/scripts/test_release_cache_isolation.py'
       - 'tools/scripts/action_pin_lint.py'
       - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
@@ -416,6 +418,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_release_workflow_test_step.py
+          # Signing/publishing jobs compile with ccache disabled and re-fetch
+          # every dependency into a fresh job root, never a shared host cache.
+          python3 tools/scripts/test_release_cache_isolation.py
           # MSVC CLI compile lane: its change scope, the pre-tag check that
           # reads it, and its configure parity with release-cli.yml's
           # Windows legs. The reconciler's circuit/drought rules ride along.

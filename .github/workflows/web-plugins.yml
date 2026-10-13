@@ -162,12 +162,19 @@ jobs:
           probe --enable-unsafe-swiftshader
           probe --enable-unsafe-swiftshader --use-angle=swiftshader
 
+      # choc at an exact commit (the pulp-webview-dnd-poc1 tag), cloned fresh.
       - name: Vendor choc for the WAM build
+        env:
+          CHOC_COMMIT: df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch pulp-webview-dnd-poc1 \
-            https://github.com/danielraffel/choc.git "$HOME/choc-src"
-          echo "PULP_WAM_CHOC_INCLUDE=$HOME/choc-src" >> "$GITHUB_ENV"
+          dest="${RUNNER_TEMP:?}/choc-src"
+          rm -rf "$dest"
+          git init -q "$dest"
+          git -C "$dest" fetch -q --depth 1 https://github.com/danielraffel/choc.git "$CHOC_COMMIT"
+          git -C "$dest" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$dest" rev-parse HEAD)" = "$CHOC_COMMIT"
+          echo "PULP_WAM_CHOC_INCLUDE=$dest" >> "$GITHUB_ENV"
 
       - name: Install playwright-core
         run: npm install --no-save playwright-core
@@ -518,10 +525,12 @@ jobs:
           set -euo pipefail
           ver=25
           url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${ver}/wasi-sdk-${ver}.0-arm64-macos.tar.gz"
-          curl -fsSL "$url" -o /tmp/wasi-sdk.tar.gz
-          mkdir -p "$HOME/wasi-sdk-macos"
-          tar -xzf /tmp/wasi-sdk.tar.gz -C "$HOME/wasi-sdk-macos" --strip-components=1
-          echo "WASI_SDK_PREFIX=$HOME/wasi-sdk-macos" >> "$GITHUB_ENV"
+          dest="${RUNNER_TEMP:?}/wasi-sdk-macos"
+          rm -rf "$dest" "${RUNNER_TEMP}/wasi-sdk.tar.gz"
+          curl -fsSL "$url" -o "${RUNNER_TEMP}/wasi-sdk.tar.gz"
+          mkdir -p "$dest"
+          tar -xzf "${RUNNER_TEMP}/wasi-sdk.tar.gz" -C "$dest" --strip-components=1
+          echo "WASI_SDK_PREFIX=$dest" >> "$GITHUB_ENV"
 
       - name: Install playwright-core
         run: npm install --no-save playwright-core
@@ -630,14 +639,21 @@ jobs:
       # looks in build/_deps) finds nothing. The Linux lane vendors it; this lane did
       # not, and configured build-webui without the flag, so it failed at CMake time
       # long before it could prove anything about the GPU.
+      # Self-hosted runners keep $HOME between jobs, and PR jobs run there too, so a
+      # copy left in $HOME is not trusted: choc is fetched at an exact commit (the
+      # pulp-webview-dnd-poc1 tag) into this job's own temp dir.
       - name: Vendor choc for the UI build
+        env:
+          CHOC_COMMIT: df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60
         run: |
           set -euo pipefail
-          # Self-hosted runners keep $HOME between jobs — a bare clone would fail on the
-          # second run.
-          [ -d "$HOME/choc-src" ] || git clone --depth 1 --branch pulp-webview-dnd-poc1 \
-            https://github.com/danielraffel/choc.git "$HOME/choc-src"
-          echo "PULP_WAM_CHOC_INCLUDE=$HOME/choc-src" >> "$GITHUB_ENV"
+          dest="${RUNNER_TEMP:?}/choc-src"
+          rm -rf "$dest"
+          git init -q "$dest"
+          git -C "$dest" fetch -q --depth 1 https://github.com/danielraffel/choc.git "$CHOC_COMMIT"
+          git -C "$dest" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$dest" rev-parse HEAD)" = "$CHOC_COMMIT"
+          echo "PULP_WAM_CHOC_INCLUDE=$dest" >> "$GITHUB_ENV"
 
       - name: Assemble the GPU demo page (the real one, from the real modules)
         run: |
