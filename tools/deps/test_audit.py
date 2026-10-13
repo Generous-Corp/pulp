@@ -283,8 +283,9 @@ class ManifestSourceScannerTests(unittest.TestCase):
 
 class RepoFetchScanTests(unittest.TestCase):
     """The completeness scan reads every CMake file and setup script, not only
-    the root CMakeLists.txt. The wgpu-native runtime archive setup.sh downloads
-    went unlisted for months because nothing outside the root file was read."""
+    the root CMakeLists.txt: a fetch in tools/cmake/ or setup.sh (such as the
+    wgpu-native runtime archive) is as much a dependency as one in the root
+    file, and a scan of the root file alone cannot see it."""
 
     def _tree(self, files: dict[str, str]) -> Path:
         tmp = tempfile.TemporaryDirectory()

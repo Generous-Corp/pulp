@@ -165,11 +165,11 @@ the last two also need `--verify-licenses` (both are in `gates.sh`):
    `ensure_shared_*` helpers) must be represented in `manifest.json`. A fetch
    that names its upstream is matched by URL (`repository` or an `artifacts`
    URL), never by its local FetchContent label, so `choc_wclap` is covered by
-   CHOC's repository and a familiar name from a different repo is not. Until
-   this scan read beyond the root `CMakeLists.txt`, setup.sh's unchecked
-   wgpu-native download had no row at all (and WebGPU-distribution's alias list
-   hid the name). A URL built at run time is invisible to it; say so in review
-   rather than assume coverage.
+   CHOC's repository and a familiar name from a different repo is not. Keep
+   aliases to genuine spellings of the same dependency: an alias naming a
+   different upstream (WebGPU-distribution once listed `wgpu-native`) hides
+   that upstream from this check. A URL built at run time is invisible to it;
+   say so in review rather than assume coverage.
 3. **Truthfulness** — the attribution text must match the license actually on
    disk: no NOTICE entry may reproduce a truncated permission notice, and no
    checked-out tree may offer a copyleft alternative while the manifest
