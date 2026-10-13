@@ -59,9 +59,8 @@ bool is_rekeyable_binding_attribute(std::string_view key) {
     // The planner must still compare their presence through the topology bits
     // above so bound↔unbound transitions recreate the native control.
     for (const auto candidate :
-         {"pulpParamKey", "pulpParamKeyX", "pulpParamKeyY", "pulpMeterSource",
-          "pulpMeterChannel", "pulpMeterValueKey", "pulpValueKey", "pulpInitialValue",
-          "pulpPlaceholder"}) {
+         {"pulpParamKey", "pulpParamKeyX", "pulpParamKeyY", "pulpMeterSource", "pulpMeterChannel",
+          "pulpMeterValueKey", "pulpValueKey", "pulpInitialValue", "pulpPlaceholder"}) {
         if (key == candidate)
             return true;
     }
@@ -180,10 +179,18 @@ void append_update(DesignChildUpdatePlan& plan, DesignUpdateKind kind, std::stri
                    std::size_t old_index, std::size_t new_index) {
     plan.updates.push_back({kind, std::move(key), old_index, new_index});
     switch (kind) {
-    case DesignUpdateKind::retained: ++plan.work.retained; break;
-    case DesignUpdateKind::moved: ++plan.work.moved; break;
-    case DesignUpdateKind::inserted: ++plan.work.inserted; break;
-    case DesignUpdateKind::removed: ++plan.work.removed; break;
+    case DesignUpdateKind::retained:
+        ++plan.work.retained;
+        break;
+    case DesignUpdateKind::moved:
+        ++plan.work.moved;
+        break;
+    case DesignUpdateKind::inserted:
+        ++plan.work.inserted;
+        break;
+    case DesignUpdateKind::removed:
+        ++plan.work.removed;
+        break;
     }
     const auto index = plan.updates.size() - 1;
     if (!plan.blocks.empty() && plan.blocks.back().kind == kind &&
