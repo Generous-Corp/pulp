@@ -239,12 +239,16 @@ elif [ "${#TARGETS[@]}" -eq 0 ] && [ "${CONTRIB_FULL_COVERAGE:-0}" != "1" ]; the
     printf '        (or CONTRIB_FULL_COVERAGE=1 for the full ~30min tree build)\n'
 else
     echo "  running coverage build for: ${TARGETS[*]:-whole tree} (several minutes)…"
-    if tools/scripts/local_diff_cover.sh ${TARGETS[@]+"${TARGETS[@]}"} >/tmp/contrib-cover.log 2>&1; then
-        ok "diff coverage at or above threshold"
-    else
-        bad "diff coverage below threshold — see /tmp/contrib-cover.log"
-        grep -iE "coverage|%" /tmp/contrib-cover.log | tail -4 | sed 's/^/        /'
-    fi
+    cover_rc=0
+    tools/scripts/local_diff_cover.sh ${TARGETS[@]+"${TARGETS[@]}"} >/tmp/contrib-cover.log 2>&1 || cover_rc=$?
+    case "$cover_rc" in
+        0) ok "diff coverage at or above threshold" ;;
+        # 4 is skipped, not passed: a starved host or a tartci gate host.
+        4) skip "diff coverage NOT CHECKED — see /tmp/contrib-cover.log"
+           grep -E "REFUSED|starved|skipped" /tmp/contrib-cover.log | tail -2 | sed 's/^/        /' ;;
+        *) bad "diff coverage below threshold — see /tmp/contrib-cover.log"
+           grep -iE "coverage|%" /tmp/contrib-cover.log | tail -4 | sed 's/^/        /' ;;
+    esac
 fi
 
 # ── Summary ────────────────────────────────────────────────────────────────

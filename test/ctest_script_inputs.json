@@ -4438,6 +4438,7 @@
     "tools/ci/governed-build.sh",
     "tools/cli",
     "tools/scripts/diff_cover_targets.py",
+    "tools/scripts/gate_host_policy.sh",
     "tools/scripts/local_diff_cover.sh",
     "tools/scripts/test_diff_cover_targets.py"
    ],
@@ -6625,7 +6626,9 @@
   "local-diff-cover-selftest": {
    "entry": "tools/scripts/test_local_diff_cover.py",
    "inputs": [
+    ".githooks/lib",
     ".githooks/pre-push",
+    "tools/scripts/gate_host_policy.sh",
     "tools/scripts/local_diff_cover.sh",
     "tools/scripts/test_local_diff_cover.py"
    ],

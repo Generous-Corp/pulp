@@ -762,7 +762,7 @@ class GatesWiringTests(unittest.TestCase):
         end = text.index("# ── 7a-bis.", start)
         return text[start:end]
 
-    def _run_block(self, stub_exit: int) -> str:
+    def _run_block(self, stub_exit: int, gate_host: int = 0) -> str:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "tools" / "ci").mkdir(parents=True)
@@ -779,7 +779,10 @@ class GatesWiringTests(unittest.TestCase):
             )
             log = root / "not-checked.log"
             self.not_checked = ""
+            # gates.sh sets gate_host_builds_skipped before this block (1 on a
+            # tartci gate host, which refuses these suites).
             script = (f'ROOT={str(root)!r}\nPYTHON={sys.executable!r}\nBASE=origin/main\nfail=0\n'
+                      f'gate_host_builds_skipped={gate_host}\n'
                       f'not_checked_log={str(log)!r}\n: > "$not_checked_log"\n'
                       + self._block() + '\necho "fail=$fail"\n')
             env = {k: v for k, v in os.environ.items()
@@ -796,6 +799,13 @@ class GatesWiringTests(unittest.TestCase):
         self.assertEqual(out, "fail=1")
         calls = argv.splitlines()
         self.assertEqual(calls[0], "run --changed-from origin/main --label-base-failures")
+
+    def test_a_gate_host_runs_no_lane_and_records_nothing_here(self) -> None:
+        # gates.sh records the refusal itself, once, before this block.
+        out, argv = self._run_block(1, gate_host=1).split("|", 1)
+        self.assertEqual(out, "fail=0")
+        self.assertEqual(argv, "")
+        self.assertEqual(self.not_checked, "")
 
     def test_both_lanes_run_and_a_passing_pair_stays_green(self) -> None:
         out, argv = self._run_block(0).split("|", 1)
@@ -1206,13 +1216,14 @@ class GatesVerdictTests(unittest.TestCase):
 
     GATES = HERE.parent / "scripts" / "gates.sh"
 
-    def _verdict(self, fail: int, not_checked: str) -> subprocess.CompletedProcess:
+    def _verdict(self, fail: int, not_checked: str, gate_host: int = 0) -> subprocess.CompletedProcess:
         text = self.GATES.read_text(encoding="utf-8")
         summary = text[text.index("# ── Summary"):]
         with tempfile.TemporaryDirectory() as tmp:
             log = pathlib.Path(tmp) / "nc.log"
             log.write_text(not_checked, encoding="utf-8")
-            script = f"fail={fail}\nnot_checked_log={str(log)!r}\n" + summary
+            script = (f"fail={fail}\ngate_host_builds_skipped={gate_host}\n"
+                      f"not_checked_log={str(log)!r}\n" + summary)
             return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                                   timeout=60)
 
@@ -1220,6 +1231,13 @@ class GatesVerdictTests(unittest.TestCase):
         r = self._verdict(0, "")
         self.assertEqual(r.returncode, 0)
         self.assertIn("gates: ✓ all gates pass", r.stderr)
+
+    def test_diff_coverage_hint_follows_the_gate_host_flag(self) -> None:
+        plain = self._verdict(0, "")
+        self.assertIn("Diff-coverage NOT run (slow)", plain.stderr)
+        refused = self._verdict(0, "[gate-host] NOT CHECKED: suites\n", gate_host=1)
+        self.assertIn("refused on this gate host", refused.stderr)
+        self.assertNotIn("Diff-coverage NOT run (slow)", refused.stderr)
 
     def test_not_checked_items_are_listed_and_qualify_the_verdict(self) -> None:
         r = self._verdict(0, "[pr-fast] NOT CHECKED locally: a (x)\n"
