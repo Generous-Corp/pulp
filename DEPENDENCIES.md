@@ -117,6 +117,7 @@ directories and used under their own licenses. Intentionally absent from
 | fflate | MIT | Deflate/zip in the developer-only Figma plugin (`tools/figma-plugin`) | Same boundary. |
 | ffmpeg-static | Wrapper MIT; bundled FFmpeg binaries GPL/LGPL | Encodes captured frames into the MP4 used by the video-proof composer | `npm` devDependency in `tools/local-ci`; runtime also accepts a system `PULP_FFMPEG`/`PATH` ffmpeg. Same boundary. |
 | json-schema-to-typescript | MIT | Generates TypeScript types from JSON Schema for the Figma plugin | Same boundary. |
+| mise | MIT | Optional installer for the exact build-tool versions pinned in `tools/toolchain/manifest.toml` (CMake, Ninja, Python, Node.js, clang-format, Tart), plus the `.mise.toml` project tasks | Developer installs it independently; Pulp commits only its config (`.mise.toml`) and generated lock files. Never committed, bundled, exported by `cmake --install`, shipped in plugins, or required by `setup.sh`, `pulp build`, or public CI. |
 | numpy | BSD-3-Clause | Array ops for the Motion visual-analysis lane (`tools/motion/visual`) | `pip`, installed on demand; analysis-only, never bundled or shipped. |
 | opencv-python | Apache-2.0 (OpenCV); packaging MIT | Optional affine estimation for the Motion visual-analysis lane (graceful PIL/FFT fallback when absent) | `pip` (optional); analysis-only, never bundled or shipped. |
 | Pillow | HPND (BSD-style) | Image IO for the Motion visual-analysis lane | `pip`; analysis-only, never bundled or shipped. |

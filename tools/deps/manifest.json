@@ -496,6 +496,27 @@
       ]
     },
     {
+      "name": "mise",
+      "category": "developer-tooling",
+      "license": "MIT",
+      "version": "2026.10.8",
+      "source_kind": "developer-supplied",
+      "repository": "https://github.com/jdx/mise",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "external_names": ["mise"],
+      "notes": "Optional developer tool that installs the exact build-tool versions pinned in tools/toolchain/manifest.toml from the checksummed mise.toolchain.lock, and runs the .mise.toml project tasks. Developer-installed; Pulp commits only configuration and generated lock files. Never bundled, shipped in plugins, or required by setup.sh, pulp build, or public CI.",
+      "source_files": [
+        ".mise.toml",
+        "tools/toolchain/manifest.toml",
+        "tools/toolchain/generate.py",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md",
+        "docs/guides/mise.md"
+      ]
+    },
+    {
       "name": "mkdocs",
       "category": "docs",
       "license": "BSD-2-Clause",
