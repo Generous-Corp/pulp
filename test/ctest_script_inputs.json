@@ -164,6 +164,7 @@
     "tools/cli/kit_profile_verification.cpp",
     "tools/cli/local_sdk_install.cpp",
     "tools/cli/mac_runtime_validators.cpp",
+    "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
     "tools/cli/tartci_lease.cpp",
     "tools/cli/tool_registry.cpp",
@@ -710,14 +711,31 @@
    "undeclared_sources": []
   },
   "pulp-test-cli-package-commands": {
-   "data": "none",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_cli_package_commands.cpp"
+   ],
+   "inputs": [
+    "tools/packages/pulp-packages-verify.cmake"
+   ],
    "kind": "compiled",
    "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
+   "sources": [
+    "test/test_cli_package_commands.cpp",
     "tools/cli/import_spi.cpp",
     "tools/cli/importer_install.cpp",
+    "tools/cli/package_commands.cpp",
+    "tools/cli/package_commands_add.cpp",
+    "tools/cli/package_commands_search.cpp",
+    "tools/cli/package_commands_util.cpp",
+    "tools/cli/package_registry.cpp",
+    "tools/cli/tool_registry.cpp"
+   ],
+   "spawning_sources": [
+    "test/test_cli_package_commands.cpp",
+    "tools/cli/import_spi.cpp",
+    "tools/cli/importer_install.cpp",
+    "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
     "tools/cli/tool_registry.cpp"
    ],
