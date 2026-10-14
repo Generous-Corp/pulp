@@ -42,6 +42,7 @@ target_sources(pulp-host PRIVATE
     src/forge_sequencing_catalog.cpp
     src/forge_catalog_export_space_synthesis.cpp
     src/forge_space_catalog.cpp
+    src/forge_tape_catalog.cpp
     src/forge_catalog_json.cpp
     src/signal_graph_executor_routing.cpp
     src/graph_timing_contract.cpp
