@@ -9971,10 +9971,12 @@
   "toolchain-check_env-selftest": {
    "entry": "tools/toolchain/test_check_env.py",
    "inputs": [
+    ".github/workflows/build.yml",
     "experimental/pulp-rs",
     "tools/toolchain",
     "tools/toolchain/check_env.py",
     "tools/toolchain/expected.json",
+    "tools/toolchain/fleet_report.py",
     "tools/toolchain/test_check_env.py"
    ],
    "kind": "python"

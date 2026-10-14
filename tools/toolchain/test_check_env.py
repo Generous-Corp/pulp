@@ -337,5 +337,107 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("findings", json.loads(out.stdout))
 
 
+REPO_ROOT = HERE.parents[1]
+
+
+def workflow_step_script() -> str:
+    """The `run:` block of build.yml's toolchain report step, as bash text."""
+    lines = (REPO_ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if "name: Toolchain report against the manifest" in line)
+    run = next(i for i in range(start, len(lines)) if lines[i].strip() == "run: |")
+    indent = len(lines[run + 1]) - len(lines[run + 1].lstrip())
+    body = []
+    for line in lines[run + 1:]:
+        if line.strip() and len(line) - len(line.lstrip()) < indent:
+            break
+        body.append(line[indent:])
+    return "\n".join(body) + "\n"
+
+
+@unittest.skipIf(os.name == "nt" or shutil.which("bash") is None, "runs the step under bash -e")
+class WorkflowStepTests(unittest.TestCase):
+    """The CI step is report only: it must exit 0 under `bash -e` whatever is missing."""
+
+    def run_step(self, cwd: Path, path: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [shutil.which("bash"), "-e", "-c", workflow_step_script()], cwd=str(cwd), env={"PATH": path, "HOME": str(cwd)},
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+
+    def test_no_python_on_path_is_a_warning_not_a_failure(self) -> None:
+        out = self.run_step(REPO_ROOT, "/nonexistent")
+        self.assertEqual(0, out.returncode, out.stderr)
+        self.assertIn("no python3 or python on PATH", out.stdout)
+
+    def test_missing_tools_and_an_unreadable_expectation_still_exit_0(self) -> None:
+        python_dir = str(Path(sys.executable).parent)
+        out = self.run_step(REPO_ROOT, python_dir)
+        self.assertEqual(0, out.returncode, out.stderr)
+        self.assertIn("difference(s) from the manifest", out.stdout)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tools/toolchain").mkdir(parents=True)
+            (root / "tools/toolchain/check_env.py").write_bytes((HERE / "check_env.py").read_bytes())
+            out = self.run_step(root, python_dir)
+            self.assertEqual(0, out.returncode, out.stderr)
+            self.assertIn("check_env.py exited 3", out.stdout)
+
+    def test_a_hung_probe_is_bounded(self) -> None:
+        self.assertLessEqual(check_env.PROBE_TIMEOUT_S, 5)
+        self.assertIn("timeout-minutes: 2", (REPO_ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8"))
+
+
+class FleetReportTests(unittest.TestCase):
+    """tools/toolchain/fleet_report.py: one table across hosts."""
+
+    def setUp(self) -> None:
+        import fleet_report
+
+        self.fr = fleet_report
+
+    def fake_run(self, results):
+        calls = []
+
+        def run(target, script, path):
+            calls.append((target, path))
+            return results[target]
+
+        return run, calls
+
+    def report(self, findings):
+        return json.dumps({"findings": findings})
+
+    def test_table_marks_pins_names_drift_and_unreachable_hosts(self) -> None:
+        results = {
+            "m1": (0, self.report([
+                {"tool": "python3", "found": "3.11.16", "note": ""},
+                {"tool": "clang-format", "found": "nothing", "note": "not installed"},
+            ]), ""),
+            "localhost": (0, self.report([]), ""),
+            "m9": (255, "", "ssh: Could not resolve hostname m9"),
+        }
+        run, calls = self.fake_run(results)
+        import io
+        from contextlib import redirect_stdout
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(0, self.fr.main(["--host", "m1", "--host", "m3=localhost", "--host", "m9"], run=run))
+        text = out.getvalue()
+        self.assertIn("| tool | m1 | m3 | m9 | pin |", text)
+        self.assertIn("| python3 | 3.11.16 | = 3.14.4 | unreachable (ssh: Could not resolve hostname m9) | 3.14.4 |", text)
+        self.assertIn("| clang-format | none | = 21.1.8 |", text)
+        self.assertEqual(["m1", "localhost", "m9"], [c[0] for c in calls])
+        self.assertTrue(all("/opt/homebrew/bin" in c[1] for c in calls))
+
+    def test_payload_runs_check_env_and_leaves_nothing_behind(self) -> None:
+        env_path = f"{Path(sys.executable).parent}{os.pathsep}/usr/bin{os.pathsep}/bin"
+        before = set(Path(tempfile.gettempdir()).glob("pulp-fleet-report-*"))
+        code, stdout, stderr = self.fr.run_on("local", self.fr.payload(), env_path)
+        self.assertEqual(0, code, stderr)
+        self.assertIn("findings", json.loads(stdout))
+        self.assertEqual(before, set(Path(tempfile.gettempdir()).glob("pulp-fleet-report-*")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -222,6 +222,12 @@ when it cannot read the expected versions. `--format github` prints GitHub
 Actions `::warning::` annotations and `--format json` a machine-readable
 report.
 
+`python3 tools/toolchain/fleet_report.py --host m1 --host m3=local --host m5 --host m5s`
+runs the same check on each host over ssh, under the non-login PATH lanes and
+agents get, and prints one table of the version every host runs against the
+pin. It copies the check into a temporary directory, removes it afterwards, and
+installs nothing; a host it cannot reach is shown as `unreachable`.
+
 A platform the manifest lists as an exception (Linux and Windows still take
 CMake from the system package manager) is still reported, labelled as the
 declared exception, so the difference stays visible.

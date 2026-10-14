@@ -38,6 +38,7 @@ RUST_DIR = "experimental/pulp-rs"
 EXIT_OK = 0
 EXIT_MISMATCH = 1
 EXIT_NO_BASELINE = 3
+PROBE_TIMEOUT_S = 5
 
 ACTIVATE_FIX = 'MISE_ENV=toolchain mise install --locked && eval "$(MISE_ENV=toolchain mise activate bash)"'
 NPM_FIX = "MISE_ENV=toolchain mise run npm-deps"
@@ -84,7 +85,9 @@ Runner = Callable[[List[str], Optional[Path]], Optional[str]]
 
 
 def run_version(argv: List[str], cwd: Optional[Path]) -> Optional[str]:
-    """stdout+stderr of `argv`, or None when it cannot run within 20 s.
+    """stdout+stderr of `argv`, or None when it cannot run within 5 s.
+
+    The bound keeps a hung tool from stalling a CI leg: at most 5 s per probe.
 
     RUSTUP_AUTO_INSTALL=0: a rustup proxy otherwise downloads the toolchain a
     rust-toolchain.toml names when it is missing, and this check never fetches.
@@ -93,7 +96,7 @@ def run_version(argv: List[str], cwd: Optional[Path]) -> Optional[str]:
     try:
         out = subprocess.run(
             argv, cwd=str(cwd) if cwd else None, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=20, check=False, env=env,
+            encoding="utf-8", errors="replace", timeout=PROBE_TIMEOUT_S, check=False, env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return None
