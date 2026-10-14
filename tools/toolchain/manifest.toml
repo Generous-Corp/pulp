@@ -50,6 +50,16 @@ enforcement = "warn"
 # up as a change to this reviewed file.
 lock_sha256 = "3e3d93b19c8ea8f1b8f034e5713bdae59c7c9552d1f26ab725e6309d53b39a05"
 
+# The installed binary hosts run, checked by digest (tools/toolchain/check_env.py).
+# Self-update is off for it: its lib/mise-self-update-instructions.toml points
+# at `pulp deps update mise`. macos-arm64 is the build live on m1, m3, m5 and
+# m5s since 2026-10-12. A rebuild from source_commit that hashes differently is
+# a reproducibility finding to investigate, not a replacement. A platform with
+# no digest here is reported as unpinned, never as a match.
+[mise.binary]
+path = "~/.local/opt/mise-2026.10.8/bin/mise"
+sha256 = { macos-arm64 = "87c18142dd67f5848b0236738eb9338976329266937ecd79b11121de64dd2d47" }
+
 # One table per tool mise installs. Rust is deliberately absent: rustup
 # installs it and cargo reads rust-toolchain.toml, so the lock never records
 # it (mise could only lock a version string, with no checksum). Every locked

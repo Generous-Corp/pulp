@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -36,6 +37,13 @@ MISE_ENV = "toolchain"
 MISE_CONFIG = ".mise.toml"
 MISE_TOOLS_CONFIG = f".mise.{MISE_ENV}.toml"
 MISE_LOCK = f"mise.{MISE_ENV}.lock"
+# What tools/toolchain/check_env.py compares a host against. check_env runs
+# before the pinned Python exists, on whatever python3 a host has (3.9 on a
+# stock Mac), which has no tomllib; it reads this JSON instead of the TOML.
+EXPECTED = "tools/toolchain/expected.json"
+# The tools check_env reports, by [toolchain] key. Xcode and tart are absent:
+# Xcode is recorded by the golden receipt, and tart is a host tool tartci owns.
+CHECKED = ("python", "cmake", "ninja", "node", "rust", "clang_format")
 
 TARGETS = {
     "macos": {"keys": ("xcode", "xcode_build", "cmake", "ninja", "python", "node", "rust", "rust_targets", "tart", "clang_format"), "manager": "brew"},
@@ -129,6 +137,15 @@ def _require_exact(data: dict) -> None:
         raise ValueError("mise.enforcement must be 'warn' or 'enforce'")
     if not isinstance(mise.get("lock_sha256"), str):
         raise ValueError("mise.lock_sha256 must be a string")
+    binary = mise.get("binary")
+    if not isinstance(binary, dict) or not isinstance(binary.get("path"), str) or mise["version"] not in binary["path"]:
+        raise ValueError("mise.binary.path must name the installed pinned binary, with its version in the path")
+    digests = binary.get("sha256")
+    if not isinstance(digests, dict) or not digests or any(
+        p not in platforms or not isinstance(d, str) or not re.match(r"^[0-9a-f]{64}$", d)
+        for p, d in digests.items()
+    ):
+        raise ValueError("mise.binary.sha256 must map lock platforms to 64-hex sha256 digests")
     if "rust" in mise["tools"]:
         raise ValueError("rust must not be a [mise.tools] entry: rustup installs it, rust-toolchain.toml pins it")
     for key, spec in mise["tools"].items():
@@ -286,6 +303,44 @@ def render_mise_block(data: dict, digest: str) -> str:
 def update_tools_config(path: Path, data: dict, digest: str, check: bool) -> bool:
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     result = render_tools_config(data, digest)
+    if check and result != text:
+        raise ValueError(
+            f"{path}: differs from tools/toolchain/manifest.toml (stale or hand-edited); "
+            "fix: python3 tools/toolchain/generate.py"
+        )
+    if not check:
+        path.write_text(result, encoding="utf-8")
+    return result != text
+
+
+def render_expected(data: dict, digest: str) -> str:
+    """tools/toolchain/expected.json: the subset check_env needs, as JSON."""
+    mise = data["mise"]
+    overrides: dict[str, dict[str, str]] = {}
+    for name, table in sorted(data.get("platform", {}).items()):
+        picked = {k: v for k, v in table.items() if k in CHECKED and v in ("system", "absent")}
+        if picked:
+            overrides[name] = picked
+    doc = {
+        "_generated": "by tools/toolchain/generate.py from tools/toolchain/manifest.toml; do not edit",
+        "schema": 1,
+        "source_sha256": digest,
+        "enforcement": mise["enforcement"],
+        "tools": {key: data["toolchain"][key] for key in CHECKED},
+        "platform_overrides": overrides,
+        "mise": {
+            "version": mise["version"],
+            "path": mise["binary"]["path"],
+            "sha256": dict(sorted(mise["binary"]["sha256"].items())),
+        },
+        "npm_prefixes": list(data["npm"]["prefixes"]),
+    }
+    return json.dumps(doc, indent=2) + "\n"
+
+
+def update_expected(path: Path, data: dict, digest: str, check: bool) -> bool:
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    result = render_expected(data, digest)
     if check and result != text:
         raise ValueError(
             f"{path}: differs from tools/toolchain/manifest.toml (stale or hand-edited); "
@@ -501,6 +556,7 @@ def generate(pulp_root: Path, tartci_root: Path | None, check: bool, mise: Path 
     check_mise_lock(lock, data)
     update_tools_config(tools_config, data, digest, check)
     update_mise_config(config, data, digest, check)
+    update_expected(pulp_root / EXPECTED, data, digest, check)
     targets: list[tuple[Path, str]] = [
         (pulp_root / ".shipyard/vm-image.toml", "macos"),
         (pulp_root / ".shipyard/vm-image.intel.toml", "intel"),

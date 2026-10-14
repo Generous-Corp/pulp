@@ -1,0 +1,35 @@
+{
+  "_generated": "by tools/toolchain/generate.py from tools/toolchain/manifest.toml; do not edit",
+  "schema": 1,
+  "source_sha256": "16f5e000715571ede64022989167d427afa48045aacf0432ac77622481b7219b",
+  "enforcement": "warn",
+  "tools": {
+    "python": "3.14.4",
+    "cmake": "4.3.3",
+    "ninja": "1.13.2",
+    "node": "26.10.0",
+    "rust": "1.97.1",
+    "clang_format": "21.1.8"
+  },
+  "platform_overrides": {
+    "linux": {
+      "cmake": "system",
+      "rust": "absent"
+    },
+    "windows": {
+      "cmake": "system",
+      "rust": "absent"
+    }
+  },
+  "mise": {
+    "version": "2026.10.8",
+    "path": "~/.local/opt/mise-2026.10.8/bin/mise",
+    "sha256": {
+      "macos-arm64": "87c18142dd67f5848b0236738eb9338976329266937ecd79b11121de64dd2d47"
+    }
+  },
+  "npm_prefixes": [
+    "tools/import-design/jsx-runtime",
+    "tools/scripts"
+  ]
+}

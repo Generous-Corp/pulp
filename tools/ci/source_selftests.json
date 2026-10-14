@@ -981,6 +981,12 @@
       ]
     },
     {
+      "name": "toolchain-check_env-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_check_env.py"
+      ]
+    },
+    {
       "name": "toolchain-mise_profile-selftest",
       "argv": [
         "{repo}/tools/toolchain/test_mise_profile.py"
