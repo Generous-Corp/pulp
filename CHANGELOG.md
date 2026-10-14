@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09710"></a>
+## [0.971.0] - 2026-10-14
+
+- release/version bump ([#10305](https://github.com/Generous-Corp/pulp/pull/10305))
+- fix/release shared package step ([#10258](https://github.com/Generous-Corp/pulp/pull/10258))
+- codex/forge chorus phaser extraction 20261014 ([#10301](https://github.com/Generous-Corp/pulp/pull/10301))
+- release/version bump ([#10303](https://github.com/Generous-Corp/pulp/pull/10303))
+- codex/refactor ios build recipes 20261014 ([#10300](https://github.com/Generous-Corp/pulp/pull/10300))
+- codex/wgpu native diagnostic 20261014 ([#10297](https://github.com/Generous-Corp/pulp/pull/10297))
+
 <a id="v09700"></a>
 ## [0.970.0] - 2026-10-14
 
@@ -10728,6 +10738,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.971.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.971.0
 [0.970.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.970.0
 [0.969.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.969.0
 [0.968.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.968.0
