@@ -22,6 +22,9 @@ on:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
       - 'tools/scripts/test_release_cache_isolation.py'
+      - 'tools/scripts/test_release_package_step.py'
+      - 'tools/ci/release_package_cli.sh'
+      - 'tools/ci/release_path_changed.py'
       - 'tools/scripts/action_pin_lint.py'
       - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
@@ -147,6 +150,9 @@ on:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
       - 'tools/scripts/test_release_cache_isolation.py'
+      - 'tools/scripts/test_release_package_step.py'
+      - 'tools/ci/release_package_cli.sh'
+      - 'tools/ci/release_path_changed.py'
       - 'tools/scripts/action_pin_lint.py'
       - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
@@ -418,6 +424,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_release_workflow_test_step.py
+          # release-cli, the dry-run and the release-path PR gate package
+          # through one script and isolate with one step body.
+          python3 tools/scripts/test_release_package_step.py
           # Signing/publishing jobs compile with ccache disabled and re-fetch
           # every dependency into a fresh job root, never a shared host cache.
           python3 tools/scripts/test_release_cache_isolation.py

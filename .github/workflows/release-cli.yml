@@ -1063,59 +1063,9 @@ jobs:
         if: runner.os != 'Windows'
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
-          MATRIX_PLATFORM: ${{ matrix.platform }}
-        run: |
-          import_design_args=()
-          control_broker_args=()
-          control_standalone_host_args=()
-          if [ -x build/tools/import-design/pulp-import-design ] \
-              && [ -d build/tools/import-design/browser_capture-v1 ]; then
-            import_design_args=(
-              --import-design-binary build/tools/import-design/pulp-import-design
-              --import-design-runtime-dir build/tools/import-design/browser_capture-v1
-            )
-            if python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "0.918.0"; then
-              test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
-              test -f build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
-              test -f build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
-              import_design_args+=(
-                --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
-                --import-design-source-emitter build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
-                --import-design-ids-map build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
-              )
-            else
-              import_design_args+=(--allow-missing-import-design-contract)
-            fi
-            if [ -n "${PULP_NODE_RUNTIME_EXECUTABLE:-}" ]; then
-              import_design_args+=(
-                --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE"
-                --node-license "$(dirname "$PULP_NODE_RUNTIME_EXECUTABLE")/node.LICENSE"
-              )
-            fi
-          fi
-          if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
-              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
-            control_broker_args=(
-              --control-broker-binary build/inspect/pulp-control-broker
-            )
-          fi
-          if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
-              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_STANDALONE_HOST_FLOOR"; then
-            control_standalone_host_args=(
-              --control-standalone-host-binary build/inspect/pulp-control-standalone-host
-              --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json
-            )
-          fi
-          python3 "$PULP_RELEASE_PACKAGER" \
-            --binary build/pulp \
-            --cpp-binary build/tools/cli/pulp-cpp \
-            --mcp-binary build/tools/mcp/pulp-mcp \
-            "${control_broker_args[@]}" \
-            "${control_standalone_host_args[@]}" \
-            "${import_design_args[@]}" \
-            --build-dir build \
-            --platform ${{ matrix.platform }} \
-            --out pulp-${{ matrix.platform }}.tar.gz
+        # The one Unix packaging step: release-dry-run.yml and the release-path
+        # PR gate run this same script (tools/scripts/test_release_package_step.py).
+        run: bash tools/ci/release_package_cli.sh "${{ matrix.platform }}" "$RELEASE_TAG"
         shell: bash
 
       - name: Package CLI (Windows)
