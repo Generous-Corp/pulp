@@ -223,7 +223,9 @@ def check_npm(expected: dict, root: Path) -> List[Finding]:
                 continue  # the root project itself
             have = installed.get(name)
             if have is None:
-                if not row.get("optional"):
+                # npm skips an optional package another platform needs; a
+                # package both dev and optional is marked devOptional.
+                if not (row.get("optional") or row.get("devOptional")):
                     drift.append(f"{name} missing")
             elif have.get("version") != row.get("version"):
                 drift.append(f"{name} {have.get('version')} != {row.get('version')}")

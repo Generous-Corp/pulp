@@ -215,6 +215,7 @@ class CheckEnvTests(unittest.TestCase):
         "": {"name": "root"},
         "node_modules/esbuild": {"version": "0.25.0"},
         "node_modules/@esbuild/linux-x64": {"version": "0.25.0", "optional": True},
+        "node_modules/@esbuild/win32-x64": {"version": "0.25.0", "devOptional": True},
     }
 
     def test_npm_installed_from_the_lockfile_matches(self) -> None:
