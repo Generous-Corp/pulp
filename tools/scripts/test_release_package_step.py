@@ -15,6 +15,7 @@ Run:
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -69,7 +70,12 @@ class EveryCallerUsesTheSharedScript(unittest.TestCase):
         for name, job, step_name in CALLERS:
             with self.subTest(workflow=name):
                 step = next(s for s in steps(load(name), job) if s.get("name") == step_name)
-                self.assertIn(f"bash {SCRIPT}", step["run"])
+                # release-cli resolves the script through the overlay variable
+                # (see ReleaseCliDispatchFindsTheScript); the others run it
+                # from their own checkout.
+                expected = ('bash "$PULP_RELEASE_PACKAGE_SCRIPT"' if name == "release-cli.yml"
+                            else f"bash {SCRIPT}")
+                self.assertIn(expected, step["run"])
 
     def test_no_caller_keeps_a_private_copy(self) -> None:
         for name, _, _ in CALLERS:
@@ -112,6 +118,57 @@ class EveryCallerUsesTheSharedScript(unittest.TestCase):
                 self.assertNotIn("if", job_steps[isolate])
                 self.assertLess(isolate, names.index("Bootstrap dependencies"))
                 self.assertLess(isolate, names.index(step_name))
+
+
+class ReleaseCliDispatchFindsTheScript(unittest.TestCase):
+    """A release-cli dispatch runs main's workflow against the TAG's checkout
+    (`ref: inputs.source_ref || inputs.version`), and no tag before this script
+    existed contains it. Main's copy is overlaid into the backfill helpers dir
+    and run through PULP_RELEASE_PACKAGE_SCRIPT, like package_cli.py."""
+
+    HELPERS = "Ensure release-content verifier helpers exist"
+
+    def helpers_run(self) -> str:
+        return next(s for s in steps(load("release-cli.yml"), "build-cli")
+                    if s.get("name") == self.HELPERS)["run"]
+
+    def test_dispatch_overlays_main_copy_and_exports_it(self) -> None:
+        run = self.helpers_run()
+        self.assertRegex(run, rf"\n\s+{re.escape(SCRIPT)} \\\n", "the script is in the helper list")
+        self.assertIn(f'[ "$path" = {SCRIPT} ]', run, "a dispatch overlays main's copy")
+        self.assertIn('compat_path="$compat_dir/tools/ci/release_package_cli.sh"', run)
+        self.assertIn('PULP_RELEASE_PACKAGE_SCRIPT=$compat_dir/tools/ci/release_package_cli.sh', run)
+        self.assertIn(f"PULP_RELEASE_PACKAGE_SCRIPT={SCRIPT}", run, "a push uses the checkout's")
+
+    def test_a_tag_checkout_without_the_script_still_packages(self) -> None:
+        """Behaviour: the tag tree lacks the script; the overlaid copy, run from
+        the tag checkout as cwd, packages it. Control: the checkout-relative
+        call the step used to make fails there."""
+        tag = Path(tempfile.mkdtemp(prefix="tag-checkout-"))
+        (tag / "CMakeLists.txt").write_text("project(pulp\n    VERSION 0.966.0\n)\n",
+                                            encoding="utf-8")
+        (tag / "tools/scripts").mkdir(parents=True)
+        (tag / "tools/scripts/release_product_matrix.json").write_bytes(
+            (REPO_ROOT / "tools/scripts/release_product_matrix.json").read_bytes())
+        packager = tag.parent / f"{tag.name}-packager.py"
+        packager.write_text(FAKE_PACKAGER, encoding="utf-8")
+        compat = Path(tempfile.mkdtemp(prefix="compat-")) / "tools/ci/release_package_cli.sh"
+        compat.parent.mkdir(parents=True)
+        compat.write_bytes((REPO_ROOT / SCRIPT).read_bytes())
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tag),
+               "PYTHON": sys.executable, "PULP_RELEASE_PACKAGER": str(packager),
+               "PULP_RELEASE_PACKAGE_SCRIPT": str(compat)}
+        self.assertFalse((tag / SCRIPT).exists())
+        control = subprocess.run(["bash", "-c", f"bash {SCRIPT} linux-x64 v0.966.0"],
+                                 cwd=tag, env=env, capture_output=True, text=True,
+                                 encoding="utf-8")
+        self.assertNotEqual(control.returncode, 0)
+        self.assertIn("No such file", control.stderr)
+        fixed = subprocess.run(
+            ["bash", "-c", 'bash "$PULP_RELEASE_PACKAGE_SCRIPT" linux-x64 v0.966.0'],
+            cwd=tag, env=env, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(fixed.returncode, 0, fixed.stdout + fixed.stderr)
+        self.assertTrue((tag / "pulp-linux-x64.tar.gz").is_file())
 
 
 FAKE_PACKAGER = """\

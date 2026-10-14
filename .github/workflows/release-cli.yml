@@ -620,6 +620,7 @@ jobs:
           mkdir -p "$compat_dir/tools/scripts"
           for path in \
               tools/scripts/package_cli.py \
+              tools/ci/release_package_cli.sh \
               tools/scripts/release_artifact_contents.py \
               tools/scripts/release_product_matrix.json \
               tools/scripts/json_schema_lite.py \
@@ -630,6 +631,7 @@ jobs:
               ; do
             if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
                 && { [ "$path" = tools/scripts/package_cli.py ] \
+                  || [ "$path" = tools/ci/release_package_cli.sh ] \
                   || [ "$path" = tools/scripts/release_artifact_contents.py ] \
                   || [ "$path" = tools/scripts/json_schema_lite.py ] \
                   || [ "$path" = tools/scripts/sdk_capability_handoff.py ] \
@@ -642,6 +644,13 @@ jobs:
                 # package_cli.py resolves the import-design runtime manifest
                 # relative to tools/scripts, so preserve that layout.
                 compat_path="$compat_dir/tools/scripts/package_cli.py"
+              fi
+              # The dispatched tag's checkout can predate the shared Unix
+              # package script; run main's copy (it reads build/ and
+              # CMakeLists.txt from the cwd, which stays the tag checkout).
+              if [ "$path" = tools/ci/release_package_cli.sh ]; then
+                mkdir -p "$compat_dir/tools/ci"
+                compat_path="$compat_dir/tools/ci/release_package_cli.sh"
               fi
               curl -fsSL "$url" -o "$compat_path"
               continue
@@ -702,6 +711,8 @@ jobs:
               >> "$GITHUB_ENV"
             echo "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py" \
               >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGE_SCRIPT=$compat_dir/tools/ci/release_package_cli.sh" \
+              >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_CMAKE=$compat_dir/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
           else
@@ -711,6 +722,8 @@ jobs:
             echo "PULP_SDK_PROVENANCE_HELPER=tools/scripts/sdk_provenance.py" \
               >> "$GITHUB_ENV"
             echo "PULP_RELEASE_PACKAGER=tools/scripts/package_cli.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGE_SCRIPT=tools/ci/release_package_cli.sh" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_CMAKE=tools/cmake/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
@@ -1065,7 +1078,9 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         # The one Unix packaging step: release-dry-run.yml and the release-path
         # PR gate run this same script (tools/scripts/test_release_package_step.py).
-        run: bash tools/ci/release_package_cli.sh "${{ matrix.platform }}" "$RELEASE_TAG"
+        # PULP_RELEASE_PACKAGE_SCRIPT is main's copy on a dispatch (the tag can
+        # predate the script), the checkout's otherwise.
+        run: bash "$PULP_RELEASE_PACKAGE_SCRIPT" "${{ matrix.platform }}" "$RELEASE_TAG"
         shell: bash
 
       - name: Package CLI (Windows)

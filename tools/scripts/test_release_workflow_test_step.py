@@ -75,7 +75,7 @@ SHIPYARD_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
 def unix_package_source(case: unittest.TestCase) -> str:
     """release-cli.yml's Unix package step plus the shared script it runs."""
     run_block = case._find_step_run("Package CLI (Unix)")
-    case.assertIn("bash tools/ci/release_package_cli.sh", run_block)
+    case.assertIn('bash "$PULP_RELEASE_PACKAGE_SCRIPT"', run_block)
     script = (REPO_ROOT / "tools/ci/release_package_cli.sh").read_text(encoding="utf-8")
     return run_block + "\n" + script
 
@@ -920,7 +920,7 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         )
         self.assertIn("[ -x build/tools/import-design/pulp-import-design ]", run_block)
         self.assertIn('"${import_design_args[@]}"', run_block)
-        self.assertIn('release_package_cli.sh "${{ matrix.platform }}"', run_block)
+        self.assertIn('bash "$PULP_RELEASE_PACKAGE_SCRIPT" "${{ matrix.platform }}"', run_block)
         self.assertIn('--out "pulp-${platform}.tar.gz"', run_block)
 
     def test_unix_strip_treats_import_design_as_versioned_payload(self) -> None:
