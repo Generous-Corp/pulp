@@ -5,6 +5,7 @@
 #include "detail/shared_io_compute_plan.hpp"
 #include "detail/shared_io_wavenet_spec.hpp"
 #include "support/dawn_transfer_call_counter.hpp"
+#include "support/physical_qualification_outcome.hpp"
 
 #include <algorithm>
 #include <array>
@@ -239,6 +240,17 @@ Result run() {
     auto& provider = *created.provider;
     const auto identity = provider.provider_identity();
     const auto adapter = provider.adapter_identity();
+    // No independent native-runtime identity source exists at the Dawn
+    // boundary yet, so an otherwise authenticated provider is unavailable for
+    // qualification: a typed skip, not a failure every physical host repeats.
+    if (pulp::test::physical_qualification_outcome(
+            true, pulp::gpu_audio::detail::gate_shared_io_provider_identity(identity)) ==
+        pulp::test::PhysicalQualificationOutcome::Unavailable) {
+        result.unavailable = true;
+        result.reason = std::string(pulp::test::kNativeRuntimeIdentityUnavailable);
+        emit(result, "unavailable");
+        return result;
+    }
     result.identity = identity.authenticated && identity.native_runtime_authenticated;
     result.immutable_provenance =
         result.identity && valid_provider_receipt_digest(

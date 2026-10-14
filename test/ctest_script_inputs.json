@@ -164,6 +164,7 @@
     "tools/cli/kit_profile_verification.cpp",
     "tools/cli/local_sdk_install.cpp",
     "tools/cli/mac_runtime_validators.cpp",
+    "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
     "tools/cli/tartci_lease.cpp",
     "tools/cli/tool_registry.cpp",
@@ -710,14 +711,31 @@
    "undeclared_sources": []
   },
   "pulp-test-cli-package-commands": {
-   "data": "none",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "test/test_cli_package_commands.cpp"
+   ],
+   "inputs": [
+    "tools/packages/pulp-packages-verify.cmake"
+   ],
    "kind": "compiled",
    "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
+   "sources": [
+    "test/test_cli_package_commands.cpp",
     "tools/cli/import_spi.cpp",
     "tools/cli/importer_install.cpp",
+    "tools/cli/package_commands.cpp",
+    "tools/cli/package_commands_add.cpp",
+    "tools/cli/package_commands_search.cpp",
+    "tools/cli/package_commands_util.cpp",
+    "tools/cli/package_registry.cpp",
+    "tools/cli/tool_registry.cpp"
+   ],
+   "spawning_sources": [
+    "test/test_cli_package_commands.cpp",
+    "tools/cli/import_spi.cpp",
+    "tools/cli/importer_install.cpp",
+    "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
     "tools/cli/tool_registry.cpp"
    ],
@@ -2886,6 +2904,7 @@
   "pulp-test-unit-delay",
   "pulp-test-validation-contract",
   "pulp-test-view-core-link",
+  "pulp-test-view-core-plugin-host-seam",
   "pulp-test-view-core-window-host-link",
   "pulp-test-visual",
   "pulp-test-visualization",
@@ -3935,7 +3954,9 @@
    "inputs": [
     "core/host/include/pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
     "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+    "core/host/include/pulp/host/forge_sequencing_catalog.hpp",
     "core/host/src/forge_dynamics_catalog.cpp",
+    "core/host/src/forge_sequencing_catalog.cpp",
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
@@ -4506,7 +4527,9 @@
    "inputs": [
     "core/host/include/pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
     "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+    "core/host/include/pulp/host/forge_sequencing_catalog.hpp",
     "core/host/src/forge_dynamics_catalog.cpp",
+    "core/host/src/forge_sequencing_catalog.cpp",
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
@@ -4674,6 +4697,14 @@
    "inputs": [
     "tools/cmake/FindSkia.cmake",
     "tools/scripts/test_findskia_arch_assert.py"
+   ],
+   "kind": "python"
+  },
+  "findskia-windows-arm64-slice-selftest": {
+   "entry": "tools/scripts/test_findskia_windows_arm64_slice.py",
+   "inputs": [
+    "tools/cmake/FindSkia.cmake",
+    "tools/scripts/test_findskia_windows_arm64_slice.py"
    ],
    "kind": "python"
   },
@@ -6929,6 +6960,7 @@
     "tools/motion/visual/requirements.lock",
     "tools/scripts",
     "tools/scripts/affected_targets.py",
+    "tools/scripts/build_time_report.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
     "tools/scripts/consumption_census.py",
@@ -6978,6 +7010,7 @@
     "tools/motion/visual/requirements.lock",
     "tools/scripts",
     "tools/scripts/affected_targets.py",
+    "tools/scripts/build_time_report.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/consumption_census.py",
     "tools/scripts/gate_common.py",
@@ -7042,8 +7075,14 @@
     ".githooks/lib",
     ".githooks/pre-push",
     "tools/scripts",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/gates_script_inputs.py",
+    "tools/scripts/merge_tree_script_state.py",
     "tools/scripts/refresh_push_check.py",
-    "tools/scripts/test_refresh_push_check.py"
+    "tools/scripts/test_refresh_push_check.py",
+    "tools/scripts/unregistered_tests_check.py",
+    "tools/scripts/vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"
   },
@@ -7383,6 +7422,13 @@
    ],
    "kind": "python"
   },
+  "pulp-view-tooling-symbol-floor": {
+   "entry": "tools/scripts/archive_symbol_closure_check.py",
+   "inputs": [
+    "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
   "pulp-worktree-creation-selftest": {
    "entry": "tools/ci/test_pulp_worktree_creation.py",
    "inputs": [
@@ -7553,11 +7599,16 @@
     "core/simd/include",
     "core/view",
     "core/view/audio",
+    "core/view/audio/include",
     "core/view/cmake/PulpViewJsPreludes.cmake",
     "core/view/include",
+    "core/view/include/pulp/view/host_surfaces.hpp",
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
+    "core/view/src/inspector.cpp",
+    "core/view/src/inspector_facts.cpp",
     "core/view/src/reload_exports.cpp",
+    "docs/status/view-audio-seam-debts.json",
     "external/fonts/Inter-Regular.ttf",
     "external/fonts/NotoColorEmoji.ttf",
     "tools/cmake",
@@ -7571,7 +7622,8 @@
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
     "tools/scripts/vellum_d3_units.json",
-    "tools/scripts/vellum_mirror_edge_patterns.json"
+    "tools/scripts/vellum_mirror_edge_patterns.json",
+    "tools/scripts/vellum_mirror_edge_table.py"
    ],
    "kind": "python"
   },
@@ -10933,6 +10985,7 @@
     "tools/motion/visual/requirements.lock",
     "tools/scripts",
     "tools/scripts/affected_targets.py",
+    "tools/scripts/build_time_report.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/consumption_census.py",
     "tools/scripts/gate_common.py",
@@ -11791,6 +11844,18 @@
    "entry": "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
    "inputs": [
     "core/view/include/pulp/view/host_surfaces.hpp",
+    "core/view/include/pulp/view/plugin_frame_renderer.hpp",
+    "core/view/include/pulp/view/plugin_view_host.hpp",
+    "core/view/platform/ios/plugin_view_host_ios.mm",
+    "core/view/platform/linux/plugin_view_host_linux.cpp",
+    "core/view/platform/mac/plugin_view_host_mac.mm",
+    "core/view/platform/mac/plugin_view_host_mac_drag.mm",
+    "core/view/platform/mac/plugin_view_host_mac_script_keys.hpp",
+    "core/view/platform/mac/plugin_view_host_mac_text_input.mm",
+    "core/view/platform/mac/plugin_view_host_mac_view.h",
+    "core/view/platform/win/plugin_view_host_win.cpp",
+    "core/view/src/plugin_frame_renderer.cpp",
+    "core/view/src/plugin_view_host_stub.cpp",
     "core/view/src/view.cpp",
     "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
     "tools/scripts/vellum_d3_units.json"

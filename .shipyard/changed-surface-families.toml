@@ -2635,6 +2635,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-e90980a37386"
+paths = ["tools/scripts/test_findskia_windows_arm64_slice.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "findskia-windows-arm64-slice-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-97a694139ce4"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
@@ -5528,7 +5562,10 @@ risk_class = "low"
 
 [[families]]
 name = "script-readers-cd32e903b950"
-paths = ["tools/scripts/test_vellum_closure.py"]
+paths = [
+  "tools/scripts/test_vellum_closure.py",
+  "tools/scripts/vellum_mirror_edge_table.py",
+]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-inventory",
@@ -6208,41 +6245,6 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-27bc251c23a6"
-paths = ["tools/scripts/unregistered_tests_check.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "pr-head-affected-tests-selftest",
-  "pr-head-diff-scoped-registrations",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "sample-region-compat-baseline-selftest",
-  "unregistered-tests-check",
-  "unregistered-tests-check-selftest",
-  "wide-non-native-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
 name = "script-readers-258b05dafebe"
 paths = ["tools/scripts/vellum_closure.py"]
 tests = [
@@ -6750,6 +6752,7 @@ tests = [
   "tools-registry-check-selftest",
   "trace-span-category-lint",
   "vellum-inheritance-ledger-negative-contract",
+  "vellum-view-core-pulp-kept-negative-contract",
   "vellum-watch-preflight-selftest",
   "version-at-land-selftest",
   "wide-non-native-selftest",
@@ -6962,6 +6965,7 @@ paths = [
   "tools/scripts/test_fetch_skia_for_release_extra.py",
   "tools/scripts/test_fetch_v8_for_release.py",
   "tools/scripts/test_findskia_arch_assert.py",
+  "tools/scripts/test_findskia_windows_arm64_slice.py",
   "tools/scripts/test_fleet_snapshot.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
@@ -7195,9 +7199,9 @@ paths = [
   "tools/scripts/token_coverage_check.py",
   "tools/scripts/token_key_check.py",
   "tools/scripts/trace_span_category_lint.py",
-  "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_mirror_edge_table.py",
   "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
@@ -7511,6 +7515,7 @@ paths = [
   "tools/scripts/test_fetch_skia_for_release_extra.py",
   "tools/scripts/test_fetch_v8_for_release.py",
   "tools/scripts/test_findskia_arch_assert.py",
+  "tools/scripts/test_findskia_windows_arm64_slice.py",
   "tools/scripts/test_fleet_snapshot.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
@@ -7744,9 +7749,9 @@ paths = [
   "tools/scripts/token_coverage_check.py",
   "tools/scripts/token_key_check.py",
   "tools/scripts/trace_span_category_lint.py",
-  "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_mirror_edge_table.py",
   "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",

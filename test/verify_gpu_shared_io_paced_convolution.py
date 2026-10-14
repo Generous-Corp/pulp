@@ -6,7 +6,29 @@ import csv
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+
+# The probe exits 77 with status "unavailable" when the run is sound but the
+# native-runtime identity has no independent source at the Dawn boundary. That
+# is a typed skip for the whole check: the negative control and the long run
+# cannot authenticate their receipts either.
+SKIP = 77
+
+
+def unavailable(result, directory):
+    """The skip reason, when the probe reported its run unavailable."""
+    if result.returncode != SKIP:
+        return None
+    receipt = json.loads((directory / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["status"] == "unavailable", receipt
+    assert receipt["reason"] == "native_runtime_identity_unavailable", receipt
+    assert receipt["native_runtime_identity_status"] == "unavailable", receipt
+    assert receipt["gpu_receipt_authenticated"] is False, receipt
+    assert receipt["admissions_attempted"] == 0, receipt
+    assert receipt["admissions_enqueued"] == 0, receipt
+    assert receipt["produced_blocks_before_stop"] == 0, receipt
+    return receipt["reason"]
 
 
 def main():
@@ -21,6 +43,11 @@ def main():
             if negative:
                 command.append("--negative-control")
             result = subprocess.run(command, text=True, capture_output=True, timeout=60)
+            if not negative:
+                reason = unavailable(result, directory)
+                if reason:
+                    print(f"SKIP: paced convolution probe unavailable: {reason}")
+                    sys.exit(SKIP)
             assert result.returncode == int(negative), (result.returncode, result.stdout, result.stderr)
             receipt = json.loads((directory / "receipt.json").read_text())
             assert receipt["schema"] == "pulp.gpu-audio-paced-convolution.v1"

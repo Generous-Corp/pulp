@@ -1060,7 +1060,8 @@ class ClosureMentionTests(unittest.TestCase):
         table = json.loads((REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
         self.assertEqual(table["schema"], "pulp.vellum.mirror-edge-patterns.v1")
         self.assertEqual(set(table["content_patterns"]), {"mirror-product-include", "mirror-product-symbol",
-                                                          "mirror-audio-framework-link", "mirror-pulp-kept-include"})
+                                                          "mirror-audio-framework-link", "mirror-pulp-kept-include",
+                                                          "mirror-pulp-kept-symbol"})
         self.assertEqual(set(table["path_patterns"]), {"mirror-pulp-kept-file"})
         self.assertTrue({"", ".md", ".ps1", ".sh", ".ts", ".tsx", ".yaml", ".yml", ".txt",
                          ".hh", ".hxx", ".in", ".py", ".mjs"} <= set(table["suffixes"]))
@@ -1068,6 +1069,95 @@ class ClosureMentionTests(unittest.TestCase):
         loaded = vellum_closure.mirror_edge_table()
         self.assertEqual({k: v.pattern for k, v in loaded["content"].items()}, table["content_patterns"])
         self.assertFalse(hasattr(vellum_closure, "CLOSURE_MENTION_PATTERNS"))
+
+    def test_table_is_generated_from_its_sources(self):
+        import vellum_mirror_edge_table as generator
+        on_disk = (REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8")
+        self.assertEqual(generator.render(generator.generate(REPO_ROOT)), on_disk)
+
+    def test_every_pulp_kept_view_header_include_is_refused(self):
+        import vellum_mirror_edge_table as generator
+        kept = generator.kept_include_paths(REPO_ROOT)
+        # The headers the #92 review planted, plus its control.
+        for named in ("pulp/view/audio_widgets.hpp", "pulp/view/register_audio_widgets.hpp",
+                      "pulp/view/visualizers.hpp", "pulp/view/visualization_bridge.hpp",
+                      "pulp/view/hosted_editor_attachment.hpp", "pulp/view/audio_inspector_panel.hpp"):
+            self.assertIn(named, kept)
+        # Every public view-audio header and every D3 pulp_kept header is in the set.
+        audio = REPO_ROOT / "core/view/audio/include"
+        on_disk = {p.relative_to(audio).as_posix() for p in audio.rglob("*.hpp")}
+        self.assertTrue(on_disk)
+        self.assertLessEqual(on_disk, set(kept))
+        self.assertIn("pulp/view/inspector.hpp", kept)
+        for header in kept:
+            for spelled in (f"#include <{header}>\n", f'#include "{header}"\n', f"#import <{header}>\n"):
+                found = self.scan(spelled, "core/canvas/x.cpp")
+                self.assertTrue(any(v.startswith("mirror-pulp-kept-include") for v in found), (spelled, found))
+
+    def test_every_pulp_kept_view_symbol_is_refused(self):
+        import vellum_mirror_edge_table as generator
+        symbols = generator.kept_symbols(REPO_ROOT)
+        self.assertIn("register_audio_widgets", symbols)
+        for symbol in symbols:
+            found = self.scan(f"void f() {{ pulp::view::{symbol}(); }}\n", "core/canvas/x.cpp")
+            self.assertTrue(any(v.startswith("mirror-pulp-kept-symbol") for v in found), (symbol, found))
+
+    def test_every_pulp_kept_file_is_refused_by_path(self):
+        import vellum_mirror_edge_table as generator
+        files = generator.d3_kept_files(REPO_ROOT) + [
+            p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / "core/view/audio").rglob("*") if p.is_file()]
+        self.assertIn("core/view/src/inspector.cpp", files)
+        for rel in files:
+            self.assertTrue(any(v.startswith("mirror-pulp-kept-file") for v in self.scan("int x;\n", rel)), rel)
+
+    def test_view_headers_vellum_exports_are_not_kept(self):
+        for header in ("pulp/view/widgets.hpp", "pulp/view/view.hpp", "pulp/view/label.hpp",
+                       "pulp/view/design_import.hpp", "pulp/view/host_surfaces.hpp",
+                       "pulp/view/inspector_facts.hpp", "pulp/view/script_inspector_port.hpp",
+                       "pulp/view/visualizers_extra.hpp", "pulp/view/audio_widgets.hpp.in"):
+            self.assertEqual(self.scan(f"#include <{header}>\n", "core/canvas/x.cpp"), [], header)
+        for text in ("register_audio_widgets_count = 1;\n", "my_register_audio_widgets();\n",
+                     "PULP_VIEW_HAS_AUDIO_WIDGETS\n"):
+            self.assertEqual(self.scan(text, "core/canvas/x.cpp"), [], text)
+        for rel in ("core/view/src/inspector_facts.cpp", "core/view/include/pulp/view/host_surfaces.hpp",
+                    "core/view/src/label.cpp"):
+            self.assertEqual(self.scan("int x;\n", rel), [], rel)
+
+    def test_a_seam_debt_line_is_the_only_approved_exception(self):
+        import vellum_mirror_edge_table as generator
+        from vellum_closure import closure_mention_violations, mirror_edge_table
+        table = json.loads((REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+        ledger = json.loads((REPO_ROOT / "docs/status/view-audio-seam-debts.json").read_text(encoding="utf-8"))
+        debts = {entry["id"] for entry in ledger["entries"]}
+        self.assertEqual(table["approved_exceptions"], [{
+            "rule": "mirror-pulp-kept-include", "path": "core/view/include/pulp/view/widgets.hpp",
+            "line": "#include <pulp/view/audio_widgets.hpp>", "debt": "vellum-header-audio-widgets-include"}])
+        self.assertLessEqual({row["debt"] for row in table["approved_exceptions"]}, debts)
+        widgets = "core/view/include/pulp/view/widgets.hpp"
+        debt_line = (REPO_ROOT / widgets).read_text(encoding="utf-8").splitlines().index(
+            "#include <pulp/view/audio_widgets.hpp>") + 1
+        marker = f"{widgets}:{debt_line}:"
+        with_exception = closure_mention_violations({"source_root": str(REPO_ROOT), "files": [widgets]})
+        self.assertFalse([v for v in with_exception if marker in v], with_exception)
+        # Without the exception the same real line is refused, and nothing else changes.
+        bare = dict(mirror_edge_table(), exceptions=set())
+        without = closure_mention_violations({"source_root": str(REPO_ROOT), "files": [widgets]}, bare)
+        self.assertEqual([v for v in without if v not in with_exception],
+                         [f"mirror-pulp-kept-include mention {marker} #include <pulp/view/audio_widgets.hpp>"])
+        # The exception holds for that exact line of that file only.
+        self.assertTrue(self.scan("#include <pulp/view/audio_widgets.hpp>\n", "core/canvas/x.cpp"))
+        self.assertTrue(self.scan('#include "pulp/view/audio_widgets.hpp"\n', widgets))
+        self.assertTrue(self.scan("#include <pulp/view/register_audio_widgets.hpp>\n", widgets))
+
+    def test_free_function_extraction(self):
+        from vellum_mirror_edge_table import free_functions
+        text = (
+            "#pragma once\n// void commented();\nnamespace pulp::view {\n"
+            "void register_audio_widgets();\ninline float level(int db) noexcept { return 0; }\n"
+            "class Meter { public: void set_level(float v); };\nstruct S { int f(); };\n"
+            "namespace detail { int helper(const char* s); }\n}\n"
+        )
+        self.assertEqual(free_functions(text), {"register_audio_widgets", "level", "helper"})
 
     def test_export_closure_files_are_free_of_mentions(self):
         from vellum_closure import closure_mention_violations

@@ -146,6 +146,10 @@ def catalog_source(root: pathlib.Path, header: pathlib.Path) -> str:
     source = root / "core" / "host" / "src" / source_name
     if not source.exists():
         return header.read_text(encoding="utf-8")
+    if header.name == "forge_sequencing_catalog.hpp":
+        # stage_seq is the first public sequencing factory. Keep its registry
+        # row first after its implementation moves to this matching source.
+        return source.read_text(encoding="utf-8") + "\n\n" + header.read_text(encoding="utf-8")
     return header.read_text(encoding="utf-8") + "\n\n" + source.read_text(encoding="utf-8")
 
 

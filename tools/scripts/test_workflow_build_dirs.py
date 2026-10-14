@@ -426,21 +426,23 @@ class WorkflowBuildDirTests(unittest.TestCase):
         shadows = str(workflow_named_step(BUILD_WORKFLOW, "build", "Merge-group shadow instruments")["run"])
         self.assertIn('--work-dir "$RUNNER_TEMP/merge-group-shadows"', shadows)
 
-    def test_failed_pr_head_full_suite_is_announced(self) -> None:
-        """The pull-request Test step is continue-on-error, so its failure must
-        be named where a PR reader sees it: a warning annotation with the
-        failing tests and a job-summary line, gated on the step's OUTCOME."""
-        step = workflow_named_step(BUILD_WORKFLOW, "build", "Announce a failed PR-head full suite (non-gating)")
+    def test_failed_fast_pr_head_full_suite_is_announced(self) -> None:
+        """The advisory fast-tier Test step is named where a PR reader sees it;
+        an armed full-tier failure remains a required red check."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Announce a failed PR-head full suite (diagnostic)")
         self.assertTrue(step.get("continue-on-error"))
         cond = " ".join(str(step.get("if")).split())
         for needle in ("github.event_name == 'pull_request'", "steps.ctest.outcome == 'failure'", "always()"):
             self.assertIn(needle, cond)
         run = str(step["run"])
-        self.assertIn("::warning title=PR-head full suite failed (non-gating)::", run)
+        self.assertIn("::warning title=PR-head full suite failed::", run)
         self.assertIn("GITHUB_STEP_SUMMARY", run)
         self.assertIn("ctest.junit.xml", run)
         test = workflow_named_step(BUILD_WORKFLOW, "build", "Test (non-Windows)")
-        self.assertEqual(str(test.get("continue-on-error")), "${{ github.event_name == 'pull_request' }}")
+        self.assertEqual(
+            str(test.get("continue-on-error")),
+            "${{ github.event_name == 'pull_request' && steps.pr_suite.outputs.suite != 'full' }}",
+        )
 
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")

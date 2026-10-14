@@ -94,7 +94,7 @@ else()
 endif()
 
 # Directory holding the macOS view/window/accessibility Objective-C cluster
-# (window_host_mac*.mm, plugin_view_host_mac.mm, drag_drop_mac.mm,
+# (window_host_mac*.mm, plugin_view_host_mac*.mm, drag_drop_mac.mm,
 # accessibility_mac.mm, text_accessibility_macos.mm). Probed the same way as
 # _PULP_FORMAT_SOURCE_DIR so it works in-tree and from an installed SDK.
 # _pulp_apply_view_mac_objc_suffix() compiles a per-binary copy of these into
@@ -169,6 +169,7 @@ function(_pulp_apply_view_mac_objc_suffix target)
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/plugin_view_host_mac.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/plugin_view_host_mac_text_input.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/drag_drop_mac.mm"
+        "${_PULP_VIEW_PLATFORM_MAC_DIR}/plugin_view_host_mac_drag.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/accessibility_mac_host_lifetime.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/accessibility_mac.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/text_accessibility_macos.mm"
@@ -209,7 +210,7 @@ function(_pulp_apply_view_mac_objc_suffix target)
     string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _pulp_view_objc_suffix "${target}")
 
     # Compile the cluster as ONE generated ObjC++ translation unit per binary
-    # rather than thirteen. Every file in the cluster imports Cocoa.h and the
+    # rather than one per file. Every file in the cluster imports Cocoa.h and the
     # same Pulp view headers, so with one file per object a tree that ships
     # eighty binaries parses Cocoa.h a thousand times for a few thousand lines
     # of ObjC; the unity file parses it once per binary. The per-binary suffix

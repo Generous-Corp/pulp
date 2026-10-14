@@ -113,30 +113,48 @@ struct GpuConvolverTrialContext {
     std::string immutable_receipt_digest;
 };
 
+enum class GpuConvolverTrialQualification : std::uint8_t {
+    Qualified,
+    UnavailableNativeIdentity,
+    InvalidContext,
+};
+
+inline GpuConvolverTrialQualification
+qualify_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
+    // A diagnostic can still prepare and run without native identity. It is
+    // an explicit unavailable qualification outcome, rather than a fabricated
+    // provider or a silent rejection of the diagnostic path.
+    if (!context.provider_identity.native_runtime_authenticated ||
+        !valid_provider_identity_component(context.provider_identity.native_runtime_name) ||
+        !valid_provider_identity_component(context.provider_identity.native_runtime_backend) ||
+        !valid_provider_identity_component(context.native_runtime_revision))
+        return GpuConvolverTrialQualification::UnavailableNativeIdentity;
+
+    const bool valid =
+        context.trial_id != 0 && context.pair_id != 0 && context.block_frames != 0 &&
+        context.sample_rate_hz != 0 && context.channels != 0 && context.ir_frames != 0 &&
+        context.inflight_depth != 0 && context.queue_capacity > context.lead_blocks &&
+        context.max_inflight != 0 &&
+        context.max_inflight <= context.queue_capacity - context.lead_blocks &&
+        context.lead_blocks != 0 && context.deadline_ns != 0 &&
+        context.watchdog_ns > context.deadline_ns && context.transfer_counters_direct &&
+        context.timing_provenance_direct && context.provider_identity.authenticated &&
+        valid_provider_identity_component(context.provider_identity.provider_revision) &&
+        valid_provider_identity_component(context.provider_identity.adapter_name) &&
+        valid_provider_identity_component(context.provider_identity.adapter_backend) &&
+        context.provider_identity.adapter_vendor_id != 0 &&
+        context.provider_identity.adapter_device_id != 0 &&
+        valid_provider_receipt_digest(context.provider_identity, context.native_runtime_revision,
+                                      context.immutable_receipt_digest) &&
+        valid_gpu_convolver_thermal_state(context.thermal_state) &&
+        (!context.workgroup_requested || context.workgroup_joined);
+    return valid ? GpuConvolverTrialQualification::Qualified
+                 : GpuConvolverTrialQualification::InvalidContext;
+}
+
 inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
-    return context.trial_id != 0 && context.pair_id != 0 && context.block_frames != 0 &&
-           context.sample_rate_hz != 0 && context.channels != 0 && context.ir_frames != 0 &&
-           context.inflight_depth != 0 && context.queue_capacity > context.lead_blocks &&
-           context.max_inflight != 0 &&
-           context.max_inflight <= context.queue_capacity - context.lead_blocks &&
-           context.lead_blocks != 0 && context.deadline_ns != 0 &&
-           context.watchdog_ns > context.deadline_ns && context.transfer_counters_direct &&
-           context.timing_provenance_direct && context.provider_identity.authenticated &&
-           valid_provider_identity_component(context.provider_identity.provider_revision) &&
-           valid_provider_identity_component(context.provider_identity.adapter_name) &&
-           valid_provider_identity_component(context.provider_identity.adapter_backend) &&
-           context.provider_identity.adapter_vendor_id != 0 &&
-           context.provider_identity.adapter_device_id != 0 &&
-           // This value is projected verbatim into the private JSONL receipt;
-           // reject unsafe bytes before digest validation or serialization.
-           valid_provider_identity_component(context.native_runtime_revision) &&
-           valid_provider_receipt_digest(context.provider_identity, context.native_runtime_revision,
-                                         context.immutable_receipt_digest) &&
-           context.provider_identity.native_runtime_authenticated &&
-           valid_provider_identity_component(context.provider_identity.native_runtime_name) &&
-           valid_provider_identity_component(context.provider_identity.native_runtime_backend) &&
-           valid_gpu_convolver_thermal_state(context.thermal_state) &&
-           (!context.workgroup_requested || context.workgroup_joined);
+    return qualify_gpu_convolver_trial_context(context) ==
+           GpuConvolverTrialQualification::Qualified;
 }
 
 // Host-only configuration for a single diagnostic preparation. This is private

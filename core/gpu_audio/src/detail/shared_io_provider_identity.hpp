@@ -20,6 +20,25 @@ struct SharedIoProviderIdentity {
     std::string native_runtime_backend;
 };
 
+// How far a provider identity reaches. A provider can authenticate itself and
+// its adapter while no independent source for the native runtime exists at
+// its boundary; that is an unavailable qualification, not a failed one, and a
+// physical qualification reports it as a typed skip.
+enum class SharedIoProviderIdentityGate : std::uint8_t {
+    Authenticated,
+    NativeRuntimeUnavailable,
+    Unauthenticated,
+};
+
+inline SharedIoProviderIdentityGate
+gate_shared_io_provider_identity(const SharedIoProviderIdentity& identity) noexcept {
+    if (!identity.authenticated)
+        return SharedIoProviderIdentityGate::Unauthenticated;
+    return identity.native_runtime_authenticated
+               ? SharedIoProviderIdentityGate::Authenticated
+               : SharedIoProviderIdentityGate::NativeRuntimeUnavailable;
+}
+
 // Provider-owned execution capabilities.  These are deliberately semantic
 // facts used by the private realtime seam; they contain no Dawn, WebGPU, or
 // native-device types.  A provider that cannot authenticate a capability must

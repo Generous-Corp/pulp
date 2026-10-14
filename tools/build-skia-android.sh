@@ -57,6 +57,35 @@ case "$ABI_ARG" in
         ;;
 esac
 
+# Keep the command body literal and pass paths through the environment. This
+# preserves shell-safe handling for worktrees whose path contains spaces or an
+# apostrophe while keeping dry-run receipts byte-for-byte aligned with live
+# builds. The post-Ninja test is intentional: Ninja may create cmake_dawn.
+GOVERNED_ANDROID_BODY='set -e
+cd "$PULP_ANDROID_SKIA_SRC"
+ninja -j "$CMAKE_BUILD_PARALLEL_LEVEL" -C "$PULP_ANDROID_BUILD_DIR" skia skshaper skparagraph skunicode_core skunicode_icu svg skottie sksg
+if [ -d "$PULP_ANDROID_SKIA_SRC/$PULP_ANDROID_BUILD_DIR/cmake_dawn" ]; then
+    cmake -S "$PULP_ANDROID_SKIA_SRC/third_party/externals/dawn" \
+        -B "$PULP_ANDROID_SKIA_SRC/$PULP_ANDROID_BUILD_DIR/cmake_dawn" \
+        -DDAWN_BUILD_MONOLITHIC_LIBRARY=STATIC
+    cmake --build "$PULP_ANDROID_SKIA_SRC/$PULP_ANDROID_BUILD_DIR/cmake_dawn" --target webgpu_dawn
+fi'
+
+# A dry run is intentionally available before any SDK checkout is touched. It
+# exercises the same governed command shape used by a live build and emits one
+# receipt per ABI, which makes it possible to review the negotiated host-share
+# boundary without requiring an Android NDK or a multi-hour Skia build.
+if [ "${PULP_SKIA_ANDROID_DRY_RUN:-0}" = "1" ]; then
+    GOVERNED_BUILD="$PULP_ROOT/tools/ci/governed-build.sh"
+    for DRY_ABI in "${ABIS[@]}"; do
+        BUILD_DIR="out/android-${DRY_ABI}-release"
+        echo "android-build-receipt abi=${DRY_ABI} lease=one-per-abi"
+        PULP_ANDROID_SKIA_SRC="$SKIA_SRC" PULP_ANDROID_BUILD_DIR="$BUILD_DIR" \
+            "$GOVERNED_BUILD" --dry-run bash -c "$GOVERNED_ANDROID_BODY"
+    done
+    exit 0
+fi
+
 # Find Android NDK
 if [ -z "$ANDROID_NDK_HOME" ]; then
     if [ -z "$ANDROID_HOME" ]; then
@@ -206,25 +235,20 @@ SKIA_GN_ARGS
     bin/gn gen "$BUILD_DIR"
 
     echo "Building Skia for Android ${ABI} (this may take a few minutes)..."
-    ninja -C "$BUILD_DIR" \
-        skia \
-        skshaper \
-        skparagraph \
-        skunicode_core \
-        skunicode_icu \
-        svg \
-        skottie \
-        sksg
+    # Keep Skia's Ninja graph and the nested Dawn CMake graph under one
+    # negotiated host lease. Acquiring them independently allows another build
+    # to enter between the two commands and defeats the per-ABI resource
+    # boundary. The governed wrapper also supplies the bounded parallelism via
+    # CMAKE_BUILD_PARALLEL_LEVEL to the nested CMake invocation.
+    GOVERNED_BUILD="$PULP_ROOT/tools/ci/governed-build.sh"
+    PULP_BUILD_CLASS=interactive PULP_ANDROID_SKIA_SRC="$SKIA_SRC" \
+        PULP_ANDROID_BUILD_DIR="$BUILD_DIR" "$GOVERNED_BUILD" bash -c "$GOVERNED_ANDROID_BODY"
 
     # Dawn's Android build is a CMake graph nested below the GN output. Its
     # default component graph leaves the top-level libdawn_combined.a empty;
     # build Dawn's supported monolithic archive so FindSkia gets one complete,
     # source-matched provider instead of a fragile component-library order.
     if [ -d "$SKIA_SRC/$BUILD_DIR/cmake_dawn" ]; then
-        cmake -S "$SKIA_SRC/third_party/externals/dawn" \
-            -B "$SKIA_SRC/$BUILD_DIR/cmake_dawn" \
-            -DDAWN_BUILD_MONOLITHIC_LIBRARY=STATIC
-        cmake --build "$SKIA_SRC/$BUILD_DIR/cmake_dawn" --target webgpu_dawn
         cp "$SKIA_SRC/$BUILD_DIR/cmake_dawn/src/dawn/native/libwebgpu_dawn.a" \
             "$SKIA_SRC/$BUILD_DIR/libdawn_combined.a"
         # The native archive does not contain Dawn's generated proc-table

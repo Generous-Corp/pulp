@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
 
@@ -40,7 +43,8 @@ class AndroidSkiaBuilderPinTests(unittest.TestCase):
         self.assertIn("for mod in skparagraph skshaper skunicode svg skottie sksg", script)
         self.assertIn('cmp -s "$SKUNICODE_HEADER"', script)
         self.assertIn("-DDAWN_BUILD_MONOLITHIC_LIBRARY=STATIC", script)
-        self.assertIn('cmake --build "$SKIA_SRC/$BUILD_DIR/cmake_dawn" --target webgpu_dawn', script)
+        self.assertIn("cmake --build", script)
+        self.assertIn("--target webgpu_dawn", script)
         self.assertIn('cmake_dawn/src/dawn/libdawn_proc.a', script)
         self.assertIn('--localize-symbol="$symbol"', script)
         self.assertIn('grep -q \'src/core/SkUTF.h\'', script)
@@ -60,6 +64,60 @@ class AndroidSkiaBuilderPinTests(unittest.TestCase):
             view_cmake,
         )
         self.assertIn("OR (ANDROID AND PULP_HAS_SKIA)", view_cmake)
+
+    def test_android_build_uses_one_governed_lease_per_abi(self) -> None:
+        script = (ROOT / "tools/build-skia-android.sh").read_text(encoding="utf-8")
+        self.assertIn('PULP_BUILD_CLASS=interactive PULP_ANDROID_SKIA_SRC=', script)
+        self.assertEqual(script.count('bash -c "$GOVERNED_ANDROID_BODY"'), 2)
+        self.assertIn('ninja -j "$CMAKE_BUILD_PARALLEL_LEVEL"', script)
+        self.assertIn('cmake --build "$PULP_ANDROID_SKIA_SRC/$PULP_ANDROID_BUILD_DIR/cmake_dawn"', script)
+        self.assertIn('android-build-receipt abi=${DRY_ABI} lease=one-per-abi', script)
+        self.assertIn('"$GOVERNED_BUILD" --dry-run bash -c', script)
+        # The shared literal body contains both commands; the live path invokes
+        # it once per ABI rather than reacquiring a second lease for Dawn.
+
+    def test_dry_run_emits_receipts_without_android_toolchain(self) -> None:
+        env = os.environ.copy()
+        env.update({"PULP_SKIA_ANDROID_DRY_RUN": "1", "PULP_TARTCI_LEASES": "0"})
+        result = subprocess.run(
+            ["bash", str(ROOT / "tools/build-skia-android.sh"), "all"],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("android-build-receipt abi=arm64 lease=one-per-abi", result.stdout)
+        self.assertIn("android-build-receipt abi=x86_64 lease=one-per-abi", result.stdout)
+        self.assertEqual(result.stdout.count("governed-build dry-run receipt:"), 2)
+        self.assertIn("ninja -j", result.stdout)
+        self.assertIn("cmake --build", result.stdout)
+
+    def test_governed_path_arguments_survive_apostrophe(self) -> None:
+        governor = ROOT / "tools/ci/governed-build.sh"
+        with tempfile.TemporaryDirectory(prefix="android-skia-") as temporary:
+            source = Path(temporary) / "skia'source"
+            source.mkdir()
+            env = os.environ.copy()
+            env.update({"PULP_TARTCI_LEASES": "0", "PULP_ANDROID_SKIA_SRC": str(source)})
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(governor),
+                    "bash",
+                    "-c",
+                    'set -e; cd "$PULP_ANDROID_SKIA_SRC"; test "$(pwd)" = "$PULP_ANDROID_SKIA_SRC"',
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
