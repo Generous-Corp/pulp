@@ -2114,6 +2114,11 @@ jobs:
           if [ "${RUNNER_OS}" = "Windows" ]; then
             cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4
           else
+            # Bound rebuilt-test selection to this PR head's build. Warm
+            # self-hosted Ninja logs retain previous branches' outputs.
+            if [ -n "${PULP_BUILD_DIR:-}" ]; then
+              date +%s.%N > "$PULP_BUILD_DIR/.pulp-build-start"
+            fi
             tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
           fi
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
@@ -2236,7 +2241,11 @@ jobs:
         # (the merge ref's first parent is the base), and a failure fails the
         # required check here. It never widens to the full suite: a diff of
         # docs, skills or workflows, or one the projection cannot focus,
-        # selects nothing extra. The extra time is capped at ten minutes;
+        # selects nothing extra. Tests whose executable this build rebuilt
+        # are added only when at most eight executables were rebuilt and the
+        # build system was not regenerated; a wider rebuild comes from the
+        # build directory's history, not the diff, and adds nothing. The
+        # extra time is capped at ten minutes;
         # tests left over are listed as skipped, and the merge group still
         # runs everything. Rules and selection: tools/ci/pr_head_affected_tests.py.
         id: pr_affected_tests

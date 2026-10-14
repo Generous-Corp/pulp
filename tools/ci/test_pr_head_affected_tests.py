@@ -35,16 +35,19 @@ NAMES = {
     "wide-non-native-selftest": set(), "other": set(),
     "pulp-gpu-host-mapped-pointer-probe": set(), "pulp-gpu-audio-provider-identity": set(),
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
+    "pulp-test-cli-migration-index": set(),
 }
 
 
 class SelectionTests(unittest.TestCase):
     def plan(self, paths: list[str], projected: step.inventory.Selection,
-             *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = ()) -> dict:
+             *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = (),
+             rebuilt: list[str] = ()) -> dict:
         with mock.patch.object(step, "project", return_value=projected) as project, \
                 mock.patch.object(step, "script_reference_tests", return_value=list(scripts)), \
                 mock.patch.object(step, "script_input_tests", return_value=list(inputs)), \
                 mock.patch.object(step, "own_tests", return_value=list(own)), \
+                mock.patch.object(step, "rebuilt_binary_tests", return_value=list(rebuilt)), \
                 mock.patch.object(step, "registration_tests", return_value=[]):
             plan = step.select(Path("/b"), paths, NAMES)
         plan["_projected"] = project.called
@@ -109,6 +112,16 @@ class SelectionTests(unittest.TestCase):
     def test_control_a_focused_projection_does_not_add_own_tests_twice(self) -> None:
         plan = self.plan(["test/test_a.cpp"], selection("focused", ["unit-a"]), own=["unit-b"])
         self.assertEqual(plan["tests"], ["unit-a"])
+
+    def test_rebuilt_binary_tests_are_added_even_without_source_projection(self) -> None:
+        plan = self.plan(["core/other.cpp"], selection("focused", []),
+                         rebuilt=["pulp-test-cli-migration-index"])
+        self.assertEqual(plan["tests"], ["pulp-test-cli-migration-index"])
+
+    def test_docs_only_diff_does_not_add_warm_build_rebuilt_tests(self) -> None:
+        plan = self.plan(["docs/a.md"], selection("focused", []),
+                         rebuilt=["pulp-test-cli-migration-index"])
+        self.assertEqual(plan["tests"], [])
 
     def test_an_unrelated_tools_change_does_not_reach_the_families(self) -> None:
         plan = self.plan(["tools/scripts/other.py"], selection("focused", ["other"]))
@@ -192,6 +205,132 @@ class DirectEdgeTests(unittest.TestCase):
                 ' "other": {"inputs": ["y.json"]}}}')
             self.assertEqual(step.script_input_tests(["docs/status/a.yaml"], root), ["census"])
             self.assertEqual(step.script_input_tests(["docs/statusx"], root), [])
+
+    def test_rebuilt_binary_output_reaches_its_registered_test(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            build.mkdir()
+            (build / ".ninja_log").write_text(
+                "# ninja log v5\n0\t12\t0\tbin/pulp-test-cli-migration-index\t1\n",
+                encoding="utf-8")
+            (build / ".pulp-build-start").write_text("start\n", encoding="utf-8")
+            output = build / "bin/pulp-test-cli-migration-index"
+            output.parent.mkdir()
+            output.write_text("binary\n", encoding="utf-8")
+            model = step.inventory.CodeModel(
+                targets={"pulp-test-cli-migration-index": step.inventory.Target(
+                    "pulp-test-cli-migration-index", "EXECUTABLE", "", "",
+                    ["test/migration.cpp"], artifacts=[str(build / "bin/pulp-test-cli-migration-index")])},
+                source_root=str(REPO), build_root=str(build))
+            entries = [step.inventory.CTestEntry(
+                "migration-round-trip", [str(build / "bin/pulp-test-cli-migration-index"), "--check"], {})]
+            with mock.patch.object(step.inventory, "codemodel_reply_available", return_value=True), \
+                    mock.patch.object(step.inventory, "load_codemodel_targets", return_value=model), \
+                    mock.patch.object(step.inventory, "load_projection_ctest_entries", return_value=entries):
+                    self.assertEqual(step.rebuilt_binary_tests(build), ["migration-round-trip"])
+
+    def test_rebuilt_binary_from_a_previous_warm_build_is_not_claimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            (build / "bin").mkdir(parents=True)
+            (build / ".ninja_log").write_text(
+                "# ninja log v5\n0\t12\t0\tbin/pulp-test-cli-migration-index\t1\n",
+                encoding="utf-8")
+            output = build / "bin/pulp-test-cli-migration-index"
+            output.write_text("old\n", encoding="utf-8")
+            marker = build / ".pulp-build-start"
+            marker.write_text("start\n", encoding="utf-8")
+            os.utime(marker, (output.stat().st_mtime + 10, output.stat().st_mtime + 10))
+            with mock.patch.object(step.inventory, "codemodel_reply_available", return_value=True):
+                self.assertEqual(step.rebuilt_binary_tests(build), [])
+
+    def _rebuilt_fixture(self, build: Path, count: int):
+        """A build whose last Ninja invocation rebuilt ``count`` test executables."""
+        (build / "bin").mkdir(parents=True)
+        marker = build / ".pulp-build-start"
+        marker.write_text("start\n", encoding="utf-8")
+        before = marker.stat().st_mtime - 100
+        os.utime(marker, (before, before))
+        names = [f"pulp-test-{i}" for i in range(count)]
+        log = "# ninja log v5\n" + "".join(
+            f"0\t{i + 1}\t0\tbin/{name}\t{i}\n" for i, name in enumerate(names))
+        (build / ".ninja_log").write_text(log, encoding="utf-8")
+        T = step.inventory.Target
+        targets = {}
+        entries = []
+        for name in names:
+            out = build / "bin" / name
+            out.write_text("binary\n", encoding="utf-8")
+            targets[name] = T(name, "EXECUTABLE", "", "", [f"test/{name}.cpp"],
+                              artifacts=[str(out)])
+            entries.append(step.inventory.CTestEntry(f"{name}-run", [str(out)], {}))
+        model = step.inventory.CodeModel(targets=targets, source_root=str(REPO),
+                                         build_root=str(build))
+        return names, mock.patch.multiple(
+            step.inventory,
+            codemodel_reply_available=mock.DEFAULT, load_codemodel_targets=mock.DEFAULT,
+            load_projection_ctest_entries=mock.DEFAULT), model, entries
+
+    def _rebuilt(self, count: int, *, regenerate: str | None = None) -> tuple[list[str], list[str]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            _, patcher, model, entries = self._rebuilt_fixture(build, count)
+            if regenerate:
+                (build / regenerate).write_text("regenerated\n", encoding="utf-8")
+            why: list[str] = []
+            with patcher as mocks:
+                mocks["codemodel_reply_available"].return_value = True
+                mocks["load_codemodel_targets"].return_value = model
+                mocks["load_projection_ctest_entries"].return_value = entries
+                return step.rebuilt_binary_tests(build, why), why
+
+    def test_a_narrow_rebuilt_set_is_selected(self) -> None:
+        # Control for the cap: up to REBUILT_EXECUTABLE_CAP rebuilt
+        # executables still reach their tests.
+        tests, why = self._rebuilt(step.REBUILT_EXECUTABLE_CAP)
+        self.assertEqual(len(tests), step.REBUILT_EXECUTABLE_CAP)
+        self.assertEqual(why, [])
+
+    def test_a_directory_wide_rebuild_adds_nothing(self) -> None:
+        # A cold, reconfigured or stale warm directory rebuilds every test
+        # executable; the diff reached none of that, so none is selected.
+        tests, why = self._rebuilt(40)
+        self.assertEqual(tests, [])
+        self.assertIn("40 rebuilt executable(s) ignored", why[0])
+
+    def test_a_regenerated_build_system_adds_nothing(self) -> None:
+        for name in ("build.ninja", "CMakeCache.txt"):
+            with self.subTest(regenerated=name):
+                tests, why = self._rebuilt(2, regenerate=name)
+                self.assertEqual(tests, [])
+                self.assertIn(f"{name} was regenerated", why[0])
+
+    def test_select_keeps_only_the_projection_when_the_rebuild_is_wide(self) -> None:
+        # End to end through select(): the last invocation rebuilt every
+        # executable, the diff projects onto one test, and only that runs.
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            names, patcher, model, entries = self._rebuilt_fixture(build, 40)
+            all_names = {**NAMES, **{e.name: set() for e in entries}}
+            with patcher as mocks, \
+                    mock.patch.object(step, "project", return_value=selection("focused", ["unit-a"])), \
+                    mock.patch.object(step, "script_reference_tests", return_value=[]), \
+                    mock.patch.object(step, "script_input_tests", return_value=[]), \
+                    mock.patch.object(step, "registration_tests", return_value=[]):
+                mocks["codemodel_reply_available"].return_value = True
+                mocks["load_codemodel_targets"].return_value = model
+                mocks["load_projection_ctest_entries"].return_value = entries
+                plan = step.select(build, ["core/a.cpp"], all_names)
+        self.assertEqual(plan["tests"], ["unit-a"])
+        self.assertEqual(plan["rebuilt_binaries"], 0)
+        self.assertIn("ignored", plan["rebuilt_binaries_ignored"])
+
+    def test_rebuilt_binary_without_a_ninja_log_is_not_claimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            build.mkdir()
+            with mock.patch.object(step.inventory, "codemodel_reply_available", return_value=True):
+                self.assertEqual(step.rebuilt_binary_tests(build), [])
 
     def model(self) -> step.inventory.CodeModel:
         T = step.inventory.Target

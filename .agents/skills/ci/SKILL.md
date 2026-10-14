@@ -117,6 +117,15 @@ on a real PR. Do them in order.
 
 ## Build emitters always use the governor
 
+The PR-head affected-test step reads a marker written immediately before the
+governed build. Keep that marker inside the build directory and before the
+build command: the warm Ninja log contains outputs from earlier branches, so
+only artifacts newer than this run's marker count as rebuilt tests. The marker
+proves the build produced an output, not that the diff caused it. So the rebuilt
+set is also dropped when it exceeds `REBUILT_EXECUTABLE_CAP` (8) executables,
+or when `build.ninja` or `CMakeCache.txt` was regenerated after the marker.
+Otherwise a cold or stale directory selects the whole suite.
+
 Any command that Pulp prints for a user to copy, any generated test driver,
 and every sanitizer workflow build step must invoke
 `tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
