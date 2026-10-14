@@ -5006,7 +5006,10 @@ risk_class = "low"
 
 [[families]]
 name = "script-readers-6e96bb3eb00d"
-paths = ["tools/scripts/test_vellum_closure.py"]
+paths = [
+  "tools/scripts/test_vellum_closure.py",
+  "tools/scripts/vellum_mirror_edge_table.py",
+]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-inventory",
@@ -6511,6 +6514,7 @@ paths = [
   "tools/scripts/trace_span_category_lint.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_mirror_edge_table.py",
   "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
@@ -7059,6 +7063,7 @@ paths = [
   "tools/scripts/trace_span_category_lint.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_mirror_edge_table.py",
   "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",

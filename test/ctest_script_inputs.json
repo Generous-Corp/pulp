@@ -7590,11 +7590,16 @@
     "core/simd/include",
     "core/view",
     "core/view/audio",
+    "core/view/audio/include",
     "core/view/cmake/PulpViewJsPreludes.cmake",
     "core/view/include",
+    "core/view/include/pulp/view/host_surfaces.hpp",
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/js/embed_js.py",
+    "core/view/src/inspector.cpp",
+    "core/view/src/inspector_facts.cpp",
     "core/view/src/reload_exports.cpp",
+    "docs/status/view-audio-seam-debts.json",
     "external/fonts/Inter-Regular.ttf",
     "external/fonts/NotoColorEmoji.ttf",
     "tools/cmake",
@@ -7608,7 +7613,8 @@
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
     "tools/scripts/vellum_d3_units.json",
-    "tools/scripts/vellum_mirror_edge_patterns.json"
+    "tools/scripts/vellum_mirror_edge_patterns.json",
+    "tools/scripts/vellum_mirror_edge_table.py"
    ],
    "kind": "python"
   },
