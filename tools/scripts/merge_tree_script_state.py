@@ -129,12 +129,16 @@ def main(argv: list[str] | None = None) -> int:
         # The ctest script-input inventory is compiled/build-owned and has no
         # build-free equivalent. Run it only when a configured build is
         # explicitly supplied; never substitute its schema-only validator.
+        # Resolved here, in the caller's checkout: the lane runs with the
+        # temporary merge-tree worktree as its root, where a relative
+        # PULP_GATES_BUILD_DIR ("build-script-inputs") names nothing.
         configured = os.environ.get("PULP_GATES_BUILD_DIR", "")
-        if configured and (Path(configured).expanduser() / "CMakeCache.txt").exists():
+        configured_path = Path(configured).expanduser().resolve() if configured else None
+        if configured_path is not None and (configured_path / "CMakeCache.txt").exists():
             checks.insert(0, ("script-test-inputs-drift", [sys.executable,
                             str(tmp / "tools/scripts/gates_script_inputs.py"),
                             "--base", base_sha, "--repo-root", str(tmp),
-                            "--build-dir", configured]))
+                            "--build-dir", str(configured_path)]))
         else:
             print("merge-tree script-state: script-test-inputs-drift (no build-free variant; skipped)", file=sys.stderr)
 
