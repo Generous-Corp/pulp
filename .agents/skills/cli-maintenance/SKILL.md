@@ -1101,6 +1101,34 @@ must use `FetchContent_MakeAvailable()` with an inert `SOURCE_SUBDIR`, then
 create the declared interface target itself. `sst-tuning-library` is the
 reference case.
 
+Every generated block now uses the inert `SOURCE_SUBDIR pulp-package-populate-only`
+and hands `add_subdirectory` to `_pulp_package_make_available(<id> <commit>
+<integrity> ON|OFF)`, because the package must be populated and its archive
+digest verified BEFORE its own CMake runs. Blocks are rendered from the lock
+entry (full commit + integrity), never from the registry tag.
+
+### Package pinning: two implementations, one recipe
+
+`pulp add` / `pulp update` live twice: Rust (`experimental/pulp-rs/src/cmd/pkg.rs`
++ `src/pkg/pin.rs`, what the user-facing `pulp` dispatches) and C++
+(`package_commands_*.cpp` + `package_pin.hpp`, reached as `pulp-cpp`). Change
+both or neither. Gotchas:
+
+- `git ls-remote <url> <tag>` with a ref pattern drops the peeled `^{}` line, so
+  an annotated tag resolves to the TAG OBJECT id, not the commit. List all tags
+  (`ls-remote --tags <url>`) and filter in code. The `rev-parse <id>^{commit}`
+  equality check after the fetch is what catches this; keep it.
+- The integrity hashes `git ls-tree -r -z --full-tree <commit>`, never `git
+  archive` (attributes, CRLF config and `export-subst` change archive bytes). The
+  CMake side writes the listing with `OUTPUT_FILE` because CMake strings cannot
+  hold the NUL separators. Never cache a passing verification: the checkout can
+  be edited between configures.
+- The CMake verifier text exists once, in `tools/packages/pulp-packages-verify.cmake`.
+  Rust `include_str!`s it; the C++ raw string is asserted byte-for-byte equal to
+  it by `test_cli_package_commands.cpp`. Edit the file, then paste into C++.
+- Tests pin through an injected pinner (`run_add_with` / `set_source_pinner_for_testing`);
+  real-git coverage uses a `file://` fixture repo, so no test touches the network.
+
 ### `pulp dev --hot-dsp` — live DSP hot-swap dev loop
 
 `pulp dev --hot-dsp` (cmd_dev.cpp) is a watch-loop MODE flag, not a new command.

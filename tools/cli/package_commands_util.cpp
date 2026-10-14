@@ -14,9 +14,14 @@
 
 #include "package_commands_internal.hpp"
 #include "package_registry.hpp"
+#include "tool_registry.hpp"
+
+#include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -36,9 +41,27 @@ std::string include_dir_expr(const PackageDescriptor& pkg) {
     return path;
 }
 
-void emit_fetchcontent(std::ostringstream& os,
-                       const PackageDescriptor& pkg,
-                       const std::string& indent) {
+void emit_fetchcontent(std::ostringstream& os, const PackageDescriptor& pkg,
+                       const LockedPackage& locked, const std::string& indent) {
+    if (is_pinned(locked)) {
+        const auto& repository =
+            locked.resolved.empty() ? pkg.fetch.git_repository : locked.resolved;
+        os << indent << "if(COMMAND pulp_register_fetchcontent_source)\n";
+        os << indent << "  pulp_register_fetchcontent_source(" << pkg.id << " REF " << locked.commit
+           << ")\n";
+        os << indent << "endif()\n";
+        os << indent << "FetchContent_Declare(" << pkg.id << "\n";
+        os << indent << "  GIT_REPOSITORY " << repository << "\n";
+        os << indent << "  GIT_TAG        " << locked.commit << "\n";
+        os << indent << "  SOURCE_SUBDIR  pulp-package-populate-only\n";
+        os << indent << ")\n";
+        os << indent << "_pulp_package_make_available(" << pkg.id << " " << locked.commit << " "
+           << locked.integrity << " " << (pkg.cmake.add_subdirectory ? "ON" : "OFF") << ")\n";
+        return;
+    }
+    os << indent << "message(WARNING \"Pulp package " << pkg.id
+       << " is not pinned in packages.lock.json (no full commit + integrity); it is "
+          "fetched by mutable tag. Run 'pulp update --apply' to pin it.\")\n";
     os << indent << "FetchContent_Declare(" << pkg.id << "\n";
     os << indent << "  GIT_REPOSITORY " << pkg.fetch.git_repository << "\n";
     os << indent << "  GIT_TAG        " << pkg.fetch.git_tag << "\n";
@@ -164,11 +187,322 @@ std::string dots(const std::string& name, int width) {
     return std::string(n, '.');
 }
 
+// ── Source pinning ──
+
+namespace {
+
+SourcePinner& active_pinner() {
+    static SourcePinner pinner;
+    return pinner;
+}
+
+bool is_lower_hex(const std::string& s) {
+    return std::all_of(s.begin(), s.end(),
+                       [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
+struct GitResult {
+    bool ok = false;
+    std::string out;
+    std::string err;
+};
+
+GitResult run_git(const fs::path& dir, const std::vector<std::string>& args) {
+    std::vector<std::string> argv;
+    if (!dir.empty()) {
+        argv.push_back("-C");
+        argv.push_back(dir.string());
+    }
+    argv.insert(argv.end(), args.begin(), args.end());
+    pulp::platform::ProcessOptions opts;
+    opts.timeout_ms = 600000;
+    opts.max_output_bytes = 64u << 20;
+    auto r = pulp::platform::ChildProcess::run("git", argv, opts);
+    GitResult g;
+    g.ok = r.exit_code == 0 && !r.timed_out && !r.output_limit_exceeded;
+    g.out = r.stdout_output;
+    g.err = r.stderr_output;
+    while (!g.err.empty() && (g.err.back() == '\n' || g.err.back() == '\r'))
+        g.err.pop_back();
+    return g;
+}
+
+struct ScratchDir {
+    fs::path path;
+    ScratchDir() {
+        static std::atomic<unsigned> seq{0};
+        std::error_code ec;
+        auto base = fs::temp_directory_path(ec);
+        for (unsigned attempt = 0; attempt < 16; ++attempt) {
+            auto candidate =
+                base /
+                ("pulp-pkg-pin-" +
+                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
+                 std::to_string(seq.fetch_add(1)));
+            if (fs::create_directory(candidate, ec)) {
+                path = candidate;
+                return;
+            }
+        }
+    }
+    ~ScratchDir() {
+        std::error_code ec;
+        if (!path.empty())
+            fs::remove_all(path, ec);
+    }
+};
+
+} // namespace
+
+bool is_full_commit(const std::string& s) {
+    return s.size() == 40 && is_lower_hex(s);
+}
+
+bool is_integrity(const std::string& s) {
+    static const std::string prefix = "sha256-";
+    if (s.rfind(prefix, 0) != 0)
+        return false;
+    auto hex = s.substr(prefix.size());
+    return hex.size() == 64 && is_lower_hex(hex);
+}
+
+bool is_pinned(const LockedPackage& lp) {
+    return is_full_commit(lp.commit) && is_integrity(lp.integrity);
+}
+
+std::string commit_for_tag(const std::string& ls_remote, const std::string& tag) {
+    const std::string plain = "refs/tags/" + tag;
+    const std::string peeled = plain + "^{}";
+    std::string plain_hit;
+    std::istringstream lines(ls_remote);
+    std::string line;
+    while (std::getline(lines, line)) {
+        std::istringstream fields(line);
+        std::string sha, name;
+        if (!(fields >> sha >> name))
+            continue;
+        std::transform(sha.begin(), sha.end(), sha.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (!is_full_commit(sha))
+            continue;
+        if (name == peeled)
+            return sha;
+        if (name == plain)
+            plain_hit = sha;
+    }
+    return plain_hit;
+}
+
+std::string tree_integrity(const fs::path& repo_dir, const std::string& commit,
+                           std::string* error) {
+    auto r = run_git(repo_dir, {"ls-tree", "-r", "-z", "--full-tree", commit});
+    if (!r.ok) {
+        if (error)
+            *error = "git ls-tree failed: " + r.err;
+        return {};
+    }
+    ScratchDir work;
+    if (work.path.empty()) {
+        if (error)
+            *error = "could not create a scratch directory";
+        return {};
+    }
+    auto listing = work.path / "tree-listing";
+    {
+        std::ofstream f(listing, std::ios::binary);
+        f.write(r.out.data(), static_cast<std::streamsize>(r.out.size()));
+        if (!f.good()) {
+            if (error)
+                *error = "could not write the tree listing";
+            return {};
+        }
+    }
+    auto hex = pulp::cli::tools::sha256_file_hex(listing);
+    if (hex.size() != 64) {
+        if (error)
+            *error = "could not hash the tree listing";
+        return {};
+    }
+    return "sha256-" + hex;
+}
+
+SourcePin git_pin_source(const std::string& repository, const std::string& git_ref) {
+    SourcePin pin;
+    std::string commit = git_ref;
+    if (!is_full_commit(git_ref)) {
+        // No ref pattern: `ls-remote <url> <tag>` omits the peeled `^{}`
+        // line, which would pin an annotated tag object instead of its commit.
+        auto ls = run_git({}, {"ls-remote", "--tags", repository});
+        if (!ls.ok) {
+            pin.error = "git ls-remote failed: " + ls.err;
+            return pin;
+        }
+        commit = commit_for_tag(ls.out, git_ref);
+        if (commit.empty()) {
+            pin.error = "'" + git_ref + "' is not a tag of " + repository +
+                        "; registry pins must be a release tag or a full 40-hex commit";
+            return pin;
+        }
+    }
+
+    ScratchDir work;
+    if (work.path.empty()) {
+        pin.error = "could not create a scratch directory";
+        return pin;
+    }
+    if (auto r = run_git(work.path, {"init", "-q"}); !r.ok) {
+        pin.error = "git init failed: " + r.err;
+        return pin;
+    }
+    if (!run_git(work.path, {"fetch", "-q", "--depth", "1", repository, commit}).ok) {
+        // Some servers refuse a fetch by commit id; fall back to the tag,
+        // then to every head and tag.
+        bool fetched = !is_full_commit(git_ref) &&
+                       run_git(work.path, {"fetch", "-q", repository, "refs/tags/" + git_ref}).ok;
+        if (!fetched) {
+            auto all = run_git(work.path,
+                               {"fetch", "-q", repository, "+refs/heads/*:refs/remotes/origin/*",
+                                "+refs/tags/*:refs/tags/*"});
+            if (!all.ok) {
+                pin.error = "git fetch failed: " + all.err;
+                return pin;
+            }
+        }
+    }
+    auto resolved = run_git(work.path, {"rev-parse", "--verify", "--quiet", commit + "^{commit}"});
+    std::string resolved_sha = resolved.out.substr(0, resolved.out.find_first_of("\r\n"));
+    if (!resolved.ok || resolved_sha != commit) {
+        pin.error = repository + " does not contain commit " + commit;
+        return pin;
+    }
+    std::string err;
+    pin.integrity = tree_integrity(work.path, commit, &err);
+    if (pin.integrity.empty()) {
+        pin.error = err;
+        return pin;
+    }
+    pin.commit = commit;
+    return pin;
+}
+
+SourcePin pin_source(const std::string& repository, const std::string& git_ref) {
+    if (auto& pinner = active_pinner(); pinner)
+        return pinner(repository, git_ref);
+    return git_pin_source(repository, git_ref);
+}
+
+void set_source_pinner_for_testing(SourcePinner pinner) {
+    active_pinner() = std::move(pinner);
+}
+
+const char* const kPackagesVerifyCmake = R"PULPCMAKE(find_package(Git QUIET)
+
+# Each package below is fetched at the full commit recorded in
+# packages.lock.json and checked before it is added to the build:
+#   1. the checkout's HEAD is the locked commit,
+#   2. its working tree has no modified, staged or untracked files,
+#   3. integrity == "sha256-" + sha256 of the bytes printed by
+#        git ls-tree -r -z --full-tree <commit>
+#      (computed from tree objects only, so no .gitattributes entry, checkout
+#      filter, git configuration or clone depth changes it).
+# Any failure stops the configure. A FETCHCONTENT_SOURCE_DIR_<NAME> set by the
+# developer is the one exception: the same checks run, but a failure is a
+# warning naming the override. The checks need no network, so they hold under
+# FETCHCONTENT_FULLY_DISCONNECTED.
+function(_pulp_package_verify name commit integrity)
+  string(TOLOWER "${name}" _lc)
+  string(TOUPPER "${name}" _uc)
+  FetchContent_GetProperties(${name})
+  set(_src "${${_lc}_SOURCE_DIR}")
+  set(_override "")
+  if(NOT "${FETCHCONTENT_SOURCE_DIR_${_uc}}" STREQUAL ""
+     AND NOT PULP_FETCHCONTENT_SOURCE_IS_SHARED_${_uc})
+    set(_override "FETCHCONTENT_SOURCE_DIR_${_uc}=${FETCHCONTENT_SOURCE_DIR_${_uc}}")
+    message(WARNING "Pulp package ${name}: using the source override "
+      "${_override} instead of the commit locked in packages.lock.json "
+      "(${commit}). A failed check below is reported, not enforced.")
+  endif()
+  if(_override STREQUAL "")
+    set(_level FATAL_ERROR)
+  else()
+    set(_level WARNING)
+  endif()
+  set(_fix "Delete ${_src} (or the build directory) to re-fetch the locked commit, or run 'pulp update --apply' if the pin changed on purpose.")
+
+  if(NOT EXISTS "${_src}/.git")
+    message(${_level} "Pulp package ${name}: ${_src} is not a git checkout, "
+      "so it cannot be checked against packages.lock.json (${commit}, "
+      "${integrity}). ${_fix}")
+    return()
+  endif()
+  if(NOT GIT_EXECUTABLE)
+    message(${_level} "Pulp package ${name}: git is required to verify the "
+      "pin recorded in packages.lock.json")
+    return()
+  endif()
+
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" -C "${_src}" rev-parse --verify --quiet "HEAD^{commit}"
+    RESULT_VARIABLE _rc OUTPUT_VARIABLE _head
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(NOT _rc EQUAL 0 OR NOT "${_head}" STREQUAL "${commit}")
+    message(${_level} "Pulp package ${name}: ${_src} is checked out at "
+      "'${_head}', but packages.lock.json pins ${commit}. ${_fix}")
+    return()
+  endif()
+
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" -C "${_src}" status --porcelain=v1
+            --untracked-files=all --ignore-submodules=none
+    RESULT_VARIABLE _rc OUTPUT_VARIABLE _dirty ERROR_VARIABLE _err)
+  if(NOT _rc EQUAL 0)
+    message(${_level} "Pulp package ${name}: git status failed in ${_src}: ${_err}")
+    return()
+  endif()
+  if(NOT "${_dirty}" STREQUAL "")
+    message(${_level} "Pulp package ${name}: ${_src} has local changes or "
+      "untracked files, so the build would not be the locked commit:\n"
+      "${_dirty}${_fix}")
+    return()
+  endif()
+
+  set(_dir "${CMAKE_BINARY_DIR}/pulp-packages")
+  file(MAKE_DIRECTORY "${_dir}")
+  set(_listing "${_dir}/${_lc}-${commit}.tree")
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" -C "${_src}" ls-tree -r -z --full-tree "${commit}"
+    OUTPUT_FILE "${_listing}" RESULT_VARIABLE _rc ERROR_VARIABLE _err)
+  if(NOT _rc EQUAL 0)
+    message(${_level} "Pulp package ${name}: git ls-tree failed: ${_err}")
+    return()
+  endif()
+  file(SHA256 "${_listing}" _digest)
+  file(REMOVE "${_listing}")
+  if(NOT "sha256-${_digest}" STREQUAL "${integrity}")
+    message(${_level} "Pulp package ${name}: integrity mismatch for ${commit}\n"
+      "  locked:   ${integrity}\n"
+      "  computed: sha256-${_digest}\n"
+      "Refusing to build an unverified dependency. ${_fix}")
+  endif()
+endfunction()
+
+# Populate (the declared SOURCE_SUBDIR never exists, so FetchContent does not
+# add the package yet), verify, then add the package's own CMake project.
+macro(_pulp_package_make_available name commit integrity add_subdir)
+  FetchContent_MakeAvailable(${name})
+  _pulp_package_verify(${name} ${commit} ${integrity})
+  string(TOLOWER "${name}" _pulp_package_lc)
+  if(${add_subdir} AND EXISTS "${${_pulp_package_lc}_SOURCE_DIR}/CMakeLists.txt")
+    add_subdirectory("${${_pulp_package_lc}_SOURCE_DIR}"
+                     "${${_pulp_package_lc}_BINARY_DIR}")
+  endif()
+endmacro()
+)PULPCMAKE";
+
 // ── CMake Generation ──
 
-std::string generate_cmake_block(const PackageDescriptor& pkg,
-                                 bool platform_guard,
-                                 const std::string& guard_platform) {
+std::string generate_cmake_block(const PackageDescriptor& pkg, const LockedPackage& locked,
+                                 bool platform_guard, const std::string& guard_platform) {
     std::ostringstream os;
     os << "# ── " << pkg.id << " (" << pkg.version << ")";
     if (platform_guard) os << " [" << guard_platform << " only]";
@@ -182,7 +516,7 @@ std::string generate_cmake_block(const PackageDescriptor& pkg,
 
     std::string indent = platform_guard ? "  " : "";
 
-    emit_fetchcontent(os, pkg, indent);
+    emit_fetchcontent(os, pkg, locked, indent);
     emit_generated_target(os, pkg, indent);
 
     if (platform_guard) {
@@ -196,11 +530,12 @@ std::string generate_cmake_block(const PackageDescriptor& pkg,
 }
 
 std::string generate_cmake_block_for_condition(const PackageDescriptor& pkg,
+                                               const LockedPackage& locked,
                                                const std::string& guard_condition) {
     std::ostringstream os;
     os << "# ── " << pkg.id << " (" << pkg.version << ") [platform guard] ──\n";
     os << "if(" << guard_condition << ")\n";
-    emit_fetchcontent(os, pkg, "  ");
+    emit_fetchcontent(os, pkg, locked, "  ");
     emit_generated_target(os, pkg, "  ");
     os << "  target_compile_definitions(${PROJECT_NAME} PRIVATE PULP_HAS_"
        << feature_macro_name(pkg.id) << "=1)\n";
@@ -214,12 +549,13 @@ std::string generate_packages_cmake(const LockFile& lock, const Registry& reg,
     std::ostringstream os;
     os << "# Auto-generated by pulp package manager — do not edit manually\n";
     os << "# Run 'pulp add <pkg>' or 'pulp remove <pkg>' to modify\n";
-    os << "include(FetchContent)\n\n";
+    os << "include(FetchContent)\n";
+    os << kPackagesVerifyCmake << "\n";
 
     for (auto& [id, lp] : lock.packages) {
         auto it = reg.packages.find(id);
         if (it == reg.packages.end()) continue;
-        os << generate_cmake_block(it->second) << "\n";
+        os << generate_cmake_block(it->second, lp) << "\n";
     }
 
     return os.str();
