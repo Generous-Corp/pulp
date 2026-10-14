@@ -1383,7 +1383,7 @@ into `.github/workflows/workflow-lint.yml` so any future PR touching
 
 ### `sign-and-release.yml` must declare `contents: write`
 
-Every release workflow that uses `softprops/action-gh-release@v2` with
+Every release workflow that uses `softprops/action-gh-release@v3` with
 `generate_release_notes: true` — or that otherwise PATCHes the release
 entry — needs an explicit job-level `permissions: contents: write`
 block. Without it the job inherits a read-only token on `push: tags`
