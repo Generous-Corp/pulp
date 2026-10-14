@@ -6708,9 +6708,16 @@ and `tartci doctor fleet`. Per-host opt-out: `auto_apply = false` under
 pin converger existed and was removed: its pin lagged
 the fleet by ~78 releases, so installing it would have downgraded every host.
 
-Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
-Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
-signed/notarized `.dmg`, so the version and asset metadata must move together.
+Pin bumps go through `python3 tools/toolchain/deps.py update shipyard --to
+vX.Y.Z` (or `generate.py --shipyard vX.Y.Z`), not a hand edit and not
+`shipyard pin bump`. The authority is `[shipyard]` in
+`tools/toolchain/manifest.toml`: the tag, the repository and the sha256 of
+every release asset, taken from the release's `checksums.sha256`.
+`tools/shipyard.toml` and `tools/toolchain/shipyard.sha256` are generated from
+it, so `shipyard pin bump`, which edits `tools/shipyard.toml` alone, fails the
+`toolchain-test_generate-selftest` drift test until it calls the generator.
+The upstream installer verifies no digest; `install-shipyard.sh` refuses a
+downloaded asset whose sha256 differs from the pin, before the installer runs.
 
 - **Pinned at v0.68.0+: a killed `shipyard pr`/`ship` worker no longer wedges
   the PR.** Before v0.68.0, a worker that died (crash, `kill`, launching a
@@ -7756,9 +7763,9 @@ and the explicit `pr.workflow=github` bypass.
 After install, every Pulp checkout that has `~/.local/bin` on PATH gets
 the same pinned Shipyard version automatically. The pin lives in
 `tools/shipyard.toml` and is bumped via PR after each Shipyard release
-that passes Pulp's CI matrix. Use `shipyard pin bump --to vX.Y.Z`
-instead of hand-editing `tools/shipyard.toml`; the helper owns the pin
-edit and worktree-safety checks.
+that passes Pulp's CI matrix. Use `python3 tools/toolchain/deps.py update
+shipyard --to vX.Y.Z`: the version and every asset digest live in
+`tools/toolchain/manifest.toml`, and `tools/shipyard.toml` is generated.
 
 `shipyard pin bump` verifies by running the installer, which installs the
 new release into `~/.local/bin` on the host you run it on. Pass
@@ -8294,9 +8301,10 @@ form is only needed when a host has no Shipyard at all. Future
 upgrades on a host that already has Shipyard installed go through
 `shipyard update`.
 
-The repo-side pin lives in `tools/shipyard.toml`; bump it with
-`shipyard pin bump --to vX.Y.Z` (this triggers the ci skill-sync gate,
-which is why this section exists). The pin and a developer's local
+The repo-side pin lives in `[shipyard]` of `tools/toolchain/manifest.toml`
+(generated into `tools/shipyard.toml`); bump it with
+`python3 tools/toolchain/deps.py update shipyard --to vX.Y.Z` (this triggers
+the ci skill-sync gate, which is why this section exists). The pin and a developer's local
 install can drift — `pulp doctor` surfaces that, and `shipyard
 --version` is the local source of truth.
 
