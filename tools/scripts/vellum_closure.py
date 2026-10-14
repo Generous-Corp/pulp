@@ -131,6 +131,82 @@ def collect_headers(files: set[Path], include_dirs: list[Path], source: Path) ->
     return seen
 
 
+HEADER_EXTS = {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
+UNIT_HEADERS_FILE = "vellum-unit-headers.txt"
+
+
+def unit_header_manifests(build: Path) -> dict[str, tuple[Path, list[str]]]:
+    """Each D3 unit target's PULP_UNIT_HEADERS, as configure wrote them.
+
+    Returns target -> (source dir, headers relative to it). A target that
+    declares no manifest maps to an empty list.
+    """
+    path = build / UNIT_HEADERS_FILE
+    if not path.is_file():
+        raise SystemExit(f"{path} is missing; reconfigure with PULP_BUILD_TESTS=ON to write the unit header manifests")
+    manifests: dict[str, tuple[Path, list[str]]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        target, directory, headers = (line.split("\t") + ["", ""])[:3]
+        manifests[target] = (Path(directory), [h for h in headers.split(";") if h])
+    return manifests
+
+
+def unit_public_headers(targets: dict, names: Iterable[str], source: Path,
+                        manifests: dict[str, tuple[Path, list[str]]]) -> tuple[set[Path], dict[str, list[str]]]:
+    """The public headers the selected targets declare, checked against disk.
+
+    A unit's public surface is its reviewed PULP_UNIT_HEADERS list, not only
+    the headers its own sources happen to include: a header-only API or an
+    umbrella header no unit source includes would otherwise be missing from the
+    export. Every listed header must exist. Where every configured target of a
+    source directory is selected and at least one declares a manifest, the
+    manifests must together list every header under that directory's
+    ``include/``; a directory that also holds other units' targets
+    (``core/view``) cannot be checked by directory and relies on the list.
+    """
+    selected = set(names)
+    by_dir: dict[str, set[str]] = {}
+    for data in targets.values():
+        directory = (data.get("paths") or {}).get("source")
+        if directory and data.get("name"):
+            by_dir.setdefault(directory, set()).add(data["name"])
+    files: set[Path] = set()
+    declared: dict[str, list[str]] = {}
+    covered: dict[Path, set[Path]] = {}
+    problems: list[str] = []
+    for name in sorted(selected):
+        directory, headers = manifests.get(name, (Path(), []))
+        if not headers:
+            continue
+        rels = []
+        for header in headers:
+            path = (directory / header).resolve()
+            if not path.is_file():
+                problems.append(f"{name}: PULP_UNIT_HEADERS lists {header}, which does not exist")
+                continue
+            files.add(path)
+            covered.setdefault(directory.resolve(), set()).add(path)
+            rels.append(path.relative_to(source).as_posix())
+        declared[name] = sorted(rels)
+    for directory, listed in sorted(covered.items()):
+        try:
+            rel_dir = directory.relative_to(source).as_posix()
+        except ValueError:
+            continue
+        if by_dir.get(rel_dir, set()) - selected:
+            continue
+        include_root = directory / "include"
+        present = {p.resolve() for p in include_root.rglob("*") if p.is_file() and p.suffix.lower() in HEADER_EXTS} \
+            if include_root.is_dir() else set()
+        unlisted = sorted(p.relative_to(source).as_posix() for p in present - listed)
+        problems += [f"{rel_dir}: public header {rel} is not in any PULP_UNIT_HEADERS" for rel in unlisted]
+    if problems:
+        raise SystemExit("unit header manifests are inconsistent:\n  " + "\n  ".join(problems))
+    return files, declared
+
+
 def fetchcontent_pins(source: Path) -> dict[str, dict]:
     """Return repository and checked-in commit pins keyed by dependency name.
 
@@ -1250,7 +1326,11 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
                 links.add(dep_name)
                 deps.append(dep_name)
         selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if not rel.startswith(("@build/", "/"))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps)), "external_link_inputs": external_links})
-    all_files = collect_headers(all_files, sorted(all_include_dirs), source)
+    public, declared = unit_public_headers(targets, names, source, unit_header_manifests(build))
+    for entry in selected:
+        if entry["name"] in declared:
+            entry["public_headers"] = declared[entry["name"]]
+    all_files = collect_headers(all_files | public, sorted(all_include_dirs), source)
     normalized = [norm_path(str(p), source, build) for p in all_files]
     # File-api does not list configure-time generated headers when they are
     # consumed only through an include directory. Add the known generated

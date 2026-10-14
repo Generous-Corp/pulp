@@ -84,3 +84,26 @@ elseif(UNIX AND NOT APPLE)
     # dbus.cpp dlopen's libdbus-1 at runtime — needs libdl for dlopen/dlsym.
     target_link_libraries(pulp-platform PRIVATE ${CMAKE_DL_LIBS})
 endif()
+
+# Public-header manifest: every header this target ships, relative to this
+# directory. The Vellum closure exports exactly these (plus what they include),
+# and the closure tool refuses a header under include/ that is not listed.
+set(PULP_PLATFORM_UNIT_HEADERS
+    include/pulp/platform/android/jni.hpp
+    include/pulp/platform/android/motion_bridge.h
+    include/pulp/platform/child_process.hpp
+    include/pulp/platform/clipboard.hpp
+    include/pulp/platform/dbus.hpp
+    include/pulp/platform/detect.hpp
+    include/pulp/platform/device_capability.hpp
+    include/pulp/platform/environment.hpp
+    include/pulp/platform/file_dialog.hpp
+    include/pulp/platform/native_handle.hpp
+    include/pulp/platform/permissions.hpp
+    include/pulp/platform/platform.hpp
+    include/pulp/platform/popup_menu.hpp
+    include/pulp/platform/progress_parser.hpp
+    include/pulp/platform/win/registry.hpp
+    include/pulp/platform/win32_sane.hpp
+)
+set_property(TARGET pulp-platform PROPERTY PULP_UNIT_HEADERS ${PULP_PLATFORM_UNIT_HEADERS})

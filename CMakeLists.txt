@@ -555,6 +555,30 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     # allowlisted and are removed as those carve PRs land.
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
     file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
+    # The file api does not carry custom properties, so each D3 unit target's
+    # public-header manifest (PULP_UNIT_HEADERS) is written beside it for the
+    # closure tool: one "target<TAB>source dir<TAB>headers" line per target.
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json" _pulp_vellum_units)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
+    string(JSON _pulp_vellum_unit_count LENGTH "${_pulp_vellum_units}" units)
+    math(EXPR _pulp_vellum_unit_last "${_pulp_vellum_unit_count} - 1")
+    set(_pulp_vellum_header_lines "")
+    set(_pulp_vellum_header_targets "")
+    foreach(_unit_index RANGE ${_pulp_vellum_unit_last})
+        string(JSON _target_count LENGTH "${_pulp_vellum_units}" units ${_unit_index} targets)
+        math(EXPR _target_last "${_target_count} - 1")
+        foreach(_target_index RANGE ${_target_last})
+            string(JSON _target GET "${_pulp_vellum_units}" units ${_unit_index} targets ${_target_index})
+            if(TARGET ${_target} AND NOT _target IN_LIST _pulp_vellum_header_targets)
+                list(APPEND _pulp_vellum_header_targets ${_target})
+                string(APPEND _pulp_vellum_header_lines
+                    "${_target}\t$<TARGET_PROPERTY:${_target},SOURCE_DIR>\t$<TARGET_PROPERTY:${_target},PULP_UNIT_HEADERS>\n")
+            endif()
+        endforeach()
+    endforeach()
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/vellum-unit-headers.txt"
+        CONTENT "${_pulp_vellum_header_lines}")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     # The D3 manifest describes the GPU-backed Vellum extraction graph. Keep
     # its positive graph receipt/gate on GPU-enabled configurations: the
