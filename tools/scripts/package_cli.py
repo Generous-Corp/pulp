@@ -100,6 +100,13 @@ def find_wgpu_lib(build_dir: Path, platform: str) -> Path | None:
     # otherwise the packager silently misses the runtime library and
     # ships a tarball that crashes on clean machines.
     roots: list[Path] = [build_dir]
+    # An explicit source/base dir (release-cli.yml's job-local isolated root)
+    # is where setup.sh and PulpFetchContent.cmake put the runtime, so it is
+    # searched before any shared cache that may hold a different build.
+    for var in ("PULP_SHARED_FETCHCONTENT_SOURCE_DIR", "PULP_FETCHCONTENT_BASE_DIR"):
+        value = os.environ.get(var)
+        if value:
+            roots.append(Path(value))
     home = Path.home()
     # macOS Pulp cache (Title-Case matches setup.sh)
     roots.append(home / "Library" / "Caches" / "Pulp")
