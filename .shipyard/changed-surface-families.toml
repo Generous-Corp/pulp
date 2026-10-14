@@ -6030,6 +6030,8 @@ tests = [
   "source-selftest-lane-selftest",
   "test-receipts-shadow-selftest",
   "timeline-command-doc-coverage",
+  "toolchain-test_generate-selftest",
+  "toolchain-update-selftest",
   "tools-registry-check",
   "tools-registry-check-selftest",
   "trace-span-category-lint",
