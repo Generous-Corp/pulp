@@ -2720,12 +2720,14 @@ jobs:
         # the job summary so the failing
         # test(s) + assertions show in the GitHub UI without host access.
         #
-        # This step only reports; it must never decide the job's result. On a
-        # pull-request head the full suite runs as non-gating receipt evidence
-        # (the Test step is continue-on-error), so a non-zero exit here would
-        # turn the required check red for a failure the workflow deliberately
-        # does not gate on. On other events the Test step already failed
-        # visibly as its own step. The default shell is `bash -e -o pipefail`,
+        # This step only reports; it must never decide the job's result. On an
+        # armed pull-request head the full suite is the required admission
+        # check: the Test step is not continue-on-error, so a failing suite has
+        # already failed the job as its own step, as it does on every other
+        # event. On a fast-tier pull-request head the Test step does not run,
+        # and this step runs only after an earlier step (such as the fast
+        # tier) has already failed. Either way it only adds the failing test
+        # names, so it exits 0. The default shell is `bash -e -o pipefail`,
         # under which a grep that matches nothing (a failure that is a timeout
         # or a non-Catch2 test) ends the step with exit 1, so errexit is off
         # and every command that may legitimately return non-zero is guarded.
