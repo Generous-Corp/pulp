@@ -192,9 +192,22 @@ set(DAWN_LIBRARY "${_skia_lib_dir}/${_dawn_lib_name}")
 # `arm64/` directory below the shared Release directory. x64 remains flat.
 # Select the slice from the target architecture before probing the archives so
 # an ARM64 configure cannot silently fall back to a missing flat path and then
-# build a CPU-only consumer.
-if(WIN32 AND (CMAKE_SYSTEM_PROCESSOR MATCHES "^[Aa][Rr][Mm]64$"
-        OR CMAKE_GENERATOR_PLATFORM MATCHES "^[Aa][Rr][Mm]64$"))
+# build a CPU-only consumer. The target comes from pulp_windows_target_arch(),
+# never CMAKE_SYSTEM_PROCESSOR alone: in a Visual Studio `-A` configure that is
+# the host, so an x64 build on an ARM64 host would take the ARM64 slice.
+if(WIN32)
+    include("${CMAKE_CURRENT_LIST_DIR}/PulpWindowsTargetArch.cmake")
+    pulp_windows_target_arch(_pulp_skia_target_arch)
+else()
+    set(_pulp_skia_target_arch "")
+endif()
+if(_pulp_skia_target_arch MATCHES "^arm64(ec|x)-win$")
+    # ARM64EC and ARM64X need archives built for them; neither the pure ARM64
+    # slice nor the flat x64 layout is compatible, so fail closed.
+    set(SKIA_LIBRARY "SKIA_LIBRARY-NOTFOUND")
+    set(DAWN_LIBRARY "DAWN_LIBRARY-NOTFOUND")
+    message(STATUS "Skia: no Windows archive slice for ${_pulp_skia_target_arch}")
+elseif(_pulp_skia_target_arch STREQUAL "arm64-win")
     if(EXISTS "${_skia_lib_dir}/arm64/${_skia_lib_name}")
         set(_skia_lib_dir "${_skia_lib_dir}/arm64")
         set(SKIA_LIBRARY "${_skia_lib_dir}/${_skia_lib_name}")
