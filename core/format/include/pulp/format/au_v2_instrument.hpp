@@ -15,6 +15,7 @@
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
+#include <pulp/runtime/trace_session.hpp>
 
 #include <array>
 #include <cstdint>
@@ -163,6 +164,14 @@ protected:
     void publish_parameter_display_changes();
 
 private:
+    // AU v2 instruments are a separate adapter path from PulpAUEffect. Keep
+    // the tracing attachment on the actual host-facing object so a traced AU
+    // instrument retains a live reference to the runtime trace controller.
+    // Without this member, the traced SDK can carry its sentinel and Perfetto
+    // archive while the linker dead-strips Tracing::attach/start/stop from
+    // instrument bundles, making the advertised tracing mode inert.
+    runtime::ScopedTracingAttachment tracing_;
+
     // The store is declared before the Processor so it is destroyed after it.
     // `Processor::state()` dereferences a pointer to this store, and a Processor
     // may read it from its destructor or from a worker thread that destructor is
