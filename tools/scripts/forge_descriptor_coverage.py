@@ -92,7 +92,7 @@ CATALOG = (
      ("convolution_reverb", "nonlin_ambience", "speaker_cabinet")),
     ("forge_synthesis_catalog.hpp", "forge_synthesis_catalog.hpp",
      ("additive_bank", "vocoder", "cyclic_stretch", "granular_live")),
-    ("forge_tape_catalog.hpp", "forge_tape_catalog.hpp", ("tape_machine",)),
+    ("forge_tape_catalog.hpp", "core/host/src/forge_tape_catalog.cpp", ("tape_machine",)),
     ("forge_wavetable_catalog.hpp", "forge_wavetable_catalog.hpp",
      ("wavetable_oscillator",)),
 )
