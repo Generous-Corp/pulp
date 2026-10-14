@@ -25,6 +25,8 @@ if [[ ! -d "$BUILD_DIR" ]]; then
 fi
 
 echo "Rebuilding hot-reload logic via $BUILD_DIR ..."
-bash "$GOVERNED_BUILD" cmake --build "$BUILD_DIR" --target hot-reload-synth-logic
+# A hot swap must not stall on a busy host: take a lease only if one is
+# free right now, otherwise build at the governor's bounded floor.
+PULP_GOVERNED_BUILD_WAIT_SECS=0 bash "$GOVERNED_BUILD" cmake --build "$BUILD_DIR" --target hot-reload-synth-logic
 echo "Published: $HOME/.pulp/hot-reload-synth/logic.dylib"
 echo "If a host has the plugin loaded, the DSP just hot-swapped."

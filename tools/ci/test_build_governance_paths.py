@@ -406,8 +406,11 @@ class BuildGovernancePathTests(unittest.TestCase):
                     if "cmake --build" in line and not line.lstrip().startswith("#")
                 ]
                 self.assertEqual(len(build_lines), 1)
+                # No lease wait: an edit-then-rebuild hot swap must not stall
+                # for the interactive wait (90 s) on a busy host.
                 self.assertIn(
-                    f'bash "$GOVERNED_BUILD" cmake --build "$BUILD_DIR" --target {target}',
+                    'PULP_GOVERNED_BUILD_WAIT_SECS=0 bash "$GOVERNED_BUILD" cmake --build '
+                    f'"$BUILD_DIR" --target {target}',
                     build_lines[0],
                 )
                 self.assertNotRegex(source, r"(?m)^\s*cmake --build")
