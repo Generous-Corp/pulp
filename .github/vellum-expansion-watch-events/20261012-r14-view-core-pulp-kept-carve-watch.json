@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261012-r14-view-core-pulp-kept-carve-watch",
+  "created_at": "2026-10-12T22:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "render-assets-and-backends"
+  ],
+  "rationale": "R14 M2 carve under the D3 boundary: the component inspector, EditorBridge, the StateStore HostParamSurface adapter and the runtime-inspector bridge move from pulp-view-core and pulp-view-script into the Pulp-kept pulp-view-tooling target, behind view-core seams (view_type_name, host_surfaces.hpp, ScriptInspectorPort). The waveform editor geometry moves into pulp-view-audio. No design-import, Chromium, rendering or packaging behavior changes, and no implementation authority moves.",
+  "tests": [
+    "pulp.vellum-view-core-pulp-kept",
+    "vellum-view-core-pulp-kept-negative-contract",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

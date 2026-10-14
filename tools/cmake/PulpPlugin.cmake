@@ -87,8 +87,9 @@ endfunction()
 #   ${target}_Standalone — Standalone executable
 #
 function(pulp_add_plugin target)
+    _pulp_resolve_consumer_targets()
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
+        "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
@@ -156,6 +157,15 @@ function(pulp_add_plugin target)
     else()
         set(PULP_${target}_NO_EDITOR FALSE CACHE INTERNAL "")
         set(_pulp_core_format_target "${_PULP_FORMAT_TARGET}")
+    endif()
+    # AAX_HEADLESS: a processor-only AAX artifact (no custom EffectGUI). Its
+    # core links the editor-less format library the same way NO_EDITOR does.
+    if(PLUGIN_AAX_HEADLESS)
+        if(NOT _PULP_FORMAT_CORE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target} AAX_HEADLESS): this Pulp SDK does not export Pulp::format-core")
+        endif()
+        set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
     endif()
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
@@ -304,6 +314,9 @@ function(pulp_add_plugin target)
             PULP_BUNDLE_ID="${PLUGIN_BUNDLE_ID}"
             PULP_PLUGIN_VERSION="${PLUGIN_VERSION}"
         )
+        if(PLUGIN_AAX_HEADLESS)
+            target_compile_definitions(${target}_Core PRIVATE PULP_AAX_HEADLESS=1)
+        endif()
     endif()
 
     # ── Design dimensions (auto-sizing for imported-design plugins) ────
@@ -388,7 +401,8 @@ function(pulp_add_plugin target)
             _pulp_add_aax(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
                           "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}"
                           "${PLUGIN_CATEGORY}" "${PLUGIN_MANUFACTURER_CODE}"
-                          "${PLUGIN_AAX_PRODUCT_CODE}" "${PLUGIN_AAX_NATIVE_CODE}")
+                          "${PLUGIN_AAX_PRODUCT_CODE}" "${PLUGIN_AAX_NATIVE_CODE}"
+                          ${PLUGIN_AAX_HEADLESS})
         endif()
     endif()
 
@@ -520,6 +534,7 @@ endfunction()
 #       SOURCES      plugin_a.cpp plugin_b.cpp   # union of the bundled plugins
 #   )
 function(pulp_add_plugin_bundle target)
+    _pulp_resolve_consumer_targets()
     cmake_parse_arguments(BUNDLE
         ""
         "BUNDLE_NAME;BUNDLE_ID;VERSION;MANUFACTURER"

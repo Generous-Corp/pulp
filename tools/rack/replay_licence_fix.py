@@ -556,7 +556,7 @@ def main() -> int:
           f"Any effect at or below this size is not distinguishable from the "
           f"gate's own run-to-run variation.")
     for k in noise:
-        print(f"    {corpus[k]["root"]}/{corpus[k]["path"]}: "
+        print(f"    {corpus[k]['root']}/{corpus[k]['path']}: "
               f"{results['prefix-a'][k]} then {results['prefix-b'][k]}")
     print()
 
@@ -573,7 +573,7 @@ def main() -> int:
               f"the fix switched off, so the binaries differ for some reason "
               f"other than licence resolution")
         for k in attribution:
-            print(f"    {corpus[k]["root"]}/{corpus[k]["path"]}: "
+            print(f"    {corpus[k]['root']}/{corpus[k]['path']}: "
                   f"{results['prefix-a'][k]} -> "
                   f"{results['fixed-no-user-dir'][k]}")
     print()
@@ -597,9 +597,9 @@ def main() -> int:
     print(f"LOST       {len(lost)} patches the pre-fix gate called audible "
           f"now measure silent")
     for k in recovered:
-        print(f"    + {corpus[k]["root"]}/{corpus[k]["path"]}")
+        print(f"    + {corpus[k]['root']}/{corpus[k]['path']}")
     for k in lost:
-        print(f"    - {corpus[k]["root"]}/{corpus[k]["path"]}")
+        print(f"    - {corpus[k]['root']}/{corpus[k]['path']}")
     print()
 
     # --- mechanism control ------------------------------------------------
@@ -613,9 +613,9 @@ def main() -> int:
               f"naming any licensed plugin, so that much of the effect is "
               f"not this fix")
         for k in drift:
-            print(f"    {corpus[k]["root"]}/{corpus[k]["path"]}: "
+            print(f"    {corpus[k]['root']}/{corpus[k]['path']}: "
                   f"{results['prefix-a'][k]} -> {results['fixed'][k]} "
-                  f"(plugins: {sorted(patch_plugins(corpus[k]["full"]))})")
+                  f"(plugins: {sorted(patch_plugins(corpus[k]['full']))})")
     print()
 
     controls_ok = not attribution and not drift

@@ -229,7 +229,14 @@ class ReportTests(unittest.TestCase):
             calls.append({"cmd": cmd, **kwargs})
             out_arg = next(arg for arg in cmd if arg.startswith("--output="))
             out_path = pathlib.Path(out_arg.split("=", 1)[1])
-            out_path.write_text('{"lane": "live", "samples": 7}\n', encoding="utf-8")
+            out_path.write_text(json.dumps({
+                "lane": "live",
+                "idle": {"counters": {"counter_schema": "pulp-design-import-benchmark-counters-v1",
+                                         **{name: 0 for name in dib.COUNTER_FIELDS}}},
+                "interactive": {"counters": {"counter_schema": "pulp-design-import-benchmark-counters-v1",
+                                                **{name: 0 for name in dib.COUNTER_FIELDS}}},
+                "samples": 7,
+            }) + "\n", encoding="utf-8")
             return object()
 
         try:
@@ -250,6 +257,18 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(calls[0]["check"], True)
         self.assertEqual(calls[0]["timeout"], 30)
         self.assertEqual(calls[0]["env"]["PULP_HEADLESS"], "1")  # type: ignore[index]
+
+    def test_counter_contract_rejects_planted_missing_counter(self) -> None:
+        report = {
+            "idle": {"counters": {"counter_schema": "pulp-design-import-benchmark-counters-v1",
+                                    **{name: 0 for name in dib.COUNTER_FIELDS}}},
+            "interactive": {"counters": {"counter_schema": "pulp-design-import-benchmark-counters-v1",
+                                           **{name: 0 for name in dib.COUNTER_FIELDS}}},
+        }
+        dib.validate_lane_counters(report)
+        del report["interactive"]["counters"]["paint_commands_total"]
+        with self.assertRaises(ValueError):
+            dib.validate_lane_counters(report)
 
     def test_comparison_and_markdown_record_phase9_gate_inputs(self) -> None:
         live = {

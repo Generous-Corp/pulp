@@ -39,6 +39,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "examples-validation.yml"
 EXAMPLES_CMAKE = ROOT / "examples" / "CMakeLists.txt"
 SANITIZERS = ROOT / ".github" / "workflows" / "sanitizers.yml"
+ADVISORY_WORKFLOWS = {
+    "coverage": ROOT / ".github" / "workflows" / "coverage.yml",
+    "intel": ROOT / ".github" / "workflows" / "intel-portability.yml",
+    "scene3d": ROOT / ".github" / "workflows" / "scene3d-advisory.yml",
+    "examples": ROOT / ".github" / "workflows" / "examples-validation.yml",
+    "control": ROOT / ".github" / "workflows" / "control-shipping-native.yml",
+}
+SCHEDULED_REPO_GUARD_WORKFLOWS = {
+    **ADVISORY_WORKFLOWS,
+    "codeql": ROOT / ".github" / "workflows" / "codeql-advanced.yml",
+}
 ANDROID = ROOT / ".github" / "workflows" / "android.yml"
 TOPOLOGY = ROOT / "tools" / "scripts" / "runner_topology.json"
 SHIPYARD_PROFILE = ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml"
@@ -354,6 +365,14 @@ class SanitizerCadenceTests(unittest.TestCase):
         self.assertIn("schedule", triggers)
         self.assertNotIn("push", triggers)
 
+    def test_pr_trigger_is_core_only_and_tsan_is_nightly_dispatch(self) -> None:
+        pr = trigger_map(self.workflow)["pull_request"]
+        self.assertEqual(pr["types"], ["opened", "synchronize", "ready_for_review"])
+        self.assertEqual(pr["paths"], ["core/**"])
+        self.assertIn("github.event_name != 'pull_request'", self.workflow["jobs"]["tsan"]["if"])
+        for name in ("asan", "ubsan"):
+            self.assertIn("github.event.pull_request.draft == false", self.workflow["jobs"][name]["if"])
+
     def test_nightly_entry_job_is_fork_guarded(self) -> None:
         condition = self.workflow["jobs"]["resolve-runners"]["if"]
         self.assertIn(
@@ -380,6 +399,37 @@ class SanitizerCadenceTests(unittest.TestCase):
             "fdn reverb stays bounded and decaying for every parameter vector",
             script,
         )
+
+
+class AdvisoryMacOSCadenceTests(unittest.TestCase):
+    def test_advisory_workflows_are_nightly_dispatch_and_arm_triggered(self) -> None:
+        for name, path in ADVISORY_WORKFLOWS.items():
+            with self.subTest(workflow=name):
+                workflow = load_workflow(path)
+                triggers = trigger_map(workflow)
+                self.assertIn("pull_request", triggers)
+                self.assertEqual(
+                    triggers["pull_request"].get("types"), ["auto_merge_enabled"]
+                )
+                self.assertIn("schedule", triggers)
+                self.assertIn("workflow_dispatch", triggers)
+                if name == "coverage":
+                    self.assertNotIn("push", triggers)
+                group = workflow["concurrency"]["group"]
+                self.assertIn("'nightly'", group)
+                self.assertIn("'arm-{0}'", group)
+
+    def test_scheduled_guards_use_the_configured_primary_repository(self) -> None:
+        stale = "github.repository == 'danielraffel/pulp'"
+        for name, path in SCHEDULED_REPO_GUARD_WORKFLOWS.items():
+            with self.subTest(workflow=name):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn(stale, text)
+                self.assertIn("github.repository == vars.PULP_PRIMARY_REPO", text)
+
+    def test_coverage_matrix_is_bounded(self) -> None:
+        strategy = load_workflow(ADVISORY_WORKFLOWS["coverage"])["jobs"]["coverage"]["strategy"]
+        self.assertEqual(strategy["max-parallel"], 2)
 
 
 class AndroidFixtureWorkflowTests(unittest.TestCase):

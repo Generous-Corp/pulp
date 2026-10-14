@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.951.0
+    VERSION 0.965.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -556,42 +556,107 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
     file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    add_test(NAME pulp.vellum-closure-boundary
-        COMMAND "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
-            manifest
-            --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
-            --build-dir "${CMAKE_BINARY_DIR}"
-            --target pulp-canvas
-            --target pulp-render
-            --target pulp-view-core
-            --target pulp-view-script
-            --target pulp-platform
-            --target pulp-runtime
-            --target pulp-simd
-            --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
-    set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
-        LABELS "validation")
-    add_test(NAME pulp.vellum-closure-gate
-        COMMAND "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
-            gate
-            --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
-            --allow pulp-audio
-            --allow pulp-midi
-            --allow pulp-view-audio
-            --allow pulp-content
-            --allow-include-prefix core/view/include/pulp/view/
-            --allow-include-prefix core/view/src/
-            --allow-include-prefix core/audio/include/pulp/audio/
-            --allow-include-prefix core/signal/include/pulp/signal/
-            --allow-include-path core/platform/src/android/jni_motion.cpp
-            --allow-include-prefix core/render/platform/android/gpu_surface_android
-            --allow-root-prefix core/audio/
-            --allow-root-prefix core/signal/)
-    set_tests_properties(pulp.vellum-closure-gate PROPERTIES
-        DEPENDS pulp.vellum-closure-boundary
-        LABELS "validation")
+    # The D3 manifest describes the GPU-backed Vellum extraction graph. Keep
+    # its positive graph receipt/gate on GPU-enabled configurations: the
+    # sanitizer and other CPU-only lanes intentionally omit those targets, so
+    # reporting them as missing would turn an out-of-scope graph into a false
+    # failure. The policy and negative controls below remain enabled for every
+    # desktop test configuration.
+    if(PULP_ENABLE_GPU)
+        add_test(NAME pulp.vellum-closure-boundary
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                manifest
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
+        set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-gate
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                gate
+                --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+                --allowlist "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_allowlist.json"
+                --generate
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
+        set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+        add_test(NAME pulp.vellum-view-core-pulp-kept
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_view_core_pulp_kept_check.py"
+                --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+        # The units exported so far, and render, hold no forbidden mirror
+        # edge in any file, comments included; export refuses one.
+        add_test(NAME pulp.vellum-closure-export-mentions
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                mentions
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit render-3d)
+        set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+        # The units the first export carries, checked exactly as export checks
+        # them: provenance, configure, generated-input digests, Skia link
+        # inputs, owned files, mirrored links and Pulp-owned mentions.
+        add_test(NAME pulp.vellum-closure-export-units
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                export-check
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --unit foundation --unit gpu-device-api --unit canvas)
+        set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+    else()
+        # Register the gate as an explicit skip so a CPU-only configuration
+        # reports it as not run rather than dropping it silently.
+        message(STATUS "pulp.vellum-closure-boundary/gate: skipped, PULP_ENABLE_GPU is OFF")
+        add_test(NAME pulp.vellum-closure-boundary
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum closure boundary needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-gate
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum closure gate needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-view-core-pulp-kept
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum view-core Pulp-kept check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-export-mentions
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum export mention check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-export-units
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum export-unit check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+    endif()
     add_test(NAME pulp.vellum-closure-gate-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
             --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json"
@@ -599,12 +664,31 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
     set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
-        LABELS "validation")
+        RESOURCE_LOCK pulp-source-git-index
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-external-input-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json"
+            --break "perl -0pi -e 's/https:\\/\\/github.com\\/danielraffel\\/choc.git/build-tree/; s/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60/unresolved/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
+    set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-edge-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json"
+            --break "perl -0pi -e 's/pulp::view-audio/pulp::audio/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allowlist ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_allowlist_fixture.json")
+    set_tests_properties(pulp.vellum-closure-edge-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
+        LABELS "pr")
     add_test(NAME pulp.vellum-closure-policy-selftest
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/test_vellum_closure.py")
     set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
-        LABELS "validation")
+        LABELS "pr")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
     FetchContent_Declare(
@@ -739,6 +823,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/render_provider_floor)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
+    add_subdirectory(test/fixtures/data_display_editor)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
@@ -1009,6 +1094,20 @@ endif()
 # ── SDK Install Rules ──────────────────────────────────────────────────────
 # Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
+
+# Match the target names exported by find_package(Pulp) for source consumers.
+# Aliases are global targets, so the parent of add_subdirectory(Pulp) sees them.
+foreach(_pulp_export_target IN LISTS PULP_SDK_TARGETS)
+    if(TARGET "${_pulp_export_target}")
+        get_target_property(_pulp_export_name "${_pulp_export_target}" EXPORT_NAME)
+        if(NOT _pulp_export_name)
+            string(REGEX REPLACE "^pulp-" "" _pulp_export_name "${_pulp_export_target}")
+        endif()
+        if(NOT TARGET "Pulp::${_pulp_export_name}")
+            add_library("Pulp::${_pulp_export_name}" ALIAS "${_pulp_export_target}")
+        endif()
+    endif()
+endforeach()
 
 # Build-specific Forge metadata is separate from the statically audited public
 # header install surface. The catalog module installs only share/pulp JSON.

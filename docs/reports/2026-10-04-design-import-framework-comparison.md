@@ -5,7 +5,7 @@ Compared against the refactor plan in `planning/2026-10-04-design-import-refacto
 | Reference | Evidence at studied commit | Transfer decision |
 |---|---|---|
 | Octane `322162cb79e72a322783d8765c97ec8ab0947bbe` | `packages/octane/src/compiler/compile-universal.js` lowers child blocks and preserves keyed identity; its benchmark corpus measures compiled templates and keyed updates. | Adopted the identity and block-planning idea, using Pulp's existing `stable_anchor_id` rather than introducing a second key field or compiler. |
-| Inferno `5c343f5f3` | `packages/inferno-create-element/src/patching.ts` and `patchKeyedChildren.spec.ts` keep keyed and non-keyed paths explicit; tests cover reorder, insert, remove, and mixed lists. | Adopted a fail-closed split: unique anchors use keyed matching; missing or duplicate anchors use a conservative positional plan and surface `ambiguous_keys`. |
+| Inferno `5c343f5f3` | `packages/inferno-create-element/src/patching.ts` and `patchKeyedChildren.spec.ts` keep keyed and non-keyed paths explicit; tests cover reorder, insert, remove, and mixed lists. | Adopted a fail-closed split: unique anchors use keyed matching; missing or duplicate anchors report `ambiguous_keys` and replace the sibling set wholesale rather than reusing anything by position. |
 | React Native Skia `e72c9647a` | `packages/skia/src/sksg/Reconciler.ts` turns commits into Skia pictures; `RNSkPictureRenderer::applyUpdatesTo` applies recorder values without rebuilding the picture. | Deferred retained picture ownership. Pulp's native materializer does not yet expose a safe recorder/picture lifetime seam, so adding one here would exceed a safe importer slice. |
 
 ## Adopted slice
@@ -37,3 +37,28 @@ observed the reorder test fail, restored the source, and observed the test pass
 again. The comparison itself found no evidence that a compiled-template
 compiler or Skia retained recorder should be copied into Pulp before a measured
 runtime seam exists.
+
+## 2026-10-13 importer refinements
+
+The follow-up slice applies the reference ideas at Pulp's existing Skia/Dawn
+boundary. It does not vendor, link, or execute Octane or Inferno.
+
+| Refinement | Pulp behavior | Evidence |
+|---|---|---|
+| Octane-style keyed identity and block planning | `stable_anchor_id` drives deterministic retained/moved/inserted/removed work; duplicate or missing anchors fail closed to positional replacement. | `DesignUpdateWorkCounters`, `[update]` tests, and the duplicate-anchor negative control. |
+| Inferno-style explicit child and value lanes | Static visuals and scalar, vector, meter, text, and action slots are classified explicitly; geometry text fields and XY pads retain their typed setter lanes. | `[slots]` tests, including the delimiter-collision negative control. |
+| Bounded observability instead of a second runtime | The existing benchmark emits bridge, layout, paint, invalidation, mutation, RSS, and paint-command counters under `pulp-design-import-benchmark-counters-v1`. | One-second live/baked lane receipts recorded in the execution plan. |
+| Agent-safe import validation | A fresh authored HTML fixture records Chromium and native Skia hashes, two interactions, and a rejected selector mutation. The committed receipt is a mandatory validator baseline. | [`17-fresh-plugin-panel.receipt.json`](../../test/fixtures/import-differential/17-fresh-plugin-panel.receipt.json) and the validator's expected-receipt check. |
+
+The measured interactive comparison is deliberately bounded: the live lane
+recorded 420 bridge calls, 120 layouts, 420 invalidations, and 14,820 paint
+commands; the baked C++ lane recorded zero bridge calls, 120 layouts, 360
+invalidations, and 13,920 paint commands. These numbers describe the existing
+benchmark fixture, not a general plugin-host or DAW guarantee. Stable identity,
+resource-lifetime stress, canonical recording/replay byte counters, and host
+validation remain explicit follow-up work in the execution plan.
+
+The exact receipt and validator baseline are committed under
+`test/fixtures/import-differential/`; review limitations remain documented in
+the validation output and are not promoted to a general plugin-host or DAW
+guarantee.

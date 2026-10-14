@@ -4,7 +4,7 @@
 #include <pulp/format/validation_harness.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/platform/platform.hpp>
-#include <pulp/state/content_registry.hpp>
+#include <pulp/state/content_capability_manifest.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>

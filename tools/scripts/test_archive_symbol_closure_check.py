@@ -98,6 +98,11 @@ class ArchiveSymbolClosureCheckTest(unittest.TestCase):
     def test_weak_definition_is_not_a_dependency(self) -> None:
         self.assertEqual(self.run_gate(STATE + "    _inline_shared U\n"), 0)
 
+    def test_weak_undefined_reference_to_forbidden_definition_fails(self) -> None:
+        # A weak call can still resolve from the forbidden archive. Lowercase
+        # nm types must not disappear from the closure instrument.
+        self.assertEqual(self.run_gate(STATE + "    _content_registry_ctor w\n"), 1)
+
     def test_blind_instrument_is_inconclusive(self) -> None:
         blind = """
             libstate.a[preset.o]:

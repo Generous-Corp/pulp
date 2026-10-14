@@ -48,7 +48,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
@@ -100,6 +100,12 @@ endif()
 # platforms that actually built it.
 if(TARGET pulp-host)
     list(APPEND PULP_SDK_TARGETS pulp-host)
+endif()
+if(TARGET pulp-view-graph-editor)
+    list(APPEND PULP_SDK_TARGETS pulp-view-graph-editor)
+endif()
+if(TARGET pulp-view-audio)
+    list(APPEND PULP_SDK_TARGETS pulp-view-audio)
 endif()
 
 # The GPU device layer is exported with the renderer that links it, and on its
@@ -359,6 +365,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+# GraphEditorView is an audio-UI header kept outside view-core, while retaining
+# its public pulp/view/widgets include path for installed consumers.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include/pulp/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+    FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"
@@ -716,6 +728,32 @@ file(WRITE "${CMAKE_BINARY_DIR}/sdk_build_type.txt"
      "${CMAKE_BUILD_TYPE}\n")
 install(FILES "${CMAKE_BINARY_DIR}/sdk_build_type.txt" DESTINATION ".")
 
+# Preserve the exact source identity in ordinary cmake --install prefixes.
+# This is local provenance only; release eligibility still requires the
+# separately verified release marker.
+find_package(Git REQUIRED)
+execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE PULP_SOURCE_INSTALL_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _pulp_source_install_sha_result ERROR_QUIET)
+execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" status --porcelain --untracked-files=no
+    OUTPUT_VARIABLE _pulp_source_install_status OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _pulp_source_install_status_result ERROR_QUIET)
+string(LENGTH "${PULP_SOURCE_INSTALL_SHA}" _pulp_source_install_sha_length)
+if(NOT _pulp_source_install_sha_result EQUAL 0 OR
+   NOT _pulp_source_install_sha_length EQUAL 40 OR
+   NOT PULP_SOURCE_INSTALL_SHA MATCHES "^[0-9a-f]+$" OR
+   NOT _pulp_source_install_status_result EQUAL 0)
+    message(FATAL_ERROR "Pulp source install provenance: unable to resolve checkout identity")
+endif()
+if(_pulp_source_install_status STREQUAL "")
+    set(PULP_SOURCE_INSTALL_DIRTY false)
+else()
+    set(PULP_SOURCE_INSTALL_DIRTY true)
+endif()
+configure_file("${PULP_ROOT_DIR}/tools/cmake/PulpStampSourceInstall.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake" @ONLY)
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake")
+
 # CMake config files for find_package(Pulp)
 install(EXPORT PulpTargets
     FILE PulpTargets.cmake
@@ -762,6 +800,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
@@ -797,6 +837,8 @@ install(FILES
     # them is exactly the gap WAH-3 closes.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpVerifyRuntimeStaging.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
+    # Included by FindSkia.cmake relative to its own directory.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
     # Every plist template a format helper can reach must ship. PulpPluginFormats
@@ -931,6 +973,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_native_view_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_adapter.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_audio_unit.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_entry.mm"

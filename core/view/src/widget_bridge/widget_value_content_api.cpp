@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/data_display.hpp>
 #include "api_registry.hpp"
 
 #include <pulp/view/gap_widgets.hpp>
@@ -26,9 +27,9 @@ void BridgeRegistrars::register_widget_value_content_api(WidgetBridge& self) {
     });
 
     register_bridge_function(api, "setMeterLevel", [&self](choc::javascript::ArgumentList args) {
-        if (auto* m = dynamic_cast<Meter*>(self.widget(args.get<std::string>(0, ""))))
-            m->set_level(static_cast<float>(args.get<double>(1, 0)),
-                        static_cast<float>(args.get<double>(2, 0)));
+        if (auto* m = dynamic_cast<LevelDisplay*>(self.widget(args.get<std::string>(0, ""))))
+            m->set_levels(static_cast<float>(args.get<double>(1, 0)),
+                          static_cast<float>(args.get<double>(2, 0)));
         return choc::value::Value();
     });
 
@@ -41,22 +42,26 @@ void BridgeRegistrars::register_widget_value_content_api(WidgetBridge& self) {
     });
 
     register_bridge_function(api, "setWaveformData", [&self](choc::javascript::ArgumentList args) {
-        if (auto* w = dynamic_cast<WaveformView*>(self.widget(args.get<std::string>(0, "")))) {
+        if (auto* w = dynamic_cast<SeriesDisplay*>(self.widget(args.get<std::string>(0, "")))) {
             if (args.numArgs > 1 && args[1]) {
-                auto& a = *args[1]; std::vector<float> d(a.size());
-                for (uint32_t i = 0; i < a.size(); ++i) d[i] = static_cast<float>(a[i].getWithDefault<double>(0));
-                w->set_data(std::move(d));
+                auto& a = *args[1];
+                std::vector<float> d(a.size());
+                for (uint32_t i = 0; i < a.size(); ++i)
+                    d[i] = static_cast<float>(a[i].getWithDefault<double>(0));
+                w->set_series(d.data(), d.size());
             }
         }
         return choc::value::Value();
     });
 
     register_bridge_function(api, "setSpectrumData", [&self](choc::javascript::ArgumentList args) {
-        if (auto* s = dynamic_cast<SpectrumView*>(self.widget(args.get<std::string>(0, "")))) {
+        if (auto* s = dynamic_cast<BinDisplay*>(self.widget(args.get<std::string>(0, "")))) {
             if (args.numArgs > 1 && args[1]) {
-                auto& a = *args[1]; std::vector<float> d(a.size());
-                for (uint32_t i = 0; i < a.size(); ++i) d[i] = static_cast<float>(a[i].getWithDefault<double>(0));
-                s->set_spectrum(std::move(d));
+                auto& a = *args[1];
+                std::vector<float> d(a.size());
+                for (uint32_t i = 0; i < a.size(); ++i)
+                    d[i] = static_cast<float>(a[i].getWithDefault<double>(0));
+                s->set_bins(d.data(), d.size());
             }
         }
         return choc::value::Value();

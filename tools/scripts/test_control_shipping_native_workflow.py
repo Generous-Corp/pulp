@@ -47,7 +47,7 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
         self.assertIn("Upload installed-SDK GPU-audio lifecycle receipt", self.workflow)
         self.assertIn("if: always()", self.workflow)
 
-    def test_linked_control_implementation_paths_trigger_the_matrix(self) -> None:
+    def test_implementation_paths_do_not_restore_push_trigger(self) -> None:
         for path in (
             "core/events/**",
             "core/format/**",
@@ -58,7 +58,7 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
             "tools/cli/**",
             "tools/mcp/**",
         ):
-            self.assertEqual(self.workflow.count(f"- '{path}'"), 2)
+            self.assertEqual(self.workflow.count(f"- '{path}'"), 0)
 
     def test_aax_skip_cannot_be_mistaken_for_proof(self) -> None:
         self.assertIn("PULP_AAX_SDK_ZIP_URL", self.workflow)

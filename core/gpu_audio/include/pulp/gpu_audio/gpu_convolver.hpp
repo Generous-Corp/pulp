@@ -8,8 +8,11 @@
 #include <vector>
 
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
-#include <pulp/render/gpu_compute.hpp>
 #include <pulp/signal/convolver.hpp>
+
+namespace pulp::render {
+class GpuCompute;
+}
 
 namespace pulp::gpu_audio {
 
@@ -174,17 +177,11 @@ class GpuConvolver : public GpuAudioNode {
     }
 
     /// True if the GPU compute device initialized (process_block uses the GPU).
-    bool gpu_available() const {
-        return gpu_ != nullptr || has_realtime_shared_io();
-    }
+    bool gpu_available() const;
     /// The live native compute backend ("Metal"/"D3D12"/"Vulkan"), or "" if CPU-only.
     /// On the shared path this names Dawn's underlying Metal backend; use the
     /// transport capability report when the provider identity itself matters.
-    std::string backend() const {
-        return gpu_                       ? gpu_->capabilities().backend
-               : has_realtime_shared_io() ? std::string("Metal")
-                                          : std::string();
-    }
+    std::string backend() const;
     uint32_t fft_size() const {
         return fft_size_;
     }

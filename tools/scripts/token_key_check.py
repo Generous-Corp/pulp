@@ -24,6 +24,8 @@ PRESETS = os.path.join(REPO, "core/view/src/theme_presets.cpp")
 SCAN_DIRS = [
     "core/view/src",
     "core/view/src/widgets",
+    "core/view/audio/src",
+    "core/view/audio/src/widgets",
 ]
 
 # Widget-specific override tokens that intentionally are NOT in derive_theme:

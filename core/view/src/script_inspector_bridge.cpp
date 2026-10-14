@@ -4,6 +4,7 @@
 
 #include <pulp/view/js_engine.hpp>
 #include <pulp/view/script_engine.hpp>
+#include <pulp/view/scripted_ui.hpp>
 
 #include <algorithm>
 
@@ -388,6 +389,16 @@ bool ScriptInspectorBridge::interrupt_if_active_locked(
     request->interrupt_window_open = false;
     request->engine->request_interrupt();
     return true;
+}
+
+void install_script_inspector_bridge() noexcept {
+    set_script_inspector_port_factory(+[]() -> std::unique_ptr<ScriptInspectorPort> {
+        return std::make_unique<ScriptInspectorBridge>();
+    });
+}
+
+ScriptInspectorBridge* script_inspector(ScriptedUiSession& session) noexcept {
+    return dynamic_cast<ScriptInspectorBridge*>(session.script_inspector_port());
 }
 
 } // namespace pulp::view

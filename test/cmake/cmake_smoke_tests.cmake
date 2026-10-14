@@ -149,6 +149,27 @@ set_tests_properties(pulp-simd-arm64ec-detect PROPERTIES
     LABELS "cmake;simd"
     TIMEOUT 30)
 
+add_test(NAME pulp-windows-target-arch
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_windows_target_arch.cmake)
+set_tests_properties(pulp-windows-target-arch PROPERTIES
+    LABELS "cmake;windows;packaging"
+    TIMEOUT 30)
+
+add_test(NAME pulp-gpu-provider-decision
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_gpu_provider_decision.cmake)
+set_tests_properties(pulp-gpu-provider-decision PROPERTIES
+    LABELS "cmake;gpu;provider"
+    TIMEOUT 30)
+
+add_test(NAME pulp-windows-gpu-provider-fail-closed
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_windows_gpu_provider_fail_closed.cmake)
+set_tests_properties(pulp-windows-gpu-provider-fail-closed PROPERTIES
+    LABELS "cmake;windows;gpu;provider"
+    TIMEOUT 30)
+
 # The Linux CLI's Scene3D archives need a render/scene rescan without placing
 # the higher-level recipe archive in that group. The latter depends back through
 # view and gpu-audio, which makes CMake reject the generated target graph.
@@ -199,6 +220,15 @@ add_test(NAME cmake-fetchcontent-base-dir
 set_tests_properties(cmake-fetchcontent-base-dir PROPERTIES
     LABELS "cmake;fetchcontent;windows;issue-4039"
     TIMEOUT 30)
+# wgpu-native runtime archives are used only when their SHA-256 matches the
+# manifest pin: a wrong digest, a tampered shared cache, or a download under
+# FETCHCONTENT_FULLY_DISCONNECTED is refused. file:// fixtures, no network.
+add_test(NAME cmake-wgpu-native-pin
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_wgpu_native_pin.cmake)
+set_tests_properties(cmake-wgpu-native-pin PROPERTIES
+    LABELS "cmake;fetchcontent;deps"
+    TIMEOUT 60)
 # IMPLEMENTATION LINT ONLY — deliberately not the runtime proof.
 #
 # This reads the TEXT of PulpWebGpuImportedTarget.cmake and asserts the
@@ -396,6 +426,34 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
         TIMEOUT 180)
 endif()
 
+# Installed-SDK consumer of the audio displays: a design-imported meter is a
+# real Meter after the explicit registration the installed SDK documents, and
+# register_audio_widgets is in the installed archive and the consumer image.
+if(TARGET pulp-view-audio AND PULP_ENABLE_DESIGN_IMPORT)
+    add_test(NAME cmake-view-audio-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            "-DPULP_NM=${CMAKE_NM}"
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_audio_sdk_consumer.cmake)
+    # The required macOS gate runs it; elsewhere it rides the slow lane with
+    # the other installed-SDK builds until a fast install there is measured.
+    set(_view_audio_sdk_consumer_labels "cmake;sdk;view;data-display")
+    if(NOT APPLE)
+        list(APPEND _view_audio_sdk_consumer_labels slow)
+    endif()
+    set_tests_properties(cmake-view-audio-sdk-consumer PROPERTIES
+        LABELS "${_view_audio_sdk_consumer_labels}"
+        COST 60
+        TIMEOUT 600)
+endif()
+
 # What does adopting ONE piece of Pulp cost an outside project? Stages an
 # install, then configures two independent consumers against the prefix: an
 # ordinary one that must pass (the positive control, which also reports which
@@ -462,8 +520,11 @@ if(PULP_ENABLE_INSPECTOR)
                 "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
                 "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_sdk_consumer.cmake)
+        # The installed control Standalone's runtime evaluator registers only
+        # when its generated factory installs the script-inspector bridge, so
+        # this test is also that install's end-to-end coverage.
         set_tests_properties(cmake-control-sdk-consumer PROPERTIES
-            LABELS "cmake;sdk;inspect;control;headless"
+            LABELS "cmake;sdk;inspect;control;headless;runtime-eval"
             COST 60
             TIMEOUT 300)
     endif()
@@ -498,6 +559,16 @@ add_test(NAME cmake-pulp-minos-linux-arch
 set_tests_properties(cmake-pulp-minos-linux-arch PROPERTIES
     LABELS "cmake;min-os;linux"
     TIMEOUT 60)
+# The one Skia-supplies-Dawn decision core/render and the link-floor fixtures
+# read: wgpu-native is linked exactly when Skia's Dawn archive is absent.
+add_test(NAME cmake-pulp-skia-dawn-provider
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/skia-dawn-provider
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_skia_dawn_provider.cmake)
+set_tests_properties(cmake-pulp-skia-dawn-provider PROPERTIES
+    LABELS "cmake;render;link-contract"
+    TIMEOUT 120)
 if(APPLE)
     add_test(NAME cmake-pulp-macos-archive-floor
         COMMAND ${CMAKE_COMMAND}
@@ -1173,6 +1244,14 @@ add_test(NAME cmake-pulp-add-sparkle
 set_tests_properties(cmake-pulp-add-sparkle PROPERTIES
     LABELS "cmake;ship" TIMEOUT 120
     SKIP_REGULAR_EXPRESSION "SKIP: pulp_add_sparkle is macOS-only")
+
+add_test(NAME cmake-pulp-cargo-staticlib-locked
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/pulp-cargo-staticlib-locked
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_cargo_staticlib_locked.cmake)
+set_tests_properties(cmake-pulp-cargo-staticlib-locked PROPERTIES
+    LABELS "cmake;rust" TIMEOUT 120)
 
 add_test(NAME cmake-build-defaults
     COMMAND ${CMAKE_COMMAND}

@@ -20,6 +20,7 @@ function(_pulp_pick_target out_var)
     set(${out_var} "" PARENT_SCOPE)
 endfunction()
 
+macro(_pulp_resolve_consumer_targets)
 _pulp_pick_target(_PULP_FORMAT_TARGET Pulp::format pulp::format)
 _pulp_pick_target(_PULP_FORMAT_CORE_TARGET Pulp::format-core pulp::format-core)
 _pulp_pick_target(_PULP_FORMAT_CLAP_CORE_TARGET Pulp::format-clap-core pulp::format-clap-core)
@@ -37,7 +38,6 @@ _pulp_pick_target(_PULP_CONTROL_UI_TARGET
 _pulp_pick_target(_PULP_CONTROL_INSPECT_TARGET Pulp::inspect pulp::inspect)
 _pulp_pick_target(_PULP_CONTROL_RUNTIME_EVAL_TARGET
     Pulp::inspect-runtime-eval pulp::inspect-runtime-eval)
-include("${CMAKE_CURRENT_LIST_DIR}/PulpControlShipping.cmake")
 # Plugin orchestration, including control declaration caching, lives in the
 # private PulpPlugin.cmake module included below. Keep PulpUtils.cmake as the
 # stable compatibility entry point for installed and in-tree consumers.
@@ -46,6 +46,10 @@ _pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
 _pulp_pick_target(_PULP_LV2_TARGET Pulp::lv2-headers lv2-headers)
 _pulp_pick_target(_PULP_AUSDK_TARGET Pulp::ausdk ausdk)
 _pulp_pick_target(_PULP_AAX_LIBRARY_TARGET Pulp::aax-library pulp-aax-library)
+endmacro()
+
+_pulp_resolve_consumer_targets()
+include("${CMAKE_CURRENT_LIST_DIR}/PulpControlShipping.cmake")
 
 if(NOT _PULP_FORMAT_TARGET)
     message(FATAL_ERROR

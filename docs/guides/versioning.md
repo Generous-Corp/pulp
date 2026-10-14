@@ -69,6 +69,7 @@ the self-tests for the compiler-asymmetry lints:
 | `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |
 | `safe_path_guard_lint.py` | an untrusted-path guard in `core/` or `tools/cli/` that trusts `is_absolute()`, which on Windows accepts `/x`, `\x` and `C:x`, instead of calling `pulp::runtime::is_safe_relative_path` |
 | `text_encoding_lint.py` | Python text I/O (`read_text`, `write_text`, `open`, `subprocess` with `text=True`) without `encoding=`, which decodes with cp1252 on Windows; the existing backlog is held by a per-file baseline (`text_encoding_baseline.json`) that can only go down |
+| `python_floor_syntax_check.py` | a tracked `*.py` file that Python 3.12 parses but 3.11, the gates' floor, rejects: an f-string field that reuses the enclosing quote or holds a backslash (including a line continuation, or in a nested f-string's text), comment or (single-quoted) line break. CI runs 3.12, so only a 3.11 run (CMake's default on a stock Homebrew Mac) would see it |
 
 `gates.sh` runs `designated_initializer_lint.py` diff-scoped and
 `win32_include_lint.py` over `core/*/include` before a push, and
@@ -238,13 +239,24 @@ only when the PR grew it relative to the merge-base, which is the same
 rebase-stable rule the hotspot guard uses. A `Fanout-Grow: <path|all> reason="..."`
 trailer authorizes deliberate growth.
 
-The workflow's last step, **Source-only selftests**, runs every registration
-listed in `tools/ci/source_selftests.json` with
-`tools/ci/source_selftests.py run --min-count 130`. Those are Python ctests that
-read only the checkout; the required `macos` gate excludes their
-`source-selftest` label on gate events, so this required context is where they
-block a merge. The step needs the full-history checkout this job already does
-and nothing but the standard library. See
+The workflow runs every registration listed in
+`tools/ci/source_selftests.json` with `tools/ci/source_selftests.py run
+--min-count 130`. Those are Python ctests that read only the checkout; the
+required `macos` gate excludes their `source-selftest` label on gate events, so
+this workflow is where they block a merge. The run is split across jobs by
+`lane_parts()`:
+- The **Source-only selftests** step of the `Version & skill sync checks` job
+  runs `--part shared`, the entries that share the machine.
+- The `Exclusive source selftests 1/2` and `2/2` jobs run `--part exclusive
+  --shard N/2`. These are the entries with `PROCESSORS` above 1, each still
+  alone on its runner.
+
+The required context **`Enforce version & skill sync`** is a third job. It needs
+both, runs `if: always()`, and fails unless both concluded `success`, so a
+failed, cancelled or skipped part fails the check. Before the split, the
+whole-machine entries ran one after another at the end of a single job. That
+was about 70% of the selftest step and most of the check's ~10 min P50. Every
+job needs the full-history checkout and nothing but the standard library. See
 [test-lanes.md](test-lanes.md#the-source-selftest-lane) for how a test joins or
 leaves the lane.
 
@@ -695,3 +707,10 @@ v0.80.4 keeps Git-over-SSH pushes alive during Pulp's long pre-push proof while
 preserving any explicitly configured SSH identity or proxy command. Without it,
 a successful local proof can still end in an expired SSH connection and waste
 the entire validation cycle.
+
+### Coverage cadence
+
+The hosted macOS Coverage workflow is advisory and runs on the main schedule or
+through an arm-time `workflow_dispatch` of the approved PR head. It does not
+start for every pull request push; the required version and skill checks remain
+unchanged.

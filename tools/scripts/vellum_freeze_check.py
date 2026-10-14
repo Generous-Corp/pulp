@@ -596,6 +596,12 @@ def validate_event(
                 )
         elif disposition != "pulp-only":
             raise FreezeError(f"event {path} has an invalid change disposition")
+        # Optional: whether Vellum inherits the change, read by the
+        # inheritance ledger checker (vellum_inheritance_ledger_check.py).
+        if "vellum_inherits" in event:
+            if type(event["vellum_inherits"]) is not bool:
+                raise FreezeError(f"event {path} vellum_inherits must be true or false")
+            allowed = allowed | {"vellum_inherits"}
         if set(event) != allowed:
             raise FreezeError(f"event {path} has missing or unknown fields")
     elif kind == "authority-transition":
@@ -876,10 +882,10 @@ def _github_json(url: str, token: str) -> dict[str, Any]:
     except (urllib.error.URLError, json.JSONDecodeError) as exc:
         endpoint = urllib.parse.urlsplit(url).path
         raise FreezeError(
-            f"cannot verify private Vellum authority at {endpoint}: {exc}"
+            f"cannot verify Vellum authority at {endpoint}: {exc}"
         ) from exc
     if not isinstance(value, dict):
-        raise FreezeError("private Vellum verification returned a non-object")
+        raise FreezeError("Vellum verification returned a non-object")
     return value
 
 
@@ -1282,7 +1288,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--verify-authority",
         action="store_true",
-        help="verify a transfer commit and counterpart through the private Vellum API",
+        help="verify a transfer commit and counterpart through the Vellum API",
     )
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--github-output", type=pathlib.Path)

@@ -133,7 +133,9 @@ jobs:
         # clone in CI per CLAUDE.md's "External SDKs" section.
         run: |
           if [ ! -d external/AudioUnitSDK ]; then
-            git clone --depth 1 https://github.com/apple/AudioUnitSDK.git external/AudioUnitSDK
+            # The tag sign-and-release.yml builds against, not the moving default branch.
+            git clone --depth 1 --branch AudioUnitSDK-1.3.0 \
+              https://github.com/apple/AudioUnitSDK.git external/AudioUnitSDK
           fi
           if [ ! -d external/vst3sdk ]; then
             git clone --depth 1 --branch v3.8.0_build_66 \

@@ -118,7 +118,10 @@
     "pulp-timeline-editor",
     "pulp-tool-gpu-health-model",
     "pulp-view",
+    "pulp-view-audio",
+    "pulp-view-graph-editor",
     "pulp-view-core",
+    "pulp-view-tooling",
     "pulp-view-native",
     "pulp-view-webview",
     "pulp-view-script"

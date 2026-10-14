@@ -37,16 +37,18 @@ static choc::value::Value view_to_value(const View& view) {
         obj.addMember("on", choc::value::createBool(toggle->is_on()));
     } else if (auto* label = dynamic_cast<const Label*>(&view)) {
         obj.addMember("text", choc::value::createString(label->text()));
-    } else if (auto* meter = dynamic_cast<const Meter*>(&view)) {
-        obj.addMember("rms", choc::value::createFloat64(meter->display_rms()));
-        obj.addMember("peak", choc::value::createFloat64(meter->display_peak()));
     } else if (auto* xy = dynamic_cast<const XYPad*>(&view)) {
         obj.addMember("x", choc::value::createFloat64(xy->x_value()));
         obj.addMember("y", choc::value::createFloat64(xy->y_value()));
-    } else if (auto* wf = dynamic_cast<const WaveformView*>(&view)) {
-        obj.addMember("samples", choc::value::createInt64(static_cast<int64_t>(wf->sample_count())));
-    } else if (auto* sp = dynamic_cast<const SpectrumView*>(&view)) {
-        obj.addMember("bins", choc::value::createInt64(static_cast<int64_t>(sp->bin_count())));
+    } else if (auto* described = dynamic_cast<const InspectorFacts*>(&view)) {
+        // Widgets outside view-core (the audio widgets) describe themselves.
+        std::vector<InspectorFacts::Fact> facts;
+        described->inspector_facts(facts);
+        for (const auto& fact : facts) {
+            obj.addMember(fact.key, fact.integral
+                                        ? choc::value::createInt64(static_cast<int64_t>(fact.value))
+                                        : choc::value::createFloat64(fact.value));
+        }
     }
 
     // Children
@@ -96,15 +98,7 @@ size_t ViewInspector::count_views(const View& root) {
 }
 
 std::string ViewInspector::type_name(const View& view) {
-    if (dynamic_cast<const Knob*>(&view)) return "Knob";
-    if (dynamic_cast<const Fader*>(&view)) return "Fader";
-    if (dynamic_cast<const Toggle*>(&view)) return "Toggle";
-    if (dynamic_cast<const Label*>(&view)) return "Label";
-    if (dynamic_cast<const Meter*>(&view)) return "Meter";
-    if (dynamic_cast<const XYPad*>(&view)) return "XYPad";
-    if (dynamic_cast<const WaveformView*>(&view)) return "WaveformView";
-    if (dynamic_cast<const SpectrumView*>(&view)) return "SpectrumView";
-    return "View";
+    return view_type_name(view);
 }
 
 // ── Inspector window helpers ────────────────────────────────────────────────
@@ -159,9 +153,14 @@ std::vector<PropertyList::Property> ViewInspector::view_properties(const View& v
     } else if (auto* lbl = dynamic_cast<const Label*>(&view)) {
         props.push_back({"text", "Text", PV{lbl->text()}, true, "Widget"});
         props.push_back({"font_size", "Font Size", PV{lbl->font_size()}, true, "Widget"});
-    } else if (auto* meter = dynamic_cast<const Meter*>(&view)) {
-        props.push_back({"rms", "RMS", PV{static_cast<float>(meter->display_rms())}, true, "Widget"});
-        props.push_back({"peak", "Peak", PV{static_cast<float>(meter->display_peak())}, true, "Widget"});
+    } else if (auto* described = dynamic_cast<const InspectorFacts*>(&view)) {
+        std::vector<InspectorFacts::Fact> facts;
+        described->inspector_facts(facts);
+        for (const auto& fact : facts) {
+            if (fact.show_in_properties)
+                props.push_back(
+                    {fact.key, fact.label, PV{static_cast<float>(fact.value)}, true, "Widget"});
+        }
     }
 
     return props;

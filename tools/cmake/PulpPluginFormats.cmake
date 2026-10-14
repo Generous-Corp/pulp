@@ -141,13 +141,8 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # copy_if_different so direct target builds and multi-config generators
     # remain deterministic.
     if(WIN32)
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
-            set(_pulp_vst3_windows_arch "arm64-win")
-        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$")
-            set(_pulp_vst3_windows_arch "x86_64-win")
-        else()
-            set(_pulp_vst3_windows_arch "x86-win")
-        endif()
+        include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpWindowsTargetArch.cmake")
+        pulp_windows_target_arch(_pulp_vst3_windows_arch)
         set(_pulp_vst3_windows_bundle
             "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
         set(_pulp_vst3_windows_contents
@@ -433,7 +428,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
 endfunction()
 
 # ── Internal: AAX target ────────────────────────────────────────────────
-function(_pulp_add_aax target name bundle_id version manufacturer category manufacturer_code product_code native_code)
+function(_pulp_add_aax target name bundle_id version manufacturer category manufacturer_code product_code native_code headless)
     if(NOT APPLE AND NOT WIN32)
         return()
     endif()
@@ -460,15 +455,25 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
         ${aax_entry}
         ${_PULP_FORMAT_SOURCE_DIR}/aax_runtime.cpp
         ${_PULP_FORMAT_SOURCE_DIR}/aax_midi_node.cpp
-        ${_PULP_FORMAT_SOURCE_DIR}/aax_effect_gui.cpp
         $<TARGET_OBJECTS:pulp-aax-export>
     )
-    target_link_libraries(${target}_AAX PRIVATE
-        ${target}_Core
-        ${_PULP_FORMAT_TARGET}
-        ${PULP_${target}_VIEW_TARGET}
-        pulp-aax-library
-    )
+    if(APPLE AND NOT headless)
+        target_sources(${target}_AAX PRIVATE
+            ${_PULP_FORMAT_SOURCE_DIR}/aax_native_view_mac.mm)
+    endif()
+    if(NOT headless)
+        target_sources(${target}_AAX PRIVATE ${_PULP_FORMAT_SOURCE_DIR}/aax_effect_gui.cpp)
+    endif()
+    if(headless)
+        target_link_libraries(${target}_AAX PRIVATE pulp::format-core)
+    else()
+        target_link_libraries(${target}_AAX PRIVATE ${_PULP_FORMAT_TARGET})
+    endif()
+    target_link_libraries(${target}_AAX PRIVATE pulp-aax-library)
+    target_link_libraries(${target}_AAX PRIVATE ${target}_Core)
+    if(NOT headless)
+        target_link_libraries(${target}_AAX PRIVATE ${PULP_${target}_VIEW_TARGET})
+    endif()
     target_include_directories(${target}_AAX PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${target}_AAX PRIVATE
         PULP_AAX=1
@@ -476,6 +481,9 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
         PULP_AAX_PRODUCT_CODE="${product_code}"
         PULP_AAX_NATIVE_CODE="${native_code}"
     )
+    if(headless)
+        target_compile_definitions(${target}_AAX PRIVATE PULP_AAX_HEADLESS=1)
+    endif()
     set_target_properties(${target}_AAX PROPERTIES
         OUTPUT_NAME "${name}"
         PREFIX ""
@@ -517,8 +525,10 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
     # pulp_stage_runtime_dependencies() is defined in both the source and
     # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
     # a missing definition silently skip staging entirely.
-    pulp_stage_runtime_dependencies(${target}_AAX)
-    pulp_assert_runtime_dependencies_staged(${target}_AAX)
+    if(NOT headless)
+        pulp_stage_runtime_dependencies(${target}_AAX)
+        pulp_assert_runtime_dependencies_staged(${target}_AAX)
+    endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AAX)
     _pulp_attach_control_shipping(${target} ${target}_AAX AAX)
 endfunction()

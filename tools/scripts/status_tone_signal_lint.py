@@ -38,7 +38,7 @@ COLOUR_FROM_TONE = "tone_token("
 NON_COLOUR_SIGNAL = "paint_tone_glyph("
 SKIP_MARKER = "status-tone-signal-lint: skip"
 SOURCE_SUFFIXES = {".cpp", ".cc", ".cxx", ".mm"}
-SCAN_ROOTS = ("core/view/src",)
+SCAN_ROOTS = ("core/view/src", "core/view/audio/src")
 
 
 def _is_comment(line: str) -> bool:

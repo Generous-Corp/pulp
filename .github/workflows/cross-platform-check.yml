@@ -431,15 +431,21 @@ jobs:
       - name: Install NDK
         run: sdkmanager "ndk;30.0.14904198"
 
-      - name: Cache Gradle
-        uses: actions/cache@v6
+      # Dependency and wrapper downloads only. The native build tree
+      # (android/app/.cxx) is never cached: it is build output, its key could
+      # not track the sources, and it never restored. Restore runs on
+      # GitHub-hosted runners only; a push to main is the only writer.
+      - name: Restore Gradle caches (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        id: gradle-cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-            android/app/.cxx
-          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle.kts') }}
-          restore-keys: ${{ runner.os }}-gradle-
+          key: ${{ runner.os }}-gradle-${{ runner.arch }}-jdk17-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-${{ runner.arch }}-jdk17-
 
       - name: Build Android APK (arm64-v8a + x86_64)
         working-directory: android
@@ -447,6 +453,22 @@ jobs:
         shell: bash
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/30.0.14904198
+
+      # A running daemon holds locks under ~/.gradle/caches, which made the
+      # Windows save fail its tar step on every run.
+      - name: Stop the Gradle daemon before saving its caches
+        if: runner.environment == 'github-hosted' && github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && steps.gradle-cache.outputs.cache-hit != 'true'
+        working-directory: android
+        run: ./gradlew --stop
+
+      - name: Save Gradle caches (main, GitHub-hosted)
+        if: runner.environment == 'github-hosted' && github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && steps.gradle-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
 
       - name: Verify APK contains libpulp.so
         shell: bash

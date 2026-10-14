@@ -11,6 +11,7 @@ target_include_directories(pulp-host
 target_sources(pulp-host PRIVATE
     src/scanner.cpp
     src/signal_graph.cpp
+    src/signal_graph_process.cpp
     src/signal_graph_diagnostics.cpp
     src/signal_graph_control.cpp
     src/processor_signal_graph_binding.cpp
@@ -34,6 +35,7 @@ target_sources(pulp-host PRIVATE
     src/forge_catalog_export_dynamics.cpp
     src/forge_dynamics_catalog.cpp
     src/forge_catalog_export_modulation.cpp
+    src/forge_effect_modulation_catalog.cpp
     src/forge_catalog_export_lofi.cpp
     src/forge_lofi_catalog.cpp
     src/forge_catalog_export_pitch_sequencing.cpp
@@ -57,7 +59,6 @@ target_sources(pulp-host PRIVATE
     src/timeline_graph_binding_candidate.cpp
     src/timeline_graph_binding_routes.cpp
     src/timeline_graph_stretch_policy.cpp
-    src/graph_editor_view.cpp
     src/sample_region_plan.cpp
     src/sample_region_proof.cpp
     src/sample_region_parameters.cpp
@@ -67,7 +68,9 @@ target_sources(pulp-host PRIVATE
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
 target_link_libraries(pulp-host PUBLIC pulp::native-components)
-target_link_libraries(pulp-host PRIVATE pulp::platform pulp::view-core)
+# GraphEditorView, the audio-UI consumer of the host graph, lives in
+# pulp-view-graph-editor (core/view/audio), so the host does not depend on view-core.
+target_link_libraries(pulp-host PRIVATE pulp::platform)
 
 # The GPU convolution realization is an explicit opt-in.  Keeping this edge
 # disabled by default leaves the CPU catalog (and its zero-latency contract)

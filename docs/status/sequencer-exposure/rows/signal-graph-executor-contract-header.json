@@ -1,0 +1,81 @@
+{
+  "id": "signal-graph-executor-contract-header",
+  "title": "SignalGraph routing classification and topology admission share a focused contract header",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "b0c9f3e7-8b9a-4b6d-a1f6-2f0d0a9d2c4e",
+  "owned_paths": [
+    "core/host/include/pulp/host/signal_graph_executor_contract.hpp",
+    "core/host/include/pulp/host/signal_graph_executor_routing.hpp",
+    "core/host/src/timeline_graph_binding_internal.hpp",
+    "test/cmake/app_audio_host_tests.cmake",
+    "test/header_compile/host_signal_graph_executor_contract.cpp",
+    "test/test_connection_classify.cpp",
+    "test/test_graph_serializer.cpp",
+    "docs/status/sequencer-exposure/rows/signal-graph-executor-contract-header.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/signal_graph_executor_contract.hpp",
+      "needles": [
+        "struct ConnectionClass",
+        "ExecutorTopologyValidationCode",
+        "validate_signal_graph_executor_topology"
+      ]
+    },
+    {
+      "path": "core/host/include/pulp/host/signal_graph_executor_routing.hpp",
+      "needles": [
+        "signal_graph_executor_contract.hpp",
+        "build_signal_graph_executor_routing"
+      ]
+    },
+    {
+      "path": "test/header_compile/host_signal_graph_executor_contract.cpp",
+      "needles": [
+        "ConnectionClass",
+        "ExecutorTopologyValidation"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The new public host contract header is installed by the host include-tree rule in tools/cmake/PulpInstallRules.cmake when pulp-host exists. The existing routing header remains installed and includes it, preserving source compatibility. Delivery remains pending installed-consumer validation; this organization slice adds no runtime capability or product control.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": ["list(APPEND _pulp_sdk_header_subsystems host)", "FILES_MATCHING PATTERN \"*.hpp\""]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/signal_graph_executor_contract.hpp",
+          "needles": ["struct ConnectionClass", "ExecutorTopologyValidationCode"]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No Timeline CLI verb, flag, handler, or document shape changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No live product operation, executor policy, grant, or profile changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or agent manifest row is added."
+    }
+  }
+}

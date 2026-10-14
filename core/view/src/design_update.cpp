@@ -9,6 +9,181 @@
 namespace pulp::view {
 namespace {
 
+struct SlotAttributeView {
+    std::string_view route;
+    std::string_view binding;
+    std::string_view parameter;
+    std::string_view module;
+    std::string_view module_parameter;
+    std::string_view x;
+    std::string_view y;
+    std::string_view x_module;
+    std::string_view x_parameter;
+    std::string_view y_module;
+    std::string_view y_parameter;
+    std::string_view meter;
+    std::string_view meter_source;
+    std::string_view meter_channel;
+    std::string_view text;
+    std::string_view action;
+};
+
+SlotAttributeView slot_attributes(const IRNode& node) {
+    SlotAttributeView view;
+    for (const auto& [key, value] : node.attributes) {
+        if (key == "pulpRouteId")
+            view.route = value;
+        else if (key == "binding")
+            view.binding = value;
+        else if (key == "pulpParamKey")
+            view.parameter = value;
+        else if (key == "pulpBindingModule")
+            view.module = value;
+        else if (key == "pulpBindingParam")
+            view.module_parameter = value;
+        else if (key == "pulpParamKeyX")
+            view.x = value;
+        else if (key == "pulpParamKeyY")
+            view.y = value;
+        else if (key == "pulpBindingModuleX")
+            view.x_module = value;
+        else if (key == "pulpBindingParamX")
+            view.x_parameter = value;
+        else if (key == "pulpBindingModuleY")
+            view.y_module = value;
+        else if (key == "pulpBindingParamY")
+            view.y_parameter = value;
+        else if (key == "pulpMeterValueKey")
+            view.meter = value;
+        else if (key == "pulpMeterSource")
+            view.meter_source = value;
+        else if (key == "pulpMeterChannel")
+            view.meter_channel = value;
+        else if (key == "pulpValueKey")
+            view.text = value;
+        else if (key == "pulpHostAction")
+            view.action = value;
+    }
+    return view;
+}
+
+void append_slot(std::vector<DesignSlot>& slots, DesignSlotKind kind, std::string_view route,
+                 std::string_view key) {
+    slots.push_back({kind, std::string(route), std::string(key)});
+}
+
+std::string encode_vector_key(std::string_view x, std::string_view y) {
+    return std::to_string(x.size()) + ":" + std::string(x) + std::to_string(y.size()) + ":" +
+           std::string(y);
+}
+
+std::string encode_pair_key(std::string_view first, std::string_view second) {
+    return std::to_string(first.size()) + ":" + std::string(first) + std::to_string(second.size()) +
+           ":" + std::string(second);
+}
+
+DesignSlotKind interactive_slot_kind(InteractiveElementKind kind) {
+    switch (kind) {
+    case InteractiveElementKind::text_field:
+    case InteractiveElementKind::value_label:
+        return DesignSlotKind::dynamic_text;
+    case InteractiveElementKind::xy_pad:
+        return DesignSlotKind::dynamic_vector;
+    default:
+        return DesignSlotKind::dynamic_scalar;
+    }
+}
+
+void append_node_slots(const IRNode& node, std::vector<DesignSlot>& slots) {
+    const auto attributes = slot_attributes(node);
+    const auto route = attributes.route;
+    bool has_dynamic_slot = false;
+    std::string scalar;
+    const auto parameter = attributes.parameter;
+    const bool has_vector_binding = !attributes.x.empty() || !attributes.y.empty() ||
+                                    !attributes.x_module.empty() ||
+                                    !attributes.x_parameter.empty() ||
+                                    !attributes.y_module.empty() || !attributes.y_parameter.empty();
+    const bool has_meter_binding = !attributes.meter.empty() || !attributes.meter_source.empty() ||
+                                   !attributes.meter_channel.empty();
+    if (!parameter.empty())
+        scalar = parameter;
+    else if (!attributes.module.empty() || !attributes.module_parameter.empty()) {
+        const auto module = attributes.module;
+        const auto param = attributes.module_parameter;
+        scalar = encode_pair_key(module, param);
+    } else if (!has_vector_binding && !has_meter_binding && !attributes.binding.empty()) {
+        scalar = std::string(attributes.binding);
+    }
+    const auto x = attributes.x.empty()
+                       ? encode_pair_key(attributes.x_module, attributes.x_parameter)
+                       : std::string(attributes.x);
+    const auto y = attributes.y.empty()
+                       ? encode_pair_key(attributes.y_module, attributes.y_parameter)
+                       : std::string(attributes.y);
+    if (!scalar.empty()) {
+        append_slot(slots, DesignSlotKind::dynamic_scalar, route, scalar);
+        has_dynamic_slot = true;
+    }
+    if (has_vector_binding) {
+        append_slot(slots, DesignSlotKind::dynamic_vector, route, encode_vector_key(x, y));
+        has_dynamic_slot = true;
+    }
+
+    const auto meter = attributes.meter;
+    const auto meter_source = attributes.meter_source;
+    const auto meter_channel = attributes.meter_channel;
+    if (!meter.empty() || !meter_source.empty() || !meter_channel.empty()) {
+        std::string meter_key;
+        if (!meter.empty())
+            meter_key = meter;
+        else
+            meter_key = encode_pair_key(meter_source, meter_channel);
+        append_slot(slots, DesignSlotKind::dynamic_meter, route, meter_key);
+        has_dynamic_slot = true;
+    }
+
+    const auto text = attributes.text;
+    if (!text.empty()) {
+        append_slot(slots, DesignSlotKind::dynamic_text, route, text);
+        has_dynamic_slot = true;
+    }
+
+    const auto action = attributes.action;
+    if (!action.empty()) {
+        append_slot(slots, DesignSlotKind::dynamic_action, route, action);
+        has_dynamic_slot = true;
+    }
+
+    // Geometry-detected controls carry their host route on the interactive
+    // element instead of the node-level pulp* attributes. Preserve the
+    // element's typed setter lane in the same inventory used by recognized
+    // widgets; this is what lets a re-key update avoid rebuilding its SVG
+    // record.
+    for (const auto& element : node.interactive_elements) {
+        if (!element.param_key.empty()) {
+            append_slot(slots, interactive_slot_kind(element.kind), route, element.param_key);
+            has_dynamic_slot = true;
+        }
+        if (!element.action.empty()) {
+            append_slot(slots, DesignSlotKind::dynamic_action, route, element.action);
+            has_dynamic_slot = true;
+        }
+    }
+
+    if (!has_dynamic_slot)
+        append_slot(slots, DesignSlotKind::static_visual, route, {});
+
+    for (const auto& child : node.children)
+        append_node_slots(child, slots);
+    for (const auto& frame : node.alternate_frames)
+        append_node_slots(frame, slots);
+}
+
+int slot_kind_rank(DesignSlotKind kind) {
+    return static_cast<int>(kind);
+}
+
 const std::string& key_for(const IRNode& node) {
     static const std::string empty;
     return node.stable_anchor_id ? *node.stable_anchor_id : empty;
@@ -26,8 +201,11 @@ bool has_unique_nonempty_keys(std::span<const IRNode> nodes) {
 }
 
 bool has_nonempty_attribute(const IRNode& node, std::string_view key) {
-    const auto it = node.attributes.find(std::string(key));
-    return it != node.attributes.end() && !it->second.empty();
+    for (const auto& [attribute, value] : node.attributes) {
+        if (attribute == key)
+            return !value.empty();
+    }
+    return false;
 }
 
 // Binding names are values that can be re-keyed on an existing control. The
@@ -53,13 +231,14 @@ struct BindingShape {
 
 bool is_rekeyable_binding_attribute(std::string_view key) {
     // These are names/payloads that an update consumer can change in place.
+    // Binding module/param values are deliberately absent: NativeImportBindingContext
+    // consumes them when installing the callback and has no re-key setter. Retaining
+    // a view across either change would leave the stable anchor pointing at the old route.
     // The planner must still compare their presence through the topology bits
     // above so bound↔unbound transitions recreate the native control.
     for (const auto candidate :
-         {"pulpParamKey", "pulpBindingModule", "pulpBindingParam", "pulpParamKeyX",
-          "pulpBindingModuleX", "pulpBindingParamX", "pulpParamKeyY", "pulpBindingModuleY",
-          "pulpBindingParamY", "pulpMeterSource", "pulpMeterChannel", "pulpMeterValueKey",
-          "pulpValueKey", "pulpInitialValue", "pulpPlaceholder"}) {
+         {"pulpParamKey", "pulpParamKeyX", "pulpParamKeyY", "pulpMeterSource", "pulpMeterChannel",
+          "pulpMeterValueKey", "pulpValueKey", "pulpInitialValue", "pulpPlaceholder"}) {
         if (key == candidate)
             return true;
     }
@@ -177,6 +356,20 @@ bool shape_compatible(const IRNode& old_node, const IRNode& new_node) {
 void append_update(DesignChildUpdatePlan& plan, DesignUpdateKind kind, std::string key,
                    std::size_t old_index, std::size_t new_index) {
     plan.updates.push_back({kind, std::move(key), old_index, new_index});
+    switch (kind) {
+    case DesignUpdateKind::retained:
+        ++plan.work.retained;
+        break;
+    case DesignUpdateKind::moved:
+        ++plan.work.moved;
+        break;
+    case DesignUpdateKind::inserted:
+        ++plan.work.inserted;
+        break;
+    case DesignUpdateKind::removed:
+        ++plan.work.removed;
+        break;
+    }
     const auto index = plan.updates.size() - 1;
     if (!plan.blocks.empty() && plan.blocks.back().kind == kind &&
         plan.blocks.back().first + plan.blocks.back().count == index) {
@@ -260,5 +453,20 @@ DesignChildUpdatePlan plan_design_child_updates(std::span<const IRNode> old_chil
         }
     }
     return plan;
+}
+
+std::vector<DesignSlot> classify_design_slots(const IRNode& node) {
+    std::vector<DesignSlot> slots;
+    append_node_slots(node, slots);
+    if (slots.empty())
+        slots.push_back({DesignSlotKind::static_visual, {}, {}});
+    std::sort(slots.begin(), slots.end(), [](const DesignSlot& lhs, const DesignSlot& rhs) {
+        if (lhs.route_id != rhs.route_id)
+            return lhs.route_id < rhs.route_id;
+        if (slot_kind_rank(lhs.kind) != slot_kind_rank(rhs.kind))
+            return slot_kind_rank(lhs.kind) < slot_kind_rank(rhs.kind);
+        return lhs.key < rhs.key;
+    });
+    return slots;
 }
 } // namespace pulp::view

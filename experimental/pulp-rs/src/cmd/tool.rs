@@ -32,7 +32,7 @@ use crate::color;
 use crate::error::{CliError, Result};
 use crate::proc::{Invocation, Spawner};
 use crate::tool_registry::{
-    self, current_platform_key, locate_tool, uninstall_tool, ToolRegistry,
+    self, current_platform_key, locate_tool, uninstall_tool, ToolDescriptor, ToolRegistry,
 };
 use crate::tool_version::{self, ActiveVersion};
 
@@ -541,8 +541,12 @@ fn install(
     }
     // A `--version` is a durable user pin: record it before installing so
     // resolution (and the re-fetch below) honor it, and so it survives a
-    // future Pulp registry-pin bump.
+    // future Pulp registry-pin bump. A version this platform's source cannot
+    // serve is refused first, so it is never saved.
     if let (Some(id), Some(v)) = (id, version) {
+        if let Some(tool) = reg.tools.get(id) {
+            refuse_unservable_version(tool, v)?;
+        }
         tool_version::set_override(id, v)?;
         writeln!(
             out,
@@ -607,7 +611,9 @@ fn update(
 
     match version {
         Some(v) => {
-            // Explicit version → durable user pin.
+            // Explicit version → durable user pin, unless this platform's
+            // source cannot serve it (refused before anything is saved).
+            refuse_unservable_version(tool, v)?;
             tool_version::set_override(id, v)?;
             writeln!(
                 out,
@@ -652,6 +658,35 @@ fn update(
         "--force".to_owned(),
     ];
     delegate_install(Some(id), &argv, out)
+}
+
+/// Refuse a requested version that this platform's download source cannot
+/// serve: a source whose `url_template` has no `${version}` publishes one fixed
+/// build, the registry pin, and installing it under another version's name
+/// would mislabel it. Checked before an override is persisted, so a refused
+/// version never becomes a saved override that breaks later installs. The
+/// C++ installer enforces the same rule for env and file overrides.
+fn refuse_unservable_version(tool: &ToolDescriptor, version: &str) -> Result<()> {
+    if version == tool.pinned_version {
+        return Ok(());
+    }
+    let platform = current_platform_key();
+    let Some(source) = tool.binary_sources.get(platform) else {
+        return Ok(());
+    };
+    if source.archive_format.is_empty() || source.url_template.contains("${version}") {
+        return Ok(());
+    }
+    Err(CliError::BadUsage(format!(
+        "{id} {version} cannot be installed on {platform}: this platform's source serves \
+         one fixed build, {id} {pin}, and has no per-version download, so installing it \
+         as {version} would mislabel it. The override was not saved. Fix: use {pin} with \
+         `pulp tool install {id}`, or install {id} {version} yourself and put it on PATH \
+         (Pulp uses a PATH copy only when no managed copy is installed; \
+         `pulp tool uninstall {id}` removes it).",
+        id = tool.id,
+        pin = tool.pinned_version,
+    )))
 }
 
 /// Print the active version + provenance line shared by install / update.
@@ -865,11 +900,11 @@ mod tests {
                     "install_method": "binary_download",
                     "pinned_version": "0.4.0",
                     "binary_sources": {
-                        "macOS-arm64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
-                        "macOS-x64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
-                        "Windows-x64": {"url_template":"x","archive_format":"zip","binary_name":"uv.exe"},
-                        "Linux-x64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
-                        "Linux-arm64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"}
+                        "macOS-arm64": {"url_template":"x-${version}","archive_format":"tar.gz","binary_name":"uv"},
+                        "macOS-x64": {"url_template":"x-${version}","archive_format":"tar.gz","binary_name":"uv"},
+                        "Windows-x64": {"url_template":"x-${version}","archive_format":"zip","binary_name":"uv.exe"},
+                        "Linux-x64": {"url_template":"x-${version}","archive_format":"tar.gz","binary_name":"uv"},
+                        "Linux-arm64": {"url_template":"x-${version}","archive_format":"tar.gz","binary_name":"uv"}
                     }
                 }
             }
@@ -1504,11 +1539,11 @@ mod tests {
                     "pinned_version": "0.6.14",
                     "managed_by_pulp": true,
                     "binary_sources": {
-                        "macOS-arm64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
-                        "macOS-x64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
-                        "Windows-x64": {"url_template":"x","archive_format":"zip","binary_name":"uv.exe"},
-                        "Linux-x64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
-                        "Linux-arm64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"}
+                        "macOS-arm64": {"url_template":"x-${version}","archive_format":"tar.gz","binary_name":"uv"},
+                        "macOS-x64": {"url_template":"x-${version}","archive_format":"tar.gz","binary_name":"uv"},
+                        "Windows-x64": {"url_template":"x-${version}","archive_format":"zip","binary_name":"uv.exe"},
+                        "Linux-x64": {"url_template":"x-${version}","archive_format":"tar.gz","binary_name":"uv"},
+                        "Linux-arm64": {"url_template":"x-${version}","archive_format":"tar.gz","binary_name":"uv"}
                     }
                 }
             }
@@ -1627,6 +1662,60 @@ mod tests {
             tool_version::read_overrides().get("uv").map(String::as_str),
             Some("0.7.0")
         );
+    }
+
+    fn fixed_source_registry_body() -> String {
+        // ffmpeg's shape on macOS arm64 / Linux x64: one fixed build, no
+        // `${version}` in the URL, on every platform key.
+        let source = r#"{"url_template":"https://example.invalid/ffmpeg-7.1.zip","archive_format":"zip","binary_name":"ffmpeg"}"#;
+        let platforms = ["macOS-arm64", "macOS-x64", "Windows-x64", "Windows-arm64", "Linux-x64", "Linux-arm64"]
+            .iter()
+            .map(|p| format!("\"{p}\": {source}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"schema_version": 1, "tools": {{"ffmpeg": {{
+                "display_name": "FFmpeg", "install_method": "binary_download",
+                "pinned_version": "7.1", "managed_by_pulp": true,
+                "binary_sources": {{ {platforms} }} }} }} }}"#
+        )
+    }
+
+    #[test]
+    fn fixed_source_version_is_refused_before_the_override_is_saved() {
+        let td = plant_project(&fixed_source_registry_body());
+        let home = td.path().join("pulp-home");
+        let _env = EnvVarGuard::set_many(&[
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+            ("PULP_HOME", Some(home.to_str().unwrap())),
+            ("PULP_TOOL_FFMPEG_VERSION", None),
+        ]);
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+
+        let mut buf = Vec::new();
+        let error = install(&reg, Some("ffmpeg"), false, false, Some("7.0"), &mut buf)
+            .unwrap_err();
+        let text = error.to_string();
+        assert!(matches!(error, CliError::BadUsage(_)), "{text}");
+        assert!(text.contains("ffmpeg 7.0 cannot be installed on"), "{text}");
+        assert!(text.contains("serves one fixed build, ffmpeg 7.1"), "{text}");
+        assert!(text.contains("The override was not saved"), "{text}");
+        assert!(tool_version::read_overrides().get("ffmpeg").is_none());
+        assert!(!String::from_utf8(buf.clone()).unwrap().contains("Pinned ffmpeg"));
+
+        let error = update(&reg, "ffmpeg", Some("7.0"), &mut buf).unwrap_err();
+        assert!(matches!(error, CliError::BadUsage(_)));
+        assert!(tool_version::read_overrides().get("ffmpeg").is_none());
+
+        // The pin itself is not an override and is never refused here.
+        assert!(refuse_unservable_version(reg.tools.get("ffmpeg").unwrap(), "7.1").is_ok());
+    }
+
+    #[test]
+    fn templated_source_version_is_still_saved() {
+        let td = plant_project(managed_registry_body());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        assert!(refuse_unservable_version(reg.tools.get("uv").unwrap(), "0.7.0").is_ok());
     }
 
     #[test]
@@ -1813,11 +1902,11 @@ mod tests {
                     "pinned_version": "v57.2",
                     "managed_by_pulp": true,
                     "binary_sources": {
-                        "macOS-arm64": {"url_template":"x","binary_name":"trace_processor_shell"},
-                        "macOS-x64": {"url_template":"x","binary_name":"trace_processor_shell"},
-                        "Linux-x64": {"url_template":"x","binary_name":"trace_processor_shell"},
-                        "Linux-arm64": {"url_template":"x","binary_name":"trace_processor_shell"},
-                        "Windows-x64": {"url_template":"x","binary_name":"trace_processor_shell.exe"}
+                        "macOS-arm64": {"url_template":"x-${version}","binary_name":"trace_processor_shell"},
+                        "macOS-x64": {"url_template":"x-${version}","binary_name":"trace_processor_shell"},
+                        "Linux-x64": {"url_template":"x-${version}","binary_name":"trace_processor_shell"},
+                        "Linux-arm64": {"url_template":"x-${version}","binary_name":"trace_processor_shell"},
+                        "Windows-x64": {"url_template":"x-${version}","binary_name":"trace_processor_shell.exe"}
                     }
                 }
             }

@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
-
-import { buildMaterializedRuntimeEntry } from './materialized_runtime_entry.mjs';
+import { evaluateEntry } from './materialized_runtime_test_helpers.mjs';
 
 // The generated entry reapplies captured metadata from `resetAfterCommit`, so
 // every cost inside one application is multiplied by the React commit rate.
@@ -11,54 +10,6 @@ import { buildMaterializedRuntimeEntry } from './materialized_runtime_entry.mjs'
 // registry snapshot rather than with the number of bindings or nodes scanned.
 // Counting operations keeps the assertions deterministic; a wall-clock budget
 // would flake on a shared runner and could not say which cost regressed.
-
-// Native bridge functions the entry calls while mounting its behavior root.
-const BRIDGE_STUBS = ['createCol', 'createImage', 'setPosition', 'setLeft', 'setTop', 'setFlex',
-  'setVisible', 'setOpacity', 'setPointerEvents', 'setZIndex', 'setBackground', 'setBackgroundGradient',
-  'setTransformOrigin', 'setTransform', 'setObjectFit', 'setImageSource'];
-
-// The entry is an ES module whose only imports are React and the native
-// renderer. Replacing those two lines with stubs lets the rest of the module
-// execute verbatim in a sandbox, so these cases exercise the shipped source
-// rather than a re-implementation of it. Evaluating it (instead of parsing it)
-// is deliberate: a declaration placed in the wrong function body still parses.
-function evaluateEntry({ layoutBindings = [], registryNodes = [],
-                         textBindings = [], paintBindings = [], pseudoBindings = [], stateAtlas = [],
-                         bridge = {}, productPrelude = '',
-                         visualAuthority = null }) {
-  const source = buildMaterializedRuntimeEntry({
-    capturedCssVariables: {}, presentationTime: 0, requestedState: '',
-    textBindings, layoutBindings, paintBindings, pseudoBindings,
-    runtimeDocumentAsset: null, sidecar: null, productPrelude,
-    surfaceBackground: null, authoredLeft: 0, authoredTop: 0,
-    authoredWidth: 100, authoredHeight: 100, authoredTransform: null,
-    visualAuthority, stateAtlas, visualWidth: 100, visualHeight: 100,
-    canvasBindings: [], behaviorCanvasAnchors: [],
-    capturedPaintAuthorityAnchors: [],
-  }).replace(/^import .*$/gm, '');
-
-  const sandbox = {
-    App: () => null,
-    __pulpRuntimeImport__: () => {},
-    __pulpReactDomRegistry__: { values: () => registryNodes.values() },
-    getLayoutBoxMetrics: () => null,
-  };
-  for (const name of BRIDGE_STUBS) sandbox[name] = () => {};
-  Object.assign(sandbox, bridge);
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(
-    'const React = { createElement: () => null };' +
-    'const createPulpRoot = () => ({});' +
-    'const renderPulp = () => {}; const unmountPulp = () => {};' + source,
-    sandbox, { filename: 'materialized-entry.js' });
-
-  // A module that threw before publishing its entry points would leave every
-  // counter at zero, which reads exactly like a perfect score.
-  assert.equal(typeof sandbox.__pulpApplyMaterializedImportMetadata__,
-    'function', 'entry did not evaluate far enough to publish the applier');
-  return sandbox;
-}
 
 // Roots are found by reading each registry node's parent, so one read per node
 // is one index build. Counting through a getter attributes the reads to the
@@ -816,8 +767,17 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
       setZIndex: (id, value) => calls.push(['z', id, value]),
     },
   });
+  assert.ok(calls.some(call => call[0] === 'createCol' &&
+    call[1] === '__pulp_materialized_pseudo_root__' && call[2] === ''),
+    'pseudo planes have a sibling visual root');
+  assert.ok(calls.some(call => call[0] === 'opacity' &&
+    call[1] === '__pulp_materialized_pseudo_root__' && call[2] === 1),
+    'pseudo root stays visible when behavior root is hidden');
+  assert.ok(calls.some(call => call[0] === 'opacity' &&
+    call[1] === '__pulp_materialized_behavior__' && call[2] === 0),
+    'reference behavior root remains transparent');
   assert.deepEqual(calls.filter(call => call[1] === '__pulp_materialized_pseudo_0'), [
-    ['createCol', '__pulp_materialized_pseudo_0', '__pulp_materialized_behavior__'],
+    ['createCol', '__pulp_materialized_pseudo_0', '__pulp_materialized_pseudo_root__'],
     ['left', '__pulp_materialized_pseudo_0', 2],
     ['top', '__pulp_materialized_pseudo_0', 3],
     ['flex', '__pulp_materialized_pseudo_0', 'width', 20],
@@ -829,7 +789,7 @@ test('materialized pseudo gradient creates an inert absolute plane', () => {
     ['z', '__pulp_materialized_pseudo_0', 19000],
   ]);
   const planeIds = new Set(calls.filter(call => call[0] === 'createCol' &&
-    call[1].startsWith('__pulp_materialized_pseudo_')).map(call => call[1]));
+    /^__pulp_materialized_pseudo_[0-9]+$/.test(call[1])).map(call => call[1]));
   assert.deepEqual(planeIds, new Set([
     '__pulp_materialized_pseudo_0', '__pulp_materialized_pseudo_1',
   ]));

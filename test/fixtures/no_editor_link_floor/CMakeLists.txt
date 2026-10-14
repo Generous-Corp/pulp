@@ -51,7 +51,7 @@ pulp_add_plugin(PulpNoEditorLinkFloorControl
 # hide a regression in the binary.
 foreach(_fmt IN LISTS _no_editor_formats)
     pulp_link_closure(PulpNoEditorLinkFloor_${_fmt} TARGETS_OUT _no_editor_closure)
-    foreach(_forbidden pulp-format pulp-format-view pulp-view pulp-view-core pulp-view-native
+    foreach(_forbidden pulp-format pulp-format-view pulp-view pulp-view-core pulp-view-native pulp-view-tooling
                        pulp-view-script pulp-canvas pulp-render pulp-standalone)
         if(_forbidden IN_LIST _no_editor_closure)
             message(FATAL_ERROR
@@ -64,7 +64,39 @@ foreach(_fmt IN LISTS _no_editor_formats)
     endif()
 endforeach()
 
-set(_no_editor_scan_args "-DCONTROL=$<TARGET_FILE:PulpNoEditorLinkFloorControl_CLAP>")
+# What the control's editor stack contains in this configuration. View and
+# canvas always; the GPU layers only when the build has them.
+set(_no_editor_control_families view canvas)
+set(_no_editor_control_gpu OFF)
+if(PULP_ENABLE_GPU AND TARGET pulp-render AND (PULP_HAS_SKIA OR PULP_HAS_WEBGPU))
+    list(APPEND _no_editor_control_families render)
+    set(_no_editor_control_gpu ON)
+    # The control must describe the provider actually linked by pulp-render.
+    # When Skia supplies Dawn, the optional wgpu-native target is deliberately
+    # absent from the renderer link graph, so expecting `_wgpu*` symbols makes
+    # the positive control report a false blind spot.
+    set(_no_editor_webgpu_target FALSE)
+    if(TARGET webgpu)
+        set(_no_editor_webgpu_target TRUE)
+    endif()
+    pulp_gpu_links_wgpu_native(_no_editor_links_wgpu
+        WEBGPU_TARGET ${_no_editor_webgpu_target})
+    if(_no_editor_links_wgpu)
+        list(APPEND _no_editor_control_families wgpu)
+    endif()
+    if(PULP_HAS_SKIA)
+        list(APPEND _no_editor_control_families skia)
+        # Skia's own Dawn archive (the decision core/render reads).
+        if(PULP_SKIA_PROVIDES_DAWN)
+            list(APPEND _no_editor_control_families dawn)
+        endif()
+    endif()
+endif()
+string(REPLACE ";" "|" _no_editor_control_families "${_no_editor_control_families}")
+set(_no_editor_scan_args
+    "-DCONTROL=$<TARGET_FILE:PulpNoEditorLinkFloorControl_CLAP>"
+    "-DCONTROL_FAMILIES=${_no_editor_control_families}"
+    "-DCONTROL_GPU_RUNTIME=${_no_editor_control_gpu}")
 foreach(_fmt IN LISTS _no_editor_formats)
     list(APPEND _no_editor_scan_args "-D${_fmt}=$<TARGET_FILE:PulpNoEditorLinkFloor_${_fmt}>")
 endforeach()
@@ -73,3 +105,13 @@ add_test(NAME no-editor-plugin-link-floor-artifacts
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scan_no_editor_link_floor.cmake")
 set_tests_properties(no-editor-plugin-link-floor-artifacts PROPERTIES
     LABELS "format;link-contract;artifact" TIMEOUT 120)
+
+# The GPU-stack dependency pattern above is platform-specific, and a host only
+# builds its own platform's artifacts. This self-test checks the pattern
+# against recorded listings from every platform on any host.
+add_test(NAME no-editor-link-floor-runtime-pattern
+    COMMAND "${CMAKE_COMMAND}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/test_no_editor_runtime_deps.cmake")
+set_tests_properties(no-editor-link-floor-runtime-pattern PROPERTIES
+    LABELS "pr;link-contract" TIMEOUT 60)
+

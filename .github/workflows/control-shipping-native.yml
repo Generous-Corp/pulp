@@ -5,52 +5,22 @@ name: Control shipping native matrix
 # native nm/readelf/dumpbin/lipo report as CI evidence.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/control-shipping-native.yml'
-      - 'CMakeLists.txt'
-      - 'core/events/**'
-      - 'core/format/**'
-      - 'core/platform/**'
-      - 'core/runtime/**'
-      - 'core/state/**'
-      - 'inspect/**'
-      - 'tools/cli/**'
-      - 'tools/cmake/**'
-      - 'tools/mcp/**'
-      - 'tools/scripts/verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_control_shipping_native_workflow.py'
-      - 'tools/validation/sdk-smoke/**'
+  schedule:
+    - cron: '59 3 * * *'
   pull_request:
-    paths:
-      - '.github/workflows/control-shipping-native.yml'
-      - 'CMakeLists.txt'
-      - 'core/events/**'
-      - 'core/format/**'
-      - 'core/platform/**'
-      - 'core/runtime/**'
-      - 'core/state/**'
-      - 'inspect/**'
-      - 'tools/cli/**'
-      - 'tools/cmake/**'
-      - 'tools/mcp/**'
-      - 'tools/scripts/verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_control_shipping_native_workflow.py'
-      - 'tools/validation/sdk-smoke/**'
+    types: [auto_merge_enabled]
   workflow_dispatch: {}
 
 permissions:
   contents: read
 
 concurrency:
-  group: control-shipping-native-${{ github.ref }}
+  group: control-shipping-native-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
   native:
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     strategy:
       fail-fast: false
       matrix:

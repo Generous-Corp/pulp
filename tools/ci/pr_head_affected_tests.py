@@ -54,6 +54,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
 
 import affected_targets  # noqa: E402
+import build_time_report  # noqa: E402
 import changed_surface_inventory as inventory  # noqa: E402
 import cmake_registration_impact as registration_impact  # noqa: E402
 
@@ -221,6 +222,87 @@ def own_tests(build: Path, root: Path, paths: list[str]) -> list[str]:
                    if any(os.path.normpath(c) in artifacts for c in e.command)})
 
 
+# A diff reaches only a handful of test executables through a CMake or
+# dependency edge. A larger rebuilt set means the directory, not the diff,
+# drove the build: a cold or reconfigured directory, or a warm one last used
+# for another branch or an older main. Those rebuild every executable that
+# differs, and the step must not widen to the suite on their account.
+REBUILT_EXECUTABLE_CAP = 8
+
+
+def rebuilt_binary_tests(build: Path, why: list[str] | None = None) -> list[str]:
+    """Tests whose executable was rebuilt by the current Ninja invocation.
+
+    Source projection misses tests whose binary is rebuilt through a CMake or
+    dependency edge, which is exactly how a rebuilt migration-index test was
+    omitted from a PR head. Ninja's latest log invocation is the build's own
+    ground truth for outputs actually produced. Map those executable outputs
+    back through the CTest command inventory.
+
+    The rebuilt set is bound to this diff only when it is narrow: none when
+    the build system was regenerated during this build, and none when more
+    than REBUILT_EXECUTABLE_CAP executables were rebuilt. ``why`` receives the
+    reason when the set is dropped.
+    """
+    why = why if why is not None else []
+    log = build / ".ninja_log"
+    build_start = build / ".pulp-build-start"
+    if not log.is_file() or not build_start.is_file() or not inventory.codemodel_reply_available(build):
+        return []
+    try:
+        runs = build_time_report.parse_ninja_log(log.read_text(encoding="utf-8", errors="replace"))
+        model = inventory.load_codemodel_targets(build)
+        entries = inventory.load_projection_ctest_entries(build) or []
+    except (OSError, ValueError, inventory.InventoryError):
+        return []
+    if not runs:
+        return []
+
+    def key(path: str) -> str:
+        value = Path(path)
+        if not value.is_absolute():
+            value = build / value
+        return os.path.normpath(str(value))
+
+    try:
+        build_start_mtime = build_start.stat().st_mtime
+    except OSError:
+        return []
+    # Ninja logs are cumulative on warm self-hosted runners. The marker is
+    # written immediately before this PR head's build, so only artifacts whose
+    # mtime belongs to this invocation may be treated as rebuilt. Without this
+    # proof, a previous branch's output could select unrelated tests.
+    built = {key(entry.output) for entry in runs[-1]
+             if Path(key(entry.output)).is_file() and
+             Path(key(entry.output)).stat().st_mtime >= build_start_mtime}
+    executable_artifacts = {
+        key(artifact)
+        for target in model.targets.values()
+        if target.type == "EXECUTABLE"
+        for artifact in target.artifacts
+    }
+    rebuilt = built & executable_artifacts
+    if not rebuilt:
+        return []
+    regenerated = [name for name in ("build.ninja", "CMakeCache.txt")
+                   if (build / name).is_file()
+                   and (build / name).stat().st_mtime >= build_start_mtime]
+    if regenerated:
+        why.append(f"{len(rebuilt)} rebuilt executable(s) ignored: {regenerated[0]} was "
+                   "regenerated during this build, so every output is new")
+        return []
+    if len(rebuilt) > REBUILT_EXECUTABLE_CAP:
+        why.append(f"{len(rebuilt)} rebuilt executable(s) ignored: more than "
+                   f"{REBUILT_EXECUTABLE_CAP}, so the directory's history drove the "
+                   "build, not this diff")
+        return []
+    selected = []
+    for entry in entries:
+        if any(key(command) in rebuilt for command in entry.command):
+            selected.append(entry.name)
+    return sorted(set(selected))
+
+
 def registration_tests(build: Path, paths: list[str], root: Path = REPO_ROOT,
                        changes: dict[str, tuple[set[int], list[str]]] | None = None
                        ) -> list[str]:
@@ -328,6 +410,13 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
         plan["reason"] = "the diff is empty"
         return plan
     chosen: list[str] = []
+    docs_only = all(is_non_test_path(p) for p in paths)
+    rebuilt_why: list[str] = []
+    rebuilt = [] if docs_only else rebuilt_binary_tests(build, rebuilt_why)
+    plan["rebuilt_binaries"] = len(rebuilt)
+    if rebuilt_why:
+        plan["rebuilt_binaries_ignored"] = rebuilt_why[0]
+    chosen.extend(rebuilt)
     # Declared script inputs are exact, so they apply even where the build
     # projection does not (a docs/status file a census test parses).
     inputs = script_input_tests(paths, root)
@@ -382,11 +471,34 @@ def junit_outcomes(path: Path) -> dict[str, str]:
     return outcomes
 
 
+def junit_failure_evidence(path: Path) -> dict[str, str]:
+    """Return the first useful failure line for each failed testcase."""
+    evidence: dict[str, str] = {}
+    if not path.is_file():
+        return evidence
+    for case in ET.parse(path).getroot().iter("testcase"):
+        failure = case.find("failure")
+        if failure is None:
+            failure = case.find("error")
+        if failure is None:
+            continue
+        text = (failure.text or "").strip()
+        evidence[case.get("name", "")] = next((line.strip() for line in text.splitlines() if line.strip()),
+                                               "ctest reported a failure without detail")
+    return evidence
+
+
+def annotation_escape(value: str) -> str:
+    """Keep GitHub workflow-command fields one-line and lossless."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                  label_exclude: str, junit_dir: Path, chunk: int) -> dict:
     """Run ``tests`` in batches until the budget is spent."""
     start = time.monotonic()
-    results = {"passed": [], "failed": [], "skipped": [], "excluded_or_absent": []}
+    results = {"passed": [], "failed": [], "skipped": [], "excluded_or_absent": [],
+               "failure_evidence": {}}
     for index in range(0, len(tests), chunk):
         batch = tests[index:index + chunk]
         if time.monotonic() - start >= budget:
@@ -402,6 +514,7 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
             command += ["-LE", label_exclude]
         subprocess.run(command, check=False)
         outcomes = junit_outcomes(junit)
+        results["failure_evidence"].update(junit_failure_evidence(junit))
         for test in batch:
             state = outcomes.get(test)
             if state == "fail":
@@ -543,7 +656,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     plan = select(build, paths, names, changes=changes)
     print(f"pr-head-affected-tests: {len(plan['tests'])} extra test(s); mode={plan['mode']} "
-          f"({plan['reason']}); families={plan['families']}", flush=True)
+          f"({plan['reason']}); rebuilt-binary-tests={plan.get('rebuilt_binaries', 0)}; "
+          f"families={plan['families']}", flush=True)
+    if plan.get("rebuilt_binaries_ignored"):
+        print(f"pr-head-affected-tests: {plan['rebuilt_binaries_ignored']}", flush=True)
     if args.dry_run:
         print(json.dumps(plan, indent=2))
         return 0
@@ -589,8 +705,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pr-head-affected-tests: SKIPPED (budget spent, not run here; the merge group "
               f"runs them): {shown}{f' and {more} more' if more > 0 else ''}")
     for test in results["failed"]:
-        print(f"::error title=pr-head-affected-tests::{test} failed on this pull request head; "
-              "it is a test this diff reaches, and it would fail the merge group too")
+        evidence = results.get("failure_evidence", {}).get(test, "ctest reported a failure without detail")
+        reproduce = f"ctest --test-dir {build} -R '^{re.escape(test)}$' --output-on-failure -C Release"
+        message = (f"test={test}; evidence={annotation_escape(evidence)}; cause_class=CTEST_FAILURE; "
+                   f"reproduce=`{reproduce}`; safe_to_auto_apply=no; "
+                   f"verify=`{reproduce}` passes")
+        print(f"::error title=pr-head-affected-tests::{message}")
     return 1 if results["failed"] else 0
 
 

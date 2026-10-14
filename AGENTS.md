@@ -42,8 +42,8 @@ work and must carry the required immutable change-event declaration.
 flips, generic design-import, UI compiler, bridge-contract, SDK, and supporting
 UI/render work may still land in Pulp, including on transferred-slice files.
 Such a change declares a `pulp-only` change event whose rationale starts with
-the fixed prefix in `docs/contracts/vellum-extraction-freeze.md`, and records a
-row in `docs/contracts/vellum-inheritance-ledger.md`. The exception ends per
+the fixed prefix in `docs/contracts/vellum-extraction-freeze.md`, and records an
+entry file `docs/contracts/vellum-inheritance-ledger/<event_id>.json`. The exception ends per
 target, in the same Pulp change that switches that target to an exact installed
 Vellum package and freezes the Pulp copy; from then on the rule above applies to
 that target without exception. The exception transfers no authority and does

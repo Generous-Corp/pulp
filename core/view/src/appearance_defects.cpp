@@ -3,7 +3,7 @@
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
-#include <pulp/view/inspector.hpp>
+#include <pulp/view/inspector_facts.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
@@ -37,7 +37,7 @@ std::string run_kind(const View& view) {
     if (dynamic_cast<const TextEditor*>(&view)) return "TextEditor";
     if (dynamic_cast<const TextButton*>(&view)) return "TextButton";
     if (dynamic_cast<const HyperlinkButton*>(&view)) return "HyperlinkButton";
-    return ViewInspector::type_name(view);
+    return view_type_name(view);
 }
 
 std::string node_label(const View& view) {

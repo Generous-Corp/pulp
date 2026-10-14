@@ -1,5 +1,5 @@
 // widgets/meter.js — canvas level meter matching the native Meter paint
-// (core/view/src/widgets/visualizers.cpp:427-585). See tokens/WIDGETS.md "Meter".
+// (core/view/audio/src/widgets/visualizers.cpp). See tokens/WIDGETS.md "Meter".
 // Vertical. Driven by push(level) each animation frame; the ballistics live in
 // meter-ballistics.js (a pure, DOM-free, unit-tested port of the native
 // MeterBallistics::update) so the release/hold timing is exact — instantaneous

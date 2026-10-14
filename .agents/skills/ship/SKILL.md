@@ -165,15 +165,21 @@ optional standalone app leaves plugin-only installs stale. Hooks must be
 executable, must resolve the active console user safely, and must treat a
 missing cache or already-stopped registrar as success.
 
-**Control-shipping sidecars are relocated for you.** CMake emits
-`*.inspector-capabilities.json` / `*.control-shipping*.json` beside the target,
-which for a bundle target lands in `Contents/MacOS` — where Apple permits code
-only, so `codesign` fails with `code object is not signed at all / In
-subcomponent: ….json`. `deep_sign()` moves them to
-`Contents/Resources/pulp-control-shipping-evidence` before signing, preserving
-the receipts. A consumer `package.sh` that *deletes* them first is both
-redundant and lossy: it destroys build provenance the installer would have
-sealed into the bundle.
+**Control-shipping sidecars live in `Contents/Resources`.** The build writes
+`*.inspector-capabilities.json` / `*.control-shipping*.json` for a macOS bundle
+into `Contents/Resources` (`_pulp_control_sidecar_dir` in
+`PulpControlShipping.cmake`), never `Contents/MacOS`, where Apple permits code
+only: there `codesign` (non `--deep`, as `pulp ship sign` signs) fails with
+`code object is not signed at all / In subcomponent: ….json`. The POST_BUILD
+step also deletes copies an older SDK left in `Contents/MacOS`, so incremental
+build trees heal. Readers find them through
+`pulp::inspect::control_sidecar_directories()` (Resources first, then the
+legacy location). `build_combined_installer.sh` refuses, before any signing, a
+bundle that still has them in `Contents/MacOS`; it no longer moves them, since a
+file moved at sign time is not the file the build verified. A consumer
+`package.sh` must not delete them: they are build provenance sealed into the
+bundle. `macos-plugin-bundle-signing` (ctest) signs the fixture's Standalone,
+VST3, CLAP and AU copies non-deep and verifies them strictly.
 
 `deep_sign()` also walks `Contents/Helpers` before sealing a bundle. Products
 may carry nested helper apps there, including their own executables and
@@ -475,12 +481,10 @@ lookup too. Guarded by the `vst3-bundle-layout` ctest
 (`tools/cmake/scripts/check_vst3_bundle_layout.py`).
 
 The same Apple rule applies inside `Contents/MacOS/`: only code belongs there.
-Pulp's control-shipping JSON is intentionally emitted beside an unsigned build
-target so the scanner can bind its proof to that exact binary. Before Developer
-ID signing, `build_combined_installer.sh` preserves those manifests and reports
-under `Contents/Resources/pulp-control-shipping-evidence/`; leaving them beside
-the Mach-O makes `codesign` report the JSON as an unsigned subcomponent. The
-signer also resolves `CFBundleExecutable` from `Info.plist` for every bundle
+Pulp's control-shipping JSON is therefore emitted into `Contents/Resources` of
+a macOS bundle (beside the binary for plain executables and iOS shallow
+bundles); leaving it beside the Mach-O makes `codesign` report the JSON as an
+unsigned subcomponent. The signer also resolves `CFBundleExecutable` from `Info.plist` for every bundle
 kind. Do not derive the main executable by stripping only `.app`: doing so
 double-signs the main binary in `.component`, `.vst3`, and `.clap` bundles and
 can trigger the same misleading subcomponent failure.
@@ -1330,6 +1334,22 @@ the same upstream tag used everywhere else in the repo: `v3.8.0_build_66`.
 The shortened `v3.8.0` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.
+
+### A signed or published build reads no shared cache
+
+Self-hosted VMs mount the host's ccache and FetchContent source cache writable
+into every job, and PR gate VMs run PR code with the same mounts, so a signed
+build that read them could link an object or dependency source any PR planted.
+`release-cli.yml` `build-cli`, `sign-and-release.yml` `build-and-sign-macos` and
+`wclap-cloudflare.yml` `build-prove-deploy` therefore set job-level
+`CCACHE_DISABLE: "1"`, run "Isolate the build from shared caches" (a fresh
+`RUNNER_TEMP` root for `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` and
+`PULP_FETCHCONTENT_BASE_DIR`) before their first build step, and use no
+`actions/cache` or Namespace cache volume. A new signing or deploy job must do
+the same: `tools/scripts/test_release_cache_isolation.py` finds such jobs by
+their signing/deploy capability and fails one that skips either setting. The
+cold compile is the accepted price; do not re-add ccache to a release to save
+minutes.
 
 ### Never run `validation` ctest tests in `sign-and-release.yml`
 

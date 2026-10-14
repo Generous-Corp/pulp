@@ -10,7 +10,7 @@ single source of truth for that model.
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
 | **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard opt-in `mac` lane (`--target mac`): yes | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below), plus a non-gating full run on a head that is armed for auto-merge on the current `main` so it can issue a receipt; an unchanged exact PR merge tree may reuse that artifact-bound result after protected-base verification |
-| **Source selftests** (`Enforce version & skill sync`, step *Source-only selftests*) | every PR + every merge group | **yes** (blocking) | no build at all | the ~140 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
+| **Source selftests** (`Enforce version & skill sync`, which needs the *Source-only selftests* step and the two *Exclusive source selftests* shards) | every PR + every merge group | **yes** (blocking) | no build at all | the ~140 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
 | **iOS compile gate** (inside `macos`'s Build step) | PRs + merge groups that touch an iOS-only surface (`ios_surface` in `classify_changes.py`: `apple/**`, iOS sources or sources branching on an iOS target, non-test CMake, dependency pins, the gate's own wiring); nightly on main; every release tag | yes when it runs on a PR or merge group; the nightly opens a tracking issue; the release publish requires it | iOS AUv3 GPU smoke example | the two-SDK iOS compile (`test/cmake/test_ios_compile_gate.sh`). Shared code is compiled for macOS by the same job, so it no longer runs the per-PR iOS gate |
@@ -22,6 +22,14 @@ The required gate is **serialized on self-hosted macOS runners** and takes
 about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
 runs). Keeping it
 lean is why the two label groups below are excluded from it.
+
+The **ThreadSanitizer lane** keeps its SignalGraph selection exact and
+bounded. It includes the compile-first lifecycle case, the mutation-lock and
+prepare/swap publication cases, and the two re-prepare/process race hammers for
+the executor and parallel paths. It does not select the full graph parity
+matrix: ordinary lanes own parity coverage, while TSan owns these concurrent
+publication and rendering cases. Keep the case names and this selection in
+sync when adding another lifecycle race proof.
 
 ### Where the required gate's wall-clock goes
 
@@ -202,7 +210,11 @@ manifest, `tools/ci/source_selftests.json`:
   `tools/ci/source_selftests.py run`, in parallel, from an empty scratch
   directory unless the registration sets a source `WORKING_DIRECTORY`, with the
   registration's `TIMEOUT` (120 s default) and `RESOURCE_LOCK`, retrying once as
-  the gate's `--repeat until-pass:2` does.
+  the gate's `--repeat until-pass:2` does. `lane_parts()` splits the manifest
+  into a shared part and two exclusive shards. Each `PROCESSORS` > 1 entry, plus
+  anything sharing its resource lock, runs alone on a shard job of its own. The
+  required `Enforce version & skill sync` job needs every part and passes only
+  when all of them succeeded.
 
 `source-selftest-lane-contract` (a ctest that stays on the gate, because it
 needs the configured tree) runs `source_selftests.py check`. It fails when a
@@ -210,8 +222,8 @@ labelled test is missing from the manifest, a listed test is not registered or
 not labelled, a manifest command no longer matches its registration, an entry
 reaches the build tree or a path outside the checkout, an entry carries
 `pr-fast` or an excluded label, an entry's script is platform-gated or imports
-an optional third-party module (see below), or either half of the wiring is
-gone. A test
+an optional third-party module (see below), the split drops or doubles an
+entry, or any part of the wiring is gone. A test
 can therefore leave the gate only by being run on another required context.
 
 **Joining the lane.** A registration qualifies when it is `python3 <script>`
@@ -561,3 +573,22 @@ has a positive pattern, and the `[#<stem>]` term is one, so a member whose own
 changed-surface selector all keep working, since they address tests by name.
 The one visible difference is `--target`: build the group
 (`pulp-test-group-view-widgets`), not the old per-suite target.
+
+### Hosted macOS advisory lanes and arm-time dispatch
+
+Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
+native matrix are advisory hosted-macOS lanes. They run from the nightly
+`schedule` on `main` and from `workflow_dispatch` on an approved PR head; they
+do not start on every `pull_request` push. The `pulp pr` wrapper calls
+`tools/scripts/dispatch_advisory_lanes.sh` after its delegated Shipyard arm/ship
+path succeeds. Direct `shipyard pr` invocations do not yet call that Pulp hook,
+so nightly main runs are the interim signal until the Shipyard arm hook lands.
+The sanitizer workflow keeps ASan and UBSan on non-draft PRs that touch
+`core/**`, while TSan is nightly or explicitly dispatched. Coverage is the only
+matrix with a `max-parallel: 2` cap; sanitizer legs are independent named jobs,
+not one matrix, so no aggregate cap is claimed. These lanes remain advisory and
+do not replace the required Vellum checks.
+
+The files under `docs/evidence/hosted-macos-advisory/` are labeled pre-change
+baselines. A post-merge follow-up must capture hosted-macOS running plus queued
+jobs and the Vellum required-check queue wait at the same hour of day.

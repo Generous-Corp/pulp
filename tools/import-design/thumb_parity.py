@@ -279,7 +279,7 @@ def main() -> int:
     print(f"\nblocks visibly different (dE2000 > {args.threshold}): {len(findings)} of ~{total_blocks}\n")
     print(f"  {'design x,y':>14}  {'dE':>6}  {'figma':>9}  {'ours':>9}")
     for f in findings[: args.top]:
-        print(f"  {f['design_x']:>6},{f['design_y']:<7}  {f["dE2000"]:>6}  "
+        print(f"  {f['design_x']:>6},{f['design_y']:<7}  {f['dE2000']:>6}  "
               f"{f['figma_rgb']:>9}  {f['ours_rgb']:>9}")
 
     if args.json:

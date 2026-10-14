@@ -8,7 +8,10 @@
 
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 #include <pulp/gpu_audio/flow_pans.hpp>
-#include <pulp/render/gpu_compute.hpp>
+
+namespace pulp::render {
+class GpuCompute;
+}
 
 namespace pulp::gpu_audio {
 
@@ -56,6 +59,7 @@ public:
     /// fixed processing block (power of two recommended).
     GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
                       std::vector<std::vector<float>> irs);
+    ~GpuMultiConvolver() override;
 
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
@@ -68,9 +72,7 @@ public:
     /// True if the GPU compute device initialized and the multi-IR plan built.
     bool gpu_available() const { return gpu_ != nullptr; }
     /// The live compute backend ("Metal"/"D3D12"/"Vulkan"), or "" if CPU-only.
-    std::string backend() const {
-        return gpu_ ? gpu_->capabilities().backend : std::string();
-    }
+    std::string backend() const;
     uint32_t num_ir() const { return num_ir_; }
     uint32_t fft_size() const { return fft_size_; }
 

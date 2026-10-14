@@ -112,13 +112,13 @@ std::string widget_make_expr(const IRNode& node,
         case NativeWidgetKind::fader:
             return "std::make_unique<pulp::view::Fader>()";
         case NativeWidgetKind::meter:
-            return "std::make_unique<pulp::view::Meter>()";
+            return "pulp::view::make_data_display(\"pulp.level\")";
         case NativeWidgetKind::xy_pad:
             return "std::make_unique<pulp::view::XYPad>()";
         case NativeWidgetKind::waveform:
-            return "std::make_unique<pulp::view::WaveformView>()";
+            return "pulp::view::make_data_display(\"pulp.series\")";
         case NativeWidgetKind::spectrum:
-            return "std::make_unique<pulp::view::SpectrumView>()";
+            return "pulp::view::make_data_display(\"pulp.bins\")";
         case NativeWidgetKind::image_view:
             return "std::make_unique<pulp::view::ImageView>()";
         case NativeWidgetKind::canvas:
@@ -405,9 +405,16 @@ void emit_widget_specific(std::ostringstream& out,
             const auto value = float_expr(ctx, semantics.normalized_value);
             const auto peak = float_expr(ctx, semantics.peak_value);
             emit_line(out, depth, opts.indent_spaces,
-                      std::string(var) + "->set_level(/* imported static meter level */ " + value + ", " + peak + ");");
+                      "if (auto* level = dynamic_cast<pulp::view::LevelDisplay*>(" +
+                          std::string(var) + ".get())) level->set_levels(" + value + ", " + peak +
+                          ");");
             if (semantics.horizontal)
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_orientation(pulp::view::Meter::Orientation::horizontal);");
+                emit_line(out, depth, opts.indent_spaces,
+                          "if (auto* level = dynamic_cast<pulp::view::LevelDisplay*>(" +
+                              std::string(var) +
+                              ".get())) "
+                              "level->set_level_orientation(pulp::view::LevelDisplay::Orientation::"
+                              "horizontal);");
             break;
         }
         case NativeWidgetKind::xy_pad:
@@ -419,7 +426,9 @@ void emit_widget_specific(std::ostringstream& out,
         case NativeWidgetKind::waveform:
             if (semantics.waveform_shape)
                 emit_line(out, depth, opts.indent_spaces,
-                          std::string(var) + "->set_preview_shape(" + cpp_string_literal(*semantics.waveform_shape) + ");");
+                          "if (auto* series = dynamic_cast<pulp::view::SeriesDisplay*>(" +
+                              std::string(var) + ".get())) series->set_series_preview(" +
+                              cpp_string_literal(*semantics.waveform_shape) + ");");
             break;
         case NativeWidgetKind::image_view:
             if (auto asset_id = first_asset_id(node)) {
@@ -773,6 +782,16 @@ void emit_node(std::ostringstream& out,
     if (!faithful)
         emit_line(out, depth, ctx.opts.indent_spaces,
                   "auto " + var + " = " + widget_make_expr(node, resolved, ctx.manifest) + ";");
+    // Optional provider displays can be absent when the audio seam is not linked.
+    // Their factories return the erased View pointer, so only those variables
+    // can use the core View fallback. Ordinary widgets retain their concrete
+    // ownership type.
+    const bool provider_display = resolved.kind == NativeWidgetKind::meter ||
+                                  resolved.kind == NativeWidgetKind::waveform ||
+                                  resolved.kind == NativeWidgetKind::spectrum;
+    if (provider_display && !faithful)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  "if (!" + var + ") " + var + " = std::make_unique<pulp::view::View>();");
     emit_line(out, depth, ctx.opts.indent_spaces,
               var + "->set_id(" + cpp_string_literal(resolved.id) + ");");
     if (node.stable_anchor_id && !node.stable_anchor_id->empty())

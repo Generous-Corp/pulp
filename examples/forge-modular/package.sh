@@ -144,8 +144,9 @@ print(manifest["slug"], manifest["version"], len(manifest["modules"]))
         echo "Rack pack provenance requires a clean tracked source tree" >&2
         return 1
     fi
-    cmake --build "$build_root" --target forge-modular-package \
-          --parallel "${PULP_PACKAGE_JOBS:-8}"
+    PULP_BUILD_JOBS="${PULP_PACKAGE_JOBS:-8}" \
+        bash "$REPO/tools/ci/governed-build.sh" \
+        cmake --build "$build_root" --target forge-modular-package
     if [[ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]]; then
         rm -f "$manifest_tmp"
         echo "Rack rebuild changed tracked source; review and commit it before packaging" >&2
@@ -279,8 +280,10 @@ print(d["version"], d["source_sha"], d["content_sha256"])
     "$REPO/forge-seam/populate.sh" "$clean_source"
     cmake -S "$clean_source" -B "$clean_build" -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_PREFIX_PATH="$prefix"
-    cmake --build "$clean_build" --target ForgeModular_Standalone ForgeModular_AU \
-          ForgeModular_VST3 ForgeModular_CLAP --parallel "${PULP_PACKAGE_JOBS:-8}"
+    PULP_BUILD_JOBS="${PULP_PACKAGE_JOBS:-8}" \
+        bash "$REPO/tools/ci/governed-build.sh" \
+        cmake --build "$clean_build" --target ForgeModular_Standalone ForgeModular_AU \
+        ForgeModular_VST3 ForgeModular_CLAP
     FORGE_SOURCE_BASE="$base"
     FORGE_SEAM_TREE_SHA="$(git -C "$REPO" rev-parse 'HEAD^{tree}')"
     BUILD_DIR="$clean_build"
@@ -621,7 +624,7 @@ check_has_binary() {
         echo "WRONG SHELL: $binary does not contain \"$SHELL_MARKER\"." >&2
         echo "  This is the old examples/forge-modular shell, not the Forge one." >&2
         echo "  Build the Forge worktree and point --build-dir at it:" >&2
-        echo "    forge-seam/populate.sh && cmake --build /tmp/forge-cur/build -j8" >&2
+        echo "    forge-seam/populate.sh && bash \"\$REPO/tools/ci/governed-build.sh\" cmake --build /tmp/forge-cur/build" >&2
         echo "    package.sh --build-dir /tmp/forge-cur/build …" >&2
         return 1
     fi
