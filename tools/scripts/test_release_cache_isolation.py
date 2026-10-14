@@ -14,7 +14,8 @@ job that signs, notarizes, attests or publishes AND compiles must therefore:
   because PulpConfigureCheckCache.cmake include()s the files it finds there;
 * restore no actions/cache, no Namespace cache action or volume, and no
   setup-action cache (`with: cache:`, setup-emsdk `actions-cache-folder`,
-  setup-go unless `cache: false`). Saving with
+  setup-go unless `cache: false`, setup-node unless
+  `package-manager-cache: false`). Saving with
   actions/cache/save is allowed: it only publishes what this trusted job
   produced, for other lanes to verify before use.
 
@@ -66,7 +67,11 @@ SHARED_CACHE_ACTIONS = ("actions/cache", "setup-namespace-macos-cache",
 # (setup-python/-node/-java `cache: pip`, setup-emsdk `actions-cache-folder`).
 CACHE_INPUTS = ("cache", "actions-cache-folder")
 # Actions that restore a cache unless told not to: `cache` must be false.
-CACHE_BY_DEFAULT = ("actions/setup-go@",)
+CACHE_BY_DEFAULT = {
+    "actions/setup-go@": "cache",
+    # v5+ caches npm automatically when a package.json names a packageManager.
+    "actions/setup-node@": "package-manager-cache",
+}
 # Write-only: a job that saves a cache reads nothing back from it.
 WRITE_ONLY_CACHE_ACTIONS = ("actions/cache/save@",)
 
@@ -80,8 +85,10 @@ def reads_shared_cache(uses: str, with_inputs: dict | None = None) -> bool:
     for key in CACHE_INPUTS:
         if key in inputs and str(inputs[key]).strip().lower() not in ("", "false"):
             return True
-    return (uses.startswith(CACHE_BY_DEFAULT)
-            and str(inputs.get("cache", "")).strip().lower() != "false")
+    for prefix, off_switch in CACHE_BY_DEFAULT.items():
+        if uses.startswith(prefix):
+            return str(inputs.get(off_switch, "")).strip().lower() != "false"
+    return False
 
 
 def _load(path: Path) -> dict:
@@ -268,11 +275,14 @@ class SigningJobsReadNoSharedCache(unittest.TestCase):
                              ("actions/setup-node@v4", {"cache": "npm"}),
                              ("mymindstorm/setup-emsdk@v14", {"actions-cache-folder": "emsdk"}),
                              ("actions/setup-go@v5", {}),
-                             ("actions/setup-go@v5", {"cache": True})):
+                             ("actions/setup-go@v5", {"cache": True}),
+                             # setup-node caches by itself unless told not to.
+                             ("actions/setup-node@v7", {"node-version": "22"}),
+                             ("actions/setup-node@v7", {"package-manager-cache": True})):
             with self.subTest(uses=uses, inputs=inputs):
                 self.assertTrue(reads_shared_cache(uses, inputs))
         for uses, inputs in (("actions/setup-python@v6", {"python-version": "3.12"}),
-                             ("actions/setup-node@v4", {"cache": ""}),
+                             ("actions/setup-node@v7", {"cache": "", "package-manager-cache": False}),
                              ("actions/setup-go@v5", {"cache": False})):
             with self.subTest(uses=uses, inputs=inputs):
                 self.assertFalse(reads_shared_cache(uses, inputs))
@@ -285,6 +295,25 @@ class SigningJobsReadNoSharedCache(unittest.TestCase):
         node = next(s for s in job["steps"] if (s.get("uses") or "").startswith("actions/setup-node@"))
         self.assertFalse(reads_shared_cache(node["uses"], node.get("with")))
         self.assertTrue(reads_shared_cache(node["uses"], {**(node.get("with") or {}), "cache": "npm"}))
+
+
+class WranglerIsPinned(unittest.TestCase):
+    """wrangler-action v4 installs the latest wrangler unless told a version."""
+
+    def test_every_wrangler_action_step_pins_an_exact_version(self) -> None:
+        steps = 0
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            for job_id, job in (_load(path).get("jobs") or {}).items():
+                for step in (job or {}).get("steps") or []:
+                    if not (step.get("uses") or "").startswith("cloudflare/wrangler-action@"):
+                        continue
+                    steps += 1
+                    with self.subTest(workflow=path.name, job=job_id, step=step.get("name")):
+                        version = str((step.get("with") or {}).get("wranglerVersion", ""))
+                        self.assertRegex(version, r"^\d+\.\d+\.\d+$",
+                                         "set with.wranglerVersion to an exact x.y.z")
+        # Control: the production deploy step was found at all.
+        self.assertGreaterEqual(steps, 1)
 
 
 class ThirdPartyClonesArePinned(unittest.TestCase):

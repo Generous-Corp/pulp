@@ -278,6 +278,9 @@ jobs:
         if: steps.relevance.outputs.run == 'true'
         with:
           node-version: "22"
+          # setup-node v5+ restores an npm cache by itself when a package.json
+          # names a packageManager; this job deploys, so it never restores one.
+          package-manager-cache: false
 
       - name: Set up wasi-sdk (pinned)
         if: steps.relevance.outputs.run == 'true'
@@ -558,6 +561,10 @@ jobs:
         if: ${{ steps.relevance.outputs.run == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:
+          # wrangler-action v4 installs the latest wrangler when this is unset,
+          # which would fetch an unpinned tool mid-deploy. Exact version, bumped
+          # deliberately (npm dist-tag `latest` on 2026-10-14).
+          wranglerVersion: "4.151.0"
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: examples/web-demos/wclap-build/cloudflare

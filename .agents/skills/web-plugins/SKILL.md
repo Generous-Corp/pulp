@@ -39,7 +39,12 @@ slice archive is checked against the manifest digest on every run (one left at
 re-downloaded) and unpacked fresh into `RUNNER_TEMP`, as is wasi-sdk. That
 "Fetch and verify the Skia wasm slice" step is the one path. The deploy job
 restores no `actions/cache`; on a main push it only saves the verified archive
-(`actions/cache/save`) for `web-plugins.yml` PR runs, which re-verify it. Do not reintroduce
+(`actions/cache/save`) for `web-plugins.yml` PR runs, which re-verify it. Its
+`setup-node` sets `package-manager-cache: false`, because setup-node v5+ restores
+an npm cache by itself when a package.json names a packageManager. Its
+wrangler-action step pins `wranglerVersion` to an exact 4.x.y; wrangler-action v4
+otherwise installs the latest wrangler in the middle of the production deploy.
+`test_release_cache_isolation.py` checks both. Bump the pin deliberately. Do not reintroduce
 `[ -d "$HOME/choc-src" ] ||`, `if [ ! -d "$HOME/skia-wasm" ]` or an
 `actions/cache` restore of an extracted tree: a reused tree cannot be checked
 against its pin. The deploy job also disables ccache and re-fetches FetchContent
