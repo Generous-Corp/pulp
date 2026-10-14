@@ -237,8 +237,20 @@ own tools: once enforcement is on, it lets the check pass with a banner naming
 every difference, on every run. It is refused on a fleet host, one with
 `~/.config/pulp/fleet-host` or `PULP_FLEET_HOST=1`.
 
-Every CI build leg (macOS, Linux, Windows) runs the check before configuring
-and shows the differences as warnings on the run. It never fails a leg.
+It also runs on its own, once, before a build:
+
+- every configure of the Pulp checkout runs it (`tools/cmake/PulpToolchainCheck.cmake`),
+  which covers `pulp build`, `pulp dev`, `pulp loop` and a raw `cmake -S . -B build`
+  alike, and prints its lines as configure status. It does not run when Pulp is a
+  subproject of another build, so SDK and plugin projects never see it;
+- `setup.sh`, including the `setup.sh --deps-only` that `pulp build` runs on a cold
+  checkout, runs it before fetching any dependency;
+- every CI build leg (macOS, Linux, Windows) runs it as its own step before
+  configuring and shows the differences as warnings on the run (the configure and
+  `setup.sh --ci` skip it there, so it is reported once).
+
+In warn mode none of these fails. Once the manifest is in enforce mode a
+difference stops the configure and `setup.sh` with the same lines.
 
 ## Building plugins with the Pulp SDK
 
@@ -269,9 +281,9 @@ section is here so the direction is visible, not as instructions.
 - **A published mise binary.** The macOS arm64 build the fleet runs is pinned
   by digest today; a reproducible build from source, published with checksums
   for every platform, is still to come.
-- **The check before every build.** `pulp build`, `pulp dev`, `pulp loop`,
-  `setup.sh` and the generators of committed files run the environment check
-  first, warn only at the start.
+- **The check before generators of committed files.** The generators that
+  write committed files run the environment check first, and refuse outside the
+  pinned environment.
 - **Rust from the manifest.** Generate `rust-toolchain.toml` from the manifest
   so cargo uses the pinned Rust instead of the current `stable`.
 - **CI images built from the lock.** The macOS CI image installs its tools with

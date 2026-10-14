@@ -9973,6 +9973,7 @@
    "inputs": [
     ".github/workflows/build.yml",
     "experimental/pulp-rs",
+    "tools/cmake/PulpToolchainCheck.cmake",
     "tools/toolchain",
     "tools/toolchain/check_env.py",
     "tools/toolchain/expected.json",

@@ -439,5 +439,81 @@ class FleetReportTests(unittest.TestCase):
         self.assertEqual(before, set(Path(tempfile.gettempdir()).glob("pulp-fleet-report-*")))
 
 
+REPO = HERE.parents[1]
+
+
+@unittest.skipIf(shutil.which("cmake") is None or os.name == "nt", "needs cmake and a POSIX stub")
+class ConfigureWiringTests(unittest.TestCase):
+    """tools/cmake/PulpToolchainCheck.cmake runs the check once per configure."""
+
+    def configure(self, exit_code: int, *, subproject: bool = False, env_extra=None) -> subprocess.CompletedProcess:
+        td = tempfile.mkdtemp(prefix="pulp-toolchain-cmake-")
+        self.addCleanup(shutil.rmtree, td, True)
+        root = Path(td)
+        fake = root / "pulp"
+        (fake / "tools/toolchain").mkdir(parents=True)
+        (fake / "tools/toolchain/check_env.py").write_text(
+            "import pathlib, sys\n"
+            "pathlib.Path(sys.argv[0]).with_name('ran').write_text(' '.join(sys.argv[1:]), encoding='utf-8')\n"
+            "print('toolchain-check: cmake: expected 4.3.3, found 3.28.3; fix: x')\n"
+            f"sys.exit({exit_code})\n", encoding="utf-8")
+        module = REPO / "tools/cmake/PulpToolchainCheck.cmake"
+        (fake / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.21)\nproject(FakePulp NONE)\n"
+            f'set(PULP_ROOT_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}")\ninclude("{module}")\n', encoding="utf-8")
+        source = fake
+        if subproject:
+            outer = root / "outer"
+            outer.mkdir()
+            (outer / "CMakeLists.txt").write_text(
+                f'cmake_minimum_required(VERSION 3.21)\nproject(Outer NONE)\nadd_subdirectory("{fake}" pulp)\n',
+                encoding="utf-8")
+            source = outer
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"}
+        env.update(env_extra or {})
+        self.ran = fake / "tools/toolchain/ran"
+        return subprocess.run(
+            ["cmake", "-S", str(source), "-B", str(root / "build"), f"-DPython3_EXECUTABLE={sys.executable}"],
+            env=env, capture_output=True, text=True, encoding="utf-8", check=False)
+
+    def test_warn_mode_prints_and_configures(self) -> None:
+        out = self.configure(0)
+        self.assertEqual(0, out.returncode, out.stdout + out.stderr)
+        self.assertIn("-- toolchain-check: cmake: expected 4.3.3, found 3.28.3; fix: x", out.stdout)
+        self.assertIn("--quiet", self.ran.read_text(encoding="utf-8"))
+
+    def test_enforce_mode_stops_the_configure(self) -> None:
+        out = self.configure(1)
+        self.assertNotEqual(0, out.returncode)
+        self.assertIn("expected 4.3.3, found 3.28.3", out.stderr)
+
+    def test_an_unrunnable_check_does_not_stop_the_configure(self) -> None:
+        out = self.configure(3)
+        self.assertEqual(0, out.returncode, out.stdout + out.stderr)
+        self.assertIn("toolchain-check: could not run (exit 3)", out.stdout)
+
+    def test_skipped_as_a_subproject_and_under_github_actions(self) -> None:
+        self.assertEqual(0, self.configure(1, subproject=True).returncode)
+        self.assertFalse(self.ran.exists())
+        self.assertEqual(0, self.configure(1, env_extra={"GITHUB_ACTIONS": "true"}).returncode)
+        self.assertFalse(self.ran.exists())
+
+    def test_the_checkout_configure_includes_it(self) -> None:
+        text = (REPO / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn('include("${PULP_ROOT_DIR}/tools/cmake/PulpToolchainCheck.cmake")', text)
+
+
+class SetupWiringTests(unittest.TestCase):
+    def test_setup_runs_the_check_before_fetching_dependencies(self) -> None:
+        text = (REPO / "setup.sh").read_text(encoding="utf-8")
+        check = text.index('"$TOOLCHAIN_PY" "$TOOLCHAIN_CHECK" --root "$REPO_ROOT"')
+        self.assertLess(check, text.index('step "Setting up external SDKs"'))
+        self.assertLess(text.index('if $DEPS_ONLY; then\n    DEPENDENCY_ERRORS'), len(text))
+        # It sits outside the full-setup-only audit block, so `pulp build`'s
+        # `setup.sh --deps-only` runs it too.
+        audit_end = text.index("fi # full environment audit")
+        self.assertGreater(check, audit_end)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -191,6 +191,8 @@ if(PULP_INTEL_CANARY)
     endif()
     message(STATUS "Pulp: Intel canary lint clean.")
 endif()
+# Report host tools that differ from tools/toolchain/manifest.toml.
+include("${PULP_ROOT_DIR}/tools/cmake/PulpToolchainCheck.cmake")
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
 # Lottie / Bodymovin JSON animation playback via the bundled skottie module.
 # Opt-in (default OFF): builds that don't use it link nothing extra and the
