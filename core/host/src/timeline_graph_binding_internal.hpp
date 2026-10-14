@@ -1,7 +1,7 @@
 #pragma once
 
 #include <pulp/host/custom_node_type.hpp>
-#include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/host/signal_graph_executor_contract.hpp>
 #include <pulp/host/timeline_graph_binding.hpp>
 #include <pulp/playback/event_compensation.hpp>
 #include <pulp/playback/realtime_stretch_renderer.hpp>
