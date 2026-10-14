@@ -129,18 +129,26 @@ def main(argv: list[str] | None = None) -> int:
         # The ctest script-input inventory is compiled/build-owned and has no
         # build-free equivalent. Run it only when a configured build is
         # explicitly supplied; never substitute its schema-only validator.
-        # Resolved here, in the caller's checkout: the lane runs with the
-        # temporary merge-tree worktree as its root, where a relative
-        # PULP_GATES_BUILD_DIR ("build-script-inputs") names nothing.
+        # The lane runs with the temporary merge-tree worktree as its root,
+        # and a configured build belongs to the checkout it was configured
+        # in: its registered commands carry that checkout's absolute paths,
+        # which the lane reads as paths outside the (temporary) checkout and
+        # reports as manifest drift. So the check runs here only for a build
+        # configured under this root -- which the caller's PULP_GATES_BUILD_DIR
+        # never is -- and is otherwise skipped, named. gates.sh runs the same
+        # lane against the caller's build in its own pass.
         configured = os.environ.get("PULP_GATES_BUILD_DIR", "")
         configured_path = Path(configured).expanduser().resolve() if configured else None
-        if configured_path is not None and (configured_path / "CMakeCache.txt").exists():
+        if (configured_path is not None and (configured_path / "CMakeCache.txt").exists()
+                and configured_path.is_relative_to(tmp.resolve())):
             checks.insert(0, ("script-test-inputs-drift", [sys.executable,
                             str(tmp / "tools/scripts/gates_script_inputs.py"),
                             "--base", base_sha, "--repo-root", str(tmp),
                             "--build-dir", str(configured_path)]))
         else:
-            print("merge-tree script-state: script-test-inputs-drift (no build-free variant; skipped)", file=sys.stderr)
+            print("merge-tree script-state: script-test-inputs-drift (no build-free variant; "
+                  "a build configured outside the merge-tree root cannot be checked here; skipped)",
+                  file=sys.stderr)
 
         ledger = tmp / "tools/scripts/vellum_inheritance_ledger_check.py"
         if ledger.exists():
