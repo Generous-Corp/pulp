@@ -3042,8 +3042,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/package_cli.py",
           "state": "pulp-owned-retained",
-          "revision": "63d9b3e0915ee6f423dfa6ca859f4bd108fcc294",
-          "object_id": "f5bd152ff4e6986ba6cd164eebd06a80edbf3687",
+          "revision": "5cd6293671d645f6f6658c55aad65c1a960dad28",
+          "object_id": "6b02c0e65795ebfa16ee67dc854e53b8d68bea5f",
           "object_type": "blob"
         },
         {
@@ -3066,8 +3066,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_package_cli.py",
           "state": "pulp-owned-retained",
-          "revision": "63d9b3e0915ee6f423dfa6ca859f4bd108fcc294",
-          "object_id": "17f06af50886183a3bb2448fc34b6e2df99d1e27",
+          "revision": "5cd6293671d645f6f6658c55aad65c1a960dad28",
+          "object_id": "3b8ef1fe6e2977608d37c611e4761a62d0dc491e",
           "object_type": "blob"
         },
         {
