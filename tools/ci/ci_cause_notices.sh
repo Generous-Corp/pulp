@@ -94,6 +94,26 @@ while at < len(text):
         if job.get("conclusion") in ("failure", "timed_out"):
             print(job["id"])' "$listing")
 
+# Job logs carry ANSI colour, and a gh that guards against terminal escape
+# sequences refuses such a response unless asked; an older gh rejects the
+# flag itself, and then the bare command is the one that works.
+fetch_log() {
+    local path=$1 out=$2 err=$3
+    if "$gh_cmd" api --allow-escape-sequences "$path" >"$out" 2>"$err"; then
+        return 0
+    fi
+    if grep -q "unknown flag" "$err"; then
+        "$gh_cmd" api "$path" >"$out" 2>"$err"
+        return
+    fi
+    return 1
+}
+
+# gh's own message, on one line, for a fetch that failed.
+why() {
+    tr '\n' ' ' <"$1" | cut -c1-300
+}
+
 failed=0
 named=0
 for id in $ids; do
@@ -104,12 +124,13 @@ for id in $ids; do
     fi
     payload="$work/job-$id.json"
     log="$work/job-$id.log"
-    if ! "$gh_cmd" api "repos/$repo/actions/jobs/$id" >"$payload"; then
-        echo "ci-cause: job $id payload unavailable"
+    err="$work/job-$id.err"
+    if ! "$gh_cmd" api "repos/$repo/actions/jobs/$id" >"$payload" 2>"$err"; then
+        echo "ci-cause: job $id payload unavailable: $(why "$err")"
         continue
     fi
-    if ! "$gh_cmd" api "repos/$repo/actions/jobs/$id/logs" >"$log"; then
-        echo "ci-cause: job $id log unavailable"
+    if ! fetch_log "repos/$repo/actions/jobs/$id/logs" "$log" "$err"; then
+        echo "ci-cause: job $id log unavailable: $(why "$err")"
         continue
     fi
     # The payload names the job; GITHUB_JOB here would name this job instead.

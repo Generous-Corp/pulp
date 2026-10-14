@@ -65,7 +65,23 @@ class CiCauseNotices(unittest.TestCase):
                 for arg in "$@"; do case "$arg" in repos/*) path="$arg" ;; esac; done
                 case "$path" in
                   */attempts/*/jobs*) cat "{fixtures}/jobs.json" ;;
-                  */jobs/*/logs) id="${{path%/logs}}"; id="${{id##*/}}"; cat "{fixtures}/job-$id.log" ;;
+                  */jobs/*/logs)
+                    # A current gh refuses a log's ANSI colour without the flag;
+                    # FAKE_GH_OLD plays a gh that does not know the flag at all.
+                    case " $* " in
+                      *" --allow-escape-sequences "*)
+                        if [ -n "${{FAKE_GH_OLD:-}}" ]; then
+                          echo "unknown flag: --allow-escape-sequences" >&2; exit 1
+                        fi ;;
+                      *)
+                        if [ -z "${{FAKE_GH_OLD:-}}" ]; then
+                          echo "the response contains terminal escape sequences; pass --allow-escape-sequences" >&2
+                          exit 1
+                        fi ;;
+                    esac
+                    id="${{path%/logs}}"; id="${{id##*/}}"
+                    [ -f "{fixtures}/job-$id.log" ] || {{ echo "HTTP 410: Gone" >&2; exit 1; }}
+                    printf '\033[31m'; cat "{fixtures}/job-$id.log" ;;
                   */jobs/*) id="${{path##*/}}"; cat "{fixtures}/job-$id.json" ;;
                   *) exit 1 ;;
                 esac
@@ -123,12 +139,40 @@ class CiCauseNotices(unittest.TestCase):
         self.assertIn("--job macos --repo Generous-Corp/pulp --event pull_request --pr 4242 --notice", extracts[0])
         self.assertIn("--job slow ", extracts[1])
         self.assertIn("job-11.log", extracts[0])
-        self.assertIn("ci-cause: job 15 log unavailable", result.stdout)
+        self.assertIn("ci-cause: job 15 log unavailable: HTTP 410: Gone", result.stdout)
+        self.assertIn("--allow-escape-sequences repos/Generous-Corp/pulp/actions/jobs/11/logs", self.calls_text())
         self.assertEqual(result.stdout.count("::notice title=ci-cause::"), 2)
         self.assertIn("ci-cause: 3 failed job(s), 2 record(s), Shipyard v0.326.0", result.stdout)
         self.assertIn(
             "releases/download/v0.326.0/shipyard-linux-x64", self.calls_text(),
         )
+
+    def test_a_gh_without_the_escape_flag_falls_back_to_the_bare_fetch(self) -> None:
+        sha = hashlib.sha256(self.binary.read_bytes()).hexdigest()
+        result = self.run_script(
+            CI_CAUSE_CURL=str(self.fake_curl(self.binary)), CI_CAUSE_TEST_SHA256=sha, FAKE_GH_OLD="1"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count("::notice title=ci-cause::"), 2, result.stdout)
+        self.assertIn("gh api repos/Generous-Corp/pulp/actions/jobs/11/logs", self.calls_text())
+
+    def test_the_bare_fetch_on_a_current_gh_names_nothing(self) -> None:
+        # Control: the refusal the escape flag exists for. A script that drops
+        # the flag reads no log, and says why.
+        script = self.tmp / "bare.sh"
+        text = SCRIPT.read_text(encoding="utf-8")
+        bare = text.replace('api --allow-escape-sequences "$path"', 'api "$path"')
+        self.assertNotEqual(bare, text)
+        script.write_text(bare, encoding="utf-8")
+        sha = hashlib.sha256(self.binary.read_bytes()).hexdigest()
+        env = dict(self.env, CI_CAUSE_CURL=str(self.fake_curl(self.binary)), CI_CAUSE_TEST_SHA256=sha)
+        result = subprocess.run(
+            ["bash", str(script)], env=env, text=True, encoding="utf-8", capture_output=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count("::notice title=ci-cause::"), 0, result.stdout)
+        self.assertIn("ci-cause: job 11 log unavailable: the response contains terminal escape sequences", result.stdout)
+        self.assertIn("ci-cause: 3 failed job(s), 0 record(s)", result.stdout)
 
     def test_a_binary_that_does_not_match_the_pin_is_never_run(self) -> None:
         junk = self.tmp / "junk"
