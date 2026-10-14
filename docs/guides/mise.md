@@ -193,7 +193,14 @@ python3 tools/toolchain/update.py rust --to 1.98.0      # no lock rows: rustup i
 python3 tools/toolchain/update.py shipyard --to v0.270.0
 ```
 
-It also marks the tool's `[evidence]` row as a `target` (the gate has not been
+`python3 tools/toolchain/deps.py` groups the three operations under one
+command: `check` (the environment report), `resolve` (fetch what a build needs
+once, before building: `setup.sh --deps-only` for the pinned dependency sources,
+then `npm ci` for any lockfile directory whose `node_modules` differs, then the
+report; it never installs a host tool), and `update` (the above, finding the
+installed pinned mise itself).
+
+`update` also marks the tool's `[evidence]` row as a `target` (the gate has not been
 seen running it yet). It never commits, pushes or installs. If any step fails
 it restores every file it touched. Moving mise itself is refused: that takes a
 reviewed source build of the new release.

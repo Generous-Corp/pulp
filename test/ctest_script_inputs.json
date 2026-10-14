@@ -10008,7 +10008,11 @@
   "toolchain-update-selftest": {
    "entry": "tools/toolchain/test_update.py",
    "inputs": [
+    "experimental/pulp-rs",
     "tools/shipyard.toml",
+    "tools/toolchain",
+    "tools/toolchain/check_env.py",
+    "tools/toolchain/deps.py",
     "tools/toolchain/expected.json",
     "tools/toolchain/generate.py",
     "tools/toolchain/manifest.toml",

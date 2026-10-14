@@ -117,5 +117,75 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual([], update.diff_table(data, data, lock, lock))
 
 
+class DepsCommandTests(unittest.TestCase):
+    """tools/toolchain/deps.py, the script behind `pulp deps`."""
+
+    def setUp(self) -> None:
+        import json
+
+        import deps
+
+        self.deps = deps
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        self.root = Path(self.td.name)
+        (self.root / "tools/toolchain").mkdir(parents=True)
+        doc = json.loads((REPO / generate.EXPECTED).read_text(encoding="utf-8"))
+        doc["npm_prefixes"] = ["fresh", "stale"]
+        (self.root / generate.EXPECTED).write_text(json.dumps(doc), encoding="utf-8")
+        for prefix, version in (("fresh", "1.0.0"), ("stale", "0.9.0")):
+            (self.root / prefix / "node_modules").mkdir(parents=True)
+            (self.root / prefix / "package-lock.json").write_text(
+                json.dumps({"packages": {"node_modules/a": {"version": "1.0.0"}}}), encoding="utf-8")
+            (self.root / prefix / "node_modules/.package-lock.json").write_text(
+                json.dumps({"packages": {"node_modules/a": {"version": version}}}), encoding="utf-8")
+
+    def test_resolve_fetches_sources_then_only_stale_npm_trees_then_reports(self) -> None:
+        calls = []
+        reported = []
+        self.addCleanup(setattr, self.deps.check_env, "main", self.deps.check_env.main)
+        self.deps.check_env.main = lambda argv: reported.append(argv) or 0
+        rc = self.deps.resolve(self.root, run=lambda argv, cwd: calls.append(argv) or 0)
+        self.assertEqual(0, rc)
+        self.assertIn("--deps-only", calls[0])
+        self.assertEqual([["npm", "ci", "--prefix", "stale", "--no-audit", "--no-fund"]], calls[1:])
+        self.assertEqual([["--root", str(self.root)]], reported)
+
+    def test_resolve_stops_when_setup_fails(self) -> None:
+        calls = []
+        rc = self.deps.resolve(self.root, run=lambda argv, cwd: calls.append(argv) or 7)
+        self.assertEqual(7, rc)
+        self.assertEqual(1, len(calls))
+
+    def test_dispatch(self) -> None:
+        self.assertEqual(0, self.deps.main(["--help"]))
+        self.assertEqual(2, self.deps.main(["frobnicate"]))
+        self.assertEqual(2, self.deps.main(["resolve", "--now"]))
+        seen = []
+        self.addCleanup(setattr, self.deps.check_env, "main", self.deps.check_env.main)
+        self.deps.check_env.main = lambda argv: seen.append(argv) or 0
+        self.assertEqual(0, self.deps.main(["check", "--format", "json"]))
+        self.assertEqual(["--format", "json"], seen[0][2:])
+
+    def test_update_finds_the_installed_pinned_mise(self) -> None:
+        import update as update_module
+
+        seen = []
+        self.addCleanup(setattr, update_module, "main", update_module.main)
+        update_module.main = lambda argv: seen.append(argv) or 0
+        self.addCleanup(setattr, self.deps, "default_mise", self.deps.default_mise)
+        self.deps.default_mise = lambda root: Path("/opt/pinned/mise")
+        self.assertEqual(0, self.deps.main(["update", "cmake", "--to", "4.3.4"]))
+        self.assertIn("--mise", seen[0])
+        self.assertEqual("/opt/pinned/mise", seen[0][seen[0].index("--mise") + 1])
+        self.assertEqual(0, self.deps.main(["update", "cmake", "--to", "4.3.4", "--mise", "/x"]))
+        self.assertEqual(1, seen[1].count("--mise"))
+
+    def test_check_path_parses_as_python_39(self) -> None:
+        import ast
+
+        ast.parse((REPO / "tools/toolchain/deps.py").read_text(encoding="utf-8"), feature_version=(3, 9))
+
+
 if __name__ == "__main__":
     unittest.main()
