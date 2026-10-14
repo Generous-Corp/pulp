@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import os
 import pathlib
 import shutil
 import subprocess
@@ -46,6 +47,30 @@ class FindWgpuLibTests(unittest.TestCase):
             (nested / "libwgpu_native.dylib").write_text("dylib", encoding="utf-8")
 
             self.assertEqual(pc.find_wgpu_lib(build, "linux-x64"), lib)
+
+    def test_find_wgpu_lib_searches_isolated_fetchcontent_roots(self) -> None:
+        for var in ("PULP_SHARED_FETCHCONTENT_SOURCE_DIR", "PULP_FETCHCONTENT_BASE_DIR"):
+            with self.subTest(var=var), tempfile.TemporaryDirectory() as td:
+                root = pathlib.Path(td)
+                build = root / "build"
+                build.mkdir()
+                isolated = root / "isolated"
+                lib = isolated / "wgpu-linux-x86_64-release-v24.0.3.1" / "lib" / "libwgpu_native.so"
+                lib.parent.mkdir(parents=True)
+                lib.write_text("so", encoding="utf-8")
+                # A different build in a shared home cache must not win.
+                home = root / "home"
+                stale = home / ".cache" / "pulp" / "old" / "libwgpu_native.so"
+                stale.parent.mkdir(parents=True)
+                stale.write_text("stale", encoding="utf-8")
+                env = {k: v for k, v in os.environ.items()
+                       if k not in ("PULP_SHARED_FETCHCONTENT_SOURCE_DIR",
+                                    "PULP_FETCHCONTENT_BASE_DIR",
+                                    "XDG_CACHE_HOME", "LOCALAPPDATA")}
+                env[var] = str(isolated)
+                with mock.patch.dict(os.environ, env, clear=True), \
+                        mock.patch.object(pathlib.Path, "home", return_value=home):
+                    self.assertEqual(pc.find_wgpu_lib(build, "linux-x64"), lib)
 
     def test_find_wgpu_lib_finds_windows_dll_name(self) -> None:
         with tempfile.TemporaryDirectory() as td:
