@@ -497,6 +497,7 @@
                 set_tests_properties(pulp-gpu-shared-io-paced-convolution-probe PROPERTIES
                     FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                     RESOURCE_LOCK pulp_gpu
+                    SKIP_RETURN_CODE 77
                     TIMEOUT 150)
 
                 # Reach the authoritative P2 matrix driver in the configured

@@ -1,6 +1,7 @@
 #include "detail/gpu_convolver_trial_config.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "support/audio_test_signals.hpp"
+#include "support/physical_qualification_outcome.hpp"
 #include "support/unique_temp_dir.hpp"
 
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -646,13 +647,26 @@ int run(Config config) {
                                         provider_identity.native_runtime_authenticated &&
                                         engine_id != 0;
     const bool receipt_authenticated = gpu_progress && provider_authenticated && raw_census_valid;
+    // A sound run whose only gap is the native-runtime identity, which no
+    // source at the Dawn boundary can authenticate yet, is unavailable (a
+    // typed skip), not failed.
+    const auto identity_gate =
+        pulp::gpu_audio::detail::gate_shared_io_provider_identity(provider_identity);
+    const auto outcome = pulp::test::physical_qualification_outcome(
+        correct && gpu_progress && raw_census_valid && engine_id != 0, identity_gate);
+    const char* status =
+        outcome == pulp::test::PhysicalQualificationOutcome::Completed     ? "completed"
+        : outcome == pulp::test::PhysicalQualificationOutcome::Unavailable ? "unavailable"
+                                                                           : "failed";
     const auto emit = [&](std::ostream& stream) {
         const auto executable_sha =
             pulp::runtime::sha256_file_hex(config.executable, 512ull * 1024ull * 1024ull)
                 .value_or("");
-        stream << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\",\"status\":\""
-               << (correct && receipt_authenticated ? "completed" : "failed")
-               << "\",\"performance_verdict\":\"unassigned\",\"path\":\"shared_async\","
+        stream << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\",\"status\":\"" << status
+               << "\",";
+        if (outcome == pulp::test::PhysicalQualificationOutcome::Unavailable)
+            stream << "\"reason\":\"" << pulp::test::kNativeRuntimeIdentityUnavailable << "\",";
+        stream << "\"performance_verdict\":\"unassigned\",\"path\":\"shared_async\","
                   "\"completion_service\":\"process_events\",\"callback_driver\":\"sleep_until_non_"
                   "rt\","
                   "\"gpu_timestamps\":\"unavailable\",\"clock\":\"steady_clock\","
@@ -695,7 +709,13 @@ int run(Config config) {
         stream << ",\"adapter_vendor_id\":" << provider_identity.adapter_vendor_id
                << ",\"adapter_device_id\":" << provider_identity.adapter_device_id
                << ",\"native_runtime_identity_status\":";
-        json_string(stream, provider_identity.native_runtime_authenticated ? "passed" : "failed");
+        json_string(
+            stream,
+            provider_identity.native_runtime_authenticated ? "passed"
+            : identity_gate ==
+                    pulp::gpu_audio::detail::SharedIoProviderIdentityGate::NativeRuntimeUnavailable
+                ? "unavailable"
+                : "failed");
         stream << ",\"native_runtime_name\":";
         json_string(stream, provider_identity.native_runtime_name);
         stream << ",\"native_runtime_backend\":";
@@ -784,6 +804,8 @@ int run(Config config) {
     const bool passed = correct && receipt_authenticated;
     if (config.expect_failure)
         return !passed && config.corrupt_output ? 0 : 1;
+    if (outcome == pulp::test::PhysicalQualificationOutcome::Unavailable)
+        return 77;
     return passed ? 0 : 1;
 }
 } // namespace

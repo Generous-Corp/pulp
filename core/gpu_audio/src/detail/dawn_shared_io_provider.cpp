@@ -2542,15 +2542,19 @@ SharedIoProviderIdentity DawnSharedIoProvider::provider_identity() const noexcep
         identity.adapter_vendor_id = adapter.vendor_id;
         identity.adapter_device_id = adapter.device_id;
         identity.native_runtime_name = adapter.native_runtime_name;
-        identity.native_runtime_backend = adapter.backend;
+        // AdapterInfo describes the selected adapter. It is not an
+        // independently authenticated native runtime identity, so do not
+        // manufacture one by copying AdapterInfo.backendType/backend.
+        identity.native_runtime_backend.clear();
         identity.authenticated =
             !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
             !identity.adapter_backend.empty() && identity.adapter_vendor_id != 0 &&
             !adapter.native_runtime_revision.empty() &&
             adapter.native_runtime_revision == identity.provider_revision &&
-            !identity.native_runtime_name.empty() &&
-            identity.native_runtime_backend == identity.adapter_backend;
-        identity.native_runtime_authenticated = identity.authenticated;
+            !identity.native_runtime_name.empty();
+        // No independent native-runtime backend source is available at this
+        // boundary. Keep this explicitly unavailable for strict qualification.
+        identity.native_runtime_authenticated = false;
     } catch (...) {
         return {};
     }
