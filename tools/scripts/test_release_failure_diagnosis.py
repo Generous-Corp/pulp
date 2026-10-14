@@ -572,6 +572,17 @@ class RepeatedPackageFailureIsTagImmutable(unittest.TestCase):
         other = PACKAGE_LOG.replace(WGPU_ERROR, "ERROR: disk full")
         self.assertEqual(self.failures({11: PACKAGE_LOG, 12: other}), ())
 
+    def test_a_cancelled_package_step_is_no_evidence(self) -> None:
+        """Two transient failures (runner lost or step cancelled) leave no
+        packager error; the whole-log fallback would name the apt dbus decoy
+        for both and open the circuit on a flake."""
+        head, _, _ = PACKAGE_LOG.partition("ERROR: wgpu native library not found")
+        head = head.rsplit("\n", 1)[0]
+        cancelled = head + "\n2026-10-14T03:03:16.9Z ##[error]The operation was canceled.\n"
+        self.assertIn("system_bus_socket", rfd.first_error_line(cancelled),
+                      "control: the human-facing diagnosis still falls back to the decoy")
+        self.assertEqual(self.failures({11: cancelled, 12: cancelled}), ())
+
     def test_missing_logs_are_no_evidence(self) -> None:
         self.assertEqual(self.failures({}), ())
 

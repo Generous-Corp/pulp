@@ -121,6 +121,19 @@ def failing_step_lines(lines: list[str]) -> list[str]:
     return lines[start:end + 1]
 
 
+def failing_step_error(log_text: str) -> str:
+    """The first specific error inside the failing step, or "".
+
+    Stricter than `first_error_line`: no whole-log fallback. When the step has
+    no exit-code marker (runner lost, timeout, cancellation) or no specific
+    line, there is no evidence of what failed, and an earlier step's
+    error-shaped line (the apt dbus warning every Linux job prints) must not
+    stand in for it. Used where two failures are compared for identity.
+    """
+    lines = [strip_timestamp(raw).strip() for raw in log_text.splitlines()]
+    return _scan_errors(failing_step_lines(lines))[0][:_ERROR_LINE_LIMIT]
+
+
 def first_error_line(log_text: str) -> str:
     """Return the first line that says what went wrong, or "".
 

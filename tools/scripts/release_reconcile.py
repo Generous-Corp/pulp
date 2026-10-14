@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from release_failure_diagnosis import (  # noqa: E402
     Diagnosis,
     diagnose,
-    first_error_line,
+    failing_step_error,
     release_asset_coordinates,
 )
 
@@ -955,7 +955,7 @@ def fetch_job_log(
         try:
             completed = run(
                 cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, text=True, errors="replace",
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                 timeout=60, check=False,
             )
         except (subprocess.SubprocessError, OSError) as exc:
@@ -1001,8 +1001,10 @@ def repeated_package_failures(
             step = _first_failed_step(job)
             if not step.startswith(PACKAGE_STEP_PREFIX):
                 continue
-            # Without the log there is no evidence the two failures are the same.
-            first = first_error_line(log_fetcher(job.get("id")))
+            # Only an error inside the failing step is evidence. Without one
+            # (no log, or a step that was lost or cancelled) two failures cannot be shown
+            # to be the same, so the tag stays on the retry path.
+            first = failing_step_error(log_fetcher(job.get("id")))
             if not first:
                 continue
             seen.setdefault((job.get("name", "unknown job"), step, first), set()).add(run["id"])
