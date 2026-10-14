@@ -23,10 +23,18 @@
 # the preferred in-tool upgrade path. This wrapper is only needed
 # for the initial bootstrap and for `--status` checks against the pin.
 #
+# The version comes from tools/toolchain/manifest.toml (generated into
+# tools/shipyard.toml), and so do the sha256 digests of every release asset
+# (generated into tools/toolchain/shipyard.sha256). The upstream installer
+# checks no digest, so this wrapper downloads the asset itself and refuses one
+# whose sha256 differs from the pin before the installer runs, then checks
+# that the binary the installer put in place is the pinned one.
+#
 # Exit codes:
 #   0   success (or already installed and matching pin)
 #   1   user error (bad flag, missing tools)
-#   2   download / verification failure (propagated from installer)
+#   2   download / verification failure (a digest mismatch, or propagated
+#       from the installer)
 
 set -euo pipefail
 
@@ -67,6 +75,12 @@ if [ -z "$VERSION" ]; then
     echo "Error: could not parse version from $PIN_FILE" >&2
     exit 1
 fi
+
+SUMS_FILE="$SCRIPT_DIR/toolchain/shipyard.sha256"
+REPO="$(sed -n '/^\[shipyard\]/,/^\[/p' "$PIN_FILE" \
+    | sed -n 's/^repo[[:space:]]*=[[:space:]]*"\(.*\)"$/\1/p' \
+    | head -1)"
+REPO="${REPO:-danielraffel/Shipyard}"
 
 # Supply-chain: pin the installer script to the same Shipyard release
 # tag as the binary it installs. Downloading `install.sh` from `main`
@@ -138,12 +152,120 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ] \
     exit 1
 fi
 
+# ── Verify the pinned release assets ────────────────────────────────────────
+# Asset names follow the upstream installer: the CLI, plus the workstream
+# provider on Linux and Windows. macOS ships a .dmg holding the binary.
+
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+pinned_digest() {
+    awk -v name="$1" '$1 !~ /^#/ && $2 == name {print $1}' "$SUMS_FILE"
+}
+
+case "$(uname -s)" in
+    Darwin) ASSET_OS=macos ;;
+    Linux)  ASSET_OS=linux ;;
+    MINGW*|MSYS*|CYGWIN*) ASSET_OS=windows ;;
+    *) echo "Error: unsupported OS $(uname -s)" >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+    arm64|aarch64) ASSET_ARCH=arm64 ;;
+    x86_64|amd64)  ASSET_ARCH=x64 ;;
+    *) echo "Error: unsupported architecture $(uname -m)" >&2; exit 1 ;;
+esac
+EXE=""
+[ "$ASSET_OS" = windows ] && EXE=".exe"
+if [ "$ASSET_OS" = macos ]; then
+    ASSETS="shipyard-macos-$ASSET_ARCH.dmg"
+else
+    ASSETS="shipyard-$ASSET_OS-$ASSET_ARCH$EXE shipyard-workstream-provider-$ASSET_OS-$ASSET_ARCH$EXE"
+fi
+
+if ! [ -f "$SUMS_FILE" ]; then
+    echo "Error: $SUMS_FILE is missing; fix: python3 tools/toolchain/generate.py" >&2
+    exit 1
+fi
+
+VERIFY=1
+if [ "${SHIPYARD_SKIP_DOWNLOAD:-0}" = "1" ]; then
+    # The installer reuses the binary already in its install dir and downloads
+    # nothing, so there is no download to check.
+    VERIFY=0
+    echo "→ NOT VERIFIED: SHIPYARD_SKIP_DOWNLOAD=1 reuses the installed binary; its digest is not checked"
+fi
+
+VERIFY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pulp-shipyard-verify.XXXXXX")"
+trap 'rm -rf "$VERIFY_DIR"' EXIT
+for asset in $ASSETS; do
+    [ "$VERIFY" = 1 ] || break
+    want="$(pinned_digest "$asset")"
+    url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+    if [ -z "$want" ]; then
+        echo "Error: tools/toolchain/manifest.toml pins no sha256 for $asset ($VERSION)." >&2
+        echo "  fix: python3 tools/toolchain/generate.py --shipyard $VERSION" >&2
+        exit 2
+    fi
+    if ! curl -fsSL "$url" -o "$VERIFY_DIR/$asset"; then
+        echo "Error: could not download $url to verify it." >&2
+        exit 2
+    fi
+    got="$(sha256_of "$VERIFY_DIR/$asset")"
+    if [ "$got" != "$want" ]; then
+        echo "Error: $url does not match the pin; refusing to install." >&2
+        echo "  pinned sha256:   $want (tools/toolchain/manifest.toml [shipyard.assets])" >&2
+        echo "  received sha256: $got" >&2
+        echo "  The release asset was replaced after it was pinned. Confirm with the Shipyard" >&2
+        echo "  release notes or its publisher, then accept it in a reviewed PR:" >&2
+        echo "    python3 tools/toolchain/generate.py --shipyard $VERSION" >&2
+        exit 2
+    fi
+done
+[ "$VERIFY" = 1 ] && echo "→ Verified $ASSETS against tools/toolchain/manifest.toml"
+
+# The binary the installer should put in place: the raw asset on Linux and
+# Windows, the `shipyard` file inside the verified .dmg on macOS.
+EXPECTED_BINARY_SHA=""
+if [ "$VERIFY" = 0 ]; then
+    :
+elif [ "$ASSET_OS" = macos ]; then
+    mnt="$VERIFY_DIR/mnt"
+    if hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$VERIFY_DIR/$ASSETS" >/dev/null 2>&1; then
+        [ -f "$mnt/shipyard" ] && EXPECTED_BINARY_SHA="$(sha256_of "$mnt/shipyard")"
+        hdiutil detach "$mnt" >/dev/null 2>&1 || true
+    fi
+    if [ -z "$EXPECTED_BINARY_SHA" ]; then
+        echo "Error: could not read the shipyard binary inside the verified $ASSETS." >&2
+        exit 2
+    fi
+else
+    EXPECTED_BINARY_SHA="$(pinned_digest "shipyard-$ASSET_OS-$ASSET_ARCH$EXE")"
+fi
+
 # ── Delegate to upstream installer ──────────────────────────────────────────
 
 echo "→ Installing Shipyard $VERSION via upstream install.sh"
 echo "    source: $UPSTREAM_INSTALLER"
 
 SHIPYARD_VERSION="$VERSION" bash <(curl -fsSL "$UPSTREAM_INSTALLER")
+
+# The installer downloads the asset again; check that what it installed is the
+# binary verified above, so a replacement between the two downloads is caught.
+INSTALLED="${SHIPYARD_INSTALL_DIR:-$HOME/.local/bin}/shipyard$EXE"
+installed_sha="$(sha256_of "$INSTALLED" 2>/dev/null || true)"
+if [ "$VERIFY" = 1 ] && [ "$installed_sha" != "$EXPECTED_BINARY_SHA" ]; then
+    echo "Error: $INSTALLED is not the pinned Shipyard $VERSION binary." >&2
+    echo "  expected sha256: $EXPECTED_BINARY_SHA" >&2
+    echo "  installed sha256: ${installed_sha:-unreadable}" >&2
+    echo "  Do not run it. Re-run ./tools/install-shipyard.sh; if this repeats, the" >&2
+    echo "  release changed while installing: report it before accepting any new digest." >&2
+    exit 2
+fi
 
 # ── Legacy cleanup (post-success only) ──────────────────────────────────────
 # Earlier versions of this script installed to ~/.pulp/shipyard/<v>/

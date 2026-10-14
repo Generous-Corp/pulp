@@ -9992,10 +9992,14 @@
   "toolchain-test_generate-selftest": {
    "entry": "tools/toolchain/test_generate.py",
    "inputs": [
+    "tools/cmake",
+    "tools/shipyard.toml",
     "tools/toolchain",
+    "tools/toolchain/check_env.py",
     "tools/toolchain/expected.json",
     "tools/toolchain/generate.py",
     "tools/toolchain/manifest.toml",
+    "tools/toolchain/shipyard.sha256",
     "tools/toolchain/test_generate.py"
    ],
    "kind": "python"

@@ -30,7 +30,10 @@ class GenerateTests(unittest.TestCase):
         )
         (root / ".shipyard/vm-image.toml").write_text(body, encoding="utf-8")
         (root / ".shipyard/vm-image.intel.toml").write_text(body, encoding="utf-8")
-        for name in (generate.MISE_CONFIG, generate.MISE_TOOLS_CONFIG, generate.MISE_LOCK, generate.EXPECTED):
+        for name in (
+            generate.MISE_CONFIG, generate.MISE_TOOLS_CONFIG, generate.MISE_LOCK, generate.EXPECTED,
+            generate.SHIPYARD_PIN, generate.SHIPYARD_SUMS,
+        ):
             (root / name).write_bytes((REPO / name).read_bytes())
 
     def test_five_runs_are_byte_identical(self) -> None:
@@ -242,6 +245,87 @@ class StrictPinTests(unittest.TestCase):
                 with self.assertRaises(ValueError) as ctx:
                     generate.load(path)
                 self.assertIn(needle, str(ctx.exception))
+
+    def test_a_pin_bump_that_edits_only_shipyard_toml_refuses(self) -> None:
+        # `shipyard pin bump` rewrites tools/shipyard.toml alone; the manifest
+        # stays the authority and the refusal names the command that moves it.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            generate.generate(root, None, True)  # control: the copy is current
+            pin = root / generate.SHIPYARD_PIN
+            pin.write_text(pin.read_text(encoding="utf-8").replace('version = "v0.269.1"', 'version = "v0.270.0"'), encoding="utf-8")
+            self.assert_check_refuses(root, "generate.py --shipyard <tag>")
+            generate.generate(root, None, False)
+            self.assertIn('version = "v0.269.1"', pin.read_text(encoding="utf-8"))
+            self.assertIn("# Pulp's pinned Shipyard release.", pin.read_text(encoding="utf-8"))
+
+    def test_hand_edited_shipyard_digests_refuse(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            sums = root / generate.SHIPYARD_SUMS
+            sums.write_text(sums.read_text(encoding="utf-8").replace("8d723c27", "0d723c27"), encoding="utf-8")
+            self.assert_check_refuses(root, "stale or hand-edited")
+
+    def test_shipyard_bump_takes_every_digest_from_the_release(self) -> None:
+        assets = {"shipyard-linux-x64": "a" * 64, "shipyard-macos-arm64.dmg": "b" * 64}
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            seen = []
+            original = generate.fetch_shipyard_assets
+            generate.fetch_shipyard_assets = lambda repo, tag: seen.append((repo, tag)) or dict(assets)
+            try:
+                generate.generate(root, None, False, shipyard="v0.270.0")
+            finally:
+                generate.fetch_shipyard_assets = original
+            self.assertEqual([("danielraffel/Shipyard", "v0.270.0")], seen)
+            data, _ = generate.load(root / "tools/toolchain/manifest.toml")
+            self.assertEqual("v0.270.0", data["shipyard"]["version"])
+            self.assertEqual(assets, data["shipyard"]["assets"])  # old asset rows are gone
+            self.assertIn('version = "v0.270.0"', (root / generate.SHIPYARD_PIN).read_text(encoding="utf-8"))
+            self.assertIn("a" * 64 + "  shipyard-linux-x64", (root / generate.SHIPYARD_SUMS).read_text(encoding="utf-8"))
+            generate.generate(root, None, True)
+            with self.assertRaises(ValueError):
+                generate.record_shipyard_pin(root / "tools/toolchain/manifest.toml", "latest", assets)
+            with self.assertRaises(ValueError) as ctx:
+                generate.generate(root, None, False, shipyard="v0.269.9")
+            self.assertIn("older than the pinned v0.270.0", str(ctx.exception))
+
+    def test_shipyard_pin_must_be_exact(self) -> None:
+        source = generate.SOURCE.read_text(encoding="utf-8")
+        cases = (
+            ('version = "v0.269.1"', 'version = "latest"', "exact release tag"),
+            ('"shipyard-linux-x64" = "327dd4b5', '"shipyard-linux-x64" = "327dd4b', "64-hex"),
+            ('repo = "danielraffel/Shipyard"', 'repo = "Shipyard"', "owner/name"),
+        )
+        for old, new, needle in cases:
+            with self.subTest(new=new), tempfile.TemporaryDirectory() as td:
+                self.assertIn(old, source)
+                path = Path(td) / "manifest.toml"
+                path.write_text(source.replace(old, new, 1), encoding="utf-8")
+                with self.assertRaises(ValueError) as ctx:
+                    generate.load(path)
+                self.assertIn(needle, str(ctx.exception))
+
+    def test_shipyard_is_never_a_build_input(self) -> None:
+        # A wrong or missing Shipyard is a fleet finding, never a build one: it
+        # is not a mise build tool, the build check does not read it, and no
+        # configure or dependency bootstrap runs it.
+        self.assertNotIn("shipyard", (REPO / generate.MISE_TOOLS_CONFIG).read_text(encoding="utf-8").lower())
+        self.assertNotIn("shipyard", (REPO / generate.EXPECTED).read_text(encoding="utf-8").lower())
+        self.assertNotIn("shipyard", (REPO / "tools/toolchain/check_env.py").read_text(encoding="utf-8").lower())
+        invokes = re.compile(r"(^|[\s;&|(`$])shipyard\s+[a-z]")
+        build_files = [REPO / "CMakeLists.txt", REPO / "setup.sh", REPO / "setup.ps1"]
+        build_files += sorted((REPO / "tools/cmake").rglob("*.cmake"))
+        self.assertGreater(len(build_files), 10)  # control: the scan reads real files
+        for path in build_files:
+            if not path.exists():
+                continue
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                code = line.split("#", 1)[0]
+                self.assertIsNone(invokes.search(code), f"{path}:{number} runs shipyard: {line.strip()}")
 
     def test_any_lock_edit_without_the_manifest_digest_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as td:

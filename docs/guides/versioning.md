@@ -13,7 +13,9 @@ Pulp versions three surfaces independently:
   the SDK that downstream consumers receive.
 - **Claude Code plugin** — `.claude-plugin/plugin.json` `version`
   and `.claude-plugin/marketplace.json` `version`.
-- **Shipyard pinned binary** — `tools/shipyard.toml`, consumed by
+- **Shipyard pinned binary** — `[shipyard]` in `tools/toolchain/manifest.toml`
+  (version, repo, and the sha256 of every release asset), generated into
+  `tools/shipyard.toml` and `tools/toolchain/shipyard.sha256`, consumed by
   `tools/install-shipyard.sh`. This is an upstream release we
   consume, not a surface we ship; see [Dependency Update
   Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for pin bumps.
@@ -611,22 +613,36 @@ coverage silently.
 
 ## Shipyard-binary pin bumps
 
-When a new Shipyard release drops, the pin lives in `tools/shipyard.toml`
-(consumed by `tools/install-shipyard.sh`). Bumping it is a normal
+When a new Shipyard release drops, the pin lives in `[shipyard]` of
+`tools/toolchain/manifest.toml`: the release tag, the repository, and the
+sha256 of every release asset. `tools/toolchain/generate.py` writes the tag and
+repository into `tools/shipyard.toml` (the file Shipyard itself reads) and the
+digests into `tools/toolchain/shipyard.sha256`. Bumping it is a normal
 dependency-pin update, not a Pulp-versioning event:
 
 ```bash
 python3 tools/deps/audit.py --strict --check-upstream --format markdown
-shipyard pin bump --to vX.Y.Z
+python3 tools/toolchain/generate.py --shipyard vX.Y.Z
+./tools/install-shipyard.sh && shipyard --version
 python3 tools/deps/validate_hosts.py
 ```
 
-Prefer `shipyard pin bump` over hand-editing `tools/shipyard.toml`. It owns
-the stale-worktree, downgrade, redundant-main-pin, version, and release-asset
-guards. The pin file holds only `version` and `repo`: `tools/install-shipyard.sh`
-runs the upstream installer at that tag, which picks the platform asset (since
-v0.50.0 an Apple-Silicon-only signed `.dmg` on macOS) and verifies its checksum
-itself, so a bump changes `version` and nothing else.
+`generate.py --shipyard` takes every asset digest from the release's own
+`checksums.sha256` and refuses a tag older than the current pin (a downgrade is
+a hand edit of the manifest in a reviewed PR). `shipyard pin bump` still edits
+only `tools/shipyard.toml`, so its change fails the
+`toolchain-test_generate-selftest` drift test, whose message names the command
+above. Use `generate.py --shipyard` until `shipyard pin bump` calls it.
+
+The upstream installer verifies no checksum, so `tools/install-shipyard.sh`
+downloads the platform assets itself (the CLI and, on Linux and Windows, the
+workstream provider; on macOS the signed `.dmg`) and refuses any whose sha256
+differs from the pin before the installer runs. It names the URL, both digests
+and the command that accepts a re-published asset in a reviewed PR. After the
+installer finishes it checks that the installed binary is the verified one (on
+macOS, the `shipyard` binary inside the verified `.dmg`), because the installer
+downloads again. `SHIPYARD_SKIP_DOWNLOAD=1` reuses an installed binary and
+prints that nothing was verified.
 
 Pulp tracks the latest verified public Shipyard release by default while still
 recording an immutable exact tag. Automation should propose the newest release;
