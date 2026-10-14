@@ -129,6 +129,18 @@ class CheckEnvTests(unittest.TestCase):
         self.assertEqual(self.tmp / check_env.RUST_DIR, seen["rustc"])
         self.assertIsNone(seen["cmake"])
 
+    def test_missing_rustup_toolchain_is_named_and_never_installed(self) -> None:
+        self.host.text["rustc"] = "error: toolchain '1.97.1-aarch64-apple-darwin' is not installed"
+        findings = self.collect(self.matching())
+        self.assertIn("found a rust-toolchain.toml toolchain that is not installed", findings[0].line())
+
+    @unittest.skipIf(os.name == "nt", "a shell-script stand-in for rustc")
+    def test_version_probe_turns_off_rustup_auto_install(self) -> None:
+        probe = self.tmp / "rustc"
+        probe.write_text('#!/bin/sh\necho "RUSTUP_AUTO_INSTALL=$RUSTUP_AUTO_INSTALL"\n', encoding="utf-8")
+        probe.chmod(0o755)
+        self.assertIn("RUSTUP_AUTO_INSTALL=0", check_env.run_version([str(probe), "--version"], None))
+
     def test_unparseable_version_is_reported_as_unknown(self) -> None:
         self.host.text["ninja"] = "ninja: something odd"
         findings = self.collect(self.matching())

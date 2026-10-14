@@ -84,11 +84,16 @@ Runner = Callable[[List[str], Optional[Path]], Optional[str]]
 
 
 def run_version(argv: List[str], cwd: Optional[Path]) -> Optional[str]:
-    """stdout+stderr of `argv`, or None when it cannot run within 20 s."""
+    """stdout+stderr of `argv`, or None when it cannot run within 20 s.
+
+    RUSTUP_AUTO_INSTALL=0: a rustup proxy otherwise downloads the toolchain a
+    rust-toolchain.toml names when it is missing, and this check never fetches.
+    """
+    env = dict(os.environ, RUSTUP_AUTO_INSTALL="0")
     try:
         out = subprocess.run(
             argv, cwd=str(cwd) if cwd else None, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=20, check=False,
+            encoding="utf-8", errors="replace", timeout=20, check=False, env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -146,6 +151,8 @@ def check_tools(
         text = run([path, "--version"], cwd)
         match = re.search(pattern, text or "", re.M)
         found = match.group(1) if match else "unknown"
+        if key == "rust" and not match and "not installed" in (text or ""):
+            found = "a rust-toolchain.toml toolchain that is not installed"
         if found == want:
             continue
         note = ""
