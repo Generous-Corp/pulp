@@ -1,17 +1,17 @@
 #include "detail/shared_io_arena.hpp"
 #include "detail/shared_io_program_session.hpp"
 
-#include <webgpu/webgpu.h>
 #include <CommonCrypto/CommonDigest.h>
+#include <webgpu/webgpu.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <memory>
@@ -95,8 +95,8 @@ std::string sha256_hex(const void* data, std::size_t size) {
     return result;
 }
 
-void adapter_callback(WGPURequestAdapterStatus status, WGPUAdapter adapter,
-                      WGPUStringView message, void* userdata, void*) {
+void adapter_callback(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView message,
+                      void* userdata, void*) {
     auto* result = static_cast<AdapterWait*>(userdata);
     result->status = status;
     result->adapter = adapter;
@@ -105,8 +105,8 @@ void adapter_callback(WGPURequestAdapterStatus status, WGPUAdapter adapter,
         std::fprintf(stderr, "wgpu adapter: %s\n", string_view(message));
 }
 
-void device_callback(WGPURequestDeviceStatus status, WGPUDevice device,
-                     WGPUStringView message, void* userdata, void*) {
+void device_callback(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringView message,
+                     void* userdata, void*) {
     auto* result = static_cast<DeviceWait*>(userdata);
     result->status = status;
     result->device = device;
@@ -136,8 +136,7 @@ class WgpuNativeStagedProgram final : public SharedIoPreparedProgram {
 
     bool prepare(SharedIoArenaProvider& provider,
                  std::span<const SlotBufferHandle> slots) noexcept override;
-    bool submit(SharedIoArenaProvider& provider, const SlotResources& resources,
-                SlotToken token,
+    bool submit(SharedIoArenaProvider& provider, const SlotResources& resources, SlotToken token,
                 std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept override;
     bool release() noexcept override;
 
@@ -231,20 +230,20 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             slot->index = index;
             slot->input.resize(input_bytes);
             slot->output.resize(output_bytes);
-            slot->input_gpu = make_buffer(input_bytes, WGPUBufferUsage_Storage |
-                                                         WGPUBufferUsage_CopyDst);
-            slot->output_gpu = make_buffer(output_bytes, WGPUBufferUsage_Storage |
-                                                         WGPUBufferUsage_CopySrc);
-            slot->readback_gpu = make_buffer(output_bytes, WGPUBufferUsage_CopyDst |
-                                                         WGPUBufferUsage_MapRead);
+            slot->input_gpu =
+                make_buffer(input_bytes, WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst);
+            slot->output_gpu =
+                make_buffer(output_bytes, WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc);
+            slot->readback_gpu =
+                make_buffer(output_bytes, WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead);
             constexpr std::array<float, 3> weights{{-0.6180188f, 1.0314025f, -1.0111561f}};
-            slot->weights_gpu = make_buffer(sizeof(weights), WGPUBufferUsage_Storage |
-                                                       WGPUBufferUsage_CopyDst);
+            slot->weights_gpu =
+                make_buffer(sizeof(weights), WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst);
             struct Params {
                 std::uint32_t in_ch, out_ch, block, weight_offset;
             } params{1, 3, 64, 0};
-            slot->params_gpu = make_buffer(sizeof(params), WGPUBufferUsage_Uniform |
-                                                       WGPUBufferUsage_CopyDst);
+            slot->params_gpu =
+                make_buffer(sizeof(params), WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst);
             if (slot->input_gpu == nullptr || slot->output_gpu == nullptr ||
                 slot->readback_gpu == nullptr || slot->weights_gpu == nullptr ||
                 slot->params_gpu == nullptr) {
@@ -304,8 +303,7 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
     }
 
     bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
-        return handle.provider == this && handle.device == device_ &&
-               !handle.lifetime.expired() &&
+        return handle.provider == this && handle.device == device_ && !handle.lifetime.expired() &&
                std::any_of(slots_.begin(), slots_.end(), [&](const auto& slot) {
                    return !slot->retired && handle.slot == slot->index &&
                           handle.input_buffer == slot->input_gpu &&
@@ -322,8 +320,7 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         if (instance_ != nullptr)
             wgpuInstanceProcessEvents(instance_);
         for (auto& pending : pending_) {
-            if (pending->queue_done &&
-                pending->queue_status == WGPUQueueWorkDoneStatus_Success &&
+            if (pending->queue_done && pending->queue_status == WGPUQueueWorkDoneStatus_Success &&
                 !pending->map_started)
                 begin_map(*pending);
             if (pending->map_started && pending->map_done && !pending->terminal_ready)
@@ -367,10 +364,8 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
                 .gpu_timestamps = false};
     }
 
-    bool submit_program(Slot& slot, SlotToken token,
-                        std::shared_ptr<SharedIoTerminalInbox> inbox,
-            WGPUComputePipeline pipeline,
-                        WGPUBindGroupLayout layout) noexcept {
+    bool submit_program(Slot& slot, SlotToken token, std::shared_ptr<SharedIoTerminalInbox> inbox,
+                        WGPUComputePipeline pipeline, WGPUBindGroupLayout layout) noexcept {
         try {
             auto pending = std::make_unique<Pending>();
             pending->owner = this;
@@ -439,7 +434,9 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         }
     }
 
-    WGPUDevice device() const noexcept { return device_; }
+    WGPUDevice device() const noexcept {
+        return device_;
+    }
 
   private:
     WgpuNativeStagedProvider() = default;
@@ -485,8 +482,8 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         (void)wgpuAdapterRequestDevice(adapter_, &device_descriptor, device_callback_info);
         if (!process_until(instance_, device_wait.done) ||
             device_wait.status != WGPURequestDeviceStatus_Success) {
-            std::fprintf(stderr, "wgpu device request failed done=%d status=%d\n",
-                         device_wait.done, static_cast<int>(device_wait.status));
+            std::fprintf(stderr, "wgpu device request failed done=%d status=%d\n", device_wait.done,
+                         static_cast<int>(device_wait.status));
             return false;
         }
         device_ = device_wait.device;
@@ -611,9 +608,9 @@ bool WgpuNativeStagedProgram::prepare(SharedIoArenaProvider& provider,
     return true;
 }
 
-bool WgpuNativeStagedProgram::submit(SharedIoArenaProvider& provider,
-                                     const SlotResources& resources, SlotToken token,
-                                     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept {
+bool WgpuNativeStagedProgram::submit(
+    SharedIoArenaProvider& provider, const SlotResources& resources, SlotToken token,
+    std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept {
     if (!prepared_ || provider_ != &provider || terminal_inbox == nullptr)
         return false;
     auto& native = static_cast<WgpuNativeStagedProvider&>(provider);
@@ -690,8 +687,7 @@ int main() {
             return 5;
         if (sequence == 4) {
             if (completion->status != SharedIoTerminalStatus::RetiredFailed ||
-                session.acquire_output(*completion) ||
-                !session.discard_completion(*completion))
+                session.acquire_output(*completion) || !session.discard_completion(*completion))
                 return 6;
             ++failures;
             continue;
