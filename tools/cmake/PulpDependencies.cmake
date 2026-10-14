@@ -77,7 +77,13 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
         else()
             string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_webgpu_processor)
         endif()
-        if(_pulp_webgpu_processor STREQUAL "arm64" OR _pulp_webgpu_processor STREQUAL "aarch64")
+        if(_pulp_webgpu_processor STREQUAL "arm64ec" OR _pulp_webgpu_processor STREQUAL "arm64x")
+            message(FATAL_ERROR
+                "Pulp: Windows ${_pulp_webgpu_processor} GPU configure is fail-closed. "
+                "The pinned wgpu-native/Skia provider publishes ARM64 and x64 slices, "
+                "but no ARM64EC/ARM64X-compatible provider. Build and provision a "
+                "matching Skia/Dawn/wgpu provider before configuring PULP_ENABLE_GPU=ON.")
+        elseif(_pulp_webgpu_processor STREQUAL "arm64" OR _pulp_webgpu_processor STREQUAL "aarch64")
             if(DEFINED ARCH)
                 set(_pulp_saved_arch "${ARCH}")
             endif()

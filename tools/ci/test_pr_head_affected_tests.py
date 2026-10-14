@@ -357,8 +357,19 @@ class BudgetTests(unittest.TestCase):
     def test_failures_are_reported_and_passes_counted(self) -> None:
         results = step.run_budgeted(self.tmp, ["a", "bad-b", "c"], 60, 1, "", self.tmp, 2)
         self.assertEqual(results["failed"], ["bad-b"])
+        self.assertEqual(results["failure_evidence"]["bad-b"],
+                         "ctest reported a failure without detail")
         self.assertEqual(sorted(results["passed"]), ["a", "c"])
         self.assertEqual(results["skipped"], [])
+
+    def test_failure_evidence_uses_the_first_failing_line_from_real_junit(self) -> None:
+        junit = self.tmp / "evidence.xml"
+        junit.write_text('<testsuite><testcase name="bad"><failure>assert x == y\nsecond line</failure></testcase></testsuite>',
+                         encoding="utf-8")
+        self.assertEqual(step.junit_failure_evidence(junit), {"bad": "assert x == y"})
+
+    def test_annotation_evidence_is_safe_for_one_line_workflow_commands(self) -> None:
+        self.assertEqual(step.annotation_escape("100%\nnext"), "100%25%0Anext")
 
     def test_no_batch_starts_after_the_budget(self) -> None:
         with mock.patch.dict(os.environ, {"FAKE_CTEST_SLEEP": "0.3"}):

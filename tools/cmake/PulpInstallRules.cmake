@@ -800,6 +800,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"

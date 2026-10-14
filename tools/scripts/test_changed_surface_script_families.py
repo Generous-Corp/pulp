@@ -550,6 +550,8 @@ class DriftCheckTest(FamilyFixture):
         self.assertEqual(rc, 2)
         self.assertIn("refusing to write", err.getvalue())
         self.assertIn("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON", err.getvalue())
+        self.assertIn("cause_class=INCOMPLETE_CONFIGURE", err.getvalue())
+        self.assertIn("safe_to_auto_apply=no", err.getvalue())
         self.assertEqual((self.root / families.FAMILIES_FILE).read_text(encoding="utf-8"),
                          "# stale\n")
 
@@ -592,6 +594,50 @@ class DriftCheckTest(FamilyFixture):
 
     def test_drift_without_a_base_is_a_full_blocking_check(self) -> None:
         self.assertEqual(self.check(None), 1)
+
+    def test_removed_main_registration_blocks_independent_of_diff_paths(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_a.py", "")
+        self.script_test("a-selftest", "tools/scripts/test_a.py")
+        generated = families.render(list(self.generate().values()))
+        self.write(str(families.FAMILIES_FILE), generated)
+        subprocess.run(["git", "-C", str(self.root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t",
+                        "commit", "-q", "-m", "base"], check=True)
+        committed = generated.replace('"a-selftest"', '"removed-selftest"')
+        removed = families.globally_removed_registered_tests(self.root, "HEAD", committed, generated)
+        self.assertEqual(removed, ["a-selftest"])
+
+    def test_entrypoint_blocks_removed_main_registration(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_a.py", "")
+        self.script_test("a-selftest", "tools/scripts/test_a.py")
+        generated = families.render(list(self.generate().values()))
+        committed_path = self.root / families.FAMILIES_FILE
+        committed_path.parent.mkdir(parents=True, exist_ok=True)
+        committed_path.write_text(generated, encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t",
+                        "commit", "-q", "-m", "base"], check=True)
+        # Main carries the live entry; the checked-in head inventory deletes it.
+        committed_path.write_text(generated.replace('"a-selftest"', '"removed-selftest"'), encoding="utf-8")
+        saved = (inventory.codemodel_reply_available, inventory.load_ctest_json,
+                 inventory.load_codemodel_targets, families.script_test_inputs.resolve_base,
+                 families.script_test_inputs.changed_files, families.script_test_inputs.advisory_here)
+        inventory.codemodel_reply_available = lambda _build: True
+        inventory.load_ctest_json = lambda _build: self.tests
+        inventory.load_codemodel_targets = lambda _build: model()
+        families.script_test_inputs.resolve_base = lambda _root, _base: "HEAD"
+        families.script_test_inputs.changed_files = lambda _root, _base: {"README.md"}
+        families.script_test_inputs.advisory_here = lambda: False
+        try:
+            rc = families.main(["--repo-root", str(self.root), "--build-dir", BUILD,
+                                "--check", "--base", "HEAD"])
+        finally:
+            (inventory.codemodel_reply_available, inventory.load_ctest_json,
+             inventory.load_codemodel_targets, families.script_test_inputs.resolve_base,
+             families.script_test_inputs.changed_files, families.script_test_inputs.advisory_here) = saved
+        self.assertEqual(rc, 1)
 
     def test_drift_is_advisory_for_unrelated_changes_and_in_merge_groups(self) -> None:
         self.assertEqual(self.check(["core/view/src/widgets.cpp", "docs/guides/local-ci.md"]), 0)

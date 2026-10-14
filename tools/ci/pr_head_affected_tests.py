@@ -400,12 +400,34 @@ def junit_outcomes(path: Path) -> dict[str, str]:
     return outcomes
 
 
+def junit_failure_evidence(path: Path) -> dict[str, str]:
+    """Return the first useful failure line for each failed testcase."""
+    evidence: dict[str, str] = {}
+    if not path.is_file():
+        return evidence
+    for case in ET.parse(path).getroot().iter("testcase"):
+        failure = case.find("failure")
+        if failure is None:
+            failure = case.find("error")
+        if failure is None:
+            continue
+        text = (failure.text or "").strip()
+        evidence[case.get("name", "")] = next((line.strip() for line in text.splitlines() if line.strip()),
+                                               "ctest reported a failure without detail")
+    return evidence
+
+
+def annotation_escape(value: str) -> str:
+    """Keep GitHub workflow-command fields one-line and lossless."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                  label_exclude: str, junit_dir: Path, chunk: int) -> dict:
     """Run ``tests`` in batches until the budget is spent."""
     start = time.monotonic()
     results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
-               "excluded_or_absent": []}
+               "excluded_or_absent": [], "failure_evidence": {}}
     for index in range(0, len(tests), chunk):
         batch = tests[index:index + chunk]
         if time.monotonic() - start >= budget:
@@ -421,6 +443,7 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
             command += ["-LE", label_exclude]
         subprocess.run(command, check=False)
         outcomes = junit_outcomes(junit)
+        results["failure_evidence"].update(junit_failure_evidence(junit))
         for test in batch:
             state = outcomes.get(test)
             if state == "fail":
@@ -623,8 +646,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pr-head-affected-tests: NOTRUN (self-skipped by ctest; not a budget omission): "
               f"{shown}{f' and {more} more' if more > 0 else ''}")
     for test in results["failed"]:
-        print(f"::error title=pr-head-affected-tests::{test} failed on this pull request head; "
-              "it is a test this diff reaches, and it would fail the merge group too")
+        evidence = results.get("failure_evidence", {}).get(test, "ctest reported a failure without detail")
+        reproduce = f"ctest --test-dir {build} -R '^{re.escape(test)}$' --output-on-failure -C Release"
+        message = (f"test={test}; evidence={annotation_escape(evidence)}; cause_class=CTEST_FAILURE; "
+                   f"reproduce=`{reproduce}`; safe_to_auto_apply=no; "
+                   f"verify=`{reproduce}` passes")
+        print(f"::error title=pr-head-affected-tests::{message}")
     return 1 if results["failed"] or results["skipped"] else 0
 
 
