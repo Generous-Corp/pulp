@@ -276,7 +276,7 @@ class EndToEndTests(unittest.TestCase):
         env = {"PATH": str(path), "HOME": str(root / "home")}
         return subprocess.run(
             [sys.executable, str(HERE / "check_env.py"), "--root", str(root), *args],
-            env=env, capture_output=True, text=True, check=False,
+            env=env, capture_output=True, text=True, encoding="utf-8", check=False,
         )
 
     def test_github_annotations_and_exit_codes(self) -> None:
@@ -318,7 +318,7 @@ class EndToEndTests(unittest.TestCase):
     def test_runs_on_the_system_python(self) -> None:
         out = subprocess.run(
             ["/usr/bin/python3", str(HERE / "check_env.py"), "--format", "json"],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8", check=False,
         )
         # 0 or 1 by the manifest's mode; 3 or a traceback means it cannot run there.
         self.assertIn(out.returncode, (0, 1), out.stderr)
