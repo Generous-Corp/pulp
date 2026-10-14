@@ -698,12 +698,6 @@ struct DawnSharedIoProvider::Impl {
         adapter_identity.backend = backend_name(adapter_info.backendType);
         adapter_identity.vendor_id = adapter_info.vendorID;
         adapter_identity.device_id = adapter_info.deviceID;
-        const auto native = observe_native_metal(adapter_identity.name, adapter_identity.vendor_id,
-                                                 adapter_identity.device_id);
-        if (native.authenticated) {
-            adapter_identity.native_runtime_name = native.name;
-            adapter_identity.native_runtime_revision = native.revision;
-        }
         if (!adapter.HasFeature(wgpu::FeatureName::HostMappedPointer)) {
             reason = "host_mapped_pointer_unavailable";
             availability = Availability::Unsupported;
@@ -770,6 +764,16 @@ struct DawnSharedIoProvider::Impl {
             return false;
         }
         device = std::move(device_request->device);
+        // Resolve the native device from the Dawn device itself. Name/vendor
+        // enumeration is only a fallback diagnostic; it cannot prove that a
+        // similarly named adapter is the one Dawn selected.
+        const auto native =
+            observe_native_metal_device(device.Get(), adapter_identity.name,
+                                        adapter_identity.vendor_id, adapter_identity.device_id);
+        if (native.authenticated) {
+            adapter_identity.native_runtime_name = native.name;
+            adapter_identity.native_runtime_revision = native.revision;
+        }
         queue = device.GetQueue();
 
         constexpr auto good_shader = R"wgsl(
@@ -2547,10 +2551,11 @@ SharedIoProviderIdentity DawnSharedIoProvider::provider_identity() const noexcep
             adapter.native_runtime_name.empty() ? std::string{} : adapter.backend;
         identity.authenticated =
             !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
-            !identity.adapter_backend.empty() && identity.adapter_vendor_id != 0 &&
-            !adapter.native_runtime_revision.empty() && !identity.native_runtime_name.empty() &&
+            !identity.adapter_backend.empty() && identity.adapter_vendor_id != 0;
+        identity.native_runtime_authenticated =
+            identity.authenticated && !adapter.native_runtime_revision.empty() &&
+            !identity.native_runtime_name.empty() &&
             identity.native_runtime_backend == identity.adapter_backend;
-        identity.native_runtime_authenticated = identity.authenticated;
     } catch (...) {
         return {};
     }

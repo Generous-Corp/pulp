@@ -26,6 +26,13 @@ NativeRuntimeIdentity observe_native_metal(std::string_view selected_name,
                                            std::uint64_t selected_vendor_id,
                                            std::uint64_t selected_device_id) noexcept;
 
+// Resolve the native device that Dawn actually created. The opaque handle is
+// a WGPUDevice so this private header stays free of Dawn and Objective-C
+// types; implementations without a first-party observer return unavailable.
+NativeRuntimeIdentity observe_native_metal_device(void* dawn_device, std::string_view selected_name,
+                                                  std::uint64_t selected_vendor_id,
+                                                  std::uint64_t selected_device_id) noexcept;
+
 // Host/quiescent-only identity of the provider that owns a prepared shared-I/O
 // session. A false authenticated value is fail-closed and is never physical
 // acceptance evidence.

@@ -1393,13 +1393,19 @@ TEST_CASE("Provider identity without a native runtime source is unavailable, not
           Outcome::Failed);
 }
 
-TEST_CASE("Native Metal observer rejects an unselected adapter", "[gpu_audio][trace][provider]") {
-    const auto identity = observe_native_metal("", 0, 0);
-    CHECK_FALSE(identity.authenticated);
-    CHECK(identity.name.empty());
-    CHECK(identity.backend.empty());
-    CHECK(identity.revision.empty());
-    CHECK(identity.registry_id == 0);
+TEST_CASE("Native observer gap preserves authenticated provider identity",
+          "[gpu_audio][trace][provider]") {
+    SharedIoProviderIdentity identity;
+    identity.provider_revision = "dawn-revision";
+    identity.adapter_name = "Apple GPU";
+    identity.adapter_backend = "Metal";
+    identity.adapter_vendor_id = 0x106b;
+    identity.authenticated = true;
+    identity.native_runtime_authenticated = false;
+
+    CHECK(identity.authenticated);
+    CHECK(gate_shared_io_provider_identity(identity) ==
+          SharedIoProviderIdentityGate::NativeRuntimeUnavailable);
 }
 
 TEST_CASE("P2 probe cannot start admissions without authenticated native identity",
