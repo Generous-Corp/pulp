@@ -108,17 +108,14 @@ function(_cmake_code out path)
     file(STRINGS "${path}" _lines)
     set(_code "")
     foreach(_line IN LISTS _lines)
-        # Older CMake rejects a REGEX MATCH whose result is empty. Blank
-        # lines contribute only whitespace to the normalized code stream.
-        if(_line STREQUAL "")
-            continue()
-        endif()
         if(_line MATCHES "^[ \t]*#")
             continue()
         endif()
         # Cut at the first `#` outside a quoted string: the longest prefix of
-        # unquoted non-`#` text and whole quoted strings ends there.
-        string(REGEX MATCH [=[^([^"#]|"([^"\]|\.)*")*]=] _head "${_line}")
+        # unquoted non-`#` text and whole quoted strings ends there. Older
+        # CMake rejects an empty regex match, so require a sentinel prefix.
+        string(REGEX MATCH [=[^x([^"#]|"([^"\]|\.)*")*]=] _prefixed_head "x${_line}")
+        string(SUBSTRING "${_prefixed_head}" 1 -1 _head)
         string(LENGTH "${_head}" _head_length)
         string(SUBSTRING "${_line}" ${_head_length} 1 _next)
         if(_next STREQUAL "#")
