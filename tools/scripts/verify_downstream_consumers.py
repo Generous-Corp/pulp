@@ -139,6 +139,13 @@ def validate_sdk_recipe(recipe, errors):
         require("cmake --build" in build,
                 "sdk_recipe.build_command must run cmake --build",
                 errors)
+        require("governed-build.sh cmake --build" in build,
+                "sdk_recipe.build_command must route through governed-build.sh",
+                errors)
+        require(re.search(r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+                          , build) is None,
+                "sdk_recipe.build_command must not carry raw parallelism",
+                errors)
     install = recipe.get("install_command")
     if isinstance(install, str):
         for fragment in ("cmake --install", "--prefix \"$PULP_SDK_PREFIX\""):
@@ -204,6 +211,15 @@ def validate_command(command, label, consumer, errors):
     command_text = command.get("command")
     if not isinstance(command_text, str):
         return
+
+    if "cmake --build" in command_text:
+        require("governed-build.sh cmake --build" in command_text,
+                f"{label}.command must route builds through governed-build.sh",
+                errors)
+        require(re.search(r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))",
+                          command_text) is None,
+                f"{label}.command must not carry raw parallelism",
+                errors)
 
     category = consumer.get("category")
     repo = consumer.get("repo")

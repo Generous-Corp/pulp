@@ -18,10 +18,10 @@
       "-DCMAKE_INSTALL_PREFIX=${PULP_SDK_PREFIX}"
     ],
     "build": [
+      "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh",
       "cmake",
       "--build",
-      "${PULP_BUILD_DIR}",
-      "-j"
+      "${PULP_BUILD_DIR}"
     ],
     "install": [
       "cmake",
@@ -58,7 +58,7 @@
         },
         {
           "id": "build",
-          "command": "cmake --build ${CHECKOUT}/build-pulp-sdk -j",
+          "command": "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh cmake --build ${CHECKOUT}/build-pulp-sdk",
           "expected_evidence": "pulp-view-embed library and smoke targets build"
         },
         {
@@ -88,7 +88,7 @@
         },
         {
           "id": "build",
-          "command": "cmake --build ${CHECKOUT}/build-pulp-sdk -j",
+          "command": "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh cmake --build ${CHECKOUT}/build-pulp-sdk",
           "expected_evidence": "iPlug2 embed example builds"
         },
         {
@@ -118,7 +118,7 @@
         },
         {
           "id": "build",
-          "command": "cmake --build ${CHECKOUT}/build-pulp-sdk --target PulpEmbedJucePlugin_All -j",
+          "command": "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh cmake --build ${CHECKOUT}/build-pulp-sdk --target PulpEmbedJucePlugin_All",
           "expected_evidence": "JUCE embed example builds"
         }
       ]

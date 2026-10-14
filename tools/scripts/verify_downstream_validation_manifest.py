@@ -152,6 +152,16 @@ def validate_recipe(recipe: Any, errors: list[str]) -> None:
                     f"canonical_sdk_recipe.required_verification must mention {token}",
                     errors)
 
+    build = recipe.get("build") if isinstance(recipe.get("build"), list) else []
+    build_text = " ".join(str(part) for part in build)
+    require("governed-build.sh cmake --build" in build_text,
+            "canonical_sdk_recipe.build must route through governed-build.sh",
+            errors)
+    require(not re.search(r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))",
+                          build_text),
+            "canonical_sdk_recipe.build must not carry raw parallelism",
+            errors)
+
 
 def validate_check(check: Any, consumer_name: str, errors: list[str]) -> str | None:
     require_exact_keys(check, CHECK_KEYS, f"{consumer_name}.required_checks[]", errors)
@@ -164,6 +174,17 @@ def validate_check(check: Any, consumer_name: str, errors: list[str]) -> str | N
     for key in ("command", "expected_evidence"):
         require(isinstance(check.get(key), str) and check[key],
                 f"{consumer_name}.required_checks[].{key} must be a non-empty string",
+                errors)
+    command = check.get("command")
+    if isinstance(command, str) and "cmake --build" in command:
+        require("governed-build.sh cmake --build" in command,
+                f"{consumer_name}.required_checks[].command must route builds "
+                "through governed-build.sh",
+                errors)
+        require(not re.search(r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))",
+                              command),
+                f"{consumer_name}.required_checks[].command must not carry "
+                "raw parallelism",
                 errors)
     return check_id if isinstance(check_id, str) else None
 
