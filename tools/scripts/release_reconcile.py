@@ -969,12 +969,15 @@ def fetch_job_log(
 
 
 # A `Package CLI` step that fails the same way on two separate runs of one tag
-# is a property of the tag: the packager and everything it reads are frozen in
-# the tag's tree, and marker-era tags refuse current-main overlays. v0.963.0 to
-# v0.965.0 each failed `Package CLI (Unix)` with "wgpu native library not found"
-# and were re-dispatched hourly — seven ~2-hour matrices for an outcome no
-# re-run could change. One failure stays on the retry path (a runner can die
-# mid-package); an identical repeat opens the circuit.
+# will keep failing until something changes: the build inputs are frozen in the
+# tag, and a dispatched run's packager is main's copy (release-cli.yml overlays
+# it), which a sweep cannot tell has been fixed. Re-dispatching unchanged only
+# repeats the result — v0.963.0 to v0.965.0 each failed `Package CLI (Unix)` with
+# "wgpu native library not found" and were re-dispatched hourly, seven ~2-hour
+# matrices, before the packager fix reached main. So an identical repeat opens
+# the circuit: the incident names the error, a human (or a redrive) dispatches
+# once after the fix lands, and a passing run clears it. One failure stays on
+# the retry path, since a runner can die mid-package.
 PACKAGE_STEP_PREFIX = "Package CLI"
 
 
@@ -1005,7 +1008,7 @@ def repeated_package_failures(
             seen.setdefault((job.get("name", "unknown job"), step, first), set()).add(run["id"])
     return tuple(
         f"{job}: {step} failed identically on {len(ids)} runs of this tag — {first} "
-        "(tag-immutable; the packager is frozen in the tag)"
+        "(re-running unchanged cannot help; land the fix on main, then dispatch once)"
         for (job, step, first), ids in sorted(seen.items())
         if len(ids) >= 2
     )

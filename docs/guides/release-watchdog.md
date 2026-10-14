@@ -156,7 +156,7 @@ The decision rules — `decide()` in `release_reconcile.py`, unit-tested in
 | A draft was left behind | re-dispatch — the re-run re-drives the draft to published |
 | Retry budget exhausted | ONE incident issue per stall episode, updated in place, closes on recovery |
 | A failed leg whose log carries a compiler error against a source file | incident at once, no re-dispatch — see "Compile errors are tag-immutable" |
-| `Package CLI` failed with the same first error on two runs of one tag | incident at once, no further re-dispatch — see "A repeated package failure is tag-immutable" |
+| `Package CLI` failed with the same first error on two runs of one tag | incident at once, no further automatic re-dispatch — see "A repeated package failure opens the circuit" |
 | Unpublished `DROUGHT_HOURS` (2) after tagging, with a failed leg or no run at all | listed in the incident, naming the failing legs; still re-dispatched if on the retry path |
 
 Every entry in the incident names the failing legs of the tag's newest
@@ -174,13 +174,16 @@ stay on the retry path. Before this rule, three tags that failed their Windows
 legs on one MSVC C2668 were each re-dispatched on every sweep — a full release
 matrix per attempt — while no incident opened.
 
-**A repeated package failure is tag-immutable.** The packager and everything
-it reads are frozen in the tag's tree, and a marker-era tag refuses current-main
-overlays, so a `Package CLI` step that fails with the same first error on two
-runs of one tag will fail on every run. One failure stays on the retry path,
+**A repeated package failure opens the circuit.** A `Package CLI` step that
+fails with the same first error on two runs of one tag keeps failing until
+something changes. The build inputs are frozen in the tag, and a dispatched
+run's packager is main's copy (the backfill compatibility overlay), which a
+sweep cannot tell has been fixed. So the circuit opens instead of re-dispatching
+hourly. The incident names the error, someone dispatches once after the fix
+lands on main, and a passing run clears it. One failure stays on the retry path,
 since a runner can die mid-package. v0.963.0 to v0.965.0 each failed
 `Package CLI (Unix)` with "wgpu native library not found" and were
-re-dispatched hourly before this rule.
+re-dispatched hourly, seven ~2-hour matrices, before this rule.
 
 **Job logs are fetched with `gh api --allow-escape-sequences`.** Logs carry
 ANSI colour codes, and the runner's gh refuses to print such a response
