@@ -934,6 +934,30 @@ it does not disable overflow. See
 [local-ci.md](../guides/local-ci.md#pulp-overflow-operator-surface) for the
 exact repository variables and rollback notes.
 
+### deps
+
+**Status**: experimental (Pulp source checkouts)
+
+The toolchain pins that build Pulp itself, in `tools/toolchain/manifest.toml`.
+Delegates to `tools/toolchain/deps.py`.
+
+```bash
+pulp deps check                       # every host tool that differs, with the fix
+pulp deps check --format github       # ::warning:: annotations for Actions
+pulp deps resolve                     # fetch what a build needs, once, then report
+pulp deps update cmake --to 4.3.4     # move one pin and print what changed
+pulp deps update shipyard --to v0.270.0
+```
+
+`check` exits 0 when everything matches or the manifest is in warn mode, 1 for a
+difference in enforce mode, and 3 when it cannot read the expected versions.
+`resolve` runs `setup.sh --deps-only`, then `npm ci` for each lockfile directory
+whose `node_modules` differs, then `check`; it never installs a host tool and
+names the command that does. `update` regenerates the mise lock with the pinned
+mise (found from the manifest, or `--mise <path>`), never commits, pushes or
+installs, and restores every file if a step fails. See
+[mise](../guides/mise.md#checking-your-environment).
+
 ### ci-local
 
 **Status**: legacy (prefer [Shipyard](https://github.com/danielraffel/Shipyard))
