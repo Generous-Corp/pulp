@@ -1,0 +1,149 @@
+﻿2026-10-14T02:40:06.2620537Z Current runner version: '2.337.0'
+2026-10-14T02:40:06.2643980Z ##[group]Runner Image Provisioner
+2026-10-14T02:40:06.2644853Z Hosted Compute Agent
+2026-10-14T02:40:06.2645437Z Version: 20261002.596
+2026-10-14T02:40:06.2646064Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+2026-10-14T02:40:06.2646746Z Build Date: 2026-10-02T22:28:27Z
+2026-10-14T02:40:06.2647379Z Worker ID: {9feaf9c5-2d57-4471-bce0-92c856133485}
+2026-10-14T02:40:06.2648095Z Region: centralus
+2026-10-14T02:40:06.2648655Z Cloud: Azure
+2026-10-14T02:40:06.2649183Z ##[endgroup]
+2026-10-14T02:40:06.2650725Z ##[group]Operating System
+2026-10-14T02:40:06.2651363Z Ubuntu
+2026-10-14T02:40:15.0197368Z ##[group]Run set -euo pipefail
+2026-10-14T02:40:39.7818736Z Setting up gnupg (2.2.27-3ubuntu2.5) ...
+2026-10-14T02:40:39.7842036Z Setting up packagekit (1.2.5-2ubuntu3.1) ...
+2026-10-14T02:40:39.8351933Z invoke-rc.d: could not determine current runlevel
+2026-10-14T02:40:39.8435547Z invoke-rc.d: policy-rc.d denied execution of force-reload.
+2026-10-14T02:40:39.8448724Z Failed to open connection to "system" message bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory
+2026-10-14T02:40:39.9283016Z Created symlink /etc/systemd/user/sockets.target.wants/pk-debconf-helper.socket → /usr/lib/systemd/user/pk-debconf-helper.socket.
+2026-10-14T02:40:39.9310589Z Setting up python3-importlib-metadata (4.6.4-1) ...
+2026-10-14T02:40:40.0262326Z Setting up python3-oauthlib (3.2.0-1ubuntu0.1) ...
+2026-10-14T03:03:16.6084435Z (Reading database ... 70%
+2026-10-14T03:03:16.6128129Z (Reading database ... 75%
+2026-10-14T03:03:16.6142704Z (Reading database ... 80%
+2026-10-14T03:03:16.6152657Z (Reading database ... 85%
+2026-10-14T03:03:16.6158914Z (Reading database ... 90%
+2026-10-14T03:03:16.6168570Z (Reading database ... 95%
+2026-10-14T03:03:16.6169020Z (Reading database ... 100%
+2026-10-14T03:03:16.6170082Z (Reading database ... 40011 files and directories currently installed.)
+2026-10-14T03:03:16.6178459Z Preparing to unpack .../patchelf_0.14.3-1_amd64.deb ...
+2026-10-14T03:03:16.6190468Z Unpacking patchelf (0.14.3-1) ...
+2026-10-14T03:03:16.6406164Z Setting up patchelf (0.14.3-1) ...
+2026-10-14T03:03:16.6696345Z ##[group]Run import_design_args=()
+2026-10-14T03:03:16.6696874Z import_design_args=()
+2026-10-14T03:03:16.6697219Z control_broker_args=()
+2026-10-14T03:03:16.6697565Z control_standalone_host_args=()
+2026-10-14T03:03:16.6698044Z if [ -x build/tools/import-design/pulp-import-design ] \
+2026-10-14T03:03:16.6698458Z     && [ -d build/tools/import-design/browser_capture-v1 ]; then
+2026-10-14T03:03:16.6698809Z   import_design_args=(
+2026-10-14T03:03:16.6699165Z     --import-design-binary build/tools/import-design/pulp-import-design
+2026-10-14T03:03:16.6700203Z     --import-design-runtime-dir build/tools/import-design/browser_capture-v1
+2026-10-14T03:03:16.6700598Z   )
+2026-10-14T03:03:16.6701169Z   if python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "0.918.0"; then
+2026-10-14T03:03:16.6702132Z     test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
+2026-10-14T03:03:16.6702655Z     test -f build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
+2026-10-14T03:03:16.6703138Z     test -f build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
+2026-10-14T03:03:16.6703505Z     import_design_args+=(
+2026-10-14T03:03:16.6703954Z       --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
+2026-10-14T03:03:16.6704628Z       --import-design-source-emitter build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
+2026-10-14T03:03:16.6705250Z       --import-design-ids-map build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
+2026-10-14T03:03:16.6705658Z     )
+2026-10-14T03:03:16.6705854Z   else
+2026-10-14T03:03:16.6706153Z     import_design_args+=(--allow-missing-import-design-contract)
+2026-10-14T03:03:16.6706491Z   fi
+2026-10-14T03:03:16.6706739Z   if [ -n "${PULP_NODE_RUNTIME_EXECUTABLE:-}" ]; then
+2026-10-14T03:03:16.6707089Z     import_design_args+=(
+2026-10-14T03:03:16.6707390Z       --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE"
+2026-10-14T03:03:16.6707811Z       --node-license "$(dirname "$PULP_NODE_RUNTIME_EXECUTABLE")/node.LICENSE"
+2026-10-14T03:03:16.6708171Z     )
+2026-10-14T03:03:16.6708359Z   fi
+2026-10-14T03:03:16.6708549Z fi
+2026-10-14T03:03:16.6708775Z if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
+2026-10-14T03:03:16.6709649Z     && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
+2026-10-14T03:03:16.6710486Z   control_broker_args=(
+2026-10-14T03:03:16.6710830Z     --control-broker-binary build/inspect/pulp-control-broker
+2026-10-14T03:03:16.6711164Z   )
+2026-10-14T03:03:16.6711353Z fi
+2026-10-14T03:03:16.6711581Z if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
+2026-10-14T03:03:16.6712262Z     && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_STANDALONE_HOST_FLOOR"; then
+2026-10-14T03:03:16.6712956Z   control_standalone_host_args=(
+2026-10-14T03:03:16.6713365Z     --control-standalone-host-binary build/inspect/pulp-control-standalone-host
+2026-10-14T03:03:16.6714018Z     --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json
+2026-10-14T03:03:16.6714501Z   )
+2026-10-14T03:03:16.6714689Z fi
+2026-10-14T03:03:16.6714906Z python3 "$PULP_RELEASE_PACKAGER" \
+2026-10-14T03:03:16.6715333Z   --binary build/pulp \
+2026-10-14T03:03:16.6715634Z   --cpp-binary build/tools/cli/pulp-cpp \
+2026-10-14T03:03:16.6715951Z   --mcp-binary build/tools/mcp/pulp-mcp \
+2026-10-14T03:03:16.6716259Z   "${control_broker_args[@]}" \
+2026-10-14T03:03:16.6716549Z   "${control_standalone_host_args[@]}" \
+2026-10-14T03:03:16.6716852Z   "${import_design_args[@]}" \
+2026-10-14T03:03:16.6717122Z   --build-dir build \
+2026-10-14T03:03:16.6717381Z   --platform linux-x64 \
+2026-10-14T03:03:16.6717652Z   --out pulp-linux-x64.tar.gz
+2026-10-14T03:03:16.6718074Z shell: bash --noprofile --norc -e -o pipefail {0}
+2026-10-14T03:03:16.6718359Z env:
+2026-10-14T03:03:16.6718562Z   CCACHE_DISABLE: 1
+2026-10-14T03:03:16.6718895Z   PULP_SHARED_FETCHCONTENT_SOURCE_DIR: /__w/_temp/pulp-isolated-38502197075-1/src
+2026-10-14T03:03:16.6719573Z   PULP_FETCHCONTENT_BASE_DIR: /__w/_temp/pulp-isolated-38502197075-1/fc
+2026-10-14T03:03:16.6720023Z   PULP_CONFIGURE_CHECK_CACHE_DIR: /__w/_temp/pulp-isolated-38502197075-1/cc
+2026-10-14T03:03:16.6720637Z   PULP_RELEASE_CONTENT_VERIFIER: /__w/_temp/pulp-release-backfill-helpers/release_artifact_contents.py
+2026-10-14T03:03:16.6721200Z   PULP_SDK_PROVENANCE_HELPER: /__w/_temp/pulp-release-backfill-helpers/sdk_provenance.py
+2026-10-14T03:03:16.6721735Z   PULP_RELEASE_PACKAGER: /__w/_temp/pulp-release-backfill-helpers/tools/scripts/package_cli.py
+2026-10-14T03:03:16.6722273Z   PULP_SDK_PROVENANCE_CMAKE: /__w/_temp/pulp-release-backfill-helpers/PulpSdkProvenance.cmake
+2026-10-14T03:03:16.6722678Z   PULP_CONTROL_BROKER_FLOOR: 0.795.0
+2026-10-14T03:03:16.6722949Z   PULP_CONTROL_STANDALONE_HOST_FLOOR: 0.803.1
+2026-10-14T03:03:16.6723305Z   PULP_NODE_RUNTIME_EXECUTABLE: /__w/_temp/pulp-node-runtime/node
+2026-10-14T03:03:16.6723626Z   RELEASE_TAG: v0.964.1
+2026-10-14T03:03:16.6723857Z   MATRIX_PLATFORM: linux-x64
+2026-10-14T03:03:16.6724086Z ##[endgroup]
+2026-10-14T03:03:16.7854495Z bundled: build/tools/cli/pulp-cpp -> pulp-cpp
+2026-10-14T03:03:16.7884895Z bundled: build/tools/mcp/pulp-mcp -> pulp-mcp
+2026-10-14T03:03:16.8045097Z bundled: build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs -> jsx-runtime/materialized_binding_contract.mjs
+2026-10-14T03:03:16.8048158Z bundled: build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs -> jsx-runtime/materialized_source_emitter.mjs
+2026-10-14T03:03:16.8049035Z bundled: build/tools/import-design/jsx-runtime/materialized_ids_map.mjs -> jsx-runtime/materialized_ids_map.mjs
+2026-10-14T03:03:16.8422042Z bundled: build/tools/import-design/pulp-import-design -> pulp-import-design with browser_capture runtime
+2026-10-14T03:03:16.8791883Z ERROR: wgpu native library not found — refusing to package an unportable tarball. Searched cache roots (see find_wgpu_lib). Verify setup.sh ran and the FetchContent cache is populated before running package_cli.py.
+2026-10-14T03:03:16.8994292Z ##[error]Process completed with exit code 1.
+2026-10-14T03:03:16.9138150Z Post job cleanup.
+2026-10-14T03:03:16.9146190Z ##[command]/usr/bin/docker exec  a7fcb72481a0e0cd986d7549c7d8fe293363ff0786a1d53cc05083d71e1b83ba sh -c "cat /etc/*release | grep ^ID"
+2026-10-14T03:03:17.0812380Z [command]/usr/bin/git version
+2026-10-14T03:03:17.0842327Z git version 2.34.1
+2026-10-14T03:03:17.0874719Z Copying '/github/home/.gitconfig' to '/__w/_temp/c753bf2a-a794-4bd9-8cf5-ef171631be6e/.gitconfig'
+2026-10-14T03:03:17.0885947Z Temporarily overriding HOME='/__w/_temp/c753bf2a-a794-4bd9-8cf5-ef171631be6e' before making global git config changes
+2026-10-14T03:03:17.0887546Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-14T03:03:17.0890520Z [command]/usr/bin/git config --global --add safe.directory /__w/pulp/pulp
+2026-10-14T03:03:17.0959976Z Removing SSH command configuration
+2026-10-14T03:03:17.0960496Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-14T03:03:17.1010977Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-14T03:03:17.1289784Z Removing HTTP extra header
+2026-10-14T03:03:17.1290628Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-14T03:03:17.1312120Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-14T03:03:17.1580163Z Removing includeIf entries pointing to credentials config files
+2026-10-14T03:03:17.1584007Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-14T03:03:17.1606649Z includeif.gitdir:/__w/pulp/pulp/.git.path
+2026-10-14T03:03:17.1607144Z includeif.gitdir:/__w/pulp/pulp/.git/worktrees/*.path
+2026-10-14T03:03:17.1607525Z includeif.gitdir:/github/workspace/.git.path
+2026-10-14T03:03:17.1607880Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-14T03:03:17.1618430Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/__w/pulp/pulp/.git.path
+2026-10-14T03:03:17.1636423Z /__w/_temp/git-credentials-27d8152d-4d84-4995-b439-623ef8e9b6d4.config
+2026-10-14T03:03:17.1645671Z [command]/usr/bin/git config --local --unset includeif.gitdir:/__w/pulp/pulp/.git.path \/__w\/_temp\/git\-credentials\-27d8152d\-4d84\-4995\-b439\-623ef8e9b6d4\.config
+2026-10-14T03:03:17.1677501Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/__w/pulp/pulp/.git/worktrees/*.path
+2026-10-14T03:03:17.1698268Z /__w/_temp/git-credentials-27d8152d-4d84-4995-b439-623ef8e9b6d4.config
+2026-10-14T03:03:17.1705831Z [command]/usr/bin/git config --local --unset includeif.gitdir:/__w/pulp/pulp/.git/worktrees/*.path \/__w\/_temp\/git\-credentials\-27d8152d\-4d84\-4995\-b439\-623ef8e9b6d4\.config
+2026-10-14T03:03:17.1736963Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-10-14T03:03:17.1756581Z /github/runner_temp/git-credentials-27d8152d-4d84-4995-b439-623ef8e9b6d4.config
+2026-10-14T03:03:17.1762817Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-27d8152d\-4d84\-4995\-b439\-623ef8e9b6d4\.config
+2026-10-14T03:03:17.1799783Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-14T03:03:17.1820819Z /github/runner_temp/git-credentials-27d8152d-4d84-4995-b439-623ef8e9b6d4.config
+2026-10-14T03:03:17.1836490Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-27d8152d\-4d84\-4995\-b439\-623ef8e9b6d4\.config
+2026-10-14T03:03:17.1874755Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-14T03:03:17.2078106Z Removing credentials config '/__w/_temp/git-credentials-27d8152d-4d84-4995-b439-623ef8e9b6d4.config'
+2026-10-14T03:03:17.2195830Z Stop and remove container: 8a7102b971f14a3abbdd0b00493a074b_ubuntu2204_1510f0
+2026-10-14T03:03:17.2200926Z ##[command]/usr/bin/docker rm --force a7fcb72481a0e0cd986d7549c7d8fe293363ff0786a1d53cc05083d71e1b83ba
+2026-10-14T03:03:21.9686509Z a7fcb72481a0e0cd986d7549c7d8fe293363ff0786a1d53cc05083d71e1b83ba
+2026-10-14T03:03:21.9709735Z Remove container network: github_network_9b8f1e6d02374ca48eab33583e020279
+2026-10-14T03:03:21.9713959Z ##[command]/usr/bin/docker network rm github_network_9b8f1e6d02374ca48eab33583e020279
+2026-10-14T03:03:22.0946004Z github_network_9b8f1e6d02374ca48eab33583e020279
+2026-10-14T03:03:22.1016402Z Cleaning up orphan processes
