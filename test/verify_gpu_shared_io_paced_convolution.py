@@ -24,6 +24,10 @@ def unavailable(result, directory):
     assert receipt["status"] == "unavailable", receipt
     assert receipt["reason"] == "native_runtime_identity_unavailable", receipt
     assert receipt["native_runtime_identity_status"] == "unavailable", receipt
+    assert receipt["gpu_receipt_authenticated"] is False, receipt
+    assert receipt["admissions_attempted"] == 0, receipt
+    assert receipt["admissions_enqueued"] == 0, receipt
+    assert receipt["produced_blocks_before_stop"] == 0, receipt
     return receipt["reason"]
 
 

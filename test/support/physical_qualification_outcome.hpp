@@ -17,6 +17,32 @@ enum class PhysicalQualificationOutcome {
     Unavailable,
 };
 
+enum class PhysicalQualificationAdmission {
+    Allowed,
+    Failed,
+    Unavailable,
+};
+
+inline PhysicalQualificationAdmission physical_qualification_admission(
+    pulp::gpu_audio::detail::SharedIoProviderIdentityGate gate) noexcept {
+    using Gate = pulp::gpu_audio::detail::SharedIoProviderIdentityGate;
+    if (gate == Gate::Unauthenticated)
+        return PhysicalQualificationAdmission::Failed;
+    if (gate == Gate::NativeRuntimeUnavailable)
+        return PhysicalQualificationAdmission::Unavailable;
+    return PhysicalQualificationAdmission::Allowed;
+}
+
+template <typename Arm>
+PhysicalQualificationAdmission
+arm_physical_qualification_trial(pulp::gpu_audio::detail::SharedIoProviderIdentityGate gate,
+                                 Arm&& arm) {
+    const auto admission = physical_qualification_admission(gate);
+    if (admission != PhysicalQualificationAdmission::Allowed)
+        return admission;
+    return arm() ? PhysicalQualificationAdmission::Allowed : PhysicalQualificationAdmission::Failed;
+}
+
 inline PhysicalQualificationOutcome physical_qualification_outcome(
     bool evidence_ok, pulp::gpu_audio::detail::SharedIoProviderIdentityGate gate) noexcept {
     using Gate = pulp::gpu_audio::detail::SharedIoProviderIdentityGate;

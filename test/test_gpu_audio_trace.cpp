@@ -1393,6 +1393,26 @@ TEST_CASE("Provider identity without a native runtime source is unavailable, not
           Outcome::Failed);
 }
 
+TEST_CASE("P2 probe cannot start admissions without authenticated native identity",
+          "[gpu_audio][trace][p2]") {
+    using Gate = SharedIoProviderIdentityGate;
+    using Admission = pulp::test::PhysicalQualificationAdmission;
+    std::uint32_t admissions = 0;
+    const auto arm = [&](Gate gate) {
+        return pulp::test::arm_physical_qualification_trial(gate, [&] {
+            ++admissions;
+            return true;
+        });
+    };
+
+    CHECK(arm(Gate::NativeRuntimeUnavailable) == Admission::Unavailable);
+    CHECK(admissions == 0);
+    CHECK(arm(Gate::Unauthenticated) == Admission::Failed);
+    CHECK(admissions == 0);
+    CHECK(arm(Gate::Authenticated) == Admission::Allowed);
+    CHECK(admissions == 1);
+}
+
 TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trace][p4]") {
     static_assert(noexcept(valid_provider_receipt_digest(
         std::declval<const SharedIoProviderIdentity&>(), std::string_view{}, std::string_view{})));
