@@ -47,7 +47,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
     # The native observer is private qualification tooling; keep Objective-C++
     # and Metal linkage out of non-Apple and iOS builds.
     target_sources(pulp-gpu-audio PRIVATE src/detail/native_runtime_identity_mac.mm)
-    target_link_libraries(pulp-gpu-audio PRIVATE "-framework Metal" "-framework IOKit")
+    target_link_libraries(pulp-gpu-audio PRIVATE "-framework Metal" "-framework IOKit"
+                          "-framework CoreFoundation" objc)
 else()
     target_sources(pulp-gpu-audio PRIVATE src/detail/native_runtime_identity_stub.cpp)
 endif()

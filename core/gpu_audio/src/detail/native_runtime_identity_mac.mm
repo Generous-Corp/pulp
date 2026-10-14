@@ -120,19 +120,25 @@ NativeRuntimeIdentity observe_native_metal(std::string_view selected_name,
         // remains fail-closed when names are ambiguous.
         NSArray<id<MTLDevice>>* devices = MTLCopyAllDevices();
         id<MTLDevice> device = nil;
+        bool ambiguous = false;
         for (id<MTLDevice> candidate in devices) {
             const auto pci = selected_device_id ? pci_identity(candidate) : std::nullopt;
             if (utf8_name(candidate.name) == selected_name &&
                 (!selected_device_id || (pci && pci->device_id == selected_device_id))) {
                 if (device != nil)
-                    return identity;
-                device = candidate;
+                    ambiguous = true;
+                else
+                    device = candidate;
+                if (ambiguous)
+                    break;
             }
         }
-        if (device == nil)
-            return identity;
-        identity = observe_native_metal_device_impl(device, selected_name, selected_vendor_id,
-                                                    selected_device_id);
+        if (!ambiguous && device != nil)
+            identity = observe_native_metal_device_impl(device, selected_name, selected_vendor_id,
+                                                        selected_device_id);
+#if !__has_feature(objc_arc)
+        [devices release];
+#endif
     }
     return identity;
 }
