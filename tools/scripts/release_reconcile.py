@@ -619,10 +619,14 @@ def collect(
                 completed = subprocess.run(
                     ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, text=True, timeout=60, check=False,
+                    stderr=subprocess.PIPE, text=True, timeout=60, check=False,
                 )
                 log_cache[job_id] = completed.stdout if completed.returncode == 0 else ""
-            except (subprocess.SubprocessError, OSError):
+                if completed.returncode != 0:
+                    print(f"  log fetch for job {job_id} failed "
+                          f"(rc={completed.returncode}): {completed.stderr.strip()[:300]}")
+            except (subprocess.SubprocessError, OSError, ValueError) as exc:
+                print(f"  log fetch for job {job_id} failed: {exc!r}"[:400])
                 log_cache[job_id] = ""
         return log_cache[job_id]
     for r in flat_runs:
