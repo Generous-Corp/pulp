@@ -2000,6 +2000,20 @@ python3 -m pip install --user -r tools/motion/visual/requirements.txt
 The analyzer falls back to a translation-only estimator without it, so it stays
 optional and is not part of the checked set.
 
+## Every build leg reports its toolchain against the manifest
+
+Before configuring, each `build.yml` leg runs `tools/toolchain/check_env.py
+--format github`. It prints one `::warning::` annotation per tool whose version
+differs from `tools/toolchain/manifest.toml` (`python3`, `cmake`, `ninja`,
+`node`, `rustc`, `clang-format`, `mise`, and the npm lockfile installs), with
+the found version, its path and the fix. The step is report only: the manifest
+is in warn mode, so the script exits 0, and the step is `continue-on-error`. It
+reads versions and installs nothing. Because the gate VM, the hosted Linux and
+Windows runners and each host get their tools from different places, these
+annotations are where drift between them shows up first; for example, the
+hosted Linux leg's apt CMake is reported against the 4.3.3 pin, labelled as
+the manifest's declared Linux exception. See [mise](mise.md#checking-your-environment).
+
 ## Build-time Node dependencies are installed before the build, never inside it
 
 The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an
@@ -2888,7 +2902,7 @@ is legible from the check itself rather than only from its step count. And
 `tools/scripts/gate_suite_executed.py` answers the question directly:
 
 ```bash
-# executed / built-but-untested / not-executed, per `macos` job
+# executed / tier-only / built-but-untested / not-executed, per `macos` job
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
 
 # exit nonzero unless the suite genuinely ran, for use in a script
@@ -2896,7 +2910,10 @@ python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-execute
 ```
 
 It classifies by the steps that actually ran, not by the conclusion, so it
-separates a real pass from a claimed one. It answers only whether the suite
+separates a real pass from a claimed one. Only a `Test (<platform>)` step is
+the suite. A pull-request head that ran only the fast deterministic tier or the
+affected-tests tier reads `tier-only`: the merge queue still runs the suite,
+and `--require-executed` does not accept it. It answers only whether the suite
 ran: an `executed` verdict on a failing job is still `executed`.
 
 ## Attributing a failed batch to the PR that caused it

@@ -67,7 +67,8 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
         f"- Native-authoritative: {counts['native-authoritative']}",
         f"- Native with browser validation: {counts['native-with-browser-validation']}",
         f"- Browser-required: {counts['browser-required']}",
-        f"- False promotions: {aggregate['false_promotions']}", "",
+        f"- False promotions: {aggregate['false_promotions']} "
+        f"({aggregate.get('false_promotion_status', 'status unavailable')})", "",
         "## Mean scores", "",
     ]
     lines += [

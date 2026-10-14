@@ -7,9 +7,10 @@
 // the drag category attaches to when a shipped binary defines
 // PULP_VIEW_OBJC_SUFFIX). Must precede the first reference to those classes.
 #include "pulp_mac_objc_names.h"
-// The categories below extend the host NSViews; their interfaces are shared
-// with the files that implement them.
-#include "plugin_view_host_mac_view.h"
+// The category below extends the standalone host NSView; its interface is
+// shared with the file that implements it. The hosted plug-in editor views get
+// the same behavior from plugin_view_host_mac_drag.mm.
+#include "drag_drop_mac_internal.h"
 #include "window_host_mac_view.h"
 
 #include <unordered_map>
@@ -29,43 +30,6 @@
 
 // Store active legacy drop targets (DropTarget registration path).
 static std::unordered_map<void*, pulp::view::DropTarget*> g_drop_targets;
-
-namespace pulp::view {
-
-// Translate an NSDraggingInfo pasteboard into a DropData (files take priority
-// over text, matching the SDL producer's file/text split).
-static DropData extract_drop_data(id<NSDraggingInfo> info) {
-    DropData data;
-    NSPasteboard* pb = [info draggingPasteboard];
-
-    NSArray<NSURL*>* urls = [pb readObjectsForClasses:@[[NSURL class]]
-                             options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
-    if (urls.count > 0) {
-        data.type = DropData::Type::files;
-        for (NSURL* url in urls) {
-            data.file_paths.push_back(std::string([[url path] UTF8String]));
-        }
-        return data;
-    }
-
-    NSString* text = [pb stringForType:NSPasteboardTypeString];
-    if (text) {
-        data.type = DropData::Type::text;
-        data.text = std::string([text UTF8String]);
-        return data;
-    }
-
-    return data;
-}
-
-// Per-view hover state for an in-flight drag (one active pointer per window).
-// Keyed by the PulpView pointer; entries are tiny and bounded by window count.
-static DragSession& mac_drag_session(const void* view) {
-    static std::unordered_map<const void*, DragSession> sessions;
-    return sessions[view];
-}
-
-}  // namespace pulp::view
 
 @interface PulpView (PulpDragDrop) <NSDraggingDestination>
 @end
@@ -138,91 +102,6 @@ static DragSession& mac_drag_session(const void* view) {
 }
 
 @end
-
-// ── Hosted plugin views (DAW-embedded) ───────────────────────────────────────
-// PulpPluginView (CPU) and PulpGpuPluginView (GPU) embed the same View tree as
-// the standalone PulpView and expose the same rootView + pointTransform slice,
-// but they live in plugin_view_host_mac.mm and so never got the drag-destination
-// category above — file drops worked in the standalone but not in a hosted AU/
-// VST3/CLAP. Give them the identical NSDraggingDestination behavior, routing into
-// the same view-tree dispatch core. They register for dragged types from their
-// own -viewDidMoveToWindow (plugin_view_host_mac.mm); this is the arrival path.
-// PulpGpuPluginView (and its drag category below) only exist when the GPU host
-// is compiled in — its @implementation in plugin_view_host_mac.mm sits inside
-// that file's PULP_HAS_SKIA guard. A CoreGraphics-only build has no such class,
-// so a category here referencing it would emit an unresolved
-// _OBJC_CLASS_$_PulpGpuPluginView at link. Mirror the same guard below.
-
-namespace pulp::view {
-// Shared bodies so the CPU + GPU categories don't duplicate the dispatch.
-static Point hosted_drop_point(NSView* v, Point (^xf)(Point), id<NSDraggingInfo> sender) {
-    NSPoint p = [v convertPoint:[sender draggingLocation] fromView:nil];
-    const float h = static_cast<float>(v.bounds.size.height);
-    Point pt{static_cast<float>(p.x), h - static_cast<float>(p.y)};  // NSView unflipped → flip Y
-    if (xf) pt = xf(pt);  // inverse design-viewport transform (matches input hit-test)
-    return pt;
-}
-static NSDragOperation hosted_drag_update(NSView* v, View* root, Point (^xf)(Point),
-                                          id<NSDraggingInfo> sender) {
-    if (!root) return NSDragOperationNone;
-    @autoreleasepool {
-        auto& session = mac_drag_session((__bridge void*)v);
-        auto data = extract_drop_data(sender);
-        return dispatch_drag_enter(*root, session, data, hosted_drop_point(v, xf, sender))
-                   ? NSDragOperationCopy : NSDragOperationNone;
-    }
-}
-static void hosted_drag_exit(NSView* v, View* root) {
-    if (root) dispatch_drag_exit(*root, mac_drag_session((__bridge void*)v));
-}
-static BOOL hosted_perform_drop(NSView* v, View* root, Point (^xf)(Point),
-                                id<NSDraggingInfo> sender) {
-    if (!root) return NO;
-    @autoreleasepool {
-        auto& session = mac_drag_session((__bridge void*)v);
-        auto data = extract_drop_data(sender);
-        return dispatch_drop(*root, session, data, hosted_drop_point(v, xf, sender)) ? YES : NO;
-    }
-}
-}  // namespace pulp::view
-
-@interface PulpPluginView (PulpDragDrop) <NSDraggingDestination>
-@end
-@implementation PulpPluginView (PulpDragDrop)
-- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)s {
-    return pulp::view::hosted_drag_update(self, self.rootView, self.pointTransform, s);
-}
-- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)s {
-    return pulp::view::hosted_drag_update(self, self.rootView, self.pointTransform, s);
-}
-- (void)draggingExited:(id<NSDraggingInfo>)s { (void)s; pulp::view::hosted_drag_exit(self, self.rootView); }
-- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)s { (void)s; return YES; }
-- (BOOL)performDragOperation:(id<NSDraggingInfo>)s {
-    return pulp::view::hosted_perform_drop(self, self.rootView, self.pointTransform, s);
-}
-@end
-
-// GPU hosted-view drag category — only when the GPU host (and thus the
-// PulpGpuPluginView class) is compiled in. See the guard on the forward
-// declaration above. The shared pulp::view::hosted_* helpers stay outside the
-// guard so the CPU category keeps using them in a no-Skia build.
-#ifdef PULP_HAS_SKIA
-@interface PulpGpuPluginView (PulpDragDrop) <NSDraggingDestination>
-@end
-@implementation PulpGpuPluginView (PulpDragDrop)
-- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)s {
-    return pulp::view::hosted_drag_update(self, self.rootView, self.pointTransform, s);
-}
-- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)s {
-    return pulp::view::hosted_drag_update(self, self.rootView, self.pointTransform, s);
-}
-- (void)draggingExited:(id<NSDraggingInfo>)s { (void)s; pulp::view::hosted_drag_exit(self, self.rootView); }
-- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)s { (void)s; return YES; }
-- (BOOL)performDragOperation:(id<NSDraggingInfo>)s {
-    return pulp::view::hosted_perform_drop(self, self.rootView, self.pointTransform, s);
-}
-@end
-#endif  // PULP_HAS_SKIA
 
 // A self-retaining NSDraggingSource for outbound file drags (see
 // begin_file_drag below). AppKit does NOT keep the source alive for the

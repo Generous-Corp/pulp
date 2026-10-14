@@ -78,7 +78,6 @@ target_sources(pulp-view-core PRIVATE
     src/canvas_replay_state.cpp
     src/native_view_host.cpp
     src/gpu_surface_observer.cpp
-    src/plugin_frame_renderer.cpp
     src/design_frame_view.cpp
     src/design_fit_view.cpp
     src/design_param_binding.cpp
@@ -154,6 +153,12 @@ target_sources(pulp-view-tooling PRIVATE
     src/inspector.cpp
     src/inspector_window.cpp
 )
+# The damage-aware frame pipeline the Windows and Linux plug-in editor hosts
+# share. The per-platform editor hosts and the PluginViewHost factory
+# registration join this target from core/view/CMakeLists.txt; the abstract
+# PluginViewHost contract (plugin_view_host.hpp, its GPU-surface observer and
+# NativeViewHost registration) stays in view-core.
+target_sources(pulp-view-tooling PRIVATE src/plugin_frame_renderer.cpp)
 # The runtime-inspector bridge is the Pulp implementation of view-script's
 # ScriptInspectorPort, so it exists only where view-script does.
 if(PULP_ENABLE_JS)

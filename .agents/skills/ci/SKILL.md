@@ -331,10 +331,15 @@ Ask the run instead of the colour:
 
 ```bash
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
-# executed | built-but-untested | not-executed, with the step count
+# executed | tier-only | built-but-untested | not-executed, with the step count
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
-# exits nonzero unless the suite genuinely ran
+# exits nonzero unless the full suite genuinely ran
 ```
+
+`tier-only` is the normal pull-request head: the fast deterministic tier or the
+affected-tests tier ran, and `Test (...)` was skipped. That is not the suite
+(build.yml: the fast tier "is NOT test evidence for the merge", and the
+affected tier can select nothing), so `--require-executed` refuses it.
 
 Each bootstrap job also writes a banner into its own job summary saying no
 build and no test step ran. A step count near three on a `macos` job is the
@@ -801,6 +806,18 @@ job summary. It never compares a number to a threshold, and it must stay off
 policy is that DSP perf is tracked, not gated. Its first dispatch after landing
 must be `ghapp workflow run dsp-throughput-bench.yml --ref main` (a new
 workflow is dispatchable only once it exists on the default branch).
+
+## `toolchain` warnings on a build leg are drift reports, not the failure
+
+Every `build.yml` leg runs `tools/toolchain/check_env.py --format github`
+before configuring and annotates the run with `::warning title=toolchain ...`
+lines: one per tool whose version differs from `tools/toolchain/manifest.toml`.
+While the manifest is in warn mode the step never fails a leg, so a red leg
+with toolchain warnings failed somewhere else; read the failing step, not the
+annotations. Use the warnings when a failure reproduces on one host or runner
+and not another: they name the version each one actually ran (for example the
+hosted Linux leg's apt CMake 3.x against the 4.3.3 pin, which is how a
+CMake-4-only script fails only there).
 
 ## Android minimum-API allocation check
 
@@ -4992,6 +5009,16 @@ bisectable.
   build with `-DPULP_BUILD_EXAMPLES=OFF` (matching `build.yml`). If you add a
   new release/packaging workflow, configure with examples OFF (or a populated
   `SKIA_DIR`), or the design-tool Skia gate will block it.
+- **A release job's dependencies live in its isolated root, not the home
+  cache.** `release-cli.yml` sets `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` /
+  `PULP_FETCHCONTENT_BASE_DIR` to a fresh `$RUNNER_TEMP/pulp-isolated-*` root.
+  Any script that later goes looking for a fetched artifact must read those
+  variables. When they are set, it must also refuse to fall back to
+  `~/Library/Caches/Pulp` or `~/.cache/pulp`, which an earlier, possibly PR,
+  job wrote. `package_cli.py`'s wgpu lookup missed this. Linux failed to
+  package at all, because the runtime is not copied into the build dir there.
+  darwin-arm64 went green while bundling the shared-cache dylib. A green leg
+  is not proof that the isolated copy shipped: read the `bundled:` line.
 - **Release/SDK builds must pass `-DPULP_ENABLE_AUDIO_PROBES=OFF`.** The
   standalone audio probe is a dev/example inspection surface and defaults ON
   for local development, but shipped CLI, standalone, and SDK artifacts must

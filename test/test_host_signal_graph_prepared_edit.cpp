@@ -935,6 +935,51 @@ TEST_CASE("SignalGraph prepared edit publishes old or new topology without silen
     REQUIRE(prepares.load(std::memory_order_relaxed) == 2);
 }
 
+TEST_CASE("SignalGraph Concurrent scalar preparation status tolerates lifecycle changes",
+          "[host][graph][prepared-edit][thread]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, output, 0));
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> mutating{false};
+    std::atomic<bool> valid_sizes{true};
+    std::atomic<unsigned> reads{0};
+    std::atomic<unsigned> concurrent_reads{0};
+    std::thread observer([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            (void)graph.is_prepared();
+            const int size = graph.prepared_max_block_size();
+            if (size != 0 && size != 64)
+                valid_sizes.store(false, std::memory_order_relaxed);
+            reads.fetch_add(1, std::memory_order_relaxed);
+            if (mutating.load(std::memory_order_relaxed))
+                concurrent_reads.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    const bool observer_started = pulp::test::wait_for_progress(reads);
+    bool prepared = true;
+    if (observer_started) {
+        mutating.store(true, std::memory_order_relaxed);
+        for (int cycle = 0; cycle < 32; ++cycle) {
+            prepared = graph.prepare(48000.0, 64) && prepared;
+            graph.release();
+        }
+        mutating.store(false, std::memory_order_relaxed);
+    }
+    stop.store(true, std::memory_order_release);
+    observer.join();
+
+    REQUIRE(observer_started);
+    REQUIRE(prepared);
+    REQUIRE(concurrent_reads.load(std::memory_order_relaxed) > 0);
+    REQUIRE(valid_sizes.load(std::memory_order_relaxed));
+    REQUIRE_FALSE(graph.is_prepared());
+    REQUIRE(graph.prepared_max_block_size() == 0);
+}
+
 TEST_CASE("SignalGraph prepared edit changes dimensions only for lifecycle-free custom nodes",
           "[host][graph][prepared-edit][dimensions]") {
     using Result = SignalGraph::PreparedTopologyEdit::Result;

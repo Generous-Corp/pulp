@@ -711,8 +711,8 @@ tools:
   invocation: python3 tools/scripts/gate_suite_executed.py --run-id <run-id> [--require-executed] [--format
     json]
   inputs: An Actions run id, read live through `ghapp`.
-  outputs: executed / built-but-untested / not-executed per `macos` job, with its step count;
-    `--require-executed` exits nonzero unless the suite genuinely ran.
+  outputs: executed / tier-only / built-but-untested / not-executed per `macos` job, with its step
+    count; `--require-executed` exits nonzero unless the full suite genuinely ran (tier-only fails it).
   caveat: Answers only whether the suite RAN, never whether the tree is healthy — an `executed` verdict on
     a failing job is still `executed`. It classifies by step names, so renaming the workflow's Test step
     without updating it would make a real run look void.

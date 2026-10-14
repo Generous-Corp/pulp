@@ -25,6 +25,14 @@ assert len(projection["catalogs"]) == 29
 assert sum(len(c["type_ids"]) for c in projection["catalogs"]) == 115
 assert sum(len(n["baked_params"]) for c in projection["catalogs"] for n in c["nodes"]) == 400
 
+sequencing = next(
+    c for c in projection["catalogs"]
+    if c["header"] == "core/host/include/pulp/host/forge_sequencing_catalog.hpp"
+)
+assert (ROOT / "core/host/src/forge_sequencing_catalog.cpp").is_file()
+assert sequencing["nodes"][0]["factory"] == "make_stage_seq_node"
+assert len(sequencing["nodes"][0]["baked_params"]) == 5
+
 dynamics = next(
     c for c in projection["catalogs"]
     if c["header"] == "core/host/include/pulp/host/forge_dynamics_catalog.hpp"

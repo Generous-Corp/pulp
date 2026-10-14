@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import platform
 import re
 import statistics
 import sys
@@ -170,7 +172,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
                 args.file.resolve(), output / "runs" / str(index + 1),
                 args.timeout_seconds, args.from_source,
                 args.browser.resolve() if args.browser else None,
-                cache_state="cold" if index == 0 else "warm",
+                cache_state=args.cache_state,
                 timing_budgets_ms=budgets))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
@@ -185,6 +187,30 @@ def command_benchmark(args: argparse.Namespace) -> int:
         "schema": "pulp-importer-differential-benchmark-v1",
         "version": 1,
         "runs": len(reports),
+        "provenance": {
+            "fixture": reports[0].get("fixture"),
+            "source": reports[0].get("source"),
+            "oracle": reports[0].get("oracle"),
+            "importer_sha256": sha256_file(args.importer.resolve()),
+            "observer_sha256": sha256_file(args.observer.resolve()),
+            "host": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "machine": platform.machine(),
+                "processor": platform.processor() or "unknown",
+                "cpu_count": os.cpu_count(),
+            },
+            "cache_model": "caller-declared; browser and native run sequentially per trial",
+        },
+        "run_receipts": [
+            {"run": index + 1,
+             "cache_state": report["observability"]["cache_state"]["identity"],
+             "report": f"runs/{index + 1}/comparison/report.json",
+             "render_receipt": f"runs/{index + 1}/candidate/render-receipt.json",
+             "promotion": report.get("promotion"),
+             "fidelity": report.get("comparison")}
+            for index, report in enumerate(reports)
+        ],
         "cold": reports[0]["timings"],
         "warm": {
             "browser_import_p50_ms": round(statistics.median(browser), 1),

@@ -36,6 +36,18 @@ using NativeViewHandle = void*; // X11 Window or nullptr
 /// also `Theme::dark()`'s `bg.primary`. See `PluginViewHost::Options::background_rgb`.
 inline constexpr std::uint32_t kEditorHostClearRgb = 0x1E1E2E;
 
+// Channel spellings of the same default. Every Pulp host -- the standalone
+// window hosts and all four plug-in editor hosts -- seeds this opaque dark
+// background so no clear/undefined composite flashes before the first GPU
+// frame lands, and so the letterbox bars around a design viewport match the
+// editor rather than the DAW's own window content. It is defined here, beside
+// the packed value, because the standalone window hosts in view-core and the
+// plug-in editor hosts in the Pulp-kept layer both paint it; macOS derives its
+// NSColor and CGColor spellings from these (window_host_mac_internal.hpp).
+inline constexpr std::uint8_t kEditorHostClearR = (kEditorHostClearRgb >> 16) & 0xff;
+inline constexpr std::uint8_t kEditorHostClearG = (kEditorHostClearRgb >> 8) & 0xff;
+inline constexpr std::uint8_t kEditorHostClearB = kEditorHostClearRgb & 0xff;
+
 // Hosts a View tree inside a DAW plugin window
 // Creates a platform-native child view that paints the widget hierarchy
 class PluginViewHost {
@@ -104,6 +116,11 @@ public:
     };
 
     // Create a plugin view host for the given view tree.
+    //
+    // create(), set_factory(), clear_factory() and has_factory() are declared
+    // here but DEFINED in pulp-view-tooling (pulp::view and pulp::format-view
+    // link it), together with the platform hosts. A target that links only
+    // pulp-view-core can subclass PluginViewHost but cannot create one.
     //
     // Platform support:
     //   - macOS: NSView-backed impl in plugin_view_host_mac.mm, including
@@ -600,6 +617,9 @@ private:
 // adapters get a working host without the caller doing anything. Exposed
 // publicly so a host can force-register early (e.g. before its own
 // set_factory()) or in a test.
+//
+// Defined in pulp-view-tooling, not pulp-view-core, like create() and the
+// factory functions above.
 void register_platform_plugin_view_host();
 
 } // namespace pulp::view

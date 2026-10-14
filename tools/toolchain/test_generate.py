@@ -30,7 +30,7 @@ class GenerateTests(unittest.TestCase):
         )
         (root / ".shipyard/vm-image.toml").write_text(body, encoding="utf-8")
         (root / ".shipyard/vm-image.intel.toml").write_text(body, encoding="utf-8")
-        for name in (generate.MISE_CONFIG, generate.MISE_TOOLS_CONFIG, generate.MISE_LOCK):
+        for name in (generate.MISE_CONFIG, generate.MISE_TOOLS_CONFIG, generate.MISE_LOCK, generate.EXPECTED):
             (root / name).write_bytes((REPO / name).read_bytes())
 
     def test_five_runs_are_byte_identical(self) -> None:
@@ -204,6 +204,44 @@ class StrictPinTests(unittest.TestCase):
             path = root / generate.MISE_TOOLS_CONFIG
             path.write_text(path.read_text(encoding="utf-8").replace('ninja = "1.13.2"', 'ninja = "1.13.1"'), encoding="utf-8")
             self.assert_check_refuses(root, "stale or hand-edited")
+
+    def test_hand_edited_expectation_refuses(self) -> None:
+        # check_env reads expected.json, so an edit there would silently move
+        # what every host is compared against.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            generate.generate(root, None, True)  # control: the copy is current
+            path = root / generate.EXPECTED
+            path.write_text(path.read_text(encoding="utf-8").replace('"cmake": "4.3.3"', '"cmake": "4.4.3"'), encoding="utf-8")
+            self.assert_check_refuses(root, "stale or hand-edited")
+
+    def test_expectation_carries_the_checked_pins(self) -> None:
+        import json
+
+        data, _ = generate.load()
+        expected = json.loads((REPO / generate.EXPECTED).read_text(encoding="utf-8"))
+        for key in generate.CHECKED:
+            self.assertEqual(data["toolchain"][key], expected["tools"][key])
+        self.assertEqual(data["mise"]["binary"]["sha256"], expected["mise"]["sha256"])
+        self.assertEqual(data["mise"]["enforcement"], expected["enforcement"])
+
+    def test_mise_binary_must_be_pinned_by_digest(self) -> None:
+        source = generate.SOURCE.read_text(encoding="utf-8")
+        digest = '87c18142dd67f5848b0236738eb9338976329266937ecd79b11121de64dd2d47'
+        cases = (
+            (f'macos-arm64 = "{digest}"', f'macos-arm64 = "{digest[:-1]}"', "64-hex"),
+            (f'macos-arm64 = "{digest}"', f'macos-arm65 = "{digest}"', "64-hex"),
+            ('path = "~/.local/opt/mise-2026.10.8/bin/mise"', 'path = "/opt/homebrew/bin/mise"', "with its version in the path"),
+        )
+        for old, new, needle in cases:
+            with self.subTest(new=new), tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "manifest.toml"
+                self.assertIn(old, source)
+                path.write_text(source.replace(old, new, 1), encoding="utf-8")
+                with self.assertRaises(ValueError) as ctx:
+                    generate.load(path)
+                self.assertIn(needle, str(ctx.exception))
 
     def test_any_lock_edit_without_the_manifest_digest_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as td:

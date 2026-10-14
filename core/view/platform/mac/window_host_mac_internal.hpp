@@ -14,7 +14,7 @@
 
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
-#include <pulp/view/plugin_frame_renderer.hpp>  // kEditorHostClear{R,G,B}
+#include <pulp/view/plugin_view_host.hpp> // kEditorHostClear{R,G,B}
 #include <pulp/view/view.hpp>  // View::CursorStyle (set_ns_cursor_for_style)
 
 #include <cstdint>
@@ -388,7 +388,7 @@ inline bool plugin_view_wants_render_link(bool has_view, bool in_window) {
 // never drift apart.
 namespace pulp::view::mac_host {
 
-// Aliases of the platform-neutral definition in plugin_frame_renderer.hpp —
+// Aliases of the platform-neutral definition in plugin_view_host.hpp —
 // the Windows and Linux editor hosts paint the same background, so the value
 // cannot live in a macOS-only header.
 inline constexpr uint8_t kHostClearR = pulp::view::kEditorHostClearR;

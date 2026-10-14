@@ -191,6 +191,49 @@ equal what the manifest generates (`python3 tools/toolchain/generate.py
 location, and that every tool has a checksummed entry, or a stated reason for
 not having one, on every platform. Never edit the generated files by hand.
 
+## Checking your environment
+
+`tools/toolchain/check_env.py` compares the tools on your `PATH` with the
+manifest and prints one line per difference: the tool, the pinned version, the
+version it found, where it found it, and the command that fixes it.
+
+```bash
+python3 tools/toolchain/check_env.py
+```
+
+```text
+toolchain-check: cmake: expected 4.3.3 (tools/toolchain/manifest.toml), found 4.4.3 at /opt/homebrew/bin/cmake; fix: MISE_ENV=toolchain mise install --locked && eval "$(MISE_ENV=toolchain mise activate bash)"
+toolchain-check: 1 difference(s) from the manifest; continuing (warn mode)
+```
+
+It checks `python3`, `cmake`, `ninja`, `node`, `rustc` (asked from
+`experimental/pulp-rs`, where cargo builds), `clang-format`, the `mise` binary
+(version, and its sha256 against `[mise.binary]` in the manifest), and that each
+npm lockfile directory's `node_modules` is exactly its `package-lock.json`. It
+only reads; it never installs anything.
+
+It runs on any Python 3.9 or newer with no packages, because it is what checks
+the interpreter. It reads `tools/toolchain/expected.json`, which `generate.py`
+writes from the manifest, rather than the TOML manifest itself.
+
+Exit status: `0` when everything matches or the manifest is in warn mode (it
+is today), `1` for a difference once the manifest is in enforce mode, and `3`
+when it cannot read the expected versions. `--format github` prints GitHub
+Actions `::warning::` annotations and `--format json` a machine-readable
+report.
+
+A platform the manifest lists as an exception (Linux and Windows still take
+CMake from the system package manager) is still reported, labelled as the
+declared exception, so the difference stays visible.
+
+`PULP_TOOLCHAIN_UNPINNED=1` is the opt-out for contributors who manage their
+own tools: once enforcement is on, it lets the check pass with a banner naming
+every difference, on every run. It is refused on a fleet host, one with
+`~/.config/pulp/fleet-host` or `PULP_FLEET_HOST=1`.
+
+Every CI build leg (macOS, Linux, Windows) runs the check before configuring
+and shows the differences as warnings on the run. It never fails a leg.
+
 ## Building plugins with the Pulp SDK
 
 If you build plugins with the installed SDK (`pulp create`, `pulp build` in a
@@ -217,16 +260,12 @@ those overrides.
 The following is designed but **not built yet**. None of it runs today; this
 section is here so the direction is visible, not as instructions.
 
-- **A Pulp-built mise binary.** mise 2026.10.8 built from source and published
-  with checksums, installed by digest, with self-update disabled, so the mise
-  binary itself is pinned.
-- **An environment check.** A small script that compares the active `python3`,
-  `cmake`, `ninja`, `node`, Rust and `clang-format` against the manifest and
-  prints one fix command per mismatch. `pulp build`, `pulp dev`, `pulp loop`,
-  `setup.sh` and the generators of committed files would run it first: warn
-  only at the start, and later refuse for generators of committed files.
-- **An explicit opt-out** for contributors who manage their own tools, printed
-  loudly on every run and refused on CI hosts.
+- **A published mise binary.** The macOS arm64 build the fleet runs is pinned
+  by digest today; a reproducible build from source, published with checksums
+  for every platform, is still to come.
+- **The check before every build.** `pulp build`, `pulp dev`, `pulp loop`,
+  `setup.sh` and the generators of committed files run the environment check
+  first, warn only at the start.
 - **Rust from the manifest.** Generate `rust-toolchain.toml` from the manifest
   so cargo uses the pinned Rust instead of the current `stable`.
 - **CI images built from the lock.** The macOS CI image installs its tools with
