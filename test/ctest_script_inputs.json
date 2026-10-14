@@ -9381,6 +9381,7 @@
     "docs/status",
     "docs/status/consumption-profiles.json",
     "examples/pulp-gain/CMakeLists.txt",
+    "test/ctest_script_inputs.json",
     "test/fixtures",
     "test/support",
     "tools/ci/load_api_exemptions.json",
