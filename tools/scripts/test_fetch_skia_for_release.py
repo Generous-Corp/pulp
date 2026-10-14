@@ -547,11 +547,11 @@ class IosMatrixRegistration(unittest.TestCase):
         # The flatten step would collide device-arm64 / simulator-arm64
         # / simulator-x86_64 libskia.a copies into one Release/ dir.
         self.assertIn(
-            "ios-device-arm64", fetch_skia._IOS_PRESERVE_ARCH_SUBDIR
+            "ios-device-arm64", fetch_skia._PRESERVE_ARCH_SUBDIR
         )
         self.assertIn(
             "ios-simulator-arm64-x86_64",
-            fetch_skia._IOS_PRESERVE_ARCH_SUBDIR,
+            fetch_skia._PRESERVE_ARCH_SUBDIR,
         )
 
 

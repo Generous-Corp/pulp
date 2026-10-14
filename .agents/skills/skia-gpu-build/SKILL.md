@@ -200,6 +200,16 @@ shipping artifact.
 
 ## Gotchas (each cost real time)
 
+- **Windows ARM64 keeps its `arm64/` slice; never flatten it.** FindSkia.cmake
+  selects `build/win-gpu/lib/Release/arm64/` for an arm64-win target and refuses
+  the flat path, so an ARM64 configure cannot link x64 archives.
+  `fetch_skia_for_release.py` therefore preserves that subdir for
+  `windows-arm64`, as it does for iOS (`_PRESERVE_ARCH_SUBDIR`). When the two
+  disagreed, every windows-arm64 release leg failed configure with "Skia: Windows
+  ARM64 archive slice is missing" (v0.966.0). Change the layout in both places
+  together; `test_fetch_skia_for_release_extra.py` reads FindSkia to hold them
+  in step. windows-x64 stays flat.
+
 - **Windows: `LNK2019 __imp_CompareObjectHandles` from `dawn_combined.lib(SharedFenceD3D12.cpp.obj)`.**
   Dawn's D3D12 shared fence calls `CompareObjectHandles`, which `kernel32.lib` does
   not import. Microsoft's docs name `Kernelbase.lib`, but the Windows SDK on the
