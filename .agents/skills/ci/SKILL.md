@@ -331,10 +331,15 @@ Ask the run instead of the colour:
 
 ```bash
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
-# executed | built-but-untested | not-executed, with the step count
+# executed | tier-only | built-but-untested | not-executed, with the step count
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
-# exits nonzero unless the suite genuinely ran
+# exits nonzero unless the full suite genuinely ran
 ```
+
+`tier-only` is the normal pull-request head: the fast deterministic tier or the
+affected-tests tier ran, and `Test (...)` was skipped. That is not the suite
+(build.yml: the fast tier "is NOT test evidence for the merge", and the
+affected tier can select nothing), so `--require-executed` refuses it.
 
 Each bootstrap job also writes a banner into its own job summary saying no
 build and no test step ran. A step count near three on a `macos` job is the

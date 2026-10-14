@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261014-10152-watch",
+  "created_at": "2026-10-14T07:21:34Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "gate_suite_executed.py, a read-only CI evidence classifier, gains a tier-only verdict so a pull-request-head tier is never reported as the full macOS suite; the tools.yaml registry entry, ci skill and local-ci guide describe it. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/test_gate_suite_executed.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

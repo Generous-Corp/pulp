@@ -2902,7 +2902,7 @@ is legible from the check itself rather than only from its step count. And
 `tools/scripts/gate_suite_executed.py` answers the question directly:
 
 ```bash
-# executed / built-but-untested / not-executed, per `macos` job
+# executed / tier-only / built-but-untested / not-executed, per `macos` job
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
 
 # exit nonzero unless the suite genuinely ran, for use in a script
@@ -2910,7 +2910,10 @@ python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-execute
 ```
 
 It classifies by the steps that actually ran, not by the conclusion, so it
-separates a real pass from a claimed one. It answers only whether the suite
+separates a real pass from a claimed one. Only a `Test (<platform>)` step is
+the suite. A pull-request head that ran only the fast deterministic tier or the
+affected-tests tier reads `tier-only`: the merge queue still runs the suite,
+and `--require-executed` does not accept it. It answers only whether the suite
 ran: an `executed` verdict on a failing job is still `executed`.
 
 ## Attributing a failed batch to the PR that caused it
