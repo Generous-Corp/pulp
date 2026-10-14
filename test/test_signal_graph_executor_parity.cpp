@@ -547,68 +547,6 @@ TEST_CASE("SignalGraph re-prepare while the executor path renders is race-free",
     CHECK(blocks.load() > 0);  // the audio thread actually ran
 }
 
-TEST_CASE("standalone executor routing build serializes with publication",
-          "[host][graph][executor][routing][rt-safety][threads][tsan]") {
-    // The standalone builder resolves raw pointers into the published
-    // CompiledGraph and then stores an opaque keepalive. Exercise that whole
-    // sequence against repeated prepare/release publication so a resolver
-    // cannot observe one generation while the keepalive pins another (or race
-    // the publisher-owned Slot::live() shared_ptr).
-    SignalGraph g;
-    build_wide_signal_graph(g, 8, /*parallel=*/true);
-    // Start from an unprepared generation so the builder's rejection path is
-    // exercised deterministically before publication begins.
-    g.release();
-
-    std::atomic<bool> stop{false};
-    std::atomic<bool> started{false};
-    std::atomic<std::uint64_t> builds{0};
-    std::atomic<std::uint64_t> successful_builds{0};
-    std::atomic<std::uint64_t> rejected_builds{0};
-    std::atomic<bool> invalid_result{false};
-    std::thread builder([&] {
-        started.store(true, std::memory_order_release);
-        while (!stop.load(std::memory_order_relaxed)) {
-            SignalGraphExecutorRouting routing;
-            const bool built = build_signal_graph_executor_routing(g, routing);
-            if (built) {
-                if (!routing.valid || !routing.snapshot_keepalive ||
-                    routing.snapshot.buffer_slot_count() == 0) {
-                    invalid_result.store(true, std::memory_order_relaxed);
-                }
-                successful_builds.fetch_add(1, std::memory_order_relaxed);
-            } else {
-                rejected_builds.fetch_add(1, std::memory_order_relaxed);
-            }
-            builds.fetch_add(1, std::memory_order_relaxed);
-        }
-    });
-
-    CHECK(pulp::test::wait_for_condition(
-        [&] { return started.load(std::memory_order_acquire); }));
-    REQUIRE(pulp::test::wait_for_condition(
-        [&] { return rejected_builds.load(std::memory_order_relaxed) > 0; }));
-    bool prepared_all = true;
-    for (int i = 0; i < 100; ++i) {
-        if (!g.prepare(kSr, kFrames)) {
-            prepared_all = false;
-            break;
-        }
-        g.release();
-    }
-    // Leave the graph in its normal prepared state for the postcondition and
-    // for the builder's final iterations.
-    prepared_all = g.prepare(kSr, kFrames) && prepared_all;
-    stop.store(true, std::memory_order_release);
-    builder.join();
-
-    REQUIRE(prepared_all);
-    REQUIRE(builds.load(std::memory_order_relaxed) > 0);
-    REQUIRE(successful_builds.load(std::memory_order_relaxed) > 0);
-    REQUIRE(rejected_builds.load(std::memory_order_relaxed) > 0);
-    CHECK_FALSE(invalid_result.load(std::memory_order_relaxed));
-}
-
 TEST_CASE("Executor eligibility rejects unprepared and non-eligible graphs",
           "[host][graph][executor][routing]") {
     SignalGraph unprepared;
@@ -2138,6 +2076,67 @@ void build_wide_signal_graph(SignalGraph& g, int n, bool parallel) {
 }
 
 }  // namespace
+
+TEST_CASE("standalone executor routing build serializes with publication",
+          "[host][graph][executor][routing][rt-safety][threads][tsan]") {
+    // The standalone builder resolves raw pointers into the published
+    // CompiledGraph and then stores an opaque keepalive. Exercise that whole
+    // sequence against repeated prepare/release publication so a resolver
+    // cannot observe one generation while the keepalive pins another (or race
+    // the publisher-owned Slot::live() shared_ptr).
+    SignalGraph g;
+    build_wide_signal_graph(g, 8, /*parallel=*/true);
+    // Start from an unprepared generation so the builder's rejection path is
+    // exercised deterministically before publication begins.
+    g.release();
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> started{false};
+    std::atomic<std::uint64_t> builds{0};
+    std::atomic<std::uint64_t> successful_builds{0};
+    std::atomic<std::uint64_t> rejected_builds{0};
+    std::atomic<bool> invalid_result{false};
+    std::thread builder([&] {
+        started.store(true, std::memory_order_release);
+        while (!stop.load(std::memory_order_relaxed)) {
+            SignalGraphExecutorRouting routing;
+            const bool built = build_signal_graph_executor_routing(g, routing);
+            if (built) {
+                if (!routing.valid || !routing.snapshot_keepalive ||
+                    routing.snapshot.buffer_slot_count() == 0) {
+                    invalid_result.store(true, std::memory_order_relaxed);
+                }
+                successful_builds.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                rejected_builds.fetch_add(1, std::memory_order_relaxed);
+            }
+            builds.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    CHECK(pulp::test::wait_for_condition([&] { return started.load(std::memory_order_acquire); }));
+    REQUIRE(pulp::test::wait_for_condition(
+        [&] { return rejected_builds.load(std::memory_order_relaxed) > 0; }));
+    bool prepared_all = true;
+    for (int i = 0; i < 100; ++i) {
+        if (!g.prepare(kSr, kFrames)) {
+            prepared_all = false;
+            break;
+        }
+        g.release();
+    }
+    // Leave the graph in its normal prepared state for the postcondition and
+    // for the builder's final iterations.
+    prepared_all = g.prepare(kSr, kFrames) && prepared_all;
+    stop.store(true, std::memory_order_release);
+    builder.join();
+
+    REQUIRE(prepared_all);
+    REQUIRE(builds.load(std::memory_order_relaxed) > 0);
+    REQUIRE(successful_builds.load(std::memory_order_relaxed) > 0);
+    REQUIRE(rejected_builds.load(std::memory_order_relaxed) > 0);
+    CHECK_FALSE(invalid_result.load(std::memory_order_relaxed));
+}
 
 TEST_CASE("SignalGraph::process parallel path matches legacy: wide graph",
           "[host][graph][executor][routing][parity][parallel]") {
