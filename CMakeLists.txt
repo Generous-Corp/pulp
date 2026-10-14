@@ -625,7 +625,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
-                --unit foundation --unit gpu-device-api --unit canvas)
+                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d)
         set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
