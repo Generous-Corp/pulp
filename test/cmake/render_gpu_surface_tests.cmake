@@ -79,8 +79,7 @@
     catch_discover_tests(pulp-test-gpu-compute ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # Read the production library identity; probes do not initialize it.
-    if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_HAS_SKIA
-            AND EXISTS "${DAWN_LIBRARY}")
+    if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
         foreach(key expected_dawn_sha asset_sha256 dawn_archive_sha256 dawn_header
                     identity_dir configure_receipt prelink_receipt bound_receipt)
             get_target_property(_pulp_gpu_audio_${key} pulp-gpu-audio "PULP_PROVIDER_${key}")
@@ -88,7 +87,7 @@
         add_executable(pulp-gpu-host-mapped-pointer-probe
             test_gpu_host_mapped_pointer_probe.cpp)
         target_link_libraries(pulp-gpu-host-mapped-pointer-probe PRIVATE
-            "${DAWN_LIBRARY}"
+            "${PULP_SKIA_DAWN_ARCHIVE}"
             "-framework Metal"
             "-framework Foundation"
             "-framework IOKit"
@@ -115,7 +114,7 @@
                     "${PROJECT_SOURCE_DIR}/tools/scripts/fetch_skia_for_release.py"
                     "${_pulp_gpu_audio_configure_receipt}"
                     "${_pulp_gpu_audio_dawn_header}"
-                    "${DAWN_LIBRARY}"
+                    "${PULP_SKIA_DAWN_ARCHIVE}"
                     "${SKIA_DIR}/.skia-asset-sha256"
                     "${SKIA_DIR}/.skia-generation-manifest.json"
                     "${SKIA_DIR}/.skia-source-archive.zip")
@@ -129,7 +128,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --result "${_pulp_gpu_audio_prelink_receipt}"
                 VERBATIM)
@@ -141,7 +140,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --prelink-receipt "${_pulp_gpu_audio_prelink_receipt}"
                     --executable "$<TARGET_FILE:pulp-gpu-host-mapped-pointer-probe>"
@@ -155,7 +154,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --prelink-receipt "${_pulp_gpu_audio_prelink_receipt}"
                     --executable "$<TARGET_FILE:pulp-gpu-host-mapped-pointer-probe>"
@@ -245,7 +244,7 @@
                     "${PROJECT_SOURCE_DIR}/tools/scripts/fetch_skia_for_release.py"
                     "${_pulp_gpu_audio_configure_receipt}"
                     "${_pulp_gpu_audio_dawn_header}"
-                    "${DAWN_LIBRARY}"
+                    "${PULP_SKIA_DAWN_ARCHIVE}"
                     "${SKIA_DIR}/.skia-asset-sha256"
                     "${SKIA_DIR}/.skia-generation-manifest.json"
                     "${SKIA_DIR}/.skia-source-archive.zip")
@@ -259,7 +258,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --result "${_pulp_gpu_audio_shared_prelink_receipt}"
                 VERBATIM)
@@ -271,7 +270,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --prelink-receipt "${_pulp_gpu_audio_shared_prelink_receipt}"
                     --executable "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"
@@ -285,7 +284,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --prelink-receipt "${_pulp_gpu_audio_shared_prelink_receipt}"
                     --executable "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"

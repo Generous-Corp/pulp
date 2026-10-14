@@ -13,6 +13,7 @@
 #include <pulp/view/scripted_ui_prewarm.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/register_audio_widgets.hpp>
 
 namespace pulp::format {
 
@@ -143,6 +144,7 @@ ViewBridge::~ViewBridge() {
 }
 
 bool ViewBridge::open(std::string* error) {
+    view::register_audio_widgets();
     if (!owner_is_alive()) {
         if (error) *error = "ViewBridge: processor owner has been destroyed";
         return false;
@@ -442,6 +444,7 @@ std::unique_ptr<view::View> ViewBridge::release_view() {
 
 void ViewBridge::pump_store_listeners() {
     if (!owner_is_alive()) return;
+    PULP_TRACE_SCOPE_NAMED("state", "editor_pump_listeners");
     store_.pump_listeners();
     sync_design_frames_from_host();
 }

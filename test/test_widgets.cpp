@@ -2,6 +2,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/data_display.hpp>
+#include <pulp/view/register_audio_widgets.hpp>
 #include <pulp/view/visualizers.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -3168,3 +3170,17 @@ TEST_CASE("a horizontal Meter's lit bar shares the box's top and bottom edge",
     }
 }
 #endif  // PULP_HAS_SKIA
+
+TEST_CASE("audio widget registration is idempotent and re-registers after clear",
+          "[view][widget][audio-seam]") {
+    register_audio_widgets();
+    REQUIRE(data_display_registration_count() == 3);
+    register_audio_widgets();
+    REQUIRE(data_display_registration_count() == 3);
+    clear_data_displays();
+    REQUIRE(data_display_registration_count() == 0);
+    register_audio_widgets();
+    auto meter = make_data_display("pulp.level");
+    REQUIRE(meter != nullptr);
+    REQUIRE(dynamic_cast<LevelDisplay*>(meter.get()) != nullptr);
+}

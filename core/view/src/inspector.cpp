@@ -98,14 +98,7 @@ size_t ViewInspector::count_views(const View& root) {
 }
 
 std::string ViewInspector::type_name(const View& view) {
-    if (dynamic_cast<const Knob*>(&view)) return "Knob";
-    if (dynamic_cast<const Fader*>(&view)) return "Fader";
-    if (dynamic_cast<const Toggle*>(&view)) return "Toggle";
-    if (dynamic_cast<const Label*>(&view)) return "Label";
-    if (dynamic_cast<const XYPad*>(&view)) return "XYPad";
-    if (auto* described = dynamic_cast<const InspectorFacts*>(&view))
-        return std::string(described->inspector_type_name());
-    return "View";
+    return view_type_name(view);
 }
 
 // ── Inspector window helpers ────────────────────────────────────────────────

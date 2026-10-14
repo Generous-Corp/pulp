@@ -125,11 +125,6 @@ target_link_libraries(pulp-format-core
         pulp::runtime
         pulp::timebase
         pulp::native-components
-    PRIVATE
-        # validation_harness.cpp uses the public ContentRegistry API. Keep
-        # that dependency explicit here now that pulp-state no longer carries
-        # pulp-content transitively.
-        pulp::content
 )
 
 # PUBLIC, and required rather than merely tidy. Three things depend on it:
@@ -147,6 +142,9 @@ target_link_libraries(pulp-format-view
         pulp::format-core
         # Public ViewBridge headers expose native View types, not WebView.
         pulp::view-core
+        pulp::view-tooling
+    PRIVATE
+        pulp::view-audio
 )
 
 target_link_libraries(pulp-format
@@ -274,8 +272,6 @@ if(PULP_HAS_CLAP)
         src/clap_note_name.cpp
     )
     target_link_libraries(pulp-format-view PUBLIC clap)
-    # The CLAP adapter installs pulp-content's preset source on its PresetManager.
-    target_link_libraries(pulp-format-view PRIVATE pulp::content)
     # Keep PulpClapPlugin's layout identical between clap_adapter.cpp and the
     # per-plugin clap_entry.cpp TU. The entry target defines PULP_CLAP_GUI=1;
     # the shared adapter must do the same or GUI members shift later fields.
@@ -298,8 +294,6 @@ if(PULP_HAS_CLAP)
             $<INSTALL_INTERFACE:include>
     )
     target_link_libraries(pulp-format-clap-core PUBLIC pulp::format-core clap)
-    # The CLAP adapter installs pulp-content's preset source on its PresetManager.
-    target_link_libraries(pulp-format-clap-core PRIVATE pulp::content)
     target_compile_definitions(pulp-format-clap-core PRIVATE PULP_CLAP=1)
     if(PULP_HAS_AUSDK)
         set_target_properties(pulp-format-clap-core PROPERTIES CXX_STANDARD 23)

@@ -35,6 +35,15 @@ bool is_new_widget_factory_api(choc::javascript::ArgumentList& args) {
     return true;
 }
 
+// What a display factory returns when no provider registered the display. The
+// bridge preamble turns it into a JS Error (see kJSPreamblePart2).
+choc::value::Value display_unavailable() {
+    auto marker = choc::value::createObject("");
+    marker.addMember("pulpUnavailable",
+                     std::string("audio widget unavailable: link pulp::view-audio"));
+    return marker;
+}
+
 } // namespace
 
 void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) {
@@ -280,8 +289,13 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
     register_bridge_function(api, "createMeter", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto o = args.get<std::string>(1, "vertical");
         auto pid = args.get<std::string>(2, "");
-        auto m = std::make_unique<Meter>(); m->set_id(id);
-        if (o == "horizontal") m->set_orientation(Meter::Orientation::horizontal);
+        auto m = make_data_display("pulp.level");
+        auto* level = m ? dynamic_cast<LevelDisplay*>(m.get()) : nullptr;
+        if (!level)
+            return display_unavailable();
+        m->set_id(id);
+        if (o == "horizontal")
+            level->set_level_orientation(LevelDisplay::Orientation::horizontal);
         self.widgets_[id] = m.get(); self.resolve_parent(pid)->add_child(std::move(m));
         return choc::value::createString(id);
     });
@@ -295,14 +309,20 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
 
     register_bridge_function(api, "createWaveform", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
-        auto w = std::make_unique<WaveformView>(); w->set_id(id);
+        auto w = make_data_display("pulp.series");
+        if (!w || !dynamic_cast<SeriesDisplay*>(w.get()))
+            return display_unavailable();
+        w->set_id(id);
         self.widgets_[id] = w.get(); self.resolve_parent(pid)->add_child(std::move(w));
         return choc::value::createString(id);
     });
 
     register_bridge_function(api, "createSpectrum", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
-        auto s = std::make_unique<SpectrumView>(); s->set_id(id);
+        auto s = make_data_display("pulp.bins");
+        if (!s || !dynamic_cast<BinDisplay*>(s.get()))
+            return display_unavailable();
+        s->set_id(id);
         self.widgets_[id] = s.get(); self.resolve_parent(pid)->add_child(std::move(s));
         return choc::value::createString(id);
     });

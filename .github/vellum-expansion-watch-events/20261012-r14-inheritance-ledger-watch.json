@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261012-r14-inheritance-ledger-watch",
+  "created_at": "2026-10-12T08:01:15Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "R14 M1: the Vellum ledger checker now covers expansion-watch events as well as change events, back-fills the missing ledger entries, and enforces append-only entries against the event's own base; the retired Vellum 0.1.7 GPU-audio coordinate is called out at configure time and in DEPENDENCIES. No implementation authority moves.",
+  "tests": [
+    "python3 tools/scripts/vellum_inheritance_ledger_check.py --base origin/main",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

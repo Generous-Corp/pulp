@@ -2,6 +2,10 @@
 # no GPU-runtime load dependency, and no defined symbol from the view, canvas,
 # render, Skia, Dawn or wgpu layers. The control module (same processor, default
 # link path) must show each family, or the scanner proves nothing.
+# Script mode starts with no policies set; pin them so IN_LIST (CMP0057) works
+# under CMake 3.x as well as 4.x.
+cmake_minimum_required(VERSION 3.24)
+
 if(NOT CONTROL)
     message(FATAL_ERROR "no-editor link floor: CONTROL artifact path is required")
 endif()

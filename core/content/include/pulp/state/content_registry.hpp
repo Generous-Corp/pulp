@@ -14,22 +14,6 @@
 
 namespace pulp::state {
 
-/// Parse the plugin-side content capability manifest embedded in a built
-/// plugin/app bundle. Schema:
-/// `{ "schema":"pulp.plugin-runtime.v1", "pluginId":"...",
-///    "content": { "capabilities":[...], "kinds":[...],
-///                 "reload": { "hotReloadKinds":[...],
-///                             "manualRescanKinds":[...] } } }`
-std::optional<ContentCapabilityManifest>
-parse_content_capability_manifest(std::string_view json, std::string* error = nullptr);
-
-/// Load and parse a plugin content capability manifest from disk.
-std::optional<ContentCapabilityManifest>
-load_content_capability_manifest(const std::filesystem::path& path, std::string* error = nullptr);
-
-/// Serialize a capability manifest for embedding in plugin bundle resources.
-std::string content_capability_manifest_to_json(const ContentCapabilityManifest& manifest);
-
 /// Metadata for one installed content pack.
 struct ContentPackInfo {
     std::string id;
@@ -97,8 +81,8 @@ class ContentRegistry {
 
 /// A PresetManager content-preset source backed by this registry: it lists the
 /// installed packs' presets under `data_root`, or under platform_data_root()
-/// when `data_root` is empty. Format adapters install it on the PresetManager
-/// they own (PresetManager::set_content_preset_source).
+/// when `data_root` is empty. Install it on a PresetManager that opts into
+/// content discovery (PresetManager::set_content_preset_source).
 ContentPresetSource content_registry_preset_source();
 
 /// Validate a local content-pack directory or .pulpcontent archive against a

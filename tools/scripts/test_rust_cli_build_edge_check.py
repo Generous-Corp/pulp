@@ -30,7 +30,7 @@ build pulp-rust-cli: phony rs/CMakeFiles/pulp-rust-cli rs/cargo-target/release/p
 
 INCREMENTAL = """\
 build rs/cargo-target/release/pulp pulp | ${cmake_ninja_workdir}rs/cargo-target/release/pulp ${cmake_ninja_workdir}pulp: CUSTOM_COMMAND /src/experimental/pulp-rs/Cargo.toml /src/experimental/pulp-rs/Cargo.lock /src/experimental/pulp-rs/rust-toolchain.toml /src/experimental/pulp-rs/build.rs
-  COMMAND = cd /src/experimental/pulp-rs && cmake -E env CARGO_TARGET_DIR=/b/rs/cargo-target cargo build --release --manifest-path /src/experimental/pulp-rs/Cargo.toml && cmake -E touch /b/rs/cargo-target/release/pulp && cmake -E copy /b/rs/cargo-target/release/pulp /b/pulp
+  COMMAND = cd /src/experimental/pulp-rs && cmake -E env CARGO_TARGET_DIR=/b/rs/cargo-target cargo build --release --locked --manifest-path /src/experimental/pulp-rs/Cargo.toml && cmake -E touch /b/rs/cargo-target/release/pulp && cmake -E copy /b/rs/cargo-target/release/pulp /b/pulp
   DESC = Building pulp-rs (Rust CLI) via cargo (release profile)
   depfile = CMakeFiles/d/0123.d
   deps = gcc
@@ -61,6 +61,25 @@ class RustCliBuildEdgeCheckTest(unittest.TestCase):
         problems = check.check(text)
         self.assertEqual(len(problems), 1)
         self.assertIn("Cargo.lock", problems[0])
+
+    def test_always_run_edge_is_also_unlocked(self) -> None:
+        self.assertIn("--locked", "\n".join(check.check(ALWAYS_RUN)))
+
+    def test_missing_locked_flag_alone_fails(self) -> None:
+        text = INCREMENTAL.replace(" --locked", "")
+        self.assertNotEqual(text, INCREMENTAL)
+        problems = check.check(text)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("--locked", problems[0])
+
+    def test_offline_and_locked_together_pass(self) -> None:
+        text = INCREMENTAL.replace(" --locked", " --locked --offline")
+        self.assertEqual(check.check(text), [])
+
+    def test_locked_on_another_step_does_not_count(self) -> None:
+        text = INCREMENTAL.replace(" --locked", "").replace(
+            "cmake -E touch", "cmake -E echo --locked && cmake -E touch")
+        self.assertIn("--locked", "\n".join(check.check(text)))
 
     def test_no_cargo_edge_is_reported_not_passed(self) -> None:
         self.assertTrue(check.check("build a: phony b\n"))

@@ -34,6 +34,15 @@ name: Release reconciler
 #     re-dispatched up to MAX_ATTEMPTS times.
 #   - An interrupted tag that exhausts MAX_ATTEMPTS is a real, human-shaped
 #     problem. It gets ONE issue, updated in place, never duplicated.
+#   - Every incident entry carries a root-cause diagnosis
+#     (release_failure_diagnosis.py): the failing run, job and step, the first
+#     error line, a cause class, the exact fix (for a pinned-asset digest
+#     mismatch: the pin file line, both digests, and the upstream provenance
+#     check), and how to verify. A failed `Sign and Release` run is reported
+#     too, and a comment is posted whenever a tag joins the open incident so
+#     an in-place edit is never the only signal.
+#   - Re-dispatch targets the tag (`--ref <tag>`); release-cli refuses a
+#     dispatch whose commit is not the tag commit.
 
 on:
   schedule:
@@ -44,6 +53,10 @@ on:
         description: 'Report what would be re-dispatched, change nothing.'
         type: boolean
         default: false
+      tags:
+        description: 'Space-separated tags to evaluate (implies dry run; prints the incident body).'
+        type: string
+        default: ''
 
 permissions:
   contents: read     # read tags/releases
@@ -91,4 +104,10 @@ jobs:
           fetch-tags: true
 
       - name: Reconcile tags against releases
-        run: python3 tools/scripts/release_reconcile.py
+        env:
+          REPLAY_TAGS: ${{ inputs.tags || '' }}
+        run: |
+          set -euo pipefail
+          args=()
+          for tag in $REPLAY_TAGS; do args+=(--tag "$tag"); done
+          python3 tools/scripts/release_reconcile.py "${args[@]}"

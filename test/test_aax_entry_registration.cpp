@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/aax_entry.hpp>
+#include <pulp/format/aax_runtime_testing.hpp>
 #include <pulp/format/processor.hpp>
 
 #include <AAX_ICollection.h>
@@ -22,6 +23,7 @@
 #include <AAX_IPropertyMap.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -69,7 +71,11 @@ std::unique_ptr<pulp::format::Processor> make_gain() {
 /// none of them are what this suite is about.
 class FakePropertyMap final : public AAX_IPropertyMap {
 public:
-    AAX_Result AddProperty(AAX_EProperty, AAX_CPropertyValue) override { return AAX_SUCCESS; }
+  std::vector<std::pair<AAX_EProperty, AAX_CPropertyValue>> properties;
+  AAX_Result AddProperty(AAX_EProperty property, AAX_CPropertyValue value) override {
+      properties.emplace_back(property, value);
+      return AAX_SUCCESS;
+  }
     AAX_Result AddPointerProperty(AAX_EProperty, const void*) override { return AAX_SUCCESS; }
     AAX_Result AddPointerProperty(AAX_EProperty, const char*) override { return AAX_SUCCESS; }
     AAX_Result AddPropertyWithIDArray(AAX_EProperty, const AAX_SPlugInIdentifierTriad*, uint32_t) override {
@@ -86,7 +92,11 @@ public:
 
 class FakeComponentDescriptor final : public AAX_IComponentDescriptor {
 public:
-    AAX_Result Clear() override { return AAX_SUCCESS; }
+  mutable std::vector<std::unique_ptr<FakePropertyMap>> maps_;
+  FakePropertyMap* process_properties = nullptr;
+  AAX_Result Clear() override {
+      return AAX_SUCCESS;
+  }
     AAX_IPropertyMap* NewPropertyMap() const override {
         maps_.push_back(std::make_unique<FakePropertyMap>());
         return maps_.back().get();
@@ -107,8 +117,10 @@ public:
     AAX_Result AddMIDINode(AAX_CFieldIndex, AAX_EMIDINodeType, const char[], uint32_t) override {
         return AAX_SUCCESS;
     }
-    AAX_Result AddProcessProc_Native(AAX_CProcessProc, AAX_IPropertyMap*, AAX_CInstanceInitProc,
-                                     AAX_CBackgroundProc, AAX_CSelector*) override {
+    AAX_Result AddProcessProc_Native(AAX_CProcessProc, AAX_IPropertyMap* properties,
+                                     AAX_CInstanceInitProc, AAX_CBackgroundProc,
+                                     AAX_CSelector*) override {
+        process_properties = static_cast<FakePropertyMap*>(properties);
         return AAX_SUCCESS;
     }
     AAX_Result AddProcessProc_TI(const char[], const char[], AAX_IPropertyMap*, const char[], const char[],
@@ -118,8 +130,6 @@ public:
     AAX_Result AddProcessProc(AAX_IPropertyMap*, AAX_CSelector*, int32_t) override { return AAX_SUCCESS; }
     AAX_Result AddMeters(AAX_CFieldIndex, const AAX_CTypeID*, const uint32_t) override { return AAX_SUCCESS; }
 
-private:
-    mutable std::vector<std::unique_ptr<FakePropertyMap>> maps_;
 };
 
 /// Records the proc IDs the entry point registers. The proc IDs are the whole
@@ -127,6 +137,9 @@ private:
 class FakeEffectDescriptor final : public AAX_IEffectDescriptor {
 public:
     std::vector<AAX_CProcPtrID> proc_ids;
+    std::vector<std::unique_ptr<FakeComponentDescriptor>> components_;
+    std::vector<std::unique_ptr<FakePropertyMap>> maps_;
+    FakePropertyMap* effect_properties = nullptr;
 
     AAX_IComponentDescriptor* NewComponentDescriptor() override {
         components_.push_back(std::make_unique<FakeComponentDescriptor>());
@@ -145,7 +158,10 @@ public:
         maps_.push_back(std::make_unique<FakePropertyMap>());
         return maps_.back().get();
     }
-    AAX_Result SetProperties(AAX_IPropertyMap*) override { return AAX_SUCCESS; }
+    AAX_Result SetProperties(AAX_IPropertyMap* properties) override {
+        effect_properties = static_cast<FakePropertyMap*>(properties);
+        return AAX_SUCCESS;
+    }
     AAX_Result AddResourceInfo(AAX_EResourceType, const char*) override { return AAX_SUCCESS; }
     AAX_Result AddMeterDescription(AAX_CTypeID, const char*, AAX_IPropertyMap*) override { return AAX_SUCCESS; }
     AAX_Result AddControlMIDINode(AAX_CTypeID, AAX_EMIDINodeType, const char[], uint32_t) override {
@@ -161,9 +177,6 @@ public:
                          static_cast<AAX_CProcPtrID>(kAAX_ProcPtrID_Create_EffectParameters)) != proc_ids.end();
     }
 
-private:
-    std::vector<std::unique_ptr<FakeComponentDescriptor>> components_;
-    std::vector<std::unique_ptr<FakePropertyMap>> maps_;
 };
 
 class FakeCollection final : public AAX_ICollection {
@@ -220,6 +233,53 @@ TEST_CASE("PULP_AAX_PLUGIN_WITH_GUI registers the custom editor", "[aax][entry]"
     REQUIRE(collection.descriptor.registered_parameters());
 }
 
+TEST_CASE("AAX component properties identify the GUI lane and data-model placement",
+          "[aax][entry]") {
+    FakeCollection strip;
+    REQUIRE(default_entry::GetEffectDescriptions(&strip) == AAX_SUCCESS);
+    REQUIRE(strip.descriptor.components_.size() == 1);
+    const auto& strip_props = strip.descriptor.components_.front()->process_properties->properties;
+    const auto property_value = [&](const auto& props, AAX_EProperty property) {
+        const auto it = std::find_if(props.begin(), props.end(), [property](const auto& item) {
+            return item.first == property;
+        });
+        REQUIRE(it != props.end());
+        return it->second;
+    };
+    REQUIRE(property_value(strip_props, AAX_eProperty_UsesClientGUI) == 1);
+    REQUIRE(property_value(strip_props, AAX_eProperty_Constraint_Location) ==
+            AAX_eConstraintLocationMask_DataModel);
+
+    FakeCollection gui;
+    REQUIRE(gui_entry::GetEffectDescriptions(&gui) == AAX_SUCCESS);
+    const auto& gui_props = gui.descriptor.components_.front()->process_properties->properties;
+    REQUIRE(property_value(gui_props, AAX_eProperty_UsesClientGUI) == 0);
+    REQUIRE(property_value(gui_props, AAX_eProperty_Constraint_Location) ==
+            AAX_eConstraintLocationMask_DataModel);
+}
+
+TEST_CASE("AAX host-generated GUI request is only set for the strip lane", "[aax][entry]") {
+    FakeCollection strip;
+    REQUIRE(default_entry::GetEffectDescriptions(&strip) == AAX_SUCCESS);
+    REQUIRE(strip.descriptor.effect_properties != nullptr);
+    REQUIRE(strip.descriptor.effect_properties->properties.size() == 3);
+    const auto strip_gui =
+        std::find_if(strip.descriptor.effect_properties->properties.begin(),
+                     strip.descriptor.effect_properties->properties.end(),
+                     [](const auto& item) { return item.first == AAX_eProperty_UsesClientGUI; });
+    REQUIRE(strip_gui != strip.descriptor.effect_properties->properties.end());
+    REQUIRE(strip_gui->second == 1);
+
+    FakeCollection gui;
+    REQUIRE(gui_entry::GetEffectDescriptions(&gui) == AAX_SUCCESS);
+    REQUIRE(gui.descriptor.effect_properties != nullptr);
+    const auto gui_host_request =
+        std::find_if(gui.descriptor.effect_properties->properties.begin(),
+                     gui.descriptor.effect_properties->properties.end(),
+                     [](const auto& item) { return item.first == AAX_eProperty_UsesClientGUI; });
+    REQUIRE(gui_host_request == gui.descriptor.effect_properties->properties.end());
+}
+
 TEST_CASE("the entry macros differ only in the editor proc", "[aax][entry]") {
     FakeCollection strip;
     FakeCollection gui;
@@ -232,4 +292,258 @@ TEST_CASE("the entry macros differ only in the editor proc", "[aax][entry]") {
                                   static_cast<AAX_CProcPtrID>(kAAX_ProcPtrID_Create_EffectGUI)),
                       without_gui.end());
     REQUIRE(without_gui == strip.descriptor.proc_ids);
+}
+
+// ── Editor <-> audio-owner binding ──────────────────────────────────────────
+//
+// AAX keeps a data model and an algorithm instance; the model constructs the
+// instance's Processor itself (ResetFieldData), so the editor can run on the
+// Processor that renders audio. These drive that lifecycle the way the host
+// does, with no window and no audio.
+
+namespace {
+
+struct ModelHandle {
+    IACFUnknown* unknown = nullptr;
+    pulp::format::aax::EditorHost* host = nullptr;
+    explicit ModelHandle(const pulp::format::aax::EntryConfig& config)
+        : unknown(pulp::format::aax::create_effect_parameters(config)) {
+        REQUIRE(unknown != nullptr);
+        unknown->AddRef();
+        host = pulp::format::aax::testing::editor_host(unknown);
+        REQUIRE(host != nullptr);
+    }
+    ~ModelHandle() {
+        if (unknown)
+            unknown->Release();
+    }
+    void release() {
+        if (unknown)
+            unknown->Release();
+        unknown = nullptr;
+        host = nullptr;
+    }
+};
+
+pulp::format::aax::EntryConfig binding_config() {
+    return pulp::format::aax::make_entry_config(&make_gain, "PulP", "Gain", "GnNt");
+}
+
+} // namespace
+
+namespace {
+
+/// Records what the render callback hands it. Declares Stereo BEFORE Mono so a
+/// mono instance is only correct when the callback honours the instance's own
+/// layout rather than the first component's.
+struct TwoLayoutGain final : pulp::format::Processor {
+    static inline int prepare_calls = 0;
+    static inline int prepared_outputs = 0;
+    static inline std::size_t last_output_channels = 0;
+    static inline int latency = 0;
+    int latency_samples() const override {
+        return latency;
+    }
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d{
+            .name = "TwoLayoutGain",
+            .manufacturer = "Pulp",
+            .bundle_id = "com.pulp.two-layout-gain",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2, false}},
+            .output_buses = {{"Main Out", 2, false}},
+        };
+        d.supported_bus_layouts = {
+            {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
+            {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+        };
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter(
+            {.id = 1, .name = "Gain", .unit = "dB", .range = {-24.0f, 24.0f, 0.0f, 0.1f}});
+    }
+    void prepare(const pulp::format::PrepareContext& ctx) override {
+        ++prepare_calls;
+        prepared_outputs = ctx.output_channels;
+    }
+    void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        last_output_channels = out.num_channels();
+        for (std::size_t ch = 0; ch < out.num_channels(); ++ch) {
+            auto dst = out.channel(ch);
+            for (std::size_t i = 0; i < out.num_samples(); ++i)
+                dst[i] = 0.25f;
+        }
+    }
+};
+std::unique_ptr<pulp::format::Processor> make_two_layout_gain() {
+    return std::make_unique<TwoLayoutGain>();
+}
+pulp::format::aax::EntryConfig two_layout_config() {
+    return pulp::format::aax::make_entry_config(&make_two_layout_gain, "PulP", "TwLy", "TwLt");
+}
+
+} // namespace
+
+TEST_CASE("AAX layout selection follows the host's stem formats", "[aax][entry][layout]") {
+    using namespace pulp::format::aax;
+    using namespace pulp::format::aax::testing;
+    std::vector<ComponentLayout> components(2);
+    components[0].input_stem = StemKind::stereo;
+    components[0].output_stem = StemKind::stereo;
+    components[1].input_stem = StemKind::mono;
+    components[1].output_stem = StemKind::mono;
+    CHECK(select_layout_for_test(components, StemKind::mono, StemKind::mono) == 1);
+    CHECK(select_layout_for_test(components, StemKind::stereo, StemKind::stereo) == 0);
+    // An unknown pairing falls back on the output stem, then on the first.
+    CHECK(select_layout_for_test(components, StemKind::lcr, StemKind::mono) == 1);
+    CHECK(select_layout_for_test(components, StemKind::none, StemKind::none) == 0);
+}
+
+TEST_CASE("AAX mono instance renders through the mono layout even when stereo is declared first",
+          "[aax][entry][layout]") {
+    using namespace pulp::format::aax;
+    using namespace pulp::format::aax::testing;
+    TwoLayoutGain::prepare_calls = 0;
+    TwoLayoutGain::prepared_outputs = 0;
+    TwoLayoutGain::last_output_channels = 0;
+    const auto config = two_layout_config();
+    const auto definition = build_plugin_definition(config.factory, config.codes);
+    INFO(definition.error);
+    REQUIRE(definition.ok);
+    REQUIRE(definition.definition.components.size() == 2);
+    ModelHandle model(config);
+    std::vector<std::byte> block(private_data_block_size());
+    REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+    REQUIRE(algorithm_processor(block.data()) != nullptr);
+    CHECK(instance_component_index(block.data()) == 0);
+
+    // The host says mono: the instance adopts the second component and is
+    // prepared for it on the control thread, before any render callback.
+    adopt_layout_for_test(block.data(), StemKind::mono, StemKind::mono, 48000.0);
+    CHECK(instance_component_index(block.data()) == 1);
+    CHECK(TwoLayoutGain::prepare_calls == 1);
+    CHECK(TwoLayoutGain::prepared_outputs == 1);
+
+    // Host-shaped pointer arrays: a mono instance owns ONE channel. The second
+    // slot is null, which is what a stereo-count read would dereference.
+    constexpr int frames = 64;
+    std::vector<float> in(frames, 1.0f), out(frames, 0.0f);
+    float* inputs[2] = {in.data(), nullptr};
+    float* outputs[2] = {out.data(), nullptr};
+    REQUIRE(render_for_test(block.data(), inputs, outputs, frames, 48000.0));
+    CHECK(TwoLayoutGain::last_output_channels == 1);
+    CHECK(out[0] == 0.25f);
+    CHECK(out[frames - 1] == 0.25f);
+    // The render did not re-prepare: the control-thread prepare covered it.
+    CHECK(TwoLayoutGain::prepare_calls == 1);
+}
+
+TEST_CASE("AAX model republishes a latency the processor changed at run time",
+          "[aax][entry][latency]") {
+    using namespace pulp::format::aax::testing;
+    TwoLayoutGain::latency = 0;
+    ModelHandle model(two_layout_config());
+    std::vector<std::byte> block(private_data_block_size());
+    REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+    auto* processor = algorithm_processor(block.data());
+    REQUIRE(processor != nullptr);
+    // Nothing pending until the processor raises its flag.
+    CHECK(pending_latency_report_for_test(model.unknown) == -1);
+    // A renderer switch: new latency, flag raised the way every format expects.
+    TwoLayoutGain::latency = 512;
+    processor->flag_latency_changed();
+    const int reported = pending_latency_report_for_test(model.unknown);
+    CHECK(reported >= 512);
+    // Consumed once; the next wakeup reports nothing.
+    CHECK(pending_latency_report_for_test(model.unknown) == -1);
+}
+
+TEST_CASE("AAX editor binds to the processor that renders audio", "[aax][entry][view-bridge]") {
+    using namespace pulp::format::aax::testing;
+    ModelHandle model(binding_config());
+    std::vector<std::byte> block(private_data_block_size());
+
+    REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+    auto* audio_owner = algorithm_processor(block.data());
+    REQUIRE(audio_owner != nullptr);
+
+    CHECK(model.host->editor_processor() == audio_owner);
+    CHECK(model.host->editor_store() == algorithm_store(block.data()));
+
+    // An editor edit lands in the store the audio thread reads.
+    model.host->editor_store()->set_value(1, 6.0f);
+    CHECK(algorithm_store(block.data())->get_value(1) == 6.0f);
+
+    // A host reset re-prepares in place: the editor's Processor survives.
+    REQUIRE(instance_init_for_test(block.data(), AAX_eComponentInstanceInitAction_ResetInstance) ==
+            0);
+    CHECK(algorithm_processor(block.data()) == audio_owner);
+    CHECK(model.host->editor_processor() == audio_owner);
+
+    // Removing the instance invalidates the editor BEFORE the Processor dies.
+    bool invalidated = false;
+    pulp::format::Processor* seen_at_invalidation = nullptr;
+    model.host->set_editor_invalidation_handler([&] {
+        invalidated = true;
+        seen_at_invalidation = algorithm_processor(block.data());
+    });
+    REQUIRE(instance_init_for_test(block.data(),
+                                   AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
+    CHECK(invalidated);
+    CHECK(seen_at_invalidation == audio_owner);
+    CHECK(algorithm_processor(block.data()) == nullptr);
+
+    // The model falls back to its own Processor for a later open. The
+    // allocator may hand the fallback the dead instance's address, so prove
+    // it is a fresh pair by its state: the audio store held +6 dB.
+    auto* fallback = model.host->editor_processor();
+    REQUIRE(fallback != nullptr);
+    REQUIRE(model.host->editor_store() != nullptr);
+    CHECK(model.host->editor_store()->get_value(1) == 0.0f);
+}
+
+TEST_CASE("AAX editor opened before any algorithm instance keeps its fallback",
+          "[aax][entry][view-bridge]") {
+    using namespace pulp::format::aax::testing;
+    ModelHandle model(binding_config());
+    auto* fallback = model.host->editor_processor();
+    REQUIRE(fallback != nullptr);
+
+    std::vector<std::byte> block(private_data_block_size());
+    REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+    REQUIRE(algorithm_processor(block.data()) != nullptr);
+    // No live rebind: an open editor's view tree points at the fallback.
+    CHECK(model.host->editor_processor() == fallback);
+
+    bool invalidated = false;
+    model.host->set_editor_invalidation_handler([&] { invalidated = true; });
+    REQUIRE(instance_init_for_test(block.data(),
+                                   AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
+    CHECK_FALSE(invalidated); // the fallback was never bound to the instance
+    CHECK(model.host->editor_processor() == fallback);
+}
+
+TEST_CASE("AAX model destroyed before its algorithm instance leaves the instance intact",
+          "[aax][entry][view-bridge]") {
+    using namespace pulp::format::aax::testing;
+    std::vector<std::byte> block(private_data_block_size());
+    {
+        ModelHandle model(binding_config());
+        REQUIRE(reset_private_data(model.unknown, block.data(), block.size()) == AAX_SUCCESS);
+        REQUIRE(model.host->editor_processor() == algorithm_processor(block.data()));
+        model.release();
+    }
+    auto* audio_owner = algorithm_processor(block.data());
+    REQUIRE(audio_owner != nullptr);
+    // The store the dead model subscribed to is still usable...
+    algorithm_store(block.data())->set_value(1, -3.0f);
+    CHECK(algorithm_store(block.data())->get_value(1) == -3.0f);
+    // ...and the instance tears down on its own.
+    REQUIRE(instance_init_for_test(block.data(),
+                                   AAX_eComponentInstanceInitAction_RemovingInstance) == 0);
+    CHECK(algorithm_processor(block.data()) == nullptr);
 }

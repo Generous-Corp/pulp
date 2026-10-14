@@ -165,6 +165,17 @@ if command -v node >/dev/null 2>&1; then
         --no-build --build-dir build --test "node value.test.mjs" \
       ) >/dev/null 2>&1; echo $? )
     check "--no-build with --build-dir is rejected" 2 "$CONFLICT"
+
+    # Another git process holding .git/index.lock (as a parallel ctest or an
+    # agent's git status does) must not stop the restore, and the tree must end
+    # clean.
+    make_script_project "$TMP/script-locked" meaningful
+    : > "$TMP/script-locked/.git/index.lock"
+    check "a held git index lock does not block the restore" 0 \
+        "$(run_script_under_test "$TMP/script-locked")"
+    rm -f "$TMP/script-locked/.git/index.lock"
+    LOCKED_CLEAN=$( ( cd "$TMP/script-locked" && git diff --quiet ) ; echo $? )
+    check "the restore under a held lock leaves the file clean" 0 "$LOCKED_CLEAN"
 else
     # A skip is not a pass, so it is reported rather than counted as one.
     printf '  SKIP script-test lane (no node on PATH)\n'

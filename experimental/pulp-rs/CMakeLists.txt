@@ -117,6 +117,16 @@ else()
     set(_pulp_rs_target_subdir "release")
 endif()
 
+# --locked: the build uses the committed Cargo.lock exactly, and fails rather
+# than rewriting it or resolving a crate version nobody reviewed. A disconnected
+# configure (FETCHCONTENT_FULLY_DISCONNECTED ON) also keeps cargo off the
+# network, resolving only from the local Cargo registry cache.
+set(_pulp_rs_lock_args "--locked")
+if(FETCHCONTENT_FULLY_DISCONNECTED)
+    list(APPEND _pulp_rs_lock_args "--offline")
+endif()
+list(APPEND _pulp_rs_cargo_args ${_pulp_rs_lock_args})
+
 if(PULP_RUST_CLI_TARGET)
     list(APPEND _pulp_rs_cargo_args "--target" "${PULP_RUST_CLI_TARGET}")
     set(_pulp_rs_target_subdir "${PULP_RUST_CLI_TARGET}/${_pulp_rs_target_subdir}")
@@ -195,7 +205,7 @@ if(PULP_BUILD_TESTS)
     add_test(NAME pulp-rust-gpu-trace-analysis-unit
         COMMAND ${CMAKE_COMMAND} -E env
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
-            ${CARGO_EXECUTABLE} test
+            ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
             trace_gpu_analysis)
     set_tests_properties(pulp-rust-gpu-trace-analysis-unit
@@ -221,7 +231,7 @@ if(PULP_BUILD_TESTS)
     add_test(NAME pulp-rust-stale-cli-guard
         COMMAND ${CMAKE_COMMAND} -E env
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
-            ${CARGO_EXECUTABLE} test
+            ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
             stale_cli)
     set_tests_properties(pulp-rust-stale-cli-guard
@@ -246,7 +256,7 @@ if(PULP_BUILD_TESTS)
     add_test(NAME pulp-rust-cli-cargo-tests
         COMMAND ${CMAKE_COMMAND} -E env
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
-            ${CARGO_EXECUTABLE} test
+            ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
             --no-fail-fast --lib --bins ${_pulp_rs_test_target_args})
     set_tests_properties(pulp-rust-cli-cargo-tests PROPERTIES
@@ -256,7 +266,7 @@ if(PULP_BUILD_TESTS)
     add_test(NAME pulp-rust-cli-doc-tests
         COMMAND ${CMAKE_COMMAND} -E env
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
-            ${CARGO_EXECUTABLE} test
+            ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
             --doc)
     set_tests_properties(pulp-rust-cli-doc-tests PROPERTIES

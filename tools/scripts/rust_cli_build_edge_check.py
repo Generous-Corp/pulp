@@ -14,7 +14,9 @@ lost any of the properties that make it skippable:
   * it writes the Cargo binary (not a symbolic `CMakeFiles/pulp-rust-cli`
     output that never exists and so is always dirty);
   * it declares a depfile (Cargo's dep-info, which lists every Rust source);
-  * it lists Cargo.toml and Cargo.lock as inputs (dep-info omits them).
+  * it lists Cargo.toml and Cargo.lock as inputs (dep-info omits them);
+  * its `cargo build` runs with --locked, so the build uses the committed
+    Cargo.lock exactly instead of rewriting it or resolving new crate versions.
 
 Exit codes: 0 pass, 1 fail, 77 skip (no build.ninja, i.e. not a Ninja build,
 or the Rust CLI is not part of this build).
@@ -23,6 +25,7 @@ or the Rust CLI is not part of this build).
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
 
@@ -71,7 +74,27 @@ def check(text: str) -> list[str]:
     for manifest in ("Cargo.toml", "Cargo.lock"):
         if not any(Path(i).name == manifest for i in edge["inputs"]):
             problems.append(f"cargo edge does not depend on {manifest}")
+    if not cargo_build_is_locked(edge["vars"].get("COMMAND", "")):
+        problems.append(
+            "cargo edge runs `cargo build` without --locked, so a build can "
+            "rewrite Cargo.lock or resolve crate versions nobody reviewed")
     return problems
+
+
+def cargo_build_is_locked(command: str) -> bool:
+    """True when every `cargo build` step in the edge command passes --locked."""
+    steps = [step.strip() for step in command.split("&&")]
+    builds = []
+    for step in steps:
+        try:
+            words = shlex.split(step)
+        except ValueError:
+            words = step.split()
+        for index, word in enumerate(words[:-1]):
+            if Path(word).name.split(".")[0] == "cargo" and words[index + 1] == "build":
+                builds.append(words[index + 2:])
+                break
+    return bool(builds) and all("--locked" in args or "--frozen" in args for args in builds)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -90,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     for problem in problems:
         print(f"FAIL: {problem}")
     if not problems:
-        print("PASS: the cargo edge is incremental (real outputs, depfile, manifests)")
+        print("PASS: the cargo edge is incremental (real outputs, depfile, manifests) and --locked")
     return 1 if problems else 0
 
 

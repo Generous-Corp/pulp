@@ -112,6 +112,17 @@ consumer-ready target can set `cmake.add_subdirectory=false`; the generated
 tools/tests, then creates the declared interface target. `sst-tuning-library`
 is the reference pattern for source-only SCL/KBM parsing.
 
+### Tag-pinned FetchContent dependencies need a checked-in commit
+
+The Vellum closure gate (`tools/scripts/vellum_closure.py`) refuses any input
+whose dependency has no checked-in 40-hex commit, and compares every row against
+that commit. A dependency fetched by tag (SDL3, yaml-cpp, Yoga, SheenBidi) records
+the peeled commit as `upstream.commit` in `tools/deps/manifest.json`; it wins
+over the `setup.sh` hash, which may be an annotated-tag object rather than a
+commit. When you bump such a tag, update `upstream.commit` in the same change
+(`git ls-remote <repo> 'refs/tags/<tag>^{}'` gives the peeled commit), or the
+gate fails on every row from that dependency.
+
 ## Overlap Awareness
 
 Before suggesting a package, check if Pulp's built-in `core/signal/` already covers the need:
@@ -159,9 +170,20 @@ the last two also need `--verify-licenses` (both are in `gates.sh`):
 1. **Consistency** — every `manifest.json` entry must appear in
    `DEPENDENCIES.md`, `NOTICE.md`, and `docs/reference/licensing.md`.
 2. **Completeness** — every dep declared in a real manifest source
-   (`requirements-docs.txt`, `mkdocs.yml`, root + `bindings/python`
-   `FetchContent_Declare`, `external/<dir>/`) must be represented in
-   `manifest.json` via name or `external_names` alias.
+   (`requirements-docs.txt`, `mkdocs.yml`, `external/<dir>/`, and every fetch
+   in any CMake file or setup/bootstrap script: `FetchContent_Declare`,
+   `ExternalProject_Add`, `file(DOWNLOAD)`, `execute_process` running
+   curl/wget, curl/wget/git-clone and the `ensure_shared_*` helpers; and
+   curl/wget in any shell script under `tools/` or `hooks/`) must be represented in
+   `manifest.json`, or be listed with a reason in `KNOWN_UNLISTED_FETCHES`
+   (printed every run as a follow-up; a stale entry fails `--strict`). A fetch
+   that names its upstream is matched by URL (`repository` or an `artifacts`
+   URL), never by its local FetchContent label, so `choc_wclap` is covered by
+   CHOC's repository and a familiar name from a different repo is not. Keep
+   aliases to genuine spellings of the same dependency: an alias naming a
+   different upstream (WebGPU-distribution once listed `wgpu-native`) hides
+   that upstream from this check. A URL built at run time is invisible to it;
+   say so in review rather than assume coverage.
 3. **Truthfulness** — the attribution text must match the license actually on
    disk: no NOTICE entry may reproduce a truncated permission notice, and no
    checked-out tree may offer a copyleft alternative while the manifest
@@ -178,6 +200,20 @@ MIT without its warranty disclaimer for 21 entries, and the VST3 SDK was
 labeled MIT on all four surfaces while the pinned tree (v3.7.12) was
 "Steinberg VST3 License OR GPLv3". **A name being present says nothing about
 the text being right** — when a license claim matters, read the tree.
+
+### Digest-pinned release assets (`artifacts`)
+
+A dependency shipped as prebuilt release assets records each one in its
+manifest row: `{"name", "url", "sha256", "tree_sha256"}`. `sha256` is the
+archive; `tree_sha256` is the extracted tree (one `"<path> <sha256>"` line per
+file, sorted), which is what lets configure re-check a shared cache that holds
+only extracted files. wgpu-native is the first user:
+`tools/cmake/PulpWgpuNative.cmake` and `setup.sh` both read these pins and
+refuse a mismatch. Record new digests with
+`python3 -I tools/deps/wgpu_native_digests.py <fresh-empty-dir>/*.zip` after
+downloading the assets yourself; a release that publishes no digest of its own
+means the download you hash is the only evidence, so download twice into
+separate empty directories and compare.
 
 ### Writing a NOTICE entry
 
@@ -400,6 +436,25 @@ its `pinned_version` in the same change. Rule + rationale:
 [extending-pulp.md](../../../docs/reference/extending-pulp.md#every-added-tool-must-be-user-updatable-and-overridable).
 The check runs anywhere `validate_registry.py` runs (its
 `test_package_validation_tools.py` unit suite covers the new rule).
+
+The same validator fails any `binary_sources` entry without a lowercase 64-hex
+`sha256` of its release asset at the pin, and fails a trace-processor or
+chrome-for-testing digest that no longer appears in the Rust fetcher that
+verifies it. A binary source therefore needs an immutable, versioned URL; a
+"latest" redirect cannot hold a digest. Recording digests and the
+unverified-version override behavior: the `installable-tools` skill.
+
+`bundleable: true` is refused unless the tool's `license` can only resolve to
+an allowed permissive license. The validator parses SPDX properly: parentheses
+group, `AND` binds tighter than `OR`, an `OR` needs one permitted branch and an
+`AND` needs both. GPL, AGPL, LGPL, prose terms, `WITH` exceptions, an empty
+license and anything that does not parse are not bundleable (it fails closed). Record
+the license of the build actually pinned, not of the upstream project: FFmpeg's
+source is LGPL, but every prebuilt Pulp pins is configured `--enable-gpl`, so
+the registry says GPL and `bundleable: false`. Read a binary's configuration
+with `strings <binary> | grep -- --enable-gpl` (look for `--enable-nonfree`
+too, which makes a build unredistributable) rather than trusting a download
+page.
 
 For `python_pip` tools, the managed venv manifest is also the installed-version
 authority. `pulp tool install` may reuse an existing venv only when its wrapper

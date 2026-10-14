@@ -509,6 +509,12 @@ def validate_event(value: Any, filename: str) -> set[str]:
     fields = set(common_fields)
     if kind == "authority-expansion-watch-refresh":
         fields.add("refresh")
+    # Optional: whether Vellum inherits the change, read by the inheritance
+    # ledger checker (vellum_inheritance_ledger_check.py).
+    if isinstance(value, dict) and "vellum_inherits" in value:
+        if type(value["vellum_inherits"]) is not bool:
+            raise WatchError(f"{filename}: vellum_inherits must be true or false")
+        fields.add("vellum_inherits")
     _exact_keys(value, fields, filename)
     if value["schema_version"] != 1 or type(value["schema_version"]) is not int:
         raise WatchError(f"{filename}: schema_version must be integer 1")

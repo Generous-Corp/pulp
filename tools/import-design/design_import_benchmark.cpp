@@ -66,6 +66,12 @@ struct PhaseMetrics {
     std::uint64_t rss_p99_bytes = 0;
     std::uint64_t rss_peak_bytes = 0;
     std::uint64_t paint_commands_last = 0;
+    std::uint64_t bridge_calls = 0;
+    std::uint64_t layout_passes = 0;
+    std::uint64_t paint_calls = 0;
+    std::uint64_t paint_commands_total = 0;
+    std::uint64_t invalidation_requests = 0;
+    std::uint64_t unmarked_paint_mutations = 0;
     int js_evaluations = 0;
 };
 
@@ -182,6 +188,9 @@ public:
     virtual View& root() = 0;
     virtual void step(int frame) = 0;
     virtual int js_evaluation_count() const = 0;
+    virtual std::uint64_t bridge_call_count() const {
+        return 0;
+    }
 };
 
 void place_absolute(IRNode& node, float left, float top, float width, float height) {
@@ -580,6 +589,9 @@ public:
     }
 
     int js_evaluation_count() const override { return js_evaluations_; }
+    std::uint64_t bridge_call_count() const override {
+        return bridge_->bridge_call_count();
+    }
 
 private:
     static std::string live_fixture_script() {
@@ -695,6 +707,10 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     const auto phase_start = Clock::now();
     const auto cpu_start = std::clock();
     auto next_frame = phase_start;
+    const auto bridge_calls_start = fixture.bridge_call_count();
+    const auto layout_passes_start = View::layout_pass_count();
+    const auto invalidation_start = View::damage_request_count();
+    const auto unmarked_start = View::unmarked_paint_mutation_count();
     std::vector<double> frame_ms;
     std::vector<double> frame_cpu_ms;
     std::vector<double> rss_bytes;
@@ -705,6 +721,8 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
         const auto frame_cpu_start = std::clock();
         if (interactive) fixture.step(frame);
         metrics.paint_commands_last = render_frame(fixture.root());
+        metrics.paint_commands_total += metrics.paint_commands_last;
+        ++metrics.paint_calls;
         const auto frame_cpu_end = std::clock();
         const auto frame_end = Clock::now();
         frame_ms.push_back(elapsed_ms(frame_start, frame_end));
@@ -735,6 +753,10 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     }
     const auto cpu_end = std::clock();
     metrics.cpu_ms = cpu_clock_delta_ms(cpu_start, cpu_end);
+    metrics.bridge_calls = fixture.bridge_call_count() - bridge_calls_start;
+    metrics.layout_passes = View::layout_pass_count() - layout_passes_start;
+    metrics.invalidation_requests = View::damage_request_count() - invalidation_start;
+    metrics.unmarked_paint_mutations = View::unmarked_paint_mutation_count() - unmarked_start;
     metrics.js_evaluations = fixture.js_evaluation_count();
     return metrics;
 }
@@ -765,7 +787,16 @@ void append_phase_json(std::ostringstream& out,
     out << "    \"rss_p99_bytes\": " << metrics.rss_p99_bytes << ",\n";
     out << "    \"rss_peak_bytes\": " << metrics.rss_peak_bytes << ",\n";
     out << "    \"paint_commands_last\": " << metrics.paint_commands_last << ",\n";
-    out << "    \"js_evaluations_total\": " << metrics.js_evaluations << "\n";
+    out << "    \"js_evaluations_total\": " << metrics.js_evaluations << ",\n";
+    out << "    \"counters\": {\n";
+    out << "      \"counter_schema\": \"pulp-design-import-benchmark-counters-v1\",\n";
+    out << "      \"bridge_calls\": " << metrics.bridge_calls << ",\n";
+    out << "      \"layout_passes\": " << metrics.layout_passes << ",\n";
+    out << "      \"paint_calls\": " << metrics.paint_calls << ",\n";
+    out << "      \"paint_commands_total\": " << metrics.paint_commands_total << ",\n";
+    out << "      \"invalidation_requests\": " << metrics.invalidation_requests << ",\n";
+    out << "      \"unmarked_paint_mutations\": " << metrics.unmarked_paint_mutations << "\n";
+    out << "    }\n";
     out << "  }" << (trailing_comma ? "," : "") << "\n";
 }
 

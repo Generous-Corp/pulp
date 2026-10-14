@@ -48,7 +48,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
@@ -835,6 +835,8 @@ install(FILES
     # them is exactly the gap WAH-3 closes.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpVerifyRuntimeStaging.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
+    # Included by FindSkia.cmake relative to its own directory.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
     # Every plist template a format helper can reach must ship. PulpPluginFormats
@@ -969,6 +971,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_native_view_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_adapter.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_audio_unit.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_entry.mm"

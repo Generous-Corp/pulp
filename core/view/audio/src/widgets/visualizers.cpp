@@ -13,6 +13,7 @@
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/audio_widgets.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <algorithm>

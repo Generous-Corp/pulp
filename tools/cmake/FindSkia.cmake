@@ -10,6 +10,8 @@
 #   SKIA_INCLUDE_DIRS  - Include directories
 #   SKIA_LIBRARIES     - Libraries to link
 #   SKIA_ICUDTL_FILE   - Path to icudtl.dat when the slice ships one
+#   PULP_SKIA_PROVIDES_DAWN - Cache: the slice's Dawn archive exists, so it is
+#                             the WebGPU implementation (PulpSkiaDawnProvider)
 #   skia::skia         - Imported target
 #
 # Backends by platform:
@@ -19,6 +21,11 @@
 # exactly one Graphite object, so SK_GRAPHITE/SK_DAWN must not be defined there.
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpMacosArchiveFloor.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpSkiaDawnProvider.cmake")
+
+# Start from "Skia supplies no Dawn" so every early return below leaves the
+# recorded provider decision false rather than stale from a previous configure.
+pulp_record_skia_dawn_provider(SKIA_FOUND FALSE)
 
 if(NOT SKIA_DIR)
     # Default: look in external/skia-build or SKIA_DIR env var
@@ -549,3 +556,6 @@ else()
     set(SKIA_FOUND FALSE)
     message(STATUS "Skia: not found at ${SKIA_DIR} — GPU rendering disabled")
 endif()
+
+# The one provider decision every GPU consumer reads (PULP_SKIA_PROVIDES_DAWN).
+pulp_record_skia_dawn_provider(SKIA_FOUND "${SKIA_FOUND}" DAWN_ARCHIVE "${DAWN_LIBRARY}")

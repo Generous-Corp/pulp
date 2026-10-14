@@ -227,6 +227,13 @@ TraceStartResult Tracing::start_exclusive(
 
     perfetto::TraceConfig cfg;
     cfg.add_buffers()->set_size_kb(ring_kb);
+    // Track events intern their names and categories per writer sequence.
+    // Once the ring wraps and overwrites a sequence's interning packets, every
+    // later event on that sequence is undecodable: the file keeps growing but
+    // trace_processor shows only the first seconds and reports
+    // `traced_buf_incremental_sequences_dropped`. Re-emitting the incremental
+    // state periodically bounds that loss to one period after a wrap.
+    cfg.mutable_incremental_state_config()->set_clear_period_ms(5000);
     auto* data_source_config =
         cfg.add_data_sources()->mutable_config();
     data_source_config->set_name("track_event");

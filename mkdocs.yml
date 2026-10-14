@@ -128,6 +128,7 @@ nav:
   - Getting Started:
       - Getting Started: guides/getting-started.md
       - Building: guides/build.md
+      - Pinned Build Tools (mise): guides/mise.md
       - Testing: guides/testing.md
       - Docs Maintenance: guides/docs-maintenance.md
       - iOS Deployment: getting-started/ios-deployment.md
