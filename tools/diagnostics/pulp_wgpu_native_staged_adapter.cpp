@@ -1,6 +1,8 @@
 #include "detail/shared_io_arena.hpp"
 #include "detail/shared_io_program_session.hpp"
 
+#include <pulp/gpu_audio/gpu_audio_program.hpp>
+
 #include <CommonCrypto/CommonDigest.h>
 #include <webgpu/webgpu.h>
 
@@ -638,8 +640,73 @@ bool WgpuNativeStagedProgram::release() noexcept {
 
 } // namespace
 
+namespace {
+
+bool validate_contract_admission() noexcept {
+    using namespace pulp::gpu_audio;
+    GpuAudioProgramDescriptor program{
+        .kind = GpuAudioProgramKind::Neural,
+        .path = GpuAudioExecutionPath::Staged,
+        .provider = GpuAudioProvider::Unknown,
+        .miss_policy = MissPolicy::Silence,
+        .channels = 1,
+        .block_size = 64,
+        .sample_rate = 48'000,
+        .algorithmic_lead_blocks = 1,
+        .pipeline_depth = 3,
+        .provider_slots = 2,
+        .provider_owned_resources = false,
+        .cpu_fallback_prepared = false,
+    };
+    if (!validate_gpu_audio_program(program).accepted())
+        return false;
+
+    auto expect = [](GpuAudioProgramDescriptor candidate, GpuAudioProgramError error) {
+        return validate_gpu_audio_program(candidate).error == error;
+    };
+    auto missing_lead = program;
+    missing_lead.algorithmic_lead_blocks = 0;
+    if (!expect(missing_lead, GpuAudioProgramError::MissingAlgorithmicLead))
+        return false;
+    auto shallow_pipeline = program;
+    shallow_pipeline.pipeline_depth = 1;
+    if (!expect(shallow_pipeline, GpuAudioProgramError::InsufficientPipelineDepth))
+        return false;
+    auto resources_on_staged = program;
+    resources_on_staged.provider_owned_resources = true;
+    if (!expect(resources_on_staged, GpuAudioProgramError::ProviderResourcesOnStaged))
+        return false;
+    auto missing_fallback = program;
+    missing_fallback.miss_policy = MissPolicy::CpuFallback;
+    if (!expect(missing_fallback, GpuAudioProgramError::CpuFallbackNotPrepared))
+        return false;
+
+    GpuAudioCapabilityReport capability{
+        .path = GpuAudioExecutionPath::Staged,
+        .provider = GpuAudioProvider::Unknown,
+        .eligibility = GpuAudioEligibility::Eligible,
+        .fallback_policy = MissPolicy::Silence,
+        .prepared_lead_blocks = 1,
+        .prepared = true,
+        .fallback_available = false,
+        .diagnostics_available = true,
+        .prepared_latency_blocks = 1,
+    };
+    if (!validate_gpu_audio_program(program, capability).accepted())
+        return false;
+    capability.path = GpuAudioExecutionPath::SharedMemory;
+    return validate_gpu_audio_program(program, capability).error ==
+           GpuAudioProgramError::CapabilityPathMismatch;
+}
+
+} // namespace
+
 int main() {
     using pulp::gpu_audio::detail::SharedIoProgramSession;
+    if (!validate_contract_admission()) {
+        std::puts("wgpu_native_contract_admission=failed");
+        return 12;
+    }
     Dl_info loaded{};
     if (dladdr(reinterpret_cast<const void*>(&wgpuCreateInstance), &loaded) == 0 ||
         loaded.dli_fname == nullptr)
@@ -659,6 +726,33 @@ int main() {
                           .storage_kind = SharedIoArenaProvider::StorageKind::Staged})) {
         std::puts("wgpu_native_session=failed");
         return 2;
+    }
+
+    // Exercise the fixed scheduler with two admitted blocks before waiting for
+    // either terminal result. This remains a private staged diagnostic; it is
+    // not realtime or product/provider evidence.
+    std::array<std::optional<SharedIoProgramSession::InputLease>, 2> inflight;
+    for (std::size_t i = 0; i < inflight.size(); ++i) {
+        inflight[i] = session.acquire_input(100 + i, 0);
+        if (!inflight[i] || !session.submit({inflight[i]->token, 0}))
+            return 13;
+    }
+    std::array<std::optional<SharedIoProgramSession::Completion>, 2> inflight_completions;
+    for (int attempt = 0;
+         attempt < 10'000 && (!inflight_completions[0] || !inflight_completions[1]); ++attempt) {
+        (void)session.service(0);
+        for (auto& completion : inflight_completions)
+            if (!completion)
+                completion = session.pop_completion();
+        if (!inflight_completions[0] || !inflight_completions[1])
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    for (const auto& completion : inflight_completions) {
+        if (!completion || completion->status != SharedIoTerminalStatus::RetiredSuccess)
+            return 14;
+        auto output = session.acquire_output(*completion);
+        if (!output || !session.release_output({output->token}))
+            return 15;
     }
     constexpr std::array<float, 3> weights{{-0.6180188f, 1.0314025f, -1.0111561f}};
     std::uint32_t successes = 0;

@@ -787,6 +787,12 @@ public:
     std::size_t custom_node_type_count() const;
 
 private:
+  // The standalone executor-routing builder must resolve every pointer and
+  // capture the matching snapshot keepalive as one publication-serialized
+  // operation.  It is a friend rather than a new public locking API so the
+  // existing source/ABI surface stays unchanged.
+  friend bool build_signal_graph_executor_routing(const SignalGraph&, SignalGraphExecutorRouting&);
+
   friend std::optional<std::vector<HostParamInfo>>
   detail::processor_node_parameters(const SignalGraph&, NodeId);
 
