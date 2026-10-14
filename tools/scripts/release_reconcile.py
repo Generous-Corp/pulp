@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from release_failure_diagnosis import (  # noqa: E402
     Diagnosis,
     diagnose,
+    failing_step_error,
     release_asset_coordinates,
 )
 
@@ -45,7 +46,12 @@ LIVE_RUN_STATES = {"queued", "in_progress", "requested", "waiting", "pending"}
 # nothing ever escalating.
 WORKING_RUN_STATES = {"in_progress"}
 
+# The long-lived incident used before stall episodes. An open one is still
+# updated and closed like an episode, so the switch loses nothing in flight.
 INCIDENT_TITLE = "Release reconciler: tags stuck after repeated re-dispatch"
+# One issue per stall episode: opened when a tag first becomes unresolved,
+# updated while anything stays unresolved, closed on recovery, never reopened.
+EPISODE_TITLE_PREFIX = "Release stalled: "
 INCIDENT_LABEL = "release-guard"
 
 
@@ -615,15 +621,10 @@ def collect(
         if job_id is None:
             return ""
         if job_id not in log_cache:
-            try:
-                completed = subprocess.run(
-                    ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
-                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, text=True, timeout=60, check=False,
-                )
-                log_cache[job_id] = completed.stdout if completed.returncode == 0 else ""
-            except (subprocess.SubprocessError, OSError):
-                log_cache[job_id] = ""
+            text, error = fetch_job_log(repo, job_id)
+            if error:
+                print(f"  job {job_id}: log not fetched — {error}")
+            log_cache[job_id] = text
         return log_cache[job_id]
     for r in flat_runs:
         if not needs_job_details(r):
@@ -719,7 +720,9 @@ def collect(
                 run_states=tuple(r["status"] for r in tag_runs),
                 validation_failures=latest_validation_failures(
                     tag_runs, job_cache, log_fetcher=log_fetcher
-                ) + immutable,
+                ) + immutable + repeated_package_failures(
+                    tag_runs, job_cache, log_fetcher
+                ),
                 # A tag push produces one `push` run; every run beyond that is a
                 # re-dispatch, ours or a human's.
                 dispatch_attempts=sum(
@@ -927,34 +930,139 @@ def redispatch(repo: str, tag: str, dry_run: bool) -> None:
     print(f"    re-dispatched release-cli for {tag}")
 
 
-def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> None:
-    """Maintain exactly ONE incident issue across its whole lifecycle.
+# Job logs carry ANSI colour codes. Newer gh refuses to print a response that
+# contains terminal escape sequences unless told to, and exits 1 — which the
+# runner's gh started doing while this host's older gh did not. Every log then
+# read as "", so no failure could be classified and every tag-immutable
+# circuit stayed shut. Ask for the bytes; fall back for a gh too old to know
+# the flag.
+_ALLOW_ESCAPES = "--allow-escape-sequences"
 
-    Deliberately not one-issue-per-tag-per-run: that pattern produced 413 issues in
-    two weeks. Three things make "one issue" actually hold, all of which the old
-    release-health.yml got wrong:
 
-      - The title is CONSTANT — no counts, no tag names. release-health embedded an
-        escalating count, so its issues were not even title-identical to each other.
-      - The label EXISTS. release-health labeled with `release-health`, which is
-        not a label in this repo; the labeled create failed, an unlabelled create
-        fell through, and its own dedupe (filtered by that label) could never find
-        what it had filed.
-      - The lookup searches `--state all` and REOPENS. Searching only open issues
-        means every recurrence after a recovery mints a fresh issue, which is just
-        the firehose with extra steps.
+def fetch_job_log(
+    repo: str, job_id: int, *, run: "Callable[..., subprocess.CompletedProcess]" = None
+) -> tuple[str, str]:
+    """Return (log text, "") or ("", why it could not be fetched).
+
+    A failure is returned, never swallowed: an unfetched log means "no
+    evidence", and the caller must be able to say so rather than report
+    "no error line in the job log" for a log it never saw.
     """
+    run = run or subprocess.run
+    base = ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"]
+    error = ""
+    for cmd in ([*base, _ALLOW_ESCAPES], base):
+        try:
+            completed = run(
+                cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                timeout=60, check=False,
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            return "", f"{exc!r}"[:300]
+        if completed.returncode == 0:
+            return completed.stdout, ""
+        error = (completed.stderr or "").strip()[:300] or f"gh exited {completed.returncode}"
+        if _ALLOW_ESCAPES not in error and "unknown flag" not in error:
+            break
+    return "", error
+
+
+# A `Package CLI` step that fails the same way on two separate runs of one tag
+# will keep failing until something changes: the build inputs are frozen in the
+# tag, and a dispatched run's packager is main's copy (release-cli.yml overlays
+# it), which a sweep cannot tell has been fixed. Re-dispatching unchanged only
+# repeats the result — v0.963.0 to v0.965.0 each failed `Package CLI (Unix)` with
+# "wgpu native library not found" and were re-dispatched hourly, seven ~2-hour
+# matrices, before the packager fix reached main. So an identical repeat opens
+# the circuit: the incident names the error, a human (or a redrive) dispatches
+# once after the fix lands, and a passing run clears it. One failure stays on
+# the retry path, since a runner can die mid-package.
+PACKAGE_STEP_PREFIX = "Package CLI"
+
+
+def repeated_package_failures(
+    runs: Iterable[dict],
+    job_cache: dict[int, list[dict]],
+    log_fetcher: Callable[[int | None], str],
+) -> tuple[str, ...]:
+    """Signatures of package failures that repeated across runs of one tag."""
+    seen: dict[tuple[str, str, str], set[int]] = {}
+    for run in runs:
+        if run.get("status") != "completed":
+            continue
+        jobs = job_cache.get(run["id"], [])
+        if not jobs:
+            continue
+        latest = max(int(j.get("run_attempt", 1)) for j in jobs)
+        for job in jobs:
+            if int(job.get("run_attempt", 1)) != latest or job.get("conclusion") != "failure":
+                continue
+            step = _first_failed_step(job)
+            if not step.startswith(PACKAGE_STEP_PREFIX):
+                continue
+            # Only an error inside the failing step is evidence. Without one
+            # (no log, or a step that was lost or cancelled) two failures cannot be shown
+            # to be the same, so the tag stays on the retry path.
+            first = failing_step_error(log_fetcher(job.get("id")))
+            if not first:
+                continue
+            seen.setdefault((job.get("name", "unknown job"), step, first), set()).add(run["id"])
+    return tuple(
+        f"{job}: {step} failed identically on {len(ids)} runs of this tag — {first} "
+        "(re-running unchanged cannot help; land the fix on main, then dispatch once)"
+        for (job, step, first), ids in sorted(seen.items())
+        if len(ids) >= 2
+    )
+
+
+def episode_title(report: list[tuple[str, str]], now: datetime) -> str:
+    """Name a stall episode after its oldest unresolved tag and its start date."""
+    tags = [tag for tag, _ in report]
+    oldest = min(tags, key=lambda t: version_of(t) or (0,))
+    return f"{EPISODE_TITLE_PREFIX}{oldest} unpublished ({now:%Y-%m-%d})"
+
+
+def is_incident(issue: dict) -> bool:
+    title = issue.get("title", "")
+    return title == INCIDENT_TITLE or title.startswith(EPISODE_TITLE_PREFIX)
+
+
+def sync_incident(
+    repo: str, report: list[tuple[str, str]], dry_run: bool, *, now: datetime | None = None
+) -> None:
+    """Keep exactly one OPEN incident per stall episode.
+
+    A stall that began yesterday must read as news. The previous design kept one
+    issue for the reconciler's whole lifetime and reopened it: #6880 had been
+    reopened and closed many times since July, so its reopen for v0.963.0 at
+    2026-10-13 22:31Z read as routine and a stuck release went unnoticed for
+    hours. Now:
+
+      - A new episode (nothing open) creates a NEW issue whose title names the
+        oldest unresolved tag and the date. A closed issue is never reopened.
+      - While an episode is open it is edited in place, with one comment per
+        tag that joins it, so the issue count stays one per episode, not one
+        per sweep or per tag (release-health once filed 413 in two weeks).
+      - The label exists and is part of the lookup, and only OPEN issues match,
+        so the lookup cannot mint a duplicate during an episode.
+    """
+    now = now or datetime.now(timezone.utc)
     found = gh_json(
         [
-            "issue", "list", "--repo", repo, "--state", "all", "--limit", "50",
-            "--label", INCIDENT_LABEL, "--search", f"in:title {INCIDENT_TITLE}",
+            "issue", "list", "--repo", repo, "--state", "open", "--limit", "50",
+            "--label", INCIDENT_LABEL, "--search", "in:title Release",
             "--json", "number,title,state",
         ]
     )
-    match = next((i for i in found if i["title"] == INCIDENT_TITLE), None)
+    match = next(
+        (i for i in found or []
+         if is_incident(i) and i.get("state", "").lower() == "open"),
+        None,
+    )
 
     if not report:
-        if match and match["state"].lower() == "open" and not dry_run:
+        if match and not dry_run:
             subprocess.run(
                 ["gh", "issue", "close", str(match["number"]), "--repo", repo,
                  "--comment", "Every recent tag is published and complete. Closing."],
@@ -965,10 +1073,11 @@ def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> No
 
     body = incident_body(report)
     if dry_run:
-        print(f"  DRY RUN: would report {len(report)} unresolved tag(s)")
+        title = match["title"] if match else episode_title(report, now)
+        print(f"  DRY RUN: would report {len(report)} unresolved tag(s) as {title!r}")
         print("  DRY RUN: incident body follows\n" + body)
         return
-    _write_incident(repo, match, report, body)
+    _write_incident(repo, match, report, body, episode_title(report, now))
 
 
 # GitHub rejects an issue body over 65,536 characters, and a rejected edit fails
@@ -1040,7 +1149,9 @@ def incident_body(
     return body
 
 
-def _write_incident(repo: str, match: dict | None, report: list[tuple[str, str]], body: str) -> None:
+def _write_incident(
+    repo: str, match: dict | None, report: list[tuple[str, str]], body: str, title: str
+) -> None:
     if match:
         # Editing a long-open issue notifies nobody, which is how five broken
         # releases sat in an already-open incident unnoticed. Comment whenever
@@ -1048,10 +1159,7 @@ def _write_incident(repo: str, match: dict | None, report: list[tuple[str, str]]
         previous = gh_json(
             ["issue", "view", str(match["number"]), "--repo", repo, "--json", "body"]
         )
-        new_tags = newly_reported(
-            (previous or {}).get("body", "") if match["state"].lower() == "open" else "",
-            report,
-        )
+        new_tags = newly_reported((previous or {}).get("body", ""), report)
         subprocess.run(
             ["gh", "issue", "edit", str(match["number"]), "--repo", repo,
              "--body", body],
@@ -1067,20 +1175,14 @@ def _write_incident(repo: str, match: dict | None, report: list[tuple[str, str]]
                  "to verify it."],
                 check=True,
             )
-        if match["state"].lower() != "open":
-            subprocess.run(
-                ["gh", "issue", "reopen", str(match["number"]), "--repo", repo],
-                check=True,
-            )
-            print(f"  reopened incident #{match['number']}")
         print(f"  updated incident #{match['number']} ({len(report)} unresolved)")
     else:
         subprocess.run(
-            ["gh", "issue", "create", "--repo", repo, "--title", INCIDENT_TITLE,
+            ["gh", "issue", "create", "--repo", repo, "--title", title,
              "--body", body, "--label", INCIDENT_LABEL],
             check=True,
         )
-        print(f"  opened incident ({len(report)} unresolved)")
+        print(f"  opened incident {title!r} ({len(report)} unresolved)")
 
 
 _TAG_IN_ENTRY = re.compile(r"`(v\d+\.\d+\.\d+)`")

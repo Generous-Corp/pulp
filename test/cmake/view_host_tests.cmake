@@ -139,6 +139,13 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_plugin_view_host_first_mouse_macos.mm
         LIBRARIES pulp::view "-framework AppKit")
 endif()
+# Both macOS plug-in host views register for file and text drags and carry the
+# drop methods of their NSDraggingDestination category, linked from the library.
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-plugin-view-drag-macos GROUP pulp-test-group-view-host-mac
+        SOURCES test_plugin_view_host_drag_macos.mm
+        LIBRARIES pulp::view "-framework AppKit")
+endif()
 # A plug-in editor opens on its own declared background: the backing layer and
 # every pixel of a frame painted before the document mounts, on both macOS
 # plug-in hosts (PluginViewHost::Options::background_rgb).
@@ -750,6 +757,29 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_view_audio_symbol_floor.py")
     set_tests_properties(pulp-view-audio-symbol-floor
         pulp-view-audio-symbol-floor-negative-contract
+        PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+endif()
+
+# The platform plug-in editor hosts, the frame pipeline and the PluginViewHost
+# factory registration build in the Pulp-kept pulp-view-tooling target,
+# and the abstract contract stays in view-core. The seam test links view-core
+# alone and drives a host through the View back-pointer; the symbol floor reads
+# the archives, because an edge-closed view-core can still hold an object (an
+# Objective-C category on a hosted editor view, say) that needs tooling's code.
+add_executable(pulp-test-view-core-plugin-host-seam test_view_core_plugin_host_seam.cpp)
+target_link_libraries(pulp-test-view-core-plugin-host-seam
+    PRIVATE pulp::view-core Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-view-core-plugin-host-seam
+    PROPERTIES LABELS "pr;view")
+if(NOT WIN32 AND TARGET pulp-view-tooling AND TARGET pulp-canvas)
+    add_test(NAME pulp-view-tooling-symbol-floor
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/archive_symbol_closure_check.py"
+            --nm "${CMAKE_NM}"
+            --subject "$<TARGET_FILE:pulp-view-core>"
+            --forbidden "$<TARGET_FILE:pulp-view-tooling>"
+            --control "$<TARGET_FILE:pulp-canvas>")
+    set_tests_properties(pulp-view-tooling-symbol-floor
         PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
 endif()
 

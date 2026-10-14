@@ -15,7 +15,8 @@ namespace pulp::gpu_audio::detail {
 inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
                                             const GpuConvolverTrialContext& context,
                                             std::span<const SharedIoTraceRecord> records) {
-    if (!valid_gpu_convolver_trial_context(context) || records.empty())
+    if (qualify_gpu_convolver_trial_context(context) != GpuConvolverTrialQualification::Qualified ||
+        records.empty())
         return false;
     // Reject malformed callback timing before writing any receipt prefix.
     for (const auto& record : records) {

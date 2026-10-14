@@ -45,6 +45,32 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The FetchContent seed and the configure-check cache on a self-hosted
+      # host can be written by earlier jobs, PR gate jobs included, so this job
+      # points setup.sh and CMake at a fresh job-local root: every dependency
+      # is re-fetched at its pin, and no cached configure-check file is
+      # include()d. The Windows subbuild base moves with it. tools/scripts/test_release_cache_isolation.py holds every
+      # signing or publishing job to this step and to CCACHE_DISABLE.
+      - name: Isolate the build from shared caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A per-dependency source override would bypass the fresh root.
+          if overrides="$(env | grep '^PULP_FETCHCONTENT_SOURCE_DIR_' | cut -d= -f1)"; then
+            echo "::error::runner environment overrides dependency sources: ${overrides//$'\n'/ }"
+            exit 1
+          fi
+          root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -m "$root")"; fi
+          rm -rf "$root"
+          mkdir -p "$root/src" "$root/fc" "$root/cc"
+          echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src" >> "$GITHUB_ENV"
+          echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc" >> "$GITHUB_ENV"
+          # PulpConfigureCheckCache.cmake include()s the files it finds here,
+          # so a shared directory would run CMake an earlier job wrote.
+          echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc" >> "$GITHUB_ENV"
+
+
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
         shell: bash
@@ -90,23 +116,8 @@ jobs:
         shell: bash
 
       - name: Package CLI (dry-run — no upload)
-        run: |
-          python3 tools/scripts/package_cli.py \
-            --binary build/pulp \
-            --cpp-binary build/tools/cli/pulp-cpp \
-            --mcp-binary build/tools/mcp/pulp-mcp \
-            --control-broker-binary build/inspect/pulp-control-broker \
-            --control-standalone-host-binary build/inspect/pulp-control-standalone-host \
-            --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json \
-            --import-design-binary build/tools/import-design/pulp-import-design \
-            --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \
-            --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs \
-            --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE" \
-            --node-license "$(dirname "$PULP_NODE_RUNTIME_EXECUTABLE")/node.LICENSE" \
-            --build-dir build \
-            --platform ${{ matrix.platform }} \
-            --out pulp-${{ matrix.platform }}.tar.gz
-          test -s pulp-${{ matrix.platform }}.tar.gz || { echo "::error::package_cli produced no tarball"; exit 1; }
+        # The same script release-cli.yml's Package CLI (Unix) step runs.
+        run: bash tools/ci/release_package_cli.sh "${{ matrix.platform }}"
         shell: bash
 
       - name: Verify arch + run the packaged CLI natively
@@ -176,7 +187,7 @@ jobs:
         shell: bash
 
       - name: Upload dry-run artifacts (throwaway — NOT a release)
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: release-dry-run-${{ matrix.platform }}
           path: |

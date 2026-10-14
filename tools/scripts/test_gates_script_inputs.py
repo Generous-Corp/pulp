@@ -49,6 +49,7 @@ COPIED = [
     "tools/ci/source_selftests.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ui-build/lint/clean_output_lint.py",
+    "tools/scripts/gate_host_policy.sh",
 ]
 
 # Stands in for changed_surface_script_families.py: its own suite covers what it
@@ -96,6 +97,24 @@ def git(root: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
 
 
+# The whole-machine entries EXCLUSIVE_SHARD_PLAN places, as (name, shard, lock).
+# `check` fails unless the manifest holds each one, so the fixture carries them.
+EXCLUSIVE = [
+    ("gpu-dpr-runner-selftest", 1, None),
+    ("gpu-first-visible-external-adapter-selftest", 1, None),
+    ("gpu-dpr-v2-evidence-selftest", 2, None),
+    ("agent-capability-manifest-selftest", 2, "agent-capability-manifest-source"),
+    ("agent-capability-rederive-selftest", 2, "agent-capability-manifest-source"),
+]
+# The three wiring lines `check` requires in the required lane's workflow.
+LANE_WORKFLOW = (
+    "jobs:\n  lane:\n    strategy:\n      matrix:\n        shard: [1, 2]\n    steps:\n"
+    "      - run: python3 tools/ci/source_selftests.py run --min-count 130 --part shared\n"
+    "      - run: python3 tools/ci/source_selftests.py run --min-count 130 --part exclusive "
+    "--shard ${{ matrix.shard }}/2\n"
+)
+
+
 class GatesScriptInputsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="gates-script-inputs-"))
@@ -115,8 +134,9 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.write("test/CMakeLists.txt", "# registrations\n")
         self.write("README.md", "readme\n")
         self.write("tools/scripts/changed_surface_script_families.py", FAKE_FAMILIES)
-        self.write(".github/workflows/version-skill-check.yml",
-                   "jobs:\n  lane:\n    steps:\n      - run: python3 tools/ci/source_selftests.py run\n")
+        self.write(".github/workflows/version-skill-check.yml", LANE_WORKFLOW)
+        for name, _, _ in EXCLUSIVE:
+            self.write(f"tools/ci/test_{name}.py", f"print('{name}')\n")
         self.write("tools/ci/test_beta.py", "print('beta')\n")
         self.write(
             "tools/ui-build/lint/fixtures/clean/FilterPanel.tsx",
@@ -133,14 +153,25 @@ class GatesScriptInputsTests(unittest.TestCase):
             "style={{color: tokens.text}}>{value}</button>;\n"
             "}\n",
         )
+        exclusive_entries = [
+            {"name": name, "argv": [f"{{repo}}/tools/ci/test_{name}.py"], "processors": 8,
+             **({"resource_lock": [lock]} if lock else {})}
+            for name, _, lock in EXCLUSIVE]
         self.write("tools/ci/source_selftests.json", json.dumps({"schema_version": 1, "tests": [
-            {"name": "beta", "argv": ["{repo}/tools/ci/test_beta.py"], "timeout": 120.0}]}) + "\n")
+            {"name": "beta", "argv": ["{repo}/tools/ci/test_beta.py"], "timeout": 120.0},
+            *exclusive_entries]}) + "\n")
         inventory = {"tests": [
             {"name": "alpha", "properties": [],
              "command": ["/usr/bin/python3", "@ROOT@/tools/scripts/test_alpha.py"]},
             {"name": "beta", "properties": [{"name": "LABELS", "value": ["source-selftest"]},
                                             {"name": "TIMEOUT", "value": 120.0}],
-             "command": ["/usr/bin/python3", "@ROOT@/tools/ci/test_beta.py"]}]}
+             "command": ["/usr/bin/python3", "@ROOT@/tools/ci/test_beta.py"]},
+            *({"name": name,
+               "properties": [{"name": "LABELS", "value": ["source-selftest"]},
+                              {"name": "PROCESSORS", "value": 8},
+                              *([{"name": "RESOURCE_LOCK", "value": [lock]}] if lock else [])],
+               "command": ["/usr/bin/python3", f"@ROOT@/tools/ci/test_{name}.py"]}
+              for name, _, lock in EXCLUSIVE)]}
         self.inventory = self.tmp / "inventory.json"
         self.inventory.write_text(json.dumps(inventory), encoding="utf-8")
         self.cmake_log = self.tmp / "cmake.log"
@@ -149,6 +180,12 @@ class GatesScriptInputsTests(unittest.TestCase):
             p = self.bin / name
             p.write_text(text, encoding="utf-8")
             p.chmod(0o755)
+        tartci = self.bin / "tartci"
+        tartci.write_text("#!/bin/sh\n"
+                          "echo TARTCI_ROLE=${FAKE_TARTCI_ROLE:-light}\n"
+                          "echo TARTCI_SERVES_GATE=${FAKE_SERVES_GATE:-0}\n",
+                          encoding="utf-8")
+        tartci.chmod(0o755)
         git(self.root, "init", "-q", "-b", "main")
         git(self.root, "config", "user.email", "t@example.com")
         git(self.root, "config", "user.name", "t")
@@ -177,6 +214,7 @@ class GatesScriptInputsTests(unittest.TestCase):
         env.update(PATH=f"{self.bin}{os.pathsep}{env.get('PATH', '')}", FAKE_ROOT=str(self.root.resolve()),
                    FAKE_CTEST_INVENTORY=str(self.inventory), FAKE_CMAKE_LOG=str(self.cmake_log),
                    PYTHON=str(self.bin / "python"), PULP_GATES_SETUP="",
+                   PULP_TARTCI_BIN=str(self.bin / "tartci"),
                    PULP_SKIP_SOURCE_SELFTESTS="1")
         env.update(extra)
         return env
@@ -187,6 +225,15 @@ class GatesScriptInputsTests(unittest.TestCase):
 
     def configures(self) -> list[str]:
         return self.cmake_log.read_text().splitlines() if self.cmake_log.exists() else []
+
+    def test_fixture_matches_the_shard_plan(self) -> None:
+        sys.path.insert(0, str(REPO / "tools/ci"))
+        import source_selftests  # noqa: PLC0415
+        self.assertEqual(
+            [sorted(names) for names in source_selftests.EXCLUSIVE_SHARD_PLAN],
+            [sorted(n for n, shard, _ in EXCLUSIVE if shard == i)
+             for i in range(1, source_selftests.EXCLUSIVE_SHARDS + 1)],
+        )
 
     def test_touched_input_without_a_build_configures_build_gate_and_checks(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
@@ -208,6 +255,63 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.configures(), [])
         self.assertIn("nothing to check", r.stderr)
+
+    def test_gate_host_refuses_heavy_lanes_and_says_where_to_run_them(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        for role in ("dedicated-builder", "dev-overflow", "a-role-tartci-adds-later"):
+            with self.subTest(role=role):
+                self.cmake_log.write_text("", encoding="utf-8")
+                # Source selftests left enabled: the refusal, not the opt-out, must stop them.
+                r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE=role,
+                               PULP_SKIP_SOURCE_SELFTESTS="")
+                self.assertEqual(self.configures(), [])
+                # The manifest lane still runs, build-free: its static families
+                # prediction is a cheap gate that can fail.
+                self.assertIn("gate host: build-free checks only, never configures", r.stderr)
+                self.assertIn("changed-surface script families (static): OK", r.stderr)
+                self.assertNotIn("▸ source-only selftests", r.stderr)
+                self.assertNotIn("▸ ctest pr-fast tier", r.stderr)
+                self.assertIn("[gate-host] REFUSED", r.stderr)
+                self.assertIn(f"TARTCI_ROLE={role}", r.stderr)
+                self.assertIn("TARTCI_ROLE=light host (m1) or a disposable VM", r.stderr)
+                self.assertIn("Run tools/scripts/gates.sh main from", r.stderr)
+                # The cheap gates still run, and the verdict is not a full pass.
+                self.assertIn("▸ skill-sync check", r.stderr)
+                self.assertIn("▸ version-bump check", r.stderr)
+                self.assertIn("[gate-host] NOT CHECKED", r.stderr)
+                self.assertNotIn("all gates pass — safe to push", r.stderr)
+
+    def test_gate_host_still_fails_a_families_flip_without_configuring(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="dedicated-builder",
+                       FAKE_STATIC_RC="1",
+                       FAKE_STATIC_SAYS="  tools/scripts/test_alpha.py: newly mapped")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertEqual(self.configures(), [])
+        self.assertIn("tools/scripts/test_alpha.py: newly mapped", r.stderr)
+        self.assertIn("one or more gates failed", r.stderr)
+
+    def test_gate_host_summary_points_diff_coverage_off_the_host(self) -> None:
+        self.write("README.md", "readme, edited\n")
+        self.commit()
+        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="dev-overflow")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Diff-coverage NOT run, and refused on this gate host", r.stderr)
+        self.assertNotIn("Diff-coverage NOT run (slow)", r.stderr)
+
+    def test_light_and_non_gate_profiles_keep_local_build_path(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        for serves, role in (("1", "light"), ("0", "dedicated-builder")):
+            with self.subTest(serves=serves, role=role):
+                r = self.gates(FAKE_SERVES_GATE=serves, FAKE_TARTCI_ROLE=role)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("▸ generated test manifests", r.stderr)
+                self.assertNotIn("[gate-host]", r.stderr)
+        # The first run configured build-gate; the second reused it.
+        self.assertEqual(len(self.configures()), 1)
 
     def test_a_current_configured_build_is_reused(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")

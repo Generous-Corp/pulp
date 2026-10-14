@@ -76,6 +76,63 @@ def cwd(path: pathlib.Path):
         os.chdir(old)
 
 
+class WindowsArm64KeepsItsSlice(unittest.TestCase):
+    """FindSkia.cmake selects build/win-gpu/lib/Release/arm64/ for an arm64-win
+    target and refuses the flat path. Flattening the slice made every
+    windows-arm64 release leg (v0.966.0 onward) fail configure with "Windows
+    ARM64 archive slice is missing"."""
+
+    ARCHIVE = {
+        "build/win-gpu/lib/Release/arm64/skia.lib": b"arm64-skia",
+        "build/win-gpu/lib/Release/arm64/dawn_combined.lib": b"arm64-dawn",
+        "build/win-gpu/lib/Release/arm64/skparagraph.lib": b"arm64-para",
+    }
+
+    def fetch(self, platform: str, manifest_key: str) -> pathlib.Path:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for name, payload in self.ARCHIVE.items():
+                zf.writestr(name, payload)
+        data = buf.getvalue()
+        root = pathlib.Path(tempfile.mkdtemp(prefix="skia-win-arm64-"))
+        with cwd(root):
+            manifest = pathlib.Path("tools/deps/manifest.json")
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({"dependencies": [{
+                "name": "skia",
+                "determinism": {"release_assets": {manifest_key: {
+                    "url": "https://example.invalid/skia.zip",
+                    "sha256": hashlib.sha256(data).hexdigest()}}},
+            }]}), encoding="utf-8")
+            with mock.patch.object(skia.urllib.request, "urlopen", return_value=_FakeResponse(data)), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(skia.main(["fetch", platform]), 0)
+        return root / "external/skia-build/build/win-gpu/lib/Release"
+
+    def test_the_arm64_slice_stays_where_findskia_looks(self) -> None:
+        release = self.fetch("windows-arm64", "win-arm64")
+        self.assertEqual((release / "arm64" / "skia.lib").read_bytes(), b"arm64-skia")
+        self.assertEqual((release / "arm64" / "dawn_combined.lib").read_bytes(), b"arm64-dawn")
+        self.assertFalse((release / "skia.lib").exists(), "the slice was flattened")
+
+    def test_the_expected_paths_name_the_slice(self) -> None:
+        self.assertEqual(skia.expected_library_path("windows-arm64").as_posix(),
+                         "external/skia-build/build/win-gpu/lib/Release/arm64/skia.lib")
+        self.assertEqual(skia.expected_dawn_library_path("windows-arm64").as_posix(),
+                         "external/skia-build/build/win-gpu/lib/Release/arm64/dawn_combined.lib")
+
+    def test_control_x64_stays_flat(self) -> None:
+        self.assertEqual(skia.expected_library_path("windows-x64").as_posix(),
+                         "external/skia-build/build/win-gpu/lib/Release/skia.lib")
+        self.assertNotIn("windows-x64", skia._PRESERVE_ARCH_SUBDIR)
+
+    def test_findskia_still_reads_the_arm64_subdir(self) -> None:
+        """The two halves of the contract: if FindSkia ever stops selecting the
+        `arm64/` slice, this fetch layout is wrong again."""
+        find_skia = (SCRIPT.parent.parent / "cmake" / "FindSkia.cmake").read_text(encoding="utf-8")
+        self.assertIn('"${_skia_lib_dir}/arm64/${_skia_lib_name}"', find_skia)
+
+
 class FetchSkiaForReleaseExtraTests(unittest.TestCase):
     def test_main_usage_unknown_platform_and_missing_manifest_paths(self) -> None:
         with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):

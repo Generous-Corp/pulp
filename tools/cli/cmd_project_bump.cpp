@@ -24,6 +24,7 @@
 #include "shell_redirect.hpp"
 #include "migration_index.hpp"
 #include "projects_registry.hpp"
+#include "tartci_lease.hpp"
 
 #include <cstddef>
 #include <cstdlib>
@@ -307,8 +308,8 @@ pb::UndoEntry bump_one(const fs::path& project_path,
         cfg += output_to_null();
         int rc = run(cfg);
         if (rc == 0) {
-            std::string bld = "cmake --build " + shell_quote(verify_build) + output_to_null();
-            rc = run(bld);
+            rc = run_governed_cmake_build(project_path, verify_build, {}, "pulp project bump",
+                                          GovernedBuildOutput::Quiet);
         }
         if (rc != 0) {
             // Roll back.

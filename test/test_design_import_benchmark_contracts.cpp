@@ -306,6 +306,10 @@ TEST_CASE("design-import benchmark JSON report includes complete phase fields",
     REQUIRE(json.find("\"rss_peak_bytes\": 3000") != std::string::npos);
     REQUIRE(json.find("\"paint_commands_last\": 88") != std::string::npos);
     REQUIRE(json.find("\"js_evaluations_total\": 14") != std::string::npos);
+    REQUIRE(json.find("\"counters\": {") != std::string::npos);
+    REQUIRE(json.find("\"bridge_calls\": 0") != std::string::npos);
+    REQUIRE(json.find("\"layout_passes\": 0") != std::string::npos);
+    REQUIRE(json.find("\"paint_calls\": 0") != std::string::npos);
     REQUIRE(json.find("\"interaction_model\": \"value drag plus overflow-panel scroll offset;") != std::string::npos);
 }
 

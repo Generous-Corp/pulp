@@ -52,6 +52,14 @@ audio edges. Add a permutation replay with a topology mutation negative control
 when changing this path so agents can distinguish deterministic replay from a
 test that only passes for one insertion order.
 
+### SignalGraph snapshot readers
+
+`runtime::Slot::live()` is publisher-thread-only. A status or telemetry
+accessor that traverses the prepared `CompiledGraph` while `prepare()` or
+`release()` may run must hold `live_slot_.read()` for the entire traversal.
+Keep concurrent lifecycle tests on a fixed authored topology; racing graph
+authoring against preparation tests a separate mutation contract.
+
 ## CLAP reference backend
 
 `plugin_slot_clap.cpp` is the simplest backend to study for dlopen,

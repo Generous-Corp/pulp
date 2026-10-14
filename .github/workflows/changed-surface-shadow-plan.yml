@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload shadow plan record
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: changed-surface-shadow-plan
           path: ${{ runner.temp }}/changed-surface-shadow-plan

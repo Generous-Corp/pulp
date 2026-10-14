@@ -1,6 +1,44 @@
 # GPU surface, Skia context, headless renderer, and compute smoke tests.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+    if(PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC)
+        if(NOT APPLE OR PULP_IOS OR PULP_SKIA_PROVIDES_DAWN OR NOT TARGET webgpu)
+            message(FATAL_ERROR
+                "The staged wgpu-native diagnostic requires desktop macOS with wgpu-native as the sole WebGPU implementation")
+        endif()
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        add_executable(pulp-gpu-wgpu-native-staged-diagnostic
+            ${PROJECT_SOURCE_DIR}/tools/diagnostics/pulp_wgpu_native_staged_adapter.cpp)
+        target_link_libraries(pulp-gpu-wgpu-native-staged-diagnostic PRIVATE
+            pulp::gpu-audio webgpu)
+        target_include_directories(pulp-gpu-wgpu-native-staged-diagnostic PRIVATE
+            ${PROJECT_SOURCE_DIR}/core/gpu_audio/src)
+        add_test(NAME pulp-gpu-wgpu-native-staged-diagnostic
+            COMMAND "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/diagnostics/verify_wgpu_native_staged.py"
+                --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                --asset "${PULP_WGPU_NATIVE_ASSET}"
+                --source-tree "${PULP_WGPU_NATIVE_SOURCE_DIR}"
+                --linked-runtime "$<TARGET_FILE:webgpu>"
+                --executable "$<TARGET_FILE:pulp-gpu-wgpu-native-staged-diagnostic>"
+                --receipt "${CMAKE_CURRENT_BINARY_DIR}/wgpu-native-staged-receipt.json")
+        set_tests_properties(pulp-gpu-wgpu-native-staged-diagnostic PROPERTIES
+            RESOURCE_LOCK pulp_gpu
+            SKIP_RETURN_CODE 77
+            TIMEOUT 60)
+        add_test(NAME pulp-gpu-wgpu-native-staged-identity-negative-control
+            COMMAND "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/diagnostics/test_verify_wgpu_native_staged.py"
+                --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                --asset "${PULP_WGPU_NATIVE_ASSET}"
+                --source-tree "${PULP_WGPU_NATIVE_SOURCE_DIR}"
+                --linked-runtime "$<TARGET_FILE:webgpu>"
+                --executable "$<TARGET_FILE:pulp-gpu-wgpu-native-staged-diagnostic>"
+                --verifier "${PROJECT_SOURCE_DIR}/tools/diagnostics/verify_wgpu_native_staged.py")
+        set_tests_properties(pulp-gpu-wgpu-native-staged-identity-negative-control PROPERTIES
+            TIMEOUT 60)
+    endif()
+
     add_executable(pulp-test-gpu-surface test_gpu_surface.cpp)
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
@@ -79,8 +117,7 @@
     catch_discover_tests(pulp-test-gpu-compute ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # Read the production library identity; probes do not initialize it.
-    if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_HAS_SKIA
-            AND EXISTS "${DAWN_LIBRARY}")
+    if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
         foreach(key expected_dawn_sha asset_sha256 dawn_archive_sha256 dawn_header
                     identity_dir configure_receipt prelink_receipt bound_receipt)
             get_target_property(_pulp_gpu_audio_${key} pulp-gpu-audio "PULP_PROVIDER_${key}")
@@ -88,7 +125,7 @@
         add_executable(pulp-gpu-host-mapped-pointer-probe
             test_gpu_host_mapped_pointer_probe.cpp)
         target_link_libraries(pulp-gpu-host-mapped-pointer-probe PRIVATE
-            "${DAWN_LIBRARY}"
+            "${PULP_SKIA_DAWN_ARCHIVE}"
             "-framework Metal"
             "-framework Foundation"
             "-framework IOKit"
@@ -115,7 +152,7 @@
                     "${PROJECT_SOURCE_DIR}/tools/scripts/fetch_skia_for_release.py"
                     "${_pulp_gpu_audio_configure_receipt}"
                     "${_pulp_gpu_audio_dawn_header}"
-                    "${DAWN_LIBRARY}"
+                    "${PULP_SKIA_DAWN_ARCHIVE}"
                     "${SKIA_DIR}/.skia-asset-sha256"
                     "${SKIA_DIR}/.skia-generation-manifest.json"
                     "${SKIA_DIR}/.skia-source-archive.zip")
@@ -129,7 +166,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --result "${_pulp_gpu_audio_prelink_receipt}"
                 VERBATIM)
@@ -141,7 +178,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --prelink-receipt "${_pulp_gpu_audio_prelink_receipt}"
                     --executable "$<TARGET_FILE:pulp-gpu-host-mapped-pointer-probe>"
@@ -155,7 +192,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --prelink-receipt "${_pulp_gpu_audio_prelink_receipt}"
                     --executable "$<TARGET_FILE:pulp-gpu-host-mapped-pointer-probe>"
@@ -226,6 +263,12 @@
                 pulp::gpu-audio)
             target_include_directories(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
                 "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+            target_include_directories(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
+                ${SKIA_INCLUDE_DIRS})
+            if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+                target_include_directories(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
+                    "${SKIA_INCLUDE_DIRS}/dawn")
+            endif()
             if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
                 # The probe's test-only proc-table counter includes Dawn
                 # declarations, but the definitions remain in vellum-gpu.
@@ -245,7 +288,7 @@
                     "${PROJECT_SOURCE_DIR}/tools/scripts/fetch_skia_for_release.py"
                     "${_pulp_gpu_audio_configure_receipt}"
                     "${_pulp_gpu_audio_dawn_header}"
-                    "${DAWN_LIBRARY}"
+                    "${PULP_SKIA_DAWN_ARCHIVE}"
                     "${SKIA_DIR}/.skia-asset-sha256"
                     "${SKIA_DIR}/.skia-generation-manifest.json"
                     "${SKIA_DIR}/.skia-source-archive.zip")
@@ -259,7 +302,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --result "${_pulp_gpu_audio_shared_prelink_receipt}"
                 VERBATIM)
@@ -271,7 +314,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --prelink-receipt "${_pulp_gpu_audio_shared_prelink_receipt}"
                     --executable "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"
@@ -285,7 +328,7 @@
                     --platform darwin-arm64
                     --skia-dir "${SKIA_DIR}"
                     --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
+                    --dawn-library "${PULP_SKIA_DAWN_ARCHIVE}"
                     --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
                     --prelink-receipt "${_pulp_gpu_audio_shared_prelink_receipt}"
                     --executable "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"
@@ -492,6 +535,7 @@
                 set_tests_properties(pulp-gpu-shared-io-paced-convolution-probe PROPERTIES
                     FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                     RESOURCE_LOCK pulp_gpu
+                    SKIP_RETURN_CODE 77
                     TIMEOUT 150)
 
                 # Reach the authoritative P2 matrix driver in the configured
@@ -542,6 +586,104 @@
                     FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                     RESOURCE_LOCK pulp_gpu
                     TIMEOUT 60)
+
+            # Bounded private one-stream WaveNet qualification. This probe is
+            # admitted only after exact provider identity and exercises the
+            # resident causal plan, imported audio-slot accounting, CPU oracle,
+            # late-result rejection, explicit reprime, and immutable receipt
+            # digest. It has no installed/public provider or generic runtime
+            # surface; unavailable physical Dawn remains a typed skip (77).
+            add_executable(pulp-gpu-dawn-wavenet-qualification
+                test_gpu_dawn_wavenet_qualification.cpp)
+            target_link_libraries(pulp-gpu-dawn-wavenet-qualification PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-dawn-wavenet-qualification PRIVATE
+                ../core/gpu_audio/src)
+            target_include_directories(pulp-gpu-dawn-wavenet-qualification PRIVATE
+                ${SKIA_INCLUDE_DIRS})
+            if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+                target_include_directories(pulp-gpu-dawn-wavenet-qualification PRIVATE
+                    "${SKIA_INCLUDE_DIRS}/dawn")
+            endif()
+            target_compile_definitions(pulp-gpu-dawn-wavenet-qualification PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                target_link_libraries(pulp-gpu-dawn-wavenet-qualification PRIVATE
+                    Vellum::Gpu Vellum::DawnHeaders)
+            endif()
+            add_dependencies(pulp-gpu-dawn-wavenet-qualification
+                pulp-gpu-dawn-shared-io-provider-probe)
+            # Bind this qualification executable to the exact provider inputs
+            # just as the shared-I/O probe is bound. A passing runtime result
+            # is not sufficient when the executable could have been relinked
+            # against a different Dawn archive.
+            set(_pulp_gpu_audio_wavenet_prelink_receipt
+                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/wavenet-pre-link.json")
+            set(_pulp_gpu_audio_wavenet_bound_receipt
+                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/wavenet-bound.json")
+            set_property(TARGET pulp-gpu-dawn-wavenet-qualification APPEND PROPERTY
+                LINK_DEPENDS
+                    "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/fetch_skia_for_release.py"
+                    "${_pulp_gpu_audio_configure_receipt}"
+                    "${_pulp_gpu_audio_dawn_header}"
+                    "${DAWN_LIBRARY}"
+                    "${SKIA_DIR}/.skia-asset-sha256"
+                    "${SKIA_DIR}/.skia-generation-manifest.json"
+                    "${SKIA_DIR}/.skia-source-archive.zip")
+            add_custom_command(TARGET pulp-gpu-dawn-wavenet-qualification PRE_LINK
+                COMMAND "${CMAKE_COMMAND}" -E make_directory
+                    "${_pulp_gpu_audio_identity_dir}/$<CONFIG>"
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    prelink
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --result "${_pulp_gpu_audio_wavenet_prelink_receipt}"
+                VERBATIM)
+            add_custom_command(TARGET pulp-gpu-dawn-wavenet-qualification POST_BUILD
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    bind
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --prelink-receipt "${_pulp_gpu_audio_wavenet_prelink_receipt}"
+                    --executable "$<TARGET_FILE:pulp-gpu-dawn-wavenet-qualification>"
+                    --result "${_pulp_gpu_audio_wavenet_bound_receipt}"
+                VERBATIM)
+            add_test(NAME pulp-gpu-dawn-wavenet-qualification-identity
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    verify
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --prelink-receipt "${_pulp_gpu_audio_wavenet_prelink_receipt}"
+                    --executable "$<TARGET_FILE:pulp-gpu-dawn-wavenet-qualification>"
+                    --receipt "${_pulp_gpu_audio_wavenet_bound_receipt}")
+            set_tests_properties(pulp-gpu-dawn-wavenet-qualification-identity PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                FIXTURES_SETUP pulp_gpu_dawn_wavenet_qualification_identity
+                TIMEOUT 60)
+            add_test(NAME pulp-gpu-dawn-wavenet-qualification
+                COMMAND pulp-gpu-dawn-wavenet-qualification --strict)
+            set_tests_properties(pulp-gpu-dawn-wavenet-qualification PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_wavenet_qualification_identity
+                RESOURCE_LOCK pulp_gpu
+                SKIP_RETURN_CODE 77
+                TIMEOUT 60)
 
             if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
                 # Matched staged/shared lifecycle screening. This is deliberately

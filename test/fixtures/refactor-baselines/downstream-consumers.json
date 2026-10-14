@@ -17,7 +17,7 @@
     "prefix_env": "PULP_SDK_PREFIX",
     "source_build_dir": "pulp-build-sdk-$PULP_SHA",
     "configure_command": "cmake -S \"$PULP_REPO\" -B \"$PULP_BUILD_DIR\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\"$PULP_SDK_PREFIX\"",
-    "build_command": "cmake --build \"$PULP_BUILD_DIR\" -j",
+    "build_command": "$PULP_REPO/tools/ci/governed-build.sh cmake --build \"$PULP_BUILD_DIR\"",
     "install_command": "cmake --install \"$PULP_BUILD_DIR\" --prefix \"$PULP_SDK_PREFIX\"",
     "required_options": [
       "-DCMAKE_BUILD_TYPE=Release",
@@ -74,7 +74,7 @@
           "id": "build-and-ctest-static-sdk-smoke",
           "description": "Build and run the top-level embed ABI smoke tests.",
           "working_dir": "$PULP_VIEW_EMBED_REPO",
-          "command": "cmake --build \"$PULP_VIEW_EMBED_REPO/build-pulp-$PULP_SHA\" -j && ctest --test-dir \"$PULP_VIEW_EMBED_REPO/build-pulp-$PULP_SHA\" --output-on-failure",
+          "command": "$PULP_REPO/tools/ci/governed-build.sh cmake --build \"$PULP_VIEW_EMBED_REPO/build-pulp-$PULP_SHA\" && ctest --test-dir \"$PULP_VIEW_EMBED_REPO/build-pulp-$PULP_SHA\" --output-on-failure",
           "required_for": [
             "pulp_view_embed_abi",
             "host_lifecycle",
@@ -89,7 +89,7 @@
           "id": "shared-distribution-smoke",
           "description": "Configure the relocatable shared C ABI distribution path.",
           "working_dir": "$PULP_VIEW_EMBED_REPO",
-          "command": "cmake -S \"$PULP_VIEW_EMBED_REPO\" -B \"$PULP_VIEW_EMBED_REPO/build-shared-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DPULP_VIEW_EMBED_SHARED=ON -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" && cmake --build \"$PULP_VIEW_EMBED_REPO/build-shared-pulp-$PULP_SHA\" -j",
+          "command": "cmake -S \"$PULP_VIEW_EMBED_REPO\" -B \"$PULP_VIEW_EMBED_REPO/build-shared-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DPULP_VIEW_EMBED_SHARED=ON -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" && $PULP_REPO/tools/ci/governed-build.sh cmake --build \"$PULP_VIEW_EMBED_REPO/build-shared-pulp-$PULP_SHA\"",
           "required_for": [
             "pulp_view_embed_abi",
             "installed_sdk_export"
@@ -130,7 +130,7 @@
           "id": "compile-link-check",
           "description": "Build the framework-neutral iPlug2 adapter compile check.",
           "working_dir": "$PULP_EMBED_IPLUG2_REPO",
-          "command": "cmake -S \"$PULP_EMBED_IPLUG2_REPO\" -B \"$PULP_EMBED_IPLUG2_REPO/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" -DPULP_VIEW_EMBED_DIR=\"$PULP_VIEW_EMBED_REPO\" && cmake --build \"$PULP_EMBED_IPLUG2_REPO/build-pulp-$PULP_SHA\" -j && ctest --test-dir \"$PULP_EMBED_IPLUG2_REPO/build-pulp-$PULP_SHA\" --output-on-failure",
+          "command": "cmake -S \"$PULP_EMBED_IPLUG2_REPO\" -B \"$PULP_EMBED_IPLUG2_REPO/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" -DPULP_VIEW_EMBED_DIR=\"$PULP_VIEW_EMBED_REPO\" && $PULP_REPO/tools/ci/governed-build.sh cmake --build \"$PULP_EMBED_IPLUG2_REPO/build-pulp-$PULP_SHA\" && ctest --test-dir \"$PULP_EMBED_IPLUG2_REPO/build-pulp-$PULP_SHA\" --output-on-failure",
           "required_for": [
             "pulp_view_embed_abi",
             "installed_sdk_export"
@@ -144,7 +144,7 @@
           "id": "example-all-formats-build",
           "description": "Build the iPlug2 APP, VST3, AU, and CLAP example formats.",
           "working_dir": "$PULP_EMBED_IPLUG2_REPO",
-          "command": "cmake -S \"$PULP_EMBED_IPLUG2_REPO/example\" -B \"$PULP_EMBED_IPLUG2_REPO/example/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DIPLUG2_DIR=\"$IPLUG2_DIR\" -DPULP_VIEW_EMBED_DIR=\"$PULP_VIEW_EMBED_REPO\" -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" && cmake --build \"$PULP_EMBED_IPLUG2_REPO/example/build-pulp-$PULP_SHA\" -j",
+          "command": "cmake -S \"$PULP_EMBED_IPLUG2_REPO/example\" -B \"$PULP_EMBED_IPLUG2_REPO/example/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DIPLUG2_DIR=\"$IPLUG2_DIR\" -DPULP_VIEW_EMBED_DIR=\"$PULP_VIEW_EMBED_REPO\" -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" && $PULP_REPO/tools/ci/governed-build.sh cmake --build \"$PULP_EMBED_IPLUG2_REPO/example/build-pulp-$PULP_SHA\"",
           "required_for": [
             "host_lifecycle",
             "parameter_bridge",
@@ -200,7 +200,7 @@
           "id": "adapter-and-example-build",
           "description": "Build the JUCE adapter and standalone example against an installed Pulp SDK.",
           "working_dir": "$PULP_EMBED_JUCE_REPO",
-          "command": "cmake -S \"$PULP_EMBED_JUCE_REPO\" -B \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" -DPULP_VIEW_EMBED_DIR=\"$PULP_VIEW_EMBED_REPO\" -DPULP_EMBED_JUCE_BUILD_EXAMPLE=ON && cmake --build \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA\" -j",
+          "command": "cmake -S \"$PULP_EMBED_JUCE_REPO\" -B \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=\"$PULP_SDK_PREFIX\" -DPULP_VIEW_EMBED_DIR=\"$PULP_VIEW_EMBED_REPO\" -DPULP_EMBED_JUCE_BUILD_EXAMPLE=ON && $PULP_REPO/tools/ci/governed-build.sh cmake --build \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA\"",
           "required_for": [
             "pulp_view_embed_abi",
             "installed_sdk_export",
@@ -215,7 +215,7 @@
           "id": "plugin-build",
           "description": "Build the JUCE VST3, AU, and Standalone plugin example.",
           "working_dir": "$PULP_EMBED_JUCE_REPO",
-          "command": "cmake --build \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA\" --target PulpEmbedJucePlugin_All -j",
+          "command": "$PULP_REPO/tools/ci/governed-build.sh cmake --build \"$PULP_EMBED_JUCE_REPO/build-pulp-$PULP_SHA\" --target PulpEmbedJucePlugin_All",
           "required_for": [
             "host_lifecycle",
             "parameter_bridge",

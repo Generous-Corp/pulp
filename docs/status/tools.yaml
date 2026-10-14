@@ -182,6 +182,17 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: fresh-plugin-fixture-validation
+  path: tools/import-design/fresh_plugin_fixture_validation.mjs
+  category: design-import
+  use_when: Validate a fresh authored HTML fixture's Chromium receipt, native import receipt, and planted negative interaction.
+  invocation: node tools/import-design/fresh_plugin_fixture_validation.mjs --importer <pulp-import-design> --fixture <fixture.html> --interactions <interactions.json> --expected-receipt <receipt.json> --receipt <out.json>
+  inputs: A fresh authored HTML fixture, its bounded browser interaction plan, a managed Chromium executable, and the importer executable.
+  outputs: A fail-closed receipt containing source and native hashes, interaction evidence, and the expected rejected-selector negative control.
+  caveat: Acceptance evidence for a named fixture only; it does not prove general HTML importer coverage or semantic native-widget reconstruction.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: check-palette-health
   path: tools/import-validation/check_palette_health.py
   category: design-import
@@ -700,8 +711,8 @@ tools:
   invocation: python3 tools/scripts/gate_suite_executed.py --run-id <run-id> [--require-executed] [--format
     json]
   inputs: An Actions run id, read live through `ghapp`.
-  outputs: executed / built-but-untested / not-executed per `macos` job, with its step count;
-    `--require-executed` exits nonzero unless the suite genuinely ran.
+  outputs: executed / tier-only / built-but-untested / not-executed per `macos` job, with its step
+    count; `--require-executed` exits nonzero unless the full suite genuinely ran (tier-only fails it).
   caveat: Answers only whether the suite RAN, never whether the tree is healthy — an `executed` verdict on
     a failing job is still `executed`. It classifies by step names, so renaming the workflow's Test step
     without updating it would make a real run look void.

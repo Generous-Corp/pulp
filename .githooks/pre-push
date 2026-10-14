@@ -28,6 +28,16 @@ set -u
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$ROOT" || exit 0
 
+# A tartci profile, not the mutable macOS hostname, identifies hosts reserved
+# for the hosted gate. Keep local configure/compile work off those machines.
+# shellcheck source=../tools/scripts/gate_host_policy.sh
+source "$ROOT/tools/scripts/gate_host_policy.sh"
+_prepush_gate_host=0
+_prepush_diff_cover_refused=0
+if pulp_gate_host_builds_reserved; then
+    _prepush_gate_host=1
+fi
+
 # Git exports GIT_DIR / GIT_WORK_TREE (and friends) into hook environments.
 # A set GIT_DIR OVERRIDES `git -C <dir>` repository discovery, so any test the
 # downstream gates run via ctest (e.g. local_diff_cover.sh) that shells out to
@@ -44,6 +54,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
 # those records before any gate subprocess can consume them: every source gate
 # below validates the checked-out HEAD, so a branch update that names another
 # commit must be refused rather than accidentally authorizing the wrong tree.
+# The build-free merge-tree check takes the pushed source SHA, which that
+# refusal keeps equal to HEAD.
 if ! PREPUSH_UPDATE_RECORDS="$(cat)"; then
     echo "✗ pre-push: failed to capture Git's pushed-ref records; refusing to validate an unknown source tree." >&2
     exit 1
@@ -269,6 +281,8 @@ BASE="${PULP_PREPUSH_BASE:-origin/main}"
 # against HEAD and claiming they covered the pushed SHA. Multiple branch refs
 # are accepted only when every one points to this exact HEAD.
 _prepush_source_update_mode="manual-head"
+_prepush_pushed_head_sha=""
+_prepush_source_remote_ref=""
 if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
     _prepush_source_update_mode="no-source"
     _prepush_head_sha="$(git rev-parse HEAD 2>/dev/null || true)"
@@ -294,13 +308,18 @@ if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
                 # Branches and every other source-bearing namespace must name
                 # the exact checked-out commit. Git hosts may use refs/review,
                 # refs/for, or another custom namespace; treating those like
-                # tags would let an unvalidated tree bypass the gates.
+                # tags would let an unvalidated tree bypass the gates. Every
+                # gate below except the merge-tree check validates checked-out
+                # HEAD, so a push of any other commit is refused here.
                 if [ -z "$_prepush_head_sha" ] || [ "$_prepush_local_sha" != "$_prepush_head_sha" ]; then
                     echo "✗ pre-push: source update $_prepush_remote_ref names $_prepush_local_sha," >&2
                     echo "  but this checkout is at ${_prepush_head_sha:-unknown}. The gates validate" >&2
                     echo "  checked-out HEAD; check out that branch and push it separately." >&2
                     exit 1
                 fi
+                # The merge-tree check below takes this exact source object.
+                _prepush_pushed_head_sha="$_prepush_local_sha"
+                _prepush_source_remote_ref="$_prepush_remote_ref"
                 _prepush_source_update_mode="exact-head"
                 ;;
         esac
@@ -310,6 +329,33 @@ EOF
     unset _prepush_head_sha _prepush_zero_sha _prepush_local_ref \
           _prepush_local_sha _prepush_remote_ref _prepush_remote_sha \
           _prepush_extra
+fi
+
+# Refresh the base only when the normal gates are enabled. The merge-tree
+# script-state check honors the same explicit base as the remaining gates and
+# receives the exact pushed source object captured above.
+MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
+MERGE_TREE_BASE="${PULP_PREPUSH_BASE:-origin/main}"
+if [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; then
+    echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — merge-tree script-state check DEMOTED to advisory." >&2
+elif [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
+    if git remote get-url origin >/dev/null 2>&1 && ! git fetch --quiet origin main; then
+        echo "[pre-push] merge-tree script-state: could not refresh $MERGE_TREE_BASE; advisory, continuing with the local base." >&2
+    fi
+    _merge_tree_head="${_prepush_pushed_head_sha:-HEAD}"
+    if [[ "${_prepush_source_remote_ref:-}" == refs/heads/explore/* ]]; then
+        echo "[pre-push] merge-tree script-state skipped for explore/*; that branch is intentionally independent of main." >&2
+    else
+        "$PULP_PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$MERGE_TREE_BASE" --head "$_merge_tree_head"
+        _merge_tree_rc=$?
+        case "$_merge_tree_rc" in
+            0) ;;
+            1) exit 1 ;;
+            2) echo "[pre-push] merge-tree script-state unavailable or timed out; advisory, run it on a healthy host." >&2 ;;
+            3) echo "[pre-push] merge-tree script-state: branch conflicts with $MERGE_TREE_BASE; advisory (GitHub will report DIRTY)." >&2 ;;
+            *) echo "[pre-push] merge-tree script-state internal error ($_merge_tree_rc); advisory." >&2 ;;
+        esac
+    fi
 fi
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
@@ -751,7 +797,12 @@ if [ -f "$SURFACE_FAMILIES" ]; then
     run_gate_captured "$PYTHON" "$SURFACE_FAMILIES" --repo-root "$ROOT" --static --base "$BASE"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] changed-surface families: regenerate .shipyard/changed-surface-families.toml from a configured build — \`tools/scripts/gates.sh $BASE\` configures build-gate and prints the exact --write command." >&2; fail=1 ;;
+        1) if [ "$_prepush_gate_host" -eq 1 ]; then
+               echo "[pre-push] changed-surface families: regenerate .shipyard/changed-surface-families.toml from a configured build — on a TARTCI_ROLE=light host (m1) or a VM, \`tools/scripts/gates.sh $BASE\` configures build-gate and prints the exact --write command (this gate host refuses the configure)." >&2
+           else
+               echo "[pre-push] changed-surface families: regenerate .shipyard/changed-surface-families.toml from a configured build — \`tools/scripts/gates.sh $BASE\` configures build-gate and prints the exact --write command." >&2
+           fi
+           fail=1 ;;
         *) gate_could_not_run "changed_surface_script_families_static" "$gate_rc"; fail=1 ;;
     esac
 fi
@@ -862,6 +913,9 @@ check_compat_status_flips "$BASE"
 DIFF_COVER_SH="$ROOT/tools/scripts/local_diff_cover.sh"
 if [ "$_prepush_source_update_mode" = "no-source" ]; then
     echo "[pre-push] diff coverage skipped: push carries no branch source update." >&2
+elif [ "$_prepush_gate_host" -eq 1 ]; then
+    pulp_gate_host_skip_line "pre-push diff-coverage configure/build" "tools/scripts/local_diff_cover.sh"
+    _prepush_diff_cover_refused=1
 elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
     # The coverage script owns both compare-ref freshness and changed-surface
     # classification. An outer git-diff filter here would use an unpinned,
@@ -920,7 +974,12 @@ fi
 # diff-cover gate only.
 
 if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed" = "0" ]; then
-    echo "[pre-push] gates clean." >&2
+    if [ "$_prepush_diff_cover_refused" = "1" ]; then
+        # A refused lane is not a pass; say so in the verdict itself.
+        echo "[pre-push] gates clean except diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM)." >&2
+    else
+        echo "[pre-push] gates clean." >&2
+    fi
     exit 0
 fi
 
@@ -945,6 +1004,9 @@ fi
 
 if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed" = "0" ]; then
     echo "[pre-push] gate failures present but demoted by env override; push allowed. Fix before merging." >&2
+    if [ "$_prepush_diff_cover_refused" = "1" ]; then
+        echo "[pre-push] diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM)." >&2
+    fi
     exit 0
 fi
 

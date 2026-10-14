@@ -4,7 +4,7 @@
 # Resolve a merge conflict in this file by regenerating, never by hand.
 
 [[families]]
-name = "script-readers-1855e27f9d4c"
+name = "script-readers-7e7d3b5c4f76"
 paths = [
   "tools/scripts/action_pin_lint.py",
   "tools/scripts/build_speed_proxies.py",
@@ -43,6 +43,7 @@ paths = [
   "tools/scripts/frontend_ir_tokens.py",
   "tools/scripts/frontend_ir_tweaks.py",
   "tools/scripts/frontend_ir_validation.py",
+  "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
@@ -189,11 +190,13 @@ paths = [
   "tools/scripts/test_promote_quirk_tiers.py",
   "tools/scripts/test_pulp_lldb.py",
   "tools/scripts/test_pulp_tooling_disposition.py",
+  "tools/scripts/test_python_floor_syntax_check.py",
   "tools/scripts/test_queue_admission_guard.py",
   "tools/scripts/test_queue_age_watchdog.py",
   "tools/scripts/test_reap_stranded_tracker.py",
   "tools/scripts/test_refresh_push_check.py",
   "tools/scripts/test_release_breakage_watchdog_wiring.py",
+  "tools/scripts/test_release_cache_isolation.py",
   "tools/scripts/test_release_checksum_manifest.py",
   "tools/scripts/test_release_cli_gpu_asset_coverage.py",
   "tools/scripts/test_release_failure_diagnosis.py",
@@ -219,6 +222,7 @@ paths = [
   "tools/scripts/test_run_swift_coverage.py",
   "tools/scripts/test_run_swift_coverage_extra.py",
   "tools/scripts/test_safe_path_guard_lint.py",
+  "tools/scripts/test_sample_region_compat_baseline.py",
   "tools/scripts/test_schedule_backstop_check.py",
   "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
@@ -283,8 +287,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -294,7 +302,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fb79b32bc3a1"
+name = "script-readers-b8da36fb0dc7"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
   "build-parallelism-guard",
@@ -313,8 +321,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -324,7 +336,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-517b54b2cf64"
+name = "script-readers-58fd64bc20ea"
 paths = ["tools/scripts/check_inspector_protocol_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -344,8 +356,12 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "inspector-protocol-registry-check-selftest",
   "inspector-protocol-registry-complete",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -355,7 +371,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e46ab15db690"
+name = "script-readers-98f3ae903652"
 paths = ["tools/scripts/check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -373,10 +389,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "visual-python-deps-present",
   "visual-python-deps-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -386,7 +406,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-caddcd6ea602"
+name = "script-readers-8e9e535bd775"
 paths = ["tools/scripts/ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -406,8 +426,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -417,7 +441,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0569a249a775"
+name = "script-readers-d6fab92e7a22"
 paths = ["tools/scripts/ctest_inventory_parity.py"]
 tests = [
   "build-parallelism-guard",
@@ -436,8 +460,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -447,7 +475,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c884586c087a"
+name = "script-readers-38705aa2830b"
 paths = ["tools/scripts/ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -467,8 +495,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -478,7 +510,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e07056e73c5d"
+name = "script-readers-088939abab30"
 paths = ["tools/scripts/design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -498,8 +530,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -509,7 +545,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-89cb481736b2"
+name = "script-readers-0872b6988c75"
 paths = ["tools/scripts/dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -528,8 +564,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -539,7 +579,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-615147ffcd25"
+name = "script-readers-73de1f6e005c"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -563,8 +603,10 @@ tests = [
   "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "source-selftest-lane-contract",
   "source-selftest-lane-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -574,7 +616,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1860ee671852"
+name = "script-readers-341c9b25bfb8"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
   "build-parallelism-guard",
@@ -593,8 +635,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -604,7 +650,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1baef4f9a1b6"
+name = "script-readers-01735483248d"
 paths = ["tools/scripts/mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -624,8 +670,12 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "mac-objc-source-list-guard",
   "mac-objc-source-list-guard-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -635,7 +685,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-488888021a64"
+name = "script-readers-039ed374f123"
 paths = ["tools/scripts/msvc_string_literal_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -654,8 +704,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "msvc-string-literal-guard",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -665,7 +719,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-772bc1173374"
+name = "script-readers-cb4583c2844a"
 paths = ["tools/scripts/pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -684,10 +738,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "test-pch-wiring",
   "test-pch-wiring-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -697,7 +755,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a97178c792a6"
+name = "script-readers-15eb421ce8ec"
 paths = ["tools/scripts/pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -716,8 +774,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "pr-fast-tier-contract",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -727,7 +789,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5f975fbc3777"
+name = "script-readers-454a62de67c2"
 paths = [
   "tools/scripts/queue_admission_guard.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -748,9 +810,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "queue-batch-attribute-selftest",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -760,7 +826,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-59aebf25cc16"
+name = "script-readers-7ecb5cbb01df"
 paths = ["tools/scripts/raw_this_async_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -778,10 +844,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "raw-this-async-check",
   "raw-this-async-selftest",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -791,7 +861,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ec959ad38f04"
+name = "script-readers-ca818bdbcb28"
 paths = ["tools/scripts/relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -809,10 +879,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "relay-contract-hosts",
   "relay-contract-hosts-selftest",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -822,7 +896,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-84ebc83ee211"
+name = "script-readers-981eac17a44d"
 paths = ["tools/scripts/render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -840,10 +914,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "render-upward-edge-check",
   "render-upward-edge-check-rules",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -853,7 +931,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e128ce713a19"
+name = "script-readers-c5e853ec8006"
 paths = ["tools/scripts/rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -871,10 +949,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "rust-cli-build-edge",
   "rust-cli-build-edge-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -884,7 +966,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-625f3af93dbf"
+name = "script-readers-9d1a9a3c84b1"
 paths = ["tools/scripts/sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
@@ -902,10 +984,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline",
   "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -915,7 +1000,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1e58accc73cb"
+name = "script-readers-f63d30357127"
 paths = ["tools/scripts/sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -933,10 +1018,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "sequencer-control-skill-coverage",
   "sequencer-control-skill-coverage-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -946,7 +1035,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-419e9ca3a363"
+name = "script-readers-11801142a212"
 paths = ["tools/scripts/setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -964,9 +1053,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "setup-bootstrap-plan-guard",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -976,7 +1069,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3d2c396d8b5e"
+name = "script-readers-2de14e633e64"
 paths = ["tools/scripts/shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -994,10 +1087,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "test-shared-objects",
   "test-shared-objects-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1007,7 +1104,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e764a55436bc"
+name = "script-readers-432a9bbb1822"
 paths = ["tools/scripts/status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -1025,9 +1122,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "status-tone-signal-lint",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1037,7 +1138,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-46382e642ab5"
+name = "script-readers-04907a0414bc"
 paths = ["tools/scripts/test_advisory_macos_runner_policy.py"]
 tests = [
   "advisory-macos-runner-policy",
@@ -1056,8 +1157,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1067,7 +1172,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a3983643f572"
+name = "script-readers-50f88c615160"
 paths = ["tools/scripts/test_affected_targets.py"]
 tests = [
   "affected-targets-selftest",
@@ -1086,8 +1191,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1097,7 +1206,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c59bbc5aa2d5"
+name = "script-readers-9c1f2de70b47"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
   "agent-hook-paths",
@@ -1116,8 +1225,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1127,7 +1240,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fcb7c56d207e"
+name = "script-readers-3cbfa99f8021"
 paths = ["tools/scripts/test_archive_symbol_closure_check.py"]
 tests = [
   "archive-symbol-closure-selftest",
@@ -1146,8 +1259,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1157,7 +1274,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aedf140c0511"
+name = "script-readers-ce3e64c79609"
 paths = ["tools/scripts/test_build_combined_installer.py"]
 tests = [
   "build-parallelism-guard",
@@ -1176,8 +1293,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1187,7 +1308,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-882e82e73c86"
+name = "script-readers-a8a7a6c119fe"
 paths = ["tools/scripts/test_build_parallelism_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1206,8 +1327,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1217,7 +1342,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-43aa62dbfe2e"
+name = "script-readers-183cc1449e61"
 paths = ["tools/scripts/test_build_speed_proxies.py"]
 tests = [
   "build-parallelism-guard",
@@ -1236,8 +1361,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1247,7 +1376,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ed6c80e7b5c2"
+name = "script-readers-17a67fcd88a5"
 paths = ["tools/scripts/test_build_speed_scorecard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1266,8 +1395,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1277,7 +1410,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ba495615dd00"
+name = "script-readers-58d3693d6b93"
 paths = ["tools/scripts/test_build_time_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -1297,8 +1430,11 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1308,7 +1444,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-af83746a383e"
+name = "script-readers-cd2110eb48d5"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -1327,8 +1463,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1338,7 +1478,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aa3eaf718cf0"
+name = "script-readers-b5c46033fea7"
 paths = ["tools/scripts/test_catch_discover_timeout_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1357,8 +1497,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1368,7 +1512,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b5fd8403cf53"
+name = "script-readers-508053148470"
 paths = ["tools/scripts/test_catch_multilabel_properties.py"]
 tests = [
   "build-parallelism-guard",
@@ -1387,8 +1531,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1398,7 +1546,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3d5e3f1c8639"
+name = "script-readers-305469a7377d"
 paths = ["tools/scripts/test_catch_test_name_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1417,8 +1565,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1428,7 +1580,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b960e9f70c3d"
+name = "script-readers-39c6783ee853"
 paths = ["tools/scripts/test_ccache_pch_isolation.py"]
 tests = [
   "build-parallelism-guard",
@@ -1447,8 +1599,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1458,7 +1614,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-acb4df3f5926"
+name = "script-readers-752e4f4d7991"
 paths = ["tools/scripts/test_changed_surface_registration_projection.py"]
 tests = [
   "build-parallelism-guard",
@@ -1477,8 +1633,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1488,7 +1648,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7e539aeeace2"
+name = "script-readers-c2199f5102ca"
 paths = ["tools/scripts/test_check_apple_bundle_signing.py"]
 tests = [
   "apple-bundle-signing-check",
@@ -1507,8 +1667,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1518,7 +1682,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2c5157571b02"
+name = "script-readers-b57fef1d9308"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
   "build-parallelism-guard",
@@ -1537,8 +1701,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1548,7 +1716,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d2bf6d3aebb6"
+name = "script-readers-daa491860ef5"
 paths = ["tools/scripts/test_check_canvas_path_flush.py"]
 tests = [
   "build-parallelism-guard",
@@ -1567,8 +1735,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1578,7 +1750,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d317edd40b33"
+name = "script-readers-99fa8f5ab721"
 paths = ["tools/scripts/test_check_installed_rpaths.py"]
 tests = [
   "build-parallelism-guard",
@@ -1597,8 +1769,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "install-rpath-closure",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1608,7 +1784,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-78b414cb2d88"
+name = "script-readers-571c0af41727"
 paths = ["tools/scripts/test_check_skip_not_pass.py"]
 tests = [
   "build-parallelism-guard",
@@ -1626,9 +1802,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "skip-not-pass-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1638,7 +1818,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-19f56fb2cbbb"
+name = "script-readers-ca51e704c72f"
 paths = ["tools/scripts/test_check_test_file_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -1656,9 +1836,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "test-file-paths-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1668,7 +1852,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4bc5d2092da3"
+name = "script-readers-ddb05ab3806e"
 paths = ["tools/scripts/test_check_transient_interaction_trace.py"]
 tests = [
   "build-parallelism-guard",
@@ -1686,9 +1870,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "transient-interaction-trace-budget-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1698,7 +1886,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6e8fe12cdec3"
+name = "script-readers-c0dca314d646"
 paths = ["tools/scripts/test_check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -1716,9 +1904,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "visual-python-deps-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1728,7 +1920,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5bae7def0aae"
+name = "script-readers-6dd49237d869"
 paths = ["tools/scripts/test_check_yoga_oracle_pin.py"]
 tests = [
   "build-parallelism-guard",
@@ -1746,8 +1938,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
   "yoga-oracle-pin-lockstep-selftest",
 ]
 build_targets = ["pulp-cli"]
@@ -1758,7 +1954,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ec91a268cdb0"
+name = "script-readers-8b4d03d7dc77"
 paths = ["tools/scripts/test_ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -1777,8 +1973,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1788,7 +1988,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-23cd3b5b9cf9"
+name = "script-readers-645a80830509"
 paths = ["tools/scripts/test_clean_build_cov.py"]
 tests = [
   "build-parallelism-guard",
@@ -1807,8 +2007,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1818,7 +2022,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-23c37a3a115f"
+name = "script-readers-575505c7f958"
 paths = ["tools/scripts/test_clean_worktree_builds.py"]
 tests = [
   "build-parallelism-guard",
@@ -1837,8 +2041,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1848,7 +2056,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-df8b776eb2f6"
+name = "script-readers-e8fa93d4aa53"
 paths = ["tools/scripts/test_clean_worktrees.py"]
 tests = [
   "build-parallelism-guard",
@@ -1867,8 +2075,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1878,7 +2090,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-df5a1fee097f"
+name = "script-readers-f03632f1d95b"
 paths = ["tools/scripts/test_clock_only_temp_key_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1897,8 +2109,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1908,7 +2124,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4a00224de992"
+name = "script-readers-a6b12a5fea24"
 paths = ["tools/scripts/test_cmake_manifest_parse.py"]
 tests = [
   "build-parallelism-guard",
@@ -1927,8 +2143,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1938,7 +2158,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-764d71a83374"
+name = "script-readers-7bc45f50384a"
 paths = ["tools/scripts/test_configure_check_cache.py"]
 tests = [
   "build-parallelism-guard",
@@ -1957,8 +2177,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1968,7 +2192,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2a6458517169"
+name = "script-readers-d09bab058254"
 paths = ["tools/scripts/test_connected_git_history.py"]
 tests = [
   "build-parallelism-guard",
@@ -1987,8 +2211,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -1998,7 +2226,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7f72f42dc1e5"
+name = "script-readers-05177ca0e95c"
 paths = ["tools/scripts/test_consumption_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -2017,8 +2245,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2028,7 +2260,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c42a99c4c6d2"
+name = "script-readers-fde6474fbc60"
 paths = ["tools/scripts/test_consumption_census_contract_note.py"]
 tests = [
   "build-parallelism-guard",
@@ -2047,8 +2279,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2058,7 +2294,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7f40cf1590c7"
+name = "script-readers-05d4822e6f01"
 paths = ["tools/scripts/test_control_profile_downgrade_is_announced.py"]
 tests = [
   "build-parallelism-guard",
@@ -2077,8 +2313,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2088,7 +2328,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-eb79b09dd8a5"
+name = "script-readers-42ef5377aad4"
 paths = ["tools/scripts/test_ctest_duplicate_registration.py"]
 tests = [
   "build-parallelism-guard",
@@ -2107,8 +2347,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2118,7 +2362,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f5d78c5f36df"
+name = "script-readers-e84d035111aa"
 paths = ["tools/scripts/test_ctest_label_exclusion_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2137,8 +2381,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2148,7 +2396,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8ac87bd1f18d"
+name = "script-readers-a0c48844f793"
 paths = ["tools/scripts/test_ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2167,8 +2415,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2178,7 +2430,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3c7bf7f6175d"
+name = "script-readers-d65fbd56ee43"
 paths = ["tools/scripts/test_design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2197,8 +2449,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2208,7 +2464,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9acd2e04d455"
+name = "script-readers-ce6e3ce4aa50"
 paths = ["tools/scripts/test_doxygen_installed_header_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2227,8 +2483,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2238,7 +2498,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fc8643f3f327"
+name = "script-readers-4f36636049e8"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -2258,8 +2518,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2269,7 +2533,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-536488076ebd"
+name = "script-readers-5164ab79d5ce"
 paths = ["tools/scripts/test_dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -2288,8 +2552,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2299,7 +2567,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5a59d2027f6b"
+name = "script-readers-f872ae7448d3"
 paths = ["tools/scripts/test_example_validation_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2318,8 +2586,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2329,7 +2601,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8a1821f146a5"
+name = "script-readers-b6626b8a4450"
 paths = ["tools/scripts/test_findskia_arch_assert.py"]
 tests = [
   "build-parallelism-guard",
@@ -2348,8 +2620,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2359,7 +2635,41 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c9ba5fd98c7e"
+name = "script-readers-e90980a37386"
+paths = ["tools/scripts/test_findskia_windows_arm64_slice.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "findskia-windows-arm64-slice-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-97a694139ce4"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
   "build-parallelism-guard",
@@ -2378,8 +2688,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2389,7 +2703,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-94f2a929f247"
+name = "script-readers-ba90831aeafd"
 paths = ["tools/scripts/test_fork_pr_runner_routing.py"]
 tests = [
   "build-parallelism-guard",
@@ -2408,8 +2722,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2419,7 +2737,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1d856565edd6"
+name = "script-readers-6b877c120371"
 paths = ["tools/scripts/test_format_baseline_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -2438,8 +2756,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2449,7 +2771,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1ccfac56f8eb"
+name = "script-readers-6426562a8209"
 paths = ["tools/scripts/test_foundation_include_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -2468,8 +2790,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2479,7 +2805,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2b50caccda5b"
+name = "script-readers-7c018ede8efe"
 paths = ["tools/scripts/test_gallery_visual_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -2498,8 +2824,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2509,7 +2839,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4fe539dde66d"
+name = "script-readers-7eb7ab547fde"
 paths = ["tools/scripts/test_gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2528,8 +2858,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2539,7 +2873,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b653fa90fc90"
+name = "script-readers-dca71cc25941"
 paths = ["tools/scripts/test_gate_suite_executed.py"]
 tests = [
   "build-parallelism-guard",
@@ -2558,8 +2892,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2569,7 +2907,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dc776963dd38"
+name = "script-readers-4d0e800f2d00"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2591,8 +2929,10 @@ tests = [
   "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "source-selftest-lane-contract",
   "source-selftest-lane-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2602,7 +2942,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e8e9f5263184"
+name = "script-readers-72a837279053"
 paths = ["tools/scripts/test_git_read_memo.py"]
 tests = [
   "build-parallelism-guard",
@@ -2621,8 +2961,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2632,7 +2976,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2935d3adb362"
+name = "script-readers-3f325c2089a2"
 paths = ["tools/scripts/test_git_stdin_pipe_deadlock.py"]
 tests = [
   "build-parallelism-guard",
@@ -2651,8 +2995,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2662,7 +3010,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4c2120c51dd4"
+name = "script-readers-94f3310ad959"
 paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
 tests = [
   "build-parallelism-guard",
@@ -2681,8 +3029,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2692,7 +3044,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1062ebe35f6e"
+name = "script-readers-20e7ede5136e"
 paths = ["tools/scripts/test_gpu_audio_p2_host_preflight.py"]
 tests = [
   "build-parallelism-guard",
@@ -2711,8 +3063,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2722,7 +3078,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7c6d90d46d9b"
+name = "script-readers-03ce873ec2f6"
 paths = ["tools/scripts/test_gpu_audio_p4_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -2741,8 +3097,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2752,7 +3112,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-66512bdd4a6c"
+name = "script-readers-c1123cce0f85"
 paths = ["tools/scripts/test_gpu_clean_agent_journey.py"]
 tests = [
   "build-parallelism-guard",
@@ -2771,8 +3131,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2782,7 +3146,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-45bfed844d2f"
+name = "script-readers-0e8ea2f785da"
 paths = ["tools/scripts/test_gpu_device_link_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -2801,8 +3165,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2812,7 +3180,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4fac77abe238"
+name = "script-readers-e456656167db"
 paths = ["tools/scripts/test_gpu_dpr_experiment.py"]
 tests = [
   "build-parallelism-guard",
@@ -2831,8 +3199,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2842,7 +3214,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1373bfe20b34"
+name = "script-readers-d446d0248e7e"
 paths = ["tools/scripts/test_gpu_dpr_pulp_native_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -2861,8 +3233,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2872,7 +3248,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3afe9be3337a"
+name = "script-readers-bc0fb8eed2cd"
 paths = ["tools/scripts/test_gpu_dpr_v2_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -2891,8 +3267,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2902,7 +3282,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8c4143634bfb"
+name = "script-readers-fda0a016d47a"
 paths = ["tools/scripts/test_gpu_dpr_web_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -2921,8 +3301,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2932,7 +3316,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8bf1247eb14d"
+name = "script-readers-ce5d1ca5fd0a"
 paths = ["tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -2951,8 +3335,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2962,7 +3350,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c829b271ed72"
+name = "script-readers-d9334bfd534d"
 paths = ["tools/scripts/test_gpu_handoff_pin_freshness.py"]
 tests = [
   "build-parallelism-guard",
@@ -2981,8 +3369,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-pin-freshness-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -2992,7 +3384,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-16e5e0257685"
+name = "script-readers-408a4ffe6169"
 paths = ["tools/scripts/test_gpu_health_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -3011,8 +3403,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-health-contract-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3022,7 +3418,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6b35db2cc542"
+name = "script-readers-f4e3b8467b94"
 paths = ["tools/scripts/test_gpu_health_read_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -3041,8 +3437,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-health-read-contract-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3052,7 +3452,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-563fff052cd5"
+name = "script-readers-36447728d220"
 paths = ["tools/scripts/test_gpu_health_run_attestation.py"]
 tests = [
   "build-parallelism-guard",
@@ -3071,8 +3471,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-health-run-attestation",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3082,7 +3486,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-273c01312fff"
+name = "script-readers-23329f5dc0c2"
 paths = ["tools/scripts/test_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -3101,8 +3505,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-probe-terminal-recorder-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3112,7 +3520,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f1e87252e2a0"
+name = "script-readers-efa18127394b"
 paths = ["tools/scripts/test_gpu_recipe_catalog.py"]
 tests = [
   "build-parallelism-guard",
@@ -3131,8 +3539,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-recipe-catalog-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3142,7 +3554,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b3b452b19c28"
+name = "script-readers-62d373f20a04"
 paths = ["tools/scripts/test_gpu_test_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -3161,8 +3573,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-test-resource-locks",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3172,7 +3588,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-eff67170b72a"
+name = "script-readers-daf76d333214"
 paths = ["tools/scripts/test_hydrate_gpu_provenance_commits.py"]
 tests = [
   "build-parallelism-guard",
@@ -3191,8 +3607,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-provenance-hydration-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3202,7 +3622,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3ecea85a35c8"
+name = "script-readers-24b950b89e46"
 paths = ["tools/scripts/test_hydrate_real_git.py"]
 tests = [
   "build-parallelism-guard",
@@ -3221,8 +3641,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-provenance-hydration-real-git-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3232,7 +3656,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-650ed824c8a5"
+name = "script-readers-6bd2d4596f89"
 paths = ["tools/scripts/test_include_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -3250,9 +3674,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "pulp-view-core-include-boundary-negative-contract",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3262,7 +3690,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f22854b02238"
+name = "script-readers-db97f26c73cd"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3281,8 +3709,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "inspector-truth-check-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3292,7 +3724,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-814570521bc8"
+name = "script-readers-c68f2ac174f0"
 paths = ["tools/scripts/test_install_sha256sums.py"]
 tests = [
   "build-parallelism-guard",
@@ -3311,8 +3743,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "install-sha256sums-current",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3322,7 +3758,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-de70c9556a4c"
+name = "script-readers-784c8434d4e9"
 paths = ["tools/scripts/test_install_shipyard_queue_repair.py"]
 tests = [
   "build-parallelism-guard",
@@ -3341,8 +3777,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "install-shipyard-queue-repair",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3352,7 +3792,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d168c57bd8b3"
+name = "script-readers-a0c7bba9a263"
 paths = ["tools/scripts/test_live_build_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3371,8 +3811,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "live-build-check-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3382,7 +3826,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f9dcc7591b4e"
+name = "script-readers-961bdecfa8c9"
 paths = ["tools/scripts/test_mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3401,8 +3845,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "mac-objc-source-list-guard-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3412,7 +3860,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a56d4f8d7558"
+name = "script-readers-1e49b8584581"
 paths = ["tools/scripts/test_measure_min_os.py"]
 tests = [
   "build-parallelism-guard",
@@ -3431,8 +3879,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "measure-min-os-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3442,7 +3894,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7582d6fad56c"
+name = "script-readers-ab00cd3f57c4"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
   "build-parallelism-guard",
@@ -3461,8 +3913,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "minos-registry-absent-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3472,7 +3928,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-58a830350517"
+name = "script-readers-1128df2b9d09"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
   "build-parallelism-guard",
@@ -3491,8 +3947,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "param-designator-order",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3502,7 +3962,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a337bc6e1034"
+name = "script-readers-4e13f1190b88"
 paths = ["tools/scripts/test_pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3520,9 +3980,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "test-pch-wiring-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3532,7 +3996,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-98e99ea2fed6"
+name = "script-readers-5ab87729499d"
 paths = ["tools/scripts/test_planning_gitlink_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3551,8 +4015,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "planning-gitlink-guard-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3562,7 +4030,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-83a8298645c6"
+name = "script-readers-2982d7e4289b"
 paths = ["tools/scripts/test_pr_batch_advisor.py"]
 tests = [
   "build-parallelism-guard",
@@ -3581,8 +4049,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "pr-batch-advisor",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3592,7 +4064,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bca7b2f03f0e"
+name = "script-readers-f87f5a580431"
 paths = ["tools/scripts/test_pr_check_triage.py"]
 tests = [
   "build-parallelism-guard",
@@ -3611,8 +4083,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "pr-check-triage-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3622,7 +4098,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-831fbc522e69"
+name = "script-readers-c463639af109"
 paths = ["tools/scripts/test_pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3641,8 +4117,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "pr-fast-tier-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3652,7 +4132,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6cfdd6e2fe1a"
+name = "script-readers-149169d4c155"
 paths = ["tools/scripts/test_pr_flow_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -3671,8 +4151,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "pr-flow-audit-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3682,7 +4166,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4537eb85c6a1"
+name = "script-readers-443776587e69"
 paths = ["tools/scripts/test_prepush_format_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -3700,9 +4184,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-format-gate-wiring",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3712,7 +4200,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dc7d7c96d670"
+name = "script-readers-9d7830443988"
 paths = ["tools/scripts/test_prepush_gate_output.py"]
 tests = [
   "build-parallelism-guard",
@@ -3730,9 +4218,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-gate-output",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3742,7 +4234,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-797b834a2947"
+name = "script-readers-c8a87b535d32"
 paths = ["tools/scripts/test_prepush_queue_rebase_hint.py"]
 tests = [
   "build-parallelism-guard",
@@ -3760,9 +4252,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-queue-rebase-hint",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3772,7 +4268,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-de93e6610c5c"
+name = "script-readers-33b11b0f193b"
 paths = ["tools/scripts/test_protected_merge_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -3791,9 +4287,13 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "ios-gate-digest-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "test-receipts-shadow-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3803,7 +4303,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4010ff850b46"
+name = "script-readers-e4bdd98d42f0"
 paths = ["tools/scripts/test_pulp_test_data_cmake.py"]
 tests = [
   "build-parallelism-guard",
@@ -3821,9 +4321,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "pulp-test-data-cmake-selftest",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3833,7 +4337,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0adefffc3d63"
+name = "script-readers-550b0d66994d"
 paths = ["tools/scripts/test_pulp_test_group.py"]
 tests = [
   "build-parallelism-guard",
@@ -3852,8 +4356,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3863,7 +4371,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f35721520b9d"
+name = "script-readers-82850a3ce919"
 paths = ["tools/scripts/test_pulp_uninstall.py"]
 tests = [
   "build-parallelism-guard",
@@ -3881,9 +4389,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "pulp-uninstaller-contract",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3893,7 +4405,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-671311f324bf"
+name = "script-readers-58072a29b034"
 paths = ["tools/scripts/test_relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3911,9 +4423,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "relay-contract-hosts-selftest",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3923,7 +4439,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-26608899c71f"
+name = "script-readers-120f60279d4d"
 paths = ["tools/scripts/test_release_trailer_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3941,9 +4457,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "release-trailer-guard-selftest",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3953,7 +4473,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-26be39a650ad"
+name = "script-readers-7c36ceeba842"
 paths = ["tools/scripts/test_render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3971,9 +4491,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "render-upward-edge-check-rules",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -3983,7 +4507,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3e1c3ad9420e"
+name = "script-readers-8c1607953b03"
 paths = ["tools/scripts/test_repo_source_scan.py"]
 tests = [
   "build-parallelism-guard",
@@ -4001,9 +4525,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "repo-source-scan",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4013,7 +4541,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-790ecb8f4ba7"
+name = "script-readers-a6c1f3c8b388"
 paths = ["tools/scripts/test_resolve_classify_base.py"]
 tests = [
   "build-parallelism-guard",
@@ -4031,9 +4559,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "resolve-classify-base-selftest",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4043,7 +4575,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c42dbbee8a7b"
+name = "script-readers-630f8a3c6f60"
 paths = ["tools/scripts/test_run_changed_surface_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -4062,8 +4594,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4073,7 +4609,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3a407605b85f"
+name = "script-readers-ad7cab78aa8d"
 paths = ["tools/scripts/test_runner_topology_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4091,9 +4627,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "runner-topology-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4103,7 +4643,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fdbb1c627c16"
+name = "script-readers-5dc0ae3b7b33"
 paths = ["tools/scripts/test_runner_topology_static.py"]
 tests = [
   "build-parallelism-guard",
@@ -4121,9 +4661,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "runner-topology-static-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4133,7 +4677,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2cc481057d95"
+name = "script-readers-28d9044c9222"
 paths = ["tools/scripts/test_rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4151,9 +4695,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "rust-cli-build-edge-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4163,7 +4711,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dcef710e1942"
+name = "script-readers-f006446070a3"
 paths = ["tools/scripts/test_sample_region_catalogs.py"]
 tests = [
   "build-parallelism-guard",
@@ -4181,39 +4729,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-catalog-contract",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-76b348c728d2"
-paths = ["tools/scripts/test_sample_region_compat_baseline.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4223,7 +4745,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9f991033fee2"
+name = "script-readers-0192ce958079"
 paths = ["tools/scripts/test_schema_drift_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4241,9 +4763,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "timeline-schema-drift-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4253,7 +4779,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5ba5d708ee63"
+name = "script-readers-f98e02cb0270"
 paths = ["tools/scripts/test_script_argv.py"]
 tests = [
   "build-parallelism-guard",
@@ -4271,9 +4797,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "script-argv-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4283,7 +4813,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-317380d2ce8c"
+name = "script-readers-f756fc5afb92"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
   "build-parallelism-guard",
@@ -4301,9 +4831,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "script-test-inputs-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4313,7 +4847,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7adac6c11e40"
+name = "script-readers-7779a6e13b11"
 paths = ["tools/scripts/test_sdk_capability_handoff.py"]
 tests = [
   "agent-capability-sdk-handoff-selftest",
@@ -4332,8 +4866,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4343,7 +4881,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6793d0f89f19"
+name = "script-readers-6f2db4567b59"
 paths = ["tools/scripts/test_sdk_consumer_sweep.py"]
 tests = [
   "build-parallelism-guard",
@@ -4361,9 +4899,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "sdk-consumer-sweep-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4373,7 +4915,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7b224b8cc7d6"
+name = "script-readers-df2e3ffeebf8"
 paths = ["tools/scripts/test_sdk_consumer_update.py"]
 tests = [
   "build-parallelism-guard",
@@ -4391,9 +4933,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "sdk-consumer-update-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4403,7 +4949,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-065c39c8f742"
+name = "script-readers-d1a6f8340047"
 paths = ["tools/scripts/test_sdk_plist_templates_installed.py"]
 tests = [
   "build-parallelism-guard",
@@ -4421,9 +4967,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "sdk-plist-templates-installed",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4433,7 +4983,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9b46d3d04a0d"
+name = "script-readers-5e175e43f367"
 paths = ["tools/scripts/test_seed_build_dir.py"]
 tests = [
   "build-parallelism-guard",
@@ -4451,9 +5001,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "seed-build-dir-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4463,7 +5017,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-141beca9a43a"
+name = "script-readers-58aecaa795f4"
 paths = ["tools/scripts/test_sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4481,9 +5035,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "sequencer-control-skill-coverage-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4493,7 +5051,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dc55baf05263"
+name = "script-readers-e0539da0fc46"
 paths = ["tools/scripts/test_setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4511,9 +5069,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "setup-bootstrap-plan-guard-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4523,7 +5085,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-78bcf48bc4ee"
+name = "script-readers-e7da0d3cb6f2"
 paths = ["tools/scripts/test_shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4541,9 +5103,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "test-shared-objects-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4553,7 +5119,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-447a6a6181dd"
+name = "script-readers-0df1e123a7c0"
 paths = ["tools/scripts/test_silent_revert_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4571,9 +5137,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "silent-revert-guard-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4583,7 +5153,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bd7c2ebe3e75"
+name = "script-readers-e8c0f791518b"
 paths = ["tools/scripts/test_skills_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4601,9 +5171,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "skills-doc-check-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4613,7 +5187,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-82ce872ac5f7"
+name = "script-readers-db180d521869"
 paths = ["tools/scripts/test_status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4631,9 +5205,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "status-tone-signal-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4643,7 +5221,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1d35f4992104"
+name = "script-readers-b8d6fae6c9f1"
 paths = ["tools/scripts/test_tart_home_resolution.py"]
 tests = [
   "build-parallelism-guard",
@@ -4661,9 +5239,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "tart-home-resolution",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4673,7 +5255,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7812259b6e1b"
+name = "script-readers-b99e54fc7074"
 paths = ["tools/scripts/test_timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4691,9 +5273,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "timeline-fixture-coverage-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4703,7 +5289,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-82742d147bf3"
+name = "script-readers-2ccc2244d6cb"
 paths = ["tools/scripts/test_tmp_leak_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4721,9 +5307,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "tmp-leak-guard-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4733,7 +5323,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-04214bc8b6f4"
+name = "script-readers-ddb84b02cdc6"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4751,9 +5341,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "tools-registry-check-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4763,7 +5357,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d4fef510fa94"
+name = "script-readers-4b30331acf3c"
 paths = ["tools/scripts/test_trace_frame_cost.py"]
 tests = [
   "build-parallelism-guard",
@@ -4781,9 +5375,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "trace-frame-cost-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4793,7 +5391,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a9e3eb2afd0f"
+name = "script-readers-598e1edf3b00"
 paths = ["tools/scripts/test_trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4811,9 +5409,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "trace-span-category-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4823,7 +5425,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-beab51ab5232"
+name = "script-readers-aa2bbfee0b87"
 paths = ["tools/scripts/test_unbounded_wait_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4841,9 +5443,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "unbounded-wait-lint-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4853,7 +5459,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-abc70305123a"
+name = "script-readers-0fe29121c568"
 paths = ["tools/scripts/test_unregistered_tests_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4871,9 +5477,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "unregistered-tests-check-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4883,7 +5493,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-264883974303"
+name = "script-readers-926ac211102c"
 paths = ["tools/scripts/test_validate_gpu_audio_trace_captures.py"]
 tests = [
   "build-parallelism-guard",
@@ -4902,8 +5512,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4913,7 +5527,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-758ac0abc53e"
+name = "script-readers-b9fa5b55962a"
 paths = ["tools/scripts/test_vellum_boundary_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4931,9 +5545,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "vellum-boundary-lint-negative-contract",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4943,8 +5561,11 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6e96bb3eb00d"
-paths = ["tools/scripts/test_vellum_closure.py"]
+name = "script-readers-cd32e903b950"
+paths = [
+  "tools/scripts/test_vellum_closure.py",
+  "tools/scripts/vellum_mirror_edge_table.py",
+]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-inventory",
@@ -4961,9 +5582,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "pulp.vellum-closure-policy-selftest",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -4973,7 +5598,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-35767613efd1"
+name = "script-readers-a3540f2d02ee"
 paths = ["tools/scripts/test_vellum_inheritance_ledger_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4991,9 +5616,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "vellum-inheritance-ledger-negative-contract",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5003,7 +5632,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4276cd078358"
+name = "script-readers-32a5cccf3361"
 paths = ["tools/scripts/test_vellum_trusted_merge.py"]
 tests = [
   "build-parallelism-guard",
@@ -5021,9 +5650,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "vellum-trusted-merge-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5033,7 +5666,41 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ae43167caa31"
+name = "script-readers-bf98c5722f4d"
+paths = ["tools/scripts/test_vellum_view_core_pulp_kept_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-view-core-pulp-kept-negative-contract",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-c303e190e07d"
 paths = ["tools/scripts/test_vellum_watch_preflight.py"]
 tests = [
   "build-parallelism-guard",
@@ -5051,9 +5718,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5063,7 +5734,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fb675126a1d5"
+name = "script-readers-d8fa1f6032ca"
 paths = ["tools/scripts/test_vellum_workflow_dispatch.py"]
 tests = [
   "build-parallelism-guard",
@@ -5081,9 +5752,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "vellum-workflow-dispatch",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5093,7 +5768,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4799554dfa9a"
+name = "script-readers-75d73259f439"
 paths = ["tools/scripts/test_verify_create_templates.py"]
 tests = [
   "build-parallelism-guard",
@@ -5112,8 +5787,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5123,7 +5802,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-234c5597181b"
+name = "script-readers-0e8255958bff"
 paths = ["tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -5142,8 +5821,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5153,7 +5836,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-637a9c9a159b"
+name = "script-readers-3ce757eeb6f2"
 paths = ["tools/scripts/test_verify_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -5172,8 +5855,12 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-probe-acceptance-verifier-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5183,7 +5870,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-86370e5a1aae"
+name = "script-readers-9385f4db3606"
 paths = ["tools/scripts/test_verify_rendered_panel.py"]
 tests = [
   "build-parallelism-guard",
@@ -5201,9 +5888,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "verify-rendered-panel-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5213,7 +5904,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5af417bfb39d"
+name = "script-readers-a05ed041bcd0"
 paths = ["tools/scripts/test_version_at_land.py"]
 tests = [
   "build-parallelism-guard",
@@ -5231,9 +5922,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "version-at-land-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5243,7 +5938,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-14dcbd9e4a8e"
+name = "script-readers-c74df102fec8"
 paths = ["tools/scripts/test_view_audio_symbol_floor.py"]
 tests = [
   "build-parallelism-guard",
@@ -5261,9 +5956,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "pulp-view-audio-symbol-floor-negative-contract",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5273,7 +5972,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cf935ef6d21b"
+name = "script-readers-23176fd19c8c"
 paths = ["tools/scripts/test_web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5291,9 +5990,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "web-timeline-source-closure-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5303,7 +6006,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3521ac551026"
+name = "script-readers-5c2512192a15"
 paths = ["tools/scripts/test_windows_posix_shims.py"]
 tests = [
   "build-parallelism-guard",
@@ -5321,8 +6024,12 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
   "windows-posix-shims-selftest",
 ]
 build_targets = ["pulp-cli"]
@@ -5333,7 +6040,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f6aa3865aa9d"
+name = "script-readers-5d15d9099f04"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5351,9 +6058,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "timeline-command-doc-coverage",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5363,7 +6074,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-45b5d6bab9ff"
+name = "script-readers-9e9aa7c6f9a2"
 paths = ["tools/scripts/timeline_engine_dependency_floor_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5381,10 +6092,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "timeline-engine-dependency-floor",
   "timeline-engine-dependency-floor-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5394,7 +6109,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-32fe5290531f"
+name = "script-readers-6e0d37e3dbd1"
 paths = ["tools/scripts/timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5412,9 +6127,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "timeline-fixture-coverage",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5424,7 +6143,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-77f6455c923b"
+name = "script-readers-55dec3effc12"
 paths = ["tools/scripts/token_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5442,9 +6161,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "token-coverage-ratchet",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5454,7 +6177,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5090775646f2"
+name = "script-readers-8c0b58b8e0f6"
 paths = ["tools/scripts/token_key_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5472,9 +6195,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "token-key-correctness",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5484,7 +6211,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-eb22fb629eb9"
+name = "script-readers-c9fbf179bbb2"
 paths = ["tools/scripts/trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -5502,9 +6229,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "trace-span-category-lint",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5514,38 +6245,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-30c66f4973ad"
-paths = ["tools/scripts/unregistered_tests_check.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "unregistered-tests-check",
-  "unregistered-tests-check-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-1d89419f9562"
+name = "script-readers-258b05dafebe"
 paths = ["tools/scripts/vellum_closure.py"]
 tests = [
   "build-parallelism-guard",
@@ -5563,11 +6263,17 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "pulp.vellum-closure-boundary",
+  "pulp.vellum-closure-export-mentions",
+  "pulp.vellum-closure-export-units",
   "pulp.vellum-closure-gate",
   "pulp.vellum-closure-policy-selftest",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5577,7 +6283,41 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b8963d92a69d"
+name = "script-readers-d8f4f5b604a2"
+paths = ["tools/scripts/vellum_view_core_pulp_kept_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "pulp.vellum-view-core-pulp-kept",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-bf4cb1cb1754"
 paths = ["tools/scripts/verify_downstream_consumers.py"]
 tests = [
   "build-parallelism-guard",
@@ -5595,10 +6335,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "refactor-downstream-consumers-manifest",
   "refactor-downstream-consumers-negative-contract",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5608,7 +6352,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-39f52c2df824"
+name = "script-readers-64296b06042d"
 paths = ["tools/scripts/verify_downstream_consumers_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5626,9 +6370,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "refactor-downstream-consumers-negative-contract",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5638,7 +6386,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5df62cab462c"
+name = "script-readers-8882bfd44bf3"
 paths = ["tools/scripts/verify_refactor_baselines.py"]
 tests = [
   "build-parallelism-guard",
@@ -5656,10 +6404,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "refactor-baseline-manifest",
   "refactor-baseline-manifest-negative-contract",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5669,7 +6421,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cf7351cba57d"
+name = "script-readers-e59cb4ec370c"
 paths = ["tools/scripts/verify_refactor_baselines_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5687,9 +6439,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "refactor-baseline-manifest-negative-contract",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5699,7 +6455,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ef01754c3fb3"
+name = "script-readers-520349024cd4"
 paths = ["tools/scripts/verify_timeline_launcher_resource_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5717,11 +6473,15 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "timeline-launcher-bulk-build-contract",
   "timeline-launcher-resource-contract-mutation-control",
   "timeline-launcher-retained-size-contract",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5731,7 +6491,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-385406b8e626"
+name = "script-readers-f0d2dc487576"
 paths = ["tools/scripts/verify_timeline_live_capture.py"]
 tests = [
   "build-parallelism-guard",
@@ -5749,9 +6509,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "timeline-live-capture-verifier-self-test",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5761,7 +6525,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3e531eaa73f5"
+name = "script-readers-f265ada57654"
 paths = ["tools/scripts/verify_timeline_transaction_launcher_complexity.py"]
 tests = [
   "build-parallelism-guard",
@@ -5779,10 +6543,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "timeline-transaction-launcher-complexity",
   "timeline-transaction-launcher-complexity-mutation-control",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5792,7 +6560,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-394e9faff763"
+name = "script-readers-f0655ee418aa"
 paths = ["tools/scripts/verify_wasm_skia_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -5810,10 +6578,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "wasm-skia-fetch-mapping",
   "wasm-skia-slice-invariants",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5823,7 +6595,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e67cb9281580"
+name = "script-readers-11eeefd5c8c5"
 paths = ["tools/scripts/view_audio_seam_debts.py"]
 tests = [
   "build-parallelism-guard",
@@ -5841,9 +6613,13 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "view-audio-seam-debts",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5853,7 +6629,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-49ec3792108d"
+name = "script-readers-395fa9310fa1"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5871,10 +6647,14 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
   "web-timeline-source-closure",
   "web-timeline-source-closure-selftest",
+  "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
 supported_build_types = [
@@ -5957,6 +6737,8 @@ tests = [
   "reuse-record-selftest",
   "runner-topology-selftest",
   "runner-topology-static-selftest",
+  "sample-region-compat-baseline",
+  "sample-region-compat-baseline-selftest",
   "script-argv-selftest",
   "sequencer-control-skill-coverage",
   "sequencer-control-skill-coverage-selftest",
@@ -5970,6 +6752,7 @@ tests = [
   "tools-registry-check-selftest",
   "trace-span-category-lint",
   "vellum-inheritance-ledger-negative-contract",
+  "vellum-view-core-pulp-kept-negative-contract",
   "vellum-watch-preflight-selftest",
   "version-at-land-selftest",
   "wide-non-native-selftest",
@@ -6035,6 +6818,7 @@ paths = [
   "tools/scripts/frontend_ir_tweaks.py",
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/gate_python_imports_check.py",
+  "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
@@ -6181,6 +6965,7 @@ paths = [
   "tools/scripts/test_fetch_skia_for_release_extra.py",
   "tools/scripts/test_fetch_v8_for_release.py",
   "tools/scripts/test_findskia_arch_assert.py",
+  "tools/scripts/test_findskia_windows_arm64_slice.py",
   "tools/scripts/test_fleet_snapshot.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
@@ -6291,6 +7076,7 @@ paths = [
   "tools/scripts/test_pulp_test_group.py",
   "tools/scripts/test_pulp_tooling_disposition.py",
   "tools/scripts/test_pulp_uninstall.py",
+  "tools/scripts/test_python_floor_syntax_check.py",
   "tools/scripts/test_queue_admission_guard.py",
   "tools/scripts/test_queue_age_watchdog.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -6298,6 +7084,7 @@ paths = [
   "tools/scripts/test_refresh_push_check.py",
   "tools/scripts/test_relay_contract_check.py",
   "tools/scripts/test_release_breakage_watchdog_wiring.py",
+  "tools/scripts/test_release_cache_isolation.py",
   "tools/scripts/test_release_checksum_manifest.py",
   "tools/scripts/test_release_cli_gpu_asset_coverage.py",
   "tools/scripts/test_release_failure_diagnosis.py",
@@ -6379,6 +7166,7 @@ paths = [
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_inheritance_ledger_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
+  "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
   "tools/scripts/test_vellum_watch_preflight.py",
   "tools/scripts/test_vellum_workflow_dispatch.py",
   "tools/scripts/test_verify_cobertura_xml.py",
@@ -6411,9 +7199,10 @@ paths = [
   "tools/scripts/token_coverage_check.py",
   "tools/scripts/token_key_check.py",
   "tools/scripts/trace_span_category_lint.py",
-  "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_mirror_edge_table.py",
+  "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",
@@ -6579,6 +7368,7 @@ paths = [
   "tools/scripts/frontend_ir_tweaks.py",
   "tools/scripts/frontend_ir_validation.py",
   "tools/scripts/gate_python_imports_check.py",
+  "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
@@ -6725,6 +7515,7 @@ paths = [
   "tools/scripts/test_fetch_skia_for_release_extra.py",
   "tools/scripts/test_fetch_v8_for_release.py",
   "tools/scripts/test_findskia_arch_assert.py",
+  "tools/scripts/test_findskia_windows_arm64_slice.py",
   "tools/scripts/test_fleet_snapshot.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
@@ -6835,6 +7626,7 @@ paths = [
   "tools/scripts/test_pulp_test_group.py",
   "tools/scripts/test_pulp_tooling_disposition.py",
   "tools/scripts/test_pulp_uninstall.py",
+  "tools/scripts/test_python_floor_syntax_check.py",
   "tools/scripts/test_queue_admission_guard.py",
   "tools/scripts/test_queue_age_watchdog.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -6842,6 +7634,7 @@ paths = [
   "tools/scripts/test_refresh_push_check.py",
   "tools/scripts/test_relay_contract_check.py",
   "tools/scripts/test_release_breakage_watchdog_wiring.py",
+  "tools/scripts/test_release_cache_isolation.py",
   "tools/scripts/test_release_checksum_manifest.py",
   "tools/scripts/test_release_cli_gpu_asset_coverage.py",
   "tools/scripts/test_release_failure_diagnosis.py",
@@ -6923,6 +7716,7 @@ paths = [
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_inheritance_ledger_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
+  "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
   "tools/scripts/test_vellum_watch_preflight.py",
   "tools/scripts/test_vellum_workflow_dispatch.py",
   "tools/scripts/test_verify_cobertura_xml.py",
@@ -6955,9 +7749,10 @@ paths = [
   "tools/scripts/token_coverage_check.py",
   "tools/scripts/token_key_check.py",
   "tools/scripts/trace_span_category_lint.py",
-  "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_mirror_edge_table.py",
+  "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",

@@ -7,6 +7,7 @@
 #include "kit_commands.hpp"
 #include "package_registry.hpp"
 #include "projects_registry.hpp"
+#include "tartci_lease.hpp"
 
 #include <pulp/runtime/safe_relative_path.hpp>
 
@@ -861,12 +862,10 @@ int cmd_create(const std::vector<std::string>& args) {
 
     auto build_targets = pulp::cli::create_default_build_targets(
         class_name, type, formats, !template_kit.has_value());
-    auto append_build_targets = [&](std::string& cmd) {
-        cmd += " --target";
-        for (const auto& target : build_targets) {
-            cmd += " " + target;
-        }
-    };
+    std::vector<std::string> build_args{"--target"};
+    build_args.insert(build_args.end(), build_targets.begin(), build_targets.end());
+    build_args.push_back("--config");
+    build_args.push_back(pulp::cli::create_build_config(debug_build));
 
     // Build
     log("Building...\n");
@@ -899,10 +898,7 @@ int cmd_create(const std::vector<std::string>& args) {
             return rc;
         }
 
-        std::string build_cmd = "cmake --build " + shell_quote(out_dir / "build");
-        append_build_targets(build_cmd);
-        build_cmd += " --config " + pulp::cli::create_build_config(debug_build);
-        rc = run_with_spinner(build_cmd, "Building");
+        rc = run_governed_cmake_build(out_dir, out_dir / "build", build_args, "pulp create");
         if (rc != 0) {
             std::cerr << "Build failed.\n";
             return rc;
@@ -928,10 +924,7 @@ int cmd_create(const std::vector<std::string>& args) {
             return rc;
         }
 
-        std::string build_cmd = "cmake --build " + shell_quote(root / "build");
-        append_build_targets(build_cmd);
-        build_cmd += " --config " + pulp::cli::create_build_config(debug_build);
-        rc = run_with_spinner(build_cmd, "Building");
+        rc = run_governed_cmake_build(root, root / "build", build_args, "pulp create");
         if (rc != 0) {
             std::cerr << "Build failed.\n";
             return rc;

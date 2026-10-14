@@ -124,9 +124,38 @@ jobs:
     # that waited for the draft to appear, are gone.)
     permissions:
       contents: read
+    # Signed, notarized artifacts never read a cache an untrusted run can
+    # write: a self-hosted release VM mounts the host's ccache writable, and
+    # PR gate VMs run PR code with the same mount. Every object is compiled here.
+    env:
+      CCACHE_DISABLE: "1"
 
     steps:
       - uses: actions/checkout@v7
+
+      # The FetchContent seed and the configure-check cache on a self-hosted
+      # host can be written by earlier jobs, PR gate jobs included, so CMake
+      # fetches every dependency at its pin into a fresh job-local root and
+      # include()s no cached configure-check file. tools/scripts/test_release_cache_isolation.py holds
+      # every signing or publishing job to this step and to CCACHE_DISABLE.
+      - name: Isolate the build from shared caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A per-dependency source override would bypass the fresh root.
+          if overrides="$(env | grep '^PULP_FETCHCONTENT_SOURCE_DIR_' | cut -d= -f1)"; then
+            echo "::error::runner environment overrides dependency sources: ${overrides//$'\n'/ }"
+            exit 1
+          fi
+          root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -m "$root")"; fi
+          rm -rf "$root"
+          mkdir -p "$root/src" "$root/fc" "$root/cc"
+          echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src" >> "$GITHUB_ENV"
+          echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc" >> "$GITHUB_ENV"
+          # PulpConfigureCheckCache.cmake include()s the files it finds here,
+          # so a shared directory would run CMake an earlier job wrote.
+          echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc" >> "$GITHUB_ENV"
 
       # CI COVERAGE-GAP FIX: this release job once ran on macos-14, whose default
       # Xcode 15.4 Apple clang lacked C++20 P0960 (parenthesized aggregate init).
@@ -442,7 +471,7 @@ jobs:
       # signs and notarizes the example-plugin packages and keeps them as
       # workflow artifacts. It cannot delay, block, or break a release.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-macos-${{ github.ref_name }}${{ steps.signing.outputs.artifact_suffix }}
           path: artifacts/

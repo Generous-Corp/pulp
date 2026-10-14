@@ -1335,6 +1335,22 @@ The shortened `v3.8.0` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.
 
+### A signed or published build reads no shared cache
+
+Self-hosted VMs mount the host's ccache and FetchContent source cache writable
+into every job, and PR gate VMs run PR code with the same mounts, so a signed
+build that read them could link an object or dependency source any PR planted.
+`release-cli.yml` `build-cli`, `sign-and-release.yml` `build-and-sign-macos` and
+`wclap-cloudflare.yml` `build-prove-deploy` therefore set job-level
+`CCACHE_DISABLE: "1"`, run "Isolate the build from shared caches" (a fresh
+`RUNNER_TEMP` root for `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` and
+`PULP_FETCHCONTENT_BASE_DIR`) before their first build step, and use no
+`actions/cache` or Namespace cache volume. A new signing or deploy job must do
+the same: `tools/scripts/test_release_cache_isolation.py` finds such jobs by
+their signing/deploy capability and fails one that skips either setting. The
+cold compile is the accepted price; do not re-add ccache to a release to save
+minutes.
+
 ### Never run `validation` ctest tests in `sign-and-release.yml`
 
 The `Test` step in `.github/workflows/sign-and-release.yml` MUST pass
@@ -1367,7 +1383,7 @@ into `.github/workflows/workflow-lint.yml` so any future PR touching
 
 ### `sign-and-release.yml` must declare `contents: write`
 
-Every release workflow that uses `softprops/action-gh-release@v2` with
+Every release workflow that uses `softprops/action-gh-release@v3` with
 `generate_release_notes: true` — or that otherwise PATCHes the release
 entry — needs an explicit job-level `permissions: contents: write`
 block. Without it the job inherits a read-only token on `push: tags`

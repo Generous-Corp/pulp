@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261013-windows-skia-arm64-slice-20261013-watch",
+  "created_at": "2026-10-13T20:15:36Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The Pulp Skia consumer now selects the published Windows ARM64 archive slice and stays fail-closed when that slice is absent. This changes only Pulp build discovery and its regression fixture; no design-import, Chromium, rendering, packaging, or Vellum authority moves.",
+  "tests": [
+    "python3 tools/scripts/test_findskia_windows_arm64_slice.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

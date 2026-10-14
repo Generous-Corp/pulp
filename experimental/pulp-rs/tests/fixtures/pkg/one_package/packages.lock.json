@@ -4,8 +4,8 @@
     "alac": {
       "version": "1.0",
       "resolved": "https://github.com/macosforge/alac.git",
-      "integrity": "",
-      "commit": "master"
+      "integrity": "sha256-5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d",
+      "commit": "c38887c5c5e64a4b31108733bd79ca9b2496d987"
     }
   }
 }

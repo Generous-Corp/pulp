@@ -48,7 +48,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
@@ -800,6 +800,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
@@ -835,6 +837,8 @@ install(FILES
     # them is exactly the gap WAH-3 closes.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpVerifyRuntimeStaging.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
+    # Included by FindSkia.cmake relative to its own directory.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
     # Every plist template a format helper can reach must ship. PulpPluginFormats
@@ -1031,6 +1035,8 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_script_keys.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_text_input.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac_internal.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_drag.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac_host_lifetime.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac_host_lifetime.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"

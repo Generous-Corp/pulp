@@ -1,18 +1,55 @@
 {
   "schema": "pulp.vellum.d3-units.v1",
   "units": [
-    {"name": "foundation", "targets": ["pulp-runtime", "pulp-simd"]},
-    {"name": "gpu-device-api", "targets": ["pulp-gpu-device"]},
+    {"name": "foundation", "targets": ["pulp-events", "pulp-platform", "pulp-runtime", "pulp-simd"]},
+    {"name": "gpu-device-api", "targets": ["pulp-gpu-device"], "optional_targets": [{"name": "pulp-skia-chromium-raw-ptr-compat", "platforms": ["Linux"]}], "owned_files": ["core/canvas/src/skia_chromium_raw_ptr_compat.cpp"]},
     {"name": "gpu-device", "targets": ["pulp-gpu-device"]},
-    {"name": "canvas", "targets": ["pulp-canvas"]},
+    {"name": "canvas", "targets": ["pulp-canvas", "pulp-bundled-fonts"], "optional_targets": ["pulp-bundled-noto-color-emoji"]},
     {"name": "render-2d", "targets": ["pulp-render"]},
     {"name": "render-3d", "targets": ["pulp-render"]},
     {"name": "state-core", "targets": ["pulp-state"]},
+    {"name": "view-core", "targets": ["pulp-view-core"], "pulp_kept": {
+      "targets": ["pulp-view-tooling"],
+      "files": [
+        "core/view/src/inspector.cpp",
+        "core/view/include/pulp/view/inspector.hpp",
+        "core/view/src/inspector_window.cpp",
+        "core/view/include/pulp/view/inspector_window.hpp",
+        "core/view/src/editor_bridge.cpp",
+        "core/view/include/pulp/view/editor_bridge.hpp",
+        "core/view/src/host_param_surface.cpp",
+        "core/view/include/pulp/view/host_param_surface.hpp",
+        "core/view/src/script_inspector_bridge.cpp",
+        "core/view/include/pulp/view/script_inspector_bridge.hpp",
+        "core/view/src/waveform_editor_primitives.cpp",
+        "core/view/include/pulp/view/waveform_editor_primitives.hpp",
+        "core/view/src/plugin_frame_renderer.cpp",
+        "core/view/include/pulp/view/plugin_frame_renderer.hpp",
+        "core/view/src/plugin_view_host_stub.cpp",
+        "core/view/platform/mac/plugin_view_host_mac.mm",
+        "core/view/platform/mac/plugin_view_host_mac_text_input.mm",
+        "core/view/platform/mac/plugin_view_host_mac_drag.mm",
+        "core/view/platform/mac/plugin_view_host_mac_view.h",
+        "core/view/platform/mac/plugin_view_host_mac_script_keys.hpp",
+        "core/view/platform/ios/plugin_view_host_ios.mm",
+        "core/view/platform/win/plugin_view_host_win.cpp",
+        "core/view/platform/linux/plugin_view_host_linux.cpp"
+      ],
+      "seam_headers": [
+        {"path": "core/view/include/pulp/view/host_surfaces.hpp", "forbidden_include_prefixes": ["pulp/state/", "pulp/runtime/alive_token"]},
+        {"path": "core/view/include/pulp/view/inspector_facts.hpp", "forbidden_include_prefixes": ["pulp/view/inspector.hpp", "pulp/view/inspector_window.hpp"]},
+        {"path": "core/view/include/pulp/view/script_inspector_port.hpp", "forbidden_include_prefixes": ["pulp/view/script_inspector_bridge.hpp"]},
+        {"path": "core/view/include/pulp/view/plugin_view_host.hpp", "forbidden_include_prefixes": ["pulp/view/plugin_frame_renderer.hpp", "pulp/render/"]}
+      ],
+      "view_core_collaborators": [
+        {"path": "core/view/src/design_param_binding.cpp", "ruling": "DECISIONS.md TEAM-LEAD RULING 2026-10-12 — R14 M2 carve boundaries for two listed files: DesignFrameView's own param, bind-grid and scalar-source collaborator; only the StateStore adapter is Pulp-kept"},
+        {"path": "core/view/include/pulp/view/design_param_binding.hpp", "ruling": "DECISIONS.md TEAM-LEAD RULING 2026-10-12 — R14 M2 carve boundaries for two listed files: DesignFrameView's own param, bind-grid and scalar-source collaborator; only the StateStore adapter is Pulp-kept"}
+      ]
+    }},
     {"name": "design-ir", "targets": ["pulp-design-import"]},
     {"name": "design-import", "targets": ["pulp-design-import"]},
-    {"name": "view-core", "targets": ["pulp-view-core"]},
-    {"name": "view-platform", "targets": ["pulp-view-native", "pulp-platform"]},
     {"name": "view-script", "targets": ["pulp-view-script"]},
+    {"name": "view-platform", "targets": ["pulp-view-native"]},
     {"name": "ui-js-packages", "targets": ["pulp-jsx-runtime-materialized-contract", "pulp-jsx-runtime-materialized-emitter"]}
   ]
 }

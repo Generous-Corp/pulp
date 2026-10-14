@@ -160,4 +160,13 @@
 @end
 #endif // PULP_HAS_SKIA
 
+namespace pulp::view::mac_host {
+/// Register a hosted editor view for file and text drags. Called from the
+/// views' -viewDidMoveToWindow; the drop delivery is the NSDraggingDestination
+/// category in plugin_view_host_mac_drag.mm, defined beside this function so a
+/// static-library link that pulls the editor host also pulls the categories
+/// (an Objective-C category alone defines no symbol a linker would follow).
+void register_hosted_drag_types(NSView* view);
+} // namespace pulp::view::mac_host
+
 #endif // TARGET_OS_OSX

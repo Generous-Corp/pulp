@@ -52,7 +52,7 @@ jobs:
             cmake_architectures: ''
             sdk_formats: 'Standalone;VST3;CLAP;LV2'
             report_formats: 'Standalone,VST3,CLAP,LV2'
-            report_architectures: 'x86_64'
+            report_architectures: 'x86_64-win'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     name: ${{ matrix.leg }}
@@ -273,7 +273,7 @@ jobs:
 
       - name: Upload installed-SDK GPU-audio lifecycle receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: control-shipping-${{ matrix.leg }}-gpu-audio-lifecycle
           if-no-files-found: error
@@ -316,7 +316,7 @@ jobs:
             --output '${{ matrix.leg }}.native-shipping-leg.json'
 
       - name: Upload native scanner reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: control-shipping-${{ matrix.leg }}
           if-no-files-found: error
@@ -333,7 +333,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           lfs: false
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: control-shipping-*
           path: native-evidence
@@ -346,7 +346,7 @@ jobs:
             --output control-shipping-native-evidence.json
         shell: bash
       - name: Upload consolidated evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: control-shipping-native-evidence
           if-no-files-found: error

@@ -38,7 +38,7 @@ target_sources(pulp-view-core PRIVATE
     src/caret.cpp
     src/continuous_frames.cpp
     src/custom_shader_host.cpp
-    src/host_param_surface.cpp
+    src/host_surfaces.cpp
     src/yoga_measurement_internal.cpp
     src/yoga_layout.cpp
     src/grid_layout.cpp
@@ -50,8 +50,6 @@ target_sources(pulp-view-core PRIVATE
     src/slider_core.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp
-    src/editor_bridge.cpp
-    src/inspector.cpp
     src/inspector_facts.cpp
     src/sdl_window_host.cpp
     src/auto_ui.cpp
@@ -80,7 +78,6 @@ target_sources(pulp-view-core PRIVATE
     src/canvas_replay_state.cpp
     src/native_view_host.cpp
     src/gpu_surface_observer.cpp
-    src/plugin_frame_renderer.cpp
     src/design_frame_view.cpp
     src/design_fit_view.cpp
     src/design_param_binding.cpp
@@ -92,7 +89,6 @@ target_sources(pulp-view-core PRIVATE
     src/svg_path_widget.cpp
     src/widgets/svg_rect.cpp
     src/widgets/svg_line.cpp
-    src/waveform_editor_primitives.cpp
     src/frame_clock.cpp
     src/host_frame_pump.cpp
     src/gpu_acquire_diagnostics.cpp
@@ -140,16 +136,41 @@ target_sources(pulp-view-core PRIVATE
     src/concertina_panel.cpp
     src/splash_screen.cpp
     src/live_constant_editor.cpp
-    src/inspector_window.cpp
     src/command_registry.cpp
     src/key_mapping_editor.cpp
     src/window_classes.cpp
     src/bubble_message.cpp
 )
 
+# Pulp-kept plugin-host and editor facilities: the component inspector, the
+# editor bridge, and the StateStore-backed HostParamSurface adapter. They stay
+# outside pulp-view-core's extractable closure; their public headers keep their
+# installed paths, and the view umbrellas link this target. The abstract
+# HostParamSurface contract (host_surfaces.cpp) stays in view-core.
+target_sources(pulp-view-tooling PRIVATE
+    src/host_param_surface.cpp
+    src/editor_bridge.cpp
+    src/inspector.cpp
+    src/inspector_window.cpp
+)
+# The damage-aware frame pipeline the Windows and Linux plug-in editor hosts
+# share. The per-platform editor hosts and the PluginViewHost factory
+# registration join this target from core/view/CMakeLists.txt; the abstract
+# PluginViewHost contract (plugin_view_host.hpp, its GPU-surface observer and
+# NativeViewHost registration) stays in view-core.
+target_sources(pulp-view-tooling PRIVATE src/plugin_frame_renderer.cpp)
+# The runtime-inspector bridge is the Pulp implementation of view-script's
+# ScriptInspectorPort, so it exists only where view-script does.
+if(PULP_ENABLE_JS)
+    target_sources(pulp-view-tooling PRIVATE src/script_inspector_bridge.cpp)
+endif()
+
 # Audio-dependent retained widgets. Keep these out of pulp-view-core so its
 # public link closure remains independent of signal/audio/host/midi.
 target_sources(pulp-view-audio PRIVATE
+    # Pulp-kept waveform editor geometry; its only compiled consumer is the
+    # waveform GPU primitives below.
+    src/waveform_editor_primitives.cpp
     audio/src/eq_curve_view.cpp
     audio/src/graph_scale.cpp
     audio/src/widgets/visualizers.cpp
@@ -171,7 +192,6 @@ target_sources(pulp-view-audio PRIVATE
 target_sources(pulp-view-script PRIVATE
     ${PULP_JS_ENGINE_SOURCES}
     src/script_engine.cpp
-    src/script_inspector_bridge.cpp
     src/js_engine_recommend.cpp
     src/widget_bridge.cpp
     src/widget_bridge/value_channel_access.cpp

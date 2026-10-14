@@ -1009,6 +1009,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
 - A vector ILLUSTRATION group imported as a flat stack of boxes instead of art. → `tools/import-design/figma_rasterize_vector_frames.py`
 - Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit. → `tools/import-design/figma_rest_export.py`
+- Validate a fresh authored HTML fixture's Chromium receipt, native import receipt, and planted negative interaction. → `tools/import-design/fresh_plugin_fixture_validation.mjs`
+  - ⚠ **Cannot see:** Acceptance evidence for a named fixture only; it does not prove general HTML importer coverage or semantic native-widget reconstruction.
 - Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
 - Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
 - Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget. → `tools/import-design/make_catalog_component.py`

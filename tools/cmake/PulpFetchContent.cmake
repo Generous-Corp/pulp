@@ -214,20 +214,33 @@ function(pulp_materialize_mutable_fetchcontent_source name)
         return()
     endif()
 
-    pulp_default_fetchcontent_cache_root(cache_root)
-    if("${cache_root}" STREQUAL "" OR NOT EXISTS "${cache_root}")
-        return()
-    endif()
-    file(REAL_PATH "${cache_root}" cache_root_real)
+    # Every automatic shared-cache selection is copied, even one that no
+    # longer sits below the current cache root (a reconfigure with a different
+    # root keeps the previous selection when the new root lacks it). Patching
+    # such a selection in place would write into another build's shared cache.
     file(REAL_PATH "${${source_var}}" source_real)
-    cmake_path(IS_PREFIX cache_root_real "${source_real}" NORMALIZE source_is_shared)
-    if(NOT source_is_shared)
-        return()
-    endif()
 
     set(local_source "${CMAKE_BINARY_DIR}/_deps/pulp-mutable-${lower_name}-src")
     set(stamp "${local_source}/.pulp-source-key")
-    set(expected_stamp "${source_real}\n${PMFS_PATCH_KEY}\n")
+    # A git checkout is copied from its object store at HEAD, so whatever its
+    # working tree holds (local edits, untracked or ignored files) never
+    # reaches the patched copy. The commit is part of the stamp.
+    set(source_commit "")
+    if(EXISTS "${source_real}/.git")
+        find_package(Git QUIET)
+        if(GIT_FOUND)
+            execute_process(
+                COMMAND "${GIT_EXECUTABLE}" -C "${source_real}" rev-parse HEAD
+                RESULT_VARIABLE commit_result
+                OUTPUT_VARIABLE source_commit
+                ERROR_QUIET
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+            if(NOT commit_result EQUAL 0)
+                set(source_commit "")
+            endif()
+        endif()
+    endif()
+    set(expected_stamp "${source_real}\n${PMFS_PATCH_KEY}\n${source_commit}\n")
     set(current_stamp "")
     if(EXISTS "${stamp}")
         file(READ "${stamp}" current_stamp)
@@ -235,7 +248,19 @@ function(pulp_materialize_mutable_fetchcontent_source name)
     if(NOT current_stamp STREQUAL expected_stamp)
         file(REMOVE_RECURSE "${local_source}")
         file(MAKE_DIRECTORY "${local_source}")
-        file(COPY "${source_real}/" DESTINATION "${local_source}" PATTERN ".git" EXCLUDE)
+        if(source_commit)
+            set(archive "${CMAKE_BINARY_DIR}/_deps/pulp-mutable-${lower_name}.tar")
+            execute_process(
+                COMMAND "${GIT_EXECUTABLE}" -C "${source_real}" archive --format=tar --output "${archive}" "${source_commit}"
+                RESULT_VARIABLE archive_result)
+            if(NOT archive_result EQUAL 0)
+                message(FATAL_ERROR "Pulp: could not export ${name} ${source_commit} from ${source_real}")
+            endif()
+            file(ARCHIVE_EXTRACT INPUT "${archive}" DESTINATION "${local_source}")
+            file(REMOVE "${archive}")
+        else()
+            file(COPY "${source_real}/" DESTINATION "${local_source}" PATTERN ".git" EXCLUDE)
+        endif()
         file(WRITE "${stamp}" "${expected_stamp}")
     endif()
 
@@ -253,6 +278,15 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpWgpuNative.cmake")
 #          one the upstream script would download.
 function(pulp_register_wgpu_native_precompiled_source version)
     cmake_parse_arguments(PWN "" "ARCH" "" ${ARGN})
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_GENERATOR_PLATFORM)
+        string(TOUPPER "${CMAKE_GENERATOR_PLATFORM}" _wgpu_target_platform)
+        if(_wgpu_target_platform MATCHES "(^|,)(ARM64EC|ARM64X)(,|$)")
+            message(FATAL_ERROR
+                "Pulp: no pinned wgpu-native provider exists for "
+                "${CMAKE_GENERATOR_PLATFORM}; refusing to fall back to a pure "
+                "ARM64 or x64 archive")
+        endif()
+    endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         set(url_os "windows")
         if(MSVC)

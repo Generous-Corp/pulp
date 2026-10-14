@@ -361,6 +361,23 @@ a CMake edit.
 grep -rln "SpectrogramView\|MultiMeter\|CorrelationMeter" --include=*.cpp --include=*.hpp .
 ```
 
+### An always-present service becomes opt-in (an accessor turns into an installer)
+
+**Pattern.** A member accessor that always returned an object is removed, and
+the object is built only when a process-wide installer ran first. For example,
+0.960.0 replaces `ScriptedUiSession::script_inspector()` with
+`pulp::view::script_inspector(session)`, which is null unless
+`pulp::view::install_script_inspector_bridge()` ran before the session was
+constructed. The call site breaks at COMPILE time; a host that only swaps the
+spelling then gets null at run time.
+
+**What to do.** Find the old accessor, switch to the free function, and add the
+installer where the host builds its UI:
+
+```bash
+grep -rn "script_inspector()" --include=*.cpp --include=*.hpp --include=*.mm .
+```
+
 ### CMake macro renames
 
 **Pattern.** A `pulp_add_*` function in `tools/cmake/Pulp*.cmake` is

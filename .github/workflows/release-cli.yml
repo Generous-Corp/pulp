@@ -80,8 +80,10 @@ jobs:
   #      `actions/checkout` default `clean: true` (git clean -ffdx) wipes the
   #      untracked build dirs each run, so a release build on the persistent
   #      self-hosted disk is clean-by-construction (no warm-dir ODR). The
-  #      host-shared ccache IS reused there; build-cli pins the same
-  #      correctness settings the PR gate uses and prints per-job hit counts.
+  #      host-shared ccache and FetchContent source cache are NOT read there:
+  #      PR jobs can write both, so build-cli disables ccache and re-fetches
+  #      every dependency into a job-local root ("Isolate the build from
+  #      shared caches").
   #   3. PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON — Namespace cloud (off for cost).
   #   4. GitHub-hosted macos-15 — last-resort fallback.
   #
@@ -305,15 +307,12 @@ jobs:
       contents: read
       id-token: write
       attestations: write
-    # The same ccache correctness settings the required macOS gate uses
-    # (build.yml's macos job env). The self-hosted macOS release VMs share the
-    # host's ccache with the gate, so without them a release inherits the
-    # runner service's depend mode and mtime compiler keying — the settings
-    # behind the stale-object poisoning the gate pins these against.
+    # Signed, attested artifacts never read a cache an untrusted run can
+    # write. The self-hosted release VMs mount the host's ccache writable, and
+    # PR gate VMs run PR code with the same mount, so a cached object could be
+    # planted by any PR. Every object in a release is compiled here.
     env:
-      CCACHE_COMPILERCHECK: content
-      CCACHE_NODEPEND: "true"
-      CCACHE_SLOPPINESS: time_macros
+      CCACHE_DISABLE: "1"
 
     steps:
       - name: Container pre-setup (ubuntu:22.04 — build toolchain the bare image lacks)
@@ -422,10 +421,6 @@ jobs:
             fi
           done
 
-      - name: Set up Namespace macOS cache
-        if: matrix.os == 'macos-15' && contains(needs.resolve-macos-runner.outputs.runs_on_json, 'namespace-profile')
-        uses: ./.github/actions/setup-namespace-macos-cache
-
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         uses: ./.github/actions/install-linux-build-deps
@@ -450,17 +445,34 @@ jobs:
             fi
           done
 
-      - name: Bootstrap dependencies
-        run: ./setup.sh --ci --deps-only
-        shell: bash
-
-      - name: Compiler cache environment
+      # The FetchContent seed and the configure-check cache on a self-hosted
+      # host can be written by earlier jobs, PR gate jobs included, so this job
+      # points setup.sh and CMake at a fresh job-local root: every dependency
+      # is re-fetched at its pin, and no cached configure-check file is
+      # include()d. The Windows subbuild base moves with it. tools/scripts/test_release_cache_isolation.py holds every
+      # signing or publishing job to this step and to CCACHE_DISABLE.
+      - name: Isolate the build from shared caches
         shell: bash
         run: |
           set -euo pipefail
-          # Per-job counters. The self-hosted macOS cache is shared by every
-          # job on the host, so its own totals say nothing about this build.
-          echo "CCACHE_STATSLOG=${RUNNER_TEMP}/ccache-stats.log" >> "$GITHUB_ENV"
+          # A per-dependency source override would bypass the fresh root.
+          if overrides="$(env | grep '^PULP_FETCHCONTENT_SOURCE_DIR_' | cut -d= -f1)"; then
+            echo "::error::runner environment overrides dependency sources: ${overrides//$'\n'/ }"
+            exit 1
+          fi
+          root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -m "$root")"; fi
+          rm -rf "$root"
+          mkdir -p "$root/src" "$root/fc" "$root/cc"
+          echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src" >> "$GITHUB_ENV"
+          echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc" >> "$GITHUB_ENV"
+          # PulpConfigureCheckCache.cmake include()s the files it finds here,
+          # so a shared directory would run CMake an earlier job wrote.
+          echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc" >> "$GITHUB_ENV"
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
 
       # Fetch Skia prebuilt binaries — the root fix for pulp #1817.
       #
@@ -608,6 +620,7 @@ jobs:
           mkdir -p "$compat_dir/tools/scripts"
           for path in \
               tools/scripts/package_cli.py \
+              tools/ci/release_package_cli.sh \
               tools/scripts/release_artifact_contents.py \
               tools/scripts/release_product_matrix.json \
               tools/scripts/json_schema_lite.py \
@@ -618,6 +631,7 @@ jobs:
               ; do
             if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
                 && { [ "$path" = tools/scripts/package_cli.py ] \
+                  || [ "$path" = tools/ci/release_package_cli.sh ] \
                   || [ "$path" = tools/scripts/release_artifact_contents.py ] \
                   || [ "$path" = tools/scripts/json_schema_lite.py ] \
                   || [ "$path" = tools/scripts/sdk_capability_handoff.py ] \
@@ -630,6 +644,13 @@ jobs:
                 # package_cli.py resolves the import-design runtime manifest
                 # relative to tools/scripts, so preserve that layout.
                 compat_path="$compat_dir/tools/scripts/package_cli.py"
+              fi
+              # The dispatched tag's checkout can predate the shared Unix
+              # package script; run main's copy (it reads build/ and
+              # CMakeLists.txt from the cwd, which stays the tag checkout).
+              if [ "$path" = tools/ci/release_package_cli.sh ]; then
+                mkdir -p "$compat_dir/tools/ci"
+                compat_path="$compat_dir/tools/ci/release_package_cli.sh"
               fi
               curl -fsSL "$url" -o "$compat_path"
               continue
@@ -690,6 +711,8 @@ jobs:
               >> "$GITHUB_ENV"
             echo "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py" \
               >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGE_SCRIPT=$compat_dir/tools/ci/release_package_cli.sh" \
+              >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_CMAKE=$compat_dir/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
           else
@@ -699,6 +722,8 @@ jobs:
             echo "PULP_SDK_PROVENANCE_HELPER=tools/scripts/sdk_provenance.py" \
               >> "$GITHUB_ENV"
             echo "PULP_RELEASE_PACKAGER=tools/scripts/package_cli.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGE_SCRIPT=tools/ci/release_package_cli.sh" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_CMAKE=tools/cmake/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
@@ -1051,59 +1076,11 @@ jobs:
         if: runner.os != 'Windows'
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
-          MATRIX_PLATFORM: ${{ matrix.platform }}
-        run: |
-          import_design_args=()
-          control_broker_args=()
-          control_standalone_host_args=()
-          if [ -x build/tools/import-design/pulp-import-design ] \
-              && [ -d build/tools/import-design/browser_capture-v1 ]; then
-            import_design_args=(
-              --import-design-binary build/tools/import-design/pulp-import-design
-              --import-design-runtime-dir build/tools/import-design/browser_capture-v1
-            )
-            if python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "0.918.0"; then
-              test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
-              test -f build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
-              test -f build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
-              import_design_args+=(
-                --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
-                --import-design-source-emitter build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
-                --import-design-ids-map build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
-              )
-            else
-              import_design_args+=(--allow-missing-import-design-contract)
-            fi
-            if [ -n "${PULP_NODE_RUNTIME_EXECUTABLE:-}" ]; then
-              import_design_args+=(
-                --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE"
-                --node-license "$(dirname "$PULP_NODE_RUNTIME_EXECUTABLE")/node.LICENSE"
-              )
-            fi
-          fi
-          if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
-              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
-            control_broker_args=(
-              --control-broker-binary build/inspect/pulp-control-broker
-            )
-          fi
-          if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
-              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_STANDALONE_HOST_FLOOR"; then
-            control_standalone_host_args=(
-              --control-standalone-host-binary build/inspect/pulp-control-standalone-host
-              --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json
-            )
-          fi
-          python3 "$PULP_RELEASE_PACKAGER" \
-            --binary build/pulp \
-            --cpp-binary build/tools/cli/pulp-cpp \
-            --mcp-binary build/tools/mcp/pulp-mcp \
-            "${control_broker_args[@]}" \
-            "${control_standalone_host_args[@]}" \
-            "${import_design_args[@]}" \
-            --build-dir build \
-            --platform ${{ matrix.platform }} \
-            --out pulp-${{ matrix.platform }}.tar.gz
+        # The one Unix packaging step: release-dry-run.yml and the release-path
+        # PR gate run this same script (tools/scripts/test_release_package_step.py).
+        # PULP_RELEASE_PACKAGE_SCRIPT is main's copy on a dispatch (the tag can
+        # predate the script), the checkout's otherwise.
+        run: bash "$PULP_RELEASE_PACKAGE_SCRIPT" "${{ matrix.platform }}" "$RELEASE_TAG"
         shell: bash
 
       - name: Package CLI (Windows)
@@ -1432,25 +1409,6 @@ jobs:
       # artifact. A workflow_dispatch backfill may build an old tag while the
       # release job itself runs from current main, so the release job must not
       # read compatibility metadata from its own checkout.
-      # The proof that the cache is configured the way the gate's is, and how
-      # much of this build it served. Per-job numbers come from CCACHE_STATSLOG.
-      - name: Ccache stats
-        if: always()
-        shell: bash
-        run: |
-          if ! command -v ccache >/dev/null 2>&1; then
-            echo "ccache not available; skipping stats"
-            exit 0
-          fi
-          ccache --version | head -1
-          ccache --show-config 2>/dev/null \
-            | grep -iE 'compiler_check|depend_mode|direct_mode|sloppiness|cache_dir|base_dir|stats_log' || true
-          if [ -s "${CCACHE_STATSLOG:-}" ]; then
-            ccache --show-log-stats -v || ccache --show-stats
-          else
-            echo "no compile in this job went through ccache (empty stats log)"
-          fi
-
       - name: Record macOS release floor
         if: runner.os == 'macOS'
         env:
@@ -1487,7 +1445,7 @@ jobs:
             pulp-sdk-${{ matrix.platform }}.*
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-${{ matrix.platform }}
           path: pulp-${{ matrix.platform }}.*
@@ -1497,7 +1455,7 @@ jobs:
           retention-days: 7
 
       - name: Upload SDK artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-sdk-${{ matrix.platform }}
           path: pulp-sdk-${{ matrix.platform }}.*
@@ -1548,7 +1506,7 @@ jobs:
 
     steps:
       - name: Download CLI artifact for this platform
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pulp-${{ matrix.platform }}
           path: artifact-in/
@@ -1952,7 +1910,7 @@ jobs:
           fetch-tags: true
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: artifacts/
 
@@ -2062,7 +2020,7 @@ jobs:
 
       - name: Create release
         if: steps.existing.outputs.published != 'true'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           # Bare tag name (owner: drop the "Pulp CLI" prefix — one product, one

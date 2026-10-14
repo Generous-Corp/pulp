@@ -133,6 +133,15 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(pulp-ui-build-contracts PROPERTIES
         LABELS "pr;design-import" TIMEOUT 60)
 
+    # The view-core Pulp-kept closure assertion (pulp.vellum-view-core-pulp-kept)
+    # reads a configured closure manifest; this self-test plants each violation
+    # it must catch against the checked-in D3 rules.
+    add_test(NAME vellum-view-core-pulp-kept-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_view_core_pulp_kept_check.py")
+    set_tests_properties(vellum-view-core-pulp-kept-negative-contract PROPERTIES
+        LABELS "pr" TIMEOUT 60)
+
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")
@@ -209,7 +218,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-manifest-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")
-    set_tests_properties(agent-capability-manifest-selftest PROPERTIES PROCESSORS 8)
+    # Median 76.5 s, p95 78.6 s across 86 Linux exclusive-shard runs, so the
+    # suite-wide 120 s default left 1.5x headroom. A slow runner that stretched
+    # every test in its shard about 1.7x pushed it past 120 s. Hold it to the
+    # same 300 s budget as its rederive sibling and the other whole-machine
+    # self-tests, which covers that slowdown with room to spare.
+    set_tests_properties(agent-capability-manifest-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
@@ -318,6 +334,10 @@ if(Python3_Interpreter_FOUND)
 
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
+    if(UNIX)
+        add_test(NAME ci-cause-notices-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_ci_cause_notices.py")
+    endif()
     if(UNIX)
         add_test(NAME linux-runner-lane-contract COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_linux_runner_lane_contract.py")
@@ -812,6 +832,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_binary_identity_shadow.py")
         set_tests_properties(binary-identity-shadow-selftest PROPERTIES TIMEOUT 120)
+        # The merge-group preamble's HOLD backstop (group decoding, trust rule,
+        # fail-open on unreadable input, build.yml wiring).
+        add_test(NAME merge-group-hold-check-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_hold_check.py")
+        set_tests_properties(merge-group-hold-check-selftest PROPERTIES TIMEOUT 60)
         # The one merge-group step that runs all four shadow instruments.
         add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")
@@ -1529,6 +1554,13 @@ if(Python3_Interpreter_FOUND)
     # passes on a matching one (skips off-macOS / without clang+ar+lipo).
     add_test(NAME findskia-arch-assert-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_findskia_arch_assert.py")
+
+    # Windows ARM64 Skia archives keep their static libraries below an arm64
+    # slice directory. This fixture configures CMake's Windows platform without
+    # a compiler and proves the slice is selected, while a flat-only fixture
+    # stays fail-closed instead of claiming ARM64 support.
+    add_test(NAME findskia-windows-arm64-slice-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_findskia_windows_arm64_slice.py")
 
     # SDK-consumer sweep: the WHAT-builds / WHICH-binaries-measured / HOW-reported
     # decision logic of the turnkey runner that rebuilds every downstream consumer

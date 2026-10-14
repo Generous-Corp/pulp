@@ -101,6 +101,40 @@ def test_shipped_contract_is_valid() -> None:
           f"got {payload.get('decisions')})")
 
 
+def row10_problems(row: dict) -> list[str]:
+    """What row 10 must keep. It once read 'the bump lives IN THE BRANCH'
+    long after version-at-land had graduated, and the stale wording sent a
+    release-stall plan to a ruling it did not need. The history tags keep it
+    findable by the bump-at-merge / issue 1008 searches agents run."""
+    problems = []
+    for tag in ("bump-at-merge", "1008", "version-at-land"):
+        if tag not in row.get("tags", []):
+            problems.append(f"missing tag {tag!r}")
+    if "pending-intent liveness" not in row.get("title", ""):
+        problems.append("title does not require the pending-intent liveness alarm")
+    do_not = row.get("do_not", "")
+    for needle in ("in-branch bump commits", "without the pending-intent liveness alarm",
+                   "squash"):
+        if needle not in do_not:
+            problems.append(f"do_not lacks {needle!r}")
+    if "IN THE BRANCH" in row.get("title", ""):
+        problems.append("title still requires the in-branch bump")
+    return problems
+
+
+def test_row10_states_version_at_land() -> None:
+    print("test_row10_states_version_at_land")
+    row = next(d for d in dc.load_contract(CONTRACT)["decision"] if d["id"] == 10)
+    check(row10_problems(row) == [], f"row 10 states version-at-land ({row10_problems(row)})")
+    # Control: the row as it read before the 2026-10-14 ruling.
+    stale = {
+        "tags": ["bump-at-merge", "version-bump", "in-branch", "1008"],
+        "title": "The version bump lives IN THE BRANCH, verifiable pre-merge — never applied at merge.",
+        "do_not": "Bump-at-merge in any costume.",
+    }
+    check(len(row10_problems(stale)) >= 3, "the stale wording is rejected")
+
+
 def test_surface_matches_and_noops() -> None:
     print("test_surface_matches_and_noops")
     # A guarded fleet/CI config path surfaces rows.
@@ -515,6 +549,7 @@ def test_live_probe_names_the_minimum_shipyard() -> None:
 
 def main() -> int:
     test_shipped_contract_is_valid()
+    test_row10_states_version_at_land()
     test_surface_matches_and_noops()
     test_malformed_contract_fails()
     test_hook_noop_and_surface()

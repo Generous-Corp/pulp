@@ -32,6 +32,32 @@
       "kind": "edge",
       "match": "pulp-view-native->pulp-midi",
       "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
+    },
+    {
+      "id": "P4-edge-4-timebase",
+      "owner": "carve-p4",
+      "debt_id": "P4-view-audio",
+      "kind": "edge",
+      "match": "pulp-view-native->pulp-timebase",
+      "platforms": [
+        "Darwin",
+        "Linux"
+      ],
+      "approver": "team-lead 2026-10-13",
+      "exit_criterion": "Removed when the P4 view-audio carve stops view-native reaching audio."
+    },
+    {
+      "id": "P4-edge-4-sample-bank-manifest",
+      "owner": "carve-p4",
+      "debt_id": "P4-view-audio",
+      "kind": "edge",
+      "match": "pulp-view-native->pulp-sample-bank-manifest",
+      "platforms": [
+        "Darwin",
+        "Linux"
+      ],
+      "approver": "team-lead 2026-10-13",
+      "exit_criterion": "Removed when the P4 view-audio carve stops view-native reaching audio."
     }
   ]
 }

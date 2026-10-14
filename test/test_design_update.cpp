@@ -70,6 +70,8 @@ TEST_CASE("keyed design updates retain identity across reorder and batch blocks"
     REQUIRE(plan.keyed);
     REQUIRE_FALSE(plan.ambiguous_keys);
     REQUIRE(plan.updates.size() == 4);
+    CHECK(plan.work == DesignUpdateWorkCounters{1, 1, 1, 1});
+    CHECK(plan.work.total() == plan.updates.size());
     CHECK(plan.updates[0].kind == DesignUpdateKind::removed);
     CHECK(plan.updates[0].key == "b");
     CHECK(plan.updates[0].old_index == 1);
@@ -92,6 +94,10 @@ TEST_CASE("ambiguous anchors fail closed to positional planning", "[view][import
     CHECK_FALSE(plan.keyed);
     CHECK(plan.ambiguous_keys);
     REQUIRE(plan.updates.size() == 3);
+    // Planted negative control: duplicate anchors must produce no retained or
+    // moved work, so a caller cannot accidentally reuse an ambiguous view.
+    CHECK(plan.work == DesignUpdateWorkCounters{0, 0, 1, 2});
+    CHECK(plan.work.total() == plan.updates.size());
     CHECK(plan.updates[0].kind == DesignUpdateKind::removed);
     CHECK(plan.updates[0].old_index == 1);
     CHECK(plan.updates[1].kind == DesignUpdateKind::removed);
@@ -153,6 +159,183 @@ TEST_CASE("compatible keyed changes retain the existing materialization shape",
     REQUIRE(plan.updates.size() == 1);
     CHECK(plan.updates.front().kind == DesignUpdateKind::retained);
     CHECK(plan.updates.front().key == "control");
+}
+
+TEST_CASE("typed slot classification separates static and dynamic updates",
+          "[view][import][update][slots]") {
+    SECTION("a node without host metadata is a static visual slot") {
+        const auto slots = classify_design_slots(node("static"));
+        REQUIRE(slots == std::vector<DesignSlot>{{DesignSlotKind::static_visual, {}, {}}});
+    }
+
+    SECTION("mixed trees retain static parents alongside dynamic descendants") {
+        auto root = node("static-parent");
+        root.attributes["pulpRouteId"] = "parent";
+        auto child = node("dynamic-child");
+        child.attributes["pulpRouteId"] = "child";
+        child.attributes["pulpParamKey"] = "gain";
+        root.children.push_back(child);
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, "child", "gain"});
+        CHECK(slots[1] == DesignSlot{DesignSlotKind::static_visual, "parent", {}});
+    }
+
+    SECTION("scalar, vector, meter, text, and action routes are typed and sorted") {
+        auto root = node("root");
+        root.attributes["pulpRouteId"] = "panel.route";
+        root.attributes["pulpParamKey"] = "gain";
+        root.attributes["pulpParamKeyX"] = "pan.x";
+        root.attributes["pulpParamKeyY"] = "pan.y";
+        root.attributes["pulpMeterValueKey"] = "meter.level";
+        root.attributes["pulpValueKey"] = "preset.name";
+        root.attributes["pulpHostAction"] = "next_preset";
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 5);
+        CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, "panel.route", "gain"});
+        CHECK(slots[1] ==
+              DesignSlot{DesignSlotKind::dynamic_vector, "panel.route", "5:pan.x5:pan.y"});
+        CHECK(slots[2] == DesignSlot{DesignSlotKind::dynamic_meter, "panel.route", "meter.level"});
+        CHECK(slots[3] == DesignSlot{DesignSlotKind::dynamic_text, "panel.route", "preset.name"});
+        CHECK(slots[4] == DesignSlot{DesignSlotKind::dynamic_action, "panel.route", "next_preset"});
+    }
+
+    SECTION("canonical lanes take precedence over the legacy binding fallback") {
+        auto scalar = node("scalar");
+        scalar.attributes["binding"] = "legacy";
+        scalar.attributes["pulpParamKey"] = "canonical";
+        auto meter = node("meter");
+        meter.attributes["binding"] = "legacy-meter";
+        meter.attributes["pulpMeterValueKey"] = "meter.level";
+        scalar.children.push_back(meter);
+        const auto slots = classify_design_slots(scalar);
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "canonical"});
+        CHECK(slots[1] == DesignSlot{DesignSlotKind::dynamic_meter, {}, "meter.level"});
+    }
+
+    SECTION("descendants remain observable") {
+        auto root = node("root");
+        auto child = node("child");
+        child.attributes["pulpParamKey"] = "child.gain";
+        root.children.push_back(child);
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] == DesignSlot{DesignSlotKind::static_visual, {}, {}});
+        CHECK(slots[1] == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "child.gain"});
+    }
+
+    SECTION("geometry-detected interactive routes use their typed lanes") {
+        auto root = node("root");
+        root.attributes["pulpRouteId"] = "geometry.route";
+        IRInteractiveElement knob;
+        knob.kind = InteractiveElementKind::knob;
+        knob.param_key = "geometry.gain";
+        root.interactive_elements.push_back(knob);
+        IRInteractiveElement readout;
+        readout.kind = InteractiveElementKind::value_label;
+        readout.param_key = "geometry.display";
+        root.interactive_elements.push_back(readout);
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] ==
+              DesignSlot{DesignSlotKind::dynamic_scalar, "geometry.route", "geometry.gain"});
+        CHECK(slots[1] ==
+              DesignSlot{DesignSlotKind::dynamic_text, "geometry.route", "geometry.display"});
+    }
+
+    SECTION("geometry text fields and XY pads retain their setter lanes") {
+        IRNode root;
+        root.stable_anchor_id = "root";
+        root.attributes["pulpRouteId"] = "geometry.route";
+        IRInteractiveElement text_field;
+        text_field.kind = InteractiveElementKind::text_field;
+        text_field.param_key = "geometry.label";
+        IRInteractiveElement xy_pad;
+        xy_pad.kind = InteractiveElementKind::xy_pad;
+        xy_pad.param_key = "geometry.xy";
+        root.interactive_elements = {text_field, xy_pad};
+
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 2);
+        CHECK(slots[0] ==
+              DesignSlot{DesignSlotKind::dynamic_vector, "geometry.route", "geometry.xy"});
+        CHECK(slots[1] ==
+              DesignSlot{DesignSlotKind::dynamic_text, "geometry.route", "geometry.label"});
+    }
+
+    SECTION("module and parameter binding fallback remains typed") {
+        auto root = node("module-route");
+        root.attributes["pulpBindingModule"] = "synth";
+        root.attributes["pulpBindingParam"] = "cutoff";
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 1);
+        CHECK(slots.front() == DesignSlot{DesignSlotKind::dynamic_scalar, {}, "5:synth6:cutoff"});
+    }
+
+    SECTION("module-bound XY attributes remain typed") {
+        auto root = node("module-xy");
+        root.attributes["pulpBindingModuleX"] = "synth";
+        root.attributes["pulpBindingParamX"] = "pan";
+        root.attributes["pulpBindingModuleY"] = "synth";
+        root.attributes["pulpBindingParamY"] = "tilt";
+        const auto slots = classify_design_slots(root);
+        REQUIRE(slots.size() == 1);
+        CHECK(slots.front().kind == DesignSlotKind::dynamic_vector);
+        CHECK(slots.front().key == "12:5:synth3:pan13:5:synth4:tilt");
+    }
+
+    SECTION("vector keys remain injective when parameter names contain delimiters") {
+        auto left = node("left");
+        left.attributes["pulpParamKeyX"] = "a|b";
+        left.attributes["pulpParamKeyY"] = "c";
+        auto right = node("right");
+        right.attributes["pulpParamKeyX"] = "a";
+        right.attributes["pulpParamKeyY"] = "b|c";
+        const auto left_slots = classify_design_slots(left);
+        const auto right_slots = classify_design_slots(right);
+        REQUIRE(left_slots.size() == 1);
+        REQUIRE(right_slots.size() == 1);
+        CHECK(left_slots.front().kind == DesignSlotKind::dynamic_vector);
+        CHECK(right_slots.front().kind == DesignSlotKind::dynamic_vector);
+        CHECK(left_slots.front().key != right_slots.front().key);
+    }
+
+    SECTION("module and meter fallback keys remain injective") {
+        auto left = node("left");
+        left.attributes["pulpBindingModule"] = "a::b";
+        left.attributes["pulpBindingParam"] = "c";
+        left.attributes["pulpMeterSource"] = "a/b";
+        left.attributes["pulpMeterChannel"] = "c";
+        auto right = node("right");
+        right.attributes["pulpBindingModule"] = "a";
+        right.attributes["pulpBindingParam"] = "b::c";
+        right.attributes["pulpMeterSource"] = "a";
+        right.attributes["pulpMeterChannel"] = "b/c";
+        const auto left_slots = classify_design_slots(left);
+        const auto right_slots = classify_design_slots(right);
+        REQUIRE(left_slots.size() == 2);
+        REQUIRE(right_slots.size() == 2);
+        CHECK(left_slots[0].key != right_slots[0].key);
+        CHECK(left_slots[1].key != right_slots[1].key);
+    }
+}
+
+TEST_CASE("slot classification mutation control preserves changed binding identity",
+          "[view][import][update][slots][negative]") {
+    auto old_node = node("control");
+    old_node.attributes["pulpRouteId"] = "route";
+    old_node.attributes["pulpParamKey"] = "gain";
+    auto new_node = old_node;
+    new_node.attributes["pulpParamKey"] = "cutoff";
+    const auto old_slots = classify_design_slots(old_node);
+    const auto new_slots = classify_design_slots(new_node);
+    REQUIRE(old_slots.size() == 1);
+    REQUIRE(new_slots.size() == 1);
+    CHECK(old_slots.front().kind == DesignSlotKind::dynamic_scalar);
+    CHECK(new_slots.front().kind == DesignSlotKind::dynamic_scalar);
+    CHECK(old_slots.front().route_id == new_slots.front().route_id);
+    CHECK(old_slots.front().key != new_slots.front().key);
 }
 
 TEST_CASE("value-only binding metadata does not change the materialization shape",
@@ -396,6 +579,21 @@ TEST_CASE("native binding contract changes recreate keyed nodes", "[view][import
 
     SECTION("route identity") {
         require_contract_recreated("route", "pulpRouteId");
+    }
+    SECTION("binding module is immutable after installation") {
+        // NativeImportBindingContext receives the module while installing the
+        // callback; there is no setter on a retained native control. This is
+        // a planted negative control for accidentally treating every binding
+        // string as a re-keyable value.
+        auto old_node = node("binding-module");
+        auto new_node = old_node;
+        old_node.attributes["pulpParamKey"] = "gain";
+        old_node.attributes["pulpBindingModule"] = "voice-a";
+        new_node.attributes["pulpParamKey"] = "gain";
+        new_node.attributes["pulpBindingModule"] = "voice-b";
+        require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
+                                                    std::span<const IRNode>(&new_node, 1)),
+                          "binding-module");
     }
     SECTION("choice value") {
         require_contract_recreated("choice-value", "pulpChoiceValue");
