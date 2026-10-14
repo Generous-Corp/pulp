@@ -184,6 +184,20 @@ A tool version changes only through a pull request that:
    the manifest's `[mise].version`, and runs mise with throwaway data, cache and
    config directories so your own mise setup cannot leak into the lock.
 
+`tools/toolchain/update.py` does both steps for one tool and prints a table of
+every version and lock checksum that moved, for the pull request body:
+
+```bash
+python3 tools/toolchain/update.py cmake --to 4.3.4 --mise /path/to/mise-2026.10.8
+python3 tools/toolchain/update.py rust --to 1.98.0      # no lock rows: rustup installs Rust
+python3 tools/toolchain/update.py shipyard --to v0.270.0
+```
+
+It also marks the tool's `[evidence]` row as a `target` (the gate has not been
+seen running it yet). It never commits, pushes or installs. If any step fails
+it restores every file it touched. Moving mise itself is refused: that takes a
+reviewed source build of the new release.
+
 The `toolchain-test_generate-selftest` ctest checks that the committed files
 equal what the manifest generates (`python3 tools/toolchain/generate.py
 --check` runs the same comparison), that the lock hashes to the manifest's

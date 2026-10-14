@@ -10005,6 +10005,19 @@
    ],
    "kind": "python"
   },
+  "toolchain-update-selftest": {
+   "entry": "tools/toolchain/test_update.py",
+   "inputs": [
+    "tools/shipyard.toml",
+    "tools/toolchain/expected.json",
+    "tools/toolchain/generate.py",
+    "tools/toolchain/manifest.toml",
+    "tools/toolchain/shipyard.sha256",
+    "tools/toolchain/test_update.py",
+    "tools/toolchain/update.py"
+   ],
+   "kind": "python"
+  },
   "tools-registry-check": {
    "entry": "tools/scripts/tools_registry_check.py",
    "inputs": [
