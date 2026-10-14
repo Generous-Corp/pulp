@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09700"></a>
+## [0.970.0] - 2026-10-14
+
+- release/version bump ([#10299](https://github.com/Generous-Corp/pulp/pull/10299))
+- release/version bump ([#10298](https://github.com/Generous-Corp/pulp/pull/10298))
+- codex/forge tape extraction 20261014 ([#10291](https://github.com/Generous-Corp/pulp/pull/10291))
+- fix/fetch skia keep windows arm64 slice ([#10262](https://github.com/Generous-Corp/pulp/pull/10262))
+- fix/agent capability manifest selftest timeout ([#10292](https://github.com/Generous-Corp/pulp/pull/10292))
+- codex/downstream governance 20261014 ([#10293](https://github.com/Generous-Corp/pulp/pull/10293))
+- release/version bump ([#10294](https://github.com/Generous-Corp/pulp/pull/10294))
+- codex/governed hot reload 20261014 ([#10290](https://github.com/Generous-Corp/pulp/pull/10290))
+- fix/release reconcile log fetch and dead tags ([#10256](https://github.com/Generous-Corp/pulp/pull/10256))
+- feat/ci cause notices ([#10261](https://github.com/Generous-Corp/pulp/pull/10261))
+- dependabot/github_actions/github actions 72a97625e3 ([#10107](https://github.com/Generous-Corp/pulp/pull/10107))
+
 <a id="v09690"></a>
 ## [0.969.0] - 2026-10-14
 
@@ -10713,6 +10728,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.970.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.970.0
 [0.969.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.969.0
 [0.968.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.968.0
 [0.967.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.967.2
