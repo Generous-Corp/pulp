@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -20,6 +21,43 @@ def read_source(relative: str) -> str:
 
 
 class BuildGovernancePathTests(unittest.TestCase):
+    def test_downstream_validation_recipes_route_every_build_through_governor(self) -> None:
+        manifests = (
+            "tools/validation/downstream/consumer-validation.json",
+            "test/fixtures/refactor-baselines/downstream-consumers.json",
+        )
+        checked = 0
+        for relative in manifests:
+            manifest = json.loads(read_source(relative))
+            if "canonical_sdk_recipe" in manifest:
+                commands = [" ".join(manifest["canonical_sdk_recipe"]["build"])]
+                commands.extend(
+                    check["command"]
+                    for consumer in manifest["consumers"]
+                    for check in consumer["required_checks"]
+                )
+            else:
+                commands = [manifest["sdk_recipe"]["build_command"]]
+                commands.extend(
+                    command["command"]
+                    for consumer in manifest["consumers"]
+                    for command in consumer["required_commands"]
+                )
+            for command in commands:
+                if "cmake --build" not in command:
+                    continue
+                checked += 1
+                self.assertIn(
+                    "governed-build.sh cmake --build",
+                    command,
+                    f"{relative} has an ungoverned downstream build: {command}",
+                )
+                self.assertNotRegex(
+                    command,
+                    r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))",
+                )
+        self.assertEqual(11, checked)
+
     def test_validate_build_routes_every_build_through_governor(self) -> None:
         source = read_source("validate-build.sh")
         build_lines = [line for line in source.splitlines() if "cmake --build" in line]
@@ -393,6 +431,27 @@ class BuildGovernancePathTests(unittest.TestCase):
         self.assertNotRegex(
             source, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
         )
+
+    def test_hot_reload_rebuild_scripts_route_through_governor(self) -> None:
+        for relative, target in (
+            ("examples/hot-reload-demo/rebuild_logic.sh", "hot-reload-demo-logic"),
+            ("examples/hot-reload-synth/rebuild_logic.sh", "hot-reload-synth-logic"),
+        ):
+            with self.subTest(relative=relative):
+                source = read_source(relative)
+                build_lines = [
+                    line for line in source.splitlines()
+                    if "cmake --build" in line and not line.lstrip().startswith("#")
+                ]
+                self.assertEqual(len(build_lines), 1)
+                # No lease wait: an edit-then-rebuild hot swap must not stall
+                # for the interactive wait (90 s) on a busy host.
+                self.assertIn(
+                    'PULP_GOVERNED_BUILD_WAIT_SECS=0 bash "$GOVERNED_BUILD" cmake --build '
+                    f'"$BUILD_DIR" --target {target}',
+                    build_lines[0],
+                )
+                self.assertNotRegex(source, r"(?m)^\s*cmake --build")
 
 
 if __name__ == "__main__":

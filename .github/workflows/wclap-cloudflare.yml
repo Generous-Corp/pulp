@@ -274,10 +274,13 @@ jobs:
           repository: danielraffel/pulp-classic-effects
           path: _ext/pulp-classic-effects
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.relevance.outputs.run == 'true'
         with:
           node-version: "22"
+          # setup-node v5+ restores an npm cache by itself when a package.json
+          # names a packageManager; this job deploys, so it never restores one.
+          package-manager-cache: false
 
       - name: Set up wasi-sdk (pinned)
         if: steps.relevance.outputs.run == 'true'
@@ -341,7 +344,7 @@ jobs:
       # far worse failure than the loud one it replaced, so they are built here.
       - name: Set up Emscripten
         if: steps.relevance.outputs.run == 'true'
-        uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
+        uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
           version: 6.0.2
 
@@ -409,7 +412,7 @@ jobs:
       # PR runs to restore (and re-verify). This job never restores it.
       - name: Save the Skia wasm archive (main push, GitHub-hosted)
         if: steps.relevance.outputs.run == 'true' && runner.environment == 'github-hosted' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/pulp/skia-wasm/${{ steps.skia-pin.outputs.sha256 }}.zip
           key: skia-wasm-archive-${{ steps.skia-pin.outputs.sha256 }}
@@ -531,7 +534,7 @@ jobs:
 
       - name: Upload proof screenshots
         if: always() && steps.relevance.outputs.run == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wclap-cloudflare-proof
           path: |
@@ -556,8 +559,14 @@ jobs:
         # step. Naming the events that MAY deploy fails closed when the next
         # trigger is added.
         if: ${{ steps.relevance.outputs.run == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:
+          # wrangler-action v4 installs the latest wrangler when this is unset,
+          # which would fetch an unpinned tool mid-deploy. Exact version, bumped
+          # deliberately. This is a soaked release, not `latest`: 4.149.0 was
+          # published 2026-10-08, a week before it was pinned, so a regression
+          # in a fresh wrangler cannot reach the production deploy first.
+          wranglerVersion: "4.149.0"
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: examples/web-demos/wclap-build/cloudflare

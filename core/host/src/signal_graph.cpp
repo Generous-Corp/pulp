@@ -1995,7 +1995,7 @@ std::vector<SampleRegionRuntimeReceipt> SignalGraph::sample_region_runtime_recei
 }
 
 int SignalGraph::prepared_max_block_size() const noexcept {
-    return live_slot_.live() ? live_slot_.live()->max_block_size : 0;
+    return prepared_max_block_size_.load(std::memory_order_relaxed);
 }
 
 std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {

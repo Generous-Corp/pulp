@@ -250,7 +250,7 @@ class ConfirmedMismatchStopsRedispatchEndToEnd(unittest.TestCase):
         def fake_run(cmd, *a, **kw):
             if cmd[:2] == ["gh", "workflow"]:
                 raise AssertionError("collect must never dispatch")
-            log = LOG if cmd[-1].endswith(f"/jobs/{push_job_id}/logs") else ""
+            log = LOG if f"repos/example/repo/actions/jobs/{push_job_id}/logs" in cmd else ""
             return subprocess.CompletedProcess(cmd, 0, stdout=log, stderr="")
 
         saved = (rr.gh_json, rr.subprocess.run, rr.read_pin_file)
@@ -449,6 +449,208 @@ class AcceptedArchiveIsNotUndone(unittest.TestCase):
         text = "\n".join(d.render())
         self.assertIn("Do not repin to an archive whose provenance is broken", text)
         self.assertNotIn("PR 10170", text)
+
+
+# ── v0.963.0-v0.965.0 stall ─────────────────────────────────────────────────
+
+PACKAGE_LOG = (
+    HERE / "fixtures" / "release_failure" / "v0964_1_linux_x64_package_cli.log"
+).read_text(encoding="utf-8")
+WGPU_ERROR = "ERROR: wgpu native library not found"
+
+
+class JobLogFetch(unittest.TestCase):
+    """The reconciler read every job log as "" in CI: the runner's gh refuses
+    to print a response with terminal escape sequences unless asked, so every
+    classification, tag-immutable circuit included, saw no evidence."""
+
+    @staticmethod
+    def gh(*, knows_flag: bool, refuses_escapes: bool, fail: str = ""):
+        import subprocess
+
+        calls: list[list[str]] = []
+
+        def run(cmd, *a, **kw):
+            calls.append(cmd)
+            flag = "--allow-escape-sequences" in cmd
+            if fail:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=fail)
+            if flag and not knows_flag:
+                return subprocess.CompletedProcess(
+                    cmd, 1, stdout="", stderr="unknown flag: --allow-escape-sequences")
+            if refuses_escapes and not flag:
+                return subprocess.CompletedProcess(
+                    cmd, 1, stdout="",
+                    stderr="the response contains terminal escape sequences; pass "
+                           "--allow-escape-sequences to output it anyway")
+            return subprocess.CompletedProcess(cmd, 0, stdout="\x1b[31mlog\x1b[0m", stderr="")
+
+        return run, calls
+
+    def test_a_gh_that_refuses_escapes_still_yields_the_log(self) -> None:
+        run, calls = self.gh(knows_flag=True, refuses_escapes=True)
+        self.assertEqual(rr.fetch_job_log("o/r", 7, run=run), ("\x1b[31mlog\x1b[0m", ""))
+        self.assertIn("--allow-escape-sequences", calls[0])
+
+    def test_the_bare_command_is_exactly_what_failed_in_ci(self) -> None:
+        """Control: the command the reconciler used to run gets nothing."""
+        import subprocess
+
+        run, _ = self.gh(knows_flag=True, refuses_escapes=True)
+        bare = run(["gh", "api", "repos/o/r/actions/jobs/7/logs"],
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(bare.returncode, 1)
+        self.assertIn("terminal escape sequences", bare.stderr)
+
+    def test_a_gh_too_old_for_the_flag_falls_back(self) -> None:
+        run, calls = self.gh(knows_flag=False, refuses_escapes=False)
+        self.assertEqual(rr.fetch_job_log("o/r", 7, run=run)[0], "\x1b[31mlog\x1b[0m")
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("--allow-escape-sequences", calls[1])
+
+    def test_a_real_failure_is_reported_not_swallowed(self) -> None:
+        run, calls = self.gh(knows_flag=True, refuses_escapes=False, fail="HTTP 404: Not Found")
+        text, error = rr.fetch_job_log("o/r", 7, run=run)
+        self.assertEqual(text, "")
+        self.assertIn("HTTP 404", error)
+        self.assertEqual(len(calls), 1, "an unrelated failure is not retried")
+
+
+class FirstErrorIsInTheFailingStep(unittest.TestCase):
+    """Recorded v0.964.1 `CLI linux-x64` job: an apt step prints a dbus error
+    thousands of lines before `Package CLI (Unix)` refuses to package."""
+
+    def test_the_packager_refusal_is_the_first_error(self) -> None:
+        self.assertTrue(rfd.first_error_line(PACKAGE_LOG).startswith(WGPU_ERROR))
+
+    def test_control_the_fixture_carries_the_earlier_decoy(self) -> None:
+        lines = [rfd.strip_timestamp(l).strip() for l in PACKAGE_LOG.splitlines()]
+        decoy, _ = rfd._scan_errors(lines)
+        self.assertIn("system_bus_socket", decoy, "a whole-log scan picks the decoy")
+
+    def test_a_log_without_step_markers_keeps_the_whole_log_scan(self) -> None:
+        self.assertEqual(rfd.first_error_line("ok\nERROR: boom\n"), "ERROR: boom")
+
+
+def package_run(run_id: int, job_id: int, step: str = "Package CLI (Unix)") -> tuple[dict, list[dict]]:
+    run = {"id": run_id, "status": "completed", "conclusion": "failure",
+           "created_at": f"2026-10-14T0{run_id}:00:00Z", "event": "workflow_dispatch"}
+    jobs = [{"id": job_id, "name": "CLI linux-x64", "conclusion": "failure", "run_attempt": 1,
+             "steps": [{"name": "Build", "conclusion": "success"},
+                       {"name": step, "conclusion": "failure"}]}]
+    return run, jobs
+
+
+class RepeatedPackageFailureIsTagImmutable(unittest.TestCase):
+    def failures(self, logs: dict[int, str], step: str = "Package CLI (Unix)"):
+        runs, cache = [], {}
+        for run_id, job_id in ((1, 11), (2, 12)):
+            run, jobs = package_run(run_id, job_id, step)
+            runs.append(run)
+            cache[run_id] = jobs
+        return rr.repeated_package_failures(runs, cache, lambda job_id: logs.get(job_id, ""))
+
+    def test_an_identical_repeat_opens_the_circuit(self) -> None:
+        found = self.failures({11: PACKAGE_LOG, 12: PACKAGE_LOG})
+        self.assertEqual(len(found), 1)
+        self.assertIn(WGPU_ERROR, found[0])
+        state = rr.TagState(
+            tag="v0.964.1", created_at=NOW - timedelta(hours=5), published=False,
+            has_release_object=False, assets=frozenset(), run_states=("completed",) * 2,
+            validation_failures=found, dispatch_attempts=1,
+        )
+        report, rebuilt = sweep([state])
+        self.assertEqual(rebuilt, [], "a repeated package failure must not be re-dispatched")
+        self.assertIn("circuit open", report["v0.964.1"])
+
+    def test_a_single_failure_stays_on_the_retry_path(self) -> None:
+        runs, cache = [], {}
+        run, jobs = package_run(1, 11)
+        self.assertEqual(rr.repeated_package_failures([run], {1: jobs}, lambda _: PACKAGE_LOG), ())
+
+    def test_different_errors_are_not_a_repeat(self) -> None:
+        other = PACKAGE_LOG.replace(WGPU_ERROR, "ERROR: disk full")
+        self.assertEqual(self.failures({11: PACKAGE_LOG, 12: other}), ())
+
+    def test_a_cancelled_package_step_is_no_evidence(self) -> None:
+        """Two transient failures (runner lost or step cancelled) leave no
+        packager error; the whole-log fallback would name the apt dbus decoy
+        for both and open the circuit on a flake."""
+        head, _, _ = PACKAGE_LOG.partition("ERROR: wgpu native library not found")
+        head = head.rsplit("\n", 1)[0]
+        cancelled = head + "\n2026-10-14T03:03:16.9Z ##[error]The operation was canceled.\n"
+        self.assertIn("system_bus_socket", rfd.first_error_line(cancelled),
+                      "control: the human-facing diagnosis still falls back to the decoy")
+        self.assertEqual(self.failures({11: cancelled, 12: cancelled}), ())
+
+    def test_missing_logs_are_no_evidence(self) -> None:
+        self.assertEqual(self.failures({}), ())
+
+    def test_another_step_is_not_a_package_failure(self) -> None:
+        self.assertEqual(self.failures({11: PACKAGE_LOG, 12: PACKAGE_LOG}, step="Build"), ())
+
+
+class OneIssuePerStallEpisode(unittest.TestCase):
+    """#6880 had been reopened since July; its reopen for v0.963.0 read as
+    routine. A new stall gets a new issue; an open one is updated in place."""
+
+    def run_sync(self, report, existing):
+        import subprocess
+
+        calls: list[list[str]] = []
+
+        def fake_gh_json(args):
+            if args[:2] == ["issue", "list"]:
+                self.assertIn("open", args, "only an OPEN issue may continue an episode")
+                return existing
+            if args[:2] == ["issue", "view"]:
+                return {"body": ""}
+            raise AssertionError(args)
+
+        def fake_run(cmd, *a, **kw):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        saved = (rr.gh_json, rr.subprocess.run)
+        try:
+            rr.gh_json, rr.subprocess.run = fake_gh_json, fake_run
+            with contextlib.redirect_stdout(io.StringIO()):
+                rr.sync_incident("example/repo", report, dry_run=False, now=NOW)
+        finally:
+            rr.gh_json, rr.subprocess.run = saved
+        return calls
+
+    REPORT = [("v0.964.1", "circuit open"), ("v0.963.0", "circuit open")]
+
+    def test_a_new_stall_creates_a_new_issue_named_for_its_oldest_tag(self) -> None:
+        calls = self.run_sync(self.REPORT, [])
+        self.assertEqual([c[:3] for c in calls], [["gh", "issue", "create"]])
+        title = calls[0][calls[0].index("--title") + 1]
+        self.assertTrue(title.startswith("Release stalled: v0.963.0 unpublished ("), title)
+        self.assertNotIn("reopen", [c[2] for c in calls])
+
+    def test_an_open_episode_is_edited_not_duplicated(self) -> None:
+        open_episode = [{"number": 9, "title": "Release stalled: v0.963.0 unpublished (2026-10-13)",
+                         "state": "OPEN"}]
+        calls = self.run_sync(self.REPORT, open_episode)
+        self.assertNotIn(["gh", "issue", "create"], [c[:3] for c in calls])
+        self.assertIn(["gh", "issue", "edit", "9"], [c[:4] for c in calls])
+
+    def test_the_open_legacy_incident_is_continued(self) -> None:
+        legacy = [{"number": 6880, "title": rr.INCIDENT_TITLE, "state": "OPEN"}]
+        calls = self.run_sync(self.REPORT, legacy)
+        self.assertIn(["gh", "issue", "edit", "6880"], [c[:4] for c in calls])
+
+    def test_recovery_closes_the_open_episode(self) -> None:
+        open_episode = [{"number": 9, "title": "Release stalled: v0.963.0 unpublished (2026-10-13)",
+                         "state": "OPEN"}]
+        calls = self.run_sync([], open_episode)
+        self.assertEqual([c[:4] for c in calls], [["gh", "issue", "close", "9"]])
+
+    def test_an_unrelated_open_issue_is_not_an_episode(self) -> None:
+        other = [{"number": 3, "title": "Release notes typo", "state": "OPEN"}]
+        calls = self.run_sync(self.REPORT, other)
+        self.assertEqual([c[:3] for c in calls], [["gh", "issue", "create"]])
 
 
 if __name__ == "__main__":

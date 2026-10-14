@@ -224,7 +224,7 @@ jobs:
       # cache before configuring so every CTest path sees the same dependency
       # set, including clean hosted sanitizer runners.
       - name: Set up Node.js for materialized runtime tests
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22.15.0'
           cache: npm
@@ -442,7 +442,7 @@ jobs:
       # pass includes pulp-materialized-runtime-conformance, which imports the
       # locked esbuild dependency from this directory.
       - name: Set up Node.js for materialized runtime tests
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22.15.0'
           cache: npm

@@ -317,6 +317,22 @@ Both event-dependent ctest decisions live in `tools/ci/ctest_gate_args.py`,
 tested by `ctest-gate-args-selftest`, which also asserts `build.yml` still
 calls it.
 
+## A red run names its own cause in the `ci-cause` annotation
+
+Before you read a 10 MB job log, look for the run's `ci-cause` notice. The
+advisory `ci-cause (advisory)` job in `build.yml` prints one `ci.cause/v1`
+record per failed job. Each record gives the failing test, compile error,
+runner failure or gate verdict, with a class and a confidence.
+
+- **Low or `unknown` means unread, not innocent.** A `low` confidence, or a
+  class of `unknown`, means the extractor could not name the cause. Read the
+  log in that case.
+- **Absent means it did not run.** If the notice is missing, the job may not
+  have run at all; check its own log. It is advisory and never gates.
+- **Upgrading the pin.** The extractor is the Shipyard release pinned, with
+  its checksums, in `tools/ci/ci_cause_notices.sh`. Bump the version and the
+  hashes together.
+
 ## A green `macos` check can mean nothing ran
 
 The required `macos` context is reported by more than one job: the macOS matrix
@@ -331,10 +347,15 @@ Ask the run instead of the colour:
 
 ```bash
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
-# executed | built-but-untested | not-executed, with the step count
+# executed | tier-only | built-but-untested | not-executed, with the step count
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
-# exits nonzero unless the suite genuinely ran
+# exits nonzero unless the full suite genuinely ran
 ```
+
+`tier-only` is the normal pull-request head: the fast deterministic tier or the
+affected-tests tier ran, and `Test (...)` was skipped. That is not the suite
+(build.yml: the fast tier "is NOT test evidence for the merge", and the
+affected tier can select nothing), so `--require-executed` refuses it.
 
 Each bootstrap job also writes a banner into its own job summary saying no
 build and no test step ran. A step count near three on a `macos` job is the
@@ -801,6 +822,18 @@ job summary. It never compares a number to a threshold, and it must stay off
 policy is that DSP perf is tracked, not gated. Its first dispatch after landing
 must be `ghapp workflow run dsp-throughput-bench.yml --ref main` (a new
 workflow is dispatchable only once it exists on the default branch).
+
+## `toolchain` warnings on a build leg are drift reports, not the failure
+
+Every `build.yml` leg runs `tools/toolchain/check_env.py --format github`
+before configuring and annotates the run with `::warning title=toolchain ...`
+lines: one per tool whose version differs from `tools/toolchain/manifest.toml`.
+While the manifest is in warn mode the step never fails a leg, so a red leg
+with toolchain warnings failed somewhere else; read the failing step, not the
+annotations. Use the warnings when a failure reproduces on one host or runner
+and not another: they name the version each one actually ran (for example the
+hosted Linux leg's apt CMake 3.x against the 4.3.3 pin, which is how a
+CMake-4-only script fails only there).
 
 ## Android minimum-API allocation check
 
@@ -9909,7 +9942,7 @@ plus ccache and FetchContent paths. It runs only on Namespace /
 nscloud labels (`contains(matrix.runs_on_json, 'namespace') ||
 contains(matrix.runs_on_json, 'nscloud')`); self-hosted Macs keep
 their caches on local disk and github-hosted runners use
-`actions/cache@v4` via the existing `Restore ccache (GitHub-hosted)`
+`actions/cache@v6` via the existing `Restore ccache (GitHub-hosted)`
 step (#420). The brew cache only restores the bottle download cache —
 it does NOT restore the brew config that would tell the runner
 "updates are recent," so `brew update --quiet` is still required

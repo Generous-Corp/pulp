@@ -26,6 +26,7 @@
       "argv": [
         "{repo}/tools/scripts/test_agent_capability_manifest.py"
       ],
+      "timeout": 300.0,
       "resource_lock": [
         "agent-capability-manifest-source"
       ],
@@ -978,6 +979,12 @@
       "name": "tmp-leak-guard-selftest",
       "argv": [
         "{repo}/tools/scripts/test_tmp_leak_guard.py"
+      ]
+    },
+    {
+      "name": "toolchain-check_env-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_check_env.py"
       ]
     },
     {

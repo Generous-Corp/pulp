@@ -176,7 +176,7 @@ jobs:
         shell: bash
 
       - name: Upload dry-run artifacts (throwaway — NOT a release)
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: release-dry-run-${{ matrix.platform }}
           path: |

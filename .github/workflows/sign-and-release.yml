@@ -471,7 +471,7 @@ jobs:
       # signs and notarizes the example-plugin packages and keeps them as
       # workflow artifacts. It cannot delay, block, or break a release.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-macos-${{ github.ref_name }}${{ steps.signing.outputs.artifact_suffix }}
           path: artifacts/
