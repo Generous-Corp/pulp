@@ -77,10 +77,13 @@ def _install_fixture(home: Path) -> tuple[Path, dict[str, str]]:
         curl = stub_dir / "curl"
         curl.write_text(
             f'#!/bin/sh\nprintf \'%s\\n\' "$@" >> "{stub_dir / "curl-args"}"\n'
-            f'cat "{installer}"\n'
+            'out=""; while [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done\n'
+            f'if [ -n "$out" ]; then cat "{installer}" > "$out"; else cat "{installer}"; fi\n'
         )
         curl.chmod(0o755)
         path = f"{stub_dir}{os.pathsep}{path}"
+    _wrapper_tree(home, installer_text=None if os.environ.get("INSTALL_SHIPYARD_LIVE") == "1"
+                  else _STUB_UPSTREAM_INSTALLER)
     env["HOME"] = str(home)
     env["PATH"] = path
     env["SHIPYARD_INSTALL_DIR"] = str(bin_dir)
@@ -93,6 +96,24 @@ def _install_fixture(home: Path) -> tuple[Path, dict[str, str]]:
     for name in ("GITHUB_ACTIONS", "GITHUB_TOKEN", "SHIPYARD_GITHUB_TOKEN"):
         env.pop(name, None)
     return bin_dir, env
+
+
+def _wrapper_tree(home: Path, installer_text: str | None) -> Path:
+    """A copy of the wrapper next to its pin files. Offline, install.sh's pinned
+    digest is the stub's, since the wrapper refuses an installer that differs."""
+    import hashlib
+
+    tools = home / "tree" / "tools"
+    (tools / "toolchain").mkdir(parents=True, exist_ok=True)
+    (tools / "install-shipyard.sh").write_bytes(INSTALL_SH.read_bytes())
+    (tools / "shipyard.toml").write_bytes((REPO_ROOT / "tools/shipyard.toml").read_bytes())
+    sums = (REPO_ROOT / "tools/toolchain/shipyard.sha256").read_text(encoding="utf-8")
+    if installer_text is not None:
+        digest = hashlib.sha256(installer_text.encode("utf-8")).hexdigest()
+        sums = "".join(line for line in sums.splitlines(keepends=True) if not line.endswith("  install.sh\n"))
+        sums += f"{digest}  install.sh\n"
+    (tools / "toolchain/shipyard.sha256").write_text(sums, encoding="utf-8")
+    return tools / "install-shipyard.sh"
 
 
 def _stub_state_dir(home: Path) -> Path:
@@ -109,7 +130,7 @@ class InstallShipyardQueueRepair(unittest.TestCase):
 
     def _run_install(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["bash", str(INSTALL_SH)],
+            ["bash", str(Path(env["HOME"]) / "tree/tools/install-shipyard.sh")],
             env=env,
             capture_output=True,
             text=True,
@@ -184,7 +205,7 @@ class InstallShipyardCiTokenPreflight(unittest.TestCase):
         _bin_dir, env = _install_fixture(home)
         env.update(extra)
         result = subprocess.run(
-            ["bash", str(INSTALL_SH)],
+            ["bash", str(home / "tree/tools/install-shipyard.sh")],
             env=env, capture_output=True, text=True, check=False,
         )
         return result, home
@@ -216,6 +237,160 @@ class InstallShipyardCiTokenPreflight(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         if os.environ.get("INSTALL_SHIPYARD_LIVE") != "1":
             self.assertIn("stub upstream installer: reused", result.stdout)
+
+
+_ASSET = b"pinned shipyard linux-x64 binary\n"
+_PROVIDER = b"pinned provider linux-x64 binary\n"
+
+
+def _sha(data: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()
+
+
+@unittest.skipIf(sys.platform.startswith("win"), "the stubs are POSIX shell scripts")
+class InstallShipyardVerifiesDigests(unittest.TestCase):
+    """The wrapper refuses a release asset whose sha256 differs from the pin,
+    before the upstream installer runs, and refuses an installed binary that is
+    not the verified one. Runs as a Linux x64 host through a stub `uname`."""
+
+    def _tree(self, root: Path, *, sums: dict[str, str], installed: bytes,
+              previous: bytes | None = None) -> dict[str, str]:
+        tools = root / "tools"
+        (tools / "toolchain").mkdir(parents=True)
+        (tools / "install-shipyard.sh").write_bytes(INSTALL_SH.read_bytes())
+        (tools / "shipyard.toml").write_text(
+            '[shipyard]\nversion = "v9.9.9"\nrepo = "example/Shipyard"\n', encoding="utf-8")
+        stub = root / "stub"
+        stub.mkdir()
+        assets = root / "assets"
+        assets.mkdir()
+        (assets / "shipyard-linux-x64").write_bytes(_ASSET)
+        (assets / "shipyard-workstream-provider-linux-x64").write_bytes(_PROVIDER)
+        (root / "installed").write_bytes(installed)
+        installer = stub / "upstream-install.sh"
+        installer.write_text(
+            "#!/bin/sh\nmkdir -p \"$SHIPYARD_INSTALL_DIR\"\n"
+            f"cp \"{root / 'installed'}\" \"$SHIPYARD_INSTALL_DIR/shipyard\"\n"
+            f"cp \"{assets / 'shipyard-workstream-provider-linux-x64'}\" \"$SHIPYARD_INSTALL_DIR/shipyard-workstream-provider\"\n"
+            "echo 'stub upstream installer: ran'\n",
+            encoding="utf-8")
+        (stub / "other-install.sh").write_text("#!/bin/sh\necho 'UNVERIFIED installer ran'\n", encoding="utf-8")
+        sums = dict(sums)
+        sums.setdefault("install.sh", _sha(installer.read_bytes()))
+        (tools / "toolchain/shipyard.sha256").write_text(
+            "# generated\n" + "".join(f"{sha}  {name}\n" for name, sha in sums.items()), encoding="utf-8")
+        # Release downloads are served from `assets`, the installer from the stub.
+        (stub / "curl").write_text(
+            "#!/bin/sh\n"
+            f'printf "%s\\n" "$*" >> "{root / "curl-args"}"\n'
+            'out=""; url=""\n'
+            'while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -*) shift;; *) url="$1"; shift;; esac; done\n'
+            'case "$url" in\n'
+            f'  */releases/download/*) cp "{assets}/$(basename "$url")" "$out" ;;\n'
+            # A second fetch of install.sh is served a different script: only
+            # the verified first download may ever run.
+            f'  *install.sh) src="{installer}"; [ -e "{root / "served"}" ] && src="{stub / "other-install.sh"}"; '
+            f': > "{root / "served"}"; if [ -n "$out" ]; then cat "$src" > "$out"; else cat "$src"; fi ;;\n'
+            '  *) exit 22 ;;\n'
+            'esac\n', encoding="utf-8")
+        (stub / "uname").write_text(
+            '#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; *) echo Linux;; esac\n', encoding="utf-8")
+        for name in ("curl", "uname"):
+            (stub / name).chmod(0o755)
+        home = root / "home"
+        home.mkdir()
+        if previous is not None:
+            (home / "bin").mkdir()
+            (home / "bin/shipyard").write_bytes(previous)
+        env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", "GITHUB_TOKEN", "SHIPYARD_GITHUB_TOKEN", "SHIPYARD_SKIP_DOWNLOAD")}
+        env.update({"HOME": str(home), "PATH": f"{stub}{os.pathsep}{env.get('PATH', '')}",
+                    "SHIPYARD_INSTALL_DIR": str(home / "bin")})
+        return env
+
+    def _run(self, root: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["bash", str(root / "tools/install-shipyard.sh")], env=env,
+                              capture_output=True, text=True, encoding="utf-8", check=False)
+
+    def pinned(self) -> dict[str, str]:
+        return {"shipyard-linux-x64": _sha(_ASSET), "shipyard-workstream-provider-linux-x64": _sha(_PROVIDER)}
+
+    def test_pinned_assets_install(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = self._run(root, self._tree(root, sums=self.pinned(), installed=_ASSET))
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Verified shipyard-linux-x64 shipyard-workstream-provider-linux-x64", result.stdout)
+            self.assertIn("stub upstream installer: ran", result.stdout)
+            self.assertNotIn("UNVERIFIED installer ran", result.stdout)
+            args = (root / "curl-args").read_text(encoding="utf-8")
+            self.assertIn("https://github.com/example/Shipyard/releases/download/v9.9.9/shipyard-linux-x64", args)
+
+    def test_replaced_asset_is_refused_before_the_installer_runs(self) -> None:
+        for name in self.pinned():
+            with self.subTest(asset=name), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                sums = self.pinned()
+                sums[name] = "0" * 64
+                result = self._run(root, self._tree(root, sums=sums, installed=_ASSET))
+                self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+                self.assertIn(f"/{name} does not match the pin", result.stderr)
+                self.assertIn("pinned sha256:   " + "0" * 64, result.stderr)
+                self.assertIn("generate.py --shipyard v9.9.9", result.stderr)
+                self.assertNotIn("install.sh", (root / "curl-args").read_text(encoding="utf-8"))
+
+    def test_asset_without_a_pinned_digest_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sums = self.pinned()
+            del sums["shipyard-workstream-provider-linux-x64"]
+            result = self._run(root, self._tree(root, sums=sums, installed=_ASSET))
+            self.assertEqual(2, result.returncode)
+            self.assertIn("pins no sha256 for shipyard-workstream-provider-linux-x64", result.stderr)
+
+    def test_installed_binary_must_be_the_verified_one(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = self._run(root, self._tree(root, sums=self.pinned(), installed=b"swapped between downloads\n"))
+            self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+            self.assertIn("is not the pinned Shipyard v9.9.9 binary", result.stderr)
+
+    def test_a_mismatched_install_is_removed_and_the_previous_binary_restored(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            env = self._tree(root, sums=self.pinned(), installed=b"swapped between downloads\n",
+                             previous=b"the previous shipyard\n")
+            result = self._run(root, env)
+            self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(b"the previous shipyard\n", (root / "home/bin/shipyard").read_bytes())
+            # There was no previous provider, so the new one is removed too.
+            self.assertFalse((root / "home/bin/shipyard-workstream-provider").exists())
+            self.assertIn("restored the previous", result.stderr)
+
+    def test_a_mismatched_first_install_leaves_nothing_on_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = self._run(root, self._tree(root, sums=self.pinned(), installed=b"swapped\n"))
+            self.assertEqual(2, result.returncode)
+            self.assertFalse((root / "home/bin/shipyard").exists())
+
+    def test_a_replaced_installer_script_is_refused_before_it_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sums = dict(self.pinned(), **{"install.sh": "0" * 64})
+            result = self._run(root, self._tree(root, sums=sums, installed=_ASSET, previous=b"old\n"))
+            self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+            self.assertIn("install.sh does not match the pin; refusing to run it", result.stderr)
+            self.assertNotIn("stub upstream installer: ran", result.stdout)
+            self.assertEqual(b"old\n", (root / "home/bin/shipyard").read_bytes())
+
+    def test_the_installer_comes_from_the_pinned_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._run(root, self._tree(root, sums=self.pinned(), installed=_ASSET))
+            args = (root / "curl-args").read_text(encoding="utf-8")
+            self.assertIn("https://raw.githubusercontent.com/example/Shipyard/refs/tags/v9.9.9/install.sh", args)
 
 
 if __name__ == "__main__":

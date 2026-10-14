@@ -1000,6 +1000,12 @@
       ]
     },
     {
+      "name": "toolchain-update-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_update.py"
+      ]
+    },
+    {
       "name": "tools-registry-check-selftest",
       "argv": [
         "{repo}/tools/scripts/test_tools_registry_check.py"

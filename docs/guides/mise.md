@@ -184,6 +184,27 @@ A tool version changes only through a pull request that:
    the manifest's `[mise].version`, and runs mise with throwaway data, cache and
    config directories so your own mise setup cannot leak into the lock.
 
+`tools/toolchain/update.py` does both steps for one tool and prints a table of
+every version and lock checksum that moved, for the pull request body:
+
+```bash
+python3 tools/toolchain/update.py cmake --to 4.3.4 --mise /path/to/mise-2026.10.8
+python3 tools/toolchain/update.py rust --to 1.98.0      # no lock rows: rustup installs Rust
+python3 tools/toolchain/update.py shipyard --to v0.270.0
+```
+
+`python3 tools/toolchain/deps.py` groups the three operations under one
+command: `check` (the environment report), `resolve` (fetch what a build needs
+once, before building: `setup.sh --deps-only` for the pinned dependency sources,
+then `npm ci` for any lockfile directory whose `node_modules` differs, then the
+report; it never installs a host tool), and `update` (the above, finding the
+installed pinned mise itself).
+
+`update` also marks the tool's `[evidence]` row as a `target` (the gate has not been
+seen running it yet). It never commits, pushes or installs. If any step fails
+it restores every file it touched. Moving mise itself is refused: that takes a
+reviewed source build of the new release.
+
 The `toolchain-test_generate-selftest` ctest checks that the committed files
 equal what the manifest generates (`python3 tools/toolchain/generate.py
 --check` runs the same comparison), that the lock hashes to the manifest's
@@ -222,6 +243,12 @@ when it cannot read the expected versions. `--format github` prints GitHub
 Actions `::warning::` annotations and `--format json` a machine-readable
 report.
 
+`python3 tools/toolchain/fleet_report.py --host m1 --host m3=local --host m5 --host m5s`
+runs the same check on each host over ssh, under the non-login PATH lanes and
+agents get, and prints one table of the version every host runs against the
+pin. It copies the check into a temporary directory, removes it afterwards, and
+installs nothing; a host it cannot reach is shown as `unreachable`.
+
 A platform the manifest lists as an exception (Linux and Windows still take
 CMake from the system package manager) is still reported, labelled as the
 declared exception, so the difference stays visible.
@@ -231,8 +258,20 @@ own tools: once enforcement is on, it lets the check pass with a banner naming
 every difference, on every run. It is refused on a fleet host, one with
 `~/.config/pulp/fleet-host` or `PULP_FLEET_HOST=1`.
 
-Every CI build leg (macOS, Linux, Windows) runs the check before configuring
-and shows the differences as warnings on the run. It never fails a leg.
+It also runs on its own, once, before a build:
+
+- every configure of the Pulp checkout runs it (`tools/cmake/PulpToolchainCheck.cmake`),
+  which covers `pulp build`, `pulp dev`, `pulp loop` and a raw `cmake -S . -B build`
+  alike, and prints its lines as configure status. It does not run when Pulp is a
+  subproject of another build, so SDK and plugin projects never see it;
+- `setup.sh`, including the `setup.sh --deps-only` that `pulp build` runs on a cold
+  checkout, runs it before fetching any dependency;
+- every CI build leg (macOS, Linux, Windows) runs it as its own step before
+  configuring and shows the differences as warnings on the run (the configure and
+  `setup.sh --ci` skip it there, so it is reported once).
+
+In warn mode none of these fails. Once the manifest is in enforce mode a
+difference stops the configure and `setup.sh` with the same lines.
 
 ## Building plugins with the Pulp SDK
 
@@ -263,9 +302,9 @@ section is here so the direction is visible, not as instructions.
 - **A published mise binary.** The macOS arm64 build the fleet runs is pinned
   by digest today; a reproducible build from source, published with checksums
   for every platform, is still to come.
-- **The check before every build.** `pulp build`, `pulp dev`, `pulp loop`,
-  `setup.sh` and the generators of committed files run the environment check
-  first, warn only at the start.
+- **The check before generators of committed files.** The generators that
+  write committed files run the environment check first, and refuse outside the
+  pinned environment.
 - **Rust from the manifest.** Generate `rust-toolchain.toml` from the manifest
   so cargo uses the pinned Rust instead of the current `stable`.
 - **CI images built from the lock.** The macOS CI image installs its tools with
