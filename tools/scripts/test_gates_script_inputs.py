@@ -343,7 +343,8 @@ class GatesScriptInputsTests(unittest.TestCase):
         r = subprocess.run([sys.executable, str(self.root / "tools/scripts/gates_script_inputs.py"),
                             "--base", "main", "--repo-root", str(self.root),
                             "--build-dir", str(elsewhere)],
-                           cwd=self.root, env=self.env(), capture_output=True, text=True, timeout=300)
+                           cwd=self.root, env=self.env(), capture_output=True, text=True,
+                           encoding="utf-8", timeout=300)
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
         self.assertNotIn("unrecognized arguments", out)
