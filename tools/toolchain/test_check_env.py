@@ -130,7 +130,7 @@ class CheckEnvTests(unittest.TestCase):
         self.assertIsNone(seen["cmake"])
 
     def test_missing_rustup_toolchain_is_named_and_never_installed(self) -> None:
-        self.host.text["rustc"] = "error: toolchain '1.97.1-aarch64-apple-darwin' is not installed"
+        self.host.text["rustc"] = "error: toolchain '1.97.1-x86_64-unknown-linux-gnu' is not installed"
         findings = self.collect(self.matching())
         self.assertIn("found a rust-toolchain.toml toolchain that is not installed", findings[0].line())
 
