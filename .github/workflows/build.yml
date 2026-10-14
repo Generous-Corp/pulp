@@ -3517,3 +3517,31 @@ jobs:
           # Windows is currently advisory (see Linux comment above).
           echo "Windows leg ${conclusion:-not found} or MSVC=$msvc_ok — failing windows alias (advisory only; not required)"
           exit 1
+
+  # Names the cause of each failed job in this run as a `ci.cause/v1` record,
+  # printed as a `::notice title=ci-cause::` annotation. A job's own log can be
+  # downloaded only once it has finished, so this job reads the failed jobs'
+  # finished logs and runs the pinned, checksum-verified
+  # `shipyard cause extract` over each (tools/ci/ci_cause_notices.sh). It is
+  # advisory: it never gates the run, and none of its failures fail it.
+  ci-cause:
+    name: ci-cause (advisory)
+    needs: [build, macos, macos-merge-group, linux, windows]
+    if: >-
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && contains(needs.*.result, 'failure')
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/ci_cause_notices.sh
+          sparse-checkout-cone-mode: false
+      - name: Name the cause of each failed job
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/ci_cause_notices.sh

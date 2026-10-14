@@ -307,6 +307,22 @@ Both event-dependent ctest decisions live in `tools/ci/ctest_gate_args.py`,
 tested by `ctest-gate-args-selftest`, which also asserts `build.yml` still
 calls it.
 
+## A red run names its own cause in the `ci-cause` annotation
+
+Before you read a 10 MB job log, look for the run's `ci-cause` notice. The
+advisory `ci-cause (advisory)` job in `build.yml` prints one `ci.cause/v1`
+record per failed job. Each record gives the failing test, compile error,
+runner failure or gate verdict, with a class and a confidence.
+
+- **Low or `unknown` means unread, not innocent.** A `low` confidence, or a
+  class of `unknown`, means the extractor could not name the cause. Read the
+  log in that case.
+- **Absent means it did not run.** If the notice is missing, the job may not
+  have run at all; check its own log. It is advisory and never gates.
+- **Upgrading the pin.** The extractor is the Shipyard release pinned, with
+  its checksums, in `tools/ci/ci_cause_notices.sh`. Bump the version and the
+  hashes together.
+
 ## A green `macos` check can mean nothing ran
 
 The required `macos` context is reported by more than one job: the macOS matrix
