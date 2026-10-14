@@ -8308,6 +8308,11 @@
             "generated_include_roots": 1
           },
           "direct_dependencies": [
+            "framework:Cocoa",
+            "framework:CoreVideo",
+            "framework:Metal",
+            "framework:QuartzCore",
+            "pulp-render",
             "pulp-view-core",
             "pulp-view-script"
           ]

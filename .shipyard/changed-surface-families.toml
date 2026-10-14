@@ -6063,6 +6063,7 @@ tests = [
   "tools-registry-check-selftest",
   "trace-span-category-lint",
   "vellum-inheritance-ledger-negative-contract",
+  "vellum-view-core-pulp-kept-negative-contract",
   "vellum-watch-preflight-selftest",
   "version-at-land-selftest",
   "wide-non-native-selftest",
