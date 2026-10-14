@@ -368,6 +368,42 @@ def case_ledger_checker_selected_from_merge_tree(fx: Fixture) -> None:
     assert "consumption-census-schema" not in result.stderr, result.stderr
 
 
+def _merge_tree_with_checkers(fx: Fixture, **scripts: str) -> subprocess.CompletedProcess[str]:
+    """Commit build-free checkers into the fixture and run the merge-tree check."""
+    fx.setup()
+    paths = {"ledger": "tools/scripts/vellum_inheritance_ledger_check.py",
+             "families": "tools/scripts/changed_surface_script_families.py"}
+    for name, body in scripts.items():
+        checker = fx.repo / paths[name]
+        checker.parent.mkdir(parents=True, exist_ok=True)
+        checker.write_text(body, encoding="utf-8")
+        fx.git("add", paths[name])
+    fx.git("commit", "-qm", "checkers")
+    return subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=60,
+        env={**os.environ, "PULP_MERGE_TREE_CHECK_TIMEOUT": "1"},
+    )
+
+
+def case_a_timed_out_check_is_not_a_stale_verdict(fx: Fixture) -> None:
+    """A check that times out exits 2 (advisory in pre-push), never STALE."""
+    res = _merge_tree_with_checkers(fx, ledger="import time; time.sleep(5)\n")
+    assert res.returncode == 2, (res.returncode, res.stderr)
+    assert "timed out" in res.stderr, res.stderr
+    assert "NOT CHECKED" in res.stderr, res.stderr
+    assert merge_tree_state.STALE not in res.stderr, res.stderr
+
+
+def case_a_real_failure_outranks_a_timeout(fx: Fixture) -> None:
+    """One check timing out cannot hide another check's real failure."""
+    res = _merge_tree_with_checkers(fx, ledger="import time; time.sleep(5)\n",
+                                    families="raise SystemExit(1)\n")
+    assert res.returncode == 1, (res.returncode, res.stderr)
+    assert merge_tree_state.STALE in res.stderr, res.stderr
+
+
 def case_merge_tree_conflict_refuses(fx: Fixture) -> None:
     """A real merge-tree conflict is refused before any script check runs."""
     repo = fx.tmp / "tree-state-repo"
@@ -410,7 +446,7 @@ def main() -> int:
                 failures.append(case.__name__)
                 print(f"FAIL {case.__name__}: {exc}")
     # Control: a suite that collected nothing would pass vacuously.
-    if len(CASES) < 12:
+    if len(CASES) < 14:
         print(f"FAIL collected only {len(CASES)} cases")
         return 1
     print(f"{len(CASES) - len(failures)}/{len(CASES)} passed")

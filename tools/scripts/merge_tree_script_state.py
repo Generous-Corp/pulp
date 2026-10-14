@@ -27,13 +27,27 @@ def git(root: Path, *args: str, check: bool = False) -> subprocess.CompletedProc
                           capture_output=True, check=check)
 
 
-def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: int = 20) -> int:
+# A check that could not run (missing interpreter, a timeout on a loaded host)
+# says nothing about the branch, so it must never read as a stale verdict.
+UNAVAILABLE = None
+
+
+def _check_timeout() -> float:
+    try:
+        return float(os.environ.get("PULP_MERGE_TREE_CHECK_TIMEOUT", "20"))
+    except ValueError:
+        return 20.0
+
+
+def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None = None) -> int | None:
+    if timeout is None:
+        timeout = _check_timeout()
     try:
         proc = subprocess.run(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
                               timeout=timeout, capture_output=True)
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"merge-tree script-state: {cmd[0]} unavailable or timed out: {exc}", file=sys.stderr)
-        return 2
+        return UNAVAILABLE
     if proc.stdout:
         print(proc.stdout, end="", file=sys.stderr)
     if proc.stderr:
@@ -128,17 +142,27 @@ def main(argv: list[str] | None = None) -> int:
         if ledger.exists():
             checks.append(("vellum-inheritance-ledger", [sys.executable, str(ledger),
                             "--root", str(tmp), "--base", base_sha]))
-        failed = 0
+        failed: list[str] = []
+        unavailable: list[str] = []
         for name, cmd in checks:
             if not Path(cmd[1]).exists():
                 continue
             print(f"merge-tree script-state: {name}", file=sys.stderr)
             rc = _run(cmd, tmp, env)
-            if rc:
-                failed = 1
+            if rc is UNAVAILABLE:
+                unavailable.append(name)
+            elif rc:
+                failed.append(name)
         if failed:
             print(f"merge-tree script-state: {STALE}", file=sys.stderr)
-        return failed
+            return 1
+        if unavailable:
+            # Exit 2: could not establish. Pre-push reports it as advisory.
+            print("merge-tree script-state: NOT CHECKED (could not run: "
+                  f"{', '.join(unavailable)}); this is not a stale-branch verdict",
+                  file=sys.stderr)
+            return 2
+        return 0
     finally:
         cleanup()
         for s, handler in old_handlers.items():

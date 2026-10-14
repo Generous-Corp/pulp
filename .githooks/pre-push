@@ -51,9 +51,11 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
       GIT_COMMON_DIR GIT_PREFIX GIT_NAMESPACE GIT_QUARANTINE_PATH
 
 # Git supplies one source/destination record per pushed ref on stdin. Capture
-# those records before any gate subprocess can consume them. The build gates
-# still run against this checkout; the build-free merge-tree check below uses
-# the exact pushed source SHA.
+# those records before any gate subprocess can consume them: every source gate
+# below validates the checked-out HEAD, so a branch update that names another
+# commit must be refused rather than accidentally authorizing the wrong tree.
+# The build-free merge-tree check takes the pushed source SHA, which that
+# refusal keeps equal to HEAD.
 if ! PREPUSH_UPDATE_RECORDS="$(cat)"; then
     echo "✗ pre-push: failed to capture Git's pushed-ref records; refusing to validate an unknown source tree." >&2
     exit 1
@@ -303,12 +305,19 @@ if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
                 continue
                 ;;
             *)
-                # Keep the exact source object for the merge-tree check. It
-                # may differ from HEAD for an explicit SHA push.
-                if [ -n "$_prepush_pushed_head_sha" ] && [ "$_prepush_pushed_head_sha" != "$_prepush_local_sha" ]; then
-                    echo "✗ pre-push: multiple source refs name different commits; refusing ambiguous validation." >&2
+                # Branches and every other source-bearing namespace must name
+                # the exact checked-out commit. Git hosts may use refs/review,
+                # refs/for, or another custom namespace; treating those like
+                # tags would let an unvalidated tree bypass the gates. Every
+                # gate below except the merge-tree check validates checked-out
+                # HEAD, so a push of any other commit is refused here.
+                if [ -z "$_prepush_head_sha" ] || [ "$_prepush_local_sha" != "$_prepush_head_sha" ]; then
+                    echo "✗ pre-push: source update $_prepush_remote_ref names $_prepush_local_sha," >&2
+                    echo "  but this checkout is at ${_prepush_head_sha:-unknown}. The gates validate" >&2
+                    echo "  checked-out HEAD; check out that branch and push it separately." >&2
                     exit 1
                 fi
+                # The merge-tree check below takes this exact source object.
                 _prepush_pushed_head_sha="$_prepush_local_sha"
                 _prepush_source_remote_ref="$_prepush_remote_ref"
                 _prepush_source_update_mode="exact-head"

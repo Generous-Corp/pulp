@@ -103,8 +103,8 @@ def main() -> int:
         mismatched = run_hook(
             f"refs/heads/prior {prior} refs/heads/prior {zeros}\n"
         )
-        if "check out that branch" in mismatched.stderr:
-            print("FAIL: non-HEAD branch push was rejected instead of validating its pushed SHA", file=sys.stderr)
+        if mismatched.returncode == 0 or "check out that branch" not in mismatched.stderr:
+            print("FAIL: non-HEAD branch push did not fail closed", file=sys.stderr)
             return 1
 
         multi_ref = run_hook(
@@ -146,8 +146,8 @@ def main() -> int:
         custom_mismatched = run_hook(
             f"refs/heads/prior {prior} refs/review/topic {zeros}\n"
         )
-        if "check out that branch" in custom_mismatched.stderr:
-            print("FAIL: non-HEAD custom source ref was rejected instead of validating its pushed SHA", file=sys.stderr)
+        if custom_mismatched.returncode == 0 or "check out that branch" not in custom_mismatched.stderr:
+            print("FAIL: non-HEAD custom source ref did not fail closed", file=sys.stderr)
             return 1
 
         truncated = run_hook(f"refs/heads/main {head}\n")
