@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -135,7 +136,15 @@ class ReleaseCliDispatchFindsTheScript(unittest.TestCase):
     def test_dispatch_overlays_main_copy_and_exports_it(self) -> None:
         run = self.helpers_run()
         self.assertRegex(run, rf"\n\s+{re.escape(SCRIPT)} \\\n", "the script is in the helper list")
-        self.assertIn(f'[ "$path" = {SCRIPT} ]', run, "a dispatch overlays main's copy")
+        # The condition list that makes a dispatch overlay main's copy: from
+        # the workflow_dispatch test to its `; }; then`. A match elsewhere in
+        # the step (the compat_path block) does not count.
+        dispatch = re.search(
+            r"if \[ '\$\{\{ github\.event_name \}\}' = 'workflow_dispatch' \] \\\n"
+            r"(?P<cond>.*?); \}; then", run, re.S)
+        self.assertIsNotNone(dispatch, "the dispatch overlay condition was not found")
+        self.assertIn(f'|| [ "$path" = {SCRIPT} ]', dispatch.group("cond"),
+                      "a dispatch overlays main's copy")
         self.assertIn('compat_path="$compat_dir/tools/ci/release_package_cli.sh"', run)
         self.assertIn('PULP_RELEASE_PACKAGE_SCRIPT=$compat_dir/tools/ci/release_package_cli.sh', run)
         self.assertIn(f"PULP_RELEASE_PACKAGE_SCRIPT={SCRIPT}", run, "a push uses the checkout's")
@@ -145,14 +154,17 @@ class ReleaseCliDispatchFindsTheScript(unittest.TestCase):
         the tag checkout as cwd, packages it. Control: the checkout-relative
         call the step used to make fails there."""
         tag = Path(tempfile.mkdtemp(prefix="tag-checkout-"))
+        self.addCleanup(shutil.rmtree, tag, True)
         (tag / "CMakeLists.txt").write_text("project(pulp\n    VERSION 0.966.0\n)\n",
                                             encoding="utf-8")
         (tag / "tools/scripts").mkdir(parents=True)
         (tag / "tools/scripts/release_product_matrix.json").write_bytes(
             (REPO_ROOT / "tools/scripts/release_product_matrix.json").read_bytes())
-        packager = tag.parent / f"{tag.name}-packager.py"
+        packager = tag / ".packager.py"
         packager.write_text(FAKE_PACKAGER, encoding="utf-8")
-        compat = Path(tempfile.mkdtemp(prefix="compat-")) / "tools/ci/release_package_cli.sh"
+        compat_root = Path(tempfile.mkdtemp(prefix="compat-"))
+        self.addCleanup(shutil.rmtree, compat_root, True)
+        compat = compat_root / "tools/ci/release_package_cli.sh"
         compat.parent.mkdir(parents=True)
         compat.write_bytes((REPO_ROOT / SCRIPT).read_bytes())
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tag),
@@ -186,6 +198,7 @@ class ScriptBehaviour(unittest.TestCase):
     def run_script(self, platform: str, tag: str | None, *, import_design: bool = True,
                    node: bool = False) -> list[str]:
         tmp = Path(tempfile.mkdtemp(prefix="release-package-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
         (tmp / "CMakeLists.txt").write_text(
             "cmake_minimum_required(VERSION 3.24)\nproject(pulp\n    VERSION 0.966.0\n)\n",
             encoding="utf-8")
