@@ -5,6 +5,7 @@
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
 #include "harness/rt_allocation_probe.hpp"
+#include "support/physical_qualification_outcome.hpp"
 
 #include <pulp/runtime/trace.hpp>
 #include <pulp/runtime/trace_session.hpp>
@@ -1358,6 +1359,38 @@ TEST_CASE("staged async records require quiescent ownership before producer drai
     CHECK(records.front().sequence == 12);
     CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::CompletedAccepted);
     CHECK(state.take_completed().empty());
+}
+
+TEST_CASE("Provider identity without a native runtime source is unavailable, not failed",
+          "[gpu_audio][trace]") {
+    using Gate = SharedIoProviderIdentityGate;
+    using Outcome = pulp::test::PhysicalQualificationOutcome;
+    SharedIoProviderIdentity identity;
+    identity.authenticated = true;
+    identity.native_runtime_authenticated = true;
+    CHECK(gate_shared_io_provider_identity(identity) == Gate::Authenticated);
+    // What DawnSharedIoProvider reports today: provider and adapter
+    // authenticated, no independent native-runtime identity.
+    identity.native_runtime_authenticated = false;
+    CHECK(gate_shared_io_provider_identity(identity) == Gate::NativeRuntimeUnavailable);
+    identity.authenticated = false;
+    CHECK(gate_shared_io_provider_identity(identity) == Gate::Unauthenticated);
+    identity.native_runtime_authenticated = true;
+    CHECK(gate_shared_io_provider_identity(identity) == Gate::Unauthenticated);
+
+    // The verdict both physical qualifications (the WaveNet qualification and
+    // the paced convolution probe) report.
+    CHECK(pulp::test::physical_qualification_outcome(true, Gate::Authenticated) ==
+          Outcome::Completed);
+    CHECK(pulp::test::physical_qualification_outcome(true, Gate::NativeRuntimeUnavailable) ==
+          Outcome::Unavailable);
+    CHECK(pulp::test::physical_qualification_outcome(true, Gate::Unauthenticated) ==
+          Outcome::Failed);
+    // Failed evidence stays a failure: an identity gap never hides it.
+    CHECK(pulp::test::physical_qualification_outcome(false, Gate::NativeRuntimeUnavailable) ==
+          Outcome::Failed);
+    CHECK(pulp::test::physical_qualification_outcome(false, Gate::Authenticated) ==
+          Outcome::Failed);
 }
 
 TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trace][p4]") {
