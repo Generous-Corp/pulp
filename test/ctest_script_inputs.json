@@ -3302,6 +3302,7 @@
     "examples/hot-reload-demo/rebuild_logic.sh",
     "examples/hot-reload-synth/rebuild_logic.sh",
     "test/cmake/gpu_audio_web_tests.cmake",
+    "test/fixtures/refactor-baselines/downstream-consumers.json",
     "tools/ci/governed-build.sh",
     "tools/ci/tart-run-job.sh",
     "tools/ci/test_build_governance_paths.py",
@@ -3311,7 +3312,8 @@
     "tools/scripts/confirm_failure.sh",
     "tools/scripts/contributor_check.sh",
     "tools/scripts/release-cli-local.sh",
-    "tools/scripts/sdk_consumer_sweep.py"
+    "tools/scripts/sdk_consumer_sweep.py",
+    "tools/validation/downstream/consumer-validation.json"
    ],
    "kind": "python"
   },
