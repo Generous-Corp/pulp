@@ -776,7 +776,7 @@ def compare_one(
             f"native render failed ({render_run.returncode}): {render_run.stderr}")
     if not native_receipt.exists():
         raise LabError("native Skia render did not emit a render receipt")
-    render_receipt = json.loads(native_receipt.read_text())
+    render_receipt = json.loads(native_receipt.read_text(encoding="utf-8"))
     if (render_receipt.get("schema") != "pulp-design-ir-render-receipt-v1"
             or render_receipt.get("backend_requested") != "skia"
             or render_receipt.get("backend_used") != "skia"
