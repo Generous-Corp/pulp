@@ -5606,37 +5606,6 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-30c66f4973ad"
-paths = ["tools/scripts/unregistered_tests_check.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "unregistered-tests-check",
-  "unregistered-tests-check-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
 name = "script-readers-7d892b6ce02d"
 paths = ["tools/scripts/vellum_closure.py"]
 tests = [
@@ -6539,7 +6508,6 @@ paths = [
   "tools/scripts/token_coverage_check.py",
   "tools/scripts/token_key_check.py",
   "tools/scripts/trace_span_category_lint.py",
-  "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
   "tools/scripts/vellum_view_core_pulp_kept_check.py",
@@ -7088,7 +7056,6 @@ paths = [
   "tools/scripts/token_coverage_check.py",
   "tools/scripts/token_key_check.py",
   "tools/scripts/trace_span_category_lint.py",
-  "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
   "tools/scripts/vellum_view_core_pulp_kept_check.py",

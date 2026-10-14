@@ -7061,8 +7061,14 @@
     ".githooks/lib",
     ".githooks/pre-push",
     "tools/scripts",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/gates_script_inputs.py",
+    "tools/scripts/merge_tree_script_state.py",
     "tools/scripts/refresh_push_check.py",
-    "tools/scripts/test_refresh_push_check.py"
+    "tools/scripts/test_refresh_push_check.py",
+    "tools/scripts/unregistered_tests_check.py",
+    "tools/scripts/vellum_inheritance_ledger_check.py"
    ],
    "kind": "python"
   },
