@@ -41,8 +41,8 @@
       "owned_paths": [
         "core/state/include/pulp/state/sequencer_state_channel.hpp",
         "core/state/include/pulp/state/step_edit_reducer.hpp",
-        "core/view/include/pulp/view/step_grid_view.hpp",
-        "core/view/src/step_grid_view.cpp"
+        "core/view/audio/include/pulp/view/step_grid_view.hpp",
+        "core/view/audio/src/step_grid_view.cpp"
       ],
       "release": {
         "pr": 5740,

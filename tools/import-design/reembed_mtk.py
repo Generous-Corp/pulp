@@ -15,7 +15,7 @@ Pipeline (faithful-vector):
      #16191E (bottom). Toolbar/overview teal (solid #16DAC2, not a ramp) is
      left untouched. This is content-based (no byte offsets), so it survives
      Figma edits. Proven to reproduce the committed SVGs byte-exact.
-  3. Emit core/view/src/musical_typing_keyboard_svg.cpp (chunked base64).
+  3. Emit core/view/audio/src/musical_typing_keyboard_svg.cpp (chunked base64).
 
 Usage:
   reembed_mtk.py [--token <T>] [--repo <path>] [--date YYYY-MM-DD]
@@ -136,7 +136,7 @@ def main():
     typing = neutralize(fetch_svg(TYPING_NODE, token))
     piano = neutralize(fetch_svg(PIANO_NODE, token))
     cpp = render_cpp(typing, piano, a.date)
-    out_path = os.path.join(a.repo, "core/view/src/musical_typing_keyboard_svg.cpp")
+    out_path = os.path.join(a.repo, "core/view/audio/src/musical_typing_keyboard_svg.cpp")
 
     if a.validate:
         cur = open(out_path).read()
