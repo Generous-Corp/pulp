@@ -42,7 +42,7 @@ which makes the dependency-backed case visible to CTest. The required macOS
 lane performs the same locked install before running its affected-test sweep.
 Because the automatic Linux selector may use a clean Proxmox VM without a
 system Node installation, `build.yml` first provisions the exact Node
-`22.15.0` toolchain with `actions/setup-node@v4` and a lockfile-keyed npm cache;
+`22.15.0` toolchain with `actions/setup-node@v7` and a lockfile-keyed npm cache;
 that version supplies the `zstdDecompressSync` API used by the `.fig` lane.
 Source-only or offline
 configurations without that `node_modules/esbuild` installation still register

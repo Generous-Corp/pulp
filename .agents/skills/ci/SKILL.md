@@ -9926,7 +9926,7 @@ plus ccache and FetchContent paths. It runs only on Namespace /
 nscloud labels (`contains(matrix.runs_on_json, 'namespace') ||
 contains(matrix.runs_on_json, 'nscloud')`); self-hosted Macs keep
 their caches on local disk and github-hosted runners use
-`actions/cache@v4` via the existing `Restore ccache (GitHub-hosted)`
+`actions/cache@v6` via the existing `Restore ccache (GitHub-hosted)`
 step (#420). The brew cache only restores the bottle download cache —
 it does NOT restore the brew config that would tell the runner
 "updates are recent," so `brew update --quiet` is still required

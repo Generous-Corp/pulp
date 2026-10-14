@@ -86,7 +86,7 @@ jobs:
       # uses the same key and path so its configure reuses those sources. It
       # never saves.
       - name: Restore FetchContent sources
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps

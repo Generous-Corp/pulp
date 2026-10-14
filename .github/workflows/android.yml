@@ -103,7 +103,7 @@ jobs:
       - name: Restore Gradle caches (GitHub-hosted)
         if: runner.environment == 'github-hosted'
         id: gradle-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.gradle/caches
@@ -127,7 +127,7 @@ jobs:
 
       - name: Save Gradle caches (main, GitHub-hosted)
         if: runner.environment == 'github-hosted' && github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && steps.gradle-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             ~/.gradle/caches
@@ -156,7 +156,7 @@ jobs:
       # verify step above fails.
       - name: Upload APK + build logs (diagnostic)
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-android-${{ matrix.os }}-diag
           path: |
@@ -170,7 +170,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-android-${{ matrix.os }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
@@ -237,7 +237,7 @@ jobs:
           sdkmanager "emulator"
 
       - name: Download APK
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: pulp-android-macos-latest
 
