@@ -3806,6 +3806,14 @@
    ],
    "kind": "python"
   },
+  "ci-cause-notices-selftest": {
+   "entry": "tools/ci/test_ci_cause_notices.py",
+   "inputs": [
+    "tools/ci/ci_cause_notices.sh",
+    "tools/ci/test_ci_cause_notices.py"
+   ],
+   "kind": "python"
+  },
   "ci-python-selector-selftest": {
    "entry": "tools/ci/test_find_python311.py",
    "inputs": [
