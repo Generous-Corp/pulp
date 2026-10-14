@@ -52,7 +52,7 @@ jobs:
             cmake_architectures: ''
             sdk_formats: 'Standalone;VST3;CLAP;LV2'
             report_formats: 'Standalone,VST3,CLAP,LV2'
-            report_architectures: 'x86_64'
+            report_architectures: 'x86_64-win'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     name: ${{ matrix.leg }}
