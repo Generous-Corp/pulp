@@ -87,16 +87,10 @@ def strip_timestamp(line: str) -> str:
     return _TIMESTAMP.sub("", line.rstrip("\r\n"))
 
 
-def first_error_line(log_text: str) -> str:
-    """Return the first line that says what went wrong, or "".
-
-    Generic runner lines ("Process completed with exit code 1") are skipped
-    unless nothing more specific exists, because they are always present and
-    never actionable.
-    """
+def _scan_errors(lines: list[str]) -> tuple[str, str]:
+    """(first specific error line, first generic runner error line)."""
     fallback = ""
-    for raw in log_text.splitlines():
-        line = strip_timestamp(raw).strip()
+    for line in lines:
         if not line or not _ERRORISH.search(line):
             continue
         # `echo "::error::..."` in a shell trace is a command, not an error.
@@ -105,8 +99,43 @@ def first_error_line(log_text: str) -> str:
         if any(p.match(line) for p in _GENERIC_ERRORS):
             fallback = fallback or line
             continue
-        return line[:_ERROR_LINE_LIMIT]
-    return fallback[:_ERROR_LINE_LIMIT]
+        return line, fallback
+    return "", fallback
+
+
+def failing_step_lines(lines: list[str]) -> list[str]:
+    """The lines of the step that failed, or [] if the log has no such marker.
+
+    The runner prints `##[group]Run <command>` at the start of every step and
+    `##[error]Process completed with exit code N` when one fails, so the failing
+    step is the last group opened before the first exit-code error.
+    """
+    end = next(
+        (i for i, line in enumerate(lines) if _GENERIC_ERRORS[0].match(line)), None
+    )
+    if end is None:
+        return []
+    start = next(
+        (i for i in range(end, -1, -1) if lines[i].startswith("##[group]Run ")), 0
+    )
+    return lines[start:end + 1]
+
+
+def first_error_line(log_text: str) -> str:
+    """Return the first line that says what went wrong, or "".
+
+    The failing step is searched first: an earlier step can print an
+    error-shaped line and still succeed (a dbus warning during apt setup sits
+    thousands of lines before the packager's real refusal). Generic runner
+    lines ("Process completed with exit code 1") are used only when nothing more
+    specific exists, because they are always present and never actionable.
+    """
+    lines = [strip_timestamp(raw).strip() for raw in log_text.splitlines()]
+    specific, _ = _scan_errors(failing_step_lines(lines))
+    if specific:
+        return specific[:_ERROR_LINE_LIMIT]
+    specific, fallback = _scan_errors(lines)
+    return (specific or fallback)[:_ERROR_LINE_LIMIT]
 
 
 @dataclass(frozen=True)
@@ -183,7 +212,7 @@ class Diagnosis:
         out = [
             f"  - **Workflow:** {self.workflow} — [run]({self.run_url})",
             f"  - **Failing job › step:** `{self.job}` › `{self.step}`",
-            f"  - **First error:** `{self.first_error or '(no error line in the job log)'}`",
+            f"  - **First error:** `{self.first_error or '(none: the job log was empty or could not be fetched; the reconciler run names the fetch error)'}`",
             f"  - **Cause class:** {self.cause}",
         ]
         if self.fix:
