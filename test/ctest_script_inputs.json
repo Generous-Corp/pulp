@@ -4376,7 +4376,6 @@
     "tools/ci/tart-provision.sh",
     "tools/deps/audit.py",
     "tools/deps/test_audit_extra.py",
-    "tools/install-shipyard.sh",
     "tools/packages/test-stubs"
    ],
    "kind": "python"
@@ -4390,7 +4389,6 @@
     "tools/deps/audit.py",
     "tools/deps/test_audit.py",
     "tools/deps/wgpu_native_digests.py",
-    "tools/install-shipyard.sh",
     "tools/packages/test-stubs"
    ],
    "kind": "python"
@@ -4400,7 +4398,6 @@
    "inputs": [
     "tools/ci/tart-provision.sh",
     "tools/deps/audit.py",
-    "tools/install-shipyard.sh",
     "tools/packages/test-stubs"
    ],
    "kind": "python"
