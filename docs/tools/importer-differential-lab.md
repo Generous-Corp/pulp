@@ -100,6 +100,14 @@ python3 tools/import-validation/importer_differential_lab.py benchmark \
   --output /tmp/importer-differential/benchmark
 ```
 
+The benchmark preserves the caller's `--cache-state` declaration on every
+run; it does not infer `cold` or `warm` from run order. Each receipt records
+the source, browser provenance, importer and observer hashes, host identity,
+per-run report links, fidelity comparison, and the native Skia render receipt.
+Browser and native processes still run sequentially within a trial, so their
+timing difference remains diagnostic until a controlled, alternated protocol
+is used.
+
 Timing numbers become load-bearing only when a caller supplies a frozen budget
 file. The keys are measured importer-lab timings in milliseconds; omitted keys
 are not gated:
@@ -125,6 +133,12 @@ The checked-in corpus covers static HTML, flex, grid, CSS variables,
 pseudo-elements, absolute positioning, SVG, form controls, Canvas, runtime
 state, typography, and media queries. It is a diagnostic seed corpus, not proof
 of general web equivalence.
+
+The methodology is informed by Octane's retained-plan and longest-task
+benchmarks: preserve the complete receipt and phase boundaries before treating
+an aggregate timing as a product claim. Runtime hydration and replay work
+remain outside Pulp's importer scope; Vellum owns the browser and GPU parity
+oracle.
 
 The initial 2026-07-30 calibration run completed all 12 fixtures:
 
