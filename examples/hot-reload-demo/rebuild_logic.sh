@@ -9,14 +9,15 @@
 # reload transaction (the sound keeps playing on the previous DSP).
 set -euo pipefail
 
-BUILD_DIR="${PULP_BUILD_DIR:-}"
-if [[ -z "$BUILD_DIR" ]]; then
-    # Walk up to the repo root (the dir containing CMakeLists.txt + build/).
-    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    root="$here"
-    while [[ "$root" != "/" && ! -d "$root/build" ]]; do root="$(dirname "$root")"; done
-    BUILD_DIR="$root/build"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$here"
+while [[ "$root" != "/" && ! -f "$root/tools/ci/governed-build.sh" ]]; do root="$(dirname "$root")"; done
+if [[ ! -f "$root/tools/ci/governed-build.sh" ]]; then
+    echo "error: could not locate the Pulp checkout root" >&2
+    exit 1
 fi
+GOVERNED_BUILD="$root/tools/ci/governed-build.sh"
+BUILD_DIR="${PULP_BUILD_DIR:-$root/build}"
 
 if [[ ! -d "$BUILD_DIR" ]]; then
     echo "error: no build dir found (set PULP_BUILD_DIR)" >&2
@@ -24,6 +25,6 @@ if [[ ! -d "$BUILD_DIR" ]]; then
 fi
 
 echo "Rebuilding hot-reload logic via $BUILD_DIR ..."
-cmake --build "$BUILD_DIR" --target hot-reload-demo-logic
+bash "$GOVERNED_BUILD" cmake --build "$BUILD_DIR" --target hot-reload-demo-logic
 echo "Published: $HOME/.pulp/hot-reload-demo/logic.dylib"
 echo "If a host has the plugin loaded, the DSP just hot-swapped."

@@ -394,6 +394,24 @@ class BuildGovernancePathTests(unittest.TestCase):
             source, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
         )
 
+    def test_hot_reload_rebuild_scripts_route_through_governor(self) -> None:
+        for relative, target in (
+            ("examples/hot-reload-demo/rebuild_logic.sh", "hot-reload-demo-logic"),
+            ("examples/hot-reload-synth/rebuild_logic.sh", "hot-reload-synth-logic"),
+        ):
+            with self.subTest(relative=relative):
+                source = read_source(relative)
+                build_lines = [
+                    line for line in source.splitlines()
+                    if "cmake --build" in line and not line.lstrip().startswith("#")
+                ]
+                self.assertEqual(len(build_lines), 1)
+                self.assertIn(
+                    f'bash "$GOVERNED_BUILD" cmake --build "$BUILD_DIR" --target {target}',
+                    build_lines[0],
+                )
+                self.assertNotRegex(source, r"(?m)^\s*cmake --build")
+
 
 if __name__ == "__main__":
     unittest.main()
