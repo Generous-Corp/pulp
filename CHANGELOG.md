@@ -9,6 +9,17 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09671"></a>
+## [0.967.1] - 2026-10-14
+
+- release/version bump ([#10278](https://github.com/Generous-Corp/pulp/pull/10278))
+- fix/cli governed create bump 20261014 ([#10275](https://github.com/Generous-Corp/pulp/pull/10275))
+- g2b/mirror edge view audio ([#10273](https://github.com/Generous-Corp/pulp/pull/10273))
+- test/signalgraph installed contract 20261014 ([#10274](https://github.com/Generous-Corp/pulp/pull/10274))
+- fix/restore gate starvation test 20261014 ([#10271](https://github.com/Generous-Corp/pulp/pull/10271))
+- codex/p2 native identity gate 20261014 ([#10270](https://github.com/Generous-Corp/pulp/pull/10270))
+- codex/importer benchmark status 20261014 ([#10269](https://github.com/Generous-Corp/pulp/pull/10269))
+
 <a id="v09670"></a>
 ## [0.967.0] - 2026-10-14
 
@@ -10677,6 +10688,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.967.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.967.1
 [0.967.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.967.0
 [0.966.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.966.1
 [0.966.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.966.0
