@@ -3953,7 +3953,9 @@
    "inputs": [
     "core/host/include/pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
     "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+    "core/host/include/pulp/host/forge_sequencing_catalog.hpp",
     "core/host/src/forge_dynamics_catalog.cpp",
+    "core/host/src/forge_sequencing_catalog.cpp",
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
@@ -4524,7 +4526,9 @@
    "inputs": [
     "core/host/include/pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
     "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+    "core/host/include/pulp/host/forge_sequencing_catalog.hpp",
     "core/host/src/forge_dynamics_catalog.cpp",
+    "core/host/src/forge_sequencing_catalog.cpp",
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
