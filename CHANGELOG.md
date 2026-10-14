@@ -9,6 +9,20 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09680"></a>
+## [0.968.0] - 2026-10-14
+
+- release/version bump ([#10283](https://github.com/Generous-Corp/pulp/pull/10283))
+
+<a id="v09672"></a>
+## [0.967.2] - 2026-10-14
+
+- release/version bump ([#10282](https://github.com/Generous-Corp/pulp/pull/10282))
+- refactor/android build governance 20261014 ([#10280](https://github.com/Generous-Corp/pulp/pull/10280))
+- feature/pluginviewhost carve ([#10272](https://github.com/Generous-Corp/pulp/pull/10272))
+- refactor/next slice 20261014 ([#10279](https://github.com/Generous-Corp/pulp/pull/10279))
+- codex/fix sample region wasm process 20261014 ([#10276](https://github.com/Generous-Corp/pulp/pull/10276))
+
 <a id="v09671"></a>
 ## [0.967.1] - 2026-10-14
 
@@ -10688,6 +10702,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.968.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.968.0
+[0.967.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.967.2
 [0.967.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.967.1
 [0.967.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.967.0
 [0.966.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.966.1
