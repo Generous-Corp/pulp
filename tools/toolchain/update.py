@@ -58,6 +58,10 @@ def diff_table(before: dict, after: dict, lock_before: str, lock_after: str) -> 
     old_sy, new_sy = before["shipyard"], after["shipyard"]
     if old_sy["version"] != new_sy["version"]:
         lines.append(f"| shipyard pin | all | {old_sy['version']} | {new_sy['version']} |")
+    if old_sy["installer_sha256"] != new_sy["installer_sha256"]:
+        lines.append(
+            f"| shipyard install.sh | all | {old_sy['installer_sha256'][:12]} | {new_sy['installer_sha256'][:12]} |"
+        )
     for name in sorted(set(old_sy["assets"]) | set(new_sy["assets"])):
         old, new = old_sy["assets"].get(name, "absent"), new_sy["assets"].get(name, "absent")
         if old != new:

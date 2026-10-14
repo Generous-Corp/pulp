@@ -640,9 +640,13 @@ workstream provider; on macOS the signed `.dmg`) and refuses any whose sha256
 differs from the pin before the installer runs. It names the URL, both digests
 and the command that accepts a re-published asset in a reviewed PR. After the
 installer finishes it checks that the installed binary is the verified one (on
-macOS, the `shipyard` binary inside the verified `.dmg`), because the installer
-downloads again. `SHIPYARD_SKIP_DOWNLOAD=1` reuses an installed binary and
-prints that nothing was verified.
+macOS, the binaries inside the verified `.dmg`), because the installer
+downloads again. On a mismatch it removes the new binaries and puts back the
+ones it replaced, so nothing unverified is left on `PATH`. The upstream
+`install.sh` itself is pinned too (`installer_sha256` in the manifest): the
+wrapper downloads it from the pinned repository's tag, refuses it if its sha256
+differs, and runs only the verified copy. `SHIPYARD_SKIP_DOWNLOAD=1` reuses an
+installed binary and prints that the binary was not verified.
 
 Pulp tracks the latest verified public Shipyard release by default while still
 recording an immutable exact tag. Automation should propose the newest release;

@@ -50,6 +50,9 @@ CHECKED = ("python", "cmake", "ninja", "node", "rust", "clang_format")
 # checksum file tools/install-shipyard.sh reads without a TOML parser.
 SHIPYARD_PIN = "tools/shipyard.toml"
 SHIPYARD_SUMS = "tools/toolchain/shipyard.sha256"
+# The upstream installer script install-shipyard.sh runs; its digest is the
+# last line of the checksum file under this name.
+SHIPYARD_INSTALLER = "install.sh"
 SHIPYARD_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 
 TARGETS = {
@@ -189,6 +192,8 @@ def _require_shipyard(shipyard: object) -> None:
         raise ValueError(f"shipyard.version must be an exact release tag such as v0.269.1, not {shipyard.get('version')!r}")
     if not isinstance(shipyard.get("repo"), str) or not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", shipyard["repo"]):
         raise ValueError("shipyard.repo must be owner/name")
+    if not isinstance(shipyard.get("installer_sha256"), str) or not re.match(r"^[0-9a-f]{64}$", shipyard["installer_sha256"]):
+        raise ValueError("shipyard.installer_sha256 must be the 64-hex sha256 of install.sh at the pinned tag")
     assets = shipyard.get("assets")
     if not isinstance(assets, dict) or not assets or any(
         not re.match(r"^shipyard[A-Za-z0-9_.-]*$", name) or not isinstance(d, str) or not re.match(r"^[0-9a-f]{64}$", d)
@@ -382,6 +387,7 @@ def render_shipyard_sums(data: dict, digest: str) -> str:
         f"# Shipyard {shipyard['version']} release assets ({shipyard['repo']}), sha256sum format.",
     ]
     lines += [f"{sha}  {name}" for name, sha in sorted(shipyard["assets"].items())]
+    lines.append(f"{shipyard['installer_sha256']}  {SHIPYARD_INSTALLER}")
     return "\n".join(lines) + "\n"
 
 
@@ -434,14 +440,23 @@ def _tag_key(tag: str) -> tuple[int, ...]:
     return tuple(int(part) for part in tag.lstrip("v").split("."))
 
 
+def _fetch(url: str) -> bytes:
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310 - fixed https URL
+            return response.read()
+    except OSError as exc:
+        raise ValueError(f"cannot read {url}: {exc}") from exc
+
+
+def fetch_shipyard_installer_sha256(repo: str, tag: str) -> str:
+    """sha256 of install.sh at the release tag. Network read."""
+    return hashlib.sha256(_fetch(f"https://raw.githubusercontent.com/{repo}/refs/tags/{tag}/install.sh")).hexdigest()
+
+
 def fetch_shipyard_assets(repo: str, tag: str) -> dict[str, str]:
     """Asset name -> sha256 from the release's own checksums.sha256. Network read."""
     url = f"https://github.com/{repo}/releases/download/{tag}/checksums.sha256"
-    try:
-        with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310 - fixed https URL
-            body = response.read().decode("utf-8")
-    except OSError as exc:
-        raise ValueError(f"cannot read {url}: {exc}") from exc
+    body = _fetch(url).decode("utf-8")
     assets: dict[str, str] = {}
     for line in body.splitlines():
         match = re.match(r"^([0-9a-f]{64})\s+\*?(shipyard[A-Za-z0-9_.-]*)$", line.strip())
@@ -452,8 +467,8 @@ def fetch_shipyard_assets(repo: str, tag: str) -> dict[str, str]:
     return assets
 
 
-def record_shipyard_pin(manifest: Path, tag: str, assets: dict[str, str]) -> None:
-    """Rewrite [shipyard] version and the whole [shipyard.assets] table."""
+def record_shipyard_pin(manifest: Path, tag: str, assets: dict[str, str], installer_sha256: str) -> None:
+    """Rewrite [shipyard] version and installer_sha256 and the whole [shipyard.assets] table."""
     if not SHIPYARD_TAG.match(tag):
         raise ValueError(f"--shipyard needs an exact release tag such as v0.269.1, not {tag!r}")
     lines = manifest.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -462,6 +477,10 @@ def record_shipyard_pin(manifest: Path, tag: str, assets: dict[str, str]) -> Non
     if index is None:
         raise ValueError(f"{manifest}: [shipyard] has no version line")
     lines[index] = f'version = "{tag}"\n'
+    i_index = next((i for i in range(begin + 1, end) if re.match(r"^installer_sha256\s*=", lines[i])), None)
+    if i_index is None:
+        raise ValueError(f"{manifest}: [shipyard] has no installer_sha256 line")
+    lines[i_index] = f'installer_sha256 = "{installer_sha256}"\n'
     a_begin, a_end = _section_bounds(lines, "shipyard.assets")
     body = [f'"{name}" = "{sha}"\n' for name, sha in sorted(assets.items())]
     lines[a_begin + 1 : a_end] = body + ["\n"]
@@ -670,7 +689,11 @@ def generate(
                 f"--shipyard {shipyard} is older than the pinned {current}; a downgrade is a deliberate "
                 "decision: edit [shipyard] in tools/toolchain/manifest.toml by hand in a reviewed PR"
             )
-        record_shipyard_pin(manifest, shipyard, fetch_shipyard_assets(data["shipyard"]["repo"], shipyard))
+        repo = data["shipyard"]["repo"]
+        record_shipyard_pin(
+            manifest, shipyard, fetch_shipyard_assets(repo, shipyard),
+            fetch_shipyard_installer_sha256(repo, shipyard),
+        )
         data, digest = load(manifest)
     config = pulp_root / MISE_CONFIG
     tools_config = pulp_root / MISE_TOOLS_CONFIG

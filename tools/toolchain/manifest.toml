@@ -105,6 +105,9 @@ unlocked = { windows-arm64 = "conda-forge publishes no windows-arm64 clang-forma
 # checksums.sha256; `generate.py --shipyard <tag>` rewrites this table from it.
 version = "v0.269.1"
 repo = "danielraffel/Shipyard"
+# sha256 of install.sh at refs/tags/<version>: install-shipyard.sh runs that
+# script, so it is pinned like a binary and refused if it differs.
+installer_sha256 = "c6ad3645c90cbe91ab6c5caef20b3cc11d4a71abf2443f59aef38fee7387c9a8"
 
 [shipyard.assets]
 "shipyard-linux-arm64" = "8d723c275e8ae8f01d07b5ca15234baabe7b043b6919e43af9eaf96f003ff738"

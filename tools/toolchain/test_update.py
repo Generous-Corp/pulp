@@ -29,6 +29,8 @@ class UpdateTests(unittest.TestCase):
         self.addCleanup(setattr, generate, "write_mise_lock", self.original_writer)
         self.original_fetch = generate.fetch_shipyard_assets
         self.addCleanup(setattr, generate, "fetch_shipyard_assets", self.original_fetch)
+        self.addCleanup(setattr, generate, "fetch_shipyard_installer_sha256", generate.fetch_shipyard_installer_sha256)
+        generate.fetch_shipyard_installer_sha256 = lambda repo, tag: "e" * 64
         self.addCleanup(setattr, generate, "require_pinned_mise", generate.require_pinned_mise)
         generate.require_pinned_mise = lambda mise, data: None
 
@@ -95,6 +97,7 @@ class UpdateTests(unittest.TestCase):
         generate.fetch_shipyard_assets = lambda repo, tag: {"shipyard-linux-x64": "c" * 64}
         table = update.update(self.root, "shipyard", "v0.300.0", None, "2026-10-14")
         self.assertIn("| shipyard pin | all | v0.269.1 | v0.300.0 |", table)
+        self.assertIn("| shipyard install.sh | all | c6ad3645c90c | eeeeeeeeeeee |", table)
         self.assertIn("| shipyard asset shipyard-linux-x64 | shipyard-linux-x64 | 327dd4b5f72a | cccccccccccc |", table)
         self.assertTrue(any("shipyard-macos-arm64.dmg | 73c426a8a6f9 | absent" in row for row in table))
 

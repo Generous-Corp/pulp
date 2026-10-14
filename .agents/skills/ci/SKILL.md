@@ -6717,7 +6717,9 @@ every release asset, taken from the release's `checksums.sha256`.
 it, so `shipyard pin bump`, which edits `tools/shipyard.toml` alone, fails the
 `toolchain-test_generate-selftest` drift test until it calls the generator.
 The upstream installer verifies no digest; `install-shipyard.sh` refuses a
-downloaded asset whose sha256 differs from the pin, before the installer runs.
+downloaded asset whose sha256 differs from the pin, and an `install.sh` that
+differs from its pinned `installer_sha256`, before anything runs. If the
+installed binary still turns out different, it restores the previous one.
 
 - **Pinned at v0.68.0+: a killed `shipyard pr`/`ship` worker no longer wedges
   the PR.** Before v0.68.0, a worker that died (crash, `kill`, launching a

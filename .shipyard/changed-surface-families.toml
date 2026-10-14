@@ -6005,6 +6005,7 @@ tests = [
   "inspector-protocol-registry-check-selftest",
   "inspector-protocol-registry-complete",
   "inspector-truth-check-selftest",
+  "install-shipyard-queue-repair",
   "ios-gate-digest-selftest",
   "local-diff-cover-selftest",
   "pr-head-affected-tests-selftest",

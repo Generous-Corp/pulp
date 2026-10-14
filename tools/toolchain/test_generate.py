@@ -274,21 +274,25 @@ class StrictPinTests(unittest.TestCase):
             root = Path(td)
             self.fixture(root)
             seen = []
-            original = generate.fetch_shipyard_assets
+            original = generate.fetch_shipyard_assets, generate.fetch_shipyard_installer_sha256
             generate.fetch_shipyard_assets = lambda repo, tag: seen.append((repo, tag)) or dict(assets)
+            generate.fetch_shipyard_installer_sha256 = lambda repo, tag: "d" * 64
             try:
                 generate.generate(root, None, False, shipyard="v0.270.0")
             finally:
-                generate.fetch_shipyard_assets = original
+                generate.fetch_shipyard_assets, generate.fetch_shipyard_installer_sha256 = original
             self.assertEqual([("danielraffel/Shipyard", "v0.270.0")], seen)
             data, _ = generate.load(root / "tools/toolchain/manifest.toml")
             self.assertEqual("v0.270.0", data["shipyard"]["version"])
             self.assertEqual(assets, data["shipyard"]["assets"])  # old asset rows are gone
             self.assertIn('version = "v0.270.0"', (root / generate.SHIPYARD_PIN).read_text(encoding="utf-8"))
-            self.assertIn("a" * 64 + "  shipyard-linux-x64", (root / generate.SHIPYARD_SUMS).read_text(encoding="utf-8"))
+            sums = (root / generate.SHIPYARD_SUMS).read_text(encoding="utf-8")
+            self.assertIn("a" * 64 + "  shipyard-linux-x64", sums)
+            self.assertIn("d" * 64 + "  install.sh", sums)
+            self.assertEqual("d" * 64, data["shipyard"]["installer_sha256"])
             generate.generate(root, None, True)
             with self.assertRaises(ValueError):
-                generate.record_shipyard_pin(root / "tools/toolchain/manifest.toml", "latest", assets)
+                generate.record_shipyard_pin(root / "tools/toolchain/manifest.toml", "latest", assets, "d" * 64)
             with self.assertRaises(ValueError) as ctx:
                 generate.generate(root, None, False, shipyard="v0.269.9")
             self.assertIn("older than the pinned v0.270.0", str(ctx.exception))
@@ -299,6 +303,7 @@ class StrictPinTests(unittest.TestCase):
             ('version = "v0.269.1"', 'version = "latest"', "exact release tag"),
             ('"shipyard-linux-x64" = "327dd4b5', '"shipyard-linux-x64" = "327dd4b', "64-hex"),
             ('repo = "danielraffel/Shipyard"', 'repo = "Shipyard"', "owner/name"),
+            ('installer_sha256 = "c6ad3645', 'installer_sha256 = "c6ad364', "sha256 of install.sh"),
         )
         for old, new, needle in cases:
             with self.subTest(new=new), tempfile.TemporaryDirectory() as td:

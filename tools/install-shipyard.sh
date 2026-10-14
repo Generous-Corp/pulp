@@ -87,7 +87,9 @@ REPO="${REPO:-danielraffel/Shipyard}"
 # means the same Pulp commit can run different installer code over
 # time; pinning to `refs/tags/<VERSION>` makes the installer
 # reproducible alongside everything else in this repo.
-UPSTREAM_INSTALLER="https://raw.githubusercontent.com/danielraffel/Shipyard/refs/tags/${VERSION}/install.sh"
+# The script is pinned by sha256 too (tools/toolchain/shipyard.sha256), and
+# is downloaded, verified and only then run.
+UPSTREAM_INSTALLER="https://raw.githubusercontent.com/${REPO}/refs/tags/${VERSION}/install.sh"
 
 # ── Status mode: report and exit ────────────────────────────────────────────
 
@@ -228,43 +230,110 @@ for asset in $ASSETS; do
 done
 [ "$VERIFY" = 1 ] && echo "→ Verified $ASSETS against tools/toolchain/manifest.toml"
 
-# The binary the installer should put in place: the raw asset on Linux and
-# Windows, the `shipyard` file inside the verified .dmg on macOS.
-EXPECTED_BINARY_SHA=""
+# The binaries the installer should put in place, as "<name> <sha256>" lines:
+# the raw assets on Linux and Windows, the files inside the verified .dmg on
+# macOS.
+INSTALL_DIR="${SHIPYARD_INSTALL_DIR:-$HOME/.local/bin}"
+EXPECTED_BINARIES=""
 if [ "$VERIFY" = 0 ]; then
     :
 elif [ "$ASSET_OS" = macos ]; then
     mnt="$VERIFY_DIR/mnt"
     if hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$VERIFY_DIR/$ASSETS" >/dev/null 2>&1; then
-        [ -f "$mnt/shipyard" ] && EXPECTED_BINARY_SHA="$(sha256_of "$mnt/shipyard")"
+        for binary in shipyard shipyard-workstream-provider; do
+            if [ -f "$mnt/$binary" ]; then
+                EXPECTED_BINARIES="$EXPECTED_BINARIES$binary $(sha256_of "$mnt/$binary")
+"
+            fi
+        done
         hdiutil detach "$mnt" >/dev/null 2>&1 || true
     fi
-    if [ -z "$EXPECTED_BINARY_SHA" ]; then
-        echo "Error: could not read the shipyard binary inside the verified $ASSETS." >&2
-        exit 2
-    fi
+    case "$EXPECTED_BINARIES" in
+        "shipyard "*) ;;
+        *)
+            echo "Error: could not read the shipyard binary inside the verified $ASSETS." >&2
+            exit 2
+            ;;
+    esac
 else
-    EXPECTED_BINARY_SHA="$(pinned_digest "shipyard-$ASSET_OS-$ASSET_ARCH$EXE")"
+    EXPECTED_BINARIES="shipyard$EXE $(pinned_digest "shipyard-$ASSET_OS-$ASSET_ARCH$EXE")
+shipyard-workstream-provider$EXE $(pinned_digest "shipyard-workstream-provider-$ASSET_OS-$ASSET_ARCH$EXE")
+"
 fi
+
+# ── Verify the pinned upstream installer script ─────────────────────────────
+
+INSTALLER_FILE="$VERIFY_DIR/install.sh"
+installer_want="$(pinned_digest install.sh)"
+if [ -z "$installer_want" ]; then
+    echo "Error: tools/toolchain/manifest.toml pins no sha256 for install.sh ($VERSION)." >&2
+    echo "  fix: python3 tools/toolchain/generate.py --shipyard $VERSION" >&2
+    exit 2
+fi
+if ! curl -fsSL "$UPSTREAM_INSTALLER" -o "$INSTALLER_FILE"; then
+    echo "Error: could not download $UPSTREAM_INSTALLER to verify it." >&2
+    exit 2
+fi
+installer_got="$(sha256_of "$INSTALLER_FILE")"
+if [ "$installer_got" != "$installer_want" ]; then
+    echo "Error: $UPSTREAM_INSTALLER does not match the pin; refusing to run it." >&2
+    echo "  pinned sha256:   $installer_want (tools/toolchain/manifest.toml [shipyard] installer_sha256)" >&2
+    echo "  received sha256: $installer_got" >&2
+    echo "  The script at that tag changed after it was pinned. Confirm with the Shipyard" >&2
+    echo "  publisher, then accept it in a reviewed PR:" >&2
+    echo "    python3 tools/toolchain/generate.py --shipyard $VERSION" >&2
+    exit 2
+fi
+
+# Keep the binaries the installer is about to replace, so a binary that turns
+# out not to be the pinned one can be removed and the previous one put back.
+BACKUP_DIR="$VERIFY_DIR/previous"
+mkdir -p "$BACKUP_DIR"
+for binary in "shipyard$EXE" "shipyard-workstream-provider$EXE"; do
+    if [ -f "$INSTALL_DIR/$binary" ]; then
+        cp -p "$INSTALL_DIR/$binary" "$BACKUP_DIR/$binary"
+    fi
+done
+
+restore_previous() {
+    for binary in "shipyard$EXE" "shipyard-workstream-provider$EXE"; do
+        rm -f "$INSTALL_DIR/$binary"
+        if [ -f "$BACKUP_DIR/$binary" ]; then
+            cp -p "$BACKUP_DIR/$binary" "$INSTALL_DIR/.$binary.restore.$$"
+            mv -f "$INSTALL_DIR/.$binary.restore.$$" "$INSTALL_DIR/$binary"
+            echo "  restored the previous $INSTALL_DIR/$binary" >&2
+        else
+            echo "  removed $INSTALL_DIR/$binary (there was no previous one)" >&2
+        fi
+    done
+}
 
 # ── Delegate to upstream installer ──────────────────────────────────────────
 
 echo "→ Installing Shipyard $VERSION via upstream install.sh"
 echo "    source: $UPSTREAM_INSTALLER"
 
-SHIPYARD_VERSION="$VERSION" bash <(curl -fsSL "$UPSTREAM_INSTALLER")
+SHIPYARD_VERSION="$VERSION" bash "$INSTALLER_FILE"
 
-# The installer downloads the asset again; check that what it installed is the
-# binary verified above, so a replacement between the two downloads is caught.
-INSTALLED="${SHIPYARD_INSTALL_DIR:-$HOME/.local/bin}/shipyard$EXE"
-installed_sha="$(sha256_of "$INSTALLED" 2>/dev/null || true)"
-if [ "$VERIFY" = 1 ] && [ "$installed_sha" != "$EXPECTED_BINARY_SHA" ]; then
-    echo "Error: $INSTALLED is not the pinned Shipyard $VERSION binary." >&2
-    echo "  expected sha256: $EXPECTED_BINARY_SHA" >&2
-    echo "  installed sha256: ${installed_sha:-unreadable}" >&2
-    echo "  Do not run it. Re-run ./tools/install-shipyard.sh; if this repeats, the" >&2
-    echo "  release changed while installing: report it before accepting any new digest." >&2
-    exit 2
+# The installer downloads the assets again; check that what it installed is
+# what was verified above, so a replacement between the two downloads is
+# caught. On a mismatch the new binaries are removed and the previous ones put
+# back before exiting, so nothing unverified is left on PATH.
+if [ "$VERIFY" = 1 ]; then
+    while read -r binary want; do
+        [ -n "$binary" ] || continue
+        installed_sha="$(sha256_of "$INSTALL_DIR/$binary" 2>/dev/null || true)"
+        if [ "$installed_sha" != "$want" ]; then
+            echo "Error: $INSTALL_DIR/$binary is not the pinned Shipyard $VERSION binary." >&2
+            echo "  expected sha256: $want" >&2
+            echo "  installed sha256: ${installed_sha:-unreadable}" >&2
+            restore_previous
+            echo "  The release changed while installing: report it before accepting any new digest." >&2
+            exit 2
+        fi
+    done <<EOF_EXPECTED
+$EXPECTED_BINARIES
+EOF_EXPECTED
 fi
 
 # ── Legacy cleanup (post-success only) ──────────────────────────────────────
