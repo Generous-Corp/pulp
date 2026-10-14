@@ -87,6 +87,16 @@ PATH_FAMILIES = (
                 r"|tools/scripts/gpu_audio_provider_identity\.py|tools/deps/manifest\.json"
                 r"|test/cmake/verify_gpu_audio_provider\w*\.cmake)$"),
      re.compile(r"^pulp-gpu-(audio-provider-identity|host-mapped-pointer-|dawn-shared-io-provider-)")),
+    # The iOS control-shipping probe is a cmake-driven fixture, so its source
+    # files are invisible to the Python input inventory. Keep edits to the
+    # fixture and its registration connected to the test on PR heads.
+    ("ios-auv3-control-shipping",
+     re.compile(r"^(test/cmake/(cmake_smoke_tests\.cmake|test_ios_auv3_control_shipping\.cmake)|"
+                r"test/fixtures/ios-auv3-control-shipping/.*)$"),
+     re.compile(r"^cmake-ios-auv3-control-shipping$")),
+    ("no-editor-link-floor",
+     re.compile(r"^test/fixtures/no_editor_link_floor/"),
+     re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
 )
 
 
@@ -425,6 +435,14 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     scripts = script_reference_tests(paths, root)
     plan["script_references"] = len(scripts)
     chosen.extend(scripts)
+    # Unknown or undeclared script inputs are unsafe to skip. Run every
+    # script-driven test when a tools/ script changed without a known edge.
+    script_paths = [p for p in paths if p.startswith(("tools/ci/", "tools/scripts/"))]
+    if script_paths and not inputs and not scripts:
+        # The broad fallback is intentionally deferred: running every script
+        # test cannot fit the PR-head budget reliably. The merge queue still
+        # runs the full script tier, so this is a neutral, visible deferral.
+        plan["selection_unknown"] = True
     registered = registration_tests(build, paths, root, changes)
     plan["registrations"] = len(registered)
     chosen.extend(registered)
@@ -497,8 +515,8 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                  label_exclude: str, junit_dir: Path, chunk: int) -> dict:
     """Run ``tests`` in batches until the budget is spent."""
     start = time.monotonic()
-    results = {"passed": [], "failed": [], "skipped": [], "excluded_or_absent": [],
-               "failure_evidence": {}}
+    results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+               "excluded_or_absent": [], "failure_evidence": {}}
     for index in range(0, len(tests), chunk):
         batch = tests[index:index + chunk]
         if time.monotonic() - start >= budget:
@@ -522,7 +540,10 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
             elif state == "run":
                 results["passed"].append(test)
             elif state == "notrun":
-                results["skipped"].append(test)
+                # CTest's SKIP_RETURN_CODE is a self-reported notrun, not a
+                # budget omission.  It is useful evidence but must not make
+                # the PR-head step red.
+                results["notrun"].append(test)
             else:
                 results["excluded_or_absent"].append(test)
     results["seconds"] = round(time.monotonic() - start, 1)
@@ -663,8 +684,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print(json.dumps(plan, indent=2))
         return 0
+    if plan.get("selection_unknown"):
+        # Keep running selections established by declared inputs, registrations,
+        # and the build projection. Only the unknown portion is deferred to the
+        # merge queue; an unknown script must not discard known coverage.
+        print("::warning title=pr-head-affected-tests::selection unknown, deferred to merge queue")
 
-    results = {"passed": [], "failed": [], "skipped": [], "excluded_or_absent": [],
+    results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+               "excluded_or_absent": [],
                "seconds": 0.0}
     if plan["tests"]:
         junit_dir = args.junit_dir or Path(tempfile.mkdtemp(prefix="pr-head-affected-"))
@@ -695,6 +722,7 @@ def main(argv: list[str] | None = None) -> int:
         "selected": len(plan["tests"]), "passed": len(results["passed"]),
         "failed": len(results["failed"]), "pre_existing_on_base": len(pre_existing),
         "skipped_for_budget": len(results["skipped"]),
+        "notrun": len(results["notrun"]),
         "excluded_or_absent": len(results["excluded_or_absent"]),
         "minutes": round(results["seconds"] / 60, 2), "budget_minutes": args.budget_secs / 60,
     }
@@ -704,6 +732,11 @@ def main(argv: list[str] | None = None) -> int:
         more = len(results["skipped"]) - 40
         print(f"pr-head-affected-tests: SKIPPED (budget spent, not run here; the merge group "
               f"runs them): {shown}{f' and {more} more' if more > 0 else ''}")
+    if results["notrun"]:
+        shown = ", ".join(results["notrun"][:40])
+        more = len(results["notrun"]) - 40
+        print(f"pr-head-affected-tests: NOTRUN (self-skipped by ctest; not a budget omission): "
+              f"{shown}{f' and {more} more' if more > 0 else ''}")
     for test in results["failed"]:
         evidence = results.get("failure_evidence", {}).get(test, "ctest reported a failure without detail")
         reproduce = f"ctest --test-dir {build} -R '^{re.escape(test)}$' --output-on-failure -C Release"
@@ -711,7 +744,7 @@ def main(argv: list[str] | None = None) -> int:
                    f"reproduce=`{reproduce}`; safe_to_auto_apply=no; "
                    f"verify=`{reproduce}` passes")
         print(f"::error title=pr-head-affected-tests::{message}")
-    return 1 if results["failed"] else 0
+    return 1 if results["failed"] or results["skipped"] else 0
 
 
 if __name__ == "__main__":

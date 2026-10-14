@@ -33,8 +33,11 @@ NAMES = {
     "unit-a": set(), "unit-b": set(), "fast-one": {"pr-fast"},
     "cmake-install-layout": set(), "cmake-sdk-smoke": set(),
     "wide-non-native-selftest": set(), "other": set(),
+    "sample-region-compat-baseline": set(),
+    "no-editor-plugin-link-floor-artifacts": set(),
     "pulp-gpu-host-mapped-pointer-probe": set(), "pulp-gpu-audio-provider-identity": set(),
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
+    "cmake-ios-auv3-control-shipping": set(),
     "pulp-test-cli-migration-index": set(),
 }
 
@@ -73,7 +76,9 @@ class SelectionTests(unittest.TestCase):
 
     def test_tools_cmake_reaches_the_cmake_fixtures(self) -> None:
         plan = self.plan(["tools/cmake/PulpPlugin.cmake"], selection("all", []))
-        self.assertEqual(sorted(plan["tests"]), ["cmake-install-layout", "cmake-sdk-smoke"])
+        self.assertEqual(sorted(plan["tests"]), ["cmake-install-layout",
+                                                   "cmake-ios-auv3-control-shipping",
+                                                   "cmake-sdk-smoke"])
 
     def test_the_tier_manifest_classifier_and_registrations_reach_wide_non_native(self) -> None:
         for path in ("tools/ci/wide_non_native_checks.json", "tools/scripts/classify_changes.py",
@@ -95,6 +100,43 @@ class SelectionTests(unittest.TestCase):
         plan = self.plan(["core/gpu_audio/src/other.cpp"], selection("focused", []))
         self.assertEqual(plan["tests"], [])
 
+    def test_ios_control_shipping_fixture_reaches_its_cmake_probe(self) -> None:
+        for path in ("test/cmake/test_ios_auv3_control_shipping.cmake",
+                     "test/cmake/cmake_smoke_tests.cmake"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("all", []))
+                self.assertIn("cmake-ios-auv3-control-shipping", plan["tests"])
+
+    def test_no_editor_fixture_reaches_its_artifact_probe(self) -> None:
+        plan = self.plan(["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],
+                         selection("all", []))
+        self.assertIn("no-editor-link-floor", plan["families"])
+
+    def test_p0_2_replay_set_selects_each_merge_group_only_check(self) -> None:
+        cases = {
+            # #10053(a): the scanner is in the fixture tree, so the family rule
+            # reaches the platform link-floor artifact probe.
+            "10053a": (["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],
+                        "no-editor-plugin-link-floor-artifacts"),
+            # #8926 and #9015: the wide tier walks every tools/scripts file;
+            # its directory declaration is generated into the input manifest.
+            "8926": (["tools/scripts/test_sdk_development_provenance.py"],
+                      "wide-non-native-selftest"),
+            "9015": (["tools/scripts/gate_python_imports_check.py"],
+                      "wide-non-native-selftest"),
+            # #9177: the compatibility baseline declares its fixture directory.
+            "9177": (["test/fixtures/sample-region-compat/expected/abi.txt"],
+                      "sample-region-compat-baseline"),
+        }
+        for case, (paths, expected) in cases.items():
+            with self.subTest(case=case):
+                declared = step.script_input_tests(paths, REPO)
+                families = step.family_tests(paths, sorted(NAMES))
+                selected = set(declared)
+                selected.update(name for names in families.values() for name in names)
+                self.assertIn(expected, selected,
+                              f"replay {case} did not select {expected}: {selected}")
+
     def test_script_tests_are_added_even_for_a_docs_only_diff(self) -> None:
         # A census test parses docs/status: the declared inputs apply where the
         # build projection does not run at all.
@@ -113,6 +155,28 @@ class SelectionTests(unittest.TestCase):
         plan = self.plan(["test/test_a.cpp"], selection("focused", ["unit-a"]), own=["unit-b"])
         self.assertEqual(plan["tests"], ["unit-a"])
 
+    def test_an_unrelated_tools_change_defers_to_the_merge_queue(self) -> None:
+        plan = self.plan(["tools/scripts/unknown_reader.py"], selection("focused", []))
+        self.assertEqual(plan["tests"], [])
+        self.assertTrue(plan["selection_unknown"])
+
+    def test_sample_region_include_closure_paths_select_the_baseline(self) -> None:
+        for path in ("core/host/include/pulp/host/custom_node_type.hpp",
+                     "core/host/include/pulp/host/signal_graph.hpp",
+                     "test/sample_region_compat/compat_runner.cpp"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", []),
+                                 inputs=["sample-region-compat-baseline"])
+                self.assertIn("sample-region-compat-baseline", plan["tests"])
+
+
+    def test_budget_skips_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with mock.patch.object(step.time, "monotonic", side_effect=[0.0, 2.0, 2.0]):
+                result = step.run_budgeted(Path("/build"), ["unit-a"], 1.0, 1, "", root, 1)
+        self.assertEqual(result["skipped"], ["unit-a"])
+
     def test_rebuilt_binary_tests_are_added_even_without_source_projection(self) -> None:
         plan = self.plan(["core/other.cpp"], selection("focused", []),
                          rebuilt=["pulp-test-cli-migration-index"])
@@ -122,10 +186,6 @@ class SelectionTests(unittest.TestCase):
         plan = self.plan(["docs/a.md"], selection("focused", []),
                          rebuilt=["pulp-test-cli-migration-index"])
         self.assertEqual(plan["tests"], [])
-
-    def test_an_unrelated_tools_change_does_not_reach_the_families(self) -> None:
-        plan = self.plan(["tools/scripts/other.py"], selection("focused", ["other"]))
-        self.assertEqual(plan["tests"], ["other"])
 
 
 MANIFEST = """\
@@ -415,15 +475,15 @@ class BudgetTests(unittest.TestCase):
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
         # A ctest stand-in: reads the listed tests and writes a JUnit file in
-        # which a test named `bad-*` fails and the rest pass.
+        # which a test named `bad-*` fails, `skip-*` self-skips, and the rest pass.
         (self.bin / "ctest").write_text(
             "#!/usr/bin/env python3\n"
             "import sys, time\n"
             "a = sys.argv\n"
             "names = open(a[a.index('--tests-from-file') + 1]).read().split()\n"
             "time.sleep(float(__import__('os').environ.get('FAKE_CTEST_SLEEP', '0')))\n"
-            "cases = ''.join(f'<testcase name=\"{n}\" status=\"{\"fail\" if n.startswith(\"bad\") else \"run\"}\">'\n"
-            "                + ('<failure/>' if n.startswith('bad') else '') + '</testcase>' for n in names)\n"
+            "cases = ''.join(f'<testcase name=\"{n}\" status=\"{\"fail\" if n.startswith(\"bad\") else \"notrun\" if n.startswith(\"skip\") else \"run\"}\">'\n"
+            "                + ('<failure/>' if n.startswith('bad') else '<skipped/>' if n.startswith('skip') else '') + '</testcase>' for n in names)\n"
             "open(a[a.index('--output-junit') + 1], 'w').write(f'<testsuite>{cases}</testsuite>')\n")
         (self.bin / "ctest").chmod(0o755)
         self.env = mock.patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"})
@@ -455,6 +515,11 @@ class BudgetTests(unittest.TestCase):
             results = step.run_budgeted(self.tmp, ["a", "b", "c", "d"], 0.2, 1, "", self.tmp, 2)
         self.assertEqual(sorted(results["passed"]), ["a", "b"])
         self.assertEqual(results["skipped"], ["c", "d"])
+
+    def test_ctest_self_skips_are_reported_notrun_not_budget_skipped(self) -> None:
+        results = step.run_budgeted(self.tmp, ["skip-self"], 60, 1, "", self.tmp, 1)
+        self.assertEqual(results["notrun"], ["skip-self"])
+        self.assertEqual(results["skipped"], [])
 
 
 class WorkflowWiringTests(unittest.TestCase):
@@ -598,10 +663,12 @@ class DiffScopedRegistrationTests(unittest.TestCase):
 class ExitCodeTests(unittest.TestCase):
     """A red main does not fail the pull request; its own failure does."""
 
-    def _main(self, verdicts: dict) -> int:
+    def _main(self, verdicts: dict, *, skipped: list[str] | None = None,
+              notrun: list[str] | None = None) -> int:
         plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
                 "tests": ["a", "b"]}
-        results = {"passed": [], "failed": list(verdicts), "skipped": [],
+        results = {"passed": [], "failed": list(verdicts), "skipped": skipped or [],
+                   "notrun": notrun or [],
                    "excluded_or_absent": [], "seconds": 1.0}
         with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
                 mock.patch.object(step, "inventory_tests", return_value={}), \
@@ -616,6 +683,34 @@ class ExitCodeTests(unittest.TestCase):
 
     def test_control_one_branch_caused_failure_fails(self) -> None:
         self.assertEqual(self._main({"a": (True, "same"), "b": (False, "passes on base")}), 1)
+
+    def test_budget_skipped_selection_fails_the_real_step(self) -> None:
+        self.assertEqual(self._main({}, skipped=["b"]), 1)
+
+    def test_ctest_self_skip_does_not_fail_the_real_step(self) -> None:
+        self.assertEqual(self._main({}, notrun=["b"]), 0)
+
+    def test_unknown_selection_defers_neutrally_to_the_merge_queue(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
+                "tests": [], "selection_unknown": True}
+        with mock.patch.object(step, "diff_paths", return_value=["tools/scripts/new.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=plan), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 0)
+
+    def test_unknown_selection_keeps_known_tests(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
+                "tests": ["known"], "selection_unknown": True}
+        results = {"passed": ["known"], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": [], "seconds": 0.1}
+        with mock.patch.object(step, "diff_paths", return_value=["tools/scripts/new.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=plan), \
+                mock.patch.object(step, "run_budgeted", return_value=results) as run, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 0)
+        run.assert_called_once()
 
 
 if __name__ == "__main__":

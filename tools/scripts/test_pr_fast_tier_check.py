@@ -66,6 +66,13 @@ class SelectionTests(unittest.TestCase):
         ):
             self.assertIn(name, tier.REQUIRED_MEMBERS)
 
+    def test_slow_targeted_checks_are_rejected_from_fast_tier(self) -> None:
+        errors = tier.check_selection(
+            self.full_selection() + ["wide-non-native-selftest", "sample-region-compat-baseline"],
+            min_count=0,
+        )
+        self.assertTrue(any("non-subsecond" in error for error in errors))
+
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
