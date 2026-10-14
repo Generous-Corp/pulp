@@ -40,8 +40,26 @@
   ],
   "surfaces": {
     "installed_sdk": {
-      "disposition": "not_applicable",
-      "rationale": "This is a compatibility-preserving header organization slice. The existing routing umbrella remains available, public declarations retain their names and types, and no new runtime capability or product control is introduced."
+      "disposition": "exposed",
+      "rationale": "The new public host contract header is installed by the host include-tree rule in tools/cmake/PulpInstallRules.cmake when pulp-host exists. The existing routing header remains installed and includes it, preserving source compatibility. Delivery remains pending installed-consumer validation; this organization slice adds no runtime capability or product control.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": ["list(APPEND _pulp_sdk_header_subsystems host)", "FILES_MATCHING PATTERN \"*.hpp\""]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/signal_graph_executor_contract.hpp",
+          "needles": ["struct ConnectionClass", "ExecutorTopologyValidationCode"]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
     },
     "offline_timeline_cli": {
       "disposition": "not_applicable",
