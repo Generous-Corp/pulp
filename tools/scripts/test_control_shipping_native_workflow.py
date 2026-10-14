@@ -27,6 +27,11 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
         ):
             self.assertIn(value, self.workflow)
 
+        windows_leg = self.workflow.split("- leg: windows-x64", 1)[1].split(
+            "- leg:", 1
+        )[0]
+        self.assertIn("report_architectures: 'x86_64-win'", windows_leg)
+
     def test_installed_sdk_builds_real_format_targets(self) -> None:
         self.assertIn("tools/validation/sdk-smoke", self.workflow)
         self.assertIn("PULP_SDK_SMOKE_REQUIRE_FORMATS", self.workflow)
