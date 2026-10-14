@@ -7,7 +7,6 @@
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
     "design-output-and-packaging",
-    "design-source-ingest",
     "visual-proof-harness"
   ],
   "rationale": "Importer differential receipts now require explicit Skia backend evidence and preserve alpha-aware fidelity/provenance; this is watch-only measurement and does not move design-import, Chromium, rendering, or packaging authority.",
