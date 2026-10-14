@@ -2751,8 +2751,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/skia-gpu-build/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "8ab88285392cf013a512fea724aa88a95d8011af",
-          "object_id": "daad860b50261db15cdcc67738eedf7e7b0ca590",
+          "revision": "45ed93440d0b12e1f22f0acc19ad6e3eb19fb901",
+          "object_id": "0c391a3d9a722a93e97b0c27ee638ce3c40960f2",
           "object_type": "blob"
         },
         {
