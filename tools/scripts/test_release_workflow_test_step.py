@@ -72,6 +72,14 @@ RELEASE_SIGNING_HELPER = REPO_ROOT / "tools" / "scripts" / "configure_release_bo
 SHIPYARD_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
 
 
+def unix_package_source(case: unittest.TestCase) -> str:
+    """release-cli.yml's Unix package step plus the shared script it runs."""
+    run_block = case._find_step_run("Package CLI (Unix)")
+    case.assertIn('bash "$PULP_RELEASE_PACKAGE_SCRIPT"', run_block)
+    script = (REPO_ROOT / "tools/ci/release_package_cli.sh").read_text(encoding="utf-8")
+    return run_block + "\n" + script
+
+
 class SignAndReleaseNoTestGate(unittest.TestCase):
     """sign-and-release.yml must NOT re-run the unit-test suite.
 
@@ -796,7 +804,7 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
             self.text.index("PULP_RELEASE_MACOS_RUNS_ON_JSON"),
             "the PR-gate-specific selector must win before the legacy shared fallback",
         )
-        self.assertIn("needs: resolve-macos-runner", self.text)
+        self.assertIn("needs: [classify, resolve-macos-runner]", self.text)
         self.assertIn(
             "matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os",
             self.text,
@@ -878,7 +886,7 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         return match.group(1)
 
     def test_unix_package_step_bundles_cpp_delegate(self) -> None:
-        run_block = self._find_step_run("Package CLI (Unix)")
+        run_block = unix_package_source(self)
         self.assertIn('"$PULP_RELEASE_PACKAGER"', run_block)
         self.assertRegex(run_block, r"--binary\s+build/pulp")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/pulp-cpp")
@@ -912,7 +920,8 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         )
         self.assertIn("[ -x build/tools/import-design/pulp-import-design ]", run_block)
         self.assertIn('"${import_design_args[@]}"', run_block)
-        self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
+        self.assertIn('bash "$PULP_RELEASE_PACKAGE_SCRIPT" "${{ matrix.platform }}"', run_block)
+        self.assertIn('--out "pulp-${platform}.tar.gz"', run_block)
 
     def test_unix_strip_treats_import_design_as_versioned_payload(self) -> None:
         step_start = self.text.index("- name: Strip binaries (Unix)")
@@ -977,7 +986,11 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
 
     def test_dry_run_package_step_uses_versioned_browser_runtime(self) -> None:
+        # The dry-run packages through the shared script (its arguments live
+        # there) and verifies the packaged binaries in its own steps.
         dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        self.assertIn("bash tools/ci/release_package_cli.sh", dry_run)
+        dry_run += (REPO_ROOT / "tools/ci/release_package_cli.sh").read_text(encoding="utf-8")
         self.assertRegex(
             dry_run,
             r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
@@ -986,7 +999,11 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             r"--import-design-contract\s+build/tools/import-design/jsx-runtime/materialized_binding_contract\.mjs")
 
     def test_dry_run_packages_and_verifies_control_broker(self) -> None:
+        # The dry-run packages through the shared script (its arguments live
+        # there) and verifies the packaged binaries in its own steps.
         dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        self.assertIn("bash tools/ci/release_package_cli.sh", dry_run)
+        dry_run += (REPO_ROOT / "tools/ci/release_package_cli.sh").read_text(encoding="utf-8")
         self.assertRegex(
             dry_run,
             r"--control-broker-binary\s+build/inspect/pulp-control-broker",
@@ -1162,7 +1179,7 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn(
             "hashFiles('tools/scripts/prepare_node_runtime.py') != ''", prepare
         )
-        unix_package = self._find_step_run("Package CLI (Unix)")
+        unix_package = unix_package_source(self)
         windows_package = self._find_step_run("Package CLI (Windows)")
         self.assertIn('${PULP_NODE_RUNTIME_EXECUTABLE:-}', unix_package)
         self.assertIn("if ($env:PULP_NODE_RUNTIME_EXECUTABLE)", windows_package)
@@ -1372,7 +1389,7 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         windows_verify = self._find_step_run(
             "Verify release archive product matrix (Windows)"
         )
-        unix_package = self._find_step_run("Package CLI (Unix)")
+        unix_package = unix_package_source(self)
         windows_package = self._find_step_run("Package CLI (Windows)")
         self.assertIn(
             'compat_dir="${RUNNER_TEMP:?}/pulp-release-backfill-helpers"',

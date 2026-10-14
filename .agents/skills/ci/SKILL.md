@@ -5025,6 +5025,17 @@ bisectable.
   build with `-DPULP_BUILD_EXAMPLES=OFF` (matching `build.yml`). If you add a
   new release/packaging workflow, configure with examples OFF (or a populated
   `SKIA_DIR`), or the design-tool Skia gate will block it.
+- **One packaging step, three callers.** `release-cli.yml` (Package CLI
+  (Unix)), `release-dry-run.yml` and `release-path-pr-gate.yml` all run
+  `tools/ci/release_package_cli.sh`, and all three isolate dependencies with
+  the same "Isolate the build from shared caches" body.
+  `tools/scripts/test_release_package_step.py` fails if any caller keeps a
+  private `package_cli.py` invocation or a drifted isolation body. Change how a
+  release packages in the script, never in one workflow. Before this, the PR
+  gate never packaged, so #10220's FetchContent move passed it and stalled
+  four releases, and the dry-run's copy drifted and went red unnoticed. The PR
+  gate also runs in `merge_group` when the batch touches its `paths:` list,
+  read by `tools/ci/release_path_changed.py` from the workflow itself.
 - **A release job's dependencies live in its isolated root, not the home
   cache.** `release-cli.yml` sets `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` /
   `PULP_FETCHCONTENT_BASE_DIR` to a fresh `$RUNNER_TEMP/pulp-isolated-*` root.
