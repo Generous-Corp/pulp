@@ -72,6 +72,40 @@ class FindWgpuLibTests(unittest.TestCase):
                         mock.patch.object(pathlib.Path, "home", return_value=home):
                     self.assertEqual(pc.find_wgpu_lib(build, "linux-x64"), lib)
 
+    def test_find_wgpu_lib_ignores_shared_caches_when_isolated(self) -> None:
+        # The isolated root is empty and only a shared home cache holds a
+        # runtime: a release must refuse rather than bundle that copy.
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            build = root / "build"
+            build.mkdir()
+            isolated = root / "isolated"
+            isolated.mkdir()
+            home = root / "home"
+            shared = []
+            for cache in (home / ".cache" / "pulp", home / "Library" / "Caches" / "Pulp",
+                          root / "xdg" / "pulp", root / "appdata" / "Pulp"):
+                lib = cache / "fetchcontent-src" / "libwgpu_native.so"
+                lib.parent.mkdir(parents=True)
+                lib.write_text("shared", encoding="utf-8")
+                shared.append(lib)
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("PULP_SHARED_FETCHCONTENT_SOURCE_DIR",
+                                "PULP_FETCHCONTENT_BASE_DIR")}
+            env.update({
+                "PULP_SHARED_FETCHCONTENT_SOURCE_DIR": str(isolated),
+                "XDG_CACHE_HOME": str(root / "xdg"),
+                "LOCALAPPDATA": str(root / "appdata"),
+            })
+            with mock.patch.object(pathlib.Path, "home", return_value=home):
+                # Control: without the isolation variable the shared copy is found.
+                control = {k: v for k, v in env.items()
+                           if k != "PULP_SHARED_FETCHCONTENT_SOURCE_DIR"}
+                with mock.patch.dict(os.environ, control, clear=True):
+                    self.assertIn(pc.find_wgpu_lib(build, "linux-x64"), shared)
+                with mock.patch.dict(os.environ, env, clear=True):
+                    self.assertIsNone(pc.find_wgpu_lib(build, "linux-x64"))
+
     def test_find_wgpu_lib_finds_windows_dll_name(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             build = pathlib.Path(td) / "build"
