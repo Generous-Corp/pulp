@@ -493,6 +493,7 @@ def visual_metrics(
     ref_pixels = list(reference.get_flattened_data())
     candidate_pixels = list(candidate.get_flattened_data())
     total_distance = 0.0
+    alpha_distance = 0.0
     foreground_distance = 0.0
     foreground_samples = 0
     differing = 0
@@ -501,8 +502,10 @@ def visual_metrics(
     candidate_background = Counter(candidate_pixels).most_common(1)[0][0]
     for ref_pixel, candidate_pixel in zip(ref_pixels, candidate_pixels):
         delta = sum(abs(a - b) for a, b in zip(ref_pixel[:3], candidate_pixel[:3]))
+        alpha_delta = abs(ref_pixel[3] - candidate_pixel[3])
+        alpha_distance += alpha_delta
         total_distance += delta
-        if delta > threshold:
+        if delta > threshold or alpha_delta > threshold:
             differing += 1
         ref_foreground = sum(
             abs(a - b) for a, b in zip(ref_pixel[:3], reference_background[:3])) > 18
@@ -514,7 +517,9 @@ def visual_metrics(
             foreground_samples += 1
     samples = max(1, len(ref_pixels))
     mean_channel_error = total_distance / (samples * 3.0)
-    global_similarity = max(0.0, 1.0 - mean_channel_error / 255.0)
+    mean_alpha_error = alpha_distance / samples
+    combined_mean_error = (total_distance + alpha_distance) / (samples * 4.0)
+    global_similarity = max(0.0, 1.0 - combined_mean_error / 255.0)
     foreground_mean_error = (
         foreground_distance / (foreground_samples * 3.0)
         if foreground_samples else mean_channel_error)
@@ -539,6 +544,8 @@ def visual_metrics(
         "global_score": round(global_similarity, 6),
         "foreground_score": round(foreground_similarity, 6),
         "mean_channel_error": round(mean_channel_error, 6),
+        "mean_alpha_error": round(mean_alpha_error, 6),
+        "combined_mean_channel_error": round(combined_mean_error, 6),
         "foreground_mean_channel_error": round(foreground_mean_error, 6),
         "foreground_pixel_count": foreground_samples,
         "differing_pixel_count": differing,
@@ -718,6 +725,7 @@ def compare_one(
     native_ir = native_dir / "design.ir.json"
     native_render = native_dir / "render.png"
     native_layout = native_dir / "layout.json"
+    native_receipt = native_dir / "render-receipt.json"
     source_args = ["--from", from_source, "--file", str(source)]
     browser_args = [
         str(importer), *source_args, "--mode", "baked", "--emit", "ir-json",
@@ -759,12 +767,21 @@ def compare_one(
         "--render", str(native_render), "--layout", str(native_layout),
         "--width", str(capture_width), "--height", str(capture_height),
         "--scale", str(capture["reference"]["device_scale_factor"]),
+        "--backend", "skia", "--render-receipt", str(native_receipt),
     ]
     render_run = run_command(render_args, timeout_seconds)
     write_json(native_dir / "render-command.json", command_record(render_run))
     if render_run.returncode != 0:
         raise LabError(
             f"native render failed ({render_run.returncode}): {render_run.stderr}")
+    if not native_receipt.exists():
+        raise LabError("native Skia render did not emit a render receipt")
+    render_receipt = json.loads(native_receipt.read_text(encoding="utf-8"))
+    if (render_receipt.get("schema") != "pulp-design-ir-render-receipt-v1"
+            or render_receipt.get("backend_requested") != "skia"
+            or render_receipt.get("backend_used") != "skia"
+            or render_receipt.get("ok") is not True):
+        raise LabError("native render receipt did not prove a successful Skia render")
 
     for name in (
         ".pulp-browser-capture-v1", "browser.png", "capture.json",
@@ -929,6 +946,7 @@ def compare_one(
             "fixture_report": "comparison/report.json",
             "browser_capture": "browser/capture.json",
             "native_readback": "candidate/render.png",
+            "native_render_receipt": "candidate/render-receipt.json",
         },
         "comparison": {
             "structural": structural,

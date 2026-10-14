@@ -1544,6 +1544,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME findskia-arch-assert-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_findskia_arch_assert.py")
 
+    # Windows ARM64 Skia archives keep their static libraries below an arm64
+    # slice directory. This fixture configures CMake's Windows platform without
+    # a compiler and proves the slice is selected, while a flat-only fixture
+    # stays fail-closed instead of claiming ARM64 support.
+    add_test(NAME findskia-windows-arm64-slice-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_findskia_windows_arm64_slice.py")
+
     # SDK-consumer sweep: the WHAT-builds / WHICH-binaries-measured / HOW-reported
     # decision logic of the turnkey runner that rebuilds every downstream consumer
     # against one installed SDK and checks the min-OS floor propagated.

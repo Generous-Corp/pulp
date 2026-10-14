@@ -9,11 +9,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "../tools/cli/package_commands.hpp"
+#include "../tools/cli/package_pin.hpp"
 #include "../tools/cli/package_registry.hpp"
+#include "../tools/cli/tool_registry.hpp"
+
+#include <pulp/platform/child_process.hpp>
 
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -24,6 +29,23 @@ namespace fs = std::filesystem;
 using namespace pulp::cli::pkg;
 
 namespace {
+
+// Every add/update in this file pins through a fixed pinner so the tests stay
+// off git and the network. The real git pinner is exercised against a local
+// file:// repository in the "git_pin_source" cases below.
+constexpr const char* kFixedCommit = "0123456789abcdef0123456789abcdef01234567";
+
+std::string fixed_integrity() {
+    return "sha256-" + std::string(64, 'e');
+}
+
+void install_fixed_pinner() {
+    set_source_pinner_for_testing([](const std::string&, const std::string&) {
+        return SourcePin{kFixedCommit, fixed_integrity(), {}};
+    });
+}
+
+const bool g_fixed_pinner_installed = (install_fixed_pinner(), true);
 
 struct TempDir {
     fs::path path;
@@ -899,8 +921,50 @@ TEST_CASE("cmd_update updates only local lock and generated cmake",
     auto apply = run_in_project(tmp.path, [&] { return cmd_update({"--apply"}); });
     REQUIRE(apply.exit_code == 0);
     REQUIRE(apply.stdout_text.find("Updated packages") != std::string::npos);
-    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages["signalsmith-dsp"].version == "1.2.0");
+    const auto updated =
+        load_lock_file(tmp.path / "packages.lock.json").packages["signalsmith-dsp"];
+    REQUIRE(updated.version == "1.2.0");
+    REQUIRE(updated.commit == kFixedCommit);
+    REQUIRE(updated.integrity == fixed_integrity());
     REQUIRE(read_file(tmp.path / "cmake" / "pulp-packages.cmake").find("signalsmith-dsp") != std::string::npos);
+}
+
+TEST_CASE("cmd_update re-pins a lock entry written before packages were pinned",
+          "[cli][package-commands][update][pin]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path, "1.2.0");
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+    REQUIRE(save_lock_file(
+        tmp.path / "packages.lock.json",
+        make_lock({
+            {"signalsmith-dsp", {"1.2.0", "https://example.com/signalsmith.git", "", "v1.2.0"}},
+        })));
+
+    auto dry_run = run_in_project(tmp.path, [&] { return cmd_update({}); });
+    REQUIRE(dry_run.exit_code == 0);
+    REQUIRE(dry_run.stdout_text.find("is not pinned") != std::string::npos);
+
+    auto apply = run_in_project(tmp.path, [&] { return cmd_update({"--apply"}); });
+    REQUIRE(apply.exit_code == 0);
+    const auto lp = load_lock_file(tmp.path / "packages.lock.json").packages["signalsmith-dsp"];
+    REQUIRE(lp.commit == kFixedCommit);
+    REQUIRE(lp.integrity == fixed_integrity());
+
+    set_source_pinner_for_testing([](const std::string&, const std::string&) {
+        return SourcePin{{}, {}, "upstream unreachable"};
+    });
+    REQUIRE(save_lock_file(
+        tmp.path / "packages.lock.json",
+        make_lock({
+            {"signalsmith-dsp", {"1.2.0", "https://example.com/signalsmith.git", "", "v1.2.0"}},
+        })));
+    auto failed = run_in_project(tmp.path, [&] { return cmd_update({"--apply"}); });
+    install_fixed_pinner();
+    REQUIRE(failed.exit_code == 1);
+    REQUIRE(failed.stdout_text.find("upstream unreachable") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages["signalsmith-dsp"].commit ==
+            "v1.2.0");
 }
 
 TEST_CASE("cmd_update reports no-op and missing-registry states",
@@ -914,9 +978,12 @@ TEST_CASE("cmd_update reports no-op and missing-registry states",
     REQUIRE(no_lock.exit_code == 0);
     REQUIRE(no_lock.stdout_text.find("No packages installed") != std::string::npos);
 
-    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({
-        {"signalsmith-dsp", {"1.2.0", "https://example.com/signalsmith.git", "", "v1.2.0"}},
-    })));
+    REQUIRE(save_lock_file(
+        tmp.path / "packages.lock.json",
+        make_lock({
+            {"signalsmith-dsp",
+             {"1.2.0", "https://example.com/signalsmith.git", fixed_integrity(), kFixedCommit}},
+        })));
     auto no_updates = run_in_project(tmp.path, [&] { return cmd_update({}); });
     REQUIRE(no_updates.exit_code == 0);
     REQUIRE(no_updates.stdout_text.find("All packages are up to date") != std::string::npos);
@@ -1018,7 +1085,12 @@ TEST_CASE("cmd_add writes unguarded generated cmake and cmd_remove deletes last 
     REQUIRE(cmake.find("FetchContent_Declare(signalsmith-dsp") != std::string::npos);
     REQUIRE(cmake.find("GIT_REPOSITORY https://example.com/signalsmith.git") !=
             std::string::npos);
-    REQUIRE(cmake.find("GIT_TAG        v1.2.0") != std::string::npos);
+    REQUIRE(cmake.find(std::string("GIT_TAG        ") + kFixedCommit) != std::string::npos);
+    REQUIRE(cmake.find("GIT_TAG        v1.2.0") == std::string::npos);
+    REQUIRE(cmake.find("GIT_SHALLOW") == std::string::npos);
+    REQUIRE(cmake.find(std::string("_pulp_package_make_available(signalsmith-dsp ") + kFixedCommit +
+                       " " + fixed_integrity() + " ON)") != std::string::npos);
+    REQUIRE(cmake.find(kPackagesVerifyCmake) != std::string::npos);
     REQUIRE(cmake.find("add_library(signalsmith::dsp INTERFACE)") != std::string::npos);
     REQUIRE(cmake.find("target_include_directories(signalsmith::dsp INTERFACE") !=
             std::string::npos);
@@ -1045,10 +1117,9 @@ TEST_CASE("cmd_add writes unguarded generated cmake and cmd_remove deletes last 
             std::string::npos);
     cmake = read_file(cmake_path);
     REQUIRE(cmake.find("FetchContent_Declare(sst-tuning-library") != std::string::npos);
-    REQUIRE(cmake.find("SOURCE_SUBDIR  cmake/pulp-source-only") !=
-            std::string::npos);
-    REQUIRE(cmake.find("FetchContent_MakeAvailable(sst-tuning-library") !=
-            std::string::npos);
+    REQUIRE(cmake.find("SOURCE_SUBDIR  pulp-package-populate-only") != std::string::npos);
+    REQUIRE(cmake.find(std::string("_pulp_package_make_available(sst-tuning-library ") +
+                       kFixedCommit + " " + fixed_integrity() + " OFF)") != std::string::npos);
     REQUIRE(cmake.find("FetchContent_Populate(sst-tuning-library") == std::string::npos);
     REQUIRE(cmake.find("add_library(sst::tuning-library INTERFACE)") !=
             std::string::npos);
@@ -1160,6 +1231,12 @@ TEST_CASE("cmd_add covers guarded installs and installed-version guards",
     REQUIRE(cmake.find("APPLE") != std::string::npos);
     REQUIRE(cmake.find("WIN32") != std::string::npos);
     REQUIRE(cmake.find("PULP_HAS_GPL_FILTER") != std::string::npos);
+    REQUIRE(cmake.find(std::string("GIT_TAG        ") + kFixedCommit) != std::string::npos);
+    {
+        const auto gpl = load_lock_file(tmp.path / "packages.lock.json").packages["gpl-filter"];
+        REQUIRE(gpl.license == "GPL-3.0");
+        REQUIRE(gpl.license_acceptance == "accept-license:GPL-3.0");
+    }
     REQUIRE(read_file(tmp.path / "CMakeLists.txt").find("include(cmake/pulp-packages.cmake OPTIONAL)")
             != std::string::npos);
 
@@ -1258,6 +1335,9 @@ TEST_CASE("cmd_add accepts commercial override for proprietary packages",
     REQUIRE(accepted.stdout_text.find("Added Commercial SDK v2.0.0") != std::string::npos);
     REQUIRE(load_lock_file(tmp.path / "packages.lock.json")
                 .packages.count("commercial-sdk") == 1);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json")
+                .packages["commercial-sdk"]
+                .license_acceptance == "commercial");
 }
 
 TEST_CASE("cmd_add permits review-required licenses with local metadata updates",
@@ -1316,4 +1396,163 @@ TEST_CASE("cmd_remove regenerates cmake when other packages remain",
     auto cmake = read_file(tmp.path / "cmake" / "pulp-packages.cmake");
     REQUIRE(cmake.find("mpl-analyzer") != std::string::npos);
     REQUIRE(cmake.find("signalsmith-dsp") == std::string::npos);
+}
+
+namespace {
+
+pulp::platform::ProcessResult run_git_in(const fs::path& dir, std::vector<std::string> args) {
+    std::vector<std::string> argv{"-C", dir.string(),
+                                  "-c", "user.name=Pulp Test",
+                                  "-c", "user.email=test@example.invalid",
+                                  "-c", "commit.gpgsign=false",
+                                  "-c", "tag.gpgsign=false"};
+    argv.insert(argv.end(), args.begin(), args.end());
+    return pulp::platform::ChildProcess::run("git", argv);
+}
+
+std::string trimmed(std::string s) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r'))
+        s.pop_back();
+    return s;
+}
+
+// A local upstream with a `main` branch and an annotated `v1.0` tag.
+// Returns the file:// URL and the commit the tag points at.
+std::pair<std::string, std::string> make_upstream(const fs::path& dir) {
+    write_file(dir / "include" / "pkg.h", "#pragma once\nint pkg_version();\n");
+    write_file(dir / "LICENSE", "MIT (fixture)\n");
+    // A ref-dependent export-subst placeholder: archive output differs between
+    // a shallow fetch and a full clone, the tree listing does not.
+    write_file(dir / ".gitattributes", "VERSION export-subst\n");
+    write_file(dir / "VERSION", "$Format:%d$\n");
+    REQUIRE(run_git_in(dir, {"init", "-q", "-b", "main"}).exit_code == 0);
+    REQUIRE(run_git_in(dir, {"add", "."}).exit_code == 0);
+    REQUIRE(run_git_in(dir, {"commit", "-q", "-m", "fixture"}).exit_code == 0);
+    REQUIRE(run_git_in(dir, {"tag", "-a", "v1.0", "-m", "release"}).exit_code == 0);
+    auto commit = trimmed(run_git_in(dir, {"rev-parse", "v1.0^{commit}"}).stdout_output);
+    REQUIRE(commit.size() == 40);
+    auto generic = dir.generic_string();
+    return {std::string("file://") + (generic.front() == '/' ? "" : "/") + generic, commit};
+}
+
+} // namespace
+
+TEST_CASE("pin helpers classify commits, integrity values and ls-remote output",
+          "[cli][package-commands][pin]") {
+    const std::string a = "1fb1f075a5d66e85bfc8f488c3f3626840cb3a1d";
+    const std::string b = "0d8ba6de543d7dcaf818b33b06633ec16ff0010b";
+    REQUIRE(is_full_commit(a));
+    REQUIRE_FALSE(is_full_commit("1fb1f075"));
+    REQUIRE_FALSE(is_full_commit("master"));
+    REQUIRE_FALSE(is_full_commit("1FB1F075A5D66E85BFC8F488C3F3626840CB3A1D"));
+    REQUIRE(is_integrity("sha256-" + std::string(64, 'a')));
+    REQUIRE_FALSE(is_integrity(""));
+    REQUIRE_FALSE(is_integrity("sha256-" + std::string(63, 'a')));
+    REQUIRE_FALSE(is_integrity(std::string(64, 'a')));
+    REQUIRE(commit_for_tag(a + "\trefs/tags/1.0.7\n" + b + "\trefs/tags/1.0.7^{}\n", "1.0.7") == b);
+    REQUIRE(commit_for_tag(a + "\trefs/tags/v2\n" + b + "\trefs/tags/v20\n", "v2") == a);
+    REQUIRE(commit_for_tag(a + "\trefs/heads/master\n", "master").empty());
+}
+
+TEST_CASE("generated cmake embeds the shared verifier byte for byte",
+          "[cli][package-commands][pin]") {
+    const auto shared =
+        read_file(fs::path(PULP_SOURCE_DIR) / "tools" / "packages" / "pulp-packages-verify.cmake");
+    REQUIRE_FALSE(shared.empty());
+    REQUIRE(shared == kPackagesVerifyCmake);
+}
+
+TEST_CASE("git_pin_source pins a tag to its commit and the documented tree digest",
+          "[cli][package-commands][pin][git]") {
+    TempDir up;
+    auto [url, commit] = make_upstream(up.path);
+
+    auto pin = git_pin_source(url, "v1.0");
+    REQUIRE(pin.error.empty());
+    REQUIRE(pin.commit == commit);
+
+    // Recompute with the documented recipe in the upstream itself (a
+    // different clone than the pinner's scratch fetch).
+    TempDir out;
+    const auto listing = out.path / "reference.tree";
+    {
+        auto ls = run_git_in(up.path, {"ls-tree", "-r", "-z", "--full-tree", commit});
+        REQUIRE(ls.exit_code == 0);
+        std::ofstream f(listing, std::ios::binary);
+        f.write(ls.stdout_output.data(), static_cast<std::streamsize>(ls.stdout_output.size()));
+    }
+    const auto reference = "sha256-" + pulp::cli::tools::sha256_file_hex(listing);
+    REQUIRE(pin.integrity == reference);
+    REQUIRE(tree_integrity(up.path, commit) == reference);
+
+#ifndef _WIN32
+    // A personal attributes file and CRLF/umask settings change `git archive`
+    // output; the tree listing must not move.
+    {
+        write_file(out.path / "attributes", "* export-ignore\n*.h eol=crlf\n");
+        write_file(out.path / "gitconfig",
+                   "[core]\n\tautocrlf = true\n\teol = crlf\n\tattributesFile = " +
+                       (out.path / "attributes").string() + "\n[tar]\n\tumask = 0077\n");
+        const char* previous = std::getenv("GIT_CONFIG_GLOBAL");
+        const std::string saved = previous ? previous : "";
+        ::setenv("GIT_CONFIG_GLOBAL", (out.path / "gitconfig").c_str(), 1);
+        auto hostile = git_pin_source(url, "v1.0");
+        if (previous)
+            ::setenv("GIT_CONFIG_GLOBAL", saved.c_str(), 1);
+        else
+            ::unsetenv("GIT_CONFIG_GLOBAL");
+        REQUIRE(hostile.error.empty());
+        REQUIRE(hostile.integrity == reference);
+    }
+#endif
+    REQUIRE(is_integrity(pin.integrity));
+
+    auto by_commit = git_pin_source(url, commit);
+    REQUIRE(by_commit.error.empty());
+    REQUIRE(by_commit.integrity == pin.integrity);
+
+    auto branch = git_pin_source(url, "main");
+    REQUIRE_FALSE(branch.error.empty());
+    REQUIRE(branch.error.find("is not a tag") != std::string::npos);
+
+    auto short_sha = git_pin_source(url, commit.substr(0, 8));
+    REQUIRE_FALSE(short_sha.error.empty());
+
+    // An annotated tag's object id is 40 hex but is not the commit; pinning
+    // it would record the wrong id.
+    auto tag_object = trimmed(run_git_in(up.path, {"rev-parse", "v1.0"}).stdout_output);
+    REQUIRE(tag_object != commit);
+    auto by_tag_object = git_pin_source(url, tag_object);
+    REQUIRE(by_tag_object.error.find("does not contain commit") != std::string::npos);
+}
+
+TEST_CASE("cmd_add writes the lock before the generated cmake", "[cli][package-commands][pin]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+    // A directory where the generated file should go makes the CMake write
+    // fail; the lock that CMake is derived from must already be on disk.
+    fs::create_directories(tmp.path / "cmake" / "pulp-packages.cmake");
+    auto added = run_in_project(tmp.path, [&] { return cmd_add({"signalsmith-dsp"}); });
+    REQUIRE(added.exit_code == 1);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages["signalsmith-dsp"].commit ==
+            kFixedCommit);
+}
+
+TEST_CASE("cmd_add refuses a package it cannot pin and writes nothing",
+          "[cli][package-commands][pin]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+
+    set_source_pinner_for_testing(
+        [](const std::string&, const std::string&) { return SourcePin{"v1.2.0", "", {}}; });
+    auto malformed = run_in_project(tmp.path, [&] { return cmd_add({"signalsmith-dsp"}); });
+    install_fixed_pinner();
+    REQUIRE(malformed.exit_code == 1);
+    REQUIRE(malformed.stderr_text.find("Could not pin") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(tmp.path / "packages.lock.json"));
+    REQUIRE_FALSE(fs::exists(tmp.path / "cmake" / "pulp-packages.cmake"));
 }

@@ -6,7 +6,7 @@ include(FetchContent)
 FetchContent_Declare(
   RTNeural
   GIT_REPOSITORY https://github.com/jatinchowdhury18/RTNeural.git
-  GIT_TAG        1fb1f075
+  GIT_TAG        1fb1f075a5d66e85bfc8f488c3f3626840cb3a1d
 )
 FetchContent_MakeAvailable(RTNeural)
 

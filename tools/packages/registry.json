@@ -3,7 +3,7 @@
   "packages": {
     "alac": {
       "name": "Apple ALAC",
-      "version": "master",
+      "version": "c38887c5",
       "description": "Apple Lossless Audio Codec encoder — cross-platform ALAC write",
       "license": "Apache-2.0",
       "category": "audio-io",
@@ -11,7 +11,7 @@
       "fetch": {
         "method": "FetchContent",
         "git_repository": "https://github.com/macosforge/alac.git",
-        "git_tag": "master"
+        "git_tag": "c38887c5c5e64a4b31108733bd79ca9b2496d987"
       },
       "cmake": {
         "targets": [
@@ -138,7 +138,7 @@
     },
     "btrack": {
       "name": "BTrack",
-      "version": "master",
+      "version": "1.0.7",
       "description": "Real-time beat tracking via onset detection",
       "license": "GPL-3.0",
       "category": "dsp",
@@ -146,7 +146,7 @@
       "fetch": {
         "method": "FetchContent",
         "git_repository": "https://github.com/adamstark/BTrack.git",
-        "git_tag": "master"
+        "git_tag": "1.0.7"
       },
       "cmake": {
         "targets": [
@@ -205,8 +205,8 @@
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-06-08",
-        "verified_version": "master",
-        "upstream_commit": "unknown",
+        "verified_version": "1.0.7",
+        "upstream_commit": "0d8ba6de543d7dcaf818b33b06633ec16ff0010b",
         "upstream_latest": "1.0.7",
         "pulp_commit": "unknown",
         "build_status": {}
@@ -2270,7 +2270,7 @@
       "fetch": {
         "method": "FetchContent",
         "git_repository": "https://github.com/jatinchowdhury18/RTNeural.git",
-        "git_tag": "1fb1f075"
+        "git_tag": "1fb1f075a5d66e85bfc8f488c3f3626840cb3a1d"
       },
       "cmake": {
         "targets": [
@@ -2336,7 +2336,7 @@
       "verification": {
         "last_verified": "2026-04-07",
         "verified_version": "1fb1f075",
-        "upstream_commit": "unknown",
+        "upstream_commit": "1fb1f075a5d66e85bfc8f488c3f3626840cb3a1d",
         "upstream_latest": "1fb1f075",
         "pulp_commit": "unknown",
         "build_status": {
@@ -2940,7 +2940,7 @@
     },
     "tinysoundfont": {
       "name": "TinySoundFont",
-      "version": "master",
+      "version": "853a0a17",
       "description": "Single-header SoundFont2 synthesizer for MIDI playback",
       "license": "MIT",
       "category": "dsp",
@@ -2948,7 +2948,7 @@
       "fetch": {
         "method": "header-only",
         "git_repository": "https://github.com/schellingb/TinySoundFont.git",
-        "git_tag": "master"
+        "git_tag": "853a0a171759f1ddba0de1442133a75912bbeffa"
       },
       "cmake": {
         "targets": [
@@ -3008,9 +3008,9 @@
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
-        "verified_version": "master",
-        "upstream_commit": "unknown",
-        "upstream_latest": "master",
+        "verified_version": "853a0a17",
+        "upstream_commit": "853a0a171759f1ddba0de1442133a75912bbeffa",
+        "upstream_latest": "853a0a17",
         "pulp_commit": "unknown",
         "build_status": {}
       }
