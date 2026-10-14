@@ -54,6 +54,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
 # those records before any gate subprocess can consume them: every source gate
 # below validates the checked-out HEAD, so a branch update that names another
 # commit must be refused rather than accidentally authorizing the wrong tree.
+# The build-free merge-tree check takes the pushed source SHA, which that
+# refusal keeps equal to HEAD.
 if ! PREPUSH_UPDATE_RECORDS="$(cat)"; then
     echo "✗ pre-push: failed to capture Git's pushed-ref records; refusing to validate an unknown source tree." >&2
     exit 1
@@ -279,6 +281,8 @@ BASE="${PULP_PREPUSH_BASE:-origin/main}"
 # against HEAD and claiming they covered the pushed SHA. Multiple branch refs
 # are accepted only when every one points to this exact HEAD.
 _prepush_source_update_mode="manual-head"
+_prepush_pushed_head_sha=""
+_prepush_source_remote_ref=""
 if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
     _prepush_source_update_mode="no-source"
     _prepush_head_sha="$(git rev-parse HEAD 2>/dev/null || true)"
@@ -304,13 +308,18 @@ if [ -n "$PREPUSH_UPDATE_RECORDS" ]; then
                 # Branches and every other source-bearing namespace must name
                 # the exact checked-out commit. Git hosts may use refs/review,
                 # refs/for, or another custom namespace; treating those like
-                # tags would let an unvalidated tree bypass the gates.
+                # tags would let an unvalidated tree bypass the gates. Every
+                # gate below except the merge-tree check validates checked-out
+                # HEAD, so a push of any other commit is refused here.
                 if [ -z "$_prepush_head_sha" ] || [ "$_prepush_local_sha" != "$_prepush_head_sha" ]; then
                     echo "✗ pre-push: source update $_prepush_remote_ref names $_prepush_local_sha," >&2
                     echo "  but this checkout is at ${_prepush_head_sha:-unknown}. The gates validate" >&2
                     echo "  checked-out HEAD; check out that branch and push it separately." >&2
                     exit 1
                 fi
+                # The merge-tree check below takes this exact source object.
+                _prepush_pushed_head_sha="$_prepush_local_sha"
+                _prepush_source_remote_ref="$_prepush_remote_ref"
                 _prepush_source_update_mode="exact-head"
                 ;;
         esac
@@ -320,6 +329,33 @@ EOF
     unset _prepush_head_sha _prepush_zero_sha _prepush_local_ref \
           _prepush_local_sha _prepush_remote_ref _prepush_remote_sha \
           _prepush_extra
+fi
+
+# Refresh the base only when the normal gates are enabled. The merge-tree
+# script-state check honors the same explicit base as the remaining gates and
+# receives the exact pushed source object captured above.
+MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
+MERGE_TREE_BASE="${PULP_PREPUSH_BASE:-origin/main}"
+if [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; then
+    echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — merge-tree script-state check DEMOTED to advisory." >&2
+elif [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
+    if git remote get-url origin >/dev/null 2>&1 && ! git fetch --quiet origin main; then
+        echo "[pre-push] merge-tree script-state: could not refresh $MERGE_TREE_BASE; advisory, continuing with the local base." >&2
+    fi
+    _merge_tree_head="${_prepush_pushed_head_sha:-HEAD}"
+    if [[ "${_prepush_source_remote_ref:-}" == refs/heads/explore/* ]]; then
+        echo "[pre-push] merge-tree script-state skipped for explore/*; that branch is intentionally independent of main." >&2
+    else
+        "$PULP_PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$MERGE_TREE_BASE" --head "$_merge_tree_head"
+        _merge_tree_rc=$?
+        case "$_merge_tree_rc" in
+            0) ;;
+            1) exit 1 ;;
+            2) echo "[pre-push] merge-tree script-state unavailable or timed out; advisory, run it on a healthy host." >&2 ;;
+            3) echo "[pre-push] merge-tree script-state: branch conflicts with $MERGE_TREE_BASE; advisory (GitHub will report DIRTY)." >&2 ;;
+            *) echo "[pre-push] merge-tree script-state internal error ($_merge_tree_rc); advisory." >&2 ;;
+        esac
+    fi
 fi
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
