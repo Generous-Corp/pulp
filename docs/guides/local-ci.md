@@ -5,7 +5,11 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) valida
 On a pull-request head, the affected-test step runs tests selected from the
 diff and from binaries rebuilt by that head's governed build. A marker written
 just before the build bounds the warm Ninja log; older branch outputs do not
-add tests. Docs-only diffs add no rebuilt-binary tests.
+add tests. Docs-only diffs add no rebuilt-binary tests. The rebuilt set counts
+only when it is narrow: at most eight test executables, and no regeneration of
+`build.ninja` or `CMakeCache.txt` during the build. A cold, reconfigured or
+stale warm directory rebuilds far more than the diff reaches, and the step then
+adds no rebuilt-binary tests and logs why.
 
 The macOS retarget lane keeps the untrusted-runner boundary for contributor
 code and invokes `tools/ci/governed-build.sh` inside that namespace for its

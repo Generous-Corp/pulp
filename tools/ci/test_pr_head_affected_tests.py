@@ -244,6 +244,87 @@ class DirectEdgeTests(unittest.TestCase):
             with mock.patch.object(step.inventory, "codemodel_reply_available", return_value=True):
                 self.assertEqual(step.rebuilt_binary_tests(build), [])
 
+    def _rebuilt_fixture(self, build: Path, count: int):
+        """A build whose last Ninja invocation rebuilt ``count`` test executables."""
+        (build / "bin").mkdir(parents=True)
+        marker = build / ".pulp-build-start"
+        marker.write_text("start\n", encoding="utf-8")
+        before = marker.stat().st_mtime - 100
+        os.utime(marker, (before, before))
+        names = [f"pulp-test-{i}" for i in range(count)]
+        log = "# ninja log v5\n" + "".join(
+            f"0\t{i + 1}\t0\tbin/{name}\t{i}\n" for i, name in enumerate(names))
+        (build / ".ninja_log").write_text(log, encoding="utf-8")
+        T = step.inventory.Target
+        targets = {}
+        entries = []
+        for name in names:
+            out = build / "bin" / name
+            out.write_text("binary\n", encoding="utf-8")
+            targets[name] = T(name, "EXECUTABLE", "", "", [f"test/{name}.cpp"],
+                              artifacts=[str(out)])
+            entries.append(step.inventory.CTestEntry(f"{name}-run", [str(out)], {}))
+        model = step.inventory.CodeModel(targets=targets, source_root=str(REPO),
+                                         build_root=str(build))
+        return names, mock.patch.multiple(
+            step.inventory,
+            codemodel_reply_available=mock.DEFAULT, load_codemodel_targets=mock.DEFAULT,
+            load_projection_ctest_entries=mock.DEFAULT), model, entries
+
+    def _rebuilt(self, count: int, *, regenerate: str | None = None) -> tuple[list[str], list[str]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            _, patcher, model, entries = self._rebuilt_fixture(build, count)
+            if regenerate:
+                (build / regenerate).write_text("regenerated\n", encoding="utf-8")
+            why: list[str] = []
+            with patcher as mocks:
+                mocks["codemodel_reply_available"].return_value = True
+                mocks["load_codemodel_targets"].return_value = model
+                mocks["load_projection_ctest_entries"].return_value = entries
+                return step.rebuilt_binary_tests(build, why), why
+
+    def test_a_narrow_rebuilt_set_is_selected(self) -> None:
+        # Control for the cap: up to REBUILT_EXECUTABLE_CAP rebuilt
+        # executables still reach their tests.
+        tests, why = self._rebuilt(step.REBUILT_EXECUTABLE_CAP)
+        self.assertEqual(len(tests), step.REBUILT_EXECUTABLE_CAP)
+        self.assertEqual(why, [])
+
+    def test_a_directory_wide_rebuild_adds_nothing(self) -> None:
+        # A cold, reconfigured or stale warm directory rebuilds every test
+        # executable; the diff reached none of that, so none is selected.
+        tests, why = self._rebuilt(40)
+        self.assertEqual(tests, [])
+        self.assertIn("40 rebuilt executable(s) ignored", why[0])
+
+    def test_a_regenerated_build_system_adds_nothing(self) -> None:
+        for name in ("build.ninja", "CMakeCache.txt"):
+            with self.subTest(regenerated=name):
+                tests, why = self._rebuilt(2, regenerate=name)
+                self.assertEqual(tests, [])
+                self.assertIn(f"{name} was regenerated", why[0])
+
+    def test_select_keeps_only_the_projection_when_the_rebuild_is_wide(self) -> None:
+        # End to end through select(): the last invocation rebuilt every
+        # executable, the diff projects onto one test, and only that runs.
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            names, patcher, model, entries = self._rebuilt_fixture(build, 40)
+            all_names = {**NAMES, **{e.name: set() for e in entries}}
+            with patcher as mocks, \
+                    mock.patch.object(step, "project", return_value=selection("focused", ["unit-a"])), \
+                    mock.patch.object(step, "script_reference_tests", return_value=[]), \
+                    mock.patch.object(step, "script_input_tests", return_value=[]), \
+                    mock.patch.object(step, "registration_tests", return_value=[]):
+                mocks["codemodel_reply_available"].return_value = True
+                mocks["load_codemodel_targets"].return_value = model
+                mocks["load_projection_ctest_entries"].return_value = entries
+                plan = step.select(build, ["core/a.cpp"], all_names)
+        self.assertEqual(plan["tests"], ["unit-a"])
+        self.assertEqual(plan["rebuilt_binaries"], 0)
+        self.assertIn("ignored", plan["rebuilt_binaries_ignored"])
+
     def test_rebuilt_binary_without_a_ninja_log_is_not_claimed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             build = Path(tmp) / "build"

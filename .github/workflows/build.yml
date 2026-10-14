@@ -2205,7 +2205,11 @@ jobs:
         # (the merge ref's first parent is the base), and a failure fails the
         # required check here. It never widens to the full suite: a diff of
         # docs, skills or workflows, or one the projection cannot focus,
-        # selects nothing extra. The extra time is capped at ten minutes;
+        # selects nothing extra. Tests whose executable this build rebuilt
+        # are added only when at most eight executables were rebuilt and the
+        # build system was not regenerated; a wider rebuild comes from the
+        # build directory's history, not the diff, and adds nothing. The
+        # extra time is capped at ten minutes;
         # tests left over are listed as skipped, and the merge group still
         # runs everything. Rules and selection: tools/ci/pr_head_affected_tests.py.
         id: pr_affected_tests
