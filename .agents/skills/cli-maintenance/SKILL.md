@@ -3489,6 +3489,16 @@ present, else the tier-0 default `tier0_default_build_jobs()` =
 `tier0_default_build_jobs()`. `build_parallelism_guard.py` fails CI on a bare
 `--parallel`/`-j` anywhere under `tools/cli/`.
 
+For an already-configured, one-shot CMake build, use
+`run_governed_cmake_build()` rather than assembling another shell command.
+`pulp create` uses it after either standalone or in-tree configure;
+`pulp project bump --verify-builds` uses `GovernedBuildOutput::Quiet` so its
+rollback and output contract stay intact. Pass the project root and build
+directory separately: the helper quotes paths and arguments, takes the lease,
+caps jobs, and applies QoS, watchdog, and the build-directory lock. Do not use
+`BuildPlan::select_and_build()` for these paths: its focus/migration behavior
+and spinner output change their command contracts.
+
 ## Standalone render seam for headless RT / audio tests
 
 `StandaloneApp`'s device-callback body lives in a private

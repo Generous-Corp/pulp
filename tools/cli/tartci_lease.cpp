@@ -200,6 +200,28 @@ int resolve_local_build_jobs() {
     return env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
 }
 
+int run_governed_cmake_build(const fs::path& project_root, const fs::path& build_dir,
+                             const std::vector<std::string>& args, const std::string& command_kind,
+                             GovernedBuildOutput output) {
+    auto lease = TartciAgentBuildLease::acquire({project_root, command_kind, false});
+    if (!lease.ok()) {
+        std::cerr << command_kind << ": " << lease.error() << "\n";
+        return lease.exit_code();
+    }
+    ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
+    const auto capped = cap_cmake_build_parallel_args(args, lease.jobs());
+    std::string command = "cmake --build " + shell_quote(build_dir);
+    for (const auto& arg : capped.args)
+        command += " " + shell_quote(arg);
+    command = apply_build_dir_lock(
+        apply_agent_build_watchdog(apply_agent_build_qos(command, lease.qos(), lease.floor()),
+                                   lease.jobs(), lease.active()),
+        project_root, build_dir);
+    if (output == GovernedBuildOutput::Quiet)
+        return run(command + output_to_null());
+    return run_with_spinner(command, "Building");
+}
+
 namespace {
 
 // Parse a plain non-negative integer (a shell-assignment value that is a byte /
