@@ -478,14 +478,18 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
         return "undeclarable", None, []
     args = command[1:]
     if exe.startswith("python"):
+        # ``-c`` may follow options that consume a separate value (for
+        # example ``-W ignore -c ...``), so do not stop scanning at that
+        # value and mistake it for the entry script.
+        module_at = args.index("-m") if "-m" in args else len(args)
+        if "-c" in args[:module_at]:
+            # Inline interpreter snippets (used by feature-disabled CTest
+            # registrations) have no repository entry file or bounded
+            # input closure.  They must stay outside this source-input
+            # inventory rather than being mistaken for a build-tree path.
+            return "undeclarable", None, []
         i = 0
-        while i < len(args) and args[i].startswith("-") and args[i] != "-m":
-            if args[i] == "-c":
-                # Inline interpreter snippets (used by feature-disabled CTest
-                # registrations) have no repository entry file or bounded
-                # input closure.  They must stay outside this source-input
-                # inventory rather than being mistaken for a build-tree path.
-                return "undeclarable", None, []
+        while i < module_at and args[i].startswith("-"):
             i += 1
         if i < len(args) and args[i] == "-m":
             return "python-module", None, args[i + 1:]
