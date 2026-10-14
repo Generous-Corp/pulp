@@ -5577,7 +5577,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fc24c8bcc36d"
+name = "script-readers-7d892b6ce02d"
 paths = ["tools/scripts/vellum_closure.py"]
 tests = [
   "build-parallelism-guard",
@@ -5598,6 +5598,7 @@ tests = [
   "prepush-refresh-push",
   "pulp.vellum-closure-boundary",
   "pulp.vellum-closure-export-mentions",
+  "pulp.vellum-closure-export-units",
   "pulp.vellum-closure-gate",
   "pulp.vellum-closure-policy-selftest",
   "reuse-policy-replay-selftest",

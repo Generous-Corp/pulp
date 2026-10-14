@@ -595,8 +595,8 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
         set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
-        # The units the first export carries hold no mention of a Pulp-owned
-        # subsystem in any file, comments included; export refuses one.
+        # The units exported so far, and render, hold no forbidden mirror
+        # edge in any file, comments included; export refuses one.
         add_test(NAME pulp.vellum-closure-export-mentions
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
@@ -604,8 +604,22 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
-                --unit foundation --unit canvas)
+                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit render-3d)
         set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+        # The units the first export carries, checked exactly as export checks
+        # them: provenance, configure, generated-input digests, Skia link
+        # inputs, owned files, mirrored links and Pulp-owned mentions.
+        add_test(NAME pulp.vellum-closure-export-units
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                export-check
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --unit foundation --unit gpu-device-api --unit canvas)
+        set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
     else()
@@ -634,6 +648,12 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             COMMAND "${Python3_EXECUTABLE}" -c
                 "import sys; print('SKIP: Vellum export mention check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
         set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-export-units
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum export-unit check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
             SKIP_RETURN_CODE 77
             LABELS "pr")
     endif()
