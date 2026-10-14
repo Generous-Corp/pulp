@@ -357,8 +357,11 @@ class PrSuiteWorkflowWiringTests(unittest.TestCase):
     def test_full_suite_on_a_pull_request_is_gated_by_the_decision(self) -> None:
         self.assertIn("steps.pr_suite.outputs.suite == 'full'", self.test)
 
-    def test_full_suite_on_a_pull_request_never_gates_the_check(self) -> None:
-        self.assertIn("continue-on-error: ${{ github.event_name == 'pull_request' }}", self.test)
+    def test_armed_full_suite_failure_gates_while_fast_pr_stays_advisory(self) -> None:
+        self.assertIn(
+            "continue-on-error: ${{ github.event_name == 'pull_request' && steps.pr_suite.outputs.suite != 'full' }}",
+            self.test,
+        )
 
 
 class WorkflowWiringTests(unittest.TestCase):

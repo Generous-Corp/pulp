@@ -3099,10 +3099,12 @@ refresh push cancels and restarts the running `macos` gate, so it costs more
 than the receipt could save. Merge `main` only when the pull request is DIRTY
 or a required check fails because of a stale base.
 
-That full run is evidence, not the pull request's gate: the step is
-`continue-on-error` on pull requests, so a failure there leaves the `macos`
-check meaning build + fast tier, and the `Surface ctest failures` step still
-reports it. That reporter always exits 0 (errexit off, every possibly-empty
+That full run is evidence and, for an armed head, a queue-admission gate: its
+step is not `continue-on-error` when `pr_suite` is `full`, so a failure turns
+the required `macos` check red before the head can enter the queue. Ordinary
+pull-request runs still skip the full step, leaving `macos` as build + fast
+tier. The `Surface ctest failures` step still reports a failed armed run. That
+reporter always exits 0 (errexit off, every possibly-empty
 grep guarded): it runs whenever the Test step's outcome is failure, so a
 non-zero exit from it alone would turn the required check red for a failure
 the workflow deliberately does not gate on. `tools/ci/test_build_matrix_contract.py`
