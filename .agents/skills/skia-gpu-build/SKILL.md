@@ -210,7 +210,12 @@ shipping artifact.
   them directly under `Release/`. `FindSkia.cmake` selects that directory from
   the target architecture and deliberately leaves `SKIA_FOUND=FALSE` when the
   ARM64 slice is absent; otherwise an ARM64 configure can silently become a
-  CPU-only build. The regression is
+  CPU-only build. The target architecture comes from
+  `pulp_windows_target_arch()` (generator platform, then
+  `CMAKE_CXX_COMPILER_ARCHITECTURE_ID`), never `CMAKE_SYSTEM_PROCESSOR`. In a
+  Visual Studio `-A` configure that is the host, so an x64 build on an ARM64
+  host would take the ARM64 slice. ARM64EC and ARM64X targets find no
+  compatible slice and fail closed. The regression is
   `tools/scripts/test_findskia_windows_arm64_slice.py`.
 
 - **A failed `fetch_skia_for_release.py` is not always a bad pin.** The pinned
