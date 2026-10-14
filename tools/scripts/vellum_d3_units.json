@@ -3,7 +3,7 @@
   "units": [
     {"name": "foundation", "targets": ["pulp-events", "pulp-platform", "pulp-runtime", "pulp-simd"]},
     {"name": "gpu-device-api", "carried_by": "gpu-device", "owned_files": ["core/canvas/src/skia_chromium_raw_ptr_compat.cpp"]},
-    {"name": "gpu-device", "targets": ["pulp-gpu-device"], "optional_targets": [{"name": "pulp-skia-chromium-raw-ptr-compat", "platforms": ["Linux"]}]},
+    {"name": "gpu-device", "targets": ["pulp-gpu-device"], "optional_targets": [{"name": "pulp-skia-chromium-raw-ptr-compat", "platforms": ["Linux", "Windows"]}]},
     {"name": "canvas", "targets": ["pulp-canvas", "pulp-bundled-fonts"], "optional_targets": ["pulp-bundled-noto-color-emoji"]},
     {"name": "render-2d", "targets": ["pulp-render"]},
     {"name": "render-3d", "alias_of": "render-2d"},

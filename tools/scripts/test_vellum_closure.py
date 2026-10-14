@@ -966,7 +966,7 @@ class MirroredLinkTests(unittest.TestCase):
             self.assertEqual((entry["kind"], entry["owner"], entry["approver"]), ("edge", "carve-p4", "team-lead 2026-10-13"))
             self.assertTrue(entry["platforms"])
 
-    def test_raw_ptr_compat_is_a_linux_only_target_below_every_skia_consumer(self):
+    def test_raw_ptr_compat_is_a_linux_and_windows_target_below_every_skia_consumer(self):
         from vellum_closure import unit_layer_violations, unit_manifest_layout, unmirrored_link_violations
         layout = unit_manifest_layout(self.UNITS)
         data = {"targets": [{"name": "pulp-gpu-device", "link_targets": ["pulp-skia-chromium-raw-ptr-compat"]},
@@ -976,9 +976,13 @@ class MirroredLinkTests(unittest.TestCase):
         mirrored, found = unit_layer_violations(linux, layout)
         self.assertEqual(found, [])
         self.assertEqual(unmirrored_link_violations(linux, mirrored, None, set()), [])
+        windows = {**data, "configure": gpu_configure(system="Windows", processor="AMD64")}
+        mirrored, found = unit_layer_violations(windows, layout)
+        self.assertEqual(found, [])
+        self.assertEqual(unmirrored_link_violations(windows, mirrored, None, set()), [])
         darwin = {**data, "configure": gpu_configure()}
         mirrored, found = unit_layer_violations(darwin, layout)
-        self.assertTrue(any("only on Linux" in v for v in found))
+        self.assertTrue(any("only on Linux, Windows" in v for v in found))
         self.assertTrue(unmirrored_link_violations(darwin, mirrored, None, set()))
         forged = {"configure": linux["configure"], "targets": [{"name": "pulp-canvas", "link_targets": ["pulp-skia-evil"]}]}
         mirrored, _found = unit_layer_violations(forged, layout)
@@ -992,6 +996,16 @@ class MirroredLinkTests(unittest.TestCase):
         self.assertEqual(export_owned_file_violations([{"files": [source]}], ["gpu-device-api"]), [])
         self.assertEqual(export_owned_file_violations([{"files": [source]}], ["canvas"]),
                          [f"{source} belongs to D3 unit gpu-device-api, not canvas"])
+        # The Linux optional target is declared by gpu-device, while the
+        # source remains owned by gpu-device-api.  A combined export is valid
+        # only when the carried owner is present; the carrier alone must not
+        # silently reassign the source.
+        self.assertEqual(export_owned_file_violations(
+            [{"files": [source]}, {"files": [source]}],
+            ["gpu-device-api", "gpu-device"], self.UNITS), [])
+        self.assertEqual(export_owned_file_violations(
+            [{"files": [source]}], ["gpu-device"], self.UNITS),
+            [f"{source} belongs to D3 unit gpu-device-api, not gpu-device"])
         with tempfile.TemporaryDirectory() as td:
             twice = Path(td) / "units.json"
             twice.write_text(json.dumps({"schema": "pulp.vellum.d3-units.v1", "units": [

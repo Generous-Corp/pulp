@@ -1801,13 +1801,42 @@ def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
 
 
 def export_owned_file_violations(manifests: list[dict], unit_names: list[str], units: Path | None = None) -> list[str]:
-    """A file a D3 unit owns travels only in that unit's closure."""
+    """Check file ownership across one combined D3 export.
+
+    A ``carried_by`` unit has no target of its own, so its target closure may
+    also appear in the carrier's manifest.  The carried unit still owns its
+    source files: a carrier may contain one of those files only when the
+    carried unit is included in the same export.  A carrier-only export is
+    rejected instead of silently attributing the file to the wrong unit.
+    """
     layout = unit_manifest_layout(units or Path(__file__).with_name("vellum_d3_units.json"))
+    by_name = {entry["name"]: entry for entry in layout}
     owner = {path: entry["name"] for entry in layout for path in entry["owned_files"]}
+    selected = set(unit_names)
+
+    def carrier_contains(owner_name: str, carrier_name: str) -> bool:
+        """Whether carrier_name is in owner_name's carried_by chain."""
+        seen: set[str] = set()
+        current = owner_name
+        while current in by_name and current not in seen:
+            seen.add(current)
+            current = by_name[current].get("carried_by")
+            if current == carrier_name:
+                return True
+            if current is None:
+                break
+        return False
+
     violations: list[str] = []
     for manifest, unit in zip(manifests, unit_names):
         for path in manifest.get("files", []):
-            if path in owner and owner[path] != unit:
+            source_owner = owner.get(path)
+            if source_owner is not None and source_owner != unit:
+                # A carrier's target closure can repeat the carried unit's
+                # files.  Preserve the source owner and require that owner to
+                # be present in this combined export before accepting it.
+                if source_owner in selected and carrier_contains(source_owner, unit):
+                    continue
                 violations.append(f"{path} belongs to D3 unit {owner[path]}, not {unit}")
     return violations
 
