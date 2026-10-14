@@ -8,7 +8,7 @@
   "capability_families": [
     "render-assets-and-backends"
   ],
-  "rationale": "Skip zero-length CMake scanner input lines in a test-only Skia Dawn provider check; no design-import, Chromium, rendering, or packaging authority moves.",
+  "rationale": "Use a sentinel to keep the test-only Skia Dawn CMake scanner regex match nonempty; no design-import, Chromium, rendering, or packaging authority moves.",
   "tests": [
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
