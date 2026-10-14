@@ -108,6 +108,11 @@ function(_cmake_code out path)
     file(STRINGS "${path}" _lines)
     set(_code "")
     foreach(_line IN LISTS _lines)
+        # Older CMake rejects a REGEX MATCH whose result is empty. Blank
+        # lines contribute only whitespace to the normalized code stream.
+        if(_line STREQUAL "")
+            continue()
+        endif()
         if(_line MATCHES "^[ \t]*#")
             continue()
         endif()
