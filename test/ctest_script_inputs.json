@@ -3299,6 +3299,8 @@
     ".github/workflows/wclap-cloudflare.yml",
     ".github/workflows/web-plugins.yml",
     ".github/workflows/windows-cli-compile.yml",
+    "examples/hot-reload-demo/rebuild_logic.sh",
+    "examples/hot-reload-synth/rebuild_logic.sh",
     "test/cmake/gpu_audio_web_tests.cmake",
     "tools/ci/governed-build.sh",
     "tools/ci/tart-run-job.sh",
