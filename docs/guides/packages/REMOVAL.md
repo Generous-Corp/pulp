@@ -18,6 +18,7 @@ Work through each section as a checklist.
 - [ ] `tools/cli/package_commands_add.cpp`
 - [ ] `tools/cli/package_commands_search.cpp`
 - [ ] `tools/cli/package_commands_util.cpp`
+- [ ] `tools/cli/package_pin.hpp`
 - [ ] `tools/cli/package_registry.hpp`
 - [ ] `tools/cli/package_registry.cpp`
 
@@ -30,6 +31,7 @@ content, kits, version parsing, and other CLI lanes.
 - [ ] `tools/packages/registry.json`
 - [ ] `tools/packages/registry-schema.json`
 - [ ] `tools/packages/packages.lock.schema.json`
+- [ ] `tools/packages/pulp-packages-verify.cmake`
 - [ ] `tools/packages/validate_registry.py`
 - [ ] `tools/packages/freshness_check.py`
 

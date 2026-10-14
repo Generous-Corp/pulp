@@ -2061,8 +2061,9 @@ std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
 SignalGraph::RoutedExecutionStatus
 SignalGraph::routed_execution_status(int block_size) const noexcept {
     RoutedExecutionStatus status;
-    const auto live = live_slot_.live();
-    if (!live || block_size <= 0)
+    auto read_guard = live_slot_.read();
+    const auto* live = read_guard.get();
+    if (live == nullptr || block_size <= 0)
         return status;
 
     status.prepared = true;

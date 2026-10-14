@@ -85,6 +85,7 @@ TEST_CASE("Restores and renders never overlap under contention",
     std::atomic<int> inside_restore{0};
     std::atomic<int> overlaps{0};
     std::atomic<int> renders_run{0};
+    std::atomic<int> restores_run{0};
     std::atomic<bool> writer_done{false};
 
     // One writer repeatedly restoring, several readers repeatedly rendering.
@@ -102,6 +103,7 @@ TEST_CASE("Restores and renders never overlap under contention",
                 std::this_thread::yield();
                 inside_restore.fetch_sub(1, std::memory_order_acq_rel);
             }
+            restores_run.fetch_add(1, std::memory_order_relaxed);
             std::this_thread::sleep_for(std::chrono::microseconds(200));
         }
     });
@@ -109,7 +111,10 @@ TEST_CASE("Restores and renders never overlap under contention",
     std::vector<std::thread> readers;
     for (int t = 0; t < 3; ++t) {
         readers.emplace_back([&] {
-            while (!writer_done.load(std::memory_order_acquire)) {
+            // Bound shared-lock attempts so readers cannot indefinitely starve
+            // a writer on platforms where shared_mutex has reader preference.
+            for (int attempt = 0; attempt < 5000 && !writer_done.load(std::memory_order_acquire);
+                 ++attempt) {
                 auto render = gate.lock_for_render();
                 if (!render) {
                     std::this_thread::sleep_for(std::chrono::microseconds(50));
@@ -128,6 +133,7 @@ TEST_CASE("Restores and renders never overlap under contention",
     for (auto& r : readers) r.join();
 
     // Assertions after every join, so a failure reports from the main thread.
+    REQUIRE(restores_run.load() == 50);
     REQUIRE(overlaps.load() == 0);
     // Guard against the run proving nothing because every render was refused.
     REQUIRE(renders_run.load() > 0);

@@ -5003,6 +5003,16 @@ bisectable.
   four releases, and the dry-run's copy drifted and went red unnoticed. The PR
   gate also runs in `merge_group` when the batch touches its `paths:` list,
   read by `tools/ci/release_path_changed.py` from the workflow itself.
+- **A release job's dependencies live in its isolated root, not the home
+  cache.** `release-cli.yml` sets `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` /
+  `PULP_FETCHCONTENT_BASE_DIR` to a fresh `$RUNNER_TEMP/pulp-isolated-*` root.
+  Any script that later goes looking for a fetched artifact must read those
+  variables. When they are set, it must also refuse to fall back to
+  `~/Library/Caches/Pulp` or `~/.cache/pulp`, which an earlier, possibly PR,
+  job wrote. `package_cli.py`'s wgpu lookup missed this. Linux failed to
+  package at all, because the runtime is not copied into the build dir there.
+  darwin-arm64 went green while bundling the shared-cache dylib. A green leg
+  is not proof that the isolated copy shipped: read the `bundled:` line.
 - **Release/SDK builds must pass `-DPULP_ENABLE_AUDIO_PROBES=OFF`.** The
   standalone audio probe is a dev/example inspection surface and defaults ON
   for local development, but shipped CLI, standalone, and SDK artifacts must

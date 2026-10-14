@@ -2502,14 +2502,21 @@ Pulp's plug-in host and editor tooling is in `pulp::view-tooling`, which links
 - `EditorBridge`;
 - `StateStoreHostParamSurface`, the StateStore adapter behind
   `HostParamSurface`;
-- `ScriptInspectorBridge`, the runtime-inspector bridge.
+- `ScriptInspectorBridge`, the runtime-inspector bridge;
+- the platform plug-in editor hosts (macOS, iOS, Windows, Linux), the
+  `PluginViewHost` factory and `PluginViewHost::create()`;
+- `PluginFrameRenderer`, the frame pipeline the Windows and Linux editor hosts
+  share.
 
 `pulp::view` and `pulp::format-view` link it; `pulp::view-core`,
 `pulp::view-script` and `pulp::view-native` do not. The abstract
 `HostParamSurface` and `HostActionSurface` contracts are in
 `<pulp/view/host_surfaces.hpp>` in `pulp::view-core`;
 `<pulp/view/host_param_surface.hpp>` re-exports them alongside the StateStore
-adapter. `view_type_name()` (`<pulp/view/inspector_facts.hpp>`, view-core) is the
+adapter. The abstract `PluginViewHost` class
+(`<pulp/view/plugin_view_host.hpp>`) also stays in `pulp::view-core`, so a view
+tree reaches its host without the kept layer; creating a platform host needs
+`pulp::view-tooling`. `view_type_name()` (`<pulp/view/inspector_facts.hpp>`, view-core) is the
 type classification `ViewInspector::type_name()` reports.
 
 A `ScriptedUiSession` carries a runtime-inspector port only when one was

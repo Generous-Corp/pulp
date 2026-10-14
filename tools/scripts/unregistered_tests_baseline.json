@@ -781,7 +781,6 @@
     "tools/scripts/test_macos_reroute_watcher.py",
     "tools/scripts/test_merge_cobertura_extra.py",
     "tools/scripts/test_mkdocs_hooks.py",
-    "tools/scripts/test_package_cli.py",
     "tools/scripts/test_package_cli_extra.py",
     "tools/scripts/test_pending_intent_liveness.py",
     "tools/scripts/test_pr_release_tag_report.py",

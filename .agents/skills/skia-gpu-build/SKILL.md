@@ -85,6 +85,12 @@ exact Skia/Dawn pair used by desktop. The script checks out the immutable Skia
 revision and stages the `skunicode` headers; mutable milestone tips and stale
 module headers are not valid provenance.
 
+Android source builds take one governed host lease per ABI for both Skia Ninja
+and nested Dawn CMake. The Dawn-directory check must run after Ninja inside the
+governed command because that graph can create `cmake_dawn`; set
+`PULP_SKIA_ANDROID_DRY_RUN=1` to inspect per-ABI command receipts without an
+Android toolchain.
+
 A valid cached generation keeps headers and libraries together and carries both
 the verified archive stamp and extracted-file digest receipt. An arbitrary
 sibling checkout is not provenance: never use its mutable

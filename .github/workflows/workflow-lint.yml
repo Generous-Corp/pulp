@@ -55,6 +55,8 @@ on:
       - 'tools/scripts/fixtures/release_failure/**'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
+      - 'tools/scripts/package_cli.py'
+      - 'tools/scripts/test_package_cli.py'
       - 'tools/scripts/release_build_matrix.py'
       - 'tools/scripts/test_release_build_matrix.py'
       - 'tools/scripts/release_platform_subset_check.py'
@@ -183,6 +185,8 @@ on:
       - 'tools/scripts/fixtures/release_failure/**'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
+      - 'tools/scripts/package_cli.py'
+      - 'tools/scripts/test_package_cli.py'
       - 'tools/scripts/release_build_matrix.py'
       - 'tools/scripts/test_release_build_matrix.py'
       - 'tools/scripts/release_platform_subset_check.py'
@@ -446,6 +450,9 @@ jobs:
           python3 tools/scripts/test_release_trailer_guard.py
           python3 tools/scripts/test_release_checksum_manifest.py
           python3 tools/scripts/test_release_artifact_contents.py
+          # The release packager, including where it looks for the wgpu-native
+          # runtime when the job's dependencies live in an isolated root.
+          python3 tools/scripts/test_package_cli.py
           # The active_platforms shipping knob: matrix-leg derivation and the
           # subset-staleness allowance that keeps a platform pause temporary.
           python3 tools/scripts/test_release_build_matrix.py
