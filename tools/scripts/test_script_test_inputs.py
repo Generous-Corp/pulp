@@ -203,6 +203,16 @@ class ProfileIndependenceTests(unittest.TestCase):
         self.assertIn("older than the source tree", proc.stderr)
         self.assertEqual(out.read_bytes(), b"sentinel\n")
 
+    def test_inline_python_skip_command_is_not_an_inventory_entry(self) -> None:
+        command = [
+            "/usr/bin/python3",
+            "-c",
+            "import sys; print('SKIP: feature disabled'); sys.exit(77)",
+        ]
+        self.assertEqual(sti.classify(command, self.repo.root), ("undeclarable", None, []))
+        inventory = {"tests": [{"name": "feature-skip", "command": command, "properties": []}]}
+        self.assertEqual(sti.build_list(inventory, self.repo.root)["tests"], {})
+
     def inventory_with_example(self, keep_root: Path | None = None) -> dict:
         r = str(self.repo.root)
         inv = self.repo.inventory()

@@ -480,6 +480,12 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     if exe.startswith("python"):
         i = 0
         while i < len(args) and args[i].startswith("-") and args[i] != "-m":
+            if args[i] == "-c":
+                # Inline interpreter snippets (used by feature-disabled CTest
+                # registrations) have no repository entry file or bounded
+                # input closure.  They must stay outside this source-input
+                # inventory rather than being mistaken for a build-tree path.
+                return "undeclarable", None, []
             i += 1
         if i < len(args) and args[i] == "-m":
             return "python-module", None, args[i + 1:]
