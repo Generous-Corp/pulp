@@ -26,7 +26,30 @@ on a real PR. Do them in order.
 
 1. **Run `tools/scripts/gates.sh origin/main` before every push.** It runs the
    offline gates CI runs, including both halves of the required `Vellum freeze`
-   check, over the merge-base range:
+   check, over the merge-base range. **On a host that carries the required gate
+   VMs it refuses its heavy half.** `tools/scripts/gate_host_policy.sh` reads
+   `tartci host-profile`, not the hostname: when `TARTCI_SERVES_GATE=1` and
+   `TARTCI_ROLE` is anything but `light` (today m3 `dedicated-builder`, m5 and
+   m5s `dev-overflow`), `gates.sh` never configures and skips every
+   source-selftest lane. The generated-manifest lane still runs build-free
+   (`PULP_GATES_NO_CONFIGURE=1`), so its families prediction can still fail.
+   The skipped lanes are listed as NOT CHECKED, so the verdict reads "not a full
+   pass" rather than "safe to push". The cheap gates still run.
+   The pre-push hook and `local_diff_cover.sh` (exit 4) refuse the
+   diff-coverage build the same way, and the hook ends "gates clean except
+   diff coverage: NOT CHECKED". Run the full set on m1 (`light`) or a
+   disposable VM.
+   The policy fails closed:
+   - tartci is found on PATH or in `~/.local/bin`;
+   - a tartci whose `host-profile` fails, or that prints no
+     `TARTCI_SERVES_GATE`, counts as a gate host;
+   - an unknown role is refused;
+   - only a machine with no tartci at all is treated as a non-fleet host.
+
+   Every fleet host reports `TARTCI_SERVES_GATE=1`, so that field alone would
+   refuse m1 too. `PULP_TARTCI_BIN` is a test hook that names a fake profile.
+   Do not point it at a fake light profile to dodge the refusal. The gate run
+   covers:
    - **watch events** — a range touching a watched capability-family path
      without a committed `.github/vellum-expansion-watch-events/` event FAILS
      (exit 10) and prints the exact JSON; or run
@@ -1146,6 +1169,17 @@ consequences worth knowing before you debug:
   and still exits 0, which is a pass it never earned. Reproduce with
   `python3.12 tools/ci/source_selftests.py run` after temporarily renaming
   `build/`, which is the lane's condition.
+- The lane is three jobs. `Version & skill sync checks` runs the shared part.
+  `Exclusive source selftests 1/2` and `2/2` run the `PROCESSORS` > 1 entries,
+  each alone on its own runner. The required `Enforce version & skill sync`
+  job only collects the result of the other two. When it is red, open the
+  needed job that failed: the aggregator's log names it but holds no test
+  output. `EXCLUSIVE_SHARD_PLAN` in `tools/ci/source_selftests.py` names the
+  shard for each `PROCESSORS` > 1 entry, balanced on measured wall time, not
+  on manifest timeouts (the timeouts are all 300 s and put the two GPU DPR
+  tests together, a 200 s shard). A new such entry still runs, on the lightest
+  shard, but the contract fails until the plan places it. Changing the shard
+  count means changing the plan and the workflow matrix together.
 - Editing a moved registration's arguments without refreshing the manifest
   fails `source-selftest-lane-contract` on the gate; run
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
@@ -12106,6 +12140,28 @@ that prints non-ASCII marks, reconfigure its own stdout at its entry point
 (`sys.stdout.reconfigure(encoding="utf-8", errors="replace")`); a Windows pipe
 defaults to the ANSI code page. `PYTHONIOENCODING=cp1252` reproduces that pipe
 on macOS.
+
+## Tracked Python parses on 3.11: the floor-syntax check
+
+The gate tooling needs Python 3.11 (`tomllib`, `enterContext`), and 3.11 is
+what CMake finds on a stock Homebrew Mac, so ctest's Python suites often run
+under it locally while CI runs 3.12. PEP 701 (3.12) lets an f-string field reuse
+the enclosing quote (`f"{row["a"]}"`) or hold a backslash, comment or line
+break. On 3.11 one such file makes `gate-python-imports` and
+`script-test-inputs-drift` fail for everyone ("f-string: unmatched '['"),
+while CI stays green. `tools/scripts/python_floor_syntax_check.py` (in
+`gates.sh` and `version-skill-check.yml`) scans every tracked `*.py`, not
+only `tools/`, because `test/` runs under the same floor.
+`ast.parse(feature_version=(3, 11))` does not catch these on 3.12, so on 3.12+
+the check walks the f-string tokens; on an older Python it compiles the file.
+Two cases leave no token of their own:
+- a backslash line continuation inside a field. The check reads the source
+  line the previous field token ends on;
+- the literal text of an f-string nested in another's field. That text is part
+  of the outer field, so a backslash in it is rejected.
+
+Fix a hit with the other quote character, or bind the expression to a local
+first.
 
 ## Hosted macOS advisory cadence
 

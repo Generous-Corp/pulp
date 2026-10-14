@@ -278,6 +278,15 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpWgpuNative.cmake")
 #          one the upstream script would download.
 function(pulp_register_wgpu_native_precompiled_source version)
     cmake_parse_arguments(PWN "" "ARCH" "" ${ARGN})
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_GENERATOR_PLATFORM)
+        string(TOUPPER "${CMAKE_GENERATOR_PLATFORM}" _wgpu_target_platform)
+        if(_wgpu_target_platform MATCHES "(^|,)(ARM64EC|ARM64X)(,|$)")
+            message(FATAL_ERROR
+                "Pulp: no pinned wgpu-native provider exists for "
+                "${CMAKE_GENERATOR_PLATFORM}; refusing to fall back to a pure "
+                "ARM64 or x64 archive")
+        endif()
+    endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         set(url_os "windows")
         if(MSVC)

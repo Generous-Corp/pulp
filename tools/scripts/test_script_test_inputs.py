@@ -42,6 +42,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -133,6 +134,10 @@ class ProfileIndependenceTests(unittest.TestCase):
         self.assertEqual(len(reason), 1)
         self.assertIn("jsx-runtime npm dependencies", reason[0])
         self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", reason[0])
+        self.assertIn("file=test/ctest_script_inputs.json", reason[0])
+        self.assertIn("cause_class=INCOMPLETE_CONFIGURE", reason[0])
+        self.assertIn("safe_to_auto_apply=no", reason[0])
+        self.assertIn("ctest --test-dir <build-dir>", reason[0])
 
     def test_gate_shaped_node_dependency_registration_is_accepted(self) -> None:
         self._profile_cache(self.repo.build)
@@ -172,6 +177,31 @@ class ProfileIndependenceTests(unittest.TestCase):
         reasons = sti.outside_gate_profile_build(self.repo.build, python_only)
         self.assertEqual(len(reasons), 1)
         self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", reasons[0])
+
+    def test_stale_build_older_than_source_refuses_to_write(self) -> None:
+        self._profile_cache(self.repo.build)
+        source = self.repo.root / "tools/scripts/test_alpha.py"
+        cache = self.repo.build / "CMakeCache.txt"
+        old = cache.stat().st_mtime - 10
+        os.utime(cache, (old, old))
+        newer = source.stat().st_mtime + 10
+        os.utime(source, (newer, newer))
+        reason = sti.outside_gate_profile_build(self.repo.build, self.repo.inventory(), self.repo.root)
+        self.assertTrue(reason)
+        self.assertIn("older than the source tree", reason[-1])
+        self.assertIn("cause_class=STALE_BUILD", reason[-1])
+        self.assertIn("safe_to_auto_apply=no", reason[-1])
+        inv_path = self.repo.build / "inv.json"
+        inv_path.write_text(json.dumps(self.repo.inventory()), encoding="utf-8")
+        out = self.repo.build / "list.json"
+        out.write_bytes(b"sentinel\n")
+        proc = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(self.repo.root),
+                               "--build-dir", str(self.repo.build), "--inventory-json", str(inv_path),
+                               "--list", str(out), "--write"], capture_output=True, text=True,
+                              timeout=60, env=tool_env(event=None, strict=False), encoding="utf-8")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("older than the source tree", proc.stderr)
+        self.assertEqual(out.read_bytes(), b"sentinel\n")
 
     def inventory_with_example(self, keep_root: Path | None = None) -> dict:
         r = str(self.repo.root)
@@ -441,6 +471,20 @@ class CheckModeTests(unittest.TestCase):
             proc = self.run_tool(repo, "--check", "--base", "base-ref", inventory=inv)
             self.assertEqual(proc.returncode, 0, proc.stdout)
             self.assertIn("missing from list: linux-only", proc.stdout)   # advisory, not blocking
+
+    def test_removed_main_entry_blocks_even_when_unrelated_files_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            committed = json.loads((repo.root / "test/ctest_script_inputs.json").read_text(encoding="utf-8"))
+            committed["tests"].pop("alpha")
+            write(repo.root, "test/ctest_script_inputs.json", json.dumps(committed))
+            write(repo.root, "README.md", "unrelated\n")
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "pr deletes a live inventory entry")
+            proc = self.run_tool(repo, "--check", "--base", "base-ref")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("missing from list: alpha", proc.stdout)
 
     def test_merge_group_reports_blocking_drift_as_a_warning_and_exits_0(self) -> None:
         """The pull-request head is the enforcement point; a merge group must
@@ -952,7 +996,13 @@ class GateProfileTests(unittest.TestCase):
 
     def cache(self, repo: Repo, **values: str) -> None:
         lines = [f"{k}:STRING={v}" for k, v in values.items()]
-        (repo.build / "CMakeCache.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        cache = repo.build / "CMakeCache.txt"
+        cache.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # This fixture mutates source-side evidence after writing the cache;
+        # keep the synthetic configure newer so the stale-build guard is
+        # exercised only by its dedicated test above.
+        future = time.time() + 60
+        os.utime(cache, (future, future))
 
     def test_a_gate_shaped_build_compares_the_compiled_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -964,6 +1014,23 @@ class GateProfileTests(unittest.TestCase):
             proc = self.run_tool(repo, "--check", "--full")
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
+
+    def test_a_stale_build_check_reports_compiled_drift_instead_of_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.cache(repo, PULP_BUILD_EXAMPLES="OFF", CMAKE_BUILD_TYPE="Release",
+                       PULP_SANITIZER="", PULP_HAS_VST3="TRUE", PULP_HAS_AUSDK="TRUE")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            compiled_evidence(repo, declare_b=True)
+            cache = repo.build / "CMakeCache.txt"
+            old = cache.stat().st_mtime - 10
+            os.utime(cache, (old, old))
+            source = repo.root / "test/test_b.cpp"
+            os.utime(source, (old + 20, old + 20))
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
+            self.assertNotIn("SKIPPED the compiled entries", proc.stdout)
 
     def test_an_off_profile_build_skips_the_compiled_half_by_name(self) -> None:
         for values, reason in ((dict(PULP_BUILD_EXAMPLES="ON"), "PULP_BUILD_EXAMPLES=ON"),
@@ -1022,7 +1089,7 @@ class GatePlatformTests(unittest.TestCase):
             self.assertIn("this is a skip, not a pass", proc.stdout)
             proc = self.run_tool(repo, "--write")
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("refusing to write: CMAKE_SYSTEM_NAME=Linux", proc.stderr)
+            self.assertIn("cause_class=WRONG_PLATFORM", proc.stderr)
             # Control: the same drift on the gate's platform still fails.
             self.cache(repo, CMAKE_SYSTEM_NAME="Darwin")
             self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 1)

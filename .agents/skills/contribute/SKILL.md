@@ -158,7 +158,9 @@ Two environment facts worth knowing before you read its output:
 - **Coverage is opt-in.** Pass your test target(s) to measure it. With no target
   the whole-tree coverage build takes ~30 minutes, so the script skips it and
   tells you rather than appearing to hang. It also skips automatically when your
-  diff contains no C/C++ — there is nothing to cover.
+  diff contains no C/C++ — there is nothing to cover. A coverage run that was skipped
+  rather than measured (the host was starved, or it is a maintainer CI host
+  that refuses local builds) reports NOT CHECKED, never a pass or a fail.
 
 ### Path-based gates can fire on files you barely touched
 

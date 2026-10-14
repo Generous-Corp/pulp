@@ -641,6 +641,17 @@ class ExternalResolver:
             row |= {"patched": True, "patch": state["patch"], **state["patch_fields"]}
         return row | ({"sha256": file_digest} if file_digest else {})
 
+    def external_link_input(self, path: Path) -> dict | None:
+        """The prebuilt Skia toolchain an include directory reaches, as a link input."""
+        located = self._skia_root(path)
+        metadata = self.pins.get("skia")
+        if not located or not metadata:
+            return None
+        receipt = self._skia_receipt(located[0])
+        if not receipt:
+            return None
+        return {"dependency": "skia", "source": metadata["source"], "pin": metadata["pin"], "asset_sha256": receipt["asset"]}
+
     def portable(self, raw: str) -> str:
         """Express an include directory without host-specific prefixes."""
         system = system_identity(raw.replace("\\", "/"), self.system_probe)
@@ -817,6 +828,66 @@ def receipt_path_violations(document: dict) -> list[str]:
     return violations
 
 
+BUILD_TIMESTAMP_PLACEHOLDER = "<build-timestamp>"
+
+
+def generated_digest(rel: str, path: Path, source: Path) -> dict | None:
+    """A generated input's digest that does not depend on when or whether it was built.
+
+    ``build_info.hpp`` is hashed with its configure timestamp replaced by
+    ``BUILD_TIMESTAMP_PLACEHOLDER``; a binary-data source is hashed by
+    running its encoder on the recorded font input, so the digest is the same
+    before and after a build. Returns None for any other input.
+    """
+    if re.fullmatch(r"@build/core/runtime/generated/(?:[^/]+/)?pulp/runtime/build_info\.hpp", rel):
+        if not path.is_file():
+            return None
+        text = path.read_text(encoding="utf-8")
+        stamp = re.search(r'kBuildIso8601\s*=\s*"([^"]*)"', text)
+        if stamp and stamp.group(1):
+            text = text.replace(stamp.group(1), BUILD_TIMESTAMP_PLACEHOLDER)
+        return {"sha256": _text_sha256(text), "normalization": {"build_timestamp": BUILD_TIMESTAMP_PLACEHOLDER}}
+    data = re.fullmatch(r"@build/core/canvas/(?P<target>pulp-bundled-[A-Za-z0-9-]+?)_data_(?P<var>[A-Za-z0-9_]+)\.cpp", rel)
+    if not data:
+        return None
+    namespaces = canvas_binary_namespaces(source)
+    inputs = canvas_binary_data(source).get(data.group("target"), [])
+    font = next((f for f in inputs if c_identifier(Path(f).name) == data.group("var")), None)
+    encoder = source / "tools/cmake/scripts/encode_binary_data.py"
+    if not font or data.group("target") not in namespaces or not encoder.is_file():
+        return None
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="pulp-binary-data-") as td:
+        out = Path(td) / "out.cpp"
+        try:
+            subprocess.run([sys.executable, str(encoder), "--src", str(source / font), "--out", str(out),
+                            "--namespace", namespaces[data.group("target")], "--var", data.group("var")],
+                           check=True, capture_output=True)
+        except (subprocess.CalledProcessError, OSError):
+            return None
+        return {"sha256": sha256(out)}
+
+
+def c_identifier(name: str) -> str:
+    """CMake's string(MAKE_C_IDENTIFIER) for a file name."""
+    ident = re.sub(r"[^A-Za-z0-9_]", "_", name)
+    return f"_{ident}" if ident[:1].isdigit() else ident
+
+
+def canvas_binary_namespaces(source: Path) -> dict[str, str]:
+    """The NAMESPACE each pulp_add_binary_data call in core/canvas declares."""
+    try:
+        text = (source / "core/canvas/CMakeLists.txt").read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    result: dict[str, str] = {}
+    for match in re.finditer(r"pulp_add_binary_data\(\s*(pulp-bundled-[A-Za-z0-9-]+)(.*?)\)", text, re.S):
+        namespace = re.search(r"\bNAMESPACE\s+(\S+)", match.group(2))
+        if namespace:
+            result[match.group(1)] = namespace.group(1)
+    return result
+
+
 def canvas_binary_data(source: Path) -> dict[str, list[str]]:
     """Binary-data targets ``core/canvas/CMakeLists.txt`` declares, with their inputs."""
     try:
@@ -841,7 +912,8 @@ def generated_producers(rel: str, source: Path) -> list[str] | None:
     # pulp_add_binary_data writes one header and one source per embedded file.
     data = re.fullmatch(r"@build/core/canvas/(?P<target>pulp-bundled-[A-Za-z0-9-]+?)_data(?:_[A-Za-z0-9_]+)?\.(?:hpp|cpp)", rel)
     if data and data.group("target") in canvas_binary_data(source):
-        return ["core/canvas/CMakeLists.txt", "tools/cmake/PulpEmbedData.cmake", *canvas_binary_data(source)[data.group("target")]]
+        return ["core/canvas/CMakeLists.txt", "tools/cmake/PulpEmbedData.cmake", "tools/cmake/scripts/encode_binary_data.py",
+                *canvas_binary_data(source)[data.group("target")]]
     return None
 
 
@@ -950,6 +1022,34 @@ def configure_violations(data: dict) -> list[str]:
     return violations
 
 
+def external_link_violations(data: dict) -> list[str]:
+    """A target that compiles against Skia records Skia as a link input, and only then."""
+    pins = fetchcontent_pins(Path(__file__).resolve().parents[2])
+    skia = pins.get("skia") or {}
+    violations: list[str] = []
+    for target in data.get("targets", []):
+        # An absent key is an empty list: omitting it must not skip the check.
+        links = target.get("external_link_inputs", [])
+        if not isinstance(links, list):
+            violations.append(f"{target.get('name')} external_link_inputs is not a list")
+            continue
+        uses_skia = "PULP_HAS_SKIA=1" in set(target.get("compile_definitions", []))
+        skia_links = [link for link in links if isinstance(link, dict) and link.get("dependency") == "skia"]
+        if len(skia_links) != len(links):
+            violations.append(f"{target.get('name')} records a link input other than Skia")
+        if len(skia_links) > 1:
+            violations.append(f"{target.get('name')} records more than one Skia link input")
+        if uses_skia and not skia_links:
+            violations.append(f"{target.get('name')} compiles against Skia but records no Skia link input")
+        if skia_links and not uses_skia:
+            violations.append(f"{target.get('name')} records a Skia link input but does not compile against Skia")
+        for link in skia_links:
+            if link.get("pin") != skia.get("pin") or link.get("source") != skia.get("source") \
+                    or link.get("asset_sha256") not in skia.get("assets", []):
+                violations.append(f"{target.get('name')} Skia link input does not match the manifest pin and assets")
+    return violations
+
+
 def generated_input_violations(data: dict) -> list[str]:
     """Generated inputs name their real generator, and producers need outputs."""
     source = Path(str(data.get("source_root") or Path(__file__).resolve().parents[2]))
@@ -980,6 +1080,67 @@ def generated_input_violations(data: dict) -> list[str]:
     return violations
 
 
+MIRROR_EDGE_TABLE = Path(__file__).with_name("vellum_mirror_edge_patterns.json")
+
+
+def mirror_edge_table(path: Path = MIRROR_EDGE_TABLE) -> dict:
+    """The forbidden-mirror-edge table Pulp's gate and Vellum's extraction scan share.
+
+    ``content_patterns`` apply to the text of every file whose suffix is in
+    ``suffixes`` (``""`` is a file with no suffix), comments included;
+    ``binary_suffixes`` name the only suffixes a closure may carry unscanned;
+    ``path_patterns`` apply to a file's path relative to the mirror root.
+    """
+    table = json.loads(path.read_text(encoding="utf-8"))
+    if table.get("schema") != "pulp.vellum.mirror-edge-patterns.v1":
+        raise SystemExit(f"invalid mirror edge table schema: {path}")
+    if set(table["suffixes"]) & set(table["binary_suffixes"]):
+        raise SystemExit(f"mirror edge table lists a suffix as both scanned and binary: {path}")
+    return {
+        "suffixes": set(table["suffixes"]),
+        "binary_suffixes": set(table["binary_suffixes"]),
+        "content": {name: re.compile(pattern) for name, pattern in table["content_patterns"].items()},
+        "path": {name: re.compile(pattern) for name, pattern in table["path_patterns"].items()},
+    }
+
+
+def closure_mention_violations(data: dict, table: dict | None = None) -> list[str]:
+    """Every file a closure carries is free of forbidden mirror edges.
+
+    A file is checked by path (a Pulp-kept file may not be mirrored at all)
+    and by content, comments included. A file whose suffix is neither
+    scanned nor declared binary is refused, so a new kind of file cannot
+    ride along unchecked. The patterns are the ones Vellum's extraction scan
+    applies to the mirror.
+    """
+    source = data.get("source_root")
+    if not source:
+        return []
+    table = table or mirror_edge_table()
+    root = Path(__file__).resolve().parents[2] if source == "." else Path(source)
+    violations: list[str] = []
+    for rel in data.get("files", []):
+        for name, pattern in table["path"].items():
+            if pattern.search(rel):
+                violations.append(f"{name} {rel}")
+        path = root / rel
+        suffix = path.suffix.lower()
+        if suffix in table["binary_suffixes"]:
+            continue
+        if suffix not in table["suffixes"]:
+            violations.append(f"mirror-unclassified-suffix {rel}: {suffix} is neither scanned nor declared binary")
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            violations.append(f"mirror-unreadable-file {rel}: {exc}")
+            continue
+        for name, pattern in table["content"].items():
+            for match in pattern.finditer(text):
+                violations.append(f"{name} mention {rel}:{text.count(chr(10), 0, match.start()) + 1}: {match.group(0)[:80]}")
+    return violations
+
+
 def cmake_reference_violations(data: dict, allowlist: list[dict] | None, used: set[str]) -> list[str]:
     """No CMake file in a closure may reference a forbidden Pulp target."""
     source = data.get("source_root")
@@ -1005,6 +1166,9 @@ def cmake_reference_violations(data: dict, allowlist: list[dict] | None, used: s
 
 def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
     config, targets = codemodel(build)
+    # Generated sources a target compiles are build-step outputs; anything
+    # else generated is written by the configure itself.
+    built_outputs: set[str] = set()
     resolver = ExternalResolver(source, build)
     by_name = {data.get("name"): data for data in targets.values()}
     optional = {n.removeprefix(OPTIONAL_PREFIX) for n in names if n.startswith(OPTIONAL_PREFIX)}
@@ -1030,7 +1194,10 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
             for index in group.get("sourceIndexes", []):
                 item = source_entries[index] if index < len(source_entries) else {}
                 raw = item.get("path")
-                if raw:
+                # A custom command's ``.rule`` pseudo-source and a custom
+                # target's CMakeFiles stamp are CMake's own bookkeeping, not
+                # inputs.
+                if raw and not raw.endswith(".rule") and "/CMakeFiles/" not in raw.replace("\\", "/"):
                     p = Path(raw)
                     if not p.is_absolute():
                         p = source / p
@@ -1042,8 +1209,13 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
                         resources.add(rel)
                     if rel.startswith("@build/"):
                         generated.add(rel)
+                        built_outputs.add(rel)
         includes: list[str] = []
         defines: list[str] = []
+        # CMake's file API omits imported targets, so a prebuilt library a
+        # target compiles against is recorded from the include directories
+        # that reach it.
+        external_links: list[dict] = []
         for group in data.get("compileGroups", []):
             for item in group.get("includes", []):
                 raw = item.get("path")
@@ -1054,6 +1226,9 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
                     p = p.resolve()
                     all_include_dirs.add(p)
                     includes.append(resolver.portable(raw))
+                    link = resolver.external_link_input(p)
+                    if link and link not in external_links:
+                        external_links.append(link)
             for item in group.get("defines", []):
                 value = item.get("define")
                 if value:
@@ -1066,7 +1241,7 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
             if dep_name:
                 links.add(dep_name)
                 deps.append(dep_name)
-        selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if not rel.startswith(("@build/", "/"))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps))})
+        selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if not rel.startswith(("@build/", "/"))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps)), "external_link_inputs": external_links})
     all_files = collect_headers(all_files, sorted(all_include_dirs), source)
     normalized = [norm_path(str(p), source, build) for p in all_files]
     # File-api does not list configure-time generated headers when they are
@@ -1081,8 +1256,11 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
                     normalized.append(norm_path(str(candidate), source, build))
                     all_files.add(candidate.resolve())
     if "pulp-canvas" in selected_names:
-        for candidate in (build / "core/canvas").glob("pulp-bundled-*_data.*"):
-            if candidate.is_file():
+        # The declaration headers pulp_add_binary_data writes at configure
+        # time, one per binary-data target this configure declares.
+        for target_name in canvas_binary_data(source):
+            candidate = build / "core/canvas" / f"{target_name}_data.hpp"
+            if target_name in by_name and candidate.is_file():
                 normalized.append(norm_path(str(candidate), source, build))
                 all_files.add(candidate.resolve())
     if "pulp-view-script" in selected_names:
@@ -1120,9 +1298,18 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
     generated_rows = []
     for rel in sorted(generated - external_paths):
         candidate = build / rel.removeprefix("@build/")
-        if not candidate.is_file():
+        row = {"path": rel, "producer_paths": sorted(set(producer_map.get(rel) or []))}
+        recipe = generated_digest(rel, candidate, source)
+        if recipe:
+            row |= recipe
+        elif rel in built_outputs:
+            # A build-step output with no recipe is listed by its declaration
+            # alone; its bytes depend on whether the build has run.
+            row["sha256"] = None
+        elif candidate.is_file():
+            row["sha256"] = sha256(candidate)
+        else:
             continue
-        row = {"path": rel, "sha256": sha256(candidate), "producer_paths": sorted(set(producer_map.get(rel) or []))}
         dependency = generated_dependency(rel, resolver)
         if dependency:
             row["producer_dependency"] = dependency
@@ -1473,6 +1660,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
         violations.extend(external_input_violations(data))
         violations.extend(receipt_path_violations(data))
         violations.extend(configure_violations(data))
+        violations.extend(external_link_violations(data))
         violations.extend(generated_input_violations(data))
         violations.extend(cmake_reference_violations(data, allowlist, used_allowlist))
         if args.unit_manifest:
@@ -1584,8 +1772,9 @@ def exportable_closure(manifest: dict, unit_name: str, cpu_only_units: Iterable[
     """Return the closure export writes for one manifest, or refuse it.
 
     Export never writes a closure whose inputs fail provenance, that still
-    names a host path, that does not record its configure, or whose generated
-    inputs name the wrong producer. The canvas is the GPU/Skia-backed graph:
+    names a host path, that does not record its configure, whose generated
+    inputs name the wrong producer, or whose files mention a Pulp-owned
+    subsystem. The canvas is the GPU/Skia-backed graph:
     a canvas closure from any other configure is refused unless the unit is
     explicitly labelled ``cpu-only``, and the label travels with the closure.
     """
@@ -1593,7 +1782,11 @@ def exportable_closure(manifest: dict, unit_name: str, cpu_only_units: Iterable[
     normalized["source_root"] = None
     normalized["build_dir"] = None
     violations = receipt_path_violations(normalized) + external_input_violations(manifest)
-    violations += configure_violations(manifest) + generated_input_violations(manifest)
+    violations += configure_violations(manifest) + generated_input_violations(manifest) + external_link_violations(manifest)
+    for row in manifest.get("generated_inputs", []):
+        if isinstance(row, dict) and not SHA256_RE.fullmatch(str(row.get("sha256"))):
+            violations.append(f"generated input has no reproducible digest; it needs a recipe {row.get('path')}")
+    violations += closure_mention_violations(manifest)
     for row in manifest.get("external_inputs", []):
         if isinstance(row, dict) and row.get("patched") and row.get("base_modification"):
             # The patch set can only be replayed onto an unmodified base.
@@ -1693,7 +1886,11 @@ def cmd_export(args: argparse.Namespace) -> int:
             if key in seen_generated and next(row for row in generated_inputs if row["path"] == key) != item:
                 raise SystemExit(f"conflicting generated input: {key}")
             if key not in seen_generated:
-                generated_inputs.append({"path": key, "sha256": item["sha256"], "producer_paths": sorted(set(item["producer_paths"]))})
+                generated_row = {"path": key, "sha256": item["sha256"], "producer_paths": sorted(set(item["producer_paths"]))}
+                for optional_key in ("normalization", "producer_dependency"):
+                    if optional_key in item:
+                        generated_row[optional_key] = item[optional_key]
+                generated_inputs.append(generated_row)
                 seen_generated.add(key)
     generated_inputs.sort(key=lambda row: row["path"])
     file_paths = {row["pulp_path"] for row in files}
@@ -1727,6 +1924,41 @@ def cmd_export(args: argparse.Namespace) -> int:
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"export_receipt={receipt_path} mirror_sha={mirror_sha} blobs={len(files)}")
     return 0
+
+
+def cmd_mentions(args: argparse.Namespace) -> int:
+    """Scan the named D3 units' closures for Pulp-owned subsystem mentions."""
+    ensure_codemodel_reply(args.source_root, args.build_dir)
+    source, build, units = Path(args.source_root).resolve(), Path(args.build_dir).resolve(), Path(args.unit_manifest)
+    problems: list[str] = []
+    for unit in args.unit:
+        manifest = target_manifest(source, build, unit_manifest_targets(units, unit))
+        problems += [f"{unit}: {violation}" for violation in closure_mention_violations(manifest)]
+    print(f"mentions {' '.join(args.unit)}: {'FAIL' if problems else 'PASS'}")
+    for problem in problems:
+        print(f"  {problem}")
+    return 1 if problems else 0
+
+
+def cmd_export_check(args: argparse.Namespace) -> int:
+    """Run every check export applies, for the named D3 units, without exporting."""
+    ensure_codemodel_reply(args.source_root, args.build_dir)
+    source, build, units = Path(args.source_root).resolve(), Path(args.build_dir).resolve(), Path(args.unit_manifest)
+    manifests = [target_manifest(source, build, unit_manifest_targets(units, unit)) for unit in args.unit]
+    problems: list[str] = []
+    for unit, manifest in zip(args.unit, manifests):
+        try:
+            exportable_closure(manifest, unit)
+        except SystemExit as exc:
+            problems.append(str(exc))
+    problems += export_owned_file_violations(manifests, args.unit, units)
+    unmirrored = export_unmirrored_links(manifests)
+    if unmirrored:
+        problems.append("exported closures link Pulp targets no exported closure carries: " + ", ".join(unmirrored))
+    print(f"export-check {' '.join(args.unit)}: {'FAIL' if problems else 'PASS'}")
+    for problem in problems:
+        print(f"  {problem}")
+    return 1 if problems else 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -1763,6 +1995,8 @@ def main() -> int:
     p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=False)
     p = sub.add_parser("report"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=True)
     p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.add_argument("--cpu-only-unit", action="append", default=[]); p.set_defaults(func=cmd_export)
+    p = sub.add_parser("mentions"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--unit-manifest", required=True); p.add_argument("--unit", action="append", required=True); p.set_defaults(func=cmd_mentions)
+    p = sub.add_parser("export-check"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--unit-manifest", required=True); p.add_argument("--unit", action="append", required=True); p.set_defaults(func=cmd_export_check)
     p = sub.add_parser("verify"); p.add_argument("--receipt", required=True); p.add_argument("--mirror", required=True); p.set_defaults(func=cmd_verify)
     args = parser.parse_args()
     return args.func(args)

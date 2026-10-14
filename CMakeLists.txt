@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.963.0
+    VERSION 0.965.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -595,6 +595,33 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
         set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
+        # The units exported so far, and render, hold no forbidden mirror
+        # edge in any file, comments included; export refuses one.
+        add_test(NAME pulp.vellum-closure-export-mentions
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                mentions
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit render-3d)
+        set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+        # The units the first export carries, checked exactly as export checks
+        # them: provenance, configure, generated-input digests, Skia link
+        # inputs, owned files, mirrored links and Pulp-owned mentions.
+        add_test(NAME pulp.vellum-closure-export-units
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                export-check
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --unit foundation --unit gpu-device-api --unit canvas)
+        set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
     else()
         # Register the gate as an explicit skip so a CPU-only configuration
         # reports it as not run rather than dropping it silently.
@@ -615,6 +642,18 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             COMMAND "${Python3_EXECUTABLE}" -c
                 "import sys; print('SKIP: Vellum view-core Pulp-kept check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
         set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-export-mentions
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum export mention check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-export-units
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum export-unit check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
             SKIP_RETURN_CODE 77
             LABELS "pr")
     endif()

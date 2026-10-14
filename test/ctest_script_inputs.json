@@ -4438,6 +4438,7 @@
     "tools/ci/governed-build.sh",
     "tools/cli",
     "tools/scripts/diff_cover_targets.py",
+    "tools/scripts/gate_host_policy.sh",
     "tools/scripts/local_diff_cover.sh",
     "tools/scripts/test_diff_cover_targets.py"
    ],
@@ -6633,7 +6634,9 @@
   "local-diff-cover-selftest": {
    "entry": "tools/scripts/test_local_diff_cover.py",
    "inputs": [
+    ".githooks/lib",
     ".githooks/pre-push",
+    "tools/scripts/gate_host_policy.sh",
     "tools/scripts/local_diff_cover.sh",
     "tools/scripts/test_local_diff_cover.py"
    ],
@@ -7411,6 +7414,7 @@
     "core/view/src/reload_exports.cpp",
     "tools/cmake",
     "tools/cmake/PulpEmbedData.cmake",
+    "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_d3_units.json"
@@ -7424,6 +7428,64 @@
     "tools/scripts/vellum_closure_edge_fixture.json"
    ],
    "kind": "shell"
+  },
+  "pulp.vellum-closure-export-mentions": {
+   "entry": "tools/scripts/vellum_closure.py",
+   "inputs": [
+    "core/canvas",
+    "core/canvas/CMakeLists.txt",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/js/embed_js.py",
+    "core/view/src/reload_exports.cpp",
+    "tools/cmake",
+    "tools/cmake/PulpEmbedData.cmake",
+    "tools/cmake/scripts/encode_binary_data.py",
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_closure.py",
+    "tools/scripts/vellum_d3_units.json"
+   ],
+   "kind": "python"
+  },
+  "pulp.vellum-closure-export-units": {
+   "entry": "tools/scripts/vellum_closure.py",
+   "inputs": [
+    "core/canvas",
+    "core/canvas/CMakeLists.txt",
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/js/embed_js.py",
+    "core/view/src/reload_exports.cpp",
+    "tools/cmake",
+    "tools/cmake/PulpEmbedData.cmake",
+    "tools/cmake/scripts/encode_binary_data.py",
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_closure.py",
+    "tools/scripts/vellum_d3_units.json"
+   ],
+   "kind": "python"
   },
   "pulp.vellum-closure-external-input-negative": {
    "entry": "tools/scripts/confirm_failure.sh",
@@ -7455,6 +7517,7 @@
     "core/view/src/reload_exports.cpp",
     "tools/cmake",
     "tools/cmake/PulpEmbedData.cmake",
+    "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
@@ -7480,6 +7543,7 @@
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
     "core/platform",
     "core/platform/include",
+    "core/render/include/pulp/render/gpu_compute.hpp",
     "core/runtime",
     "core/runtime/CMakeLists.txt",
     "core/runtime/include",
@@ -7499,12 +7563,14 @@
     "tools/cmake/PulpEmbedData.cmake",
     "tools/cmake/PulpInstallRules.cmake",
     "tools/cmake/PulpPatchChoc.cmake",
+    "tools/cmake/scripts/encode_binary_data.py",
     "tools/import-design/jsx-runtime/package-lock.json",
     "tools/scripts/include_boundary.py",
     "tools/scripts/test_vellum_closure.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_mirror_edge_patterns.json"
    ],
    "kind": "python"
   },
@@ -9323,6 +9389,7 @@
     "docs/status",
     "docs/status/consumption-profiles.json",
     "examples/pulp-gain/CMakeLists.txt",
+    "test/ctest_script_inputs.json",
     "test/fixtures",
     "test/support",
     "tools/ci/load_api_exemptions.json",

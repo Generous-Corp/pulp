@@ -133,6 +133,9 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
                     """
                 ), encoding="utf-8"
             )
+            runner_listing = (
+                'printf "17\\tpulp-auto-ephemeral-200\\t' + github_status + '\\t' + ('true' if busy else 'false') + '\\n"' if github_present else ':'
+            )
             ghapp = tmp / "ghapp"
             ghapp.write_text(
                 textwrap.dedent(
@@ -140,7 +143,7 @@ class ProxmoxEphemeralReapTests(unittest.TestCase):
                     #!/bin/sh
                     echo "$*" >> {operations}
                     case "$*" in
-                      *'orgs/Generous-Corp/actions/runners?per_page=100'*) {'printf "17\\tpulp-auto-ephemeral-200\\t' + github_status + '\\t' + ('true' if busy else 'false') + '\\n"' if github_present else ':'} ;;
+                      *'orgs/Generous-Corp/actions/runners?per_page=100'*) {runner_listing} ;;
                       *'repos/Generous-Corp/pulp/actions/runners?per_page=100'*) : ;;
                       *) exit 2 ;;
                     esac
