@@ -563,8 +563,10 @@ jobs:
         with:
           # wrangler-action v4 installs the latest wrangler when this is unset,
           # which would fetch an unpinned tool mid-deploy. Exact version, bumped
-          # deliberately (npm dist-tag `latest` on 2026-10-14).
-          wranglerVersion: "4.151.0"
+          # deliberately. This is a soaked release, not `latest`: 4.149.0 was
+          # published 2026-10-08, a week before it was pinned, so a regression
+          # in a fresh wrangler cannot reach the production deploy first.
+          wranglerVersion: "4.149.0"
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: examples/web-demos/wclap-build/cloudflare
