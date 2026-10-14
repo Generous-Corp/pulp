@@ -36,26 +36,6 @@ namespace pulp::view {
 
 class View;
 
-// ── Editor host clear / background color ─────────────────────────────────
-//
-// Every Pulp host — the standalone window hosts and all four plug-in editor
-// hosts — seeds the same opaque dark background (RGB 30,30,46 = 0x1E1E2E) so
-// no clear/undefined composite flashes before the first GPU frame lands, and
-// so the letterbox bars around a design viewport match the editor rather than
-// showing the DAW's own window content.
-//
-// It lives HERE, platform-neutrally, because it is a property of the frame
-// pipeline, not of any one OS. macOS additionally needs NSColor and CGColor
-// spellings of the same value (window_host_mac_internal.hpp), which is exactly
-// the kind of divergence a single definition prevents.
-//
-// That is the DEFAULT. A plug-in that declares its own background
-// (`Processor::editor_background()`) gets that instead, through
-// `PluginViewHost::Options::background_rgb` → `FrameGeometry::background_rgb`.
-inline constexpr std::uint8_t kEditorHostClearR = (kEditorHostClearRgb >> 16) & 0xff;
-inline constexpr std::uint8_t kEditorHostClearG = (kEditorHostClearRgb >> 8) & 0xff;
-inline constexpr std::uint8_t kEditorHostClearB = kEditorHostClearRgb & 0xff;
-
 /// The size/scale/viewport a frame is painted against, in one value.
 ///
 /// `width`/`height` are LOGICAL (the view tree's units). `scale` maps them to

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4263,
+  "total": 4250,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -597,7 +597,7 @@
     "tools/scripts/refresh_push_check.py": 2,
     "tools/scripts/release_artifact_contents.py": 2,
     "tools/scripts/release_platform_subset_check.py": 2,
-    "tools/scripts/release_reconcile.py": 3,
+    "tools/scripts/release_reconcile.py": 2,
     "tools/scripts/release_trailer_guard.py": 1,
     "tools/scripts/required_check_machinery.py": 2,
     "tools/scripts/required_gate_liveness.py": 1,
@@ -791,7 +791,6 @@
     "tools/scripts/test_runner_topology_check.py": 17,
     "tools/scripts/test_rust_cli_build_edge_check.py": 3,
     "tools/scripts/test_sample_region_catalogs.py": 2,
-    "tools/scripts/test_sample_region_compat_baseline.py": 12,
     "tools/scripts/test_schedule_backstop_check.py": 4,
     "tools/scripts/test_scheduled_workflow_fork_guard_check.py": 2,
     "tools/scripts/test_script_test_inputs.py": 5,

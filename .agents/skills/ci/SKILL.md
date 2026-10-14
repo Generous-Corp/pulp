@@ -117,6 +117,15 @@ on a real PR. Do them in order.
 
 ## Build emitters always use the governor
 
+The PR-head affected-test step reads a marker written immediately before the
+governed build. Keep that marker inside the build directory and before the
+build command: the warm Ninja log contains outputs from earlier branches, so
+only artifacts newer than this run's marker count as rebuilt tests. The marker
+proves the build produced an output, not that the diff caused it. So the rebuilt
+set is also dropped when it exceeds `REBUILT_EXECUTABLE_CAP` (8) executables,
+or when `build.ninja` or `CMakeCache.txt` was regenerated after the marker.
+Otherwise a cold or stale directory selects the whole suite.
+
 Any command that Pulp prints for a user to copy, any generated test driver,
 and every sanitizer workflow build step must invoke
 `tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
@@ -254,10 +263,11 @@ against a batch name that was not the culprit.
 Three facts make that possible, and all three are worth knowing before you
 diagnose a stalled queue:
 
-**A pull-request head does not run the test suite at all.** The `Test
-(non-Windows)` step is gated `github.event_name != 'pull_request'`. Tests run
-in the merge queue, on push, and on Shipyard's `workflow_dispatch` — never on
-the PR head. So "the PR was green" never meant its tests passed.
+**An ordinary pull-request head does not run the full test suite.** The
+`Test (non-Windows)` step runs the fast tier for ordinary heads, while an
+armed head selected by `pr_suite == full` runs the full suite as a required
+queue-admission signal. Tests also run in the merge queue, on push, and on
+Shipyard's `workflow_dispatch`.
 
 **`main`'s macOS health is the merge group's `macos` job, not a push run.**
 The queue lands with the MERGE method, so the commit on `main` IS the
@@ -307,6 +317,22 @@ Both event-dependent ctest decisions live in `tools/ci/ctest_gate_args.py`,
 tested by `ctest-gate-args-selftest`, which also asserts `build.yml` still
 calls it.
 
+## A red run names its own cause in the `ci-cause` annotation
+
+Before you read a 10 MB job log, look for the run's `ci-cause` notice. The
+advisory `ci-cause (advisory)` job in `build.yml` prints one `ci.cause/v1`
+record per failed job. Each record gives the failing test, compile error,
+runner failure or gate verdict, with a class and a confidence.
+
+- **Low or `unknown` means unread, not innocent.** A `low` confidence, or a
+  class of `unknown`, means the extractor could not name the cause. Read the
+  log in that case.
+- **Absent means it did not run.** If the notice is missing, the job may not
+  have run at all; check its own log. It is advisory and never gates.
+- **Upgrading the pin.** The extractor is the Shipyard release pinned, with
+  its checksums, in `tools/ci/ci_cause_notices.sh`. Bump the version and the
+  hashes together.
+
 ## A green `macos` check can mean nothing ran
 
 The required `macos` context is reported by more than one job: the macOS matrix
@@ -321,10 +347,15 @@ Ask the run instead of the colour:
 
 ```bash
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
-# executed | built-but-untested | not-executed, with the step count
+# executed | tier-only | built-but-untested | not-executed, with the step count
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
-# exits nonzero unless the suite genuinely ran
+# exits nonzero unless the full suite genuinely ran
 ```
+
+`tier-only` is the normal pull-request head: the fast deterministic tier or the
+affected-tests tier ran, and `Test (...)` was skipped. That is not the suite
+(build.yml: the fast tier "is NOT test evidence for the merge", and the
+affected tier can select nothing), so `--require-executed` refuses it.
 
 Each bootstrap job also writes a banner into its own job summary saying no
 build and no test step ran. A step count near three on a `macos` job is the
@@ -4994,6 +5025,16 @@ bisectable.
   build with `-DPULP_BUILD_EXAMPLES=OFF` (matching `build.yml`). If you add a
   new release/packaging workflow, configure with examples OFF (or a populated
   `SKIA_DIR`), or the design-tool Skia gate will block it.
+- **A release job's dependencies live in its isolated root, not the home
+  cache.** `release-cli.yml` sets `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` /
+  `PULP_FETCHCONTENT_BASE_DIR` to a fresh `$RUNNER_TEMP/pulp-isolated-*` root.
+  Any script that later goes looking for a fetched artifact must read those
+  variables. When they are set, it must also refuse to fall back to
+  `~/Library/Caches/Pulp` or `~/.cache/pulp`, which an earlier, possibly PR,
+  job wrote. `package_cli.py`'s wgpu lookup missed this. Linux failed to
+  package at all, because the runtime is not copied into the build dir there.
+  darwin-arm64 went green while bundling the shared-cache dylib. A green leg
+  is not proof that the isolated copy shipped: read the `bundled:` line.
 - **Release/SDK builds must pass `-DPULP_ENABLE_AUDIO_PROBES=OFF`.** The
   standalone audio probe is a dev/example inspection surface and defaults ON
   for local development, but shipped CLI, standalone, and SDK artifacts must
@@ -9911,7 +9952,7 @@ plus ccache and FetchContent paths. It runs only on Namespace /
 nscloud labels (`contains(matrix.runs_on_json, 'namespace') ||
 contains(matrix.runs_on_json, 'nscloud')`); self-hosted Macs keep
 their caches on local disk and github-hosted runners use
-`actions/cache@v4` via the existing `Restore ccache (GitHub-hosted)`
+`actions/cache@v6` via the existing `Restore ccache (GitHub-hosted)`
 step (#420). The brew cache only restores the bottle download cache —
 it does NOT restore the brew config that would tell the runner
 "updates are recent," so `brew update --quiet` is still required

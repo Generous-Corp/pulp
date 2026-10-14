@@ -746,7 +746,7 @@ jobs:
 
       - name: Upload HTML report
         if: always() && env.PULP_COVERAGE_SKIP_HTML != '1'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report-${{ matrix.os }}-${{ github.sha }}
           path: build-coverage/coverage/
@@ -755,7 +755,7 @@ jobs:
       - name: Upload summary
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-summary-${{ matrix.os }}-${{ github.sha }}
           path: build-coverage/coverage/summary.txt
@@ -763,7 +763,7 @@ jobs:
 
       - name: Upload Python HTML report
         if: always() && matrix.os == 'linux'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-python-report-${{ github.sha }}
           path: build-coverage/python/html/
@@ -773,7 +773,7 @@ jobs:
       - name: Upload Python summary
         if: always() && matrix.os == 'linux'
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-python-summary-${{ github.sha }}
           path: build-coverage/python/summary.txt
@@ -786,7 +786,7 @@ jobs:
         # upload and `if-no-files-found: error` would hard-fail the leg.
         if: always() && matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-apple-summary-${{ github.sha }}
           path: build-coverage/apple/summary.txt
@@ -891,7 +891,7 @@ jobs:
         # build/ctest-failure report as a diagnostic artifact; the semantic
         # verifier prevents that partial report from reaching Codecov.
         if: always() && steps.coverage-suite.outputs.budget_hit != 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.os == 'linux' && format('coverage-cobertura-{0}', github.sha) || format('coverage-cobertura-{0}-{1}', matrix.os, github.sha) }}
           path: build-coverage/coverage.cobertura.xml
@@ -900,7 +900,7 @@ jobs:
 
       - name: Upload Python Cobertura XML
         if: always() && matrix.os == 'linux'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-python-${{ github.sha }}
           path: build-coverage/python/coverage.python.xml
@@ -912,7 +912,7 @@ jobs:
         # `if-no-files-found: error` would hard-fail the leg when the
         # Swift step legitimately skipped on a non-iOS PR diff.
         if: always() && matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-apple-${{ github.sha }}
           path: build-coverage/apple/coverage.apple.lcov
@@ -1192,13 +1192,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Download Linux native coverage artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: coverage-cobertura-${{ github.sha }}
           path: native-coverage/linux
 
       - name: Download macOS native coverage artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: coverage-cobertura-macos-${{ github.sha }}
           path: native-coverage/macos
@@ -1272,7 +1272,7 @@ jobs:
           exit 1
 
       - name: Cache Gradle
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
@@ -1319,7 +1319,7 @@ jobs:
 
       - name: Upload Kotlin coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: android-kotlin-coverage-${{ github.sha }}
           path: |
@@ -1354,7 +1354,7 @@ jobs:
           lfs: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: npm
@@ -1392,7 +1392,7 @@ jobs:
 
       - name: Upload pulp-react coverage artifact
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-react-coverage-${{ github.sha }}
           path: packages/pulp-react/coverage/cobertura-coverage.xml
@@ -1531,7 +1531,7 @@ jobs:
         # "Merge per-OS Cobertura XMLs" below) rather than silently
         # passing the required gate.
         if: steps.gate_preconditions.outputs.gate_ready == 'true'
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: coverage-cobertura-${{ github.sha }}
           path: coverage-artifact-linux/
@@ -1540,7 +1540,7 @@ jobs:
       - name: Download Cobertura XML from coverage job (macOS)
         # Scheduled and dispatched runs include the macOS artifact.
         if: steps.gate_preconditions.outputs.gate_ready == 'true'
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: coverage-cobertura-macos-${{ github.sha }}
           path: coverage-artifact-macos/
@@ -1549,7 +1549,7 @@ jobs:
       - name: Download Cobertura XML from coverage job (Windows)
         # Scheduled and dispatched runs include the Windows artifact.
         if: steps.gate_preconditions.outputs.gate_ready == 'true'
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: coverage-cobertura-windows-${{ github.sha }}
           path: coverage-artifact-windows/
@@ -1843,7 +1843,7 @@ jobs:
 
       - name: Upload diff-cover report artifact
         if: always() && steps.gate_preconditions.outputs.gate_ready == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-diff-${{ github.sha }}
           path: |

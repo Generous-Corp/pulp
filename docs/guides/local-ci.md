@@ -2,6 +2,15 @@
 
 Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) validation lanes before merging.
 
+On a pull-request head, the affected-test step runs tests selected from the
+diff and from binaries rebuilt by that head's governed build. A marker written
+just before the build bounds the warm Ninja log; older branch outputs do not
+add tests. Docs-only diffs add no rebuilt-binary tests. The rebuilt set counts
+only when it is narrow: at most eight test executables, and no regeneration of
+`build.ninja` or `CMakeCache.txt` during the build. A cold, reconfigured or
+stale warm directory rebuilds far more than the diff reaches, and the step then
+adds no rebuilt-binary tests and logs why.
+
 The macOS retarget lane keeps the untrusted-runner boundary for contributor
 code and invokes `tools/ci/governed-build.sh` inside that namespace for its
 build. This preserves the lane's runner isolation while applying the same
@@ -33,7 +42,7 @@ which makes the dependency-backed case visible to CTest. The required macOS
 lane performs the same locked install before running its affected-test sweep.
 Because the automatic Linux selector may use a clean Proxmox VM without a
 system Node installation, `build.yml` first provisions the exact Node
-`22.15.0` toolchain with `actions/setup-node@v4` and a lockfile-keyed npm cache;
+`22.15.0` toolchain with `actions/setup-node@v7` and a lockfile-keyed npm cache;
 that version supplies the `zstdDecompressSync` API used by the `.fig` lane.
 Source-only or offline
 configurations without that `node_modules/esbuild` installation still register
@@ -2880,6 +2889,29 @@ two disagree (and the detector judges all six on main's tip). `[governance]` is 
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
 
+## Every failed run names its cause: the advisory `ci-cause` job
+
+When any job in a `build.yml` run fails, the `ci-cause (advisory)` job runs
+`tools/ci/ci_cause_notices.sh`. It reads each failed job's finished log through
+the Actions API and runs `shipyard cause extract` over it. The result is one
+`ci.cause/v1` record per failed job, printed as a `::notice title=ci-cause::`
+annotation on the run: the failing test, compile error, runner failure or gate
+verdict, its class and a confidence.
+
+- **Why a separate job.** A job's own log cannot be downloaded until the job
+  has finished, so a step inside the failing job has nothing to read.
+- **Pinned and verified.** The extractor is the Shipyard release pinned in the
+  script (`v0.326.0`). Its SHA-256 must match the release checksum, or nothing
+  runs. Moving to a newer release means editing both the version and the
+  hashes in the script.
+- **Never a gate.** The job is `continue-on-error`. A missing asset, an
+  unreadable log or an extractor failure is reported and exits 0.
+- **Selftest.** `ci-cause-notices-selftest` covers the script.
+
+The records are the input to the root-cause dataset. Shipyard's scorecard
+`--export-cases` carries the same records, and `shipyard cause archive` keeps
+them append-only.
+
 ## A green `macos` check does not always mean the suite ran
 
 The required `macos` context is reported by more than one job. It can come from
@@ -2899,7 +2931,7 @@ is legible from the check itself rather than only from its step count. And
 `tools/scripts/gate_suite_executed.py` answers the question directly:
 
 ```bash
-# executed / built-but-untested / not-executed, per `macos` job
+# executed / tier-only / built-but-untested / not-executed, per `macos` job
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
 
 # exit nonzero unless the suite genuinely ran, for use in a script
@@ -2907,7 +2939,10 @@ python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-execute
 ```
 
 It classifies by the steps that actually ran, not by the conclusion, so it
-separates a real pass from a claimed one. It answers only whether the suite
+separates a real pass from a claimed one. Only a `Test (<platform>)` step is
+the suite. A pull-request head that ran only the fast deterministic tier or the
+affected-tests tier reads `tier-only`: the merge queue still runs the suite,
+and `--require-executed` does not accept it. It answers only whether the suite
 ran: an `executed` verdict on a failing job is still `executed`.
 
 ## Attributing a failed batch to the PR that caused it
@@ -3119,10 +3154,12 @@ refresh push cancels and restarts the running `macos` gate, so it costs more
 than the receipt could save. Merge `main` only when the pull request is DIRTY
 or a required check fails because of a stale base.
 
-That full run is evidence, not the pull request's gate: the step is
-`continue-on-error` on pull requests, so a failure there leaves the `macos`
-check meaning build + fast tier, and the `Surface ctest failures` step still
-reports it. That reporter always exits 0 (errexit off, every possibly-empty
+That full run is evidence and, for an armed head, a queue-admission gate: its
+step is not `continue-on-error` when `pr_suite` is `full`, so a failure turns
+the required `macos` check red before the head can enter the queue. Ordinary
+pull-request runs still skip the full step, leaving `macos` as build + fast
+tier. The `Surface ctest failures` step still reports a failed armed run. That
+reporter always exits 0 (errexit off, every possibly-empty
 grep guarded): it runs whenever the Test step's outcome is failure, so a
 non-zero exit from it alone would turn the required check red for a failure
 the workflow deliberately does not gate on. `tools/ci/test_build_matrix_contract.py`

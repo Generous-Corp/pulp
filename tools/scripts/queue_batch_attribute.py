@@ -1900,6 +1900,45 @@ def advisory_only(observations: list[GroupObservation]) -> list[GroupObservation
     return [o for o in observations if o.advisory_failed and not o.failed]
 
 
+def ejected_not_selected(
+    observations: list[GroupObservation],
+    selections: dict[int | str, Iterable[str]],
+    pr_fast: Iterable[str],
+) -> list[dict[str, object]]:
+    """Return ejected (PR, test) pairs absent from both selection sources.
+
+    ``selections`` is the weekly PR-head selector receipt keyed by PR number;
+    callers must supply it rather than guessing from file names.  A missing
+    receipt is reported as an evidence gap by the CLI and never silently
+    treated as an empty selection.
+    """
+    fast = set(pr_fast)
+    rows: set[tuple[int, str, str]] = set()
+    for obs in observations:
+        if obs.members is None:
+            continue
+        for pr in obs.members:
+            selected = set(selections.get(pr, selections.get(str(pr), ())))
+            for test in obs.failed:
+                if test not in fast and test not in selected:
+                    rows.add((pr, test, obs.run_id))
+    return [
+        {"pr": pr, "test": test, "run_id": run_id}
+        for pr, test, run_id in sorted(rows)
+    ]
+
+
+def committed_pr_fast_names(source_root: Path) -> set[str]:
+    """Read the committed CMake fast-tier names for the weekly report."""
+    path = source_root / "test" / "cmake" / "pr_fast_tests.cmake"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    block = re.search(r"set\(PULP_PR_FAST_TESTS\s+(.*?)\n\)", text, re.S)
+    return set(re.findall(r"^[ \t]+([A-Za-z0-9_.-]+)$", block.group(1), re.M)) if block else set()
+
+
 def render_advisory(observations: list[GroupObservation]) -> list[str]:
     groups = advisory_only(observations)
     if not groups:
@@ -2443,6 +2482,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="--history reads every run afresh instead of the per-run cache",
     )
+    parser.add_argument(
+        "--ejected-not-selected",
+        action="store_true",
+        help="with --history, emit the weekly ejected-but-not-selected report",
+    )
+    parser.add_argument(
+        "--selection-file",
+        help="JSON PR-head selector receipt ({pr: [test, ...]}); required by the weekly report",
+    )
     args = parser.parse_args(argv)
 
     if args.run_id and args.run_id_flag and args.run_id != args.run_id_flag:
@@ -2483,6 +2531,29 @@ def main(argv: list[str] | None = None) -> int:
                 {t for obs in observations if obs.run_id == given for t in obs.failed}
             )
         histories = history_attribution(observations, focus)
+        if args.ejected_not_selected:
+            if not args.selection_file:
+                print("--ejected-not-selected requires --selection-file", file=sys.stderr)
+                return 2
+            try:
+                selections = json.loads(Path(args.selection_file).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                print(f"could not read --selection-file: {exc}", file=sys.stderr)
+                return 2
+            if not isinstance(selections, dict):
+                print("--selection-file must contain a JSON object", file=sys.stderr)
+                return 2
+            report = ejected_not_selected(
+                observations, selections, committed_pr_fast_names(Path(args.source_root))
+            )
+            if args.format == "json":
+                print(json.dumps({"schema": "pulp-ejected-not-selected/v1",
+                                  "rows": report}, indent=2, sort_keys=True))
+            else:
+                print("weekly ejected-but-not-selected")
+                for row in report:
+                    print(f"    PR #{row['pr']}: {row['test']} (run {row['run_id']})")
+            return 0
         inputs_list = Path(args.source_root) / SCRIPT_INPUTS_LIST
         if inputs_list.is_file():
             attribute_by_inputs(

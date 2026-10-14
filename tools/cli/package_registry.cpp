@@ -394,6 +394,10 @@ LockFile load_lock_file(const fs::path& path) {
             if (auto v = val.get("resolved")) lp.resolved = v->as_string();
             if (auto v = val.get("integrity")) lp.integrity = v->as_string();
             if (auto v = val.get("commit")) lp.commit = v->as_string();
+            if (auto v = val.get("license"))
+                lp.license = v->as_string();
+            if (auto v = val.get("license_acceptance"))
+                lp.license_acceptance = v->as_string();
             lock.packages[id] = lp;
         }
     }
@@ -415,7 +419,13 @@ bool save_lock_file(const fs::path& path, const LockFile& lock) {
         os << "      \"version\": \"" << json_escape(lp.version) << "\",\n";
         os << "      \"resolved\": \"" << json_escape(lp.resolved) << "\",\n";
         os << "      \"integrity\": \"" << json_escape(lp.integrity) << "\",\n";
-        os << "      \"commit\": \"" << json_escape(lp.commit) << "\"\n";
+        os << "      \"commit\": \"" << json_escape(lp.commit) << "\"";
+        if (!lp.license.empty())
+            os << ",\n      \"license\": \"" << json_escape(lp.license) << "\"";
+        if (!lp.license_acceptance.empty())
+            os << ",\n      \"license_acceptance\": \"" << json_escape(lp.license_acceptance)
+               << "\"";
+        os << "\n";
         os << "    }";
     }
 

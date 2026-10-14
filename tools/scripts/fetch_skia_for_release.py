@@ -112,11 +112,16 @@ MATRIX_TO_MANIFEST = {
 
 # iOS keeps its per-arch subdir under Release/ (device-arm64,
 # simulator-arm64, simulator-x86_64) because flattening would collide
-# library names across slices. The flatten step below is skipped for
-# any matrix entry in this set.
-_IOS_PRESERVE_ARCH_SUBDIR = {
+# library names across slices. Windows ARM64 keeps `arm64/` because
+# FindSkia.cmake selects that slice by target architecture and refuses the
+# flat path, so an ARM64 configure can never pick up x64 archives; flattening
+# it made every windows-arm64 release leg fail configure ("Windows ARM64
+# archive slice is missing"). The flatten step below is skipped for any
+# matrix entry in this set.
+_PRESERVE_ARCH_SUBDIR = {
     "ios-device-arm64",
     "ios-simulator-arm64-x86_64",
+    "windows-arm64",
 }
 
 # Each main() invocation owns only the unique archives it creates. This keeps
@@ -338,7 +343,7 @@ def _archive_generation_payload(
             parts = raw_path.parts
             release_parts = PurePosixPath(release_dir).parts
             logical = raw_path
-            if (matrix_platform not in _IOS_PRESERVE_ARCH_SUBDIR
+            if (matrix_platform not in _PRESERVE_ARCH_SUBDIR
                     and flatten_arch_subdirs):
                 tail = parts[len(release_parts):] if parts[:len(release_parts)] == release_parts else ()
                 if len(tail) == 2:
@@ -497,6 +502,11 @@ def expected_library_path(matrix_platform: str, dest_root: str = "external/skia-
         plat_dir = "linux-gpu"
         lib_name = "libskia.a"
         arch_subdir = ""
+    elif matrix_platform == "windows-arm64":
+        # The slice FindSkia.cmake selects for an arm64-win target.
+        plat_dir = "win-gpu"
+        lib_name = "skia.lib"
+        arch_subdir = "arm64"
     elif matrix_platform.startswith("windows"):
         plat_dir = "win-gpu"
         lib_name = "skia.lib"
@@ -966,14 +976,12 @@ def _main(argv: list[str]) -> int:
     # Flatten that arch directory into Release/ so FindSkia.cmake's
     # existing layout probe matches without further changes.
     #
-    # iOS is the deliberate exception: device-arm64, simulator-arm64,
-    # and simulator-x86_64 all ship libskia.a / libdawn_combined.a with
-    # the same names and CANNOT be flattened into one Release/ dir
-    # without collision. For iOS, expected_lib already points inside
-    # the arch subdir, so the flatten loop must be skipped entirely.
-    if matrix_platform in _IOS_PRESERVE_ARCH_SUBDIR:
+    # iOS and Windows ARM64 are the deliberate exceptions (see
+    # _PRESERVE_ARCH_SUBDIR): expected_lib already points inside the arch
+    # subdir, so the flatten loop must be skipped entirely.
+    if matrix_platform in _PRESERVE_ARCH_SUBDIR:
         # Nothing to do — the upstream layout is exactly what FindSkia
-        # expects for iOS. Drop into the sanity check below.
+        # expects. Drop into the sanity check below.
         pass
     elif not expected_lib.is_file():
         release_dir = expected_lib.parent

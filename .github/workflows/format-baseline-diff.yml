@@ -223,7 +223,7 @@ jobs:
         # it reachable from the run. `if: always()` because the run that most
         # needs its output uploaded is the one that failed.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: format-baseline-validator-output-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/baseline-diag

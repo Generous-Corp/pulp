@@ -36,6 +36,15 @@ REQUIRED_MEMBERS = (
     "agent-capability-manifest-check",
     "catch-discover-timeout-guard",
     "pr-fast-tier-contract",
+    "unregistered-tests-check",
+)
+
+# These checks are intentionally selected by declared inputs / affected-test
+# selection. Keeping them out of pr-fast prevents a multi-second probe from
+# silently becoming part of every pull-request head run.
+NON_FAST_MEMBERS = (
+    "wide-non-native-selftest",
+    "sample-region-compat-baseline",
 )
 
 DEFAULT_MIN_COUNT = 50
@@ -70,6 +79,9 @@ def check_selection(names: list[str], *, min_count: int) -> list[str]:
     missing = [name for name in REQUIRED_MEMBERS if name not in names]
     if missing:
         errors.append(f"required {LABEL} members are missing: {', '.join(missing)}")
+    misplaced = [name for name in NON_FAST_MEMBERS if name in names]
+    if misplaced:
+        errors.append(f"non-subsecond tests must not be in {LABEL}: {', '.join(misplaced)}")
     return errors
 
 

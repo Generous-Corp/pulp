@@ -29,6 +29,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools/scripts/refresh_push_check.py"
 HOOK = ROOT / ".githooks/pre-push"
 HOOK_LIB = ROOT / ".githooks/lib"
+MERGE_TREE_STATE = ROOT / "tools/scripts/merge_tree_script_state.py"
+sys.path.insert(0, str(ROOT / "tools/scripts"))
+import merge_tree_script_state as merge_tree_state  # noqa: E402
 
 FAKE_GH = r"""#!/usr/bin/env python3
 import json, os, sys, time
@@ -340,6 +343,95 @@ def case_hook_wiring(fx: Fixture) -> None:
     assert decisions == ["warned", "refused", "refused"], decisions
 
 
+def case_script_failure_is_not_masked_by_not_checked(fx: Fixture) -> None:
+    script = fx.tmp / "failing.py"
+    script.write_text("print('NOT CHECKED locally: compiled inventory'); raise SystemExit(1)\n", encoding="utf-8")
+    assert merge_tree_state._run([sys.executable, str(script)], fx.tmp, os.environ.copy()) == 1
+
+
+def case_ledger_checker_selected_from_merge_tree(fx: Fixture) -> None:
+    fx.setup()
+    checker = fx.repo / "tools/scripts/vellum_inheritance_ledger_check.py"
+    checker.parent.mkdir(parents=True, exist_ok=True)
+    checker.write_text("from pathlib import Path; raise SystemExit(1 if Path('ledger.drift').exists() else 0)\n", encoding="utf-8")
+    checker.chmod(checker.stat().st_mode | stat.S_IXUSR)
+    (fx.repo / "ledger.drift").write_text("drift\n", encoding="utf-8")
+    fx.git("add", "tools/scripts/vellum_inheritance_ledger_check.py", "ledger.drift")
+    fx.git("commit", "-qm", "ledger drift")
+    result = subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert result.returncode == 1, (result.returncode, result.stderr)
+    assert "vellum-inheritance-ledger" in result.stderr, result.stderr
+    assert "consumption-census-schema" not in result.stderr, result.stderr
+
+
+def _merge_tree_with_checkers(fx: Fixture, **scripts: str) -> subprocess.CompletedProcess[str]:
+    """Commit build-free checkers into the fixture and run the merge-tree check."""
+    fx.setup()
+    paths = {"ledger": "tools/scripts/vellum_inheritance_ledger_check.py",
+             "families": "tools/scripts/changed_surface_script_families.py"}
+    for name, body in scripts.items():
+        checker = fx.repo / paths[name]
+        checker.parent.mkdir(parents=True, exist_ok=True)
+        checker.write_text(body, encoding="utf-8")
+        fx.git("add", paths[name])
+    fx.git("commit", "-qm", "checkers")
+    return subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=60,
+        env={**os.environ, "PULP_MERGE_TREE_CHECK_TIMEOUT": "1"},
+    )
+
+
+def case_a_timed_out_check_is_not_a_stale_verdict(fx: Fixture) -> None:
+    """A check that times out exits 2 (advisory in pre-push), never STALE."""
+    res = _merge_tree_with_checkers(fx, ledger="import time; time.sleep(5)\n")
+    assert res.returncode == 2, (res.returncode, res.stderr)
+    assert "timed out" in res.stderr, res.stderr
+    assert "NOT CHECKED" in res.stderr, res.stderr
+    assert merge_tree_state.STALE not in res.stderr, res.stderr
+
+
+def case_a_real_failure_outranks_a_timeout(fx: Fixture) -> None:
+    """One check timing out cannot hide another check's real failure."""
+    res = _merge_tree_with_checkers(fx, ledger="import time; time.sleep(5)\n",
+                                    families="raise SystemExit(1)\n")
+    assert res.returncode == 1, (res.returncode, res.stderr)
+    assert merge_tree_state.STALE in res.stderr, res.stderr
+
+
+def case_merge_tree_conflict_refuses(fx: Fixture) -> None:
+    """A real merge-tree conflict is refused before any script check runs."""
+    repo = fx.tmp / "tree-state-repo"
+    repo.mkdir()
+    def g(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=repo, check=True,
+                              capture_output=True, text=True, encoding="utf-8").stdout.strip()
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "test@example.invalid")
+    g("config", "user.name", "test")
+    (repo / "marker.txt").write_text("base\n", encoding="utf-8")
+    g("add", "."); g("commit", "-qm", "base")
+    g("branch", "feature")
+    (repo / "marker.txt").write_text("main\n", encoding="utf-8")
+    g("commit", "-qam", "main change")
+    g("checkout", "-q", "feature")
+    (repo / "marker.txt").write_text("feature\n", encoding="utf-8")
+    g("commit", "-qam", "feature change")
+    base = g("rev-parse", "main")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+           "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
+    res = subprocess.run([sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(repo),
+                          "--base", base, "--head", "HEAD"], cwd=repo, env=env,
+                         capture_output=True, text=True, encoding="utf-8")
+    assert res.returncode == merge_tree_state.CONFLICT, (res.returncode, res.stdout, res.stderr)
+    assert "your branch is stale against main; merge origin/main and regenerate" in res.stderr
+
+
 CASES = [v for k, v in sorted(globals().items()) if k.startswith("case_")]
 
 
@@ -354,7 +446,7 @@ def main() -> int:
                 failures.append(case.__name__)
                 print(f"FAIL {case.__name__}: {exc}")
     # Control: a suite that collected nothing would pass vacuously.
-    if len(CASES) < 12:
+    if len(CASES) < 14:
         print(f"FAIL collected only {len(CASES)} cases")
         return 1
     print(f"{len(CASES) - len(failures)}/{len(CASES)} passed")

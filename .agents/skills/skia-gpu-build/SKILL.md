@@ -85,6 +85,12 @@ exact Skia/Dawn pair used by desktop. The script checks out the immutable Skia
 revision and stages the `skunicode` headers; mutable milestone tips and stale
 module headers are not valid provenance.
 
+Android source builds take one governed host lease per ABI for both Skia Ninja
+and nested Dawn CMake. The Dawn-directory check must run after Ninja inside the
+governed command because that graph can create `cmake_dawn`; set
+`PULP_SKIA_ANDROID_DRY_RUN=1` to inspect per-ABI command receipts without an
+Android toolchain.
+
 A valid cached generation keeps headers and libraries together and carries both
 the verified archive stamp and extracted-file digest receipt. An arbitrary
 sibling checkout is not provenance: never use its mutable
@@ -194,6 +200,16 @@ shipping artifact.
 
 ## Gotchas (each cost real time)
 
+- **Windows ARM64 keeps its `arm64/` slice; never flatten it.** FindSkia.cmake
+  selects `build/win-gpu/lib/Release/arm64/` for an arm64-win target and refuses
+  the flat path, so an ARM64 configure cannot link x64 archives.
+  `fetch_skia_for_release.py` therefore preserves that subdir for
+  `windows-arm64`, as it does for iOS (`_PRESERVE_ARCH_SUBDIR`). When the two
+  disagreed, every windows-arm64 release leg failed configure with "Skia: Windows
+  ARM64 archive slice is missing" (v0.966.0). Change the layout in both places
+  together; `test_fetch_skia_for_release_extra.py` reads FindSkia to hold them
+  in step. windows-x64 stays flat.
+
 - **Windows: `LNK2019 __imp_CompareObjectHandles` from `dawn_combined.lib(SharedFenceD3D12.cpp.obj)`.**
   Dawn's D3D12 shared fence calls `CompareObjectHandles`, which `kernel32.lib` does
   not import. Microsoft's docs name `Kernelbase.lib`, but the Windows SDK on the
@@ -203,6 +219,20 @@ shipping artifact.
   Dawn through its own path needs the same. Dawn calls it directly, so a runtime
   `GetProcAddress` lookup would mean patching Dawn. It surfaces only in targets that pull in the D3D12 device path (GPU compute,
   headless surface, renderer3d), which is why other Windows targets link fine.
+
+- **Windows ARM64 Skia archives are nested one level deeper than x64.** The
+  `skia-builder` Windows ARM64 release stores `skia.lib` and
+  `dawn_combined.lib` under `build/win-gpu/lib/Release/arm64/`, while x64 keeps
+  them directly under `Release/`. `FindSkia.cmake` selects that directory from
+  the target architecture and deliberately leaves `SKIA_FOUND=FALSE` when the
+  ARM64 slice is absent; otherwise an ARM64 configure can silently become a
+  CPU-only build. The target architecture comes from
+  `pulp_windows_target_arch()` (generator platform, then
+  `CMAKE_CXX_COMPILER_ARCHITECTURE_ID`), never `CMAKE_SYSTEM_PROCESSOR`. In a
+  Visual Studio `-A` configure that is the host, so an x64 build on an ARM64
+  host would take the ARM64 slice. ARM64EC and ARM64X targets find no
+  compatible slice and fail closed. The regression is
+  `tools/scripts/test_findskia_windows_arm64_slice.py`.
 
 - **A failed `fetch_skia_for_release.py` is not always a bad pin.** The pinned
   archive is a few hundred megabytes from a release CDN, fetched fresh on lanes

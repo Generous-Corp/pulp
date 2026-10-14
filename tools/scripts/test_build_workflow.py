@@ -263,14 +263,34 @@ class ReadyPullRequestReceiptTest(unittest.TestCase):
         self.assertTrue(_evaluate_if(self.fast["if"], ready))
         self.assertTrue(_evaluate_if(self.full["if"], ready))
         self.assertEqual(
-            _evaluate_if(self.full["continue-on-error"], ready), True,
-            "a ready head's full run must not gate the pull request check")
+            _evaluate_if(self.full["continue-on-error"], ready), False,
+            "an armed head's full run must gate queue admission")
 
     def test_ordinary_pull_request_push_keeps_only_the_fast_tier(self) -> None:
         for suite in ("fast", ""):
             ordinary = self._context("pull_request", suite=suite)
             self.assertTrue(_evaluate_if(self.fast["if"], ordinary))
             self.assertFalse(_evaluate_if(self.full["if"], ordinary), suite)
+            self.assertTrue(
+                _evaluate_if(self.full["continue-on-error"], ordinary),
+                "ordinary pull-request runs keep the skipped full step non-gating")
+
+    def test_armed_full_suite_failure_is_not_downgraded_to_green(self) -> None:
+        armed = self._context("pull_request", suite="full", ctest_outcome="failure")
+        self.assertFalse(
+            _evaluate_if(self.full["continue-on-error"], armed),
+            "a failed armed full suite must make the required check red")
+
+    def test_audited_ejected_heads_would_be_blocked(self) -> None:
+        # Replay the six armed heads named by the fleet-completion audit. Their
+        # full-suite evidence was red while the required check stayed green.
+        for pr in (8933, 9036, 9283, 9577, 10084, 10115):
+            with self.subTest(pr=pr):
+                armed_failure = self._context(
+                    "pull_request", suite="full", ctest_outcome="failure")
+                self.assertFalse(
+                    _evaluate_if(self.full["continue-on-error"], armed_failure),
+                    f"audit PR #{pr} must be refused before queue admission")
 
     def test_merge_group_and_push_still_run_the_full_suite_as_the_gate(self) -> None:
         for event in ("merge_group", "push"):

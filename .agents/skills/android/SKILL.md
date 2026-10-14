@@ -84,6 +84,11 @@ revision after `git-sync-deps`, and copies the `skunicode` module headers;
 never treat a mutable `chrome/m153` branch checkout or an old `SkUnicode.h`
 artifact as a valid Android build.
 
+The source builder negotiates one governed host lease per ABI around both the
+Skia Ninja graph and nested Dawn CMake graph. Keep the Dawn-directory test
+inside that post-Ninja command because Ninja may create `cmake_dawn`; use
+`PULP_SKIA_ANDROID_DRY_RUN=1` for one explicit receipt per ABI without an NDK.
+
 ### Branch & Worktree
 
 Android work lives on `feature/android-targeting`, typically in a worktree at `../pulp-android`:

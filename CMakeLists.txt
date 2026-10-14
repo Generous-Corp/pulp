@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.965.0
+    VERSION 0.970.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -102,6 +102,13 @@ option(PULP_CHANGED_SURFACE_INVENTORY_TARGET
        "Validate the exact filtered CTest inventory for Shipyard's declared shadow-selection target"
        OFF)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
+option(PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC
+       "Build the private staged wgpu-native architecture diagnostic" OFF)
+if(PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC AND
+   (NOT PULP_BUILD_TESTS OR NOT PULP_ENABLE_GPU))
+    message(FATAL_ERROR
+        "The staged wgpu-native diagnostic requires PULP_BUILD_TESTS=ON and PULP_ENABLE_GPU=ON")
+endif()
 option(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF
        "Require GPU-audio library and probes to use the manifest-pinned Skia/Dawn generation"
        OFF)

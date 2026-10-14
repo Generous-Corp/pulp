@@ -43,6 +43,15 @@ int tier0_default_build_jobs();
 // (the CLI SDK install and the lease-acquisition fallbacks).
 int resolve_local_build_jobs();
 
+enum class GovernedBuildOutput { Spinner, Quiet };
+
+// Build an already-configured tree once, under the same lease, parallelism cap,
+// QoS, watchdog, and build-directory lock as the interactive CLI build path.
+// This leaves configure policy and command-specific failure handling to callers.
+int run_governed_cmake_build(const fs::path& project_root, const fs::path& build_dir,
+                             const std::vector<std::string>& args, const std::string& command_kind,
+                             GovernedBuildOutput output = GovernedBuildOutput::Spinner);
+
 // The build-governance tier that is currently active on this host — the model a
 // build's parallelism is bounded by. Reported by `pulp status` so a user can see
 // which layer of the host-resource governor is in effect:

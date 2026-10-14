@@ -1995,7 +1995,7 @@ std::vector<SampleRegionRuntimeReceipt> SignalGraph::sample_region_runtime_recei
 }
 
 int SignalGraph::prepared_max_block_size() const noexcept {
-    return live_slot_.live() ? live_slot_.live()->max_block_size : 0;
+    return prepared_max_block_size_.load(std::memory_order_relaxed);
 }
 
 std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {
@@ -2061,8 +2061,9 @@ std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
 SignalGraph::RoutedExecutionStatus
 SignalGraph::routed_execution_status(int block_size) const noexcept {
     RoutedExecutionStatus status;
-    const auto live = live_slot_.live();
-    if (!live || block_size <= 0)
+    auto read_guard = live_slot_.read();
+    const auto* live = read_guard.get();
+    if (live == nullptr || block_size <= 0)
         return status;
 
     status.prepared = true;

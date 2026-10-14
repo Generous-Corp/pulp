@@ -26,6 +26,7 @@
       "argv": [
         "{repo}/tools/scripts/test_agent_capability_manifest.py"
       ],
+      "timeout": 300.0,
       "resource_lock": [
         "agent-capability-manifest-source"
       ],
