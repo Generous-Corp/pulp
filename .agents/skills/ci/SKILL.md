@@ -802,6 +802,18 @@ policy is that DSP perf is tracked, not gated. Its first dispatch after landing
 must be `ghapp workflow run dsp-throughput-bench.yml --ref main` (a new
 workflow is dispatchable only once it exists on the default branch).
 
+## `toolchain` warnings on a build leg are drift reports, not the failure
+
+Every `build.yml` leg runs `tools/toolchain/check_env.py --format github`
+before configuring and annotates the run with `::warning title=toolchain ...`
+lines: one per tool whose version differs from `tools/toolchain/manifest.toml`.
+While the manifest is in warn mode the step never fails a leg, so a red leg
+with toolchain warnings failed somewhere else; read the failing step, not the
+annotations. Use the warnings when a failure reproduces on one host or runner
+and not another: they name the version each one actually ran (for example the
+hosted Linux leg's apt CMake 3.x against the 4.3.3 pin, which is how a
+CMake-4-only script fails only there).
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both

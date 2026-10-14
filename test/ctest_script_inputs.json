@@ -11696,6 +11696,17 @@
    ],
    "kind": "shell"
   },
+  "toolchain-check_env-selftest": {
+   "entry": "tools/toolchain/test_check_env.py",
+   "inputs": [
+    "experimental/pulp-rs",
+    "tools/toolchain",
+    "tools/toolchain/check_env.py",
+    "tools/toolchain/expected.json",
+    "tools/toolchain/test_check_env.py"
+   ],
+   "kind": "python"
+  },
   "toolchain-mise_profile-selftest": {
    "entry": "tools/toolchain/test_mise_profile.py",
    "inputs": [
@@ -11708,6 +11719,7 @@
    "entry": "tools/toolchain/test_generate.py",
    "inputs": [
     "tools/toolchain",
+    "tools/toolchain/expected.json",
     "tools/toolchain/generate.py",
     "tools/toolchain/manifest.toml",
     "tools/toolchain/test_generate.py"

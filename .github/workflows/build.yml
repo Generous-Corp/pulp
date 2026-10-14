@@ -1869,6 +1869,21 @@ jobs:
         if: runner.os == 'macOS'
         run: npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
 
+      # Names every tool this leg runs at a version other than
+      # tools/toolchain/manifest.toml pins, as ::warning:: annotations, so
+      # drift between gate VMs, hosts and hosted runners is visible on every
+      # run. Report only: the manifest is in warn mode, the script exits 0 on
+      # a mismatch, and continue-on-error keeps even an unreadable manifest
+      # (exit 3) from failing the leg. It reads versions and installs
+      # nothing. It runs on whatever python3 the runner has (3.9 compatible)
+      # because it is what checks that interpreter.
+      - name: Toolchain report against the manifest (warn only)
+        continue-on-error: true
+        shell: bash
+        run: |
+          py="$(command -v python3 || command -v python)"
+          "$py" tools/toolchain/check_env.py --format github
+
       - name: Configure
         # On PR and Shipyard workflow_dispatch validation, skip the examples tree
         # (PulpDrums / PulpSynth / PulpMpeSynth / PulpPluck /

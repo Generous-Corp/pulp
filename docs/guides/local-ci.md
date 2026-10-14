@@ -2000,6 +2000,20 @@ python3 -m pip install --user -r tools/motion/visual/requirements.txt
 The analyzer falls back to a translation-only estimator without it, so it stays
 optional and is not part of the checked set.
 
+## Every build leg reports its toolchain against the manifest
+
+Before configuring, each `build.yml` leg runs `tools/toolchain/check_env.py
+--format github`. It prints one `::warning::` annotation per tool whose version
+differs from `tools/toolchain/manifest.toml` (`python3`, `cmake`, `ninja`,
+`node`, `rustc`, `clang-format`, `mise`, and the npm lockfile installs), with
+the found version, its path and the fix. The step is report only: the manifest
+is in warn mode, so the script exits 0, and the step is `continue-on-error`. It
+reads versions and installs nothing. Because the gate VM, the hosted Linux and
+Windows runners and each host get their tools from different places, these
+annotations are where drift between them shows up first; for example, the
+hosted Linux leg's apt CMake is reported against the 4.3.3 pin, labelled as
+the manifest's declared Linux exception. See [mise](mise.md#checking-your-environment).
+
 ## Build-time Node dependencies are installed before the build, never inside it
 
 The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an
