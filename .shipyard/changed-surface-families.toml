@@ -2391,6 +2391,36 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-257e27df7e67"
+paths = ["tools/scripts/test_findskia_windows_arm64_slice.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "findskia-windows-arm64-slice-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-c9ba5fd98c7e"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
@@ -6275,6 +6305,7 @@ paths = [
   "tools/scripts/test_fetch_skia_for_release_extra.py",
   "tools/scripts/test_fetch_v8_for_release.py",
   "tools/scripts/test_findskia_arch_assert.py",
+  "tools/scripts/test_findskia_windows_arm64_slice.py",
   "tools/scripts/test_fleet_snapshot.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
@@ -6823,6 +6854,7 @@ paths = [
   "tools/scripts/test_fetch_skia_for_release_extra.py",
   "tools/scripts/test_fetch_v8_for_release.py",
   "tools/scripts/test_findskia_arch_assert.py",
+  "tools/scripts/test_findskia_windows_arm64_slice.py",
   "tools/scripts/test_fleet_snapshot.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
