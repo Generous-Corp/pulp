@@ -498,7 +498,9 @@ public:
     // signal_graph_executor_routing.{hpp,cpp}; these are control-thread only.
 
     // True once prepare() has published a live compiled snapshot.
-    bool is_prepared() const noexcept { return live_slot_.live() != nullptr; }
+    bool is_prepared() const noexcept {
+        return live_slot_.has_value();
+    }
     // Max block size the live snapshot was prepared for (0 if not prepared).
     int prepared_max_block_size() const noexcept;
     // The live compiled snapshot's per-node gain atomic (Gain nodes only), or

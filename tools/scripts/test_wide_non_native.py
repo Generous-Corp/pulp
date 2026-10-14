@@ -41,6 +41,10 @@ classify = _load("classify_changes")
 
 LANE_TEST = "tools/scripts/test_lane_thing.py"
 TIER_SCRIPT = "tools/scripts/tree_scanner.py"
+# The wide tier walks every script under this directory. Keep the directory
+# literal in the entry script so the generated inventory selects this test for
+# additions and edits anywhere under tools/scripts/.
+SCRIPT_INVENTORY_ROOT = "tools/scripts"
 
 
 class FixtureRepo:
