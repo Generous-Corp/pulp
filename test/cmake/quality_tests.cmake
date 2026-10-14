@@ -218,7 +218,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-manifest-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")
-    set_tests_properties(agent-capability-manifest-selftest PROPERTIES PROCESSORS 8)
+    # Median 76.5 s, p95 78.6 s across 86 Linux exclusive-shard runs, so the
+    # suite-wide 120 s default left 1.5x headroom. A slow runner that stretched
+    # every test in its shard about 1.7x pushed it past 120 s. Hold it to the
+    # same 300 s budget as its rederive sibling and the other whole-machine
+    # self-tests, which covers that slowdown with room to spare.
+    set_tests_properties(agent-capability-manifest-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
