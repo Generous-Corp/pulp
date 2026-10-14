@@ -619,6 +619,106 @@ STUB
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== a digest-pinned archive is refused unless its SHA-256 matches"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    export FETCHCONTENT_CACHE_ROOT="$tmp/cache"
+    mkdir -p "$tmp/bin" "$tmp/seed/lib"
+    printf 'unverifiable\n' > "$tmp/seed/lib/runtime.txt"
+    python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1], "w").writestr("lib/runtime.txt", "ok\n")' \
+        "$tmp/fixture.zip"
+    good="$(sha256_of_file "$tmp/fixture.zip")"
+    wrong="0000000000000000000000000000000000000000000000000000000000000000"
+    cat > "$tmp/bin/curl" <<STUB
+#!/usr/bin/env bash
+echo call >> "$tmp/curl.calls"
+out=""
+while [ \$# -gt 0 ]; do [ "\$1" = "-o" ] && out="\$2"; shift; done
+cp "$tmp/fixture.zip" "\$out"
+STUB
+    chmod +x "$tmp/bin/curl"
+    check "$(printf '%s' "$good" | grep -cE '^[0-9a-f]{64}$')" "1" "control: sha256_of_file yields a digest"
+
+    err="$(PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$wrong" 2>&1 >/dev/null)"
+    rc=$?
+    check "$([ "$rc" -ne 0 ] && echo refused || echo accepted)" "refused" "a wrong digest is refused"
+    check "$(printf '%s' "$err" | grep -c "expected: $wrong")" "1" "the refusal names the expected digest"
+    check "$(printf '%s' "$err" | grep -c "found:    $good")" "1" "the refusal names the digest it found"
+    check "$(printf '%s' "$err" | grep -c 'deps/manifest.json')" "1" "the refusal says where the pin lives"
+    check "$([ -e "$FETCHCONTENT_CACHE_ROOT/pinned-v1" ] && echo present || echo absent)" "absent" \
+        "a refused archive is never extracted (and the unverifiable seed is not used)"
+    check "$([ -e "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete" ] && echo present || echo absent)" "absent" \
+        "a refused archive never gets a completion marker"
+    check "$([ -e "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.lock" ] && echo held || echo released)" "released" \
+        "a refused archive releases its cache lock"
+
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" >/dev/null 2>&1
+    check "$?" "0" "the pinned digest is accepted"
+    check "$(cat "$FETCHCONTENT_CACHE_ROOT/pinned-v1/lib/runtime.txt" 2>/dev/null)" "ok" \
+        "the verified archive (not the seed) was unpacked"
+    check "$(grep -cx "sha256=$good" "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete")" "1" \
+        "the completion marker records the verified digest"
+
+    # A cache primed before the pin carries a marker with no digest; it is
+    # re-fetched rather than trusted.
+    printf 'ref=https://example.invalid/r.zip\ncompleted=1\n' > "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete"
+    rm -f "$tmp/curl.calls"
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" >/dev/null 2>&1
+    check "$?" "0" "a legacy cache is re-primed"
+    check "$(wc -l < "$tmp/curl.calls" 2>/dev/null | tr -d ' ')" "1" "a legacy marker forces a verified re-download"
+
+    # With the pinned tree digest, a legacy cache whose files match is adopted
+    # in place (no download, no directory churn under concurrent builds) and
+    # one whose files differ is re-fetched.
+    tree="$(tree_sha256_of_dir "$FETCHCONTENT_CACHE_ROOT/pinned-v1")"
+    check "$tree" "$(python3 -I "$REPO_ROOT/tools/deps/wgpu_native_digests.py" "$tmp/fixture.zip" \
+        | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["tree_sha256"])')" \
+        "setup's tree digest equals wgpu_native_digests.py's"
+    printf 'ref=https://example.invalid/r.zip\ncompleted=1\n' > "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete"
+    rm -f "$tmp/curl.calls"
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" "$tree" >/dev/null 2>&1
+    check "$?" "0" "a legacy cache with matching files is adopted"
+    check "$([ -e "$tmp/curl.calls" ] && echo downloaded || echo adopted)" "adopted" \
+        "a legacy cache with matching files is not downloaded again"
+    check "$(grep -cx "sha256=$good" "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete")" "1" \
+        "an adopted cache's marker now records the verified digest"
+    printf 'ref=https://example.invalid/r.zip\ncompleted=1\n' > "$FETCHCONTENT_CACHE_ROOT/.pinned-v1.complete"
+    printf 'tampered\n' > "$FETCHCONTENT_CACHE_ROOT/pinned-v1/lib/runtime.txt"
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" "$tree" >/dev/null 2>&1
+    check "$(cat "$FETCHCONTENT_CACHE_ROOT/pinned-v1/lib/runtime.txt" 2>/dev/null)" "ok" \
+        "a legacy cache whose files differ is replaced by the verified archive"
+
+    rm -f "$tmp/curl.calls"
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "pinned-v1" "$tmp/seed" "$good" >/dev/null 2>&1
+    check "$?" "0" "a verified cache is reused"
+    check "$([ -e "$tmp/curl.calls" ] && echo downloaded || echo reused)" "reused" \
+        "a cache whose marker records the pin is not downloaded again"
+
+    err="$(FETCHCONTENT_FULLY_DISCONNECTED=ON PATH="$tmp/bin:$PATH" ensure_shared_archive_source \
+        "Runtime" "https://example.invalid/r.zip" "pinned-v2" "$tmp/seed" "$good" 2>&1 >/dev/null)"
+    rc=$?
+    check "$([ "$rc" -ne 0 ] && echo refused || echo accepted)" "refused" \
+        "FETCHCONTENT_FULLY_DISCONNECTED refuses to download an unprimed cache"
+    check "$([ -e "$tmp/curl.calls" ] && echo downloaded || echo offline)" "offline" \
+        "FETCHCONTENT_FULLY_DISCONNECTED never reaches the network"
+    check "$(printf '%s' "$err" | grep -c 'FETCHCONTENT_FULLY_DISCONNECTED')" "1" \
+        "the disconnected refusal names the setting"
+
+    check "$(wgpu_native_pinned_sha256 wgpu-macos-aarch64-release v24.0.3.1)" \
+        "$(python3 -I -c 'import json,sys; d=[x for x in json.load(open(sys.argv[1]))["dependencies"] if x["name"]=="wgpu-native"][0]; a=[a for a in d["artifacts"] if a["name"]=="wgpu-macos-aarch64-release"][0]; print(a["sha256"], a["tree_sha256"])' "$REPO_ROOT/tools/deps/manifest.json")" \
+        "setup reads the wgpu-native pins from the manifest"
+    wgpu_native_pinned_sha256 wgpu-macos-aarch64-release v0.0.0 >/dev/null 2>&1
+    check "$?" "1" "a version the manifest does not pin has no digest"
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo "== non-interactive setup never accepts an install prompt"
 (
     load_setup_lib
@@ -706,6 +806,95 @@ EOF
         "the build-local copy refreshes from the newly pinned cache"
     check "$(grep '^FETCHCONTENT_SOURCE_DIR_CHOC:PATH=' "$tmp/build/CMakeCache.txt" | cut -d= -f2-)" \
         "$tmp/cache/choc-v2" "the automatic cache selection advances to the new pin"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== a reconfigure with another cache root never exposes the previous shared selection"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache-a/choc-v1" "$tmp/cache-b" "$tmp/src"
+    printf 'v1\n' > "$tmp/cache-a/choc-v1/value.txt"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(shared_root_change NONE)
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF v1)
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY fixture)
+file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+EOF
+    PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$tmp/cache-a" cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1
+    PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$tmp/cache-b" cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1
+    check "$(cat "$tmp/build/selected.txt")" "$tmp/build/_deps/pulp-mutable-choc-src" \
+        "the patched dependency stays build-local after the cache root changes"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== a git shared cache is copied from its object store, not its working tree"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache/choc-v1" "$tmp/src"
+    printf 'v1\n' > "$tmp/cache/choc-v1/value.txt"
+    git init -q "$tmp/cache/choc-v1"
+    git -C "$tmp/cache/choc-v1" config user.email fixture@pulp.audio
+    git -C "$tmp/cache/choc-v1" config user.name fixture
+    git -C "$tmp/cache/choc-v1" add value.txt
+    git -C "$tmp/cache/choc-v1" commit -qm fixture
+    printf 'patched in place\n' > "$tmp/cache/choc-v1/value.txt"
+    printf 'junk\n' > "$tmp/cache/choc-v1/.DS_Store"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(shared_object_store NONE)
+set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF v1)
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY fixture)
+file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+EOF
+    cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1
+    selected="$(cat "$tmp/build/selected.txt")"
+    check "$(cat "$selected/value.txt")" "v1" "the copy holds the committed bytes, not a working-tree edit"
+    check "$([ -e "$selected/.DS_Store" ] && echo present || echo absent)" "absent" \
+        "an untracked file in the shared cache does not reach the copy"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== the CHOC patch set is idempotent on its own output"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/choc/choc/javascript" "$tmp/choc/choc/text"
+    cat > "$tmp/choc/choc/javascript/choc_javascript_V8.h" <<'EOF'
+#include "choc_javascript.h"
+    std::string v8StringToStd (v8::String& s)
+    {
+        std::string result;
+        auto len = s.Utf8Length (isolate);
+        result.resize (static_cast<std::string::size_type> (len));
+        s.WriteUtf8 (isolate, result.data(), len);
+        return result;
+    }
+EOF
+    cat > "$tmp/choc/choc/text/choc_JSON.h" <<'EOF'
+                    hadExponent = true;
+                    popIf ('-');
+                    continue;
+EOF
+    cat > "$tmp/patch.cmake" <<EOF
+include("$REPO_ROOT/tools/cmake/PulpPatchChoc.cmake")
+pulp_patch_choc_v8("$tmp/choc")
+pulp_patch_choc_json_number_exponent("$tmp/choc")
+EOF
+    cmake -P "$tmp/patch.cmake" >/dev/null 2>&1
+    once="$(cat "$tmp/choc/choc/javascript/choc_javascript_V8.h" "$tmp/choc/choc/text/choc_JSON.h" | cksum)"
+    cmake -P "$tmp/patch.cmake" >/dev/null 2>&1
+    twice="$(cat "$tmp/choc/choc/javascript/choc_javascript_V8.h" "$tmp/choc/choc/text/choc_JSON.h" | cksum)"
+    check "$twice" "$once" "a second configure leaves the patched headers unchanged"
+    check "$(grep -c 'Utf8LengthV2' "$tmp/choc/choc/javascript/choc_javascript_V8.h")" "1" \
+        "the V8 string patch is applied exactly once"
 
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))

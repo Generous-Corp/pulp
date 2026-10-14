@@ -496,6 +496,27 @@
       ]
     },
     {
+      "name": "mise",
+      "category": "developer-tooling",
+      "license": "MIT",
+      "version": "2026.10.8",
+      "source_kind": "developer-supplied",
+      "repository": "https://github.com/jdx/mise",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "external_names": ["mise"],
+      "notes": "Optional developer tool that installs the exact build-tool versions pinned in tools/toolchain/manifest.toml from the checksummed mise.toolchain.lock, and runs the .mise.toml project tasks. Developer-installed; Pulp commits only configuration and generated lock files. Never bundled, shipped in plugins, or required by setup.sh, pulp build, or public CI.",
+      "source_files": [
+        ".mise.toml",
+        "tools/toolchain/manifest.toml",
+        "tools/toolchain/generate.py",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md",
+        "docs/guides/mise.md"
+      ]
+    },
+    {
       "name": "mkdocs",
       "category": "docs",
       "license": "BSD-2-Clause",
@@ -1294,6 +1315,51 @@
       "documented_in_notice_md": true,
       "source_files": [
         "CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "wgpu-native",
+      "category": "render",
+      "license": "MIT OR Apache-2.0",
+      "version": "v24.0.3.1",
+      "source_kind": "release-asset",
+      "repository": "https://github.com/gfx-rs/wgpu-native",
+      "upstream": { "kind": "git-tag", "ref": "v24.0.3.1" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Prebuilt WebGPU runtime (libwgpu_native) behind WebGPU-distribution on desktop GPU builds; staged beside every module that links WebGPU. Each release asset is digest-pinned in `artifacts`: `sha256` is the downloaded zip (setup.sh and configure refuse a mismatch), `tree_sha256` is its extracted tree (configure re-checks the shared source cache against it). tools/deps/wgpu_native_digests.py computes both. Bumping it also bumps PULP_WGPU_NATIVE_VERSION, WGPU_NATIVE_VERSION in setup.sh and tools/deps/shared-source-contract.txt.",
+      "artifacts": [
+        { "name": "wgpu-linux-aarch64-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-linux-aarch64-release.zip",
+          "sha256": "97786f622d6d4f9aaa87c27d165de8db65daf1d391e0bcc32a2dd9bb45fcd299",
+          "tree_sha256": "b6673c0bfa6d5913588c2d2c818776eac839ec5137fc5647633552649f1a6591" },
+        { "name": "wgpu-linux-x86_64-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-linux-x86_64-release.zip",
+          "sha256": "86f3eb9f74d7f1ac82ee52d9b2ab15e366ef86a932759c750b7472652836ee59",
+          "tree_sha256": "5675a82d171f2936313859b96803bf0c073032e5554d18b34edfd955dbd8e403" },
+        { "name": "wgpu-macos-aarch64-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-macos-aarch64-release.zip",
+          "sha256": "f140ff27234ebfa9fcca2b492d0cb499f2e197424b9edc45134bcbad0f8d3a78",
+          "tree_sha256": "ab8484562a4c36a02a82a3f781ee3a0df9a37217a99a45a5e84e20025ff1c188" },
+        { "name": "wgpu-macos-x86_64-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-macos-x86_64-release.zip",
+          "sha256": "1fbc6930e2811b7fde7f046e5300ae5dc20c451d0c3e42a10ff71efae1f565ac",
+          "tree_sha256": "62a2b079b3aaa39ef7b4f12aa30c7a49adcf8371d2ee89767abb8b8e00e2c4cb" },
+        { "name": "wgpu-windows-aarch64-msvc-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-aarch64-msvc-release.zip",
+          "sha256": "b2adb3c0e7ffaccb9373b1b4156892dcec6b40778b06d88fb4d62fa386676881",
+          "tree_sha256": "40aa5c173071f8b79e41d207276fba41e84db8d6f5b3f3d4d4b33d615379f19d" },
+        { "name": "wgpu-windows-i686-msvc-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-i686-msvc-release.zip",
+          "sha256": "226e196ba4b65a29a1f08e236ad53787f066e4677a8e62382af5a049d07787b2",
+          "tree_sha256": "ed83f95481b1c33641337abb2fc72742f2b4a4982f038c9a4e67827207876c92" },
+        { "name": "wgpu-windows-x86_64-gnu-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-x86_64-gnu-release.zip",
+          "sha256": "fb3efad0ca05c2eda61ee54349709f05ff28290308b4b80b01f1bad574ce19f7",
+          "tree_sha256": "80c507ff943a6dfc5d055bc76ebfc3f1d747201487f5bf53b45924e58e476632" },
+        { "name": "wgpu-windows-x86_64-msvc-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-x86_64-msvc-release.zip",
+          "sha256": "72d3abf74e0b55f9474602e2ce7f20fd0f9b9c46be8405b45a697ec1ee343436",
+          "tree_sha256": "c930805f09da78e31a1317532c9e4103e5618a5ee9991c7b5cd4fb9369a9ae45" }
+      ],
+      "source_files": [
+        "setup.sh",
+        "tools/cmake/PulpDependencies.cmake",
+        "tools/cmake/PulpFetchContent.cmake",
+        "tools/cmake/PulpWgpuNative.cmake",
+        "tools/cmake/PulpWgpuUniversal.cmake"
       ]
     },
     {

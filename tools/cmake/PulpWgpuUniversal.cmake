@@ -24,20 +24,14 @@
 
 include_guard(GLOBAL)
 
-# Pinned wgpu-native mac slice digests. Keep in lockstep with the version
-# passed to pulp_register_wgpu_native_precompiled_source() in
-# PulpDependencies.cmake. Bumping wgpu-native means re-recording BOTH shas
-# here (download the two macos zips and `shasum -a 256`).
-set(_PULP_WGPU_UNIVERSAL_VERSION "v24.0.3.1")
-set(_PULP_WGPU_UNIVERSAL_MIRROR "https://github.com/gfx-rs/wgpu-native")
-set(_PULP_WGPU_UNIVERSAL_SHA_AARCH64
-    "f140ff27234ebfa9fcca2b492d0cb499f2e197424b9edc45134bcbad0f8d3a78")
-set(_PULP_WGPU_UNIVERSAL_SHA_X86_64
-    "1fbc6930e2811b7fde7f046e5300ae5dc20c451d0c3e42a10ff71efae1f565ac")
+# The slice URLs and SHA-256 digests come from the wgpu-native `artifacts` list
+# in tools/deps/manifest.json (PulpWgpuNative.cmake reads them), the same pins
+# setup.sh and the single-slice configure path verify against.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpWgpuNative.cmake")
 
 # Fabricate the fat dylib and repoint the `webgpu` target at it.
-#   version — the wgpu-native release the caller pinned; must match the pin
-#             recorded above (a mismatch is a maintainer error, so FATAL).
+#   version — the wgpu-native release the caller pinned; must match the
+#             manifest's (a mismatch is a maintainer error, so FATAL).
 function(pulp_make_wgpu_universal version)
     if(NOT APPLE)
         return()
@@ -63,14 +57,6 @@ function(pulp_make_wgpu_universal version)
         return()
     endif()
 
-    if(NOT version STREQUAL _PULP_WGPU_UNIVERSAL_VERSION)
-        message(FATAL_ERROR
-            "PulpWgpuUniversal: pinned universal shas are for wgpu-native "
-            "${_PULP_WGPU_UNIVERSAL_VERSION}, but the build pinned '${version}'. "
-            "Re-record both macos slice sha256 digests in "
-            "tools/cmake/PulpWgpuUniversal.cmake before building universal.")
-    endif()
-
     set(_out_dir "${CMAKE_BINARY_DIR}/wgpu-universal")
     set(_fat "${_out_dir}/libwgpu_native.dylib")
     file(MAKE_DIRECTORY "${_out_dir}")
@@ -78,16 +64,14 @@ function(pulp_make_wgpu_universal version)
     # Fetch + extract each thin slice (sha256-verified) unless already present.
     set(_slice_dylibs "")
     foreach(_slice aarch64 x86_64)
-        if(_slice STREQUAL "aarch64")
-            set(_sha "${_PULP_WGPU_UNIVERSAL_SHA_AARCH64}")
-        else()
-            set(_sha "${_PULP_WGPU_UNIVERSAL_SHA_X86_64}")
-        endif()
+        # Fails configure when the manifest records a different version or no
+        # digest for this slice.
+        pulp_wgpu_native_pin("wgpu-macos-${_slice}-release" "${version}"
+            _url _sha _tree_sha)
         set(_zip "${_out_dir}/wgpu-macos-${_slice}-release.zip")
         set(_extract "${_out_dir}/${_slice}")
         set(_dylib "${_extract}/lib/libwgpu_native.dylib")
         if(NOT EXISTS "${_dylib}")
-            set(_url "${_PULP_WGPU_UNIVERSAL_MIRROR}/releases/download/${version}/wgpu-macos-${_slice}-release.zip")
             message(STATUS "PulpWgpuUniversal: fetching ${_url}")
             file(DOWNLOAD "${_url}" "${_zip}"
                 EXPECTED_HASH SHA256=${_sha}

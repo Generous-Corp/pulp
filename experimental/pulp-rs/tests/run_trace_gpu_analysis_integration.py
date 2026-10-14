@@ -97,6 +97,7 @@ def run_integration(
         [
             cargo,
             "test",
+            "--locked",
             "--manifest-path",
             str(manifest),
             "--test",

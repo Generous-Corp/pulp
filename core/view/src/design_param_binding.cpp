@@ -1,6 +1,6 @@
 #include <pulp/view/design_param_binding.hpp>
 
-#include <pulp/view/host_param_surface.hpp>
+#include <pulp/view/host_surfaces.hpp>
 
 #include <algorithm>
 #include <unordered_set>

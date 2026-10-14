@@ -22,8 +22,8 @@ namespace pulp::view {
 class WindowHost;  // Forward declaration for View→Host back-reference
 class PluginViewHost;
 class WidgetBridge;
-class HostParamSurface;   // pulp/view/host_param_surface.hpp — runtime param accessor
-class HostActionSurface;  // pulp/view/host_param_surface.hpp — host command channel
+class HostParamSurface;  // pulp/view/host_surfaces.hpp — runtime param accessor
+class HostActionSurface; // pulp/view/host_surfaces.hpp — host command channel
 class GestureArbiter; class GestureRecognizer;
 class FrameClock;
 class WidgetPainter;     // pulp/view/widget_painter.hpp — pluggable paint delegate
@@ -2451,7 +2451,7 @@ public:
     /// like a sandboxed native view). Set by the host that owns the tree —
     /// StateStore-backed natively, or ABI-backed under a foreign-host embed —
     /// and propagated to children like window_host()/plugin_view_host(). See
-    /// pulp/view/host_param_surface.hpp for the tick-only call contract.
+    /// pulp/view/host_surfaces.hpp for the tick-only call contract.
     void set_host_params(HostParamSurface* surface);
     HostParamSurface* host_params() const { return host_params_; }
 

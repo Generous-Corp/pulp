@@ -66,6 +66,21 @@ managed copy is used only after explicit installation. Normal agent operation
 does not require a special enable switch: the user-visible `pulp tool install`
 command is the opt-in action.
 
+### Design-import inspiration and clean-room boundary
+
+Pulp's design-import refinements were informed by public architectural ideas
+studied in [Octane](https://github.com/Generous-Corp/octane) and
+[Inferno](https://github.com/infernojs/inferno), especially keyed identity,
+explicit child-shape lanes, and fail-closed update planning. Pulp's
+implementation is an independent reimplementation over its existing DesignIR,
+Skia, and Dawn paths. Pulp does not vendor, link, execute, or redistribute
+Octane or Inferno code, packages, runtime dependencies, or generated artifacts.
+
+The evidence and transfer decisions are recorded in
+[`docs/reports/2026-10-04-design-import-framework-comparison.md`](../reports/2026-10-04-design-import-framework-comparison.md)
+These references are architectural background only and do not add a
+redistributed dependency or a new licensing obligation.
+
 ### Design Formats and Test Fixtures
 
 Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) format as a first-class import source (`pulp import-design --from designmd`). The format specification is reimplemented in C++ (no upstream code vendored); the YAML frontmatter is parsed with `yaml-cpp` (see Core Dependencies above). One example file from upstream `examples/paws-and-paths/` is redistributed verbatim as the test fixture at `test/fixtures/imports/designmd/alpha/DESIGN.md`.
@@ -194,6 +209,7 @@ setup, the audio-thread gating rule, and the reference plugin.
 | **Skia** | BSD-3-Clause | 2D GPU rendering engine (Graphite backend), pinned to `chrome/m144 @ cd0c5f445516` with bundled HarfBuzz and ICU DEPS revisions locked for deterministic text shaping | [skia.org](https://skia.org) |
 | **Vellum D15 GPU provider** | MIT plus bundled third-party notices | Opt-in macOS development provider for coordinated Dawn GPU-audio. D15-enabled SDKs ship the exact provider LICENSE, NOTICE, and dependency inventory; production release remains blocked pending exhaustive renderer-builder provenance | [github.com/Generous-Corp/vellum](https://github.com/Generous-Corp/vellum) |
 | **WebGPU-distribution** | MIT | WebGPU C API wrapper for Dawn | [github.com/eliemichel/WebGPU-distribution](https://github.com/eliemichel/WebGPU-distribution) |
+| **wgpu-native** | MIT OR Apache-2.0 | Prebuilt WebGPU runtime library staged beside desktop GPU modules; release assets SHA-256 pinned | [github.com/gfx-rs/wgpu-native](https://github.com/gfx-rs/wgpu-native) |
 
 ### Optional Dependencies
 
@@ -224,24 +240,25 @@ packages are installed on demand via `npm`.
 
 Building, testing, and reviewing Pulp uses developer-only tools that are **never
 bundled into Pulp or shipped in end-user plugins** — installed on demand via
-`npm`/`pip` and used under their own licenses. (The video-proof composer's
+`npm`/`pip` or by the developer (mise), and used under their own licenses. (The video-proof composer's
 `Remotion` and `ffmpeg-static` are listed under Optional Dependencies above.)
 Full inventory and boundary live in `DEPENDENCIES.md`.
 
 | Name | License | Purpose |
 |------|---------|---------|
 | **esbuild** | MIT | Build-time JS/TS bundler for `@pulp/react`, `pulp-import-ir`, the Figma plugin, and the Three.js bundle |
-| **TypeScript** | Apache-2.0 | Type-checking/build for the TypeScript packages and the Figma plugin |
-| **Vitest** | MIT | Unit tests for `@pulp/react` and `pulp-import-ir` |
-| **json-schema-to-typescript** | MIT | TypeScript type generation for the Figma plugin |
 | **fflate** | MIT | Deflate/zip in the developer-only Figma plugin |
+| **json-schema-to-typescript** | MIT | TypeScript type generation for the Figma plugin |
+| **melatonin_perfetto** ([sudara/melatonin_perfetto](https://github.com/sudara/melatonin_perfetto)) | MIT | Compile-time `PRETTY_FUNCTION` trimmer adapted into `pulp::runtime::trace_detail::prettify_function` (only that component; dev-only, compiled under `PULP_TRACING`). See NOTICE.md |
+| **mise** ([jdx/mise](https://github.com/jdx/mise)) | MIT | Optional installer for the exact build-tool versions pinned in `tools/toolchain/manifest.toml` (CMake, Ninja, Python, Node.js, clang-format, Tart) and runner for the `.mise.toml` project tasks; developer-installed, never bundled, shipped, or required by `setup.sh`, `pulp build`, or public CI. See [Pinned Build Tools with mise](../guides/mise.md) |
 | **numpy** | BSD-3-Clause | Motion visual-analysis lane (`tools/motion/visual`) and the Audio Quality Lab (`tools/audio/quality-lab`) |
+| **opencv-python** | Apache-2.0 (OpenCV); packaging MIT | Optional affine estimation for the Motion visual-analysis lane (graceful fallback) |
+| **Perfetto** ([google/perfetto](https://github.com/google/perfetto)) | Apache-2.0 | Dev-only tracing SDK (amalgamated `perfetto.cc`/`perfetto.h`); fetched by pinned URL + SHA-256 via `tools/cmake/PulpTracing.cmake` only when `PULP_TRACING=ON` (OFF by default; never linked into a shipping build, never exported by `cmake --install`). The pinned `trace_processor` query tool (same v57.2) backs `pulp trace query --trace` and is fetched on demand by `pulp trace fetch`, SHA-256-verified per platform, never linked or shipped |
 | **Pillow** | HPND (BSD-style) | Image IO for the Motion visual-analysis lane |
 | **scikit-image** | BSD-3-Clause | Image metrics for the Motion visual-analysis lane |
-| **opencv-python** | Apache-2.0 (OpenCV); packaging MIT | Optional affine estimation for the Motion visual-analysis lane (graceful fallback) |
 | **soundfile** (libsndfile) | BSD-3-Clause (package); libsndfile LGPL-2.1 | WAV/audio IO for the Audio Quality Lab |
-| **Perfetto** ([google/perfetto](https://github.com/google/perfetto)) | Apache-2.0 | Dev-only tracing SDK (amalgamated `perfetto.cc`/`perfetto.h`); fetched by pinned URL + SHA-256 via `tools/cmake/PulpTracing.cmake` only when `PULP_TRACING=ON` (OFF by default; never linked into a shipping build, never exported by `cmake --install`). The pinned `trace_processor` query tool (same v57.2) backs `pulp trace query --trace` and is fetched on demand by `pulp trace fetch`, SHA-256-verified per platform, never linked or shipped |
-| **melatonin_perfetto** ([sudara/melatonin_perfetto](https://github.com/sudara/melatonin_perfetto)) | MIT | Compile-time `PRETTY_FUNCTION` trimmer adapted into `pulp::runtime::trace_detail::prettify_function` (only that component; dev-only, compiled under `PULP_TRACING`). See NOTICE.md |
+| **TypeScript** | Apache-2.0 | Type-checking/build for the TypeScript packages and the Figma plugin |
+| **Vitest** | MIT | Unit tests for `@pulp/react` and `pulp-import-ir` |
 
 **Audio Quality Lab — optional perceptual models + MIR oracle (not bundled, developer-supplied).**
 The Audio Quality Lab (`tools/audio/quality-lab`) can optionally consult full-reference

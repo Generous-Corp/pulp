@@ -439,7 +439,16 @@ one host used to run on whichever copy loaded first. The link-floor ctest
 a positive control that really loads it. Gotcha: a reused build dir that once
 staged the dylib still has it in each bundle until that target relinks;
 `pulp_stage_runtime_dependencies` removes it POST_BUILD, so rebuild the bundle
-rather than trusting an old one. The rpath guidance below still applies
+rather than trusting an old one. Gotcha: whether Skia supplies Dawn is ONE
+recorded decision, the cache variable `PULP_SKIA_PROVIDES_DAWN` that FindSkia
+sets through `tools/cmake/PulpSkiaDawnProvider.cmake`; choose wgpu-native with
+`pulp_gpu_links_wgpu_native()`, and take the archive path from
+`PULP_SKIA_DAWN_ARCHIVE`. Never re-derive either from `DAWN_LIBRARY`: that is a
+normal variable a nested scope may not see (an `EXISTS` test then links
+wgpu-native beside Skia's Dawn), and a NOTFOUND-sentinel compare treats a stale
+path as a present Dawn. `cmake-pulp-skia-dawn-provider` scans every CMake file
+for such a condition. The rpath
+guidance below still applies
 to a no-Skia (wgpu-native fallback) build and to any other bundled runtime dylib
 (V8).
 
@@ -540,6 +549,11 @@ wrong for a cross/Intel build on Apple Silicon).
   the per-slice adhoc linker signatures don't merge, and an unsigned arm64
   dylib is **killed at load**. `LC_ID_DYLIB` is already `@rpath/…` and the dylib
   has no `LC_RPATH`, so the `@loader_path` relocatable contract above still holds.
+  The two slice digests are not in that file: it reads them from the
+  `wgpu-native` row of `tools/deps/manifest.json` (`artifacts`), the same pins
+  the single-slice path verifies through `PulpWgpuNative.cmake`. A missing or
+  stale slice digest there fails configure for universal builds only, so a
+  wgpu-native bump must re-record every asset, not just the host's.
 - **No universal libv8.** `PULP_JS_ENGINE=v8` + a universal target is a hard
   `FindV8.cmake` FATAL (v8-builder ships only thin mac slices). Use quickjs/jsc
   for universal, or lipo two thin V8 builds yourself.

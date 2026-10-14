@@ -189,11 +189,13 @@ paths = [
   "tools/scripts/test_promote_quirk_tiers.py",
   "tools/scripts/test_pulp_lldb.py",
   "tools/scripts/test_pulp_tooling_disposition.py",
+  "tools/scripts/test_python_floor_syntax_check.py",
   "tools/scripts/test_queue_admission_guard.py",
   "tools/scripts/test_queue_age_watchdog.py",
   "tools/scripts/test_reap_stranded_tracker.py",
   "tools/scripts/test_refresh_push_check.py",
   "tools/scripts/test_release_breakage_watchdog_wiring.py",
+  "tools/scripts/test_release_cache_isolation.py",
   "tools/scripts/test_release_checksum_manifest.py",
   "tools/scripts/test_release_cli_gpu_asset_coverage.py",
   "tools/scripts/test_release_failure_diagnosis.py",
@@ -5033,6 +5035,36 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-d52662541e54"
+paths = ["tools/scripts/test_vellum_view_core_pulp_kept_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "vellum-view-core-pulp-kept-negative-contract",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-ae43167caa31"
 paths = ["tools/scripts/test_vellum_watch_preflight.py"]
 tests = [
@@ -5545,7 +5577,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1d89419f9562"
+name = "script-readers-7d892b6ce02d"
 paths = ["tools/scripts/vellum_closure.py"]
 tests = [
   "build-parallelism-guard",
@@ -5565,8 +5597,40 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "prepush-refresh-push",
   "pulp.vellum-closure-boundary",
+  "pulp.vellum-closure-export-mentions",
+  "pulp.vellum-closure-export-units",
   "pulp.vellum-closure-gate",
   "pulp.vellum-closure-policy-selftest",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-db3af3b79581"
+paths = ["tools/scripts/vellum_view_core_pulp_kept_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "pulp.vellum-view-core-pulp-kept",
   "reuse-policy-replay-selftest",
 ]
 build_targets = ["pulp-cli"]
@@ -6291,6 +6355,7 @@ paths = [
   "tools/scripts/test_pulp_test_group.py",
   "tools/scripts/test_pulp_tooling_disposition.py",
   "tools/scripts/test_pulp_uninstall.py",
+  "tools/scripts/test_python_floor_syntax_check.py",
   "tools/scripts/test_queue_admission_guard.py",
   "tools/scripts/test_queue_age_watchdog.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -6298,6 +6363,7 @@ paths = [
   "tools/scripts/test_refresh_push_check.py",
   "tools/scripts/test_relay_contract_check.py",
   "tools/scripts/test_release_breakage_watchdog_wiring.py",
+  "tools/scripts/test_release_cache_isolation.py",
   "tools/scripts/test_release_checksum_manifest.py",
   "tools/scripts/test_release_cli_gpu_asset_coverage.py",
   "tools/scripts/test_release_failure_diagnosis.py",
@@ -6379,6 +6445,7 @@ paths = [
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_inheritance_ledger_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
+  "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
   "tools/scripts/test_vellum_watch_preflight.py",
   "tools/scripts/test_vellum_workflow_dispatch.py",
   "tools/scripts/test_verify_cobertura_xml.py",
@@ -6414,6 +6481,7 @@ paths = [
   "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",
@@ -6835,6 +6903,7 @@ paths = [
   "tools/scripts/test_pulp_test_group.py",
   "tools/scripts/test_pulp_tooling_disposition.py",
   "tools/scripts/test_pulp_uninstall.py",
+  "tools/scripts/test_python_floor_syntax_check.py",
   "tools/scripts/test_queue_admission_guard.py",
   "tools/scripts/test_queue_age_watchdog.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -6842,6 +6911,7 @@ paths = [
   "tools/scripts/test_refresh_push_check.py",
   "tools/scripts/test_relay_contract_check.py",
   "tools/scripts/test_release_breakage_watchdog_wiring.py",
+  "tools/scripts/test_release_cache_isolation.py",
   "tools/scripts/test_release_checksum_manifest.py",
   "tools/scripts/test_release_cli_gpu_asset_coverage.py",
   "tools/scripts/test_release_failure_diagnosis.py",
@@ -6923,6 +6993,7 @@ paths = [
   "tools/scripts/test_vellum_freeze_check.py",
   "tools/scripts/test_vellum_inheritance_ledger_check.py",
   "tools/scripts/test_vellum_trusted_merge.py",
+  "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
   "tools/scripts/test_vellum_watch_preflight.py",
   "tools/scripts/test_vellum_workflow_dispatch.py",
   "tools/scripts/test_verify_cobertura_xml.py",
@@ -6958,6 +7029,7 @@ paths = [
   "tools/scripts/unregistered_tests_check.py",
   "tools/scripts/validation_profile_select.py",
   "tools/scripts/vellum_closure.py",
+  "tools/scripts/vellum_view_core_pulp_kept_check.py",
   "tools/scripts/verify_cobertura_xml.py",
   "tools/scripts/verify_control_shipping_native_evidence.py",
   "tools/scripts/verify_downstream_consumers.py",

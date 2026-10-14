@@ -4,7 +4,7 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
-#include <pulp/view/host_param_surface.hpp>
+#include <pulp/view/host_surfaces.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 

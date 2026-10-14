@@ -10,7 +10,7 @@ single source of truth for that model.
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
 | **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard opt-in `mac` lane (`--target mac`): yes | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below), plus a non-gating full run on a head that is armed for auto-merge on the current `main` so it can issue a receipt; an unchanged exact PR merge tree may reuse that artifact-bound result after protected-base verification |
-| **Source selftests** (`Enforce version & skill sync`, step *Source-only selftests*) | every PR + every merge group | **yes** (blocking) | no build at all | the ~140 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
+| **Source selftests** (`Enforce version & skill sync`, which needs the *Source-only selftests* step and the two *Exclusive source selftests* shards) | every PR + every merge group | **yes** (blocking) | no build at all | the ~140 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
 | **iOS compile gate** (inside `macos`'s Build step) | PRs + merge groups that touch an iOS-only surface (`ios_surface` in `classify_changes.py`: `apple/**`, iOS sources or sources branching on an iOS target, non-test CMake, dependency pins, the gate's own wiring); nightly on main; every release tag | yes when it runs on a PR or merge group; the nightly opens a tracking issue; the release publish requires it | iOS AUv3 GPU smoke example | the two-SDK iOS compile (`test/cmake/test_ios_compile_gate.sh`). Shared code is compiled for macOS by the same job, so it no longer runs the per-PR iOS gate |
@@ -210,7 +210,11 @@ manifest, `tools/ci/source_selftests.json`:
   `tools/ci/source_selftests.py run`, in parallel, from an empty scratch
   directory unless the registration sets a source `WORKING_DIRECTORY`, with the
   registration's `TIMEOUT` (120 s default) and `RESOURCE_LOCK`, retrying once as
-  the gate's `--repeat until-pass:2` does.
+  the gate's `--repeat until-pass:2` does. `lane_parts()` splits the manifest
+  into a shared part and two exclusive shards. Each `PROCESSORS` > 1 entry, plus
+  anything sharing its resource lock, runs alone on a shard job of its own. The
+  required `Enforce version & skill sync` job needs every part and passes only
+  when all of them succeeded.
 
 `source-selftest-lane-contract` (a ctest that stays on the gate, because it
 needs the configured tree) runs `source_selftests.py check`. It fails when a
@@ -218,8 +222,8 @@ labelled test is missing from the manifest, a listed test is not registered or
 not labelled, a manifest command no longer matches its registration, an entry
 reaches the build tree or a path outside the checkout, an entry carries
 `pr-fast` or an excluded label, an entry's script is platform-gated or imports
-an optional third-party module (see below), or either half of the wiring is
-gone. A test
+an optional third-party module (see below), the split drops or doubles an
+entry, or any part of the wiring is gone. A test
 can therefore leave the gate only by being run on another required context.
 
 **Joining the lane.** A registration qualifies when it is `python3 <script>`

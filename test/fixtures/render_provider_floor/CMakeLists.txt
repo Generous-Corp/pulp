@@ -5,8 +5,7 @@
 # on whichever copy loaded first. The plug-in images are the always-built
 # bundle-name-quoting fixture's formats, which reach Dawn through the format
 # and view layers.
-if(NOT APPLE OR PULP_IOS OR NOT PULP_HAS_SKIA
-   OR DAWN_LIBRARY STREQUAL "DAWN_LIBRARY-NOTFOUND")
+if(NOT APPLE OR PULP_IOS OR NOT PULP_SKIA_PROVIDES_DAWN)
     return()
 endif()
 

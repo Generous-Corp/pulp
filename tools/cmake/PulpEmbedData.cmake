@@ -2,9 +2,9 @@
 # include so it can run *before* the Pulp targets exist (e.g. inside
 # core/canvas/CMakeLists.txt for bundled fonts).
 #
-# `PulpUtils.cmake` itself fails fast unless `pulp::format` already exists,
-# because most of its other helpers (pulp_add_plugin / pulp_add_app) wire
-# format adapters into a target. `pulp_add_binary_data` has no such
+# `PulpUtils.cmake` itself fails fast unless the plug-in adapter targets
+# already exist, because most of its other helpers (pulp_add_plugin /
+# pulp_add_app) wire those adapters into a target. `pulp_add_binary_data` has no such
 # requirement — it just generates a static C++ array library — so it lives
 # in its own file with no preconditions. PulpUtils.cmake `include()`s this
 # file as well, so the public surface is unchanged: callers continue to use
