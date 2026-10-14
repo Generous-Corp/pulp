@@ -3570,12 +3570,16 @@
             "generated_include_roots": 0
           },
           "direct_dependencies": [
+            "framework:CoreFoundation",
+            "framework:IOKit",
+            "framework:Metal",
             "pulp-audio",
             "pulp-gpu-device",
             "pulp-runtime",
             "pulp-signal",
             "skia::skia",
-            "system:Threads::Threads"
+            "system:Threads::Threads",
+            "system:objc"
           ]
         },
         "gpu-device": {
