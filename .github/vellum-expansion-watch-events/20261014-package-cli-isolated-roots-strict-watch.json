@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261014-package-cli-isolated-roots-strict-watch",
+  "created_at": "2026-10-14T05:54:49Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "find_wgpu_lib in tools/scripts/package_cli.py no longer falls back to shared home caches when the job declares an isolated FetchContent root, and test_package_cli.py is now run by workflow-lint.yml. This only narrows where one runtime library is looked up. No design-import, Chromium, rendering or packaging authority moves, and the packaged file set is unchanged.",
+  "tests": [
+    "python3 tools/scripts/test_package_cli.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
