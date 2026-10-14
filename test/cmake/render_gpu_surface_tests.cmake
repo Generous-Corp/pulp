@@ -1,6 +1,44 @@
 # GPU surface, Skia context, headless renderer, and compute smoke tests.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+    if(PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC)
+        if(NOT APPLE OR PULP_IOS OR PULP_SKIA_PROVIDES_DAWN OR NOT TARGET webgpu)
+            message(FATAL_ERROR
+                "The staged wgpu-native diagnostic requires desktop macOS with wgpu-native as the sole WebGPU implementation")
+        endif()
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        add_executable(pulp-gpu-wgpu-native-staged-diagnostic
+            ${PROJECT_SOURCE_DIR}/tools/diagnostics/pulp_wgpu_native_staged_adapter.cpp)
+        target_link_libraries(pulp-gpu-wgpu-native-staged-diagnostic PRIVATE
+            pulp::gpu-audio webgpu)
+        target_include_directories(pulp-gpu-wgpu-native-staged-diagnostic PRIVATE
+            ${PROJECT_SOURCE_DIR}/core/gpu_audio/src)
+        add_test(NAME pulp-gpu-wgpu-native-staged-diagnostic
+            COMMAND "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/diagnostics/verify_wgpu_native_staged.py"
+                --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                --asset "${PULP_WGPU_NATIVE_ASSET}"
+                --source-tree "${PULP_WGPU_NATIVE_SOURCE_DIR}"
+                --linked-runtime "$<TARGET_FILE:webgpu>"
+                --executable "$<TARGET_FILE:pulp-gpu-wgpu-native-staged-diagnostic>"
+                --receipt "${CMAKE_CURRENT_BINARY_DIR}/wgpu-native-staged-receipt.json")
+        set_tests_properties(pulp-gpu-wgpu-native-staged-diagnostic PROPERTIES
+            RESOURCE_LOCK pulp_gpu
+            SKIP_RETURN_CODE 77
+            TIMEOUT 60)
+        add_test(NAME pulp-gpu-wgpu-native-staged-identity-negative-control
+            COMMAND "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/diagnostics/test_verify_wgpu_native_staged.py"
+                --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                --asset "${PULP_WGPU_NATIVE_ASSET}"
+                --source-tree "${PULP_WGPU_NATIVE_SOURCE_DIR}"
+                --linked-runtime "$<TARGET_FILE:webgpu>"
+                --executable "$<TARGET_FILE:pulp-gpu-wgpu-native-staged-diagnostic>"
+                --verifier "${PROJECT_SOURCE_DIR}/tools/diagnostics/verify_wgpu_native_staged.py")
+        set_tests_properties(pulp-gpu-wgpu-native-staged-identity-negative-control PROPERTIES
+            TIMEOUT 60)
+    endif()
+
     add_executable(pulp-test-gpu-surface test_gpu_surface.cpp)
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
