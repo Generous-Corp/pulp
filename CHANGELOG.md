@@ -9,6 +9,20 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09660"></a>
+## [0.966.0] - 2026-10-14
+
+- release/version bump ([#10251](https://github.com/Generous-Corp/pulp/pull/10251))
+- fix/windows skia arm64 slice 20261013 ([#10237](https://github.com/Generous-Corp/pulp/pull/10237))
+- fix/pr head rebuilt test selection 20261012 ([#10162](https://github.com/Generous-Corp/pulp/pull/10162))
+- fix/armed full suite admission 20261012 ([#10161](https://github.com/Generous-Corp/pulp/pull/10161))
+- fix/package cli isolated fetchcontent roots ([#10247](https://github.com/Generous-Corp/pulp/pull/10247))
+- codex/signalgraph process seam 20261013 ([#10246](https://github.com/Generous-Corp/pulp/pull/10246))
+- fix/windows dawn provider fix ([#10171](https://github.com/Generous-Corp/pulp/pull/10171))
+- fix/test inventory poka yoke 20261012 ([#10180](https://github.com/Generous-Corp/pulp/pull/10180))
+- codex/windows gpu repeatable 20261013 ([#10226](https://github.com/Generous-Corp/pulp/pull/10226))
+- codex/wavenet dawn qualification 20261012 ([#10182](https://github.com/Generous-Corp/pulp/pull/10182))
+
 <a id="v09650"></a>
 ## [0.965.0] - 2026-10-14
 
@@ -10644,6 +10658,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.966.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.966.0
 [0.965.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.965.0
 [0.964.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.964.1
 [0.964.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.964.0
