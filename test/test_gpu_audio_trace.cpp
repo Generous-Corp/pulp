@@ -1393,6 +1393,15 @@ TEST_CASE("Provider identity without a native runtime source is unavailable, not
           Outcome::Failed);
 }
 
+TEST_CASE("Native Metal observer rejects an unselected adapter", "[gpu_audio][trace][provider]") {
+    const auto identity = observe_native_metal("", 0, 0);
+    CHECK_FALSE(identity.authenticated);
+    CHECK(identity.name.empty());
+    CHECK(identity.backend.empty());
+    CHECK(identity.revision.empty());
+    CHECK(identity.registry_id == 0);
+}
+
 TEST_CASE("P2 probe cannot start admissions without authenticated native identity",
           "[gpu_audio][trace][p2]") {
     using Gate = SharedIoProviderIdentityGate;

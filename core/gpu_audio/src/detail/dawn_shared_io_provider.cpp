@@ -696,13 +696,14 @@ struct DawnSharedIoProvider::Impl {
         }
         adapter_identity.name = copy_string(adapter_info.device);
         adapter_identity.backend = backend_name(adapter_info.backendType);
-        adapter_identity.native_runtime_revision = revision(dawnProcGetVersion());
-        // Preserve the runtime description returned by the live adapter. The
-        // session accepts it only together with the observed proc revision and
-        // backend; a build-time Dawn/Metal label is not runtime identity.
-        adapter_identity.native_runtime_name = copy_string(adapter_info.description);
         adapter_identity.vendor_id = adapter_info.vendorID;
         adapter_identity.device_id = adapter_info.deviceID;
+        const auto native = observe_native_metal(adapter_identity.name, adapter_identity.vendor_id,
+                                                 adapter_identity.device_id);
+        if (native.authenticated) {
+            adapter_identity.native_runtime_name = native.name;
+            adapter_identity.native_runtime_revision = native.revision;
+        }
         if (!adapter.HasFeature(wgpu::FeatureName::HostMappedPointer)) {
             reason = "host_mapped_pointer_unavailable";
             availability = Availability::Unsupported;
@@ -2542,19 +2543,14 @@ SharedIoProviderIdentity DawnSharedIoProvider::provider_identity() const noexcep
         identity.adapter_vendor_id = adapter.vendor_id;
         identity.adapter_device_id = adapter.device_id;
         identity.native_runtime_name = adapter.native_runtime_name;
-        // AdapterInfo describes the selected adapter. It is not an
-        // independently authenticated native runtime identity, so do not
-        // manufacture one by copying AdapterInfo.backendType/backend.
-        identity.native_runtime_backend.clear();
+        identity.native_runtime_backend =
+            adapter.native_runtime_name.empty() ? std::string{} : adapter.backend;
         identity.authenticated =
             !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
             !identity.adapter_backend.empty() && identity.adapter_vendor_id != 0 &&
-            !adapter.native_runtime_revision.empty() &&
-            adapter.native_runtime_revision == identity.provider_revision &&
-            !identity.native_runtime_name.empty();
-        // No independent native-runtime backend source is available at this
-        // boundary. Keep this explicitly unavailable for strict qualification.
-        identity.native_runtime_authenticated = false;
+            !adapter.native_runtime_revision.empty() && !identity.native_runtime_name.empty() &&
+            identity.native_runtime_backend == identity.adapter_backend;
+        identity.native_runtime_authenticated = identity.authenticated;
     } catch (...) {
         return {};
     }
