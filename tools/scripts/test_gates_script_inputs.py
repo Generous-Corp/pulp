@@ -326,6 +326,31 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertEqual(self.configures(), [])
         self.assertIn("script-test-inputs: OK", r.stderr)
 
+    def test_the_lane_accepts_the_build_dir_flag_its_merge_tree_caller_passes(self) -> None:
+        # merge_tree_script_state.py runs this lane with `--build-dir <configured>`
+        # rather than through gates.sh. The lane must take that flag as the same
+        # declaration PULP_GATES_BUILD_DIR makes: check that build, configure
+        # nothing. It rejected the flag outright, which made every merge-tree
+        # verdict on a host with a configured build read "stale against main".
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        elsewhere = self.root / "build-elsewhere"
+        subprocess.run([str(self.bin / "cmake"), "-S", str(self.root), "-B", str(elsewhere)],
+                       check=True, env=self.env(FAKE_CMAKE_LOG=str(self.tmp / "pre.log")))
+        query = elsewhere / ".cmake/api/v1/query/codemodel-v2"
+        query.parent.mkdir(parents=True)
+        query.touch()
+        r = subprocess.run([sys.executable, str(self.root / "tools/scripts/gates_script_inputs.py"),
+                            "--base", "main", "--repo-root", str(self.root),
+                            "--build-dir", str(elsewhere)],
+                           cwd=self.root, env=self.env(), capture_output=True, text=True, timeout=300)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertNotIn("unrecognized arguments", out)
+        self.assertEqual(self.configures(), [])
+        self.assertIn(str(elsewhere), out)
+        self.assertIn("script-test-inputs: OK", out)
+
     def test_a_reused_build_without_a_codemodel_query_is_reconfigured_once(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
         self.commit()
