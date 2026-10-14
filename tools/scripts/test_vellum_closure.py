@@ -846,7 +846,88 @@ class MirroredLinkTests(unittest.TestCase):
                          ["pulp-canvas", "pulp-bundled-fonts", "?pulp-bundled-noto-color-emoji"])
         self.assertEqual(unit_manifest_targets(self.UNITS, "gpu-device-api"),
                          ["pulp-gpu-device", "?pulp-skia-chromium-raw-ptr-compat"])
+        self.assertEqual(unit_manifest_targets(self.UNITS, "render-3d"), ["pulp-render"])
+        self.assertEqual(unit_manifest_targets(self.UNITS, "design-ir"), ["pulp-view-core"])
         self.assertNotIn("pulp-platform", unit_manifest_targets(self.UNITS, "view-platform"))
+
+    def test_each_target_has_one_owner_and_source_aliases_resolve(self):
+        from vellum_closure import unit_manifest_layout, unit_manifest_targets
+        layout = unit_manifest_layout(self.UNITS)
+        owners = {}
+        for unit in layout:
+            for target in unit["targets"]:
+                self.assertNotIn(target, owners, (target, owners.get(target), unit["name"]))
+                owners[target] = unit["name"]
+        aliases = {unit["name"]: unit.get("alias_of") for unit in layout if unit.get("alias_of")}
+        self.assertEqual(aliases, {"render-3d": "render-2d"})
+        self.assertEqual(unit_manifest_targets(self.UNITS),
+                         ["pulp-events", "pulp-platform", "pulp-runtime", "pulp-simd",
+                          "pulp-gpu-device", "?pulp-skia-chromium-raw-ptr-compat",
+                          "pulp-canvas", "pulp-bundled-fonts", "?pulp-bundled-noto-color-emoji", "pulp-render",
+                          "pulp-state", "pulp-view-core", "pulp-design-import",
+                          "pulp-view-script", "pulp-view-native", "pulp-jsx-runtime-materialized-contract",
+                          "pulp-jsx-runtime-materialized-emitter"])
+
+    def test_duplicate_target_requires_an_explicit_alias(self):
+        from vellum_closure import unit_manifest_layout
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "units.json"
+            path.write_text(json.dumps({"schema": "pulp.vellum.d3-units.v1", "units": [
+                {"name": "first", "targets": ["pulp-shared"]},
+                {"name": "second", "targets": ["pulp-shared"]},
+            ]}), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "owned by both"):
+                unit_manifest_layout(path)
+
+    def test_carried_unit_chain_must_terminate_at_a_target_owner(self):
+        from vellum_closure import unit_manifest_targets
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "units.json"
+            path.write_text(json.dumps({"schema": "pulp.vellum.d3-units.v1", "units": [
+                {"name": "first", "carried_by": "second"},
+                {"name": "second", "carried_by": "first"},
+            ]}), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "cyclic D3 unit"):
+                unit_manifest_targets(path, "first")
+
+    def test_carried_unit_must_name_an_existing_unit(self):
+        from vellum_closure import unit_manifest_layout
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "units.json"
+            path.write_text(json.dumps({"schema": "pulp.vellum.d3-units.v1", "units": [
+                {"name": "carried", "carried_by": "missing"},
+            ]}), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "carried_by must name an existing unit"):
+                unit_manifest_layout(path)
+
+    def test_carried_unit_cannot_name_itself(self):
+        from vellum_closure import unit_manifest_layout
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "units.json"
+            path.write_text(json.dumps({"schema": "pulp.vellum.d3-units.v1", "units": [
+                {"name": "self", "carried_by": "self"},
+            ]}), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "carried_by must name another unit"):
+                unit_manifest_layout(path)
+
+    def test_alias_and_carried_units_cannot_claim_targets(self):
+        from vellum_closure import unit_manifest_layout
+        cases = [
+            ([
+                {"name": "owner", "targets": ["pulp-shared"]},
+                {"name": "alias", "alias_of": "owner", "targets": ["pulp-shared"]},
+            ], "alias unit alias must not declare targets"),
+            ([
+                {"name": "owner", "targets": ["pulp-shared"]},
+                {"name": "carried", "carried_by": "owner", "targets": ["pulp-other"]},
+            ], "carried unit carried must not declare targets"),
+        ]
+        for units, message in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "units.json"
+                path.write_text(json.dumps({"schema": "pulp.vellum.d3-units.v1", "units": units}), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, message):
+                    unit_manifest_layout(path)
 
     def test_allowlist_has_no_target_wide_debt_kind(self):
         entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
@@ -885,7 +966,7 @@ class MirroredLinkTests(unittest.TestCase):
             self.assertEqual((entry["kind"], entry["owner"], entry["approver"]), ("edge", "carve-p4", "team-lead 2026-10-13"))
             self.assertTrue(entry["platforms"])
 
-    def test_raw_ptr_compat_is_a_linux_only_target_below_every_skia_consumer(self):
+    def test_raw_ptr_compat_is_a_linux_and_windows_target_below_every_skia_consumer(self):
         from vellum_closure import unit_layer_violations, unit_manifest_layout, unmirrored_link_violations
         layout = unit_manifest_layout(self.UNITS)
         data = {"targets": [{"name": "pulp-gpu-device", "link_targets": ["pulp-skia-chromium-raw-ptr-compat"]},
@@ -895,9 +976,13 @@ class MirroredLinkTests(unittest.TestCase):
         mirrored, found = unit_layer_violations(linux, layout)
         self.assertEqual(found, [])
         self.assertEqual(unmirrored_link_violations(linux, mirrored, None, set()), [])
+        windows = {**data, "configure": gpu_configure(system="Windows", processor="AMD64")}
+        mirrored, found = unit_layer_violations(windows, layout)
+        self.assertEqual(found, [])
+        self.assertEqual(unmirrored_link_violations(windows, mirrored, None, set()), [])
         darwin = {**data, "configure": gpu_configure()}
         mirrored, found = unit_layer_violations(darwin, layout)
-        self.assertTrue(any("only on Linux" in v for v in found))
+        self.assertTrue(any("only on Linux, Windows" in v for v in found))
         self.assertTrue(unmirrored_link_violations(darwin, mirrored, None, set()))
         forged = {"configure": linux["configure"], "targets": [{"name": "pulp-canvas", "link_targets": ["pulp-skia-evil"]}]}
         mirrored, _found = unit_layer_violations(forged, layout)
@@ -911,6 +996,16 @@ class MirroredLinkTests(unittest.TestCase):
         self.assertEqual(export_owned_file_violations([{"files": [source]}], ["gpu-device-api"]), [])
         self.assertEqual(export_owned_file_violations([{"files": [source]}], ["canvas"]),
                          [f"{source} belongs to D3 unit gpu-device-api, not canvas"])
+        # The Linux optional target is declared by gpu-device, while the
+        # source remains owned by gpu-device-api.  A combined export is valid
+        # only when the carried owner is present; the carrier alone must not
+        # silently reassign the source.
+        self.assertEqual(export_owned_file_violations(
+            [{"files": [source]}, {"files": [source]}],
+            ["gpu-device-api", "gpu-device"], self.UNITS), [])
+        self.assertEqual(export_owned_file_violations(
+            [{"files": [source]}], ["gpu-device"], self.UNITS),
+            [f"{source} belongs to D3 unit gpu-device-api, not gpu-device"])
         with tempfile.TemporaryDirectory() as td:
             twice = Path(td) / "units.json"
             twice.write_text(json.dumps({"schema": "pulp.vellum.d3-units.v1", "units": [
@@ -934,7 +1029,7 @@ class MirroredLinkTests(unittest.TestCase):
         from vellum_closure import unit_layer_violations, unit_manifest_layout
         layout = unit_manifest_layout(self.UNITS)
         names = [u["name"] for u in layout]
-        self.assertLess(names.index("view-core"), names.index("design-ir"))
+        self.assertLess(names.index("design-ir"), names.index("view-core"))
         self.assertLess(names.index("view-script"), names.index("view-platform"))
         real = {"configure": gpu_configure(), "targets": [
             {"name": "pulp-design-import", "link_targets": ["pulp-view-core", "pulp-canvas", "pulp-runtime"]},
