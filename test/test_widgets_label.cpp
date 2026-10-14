@@ -770,12 +770,14 @@ TEST_CASE("Label honors Chromium captured vertical line positions",
     CHECK(fills[0].f[1] - em_fills[0].f[1] == Catch::Approx(2.0f));
 }
 
-TEST_CASE("Label keeps painting natively once its copy diverged from the captured basis",
+TEST_CASE("Label keeps a retyped single captured line where Chromium put it",
           "[view][widget][label-cache][readout]") {
-    // A modulated readout cycles through values that include the design's
-    // original copy. The captured line box is honored only while the text
-    // equals that copy, so without dropping it the label would flip between
-    // captured and native placement every time the value passed through it.
+    // A modulated readout ("32 BANDS" playing "64 BANDS") changes its copy
+    // without changing its font or its box. The captured line box is still
+    // where that text sits; only its width has to be asked again. Dropping
+    // the box on a text change re-centred the caption from native metrics,
+    // which sat visibly higher than the captured line -- the caption jumped
+    // the moment the LFO started and jumped back when it stopped.
     Label label("8 BANDS");
     label.set_font_family("Inter");
     label.set_font_size(12.0f);
@@ -791,24 +793,67 @@ TEST_CASE("Label keeps painting natively once its copy diverged from the capture
     const auto captured_fills = commands_of(captured, DrawCommand::Type::fill_text);
     REQUIRE(captured_fills.size() == 1);
 
-    label.set_text("12 BANDS");
-    // The boxes stay for the responsive reflow; only the basis is retired.
-    CHECK_FALSE(label.cached_line_boxes().empty());
-    RecordingCanvas native;
-    label.paint(native);
-    const auto native_fills = commands_of(native, DrawCommand::Type::fill_text);
-    REQUIRE(native_fills.size() == 1);
-    // Control: the two placements differ, so the equality below is a
-    // measurement of the drop and not of two paths that already agreed.
-    CHECK(native_fills[0].f[1] != Catch::Approx(captured_fills[0].f[1]));
+    // Control: without the box the native placement differs, so an equality
+    // below measures the box being honoured rather than two paths agreeing.
+    {
+        Label bare("12 BANDS");
+        bare.set_font_family("Inter");
+        bare.set_font_size(12.0f);
+        bare.set_bounds({0, 0, 100, 40});
+        RecordingCanvas native;
+        bare.paint(native);
+        const auto native_fills = commands_of(native, DrawCommand::Type::fill_text);
+        REQUIRE(native_fills.size() == 1);
+        CHECK(native_fills[0].f[1] != Catch::Approx(captured_fills[0].f[1]));
+    }
 
+    label.set_text("12 BANDS");
+    CHECK_FALSE(label.cached_line_boxes().empty());
+    RecordingCanvas retyped;
+    label.paint(retyped);
+    const auto retyped_fills = commands_of(retyped, DrawCommand::Type::fill_text);
+    REQUIRE(retyped_fills.size() == 1);
+    CHECK(retyped_fills[0].text == "12 BANDS");
+    // Same baseline and, left-aligned, the same left edge.
+    CHECK(retyped_fills[0].f[1] == Catch::Approx(captured_fills[0].f[1]));
+    CHECK(retyped_fills[0].f[0] == Catch::Approx(captured_fills[0].f[0]));
+
+    // And back: the original copy paints exactly where it did.
     label.set_text("8 BANDS");
     RecordingCanvas again;
     label.paint(again);
     const auto again_fills = commands_of(again, DrawCommand::Type::fill_text);
     REQUIRE(again_fills.size() == 1);
-    CHECK(again_fills[0].f[0] == Catch::Approx(native_fills[0].f[0]));
-    CHECK(again_fills[0].f[1] == Catch::Approx(native_fills[0].f[1]));
+    CHECK(again_fills[0].f[0] == Catch::Approx(captured_fills[0].f[0]));
+    CHECK(again_fills[0].f[1] == Catch::Approx(captured_fills[0].f[1]));
+}
+
+TEST_CASE("Label re-centres a retyped captured line on the captured box",
+          "[view][widget][label-cache][readout][alignment]") {
+    // A centred caption whose copy grows keeps the box's centre: the captured
+    // left edge moves by half the width change, so the wider text is centred
+    // where the narrower one was rather than starting at its old left edge.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty()) return;
+    Label label("8 BANDS");
+    label.set_font_family("Inter");
+    label.set_font_size(12.0f);
+    label.set_text_align(LabelAlign::center);
+    label.set_bounds({0, 0, 100, 40});
+    constexpr float kBoxLeft = 25.0f, kBoxWidth = 50.0f;
+    label.set_cached_line_boxes({{kBoxLeft, 9, kBoxWidth, 16, 0, 7}}, 100.0f, face, false);
+
+    label.set_text("128 BANDS");
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    const float width = pulp::canvas::global_text_shaper()
+        .prepare("128 BANDS", "Inter", 12.0f, 400, 0, 0.0f).total_width();
+    REQUIRE(width > 0.0f);
+    // Painted left-anchored at the recentred edge: its centre is the box's.
+    CHECK(fills[0].f[0] + width * 0.5f == Catch::Approx(kBoxLeft + kBoxWidth * 0.5f).margin(0.05f));
+    CHECK(fills[0].f[0] != Catch::Approx(kBoxLeft));
 }
 
 TEST_CASE("Attributed Label honors each Chromium captured line position",
