@@ -153,7 +153,8 @@ class ScriptBehaviour(unittest.TestCase):
         if node:
             env["PULP_NODE_RUNTIME_EXECUTABLE"] = str(tmp / "node-rt" / "node")
         cmd = ["bash", str(REPO_ROOT / SCRIPT), platform] + ([tag] if tag else [])
-        proc = subprocess.run(cmd, cwd=tmp, env=env, capture_output=True, text=True)
+        proc = subprocess.run(cmd, cwd=tmp, env=env, capture_output=True, text=True,
+                              encoding="utf-8")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertTrue((tmp / f"pulp-{platform}.tar.gz").is_file())
         return (tmp / "argv.txt").read_text(encoding="utf-8").splitlines()
