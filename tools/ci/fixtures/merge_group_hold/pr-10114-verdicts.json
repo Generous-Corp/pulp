@@ -1,0 +1,165 @@
+{
+ "data": {
+  "repository": {
+   "pullRequest": {
+    "headRefOid": "5e1f3c280fb8664d5e3c55b0a01d549447ccda60",
+    "author": {
+     "login": "shipyard-local"
+    },
+    "comments": {
+     "totalCount": 16,
+     "nodes": [
+      {
+       "author": {
+        "login": "github-actions"
+       },
+       "authorAssociation": "NONE",
+       "body": "@codex review",
+       "createdAt": "2026-10-11T20:32:26Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "chatgpt-codex-connector"
+       },
+       "authorAssociation": "NONE",
+       "body": "To use Codex here, [create a Codex account and connect to github](https://chatgpt.com/codex/cloud/settings/connectors).",
+       "createdAt": "2026-10-11T20:32:29Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "github-actions"
+       },
+       "authorAssociation": "NONE",
+       "body": "@codex review",
+       "createdAt": "2026-10-11T20:41:33Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "chatgpt-codex-connector"
+       },
+       "authorAssociation": "NONE",
+       "body": "To use Codex here, [create a Codex account and connect to github](https://chatgpt.com/codex/cloud/settings/connectors).",
+       "createdAt": "2026-10-11T20:41:37Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "github-actions"
+       },
+       "authorAssociation": "NONE",
+       "body": "@codex review",
+       "createdAt": "2026-10-11T21:43:52Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "chatgpt-codex-connector"
+       },
+       "authorAssociation": "NONE",
+       "body": "To use Codex here, [create a Codex account and connect to github](https://chatgpt.com/codex/cloud/settings/connectors).",
+       "createdAt": "2026-10-11T21:43:56Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "github-actions"
+       },
+       "authorAssociation": "NONE",
+       "body": "@codex review",
+       "createdAt": "2026-10-11T22:10:29Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "chatgpt-codex-connector"
+       },
+       "authorAssociation": "NONE",
+       "body": "To use Codex here, [create a Codex account and connect to github](https://chatgpt.com/codex/cloud/settings/connectors).",
+       "createdAt": "2026-10-11T22:10:32Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "codecov"
+       },
+       "authorAssociation": "NONE",
+       "body": "## [Codecov](https://app.codecov.io/gh/Generous-Corp/pulp/pull/10114?dropdown=coverage&src=pr&el=h1&utm_medium=referral&utm_source=github&utm_content=comment&utm_campaign=pr+comments&utm_term=Generous-Corp) Report\n:white_check_mark: All modified and coverable lines are covered by tests.\n\n:loudspeaker: Thoughts on this report? [Let us know!](https://github.com/codecov/feedback/issues/255)",
+       "createdAt": "2026-10-12T00:37:15Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "github-actions"
+       },
+       "authorAssociation": "NONE",
+       "body": "<!-- pulp-coverage-diff-gate -->\n\n## Diff coverage (Phase 1 advisory)\n\nAdvisory window: this gate is **informational only** until **2026-05-04**, after which diff coverage below **75%** will block merges (issue #566 Phase 3).\nThis percentage applies only to the coverage surfaces currently represented on Codecov; see `docs/guides/coverage.md` for the current perimeter.\n\n<details><summary>diff-cover report</summary>\n\n## Diff: origin/main...HEAD, staged and unstaged changes\n\nNo lines with coverage information in this diff.\n\n</details>\n\nSee [coverage.md](https://github.com/Generous-Corp/pulp/blob/main/docs/guides/coverage.md) for the current represented surface, how to interpret this number, and the full Phase 1 \u2192 Phase 3 roadmap.",
+       "createdAt": "2026-10-12T00:37:44Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "shipyard-local"
+       },
+       "authorAssociation": "CONTRIBUTOR",
+       "body": "<!-- shipyard-pr-watch v1 -->\n**Shipyard PR watch**: resolved. No flags hold on this pull request.\n",
+       "createdAt": "2026-10-12T02:21:00Z",
+       "lastEditedAt": "2026-10-12T05:00:40Z"
+      },
+      {
+       "author": {
+        "login": "github-actions"
+       },
+       "authorAssociation": "NONE",
+       "body": "@codex review",
+       "createdAt": "2026-10-12T04:42:16Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "chatgpt-codex-connector"
+       },
+       "authorAssociation": "NONE",
+       "body": "To use Codex here, [create a Codex account and connect to github](https://chatgpt.com/codex/cloud/settings/connectors).",
+       "createdAt": "2026-10-12T04:42:19Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "shipyard-local"
+       },
+       "authorAssociation": "CONTRIBUTOR",
+       "body": "READY head:5e1f3c280fb8664d5e3c55b0a01d549447ccda60\n\nAlready enqueued: the integrator armed it through Shipyard before the review-before-arm rule (2026-10-12), so it is in the merge queue now. Please review this exact head.\n\nWhat changed since R9's MERGE verdict at a603b26a:\n- cf6a04e / 17196fb: F7 exact edge-debt hardening (schema allowlist, unused entries fail, edge negative control)\n- 8ec5b1114a: merge of origin/main. main's exact include-edge rule (#10091 F1) is combined with this branch's schema allowlist; a path exemption counts only for its named include edge, confirmed with confirm_failure.sh. 43 P4 debts that #10030 cleared were pruned (50 -> 7).\n- 5e1f3c280f: regenerated .shipyard/changed-surface-families.toml\n\nLocal: tools/scripts/gates.sh origin/main passes. The 6 pulp.vellum-closure-* ctests pass. test_vellum_closure.py passes.\n",
+       "createdAt": "2026-10-12T05:15:08Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "shipyard-local"
+       },
+       "authorAssociation": "CONTRIBUTOR",
+       "body": "Reviewer note for head 5e1f3c280fb8664d5e3c55b0a01d549447ccda60, from the C19 crosswalk audit. Not a new push.\n\n`tools/scripts/vellum_d3_units.json` maps D3 unit `gpu-device-api` to `pulp-gpu-device`, and `design-ir` to `pulp-design-import`. The units' own targets are the INTERFACE libraries `pulp-gpu-device-api` and `pulp-design-ir`.\n\nI checked: CMake's file-api codemodel (v2.11) does not report INTERFACE targets at all. Neither one appears in the reply. So the closure gate can only reach these units through the static libraries that compile their headers. The mapping is a deliberate approximation, not a typo.\n\nCoverage consequence: the INTERFACE headers are scanned only when a compiled source includes them. Please judge whether that is acceptable for this PR, or whether you want a follow-up that enumerates INTERFACE headers by directory.\n",
+       "createdAt": "2026-10-12T05:26:56Z",
+       "lastEditedAt": null
+      },
+      {
+       "author": {
+        "login": "shipyard-local"
+       },
+       "authorAssociation": "CONTRIBUTOR",
+       "body": "Adversarial review of 5e1f3c280fb8664d5e3c55b0a01d549447ccda60: HOLD. The code reads correctly, but most of the gate branches this PR claims are untested. Each can be deleted and every test still passes.\n\n**Must-fix: add failing-case tests for the provenance and unused-allowlist checks.** I ran one-line mutants against `tools/scripts/vellum_closure.py` (each diff non-empty, 1 line) and re-ran `tools/scripts/test_vellum_closure.py` (7 tests, OK at head):\n\n| mutant (branch replaced by `if False:` / `pass`) | unit suite |\n|---|---|\n| `if source != expected[\"source\"]` (repository mismatch) | OK |\n| `if not ... FULL_SHA_RE.fullmatch(pin)` (non-40-hex pin) | OK |\n| `elif pin != expected[\"pin\"]` (pin mismatch) | OK |\n| `if expected is None` (unknown FetchContent name) | OK |\n| `if source == \"build-tree\" or pin == \"unresolved\"` | OK |\n| `failed \\|= bool(unused)` in `cmd_gate` (unused allowlist entry) | OK |\n\nThe only rogue case (`rogue-src` + `build-tree` + `unresolved`) trips two branches at once, so each branch masks the other. The `pulp.vellum-closure-external-input-negative` ctest breaks source and pin together, so it also hits only the build-tree/unresolved branch. The headline guarantees (\"match a known FetchContent repository and full 40-hex pin\", \"fails on unused entries\") therefore have no test that fails when they are removed.\n\nAdd one case per branch, each changing only one field of a valid row:\n- known name (`choc`), right pin, wrong repository: must be flagged\n- right repository, short or non-hex pin: must be flagged\n- right repository, different full 40-hex pin: must be flagged\n- unknown name (`rogue-src`), plausible repository, 40-hex pin: must be flagged\n- an allowlist containing one entry that nothing matches: `cmd_gate` must return 1\n- the positive control: the valid choc row passes (already covered by the fixture)\n\nShould-fix (not blocking):\n- `vellum_closure_external_input_fixture.json` hard-codes choc `df148a41...` and resolves pins from the live `tools/deps/manifest.json`/`setup.sh` through `source_root: \".\"`. The next choc bump turns the `pr`-labelled `external-input-negative` ctest red, inside a dependency PR that never touched Vellum. Either derive the expected row from `fetchcontent_pins()` in a unit test, or document the coupling next to the choc pin.\n- `allowlist_match` short-circuits: if an edge entry matches first, a `target` entry for the same link is never marked used. That is fine today (no target entries), but a future target entry would fail as \"unused\" for an ordering reason.\n\nVerified OK: CMake's old `--allow-root-prefix core/audio/` and `core/signal/` plus the include-prefix allowances are gone, and `pulp.vellum-closure-gate` still passes on both the required macOS job and Linux x64 for this head (job logs: 22/22, gate Passed). The `--allow-include-path` arg is now ignored; edge-exact matching is stricter, so this is fine.\n\nverdict: HOLD head:5e1f3c280fb8664d5e3c55b0a01d549447ccda60",
+       "createdAt": "2026-10-12T05:49:35Z",
+       "lastEditedAt": null
+      }
+     ]
+    },
+    "reviews": {
+     "totalCount": 0,
+     "nodes": []
+    }
+   }
+  }
+ }
+}

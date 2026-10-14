@@ -2,36 +2,20 @@
   "schema": "pulp.vellum.closure.allowlist.v1",
   "entries": [
     {
-      "id": "design-import-view-audio-link",
-      "owner": "l3-gpu",
-      "debt_id": "design-import-view-audio-link",
-      "kind": "edge",
-      "match": "pulp-design-import->pulp-view-audio",
-      "exit_criterion": "Remove when P4 removes the design-import to view-audio link from the extracted target graph."
-    },
-    {
-      "id": "view-script-view-audio-link",
-      "owner": "l3-gpu",
-      "debt_id": "view-script-view-audio-link",
-      "kind": "edge",
-      "match": "pulp-view-script->pulp-view-audio",
-      "exit_criterion": "Remove when P4 removes the view-script to view-audio link from the extracted target graph."
-    },
-    {
-      "id": "P4-edge-1",
-      "owner": "carve-p4",
-      "debt_id": "P4-view-audio",
-      "kind": "edge",
-      "match": "pulp-design-import->pulp-midi",
-      "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
-    },
-    {
       "id": "P4-edge-4",
       "owner": "carve-p4",
       "debt_id": "P4-view-audio",
       "kind": "edge",
       "match": "pulp-view-native->pulp-view-audio",
       "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
+    },
+    {
+      "id": "P4-edge-4-audio",
+      "owner": "carve-p4",
+      "debt_id": "P4-view-audio",
+      "kind": "edge",
+      "match": "pulp-view-native->pulp-audio",
+      "exit_criterion": "Transitive through pulp-view-audio, which links pulp::audio. Remove with P4-edge-4 when pulp-view-native no longer links pulp-view-audio."
     },
     {
       "id": "P4-edge-5",
@@ -50,12 +34,30 @@
       "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
     },
     {
-      "id": "P4-edge-7",
+      "id": "P4-edge-4-timebase",
       "owner": "carve-p4",
       "debt_id": "P4-view-audio",
       "kind": "edge",
-      "match": "pulp-view-script->pulp-midi",
-      "exit_criterion": "Remove when the P4 carve removes this extracted-unit to retained Pulp dependency."
+      "match": "pulp-view-native->pulp-timebase",
+      "platforms": [
+        "Darwin",
+        "Linux"
+      ],
+      "approver": "team-lead 2026-10-13",
+      "exit_criterion": "Removed when the P4 view-audio carve stops view-native reaching audio."
+    },
+    {
+      "id": "P4-edge-4-sample-bank-manifest",
+      "owner": "carve-p4",
+      "debt_id": "P4-view-audio",
+      "kind": "edge",
+      "match": "pulp-view-native->pulp-sample-bank-manifest",
+      "platforms": [
+        "Darwin",
+        "Linux"
+      ],
+      "approver": "team-lead 2026-10-13",
+      "exit_criterion": "Removed when the P4 view-audio carve stops view-native reaching audio."
     }
   ]
 }

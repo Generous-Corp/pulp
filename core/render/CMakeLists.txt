@@ -197,8 +197,18 @@ foreach(_pulp_gpu_target IN ITEMS pulp-gpu-device pulp-render)
         set(_pulp_gpu_provider_scope PUBLIC)
         set(_pulp_gpu_provider_def_scope PUBLIC)
     endif()
-    if(PULP_HAS_WEBGPU AND TARGET webgpu
-       AND NOT (PULP_HAS_SKIA AND NOT DAWN_LIBRARY STREQUAL "DAWN_LIBRARY-NOTFOUND"))
+    # A native Skia slice owns the Dawn implementation when its archive is
+    # present; linking wgpu-native as well duplicates every wgpu* symbol.
+    # FindSkia records that once (PULP_SKIA_PROVIDES_DAWN, see
+    # tools/cmake/PulpSkiaDawnProvider.cmake), so read the decision rather
+    # than re-deriving it from DAWN_LIBRARY.
+    set(_pulp_webgpu_target_exists FALSE)
+    if(TARGET webgpu)
+        set(_pulp_webgpu_target_exists TRUE)
+    endif()
+    pulp_gpu_links_wgpu_native(_pulp_gpu_links_wgpu
+        WEBGPU_TARGET ${_pulp_webgpu_target_exists})
+    if(_pulp_gpu_links_wgpu)
         target_link_libraries(${_pulp_gpu_target} ${_pulp_gpu_provider_scope} webgpu)
     endif()
     if(PULP_HAS_WEBGPU)

@@ -108,7 +108,7 @@ public:
     // values (2*n floats in and out). `n` must be a power of two and small
     // enough that 2*n*sizeof(float) fits the device storage-buffer limit.
     // Not for the audio callback — these build/cache a per-`n` plan and block
-    // on readback. Validated against a direct DFT and pulp::signal::Fft
+    // on readback. Validated against a direct DFT and the CPU FFT
     // (magnitude parity + round-trip identity); see test/test_gpu_compute.cpp.
     //
     // Thread-safety: like the rest of GpuCompute, a single instance is NOT

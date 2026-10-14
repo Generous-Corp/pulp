@@ -239,6 +239,7 @@ ToolDescriptor binary_tool(std::string id, std::string binary_name = {}) {
         "https://example.invalid/" + tool.id + "-${version}.tar.gz",
         "tar.gz",
         std::move(binary_name),
+        {},
     };
     return tool;
 }
@@ -611,6 +612,257 @@ TEST_CASE("install_binary_tool defers a bare (un-archived) binary source",
     REQUIRE(result.installed_version == tool.pinned_version);
     // Nothing was written to the managed tree.
     REQUIRE_FALSE(fs::exists(tmp.path / "home" / "tools" / "trace-processor"));
+}
+
+// ── Binary download verification ──
+//
+// A local tar.gz served over file:// stands in for a release asset, so these
+// exercise the real download, digest, extract and manifest path with no network.
+
+struct VerifiedToolFixture {
+    TempDir tmp;
+    ScopedEnv home{"PULP_HOME", tmp.path / "home"};
+    fs::path assets = tmp.path / "assets";
+    ToolDescriptor tool;
+
+    explicit VerifiedToolFixture(const std::string& id) {
+        tool = binary_tool(id);
+        tool.binary_sources[current_platform_key()].url_template =
+            "file://" + assets.generic_string() + "/" + id + "-${version}.tar.gz";
+    }
+
+    // Publish an asset for `version` whose binary prints `body`; returns its digest.
+    std::string publish(const std::string& version, const std::string& body) {
+        auto payload = tmp.path / ("payload-" + version);
+        write_file(payload / "bin" / tool.id, body);
+        fs::create_directories(assets);
+        auto archive = assets / (tool.id + "-" + version + ".tar.gz");
+        require_exec_ok("tar", {"czf", archive.string(), "-C", payload.string(), "."});
+        return sha256_file_hex(archive);
+    }
+
+    fs::path installed(const std::string& version) const {
+        return managed_binary_path(tmp.path / "home", tool.id, version, tool.id);
+    }
+};
+
+TEST_CASE("install_binary_tool installs a registry pin whose sha256 matches",
+          "[cli][tool-registry][install][sha256]") {
+#ifdef _WIN32
+    SKIP("downloads through curl file:// on Unix hosts");
+#endif
+    VerifiedToolFixture fx("verified-ok");
+    auto digest = fx.publish("1.2.3", "pinned\n");
+    REQUIRE(digest.size() == 64);
+    fx.tool.binary_sources[current_platform_key()].sha256 = digest;
+
+    auto result = install_binary_tool(fx.tool, /*force=*/true);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(result.verification == "sha256-verified");
+    REQUIRE(result.sha256 == digest);
+    REQUIRE(result.installed_version == "1.2.3");
+    REQUIRE(read_file(fx.installed("1.2.3")) == "pinned\n");
+    auto manifest = read_file(fx.installed("1.2.3").parent_path() / "manifest.json");
+    REQUIRE(manifest.find("\"verification\": \"sha256-verified\"") != std::string::npos);
+    REQUIRE(manifest.find("\"sha256\": \"" + digest + "\"") != std::string::npos);
+    REQUIRE(manifest.find("\"version_source\": \"registry pin\"") != std::string::npos);
+}
+
+TEST_CASE("install_binary_tool refuses a registry pin whose sha256 differs",
+          "[cli][tool-registry][install][sha256]") {
+#ifdef _WIN32
+    SKIP("downloads through curl file:// on Unix hosts");
+#endif
+    VerifiedToolFixture fx("verified-bad");
+    auto digest = fx.publish("1.2.3", "tampered\n");
+    const std::string expected(64, 'a');
+    fx.tool.binary_sources[current_platform_key()].sha256 = expected;
+
+    auto result = install_binary_tool(fx.tool, /*force=*/true);
+    REQUIRE_FALSE(result.ok);
+    for (const std::string& needle :
+         {std::string("SHA-256 mismatch for verified-bad 1.2.3"), current_platform_key(),
+          "expected " + expected, "found " + digest, std::string("Fix:")}) {
+        INFO(result.error);
+        REQUIRE(result.error.find(needle) != std::string::npos);
+    }
+    REQUIRE_FALSE(fs::exists(fx.installed("1.2.3")));
+    REQUIRE_FALSE(
+        fs::exists(fx.tmp.path / "home" / "tools" / ".downloads" / "verified-bad-1.2.3.tar.gz"));
+}
+
+TEST_CASE("install_binary_tool refuses a registry pin with no recorded sha256",
+          "[cli][tool-registry][install][sha256]") {
+    VerifiedToolFixture fx("verified-missing");
+    auto result = install_binary_tool(fx.tool, /*force=*/true);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("has no recorded sha256") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(fx.installed("1.2.3")));
+}
+
+TEST_CASE("install_binary_tool installs an overridden version as unverified-version",
+          "[cli][tool-registry][install][sha256][override]") {
+#ifdef _WIN32
+    SKIP("downloads through curl file:// on Unix hosts");
+#endif
+    SECTION("PULP_TOOL_<ID>_VERSION") {
+        VerifiedToolFixture fx("override-env");
+        fx.tool.binary_sources[current_platform_key()].sha256 = fx.publish("1.2.3", "pin\n");
+        auto observed = fx.publish("2.0.0", "newer\n");
+        ScopedEnv version{"PULP_TOOL_OVERRIDE_ENV_VERSION", "2.0.0"};
+
+        auto result = install_binary_tool(fx.tool, /*force=*/true);
+        INFO(result.error);
+        REQUIRE(result.ok);
+        REQUIRE(result.installed_version == "2.0.0");
+        REQUIRE(result.verification == "unverified-version");
+        REQUIRE(result.sha256 == observed);
+        REQUIRE(read_file(fx.installed("2.0.0")) == "newer\n");
+        auto manifest = read_file(fx.installed("2.0.0").parent_path() / "manifest.json");
+        REQUIRE(manifest.find("\"verification\": \"unverified-version\"") != std::string::npos);
+        REQUIRE(manifest.find("\"sha256\": \"" + observed + "\"") != std::string::npos);
+        REQUIRE(manifest.find("\"version_source\": \"env override\"") != std::string::npos);
+    }
+    SECTION("$PULP_HOME/tool-overrides.json") {
+        VerifiedToolFixture fx("override-file");
+        fx.tool.binary_sources[current_platform_key()].sha256 = fx.publish("1.2.3", "pin\n");
+        auto observed = fx.publish("3.1.0", "chosen\n");
+        write_file(fx.tmp.path / "home" / "tool-overrides.json",
+                   "{\"overrides\": {\"override-file\": \"3.1.0\"}}\n");
+
+        auto result = install_binary_tool(fx.tool, /*force=*/true);
+        INFO(result.error);
+        REQUIRE(result.ok);
+        REQUIRE(result.installed_version == "3.1.0");
+        REQUIRE(result.verification == "unverified-version");
+        REQUIRE(result.sha256 == observed);
+        REQUIRE(fs::exists(fx.installed("3.1.0")));
+    }
+}
+
+TEST_CASE("an override on a fixed-build source is refused, never mislabelled",
+          "[cli][tool-registry][install][sha256][override]") {
+    VerifiedToolFixture fx("fixed-source");
+    // One fixed asset, no ${version} in the URL: the pinned build only.
+    auto digest = fx.publish("1.2.3", "pinned\n");
+    auto& source = fx.tool.binary_sources[current_platform_key()];
+    source.url_template = "file://" + fx.assets.generic_string() + "/fixed-source-1.2.3.tar.gz";
+    source.sha256 = digest;
+    ScopedEnv version{"PULP_TOOL_FIXED_SOURCE_VERSION", "2.0.0"};
+
+    auto result = install_binary_tool(fx.tool, /*force=*/true);
+    REQUIRE_FALSE(result.ok);
+    for (const std::string& needle :
+         {std::string("fixed-source 2.0.0 (env override)"), current_platform_key(),
+          std::string("serves one fixed build, fixed-source 1.2.3"),
+          std::string("Fix: unset PULP_TOOL_FIXED_SOURCE_VERSION to use 1.2.3")}) {
+        INFO(result.error);
+        REQUIRE(result.error.find(needle) != std::string::npos);
+    }
+    // `pulp tool update` cannot clear an env override, so it is not the advice.
+    REQUIRE(result.error.find("pulp tool update") == std::string::npos);
+    REQUIRE_FALSE(fs::exists(fx.installed("2.0.0")));
+    REQUIRE_FALSE(fs::exists(fx.installed("1.2.3")));
+
+    // A saved override is dropped with `pulp tool update`.
+    version.set("");
+    write_file(fx.tmp.path / "home" / "tool-overrides.json",
+               "{\"overrides\": {\"fixed-source\": \"2.0.0\"}}\n");
+    auto saved = install_binary_tool(fx.tool, /*force=*/true);
+    REQUIRE_FALSE(saved.ok);
+    INFO(saved.error);
+    REQUIRE(saved.error.find("fixed-source 2.0.0 (user override)") != std::string::npos);
+    REQUIRE(saved.error.find("Fix: run `pulp tool update fixed-source` to drop the saved "
+                             "override to use 1.2.3") != std::string::npos);
+    REQUIRE(saved.error.find("unset PULP_TOOL") == std::string::npos);
+    fs::remove(fx.tmp.path / "home" / "tool-overrides.json");
+
+#ifndef _WIN32
+    // The same fixed source still installs its pin, verified.
+    auto pinned = install_binary_tool(fx.tool, /*force=*/true);
+    INFO(pinned.error);
+    REQUIRE(pinned.ok);
+    REQUIRE(pinned.verification == "sha256-verified");
+#endif
+}
+
+TEST_CASE("the installed-version check compares the manifest version exactly",
+          "[cli][tool-registry][install][override]") {
+#ifdef _WIN32
+    SKIP("downloads through curl file:// on Unix hosts");
+#endif
+    VerifiedToolFixture fx("exact-version");
+    // An installed pin whose manifest digest and path contain the digit 7.
+    auto existing = fx.installed("1.2.3");
+    write_file(existing, "pinned\n");
+    write_file(existing.parent_path() / "manifest.json",
+               "{\n  \"tool_id\": \"exact-version\",\n  \"version\": \"1.2.3\",\n"
+               "  \"sha256\": \"" +
+                   std::string(64, '7') + "\"\n}\n");
+    fx.publish("7", "seven\n");
+    ScopedEnv version{"PULP_TOOL_EXACT_VERSION_VERSION", "7"};
+
+    auto result = install_binary_tool(fx.tool, /*force=*/false);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(result.installed_version == "7");
+    REQUIRE(result.verification == "unverified-version"); // reinstalled, not cached
+    REQUIRE(read_file(fx.installed("7")) == "seven\n");
+}
+
+TEST_CASE("an override naming the pinned version is still verified",
+          "[cli][tool-registry][install][sha256][override]") {
+#ifdef _WIN32
+    SKIP("downloads through curl file:// on Unix hosts");
+#endif
+    VerifiedToolFixture fx("override-same");
+    fx.publish("1.2.3", "tampered\n");
+    fx.tool.binary_sources[current_platform_key()].sha256 = std::string(64, 'b');
+    ScopedEnv version{"PULP_TOOL_OVERRIDE_SAME_VERSION", "1.2.3"};
+    auto result = install_binary_tool(fx.tool, /*force=*/true);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("SHA-256 mismatch") != std::string::npos);
+}
+
+TEST_CASE("active tool version follows env, then overrides file, then registry pin",
+          "[cli][tool-registry][override]") {
+    TempDir tmp;
+    ScopedEnv home{"PULP_HOME", tmp.path};
+    auto tool = binary_tool("precedence-tool");
+    REQUIRE(tool_version_env_var("audio-quality-lab") == "PULP_TOOL_AUDIO_QUALITY_LAB_VERSION");
+
+    auto pin = resolve_active_tool_version(tool);
+    REQUIRE(pin.version == "1.2.3");
+    REQUIRE(pin.source == "registry pin");
+
+    write_file(tmp.path / "tool-overrides.json",
+               "{\"overrides\": {\"precedence-tool\": \"1.5.0\", \"other\": \"9\"}}\n");
+    auto file = resolve_active_tool_version(tool);
+    REQUIRE(file.version == "1.5.0");
+    REQUIRE(file.source == "user override");
+
+    ScopedEnv env{"PULP_TOOL_PRECEDENCE_TOOL_VERSION", "2.0.0"};
+    auto from_env = resolve_active_tool_version(tool);
+    REQUIRE(from_env.version == "2.0.0");
+    REQUIRE(from_env.source == "env override");
+
+    env.set("");
+    REQUIRE(resolve_active_tool_version(tool).version == "1.5.0");
+    write_file(tmp.path / "tool-overrides.json", "not json");
+    REQUIRE(resolve_active_tool_version(tool).source == "registry pin");
+}
+
+TEST_CASE("install_binary_tool refuses a version that is not a release version",
+          "[cli][tool-registry][install][override]") {
+    TempDir tmp;
+    ScopedEnv home{"PULP_HOME", tmp.path};
+    auto tool = binary_tool("unsafe-version");
+    ScopedEnv env{"PULP_TOOL_UNSAFE_VERSION_VERSION", "../../escape"};
+    auto result = install_binary_tool(tool, /*force=*/true);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("is not a valid release version") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(tmp.path / "escape"));
 }
 
 TEST_CASE("tool registry coverage preserves platform sources and home helpers",

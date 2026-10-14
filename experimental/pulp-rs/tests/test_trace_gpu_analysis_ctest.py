@@ -80,6 +80,7 @@ class TraceGpuAnalysisCtestTests(unittest.TestCase):
             self.assertEqual(result, 19)
             argv = run.call_args.args[0]
             self.assertEqual(argv[-2:], ["--test", "trace_gpu_analysis_tool_test"])
+            self.assertIn("--locked", argv)
             child_environment = run.call_args.kwargs["env"]
             self.assertEqual(child_environment["PULP_TRACE_PROCESSOR"], str(processor))
             self.assertEqual(child_environment["CARGO_TARGET_DIR"], str(root / "target"))

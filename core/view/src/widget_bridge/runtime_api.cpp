@@ -51,11 +51,21 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             "    ? globalThis.__pulpBatchUpdates__ : undefined;"
             "  return (typeof batch === 'function') ? batch(fn, arg) : fn(arg);"
             "}"
+            // Each frame callback runs inside a `js` span named after the
+            // function, so a trace attributes the rAF flush to the callbacks
+            // that spent it (a Pro Tools capture showed 2 ms per flush with
+            // nothing below `raf_flush` to say where). `__traceBegin__` returns
+            // false when the span stack refused the open, and only an opened
+            // span is closed. With tracing off the hooks keep depth
+            // bookkeeping only.
             "function __invokeFrame__(id, now) {"
             "  var fn = __frameCallbacks__[id];"
             "  if (fn) {"
             "    delete __frameCallbacks__[id];"
-            "    __pulpRunHostCallback__(fn, now);"
+            "    var traced = (typeof __traceBegin__ === 'function')"
+            "      && __traceBegin__('raf:' + (fn.name || 'anonymous')) === true;"
+            "    try { __pulpRunHostCallback__(fn, now); }"
+            "    finally { if (traced) __traceEnd__(); }"
             "  }"
             "}"
             // Timer registry for native setTimeout / setInterval. Callbacks
@@ -72,8 +82,7 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             "    if (typeof console !== 'undefined' && console.error)"
             "      console.error('timer:', e);"
             "  }"
-            "}"
-        );
+            "}");
     }
 
     BridgeApiContext api{self.engine_};
@@ -292,22 +301,23 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
     // see inside it. These name what is inside. The pair is balanced by the
     // script, so safe_dispatch_eval force-closes whatever the handler leaves
     // open and reports it rather than silently re-parenting later slices.
-    register_bridge_function(api, "__traceBegin__", [](choc::javascript::ArgumentList args) {
+    register_trace_seam_function(api, "__traceBegin__", [](choc::javascript::ArgumentList args) {
         return choc::value::createBool(js_trace::begin(args.get<std::string>(0, "js_scope")));
     });
 
-    register_bridge_function(api, "__traceEnd__", [](choc::javascript::ArgumentList) {
+    register_trace_seam_function(api, "__traceEnd__", [](choc::javascript::ArgumentList) {
         return choc::value::createBool(js_trace::end());
     });
 
     // Balance bookkeeping, readable from script and from a test. Kept in one
-    // native so the four counters are always read from the same instant.
+    // native so the counters are always read from the same instant.
     register_bridge_function(api, "__traceStats__", [](choc::javascript::ArgumentList) {
-        return choc::value::createObject("PulpTraceStats",
-            "depth", static_cast<int64_t>(js_trace::open_depth()),
-            "forceClosed", static_cast<int64_t>(js_trace::force_closed_count()),
-            "unmatchedEnd", static_cast<int64_t>(js_trace::unmatched_end_count()),
-            "refused", static_cast<int64_t>(js_trace::refused_count()));
+        return choc::value::createObject(
+            "PulpTraceStats", "depth", static_cast<int64_t>(js_trace::open_depth()), "forceClosed",
+            static_cast<int64_t>(js_trace::force_closed_count()), "unmatchedEnd",
+            static_cast<int64_t>(js_trace::unmatched_end_count()), "refused",
+            static_cast<int64_t>(js_trace::refused_count()), "beginInsideNative",
+            static_cast<int64_t>(js_trace::begun_inside_native_count()));
     });
 
     // Install the JS-side `pulpTrace` global wrapping the natives.

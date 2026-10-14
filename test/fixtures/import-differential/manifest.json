@@ -20,6 +20,7 @@
     {"id":"static-canvas","source":"09-static-canvas.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["canvas"]},
     {"id":"runtime-state","source":"10-runtime-state.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["javascript-evaluation"]},
     {"id":"typography","source":"11-typography.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
-    {"id":"responsive-panel","source":"12-responsive-panel.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["responsive-style"]}
+    {"id":"responsive-panel","source":"12-responsive-panel.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["responsive-style"]},
+    {"id":"fresh-plugin-panel","source":"17-fresh-plugin-panel.html","shape":"self-contained-html","from":"claude","split":"fresh-plugin","expected_blockers":[]}
   ]
 }

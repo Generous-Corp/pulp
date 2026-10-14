@@ -79,6 +79,8 @@ A new repo adds one `.shipyard/vm-image.toml` and the same `tart-provision.sh ma
 
 Fields: `base`, `disk_gb`, `auto_login`, `[toolchain].xcode` (omit → no Xcode tier), `[toolchain].rust` + `.rust_targets` + `.rosetta` (Intel cross-build layer — omit → not installed), `[brew].packages`, `[pip].packages`, `[caches].ccache_max`, `[[mounts]]`. See `.shipyard/vm-image.toml` (Pulp: Xcode+Skia), `.shipyard/vm-image.intel.toml` (Intel cross-build layer), and `tools/ci/examples/vm-image.rust-repo.toml` (a light Rust profile, no Xcode — proves generalization).
 
+**Pulp's `[toolchain]` fields and `[brew].packages` are generated, not hand-edited.** `tools/toolchain/manifest.toml` is the authority; `python3 tools/toolchain/generate.py` rewrites the owned keys in both vm-image files plus `.mise.toml`, `.mise.toolchain.toml` and `mise.toolchain.lock`, and the `toolchain-test_generate-selftest` drift test fails on any hand edit. The manifest's `[evidence]` table says per tool whether a pin is `observed` on the gate or a `target`: `tart-provision.sh` still installs the unversioned Homebrew `[brew].packages` and `rustup ... stable`, so a fresh bake does NOT necessarily produce the pinned versions. To learn what a golden really holds without booting it (gate hosts have no spare VM slot), attach its `disk.img` read-only and mount the Data volume with `/sbin/mount_apfs -o rdonly,nobrowse` (`diskutil mount readOnly` hangs on these images): read `Applications/Xcode.app/Contents/version.plist`, `opt/homebrew/Cellar/<formula>/`, and `Users/admin/.rustup/toolchains/*/lib/rustlib/multirust-channel-manifest.toml`, then unmount and `hdiutil detach`. The m3 golden of 2026-08-03 holds Xcode 26.5 (17F42), cmake 4.3.3, python 3.14.4, rustc 1.97.1, Homebrew node 26.0.0, Homebrew mise 2026.4.28, and no clang-format.
+
 ## Intel (x86_64) cross-build lane — no native Intel hardware needed
 Pulp's required `darwin-x64` release leg **cross-compiles on Apple Silicon and
 runs under Rosetta 2**. It routes through `PULP_RELEASE_MACOS_RUNS_ON_JSON`,
@@ -292,6 +294,42 @@ real failing test, don't chase your own diff. (Found 2026-06-03: #3386's
 `--emit swiftui` broke two `test_import_design_tool.cpp` exact-match asserts on
 main, reddening every PR's macOS gate.)
 
+## Diagnosing a queued macOS job that never starts (the fleet looks "ready")
+
+An empty `GET repos/<o>/<r>/actions/runners` proves nothing: gate runners are
+just-in-time, minted per job, so none are registered between jobs. And
+`tartci pool status` reporting `fleet ready: yes` / `5/5` only means the lane
+supervisors are alive, not that they can clone. Read the lane's own record on
+each host instead:
+
+1. **Lane log** — `~/Library/Logs/tartci/macos-fleet-pulp-gate*.log`. A healthy
+   lane with demand prints `queued=N … → booting ephemeral VM` and then
+   `vm … up at <ip> — launching JIT runner`. If it sees `queued=N` but every
+   cycle ends in `Shipyard admission failed before clone`, `VM DHCP … breaker
+   open`, `SCAN BLIND`, or a lease refusal, that line names the blocker.
+2. **Admission verdict** — `~/.tartci/state/macos-fleet/<lane>/*.admission-precheck.json`
+   holds Shipyard's last verdict (`verdict`, `reason`, plus the error text
+   when admission failed). Check `observed_at` first: the file is rewritten
+   only when Shipyard produces output, so a silent crash leaves an old verdict
+   behind. Reproduce it by hand with the lane's environment so `ghapp` resolves
+   the same repository the lane uses:
+   ```bash
+   SHIPYARD_GH_APP_REPO=Generous-Corp/pulp GH_REPO=Generous-Corp/pulp \
+     shipyard runner admission-clean --repo Generous-Corp/pulp --base main \
+     --labels self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-build-pr-head --json
+   ```
+3. **DHCP breaker** — `tartci vm-dhcp status`. `cause=probe_unreported` with
+   `failed_probes=0` means the granted probe never cloned a VM (it bailed
+   earlier, usually at admission), not that VMs lost DHCP; fix the earlier
+   blocker, then `tartci vm-dhcp probe-now` on each host instead of waiting
+   for the 300 s probe cadence.
+
+On 2026-10-12 every host showed `fleet ready: yes` while no VM could clone for
+about three hours: a Shipyard release asked GitHub for a bulk open-PR list with
+a nested `commits{authors}` connection (about 1,000,000 nodes, over the
+500,000 limit), so every admission check failed, and the DHCP breaker then
+blamed DHCP. The lane log and admission JSON named the cause in one read.
+
 ## Rollout: pilot → graduate
 1. **Additive pilot (safe):** run `tartci serve macos --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
 2. **Required-label prevalidation (safe):** run a one-shot VM with `pulp-build` **plus a unique proof label**, then dispatch `Build and Test` with `macos_runner_selector_json` requiring both labels. This proves a VM can satisfy the required label while bare-metal `pulp-build` remains online. Verified 2026-06-10: run `27250564395`, runner `tartci-phase6-pulp-build-proof-r2-20260610`, `macOS (ARM64) [operator]` success, `macos` alias success, VM/JIT runner cleaned up. Cancel unrelated Linux/Windows legs after `macos` is green.
@@ -314,6 +352,21 @@ main, reddening every PR's macOS gate.)
    from `tools/scripts/runner_topology.json`, preserve both event classes and
    their repository-scoped registration authority, and change one idle host at
    a time with a proven assignment receipt.
+
+## Rolling a CI-path tool to the fleet (Shipyard, tartci, the ghapp wrapper)
+
+Never update every host at once. Update ONE host, run the lane-path check above
+(admission must return `admit` or `defer`, never an observation error), confirm
+a gate VM clones there, then update the rest. A version check is not a
+functional check. Emergency rollback: `shipyard update --to vX.Y.Z` on each host
+works even when `shipyard runner fleet-update` refuses. A rollback does not
+hold on its own: tartci's tool-freshness watchdog sees the host as behind and
+reinstalls the newest soaked release (the bad one) within hours. On every
+rolled-back host, also set `auto_apply = false` under `[tools.shipyard]` in
+`~/.config/tartci/tool-freshness.toml`, and remove it once a fixed release
+ships. An unaccepted Xcode license turns `/usr/bin/python3` and `/usr/bin/git`
+into shims that exit 69, which breaks `fleet-update` and several tartci
+commands until someone runs `sudo xcodebuild -license accept` on that host.
 
 ## Gotchas (hard-won)
 - **Dynamic event classes require dynamic registration authority, not just

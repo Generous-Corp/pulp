@@ -115,7 +115,7 @@ def sign_bundle(bundle: Path, *, identity: str, required: bool) -> dict[str, Any
         if verify["returncode"] != 0:
             result["status"] = "failed"
             if required:
-                raise RuntimeError(f"codesign verification failed for {bundle}: {verify["stderr"]}")
+                raise RuntimeError(f"codesign verification failed for {bundle}: {verify['stderr']}")
         else:
             result["status"] = "passed"
     return result

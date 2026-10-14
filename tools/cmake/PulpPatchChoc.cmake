@@ -48,6 +48,10 @@ function(pulp_patch_choc_v8 choc_source_dir)
 "            return static_cast<V8Context*> (v8::Isolate::GetCurrent()->GetData (0))"
         _pulp_choc_v8 "${_pulp_choc_v8}")
 
+    # The replacement keeps the original as its #else branch, so it would
+    # nest again on a second run; apply it only to an unpatched header.
+    string(FIND "${_pulp_choc_v8}" "auto len = s.Utf8LengthV2 (isolate);" _pulp_choc_v8_utf8_patched)
+    if(_pulp_choc_v8_utf8_patched EQUAL -1)
     string(REPLACE
 "        auto len = s.Utf8Length (isolate);
         result.resize (static_cast<std::string::size_type> (len));
@@ -62,6 +66,7 @@ function(pulp_patch_choc_v8 choc_source_dir)
         s.WriteUtf8 (isolate, result.data(), len);
        #endif"
         _pulp_choc_v8 "${_pulp_choc_v8}")
+    endif()
     string(REPLACE
 "       #if V8_MAJOR_VERSION >= 14"
 "       #if defined(V8_MAJOR_VERSION) && V8_MAJOR_VERSION >= 14"

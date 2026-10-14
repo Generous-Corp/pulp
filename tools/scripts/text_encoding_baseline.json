@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4267,
+  "total": 4263,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -686,7 +686,7 @@
     "tools/scripts/test_ctest_scheduling_contract.py": 1,
     "tools/scripts/test_ctest_unique_names_check.py": 2,
     "tools/scripts/test_decisions_contract.py": 11,
-    "tools/scripts/test_diff_cover_targets.py": 25,
+    "tools/scripts/test_diff_cover_targets.py": 23,
     "tools/scripts/test_docs_generate.py": 1,
     "tools/scripts/test_docs_noise_lint.py": 4,
     "tools/scripts/test_downstream_validation_manifest.py": 4,
@@ -752,7 +752,7 @@
     "tools/scripts/test_lcov_cobertura_extra.py": 1,
     "tools/scripts/test_lcov_excl_propagation.py": 4,
     "tools/scripts/test_live_build_check.py": 1,
-    "tools/scripts/test_local_diff_cover.py": 81,
+    "tools/scripts/test_local_diff_cover.py": 79,
     "tools/scripts/test_mac_objc_source_list_guard.py": 5,
     "tools/scripts/test_merge_cobertura.py": 2,
     "tools/scripts/test_merge_cobertura_extra.py": 1,

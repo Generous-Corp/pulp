@@ -32,7 +32,8 @@
 #   3 — not enough free disk space to run the coverage build (nothing built)
 #   4 — skipped, NOT passed: PULP_DIFF_COVER_SKIP_WHEN_STARVED=1 (the pre-push
 #       hook sets it) and the host governor would grant this build no more than
-#       PULP_DIFF_COVER_STARVED_MAX_JOBS (default 2) jobs; nothing built
+#       PULP_DIFF_COVER_STARVED_MAX_JOBS (default 2) jobs; or tartci's profile
+#       marks this a gate host (gate_host_policy.sh); nothing built
 #  10 — preflight-only mode found potentially coverable lines (caller should run)
 #
 # Design (mirrors CI):
@@ -650,6 +651,17 @@ fi
 if [ "${PULP_SKIP_DIFF_COVER:-0}" = "1" ]; then
     echo "[local_diff_cover] skipped via PULP_SKIP_DIFF_COVER=1" >&2
     exit 0
+fi
+
+# ── Gate-host refusal ───────────────────────────────────────────────────────
+# A tartci host that carries the required gate VMs (see gate_host_policy.sh)
+# never starts a local configure or coverage build. The profile decides, not
+# the hostname. Exit 4: refused, not passed.
+# shellcheck source=gate_host_policy.sh
+source "${SCRIPT_DIR}/gate_host_policy.sh"
+if pulp_gate_host_builds_reserved; then
+    pulp_gate_host_skip_line "local diff-coverage configure/build" "tools/scripts/local_diff_cover.sh"
+    exit 4
 fi
 
 # ── Read configuration via python3 (no jq dep needed) ──────────────────────

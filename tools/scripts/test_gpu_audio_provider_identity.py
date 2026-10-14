@@ -347,6 +347,7 @@ class ProductionProviderCmakeTests(unittest.TestCase):
             manifest["dependencies"][0]["determinism"]["built_dawn"] = "f" * 40
             fixture.manifest.write_text(json.dumps(manifest))
         helper = SCRIPT.parents[1] / "cmake/PulpGpuAudioProviderIdentity.cmake"
+        provider = SCRIPT.parents[1] / "cmake/PulpSkiaDawnProvider.cmake"
         (source / "dummy.c").write_text("int gpu_audio_fixture;\n")
         (source / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.20)
 project(ProviderIdentityFixture LANGUAGES C)
@@ -357,7 +358,8 @@ set(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF {"TRUE" if exact else "FALSE"})
 set(PULP_BUILD_TESTS {"ON" if tests else "OFF"})
 set(SKIA_DIR "{fixture.skia}")
 set(SKIA_INCLUDE_DIRS "{fixture.header.parent.parent}")
-set(DAWN_LIBRARY "{fixture.library}")
+include("{provider}")
+pulp_record_skia_dawn_provider(SKIA_FOUND TRUE DAWN_ARCHIVE "{fixture.library}")
 add_library(pulp-gpu-audio STATIC dummy.c)
 include("{helper}")
 pulp_gpu_audio_configure_provider_identity(pulp-gpu-audio)

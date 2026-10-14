@@ -1,5 +1,6 @@
 #include "support/unique_temp_dir.hpp"
 #include "widget_bridge_test_support.hpp"
+#include "js_trace_scopes.hpp"
 
 template <typename Body>
 static std::string capture_widget_bridge_stderr(Body&& body) {
@@ -1707,4 +1708,41 @@ TEST_CASE("a hover runs the scripted pointermove and its cursor decision",
     // And the cursor the handler chose is the one the view now publishes — the
     // value a host reads back to tell AppKit what to display.
     CHECK(surface->cursor() == View::CursorStyle::grab);
+}
+
+// The trace seam must not run inside the `js_native` wrapper. Perfetto closes
+// slices last-in first-out per track, so a script span opened inside the
+// wrapper's RAII scope is closed by the wrapper's end: the script-named slice
+// inherits a sub-microsecond native duration and the wrapper's slice absorbs
+// the real one. The depth bookkeeping runs on every build, so the default gate
+// sees a seam that was re-routed through the wrapper without needing a flushed
+// trace to read.
+TEST_CASE("script trace spans never open inside a wrapped native call", "[widget-bridge][trace]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    auto inside_native = [&engine] {
+        return engine.evaluate("__traceStats__().beginInsideNative").getWithDefault<double>(-1.0);
+    };
+    const double before = inside_native();
+    REQUIRE(before >= 0.0);
+
+    // Control: an open made while a wrapper scope is alive is counted, so the
+    // unchanged reading below is a measurement and not a dead counter.
+    {
+        pulp::view::js_trace::NativeWrapperScope wrapped;
+        REQUIRE(pulp::view::js_trace::begin("control"));
+        REQUIRE(pulp::view::js_trace::end());
+    }
+    REQUIRE(inside_native() == Catch::Approx(before + 1.0));
+
+    // The real seam, driven the way a script drives it.
+    CHECK(engine.evaluate("pulpTrace.begin('outer')").getWithDefault<bool>(false));
+    CHECK(engine.evaluate("pulpTrace.end()").getWithDefault<bool>(false));
+    CHECK(engine.evaluate("pulpTrace.scope('inner', function() { return 1; })")
+              .getWithDefault<double>(0.0) == Catch::Approx(1.0));
+    CHECK(inside_native() == Catch::Approx(before + 1.0));
 }

@@ -1,0 +1,15 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261011-design-ir-json-truncated-input-watch",
+  "slices": [
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the bounded DesignIR JSON parsing and malformed-input diagnostics into the Vellum DesignIR reader.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261011-design-ir-json-truncated-input-watch.json",
+    "planning ledger row L3-browser-5"
+  ]
+}

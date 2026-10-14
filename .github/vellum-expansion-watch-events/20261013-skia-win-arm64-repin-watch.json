@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261013-skia-win-arm64-repin-watch",
+  "created_at": "2026-10-13T00:30:56Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Repins only the Windows ARM64 Skia release-asset sha256 in tools/deps/manifest.json and its VERSION.md mirror after the skia-builder fork re-uploaded the chrome/m153 asset in place. The asset is code-identical to the previous pin: headers are byte-identical and every arm64 .lib member differs only in its COFF TimeDateStamp. The render-toolchain skill records the recovery procedure. No design-import, Chromium, rendering, or packaging authority moves; no source, layout, raster, or capture behaviour changes.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

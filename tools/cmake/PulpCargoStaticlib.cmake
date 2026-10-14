@@ -12,6 +12,12 @@
 #   * reference an exported symbol directly (no --whole-archive / -force_load)
 #   * link Threads / ${CMAKE_DL_LIBS} / m AFTER the Rust archive on Linux
 #
+# Reproducibility: cargo always runs with --locked, so a build fails instead of
+# rewriting the committed Cargo.lock or resolving a crate version nobody
+# reviewed. The crate must commit a Cargo.lock next to its Cargo.toml. With
+# FETCHCONTENT_FULLY_DISCONNECTED ON, cargo also runs --offline and resolves
+# only from the local Cargo registry cache.
+#
 # Usage:
 #   pulp_add_cargo_staticlib(
 #       NAME        pulp-noop-rust-core        # CMake target to create
@@ -78,6 +84,18 @@ function(pulp_add_cargo_staticlib)
     # CONFIGURE_DEPENDS so adding/removing a source file re-runs CMake. cargo is
     # itself incremental, so re-invoking it when nothing changed is cheap.
     get_filename_component(_crate_dir "${CS_MANIFEST}" DIRECTORY)
+    set(_lockfile "${_crate_dir}/Cargo.lock")
+    if(NOT EXISTS "${_lockfile}")
+        message(FATAL_ERROR
+            "pulp_add_cargo_staticlib(${CS_NAME}): ${_lockfile} is missing. cargo "
+            "runs with --locked so a build cannot resolve unreviewed crate "
+            "versions. Run `cargo generate-lockfile --manifest-path ${CS_MANIFEST}` "
+            "and commit the Cargo.lock it writes.")
+    endif()
+    set(_lock_args "--locked")
+    if(FETCHCONTENT_FULLY_DISCONNECTED)
+        list(APPEND _lock_args "--offline")
+    endif()
     file(GLOB_RECURSE _crate_sources CONFIGURE_DEPENDS
         "${_crate_dir}/src/*.rs")
     add_custom_command(
@@ -85,9 +103,9 @@ function(pulp_add_cargo_staticlib)
         COMMAND ${CMAKE_COMMAND} -E env
             "CARGO_TARGET_DIR=${_target_dir}"
             "RUSTFLAGS=-C relocation-model=pic -C panic=abort"
-            ${_cargo} build ${_profile_flag} ${_feature_args}
+            ${_cargo} build ${_lock_args} ${_profile_flag} ${_feature_args}
             --manifest-path "${CS_MANIFEST}"
-        DEPENDS ${_crate_sources} "${CS_MANIFEST}"
+        DEPENDS ${_crate_sources} "${CS_MANIFEST}" "${_lockfile}"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         COMMENT "cargo build (staticlib) ${CS_NAME} [${CS_PROFILE}]"
         VERBATIM)

@@ -105,6 +105,13 @@ void require_lane_schema(const std::string& json, const std::string& lane) {
     REQUIRE(contains_key(json, "rss_p99_bytes"));
     REQUIRE(contains_key(json, "rss_peak_bytes"));
     REQUIRE(contains_key(json, "js_evaluations_total"));
+    REQUIRE(contains_key(json, "counters"));
+    REQUIRE(contains_key(json, "bridge_calls"));
+    REQUIRE(contains_key(json, "layout_passes"));
+    REQUIRE(contains_key(json, "paint_calls"));
+    REQUIRE(contains_key(json, "paint_commands_total"));
+    REQUIRE(contains_key(json, "invalidation_requests"));
+    REQUIRE(contains_key(json, "unmarked_paint_mutations"));
 
     const double first_frame = extract_number(json, "first_frame_ms");
     const double commands = extract_number(json, "first_frame_paint_commands");
