@@ -170,6 +170,24 @@ class SelectionTests(unittest.TestCase):
                 self.assertIn("sample-region-compat-baseline", plan["tests"])
 
 
+    def test_merge_only_checks_run_before_ordinary_affected_tests(self) -> None:
+        # The projection's own test and a rebuilt binary come first in selection
+        # order; the declared-input and path-family checks must still lead the
+        # run list, so a budget that fits only them still runs them.
+        plan = self.plan(["tools/cmake/PulpPlugin.cmake", "core/x/a.cpp"],
+                         selection("focused", ["unit-a"]), rebuilt=["unit-b"],
+                         inputs=["sample-region-compat-baseline"])
+        merge_only = ["sample-region-compat-baseline", "cmake-install-layout",
+                      "cmake-ios-auv3-control-shipping", "cmake-sdk-smoke"]
+        self.assertEqual(sorted(plan["merge_only"]), sorted(merge_only))
+        self.assertEqual(sorted(plan["tests"][:len(merge_only)]), sorted(merge_only))
+        self.assertEqual(sorted(plan["tests"][len(merge_only):]), ["unit-a", "unit-b"])
+
+    def test_control_a_plan_without_merge_only_checks_keeps_its_order(self) -> None:
+        plan = self.plan(["core/x/a.cpp"], selection("focused", ["unit-a"]), rebuilt=["unit-b"])
+        self.assertEqual(plan["merge_only"], [])
+        self.assertEqual(plan["tests"], ["unit-b", "unit-a"])
+
     def test_budget_skips_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -516,6 +534,22 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(sorted(results["passed"]), ["a", "b"])
         self.assertEqual(results["skipped"], ["c", "d"])
 
+    def test_a_budget_that_fits_only_the_merge_only_checks_still_runs_them(self) -> None:
+        # Path-family checks are collected after the projection's tests; the
+        # plan moves them ahead, so one batch is enough to run them.
+        with mock.patch.object(step, "project", return_value=selection("focused", ["unit-a", "unit-b"])), \
+                mock.patch.object(step, "script_reference_tests", return_value=[]), \
+                mock.patch.object(step, "script_input_tests", return_value=[]), \
+                mock.patch.object(step, "own_tests", return_value=[]), \
+                mock.patch.object(step, "rebuilt_binary_tests", return_value=[]), \
+                mock.patch.object(step, "registration_tests", return_value=[]):
+            plan = step.select(Path("/b"), ["tools/cmake/PulpPlugin.cmake", "core/x/a.cpp"], NAMES)
+        family = ["cmake-install-layout", "cmake-ios-auv3-control-shipping", "cmake-sdk-smoke"]
+        with mock.patch.dict(os.environ, {"FAKE_CTEST_SLEEP": "0.3"}):
+            results = step.run_budgeted(self.tmp, plan["tests"], 0.2, 1, "", self.tmp, len(family))
+        self.assertEqual(sorted(results["passed"]), family)
+        self.assertEqual(results["skipped"], ["unit-a", "unit-b"])
+
     def test_ctest_self_skips_are_reported_notrun_not_budget_skipped(self) -> None:
         results = step.run_budgeted(self.tmp, ["skip-self"], 60, 1, "", self.tmp, 1)
         self.assertEqual(results["notrun"], ["skip-self"])
@@ -664,19 +698,22 @@ class ExitCodeTests(unittest.TestCase):
     """A red main does not fail the pull request; its own failure does."""
 
     def _main(self, verdicts: dict, *, skipped: list[str] | None = None,
-              notrun: list[str] | None = None) -> int:
+              notrun: list[str] | None = None, merge_only: list[str] | None = None) -> int:
         plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
-                "tests": ["a", "b"]}
+                "tests": ["a", "b", "c"], "merge_only": merge_only or []}
         results = {"passed": [], "failed": list(verdicts), "skipped": skipped or [],
                    "notrun": notrun or [],
                    "excluded_or_absent": [], "seconds": 1.0}
+        out = io.StringIO()
         with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
                 mock.patch.object(step, "inventory_tests", return_value={}), \
                 mock.patch.object(step, "select", return_value=plan), \
                 mock.patch.object(step, "run_budgeted", return_value=results), \
                 mock.patch.object(step, "label_base_failures", return_value=verdicts), \
-                contextlib.redirect_stdout(io.StringIO()):
-            return step.main(["--build-dir", "/nonexistent"])
+                contextlib.redirect_stdout(out):
+            code = step.main(["--build-dir", "/nonexistent"])
+        self.output = out.getvalue()
+        return code
 
     def test_every_failure_pre_existing_passes(self) -> None:
         self.assertEqual(self._main({"a": (True, "same on base")}), 0)
@@ -685,7 +722,24 @@ class ExitCodeTests(unittest.TestCase):
         self.assertEqual(self._main({"a": (True, "same"), "b": (False, "passes on base")}), 1)
 
     def test_budget_skipped_selection_fails_the_real_step(self) -> None:
-        self.assertEqual(self._main({}, skipped=["b"]), 1)
+        # A merge-only check the budget pushed out has run nowhere yet.
+        self.assertEqual(self._main({}, skipped=["b"], merge_only=["b"]), 1)
+        self.assertIn("SKIPPED, NOT RUN", self.output)
+        self.assertNotIn("the merge group runs them", self.output)
+
+    def test_ordinary_budget_skips_defer_to_the_merge_queue(self) -> None:
+        self.assertEqual(self._main({}, skipped=["b", "c"], merge_only=["a"]), 0)
+        self.assertIn("::warning title=pr-head-affected-tests::2 affected test(s) deferred to "
+                      "merge queue (budget spent): b, c", self.output)
+        self.assertIn('"deferred_to_merge_queue": 2', self.output)
+        self.assertIn('"skipped_for_budget": 2', self.output)
+
+    def test_a_merge_only_skip_fails_even_beside_ordinary_deferrals(self) -> None:
+        self.assertEqual(self._main({}, skipped=["b", "c"], merge_only=["b"]), 1)
+        self.assertIn('"merge_only_skipped_for_budget": 1', self.output)
+
+    def test_control_a_real_failure_still_fails_beside_ordinary_deferrals(self) -> None:
+        self.assertEqual(self._main({"a": (False, "passes on base")}, skipped=["c"]), 1)
 
     def test_ctest_self_skip_does_not_fail_the_real_step(self) -> None:
         self.assertEqual(self._main({}, notrun=["b"]), 0)
