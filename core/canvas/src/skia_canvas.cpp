@@ -1055,7 +1055,10 @@ bool SkiaCanvas::draw_image_from_static_data_rect(const uint8_t* data, size_t si
                             std::to_string(size);
     auto image = ImageFileCache::instance().get_or_build(
         key, image_cache_backend_key(), [&]() -> sk_sp<SkImage> {
-            auto bytes = SkData::MakeWithoutCopy(data, size);
+            // The cache can outlive the module that owns an embedded asset
+            // (for example after a plugin unload). Own a copy so a deferred
+            // decode never reads unmapped static storage.
+            auto bytes = SkData::MakeWithCopy(data, size);
             auto decoded = SkImages::DeferredFromEncodedData(bytes);
             return decoded ? ensure_gpu_image(std::move(decoded)) : nullptr;
         });

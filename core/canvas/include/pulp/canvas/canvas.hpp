@@ -1927,6 +1927,7 @@ protected:
         set_fill_gradient_linear(x0, y0, x1, y1, colors, positions, count);
     }
 
+  public:
     /// Source-rect draw for bytes with static storage duration and immutable
     /// contents. GPU backends may retain a decoded/uploaded image across frames.
     /// Appended to preserve the slots of existing Canvas virtual methods.
