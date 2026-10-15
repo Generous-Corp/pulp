@@ -22,7 +22,13 @@ with the Shipyard changed-surface families), plus these rules:
     or any ctest registration under `test/` reaches `wide-non-native-selftest`;
   * `pr-fast` members already ran and are left out;
   * the extra time is capped: tests run in batches, no batch starts once the
-    budget is spent, and every test that did not run is listed as skipped.
+    budget is spent, and every test that did not run is listed as skipped;
+  * merge-only checks (selected because the diff changes their declared
+    inputs, adds or edits their registration, or by a path family) run first,
+    then the tests built from the sources the diff edits. If the budget still pushes one
+    out, the step fails, because nothing else runs it before the merge group.
+    An ordinary affected test the budget pushes out is deferred to the merge
+    queue, which runs the full suite, and the step stays neutral.
 
 A failing script-driven test is re-run from a checkout of the base; when every
 test it fails also fails there, main was already red and the failure is
@@ -31,9 +37,10 @@ Compiled tests are never exempted (their binary is this pull request's).
 
 Output: one `::notice title=pr-head-affected-tests::` JSON line
 (`pulp-pr-head-affected-tests/v1`) with the counts and minutes, then any
-failures. Exit 1 when a selected test failed because of this pull request, 0
-otherwise (including when nothing was selected), 2 when an input could not be
-read.
+failures. Exit 1 when a selected test failed because of this pull request or a
+selected merge-only check was skipped for budget, 0 otherwise (including when
+nothing was selected or only ordinary affected tests were deferred), 2 when an
+input could not be read.
 """
 
 from __future__ import annotations
@@ -420,6 +427,7 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
         plan["reason"] = "the diff is empty"
         return plan
     chosen: list[str] = []
+    own: list[str] = []
     docs_only = all(is_non_test_path(p) for p in paths)
     rebuilt_why: list[str] = []
     rebuilt = [] if docs_only else rebuilt_binary_tests(build, rebuilt_why)
@@ -466,9 +474,22 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     plan["families"] = {k: len(v) for k, v in families.items()}
     for tests in families.values():
         chosen.extend(tests)
+    # Merge-only checks reach a pull-request head only through their declared
+    # inputs, a path family, or a registration the diff adds or edits (a new
+    # test has no declared inputs until the manifest is regenerated). Nothing
+    # else runs them before the merge group, so they go first, where the
+    # budget is sure to reach them. The tests built from the sources the diff
+    # edits come next, ahead of the wider projection.
+    merge_only = set(inputs) | set(registered)
+    for tests in families.values():
+        merge_only.update(tests)
     seen: set[str] = set()
-    plan["tests"] = [t for t in chosen if t in names and PR_FAST_LABEL not in names[t]
-                     and not (t in seen or seen.add(t))]
+    tests = [t for t in chosen if t in names and PR_FAST_LABEL not in names[t]
+             and not (t in seen or seen.add(t))]
+    plan["merge_only"] = [t for t in tests if t in merge_only]
+    own_first = [t for t in tests if t in set(own) and t not in merge_only]
+    plan["tests"] = plan["merge_only"] + own_first + [
+        t for t in tests if t not in merge_only and t not in set(own)]
     return plan
 
 
@@ -716,22 +737,40 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"pr-head-affected-tests: {test}: {why}")
         results["failed"] = [t for t in results["failed"] if t not in pre_existing]
+    # A merge-only check the budget pushed out has not run anywhere yet, so it
+    # fails the step. An ordinary affected test is deferred to the merge queue.
+    merge_only = set(plan.get("merge_only", []))
+    blocking = [t for t in results["skipped"] if t in merge_only]
+    deferred = [t for t in results["skipped"] if t not in merge_only]
     summary = {
         "schema": SCHEMA, "mode": plan["mode"], "reason": plan["reason"],
         "changed_files": plan["changed"], "families": plan["families"],
         "selected": len(plan["tests"]), "passed": len(results["passed"]),
         "failed": len(results["failed"]), "pre_existing_on_base": len(pre_existing),
         "skipped_for_budget": len(results["skipped"]),
+        "merge_only_skipped_for_budget": len(blocking),
+        "deferred_to_merge_queue": len(deferred),
         "notrun": len(results["notrun"]),
         "excluded_or_absent": len(results["excluded_or_absent"]),
         "minutes": round(results["seconds"] / 60, 2), "budget_minutes": args.budget_secs / 60,
     }
     print(f"::notice title=pr-head-affected-tests::{json.dumps(summary, sort_keys=True)}")
-    if results["skipped"]:
-        shown = ", ".join(results["skipped"][:40])
-        more = len(results["skipped"]) - 40
-        print(f"pr-head-affected-tests: SKIPPED (budget spent, not run here; the merge group "
-              f"runs them): {shown}{f' and {more} more' if more > 0 else ''}")
+    if blocking:
+        shown = ", ".join(blocking[:40])
+        more = len(blocking) - 40
+        print(f"pr-head-affected-tests: SKIPPED, NOT RUN (budget spent before these merge-only "
+              f"checks ran; this diff changes their inputs and nothing else runs them before "
+              f"the merge group, so this step fails): {shown}"
+              f"{f' and {more} more' if more > 0 else ''}")
+        print(f"::error title=pr-head-affected-tests::{len(blocking)} merge-only check(s) the "
+              f"diff selected were skipped for budget: {', '.join(blocking[:10])}")
+    if deferred:
+        shown = ", ".join(deferred[:40])
+        more = len(deferred) - 40
+        print(f"pr-head-affected-tests: DEFERRED TO MERGE QUEUE (budget spent; ordinary affected "
+              f"tests): {shown}{f' and {more} more' if more > 0 else ''}")
+        print(f"::warning title=pr-head-affected-tests::{len(deferred)} affected test(s) deferred "
+              f"to merge queue (budget spent): {', '.join(deferred[:10])}")
     if results["notrun"]:
         shown = ", ".join(results["notrun"][:40])
         more = len(results["notrun"]) - 40
@@ -744,7 +783,7 @@ def main(argv: list[str] | None = None) -> int:
                    f"reproduce=`{reproduce}`; safe_to_auto_apply=no; "
                    f"verify=`{reproduce}` passes")
         print(f"::error title=pr-head-affected-tests::{message}")
-    return 1 if results["failed"] or results["skipped"] else 0
+    return 1 if results["failed"] or blocking else 0
 
 
 if __name__ == "__main__":
