@@ -1383,6 +1383,14 @@ class GeneratedDigestTests(unittest.TestCase):
             producer.write_text(original + "\nSET ( pulp_js_preludes ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n", encoding="utf-8")
             self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
                              "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
+            blocked = original.replace("set(PULP_JS_PRELUDES", "#[[\nset(PULP_JS_PRELUDES", 1)
+            blocked = blocked.replace("\n)\n", "\n)\n]]\n", 1)
+            producer.write_text(blocked, encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            producer.write_text("if(FALSE)\n" + original + "endif()\n", encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            producer.write_text(original.replace("extern const char* const ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
 
     def test_target_manifest_only_exposes_the_supported_prelude_source(self):
         from vellum_closure import target_manifest
