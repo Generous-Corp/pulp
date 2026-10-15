@@ -8,12 +8,10 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/headless_surface.hpp>
+#include <pulp/render/render_observer.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
-#include "include/core/SkMilestone.h"
-#include <dawn/dawn_version.h>
-#include <webgpu/webgpu_cpp.h>
 #endif
 
 #include <cstdint>
@@ -399,26 +397,7 @@ const char* frame_outcome_name(pulp::render::FrameOutcome outcome) {
     return "unknown";
 }
 
-std::string dawn_version_hex() {
-    static constexpr char digits[] = "0123456789abcdef";
-    std::string hex;
-    for (auto byte : dawn::kDawnVersion) {
-        hex += digits[byte >> 4];
-        hex += digits[byte & 0x0f];
-    }
-    return hex;
-}
 
-// True once the device's lost future has resolved. Polls with a zero timeout,
-// which Dawn accepts without the timed-wait instance feature.
-bool device_lost(const pulp::render::GpuSurface& gpu) {
-    auto* device = static_cast<wgpu::Device*>(gpu.dawn_device_handle());
-    auto* instance = static_cast<wgpu::Instance*>(gpu.dawn_instance_handle());
-    if (!device || !*device || !instance || !*instance)
-        return true;
-    wgpu::FutureWaitInfo wait{device->GetLostFuture()};
-    return instance->WaitAny(1, &wait, 0) == wgpu::WaitStatus::Success && wait.completed;
-}
 
 // Renders through Skia Graphite on a Dawn device with no presentation surface:
 // the composition HeadlessSurface uses, opened up so the receipt can record the
@@ -452,19 +431,19 @@ std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width
     }
     report.surface_created = true;
     if (fault == GpuFault::device_destroyed)
-        static_cast<wgpu::Device*>(gpu->dawn_device_handle())->Destroy();
+        pulp::render::render_observer::inject_device_loss(*gpu);
 
     if (fault != GpuFault::no_frame) {
         if (!gpu->begin_frame()) {
             report.error = "GpuSurface::begin_frame failed";
-            report.device_lost = device_lost(*gpu);
+            report.device_lost = pulp::render::render_observer::device_lost(*gpu);
             return {};
         }
         auto* canvas = skia->begin_frame();
         if (!canvas) {
             gpu->end_frame();
             report.error = "SkiaSurface::begin_frame returned no canvas";
-            report.device_lost = device_lost(*gpu);
+            report.device_lost = pulp::render::render_observer::device_lost(*gpu);
             return {};
         }
         canvas->set_fill_color(pulp::canvas::Color::rgba8(0, 0, 0, 255));
@@ -486,7 +465,7 @@ std::vector<std::uint8_t> render_gpu(pulp::view::View& root, std::uint32_t width
     pulp::render::HeadlessSurface::Rgba rgba;
     report.readback_completed = skia->read_current_rgba(rgba.pixels, rgba.width, rgba.height);
     gpu->end_frame();
-    report.device_lost = device_lost(*gpu);
+    report.device_lost = pulp::render::render_observer::device_lost(*gpu);
     report.pixel_width = rgba.width;
     report.pixel_height = rgba.height;
     if (!report.readback_completed) {
@@ -521,8 +500,9 @@ std::string render_receipt_json(const RenderReport& report) {
     receipt.addMember("error", choc::value::createString(report.error));
     receipt.addMember("seeded_fault", choc::value::createString(report.fault));
 #if defined(PULP_HAS_SKIA)
-    receipt.addMember("skia_milestone", choc::value::createInt32(SK_MILESTONE));
-    receipt.addMember("dawn_version", choc::value::createString(dawn_version_hex()));
+    const auto versions = pulp::render::render_observer::toolchain_versions();
+    receipt.addMember("skia_milestone", choc::value::createInt32(versions.skia_milestone));
+    receipt.addMember("dawn_version", choc::value::createString(versions.dawn_version));
     if (report.requested == "gpu") {
         auto gpu = choc::value::createObject("");
         gpu.addMember("surface_created", choc::value::createBool(report.surface_created));
