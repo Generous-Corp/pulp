@@ -1,5 +1,6 @@
 #include "test_design_import_shared.hpp"
 #include <pulp/canvas/font_resolver.hpp>
+#include <pulp/view/editor_bridge.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 
 TEST_CASE("parse_v0_tsx normalizes JSON and unsupported-source fallback diagnostics",

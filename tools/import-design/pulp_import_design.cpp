@@ -6,6 +6,7 @@
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/editor_bridge.hpp>
 #include <pulp/view/inspector.hpp>
 #include <choc/text/choc_JSON.h>
 #include <pulp/view/script_engine.hpp>

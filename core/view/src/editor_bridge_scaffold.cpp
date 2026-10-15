@@ -8,7 +8,7 @@
 #include <sstream>
 #include <string>
 
-#include <pulp/view/design_sources.hpp>
+#include <pulp/view/editor_bridge.hpp>
 
 namespace pulp::view {
 
