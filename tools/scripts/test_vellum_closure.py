@@ -1121,6 +1121,19 @@ class ClosureMentionTests(unittest.TestCase):
         self.assertTrue(self.scan('LINK_FLAGS "-framework CoreAudio"\n'))
         self.assertEqual(self.scan("# the plug-in adapter targets\n"), [])
 
+    def test_design_import_comments_are_negative_controls(self):
+        """The design-import closure must reject ownership-shaped comments too."""
+        self.assertEqual(
+            self.scan("// the format parser is pulp::format::detail::parse_double_c_locale\n",
+                      "core/view/src/design_adherence.cpp"),
+            ["mirror-product-symbol mention core/view/src/design_adherence.cpp:1: pulp::format"],
+        )
+        self.assertEqual(
+            self.scan("// written by register_audio_widgets during editor setup\n",
+                      "core/view/src/design_import_legacy_registry.cpp"),
+            ["mirror-pulp-kept-symbol mention core/view/src/design_import_legacy_registry.cpp:1: register_audio_widgets"],
+        )
+
     def test_files_without_a_code_suffix_are_scanned(self):
         for name in ("tools/run", "docs/notes.md", "tools/x.sh", "tools/x.ps1", "ui/x.ts", "ui/x.tsx",
                      "ci/x.yaml", "ci/x.yml", "core/x/CMakeLists.txt"):
