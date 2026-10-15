@@ -643,7 +643,7 @@ void MusicalTypingKeyboard::light_typing_semitone(int semitone, bool on) {
 // toolbars reflowed identically after #82 removed their right-side readouts).
 
 namespace {
-constexpr float kStripY = 17.0f, kStripH = 24.0f; // vertical band (post-#82 centering)
+constexpr float kStripY = 17.0f, kStripH = 24.0f; // vertical band after centering
 constexpr int kRulerLo = 0, kRulerHi = 127;       // C-2 … G8
 constexpr int kPlaySpan = 17;                     // typing keys a..' = 18 semitones
 constexpr int kPianoSpan = 35;                    // piano frame = 36 keys (C2..B4)

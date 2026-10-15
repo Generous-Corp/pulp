@@ -8,7 +8,7 @@
 // Source file q9iDYZzg86YrOQKr6I3bY0, re-imported 2026-06-17. The combined
 // spec frame (187:2) stacks both modes to show their states at once; the live
 // component shows one at a time. The design's baked "selected keys shown" demo
-// chord (pure-#16DAC2 lit key gradients in the key-bed) is NEUTRALIZED to the
+// chord with pure teal lit-key gradients in the key-bed is NEUTRALIZED to the
 // resting key color here — white→#EBEEF1, black→#3A3F47/#16191E — so the live
 // momentary overlay owns every pressed-state highlight (matching the combined
 // frame's invariant). Toolbar/overview teal is untouched. Stored as chunked
