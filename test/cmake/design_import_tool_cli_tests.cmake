@@ -515,8 +515,8 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
         TIMEOUT 120)
 endif()
 
-# The importer observer uses the narrow Pulp render observer seam. Keep provider
-# headers and opaque Dawn/WebGPU handles private to the render implementation.
+# The importer observer uses the narrow private render observer seam. Keep the
+# seam out of the installed SDK, along with provider headers and opaque handles.
 if(Python3_Interpreter_FOUND AND PROJECT_IS_TOP_LEVEL)
     add_test(NAME import-design-ir-observe-provider-boundary
         COMMAND ${Python3_EXECUTABLE}

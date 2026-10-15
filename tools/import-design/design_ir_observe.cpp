@@ -8,7 +8,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/headless_surface.hpp>
-#include <pulp/render/render_observer.hpp>
+#include "render_observer_private.hpp"
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 

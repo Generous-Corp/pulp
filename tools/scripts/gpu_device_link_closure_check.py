@@ -39,7 +39,6 @@ API_HEADERS = frozenset({
     "pulp/render/gpu_startup_report.hpp",
     "pulp/render/gpu_render_time.hpp",
     "pulp/render/bench/perf_counters.hpp",
-    "pulp/render/render_observer.hpp",
 })
 
 # Pulp modules the device implementation may link. Anything else named pulp::
