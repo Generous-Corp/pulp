@@ -163,6 +163,7 @@ protected:
     /// Drain host-facing name changes on the caller's control/main thread.
     void publish_parameter_display_changes();
 
+    // clang-format off: preserve the repository's four-space private-section style.
 private:
     // AU v2 instruments are a separate adapter path from PulpAUEffect. Keep
     // the tracing attachment on the actual host-facing object so a traced AU
@@ -222,6 +223,7 @@ private:
     // Host offline-render intent (kAudioUnitProperty_OfflineRender), written by
     // the host before a faster-than-realtime bounce and read each render block.
     OfflineRenderProperty offline_render_;
+    // clang-format on
 };
 
 } // namespace pulp::format::au
