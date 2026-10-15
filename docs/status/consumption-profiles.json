@@ -970,6 +970,7 @@
       "pulp/signal/leslie.hpp",
       "pulp/signal/leslie_rotary.hpp",
       "pulp/signal/lfo.hpp",
+      "pulp/signal/lfo_sampling.hpp",
       "pulp/signal/lfsr.hpp",
       "pulp/signal/linkwitz_riley.hpp",
       "pulp/signal/lofi_chain.hpp",

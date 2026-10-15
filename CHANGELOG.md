@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09780"></a>
+## [0.978.0] - 2026-10-15
+
+- release/version bump ([#10371](https://github.com/Generous-Corp/pulp/pull/10371))
+- codex/windows lessons 20261015 ([#10364](https://github.com/Generous-Corp/pulp/pull/10364))
+- codex/forge dynamics extraction 20261015 ([#10366](https://github.com/Generous-Corp/pulp/pull/10366))
+- codex/nodal embedded image cache clean 20261015 ([#10357](https://github.com/Generous-Corp/pulp/pull/10357))
+
 <a id="v09771"></a>
 ## [0.977.1] - 2026-10-15
 
@@ -10815,6 +10823,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.978.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.978.0
 [0.977.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.977.1
 [0.977.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.977.0
 [0.976.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.976.0
