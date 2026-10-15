@@ -1927,6 +1927,16 @@ protected:
         set_fill_gradient_linear(x0, y0, x1, y1, colors, positions, count);
     }
 
+  public:
+    /// Source-rect draw for bytes with static storage duration and immutable
+    /// contents. GPU backends may retain a decoded/uploaded image across frames.
+    /// Appended to preserve the slots of existing Canvas virtual methods.
+    /// Never use this for a mutable or short-lived buffer.
+    virtual bool draw_image_from_static_data_rect(const uint8_t* data, size_t size, float sx,
+                                                  float sy, float sw, float sh, float dx, float dy,
+                                                  float dw, float dh) {
+        return draw_image_from_data_rect(data, size, sx, sy, sw, sh, dx, dy, dw, dh);
+    }
 };
 
 } // namespace pulp::canvas

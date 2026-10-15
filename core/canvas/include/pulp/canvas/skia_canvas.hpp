@@ -270,6 +270,9 @@ public:
     bool draw_image_from_data_rect(const uint8_t* data, size_t size,
                                     float sx, float sy, float sw, float sh,
                                     float dx, float dy, float dw, float dh) override;
+    bool draw_image_from_static_data_rect(const uint8_t* data, size_t size, float sx, float sy,
+                                          float sw, float sh, float dx, float dy, float dw,
+                                          float dh) override;
     bool draw_image_from_file_rect(const std::string& path,
                                     float sx, float sy, float sw, float sh,
                                     float dx, float dy, float dw, float dh) override;
