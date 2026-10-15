@@ -1061,6 +1061,28 @@ def prelude_inputs(source: Path) -> list[Path] | None:
         return found
 
     parsed = commands(uncommented)
+    declarations = list(re.finditer(
+        r"\bset\s*\(\s*PULP_JS_PRELUDES\b(?P<body>.*?)\n\s*\)",
+        uncommented,
+        re.S | re.I,
+    ))
+    set_count = len(re.findall(
+        r"\bset\s*\(\s*PULP_JS_PRELUDES\b",
+        uncommented,
+        re.I,
+    ))
+    list_mutation = re.search(
+        r"\blist\s*\([^)]*\bPULP_JS_PRELUDES\b",
+        uncommented,
+        re.S | re.I,
+    )
+    unset_mutation = re.search(
+        r"\bunset\s*\(\s*PULP_JS_PRELUDES\b",
+        uncommented,
+        re.I,
+    )
+    if len(declarations) != 1 or set_count != 1 or list_mutation or unset_mutation:
+        return None
     expected_names = [
         "set", "set", "set", "find_package", "set", "foreach",
         "get_filename_component", "string", "string", "endforeach", "string",
