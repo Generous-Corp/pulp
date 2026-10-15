@@ -150,6 +150,7 @@ target_sources(pulp-view-core PRIVATE
 target_sources(pulp-view-tooling PRIVATE
     src/host_param_surface.cpp
     src/editor_bridge.cpp
+    src/editor_bridge_scaffold.cpp
     src/inspector.cpp
     src/inspector_window.cpp
 )

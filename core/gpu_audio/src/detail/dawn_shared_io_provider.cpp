@@ -696,11 +696,6 @@ struct DawnSharedIoProvider::Impl {
         }
         adapter_identity.name = copy_string(adapter_info.device);
         adapter_identity.backend = backend_name(adapter_info.backendType);
-        adapter_identity.native_runtime_revision = revision(dawnProcGetVersion());
-        // Preserve the runtime description returned by the live adapter. The
-        // session accepts it only together with the observed proc revision and
-        // backend; a build-time Dawn/Metal label is not runtime identity.
-        adapter_identity.native_runtime_name = copy_string(adapter_info.description);
         adapter_identity.vendor_id = adapter_info.vendorID;
         adapter_identity.device_id = adapter_info.deviceID;
         if (!adapter.HasFeature(wgpu::FeatureName::HostMappedPointer)) {
@@ -769,6 +764,16 @@ struct DawnSharedIoProvider::Impl {
             return false;
         }
         device = std::move(device_request->device);
+        // Resolve the native device from the Dawn device itself. Name/vendor
+        // enumeration is only a fallback diagnostic; it cannot prove that a
+        // similarly named adapter is the one Dawn selected.
+        const auto native =
+            observe_native_metal_device(device.Get(), adapter_identity.name,
+                                        adapter_identity.vendor_id, adapter_identity.device_id);
+        if (native.authenticated) {
+            adapter_identity.native_runtime_name = native.name;
+            adapter_identity.native_runtime_revision = native.revision;
+        }
         queue = device.GetQueue();
 
         constexpr auto good_shader = R"wgsl(
@@ -2542,19 +2547,15 @@ SharedIoProviderIdentity DawnSharedIoProvider::provider_identity() const noexcep
         identity.adapter_vendor_id = adapter.vendor_id;
         identity.adapter_device_id = adapter.device_id;
         identity.native_runtime_name = adapter.native_runtime_name;
-        // AdapterInfo describes the selected adapter. It is not an
-        // independently authenticated native runtime identity, so do not
-        // manufacture one by copying AdapterInfo.backendType/backend.
-        identity.native_runtime_backend.clear();
+        identity.native_runtime_backend =
+            adapter.native_runtime_name.empty() ? std::string{} : adapter.backend;
         identity.authenticated =
             !identity.provider_revision.empty() && !identity.adapter_name.empty() &&
-            !identity.adapter_backend.empty() && identity.adapter_vendor_id != 0 &&
-            !adapter.native_runtime_revision.empty() &&
-            adapter.native_runtime_revision == identity.provider_revision &&
-            !identity.native_runtime_name.empty();
-        // No independent native-runtime backend source is available at this
-        // boundary. Keep this explicitly unavailable for strict qualification.
-        identity.native_runtime_authenticated = false;
+            !identity.adapter_backend.empty() && identity.adapter_vendor_id != 0;
+        identity.native_runtime_authenticated =
+            identity.authenticated && !adapter.native_runtime_revision.empty() &&
+            !identity.native_runtime_name.empty() &&
+            identity.native_runtime_backend == identity.adapter_backend;
     } catch (...) {
         return {};
     }

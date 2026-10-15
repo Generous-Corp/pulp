@@ -135,7 +135,12 @@ retain those fields in the PR/landing evidence.
    and simulator slices, WASM, or XCFramework coverage.
 3. Inspect one native archive and `external/skia-build/VERSION.md`. Confirm the exact
    Skia and built-Dawn SHAs, deployment floors, and optional archives such as Skottie,
-   `jsonreader`, and `skresources`.
+   `jsonreader`, and `skresources`. For Windows ARM64EC and ARM64X consumers, also
+   verify that the producer archive contains the matching
+   `build/win-gpu/lib/Release/arm64ec/` or `arm64x/` slice; pure `arm64/` and flat
+   x64 libraries are not compatible substitutes. Record the exact producer run and
+   archive digest, and keep the consumer provider decision fail-closed when the
+   requested slice is missing.
 4. Inspect the matched v8-builder release manifests. All assets must agree on
    `pair.pair_kind=chromium-milestone`, `pair.milestone`, `pair.skia`, `pair.v8`,
    `pair.built_dawn`, and `pair.validated_skia_release`.

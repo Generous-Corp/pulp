@@ -1487,7 +1487,12 @@ def unit_manifest_layout(path: Path) -> list[dict]:
     A unit's ``optional_targets`` are targets only some configures create.
     Each is a name, or ``{"name": ..., "platforms": [CMake system names]}``
     when it belongs to the unit only on those platforms. The file order is the
-    layering: a unit may link only its own targets and earlier units'.
+    layering: a unit may link only its own targets and earlier units'.  An
+    alias unit has no target of its own and reuses the target closure of the
+    named earlier unit.  A carried unit has no target of its own and records
+    the unit whose target closure carries it; this is used for INTERFACE
+    targets omitted by a configure's CMake file-api reply.  These forms keep
+    source slices distinct without assigning one CMake target to two owners.
     """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -1499,12 +1504,32 @@ def unit_manifest_layout(path: Path) -> list[dict]:
     if not isinstance(units, list) or not units:
         raise SystemExit("Vellum unit manifest must contain units")
     layout: list[dict] = []
+    names: set[str] = set()
+    target_owners: dict[str, str] = {}
     for entry in units:
         if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
             raise SystemExit("Vellum unit manifest units require a name")
+        name = entry["name"]
+        if name in names:
+            raise SystemExit(f"duplicate Vellum unit name {name}")
+        names.add(name)
         unit_targets = entry.get("targets")
-        if not isinstance(unit_targets, list) or not unit_targets or not all(isinstance(t, str) for t in unit_targets):
-            raise SystemExit(f"Vellum unit {entry['name']} requires non-empty targets")
+        alias_of = entry.get("alias_of")
+        carried_by = entry.get("carried_by")
+        if alias_of is not None and carried_by is not None:
+            raise SystemExit(f"Vellum unit {name} cannot declare both alias_of and carried_by")
+        if alias_of is not None and (not isinstance(alias_of, str) or not alias_of or alias_of == name or alias_of not in names):
+            raise SystemExit(f"Vellum unit {name} alias_of must name an earlier unit")
+        if carried_by is not None and (not isinstance(carried_by, str) or not carried_by or carried_by == name):
+            raise SystemExit(f"Vellum unit {name} carried_by must name another unit")
+        if alias_of is None and carried_by is None:
+            if not isinstance(unit_targets, list) or not unit_targets or not all(isinstance(t, str) and t for t in unit_targets):
+                raise SystemExit(f"Vellum unit {name} requires non-empty targets")
+        elif unit_targets not in (None, []):
+            kind = "alias" if alias_of is not None else "carried"
+            raise SystemExit(f"Vellum {kind} unit {name} must not declare targets")
+        if alias_of is not None or carried_by is not None:
+            unit_targets = []
         optional: dict[str, list[str] | None] = {}
         for item in entry.get("optional_targets", []):
             if isinstance(item, str) and item:
@@ -1514,11 +1539,28 @@ def unit_manifest_layout(path: Path) -> list[dict]:
                     and all(isinstance(v, str) and v for v in item["platforms"]):
                 optional[item["name"]] = list(item["platforms"])
             else:
-                raise SystemExit(f"Vellum unit {entry['name']} optional_targets must be names or {{name, platforms}}")
+                raise SystemExit(f"Vellum unit {name} optional_targets must be names or {{name, platforms}}")
+        if (alias_of is not None or carried_by is not None) and optional:
+            kind = "alias" if alias_of is not None else "carried"
+            raise SystemExit(f"Vellum {kind} unit {name} must not declare optional_targets")
         owned = entry.get("owned_files", [])
         if not isinstance(owned, list) or not all(isinstance(v, str) and v and not host_path(v) for v in owned):
-            raise SystemExit(f"Vellum unit {entry['name']} owned_files must be repository paths")
-        layout.append({"name": entry["name"], "targets": list(unit_targets), "optional": optional, "owned_files": list(owned)})
+            raise SystemExit(f"Vellum unit {name} owned_files must be repository paths")
+        for target in [*unit_targets, *optional]:
+            previous = target_owners.get(target)
+            if previous is not None:
+                raise SystemExit(f"D3 target {target} is owned by both {previous} and {name}; use alias_of for a source slice alias")
+            target_owners[target] = name
+        row = {"name": name, "targets": list(unit_targets), "optional": optional, "owned_files": list(owned)}
+        if alias_of is not None:
+            row["alias_of"] = alias_of
+        if carried_by is not None:
+            row["carried_by"] = carried_by
+        layout.append(row)
+    for row in layout:
+        carrier = row.get("carried_by")
+        if carrier is not None and carrier not in names:
+            raise SystemExit(f"Vellum unit {row['name']} carried_by must name an existing unit")
     owners: dict[str, str] = {}
     for entry in layout:
         for path in entry["owned_files"]:
@@ -1535,13 +1577,23 @@ def unit_manifest_targets(path: Path, unit: str | None = None) -> list[str]:
     returned with a leading ``?``; ``target_manifest`` takes them when the
     configure has them and does not report them missing.
     """
+    layout = unit_manifest_layout(path)
+    by_name = {entry["name"]: entry for entry in layout}
+
+    def resolved(entry: dict, stack: tuple[str, ...] = ()) -> list[str]:
+        if entry.get("alias_of") is None and entry.get("carried_by") is None:
+            return [*entry["targets"], *(f"{OPTIONAL_PREFIX}{t}" for t in entry["optional"])]
+        name = entry["name"]
+        if name in stack:
+            raise SystemExit("cyclic D3 unit alias/carried_by chain: " + " -> ".join((*stack, name)))
+        return resolved(by_name[entry.get("alias_of") or entry["carried_by"]], (*stack, name))
+
     targets: list[str] = []
     found = False
-    for entry in unit_manifest_layout(path):
+    for entry in layout:
         if unit is None or entry["name"] == unit:
             found = True
-            targets.extend(entry["targets"])
-            targets.extend(f"{OPTIONAL_PREFIX}{t}" for t in entry["optional"])
+            targets.extend(resolved(entry))
     if unit is not None and not found:
         raise SystemExit(f"Vellum unit manifest has no unit named {unit}")
     return list(dict.fromkeys(targets))
@@ -1829,13 +1881,42 @@ def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
 
 
 def export_owned_file_violations(manifests: list[dict], unit_names: list[str], units: Path | None = None) -> list[str]:
-    """A file a D3 unit owns travels only in that unit's closure."""
+    """Check file ownership across one combined D3 export.
+
+    A ``carried_by`` unit has no target of its own, so its target closure may
+    also appear in the carrier's manifest.  The carried unit still owns its
+    source files: a carrier may contain one of those files only when the
+    carried unit is included in the same export.  A carrier-only export is
+    rejected instead of silently attributing the file to the wrong unit.
+    """
     layout = unit_manifest_layout(units or Path(__file__).with_name("vellum_d3_units.json"))
+    by_name = {entry["name"]: entry for entry in layout}
     owner = {path: entry["name"] for entry in layout for path in entry["owned_files"]}
+    selected = set(unit_names)
+
+    def carrier_contains(owner_name: str, carrier_name: str) -> bool:
+        """Whether carrier_name is in owner_name's carried_by chain."""
+        seen: set[str] = set()
+        current = owner_name
+        while current in by_name and current not in seen:
+            seen.add(current)
+            current = by_name[current].get("carried_by")
+            if current == carrier_name:
+                return True
+            if current is None:
+                break
+        return False
+
     violations: list[str] = []
     for manifest, unit in zip(manifests, unit_names):
         for path in manifest.get("files", []):
-            if path in owner and owner[path] != unit:
+            source_owner = owner.get(path)
+            if source_owner is not None and source_owner != unit:
+                # A carrier's target closure can repeat the carried unit's
+                # files.  Preserve the source owner and require that owner to
+                # be present in this combined export before accepting it.
+                if source_owner in selected and carrier_contains(source_owner, unit):
+                    continue
                 violations.append(f"{path} belongs to D3 unit {owner[path]}, not {unit}")
     return violations
 

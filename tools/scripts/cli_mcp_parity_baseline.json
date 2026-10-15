@@ -17,6 +17,7 @@
     "control": "Canonical authenticated CLI adapter; the equivalent finite MCP family lands in the dedicated MCP adapter slice",
     "coverage": "Wraps tools/scripts/local_diff_cover.sh; agents call the script directly",
     "design": "AI design tool \u2014 interactive surface, not RPC-shaped",
+    "deps": "Source-checkout toolchain maintenance (wraps tools/toolchain/deps.py); agents run it in their own checkout, and the MCP server's process has no checkout environment to check or pins to move",
     "design-debug": "Headless debug runner; not RPC-shaped",
     "dev": "Watch loop; not useful from a one-shot RPC",
     "docs": "Parent command \u2014 actual MCP surface is pulp_docs_check and pulp_docs_search sub-tools",

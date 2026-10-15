@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.970.0
+    VERSION 0.977.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -198,6 +198,8 @@ if(PULP_INTEL_CANARY)
     endif()
     message(STATUS "Pulp: Intel canary lint clean.")
 endif()
+# Report host tools that differ from tools/toolchain/manifest.toml.
+include("${PULP_ROOT_DIR}/tools/cmake/PulpToolchainCheck.cmake")
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
 # Lottie / Bodymovin JSON animation playback via the bundled skottie module.
 # Opt-in (default OFF): builds that don't use it link nothing extra and the
@@ -635,7 +637,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
-                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit render-3d)
+                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit render-3d --unit state-core)
         set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")
@@ -649,7 +651,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
-                --unit foundation --unit gpu-device-api --unit canvas)
+                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit state-core)
         set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
             DEPENDS pulp.vellum-closure-boundary
             LABELS "pr")

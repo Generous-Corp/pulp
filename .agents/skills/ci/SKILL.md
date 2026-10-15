@@ -382,15 +382,27 @@ hosts that enable `hold-disarms`). Behind it, the merge-group classify job runs
 `tools/ci/merge_group_hold_check.py`, which fails `macos` closed, before any VM,
 when a queued pull request's latest trusted verdict on the head it lands is
 HOLD. Its error annotation names the pull request, the HOLD's URL and the fix:
-a new head plus an APPROVE, or an APPROVE on that head if the HOLD no longer
-applies, then re-queue. It fails closed: an "(unreadable)" error annotation
+a new head plus the fleet App's APPROVE, or the App's APPROVE on that head if
+the HOLD no longer applies, then re-queue. Only the fleet App's APPROVE (a
+verdict posted through `ghapp`, whose author is a `Bot`) clears a HOLD here; a
+human account's APPROVE, comment or review, never does, and neither does a
+user account named `shipyard-local`. It fails closed: an "(unreadable)" error annotation
 means it could not read the group (a commit on the chain, a missing token) or a
 pull request's comments or reviews in full (a failed read, a GraphQL `errors`
 answer, a list short of its `totalCount`), and that fails the group too. A
 stalled queue is the deliberate lesser harm: re-run the group's classify job or
 re-queue. A failed fetch of the base branch fails the same way; only a base
 that does not carry the check yet passes, with a notice. A HOLD from the pull
-request's own author counts; their APPROVE never does.
+request's own author counts; a HOLD from an OWNER, MEMBER or COLLABORATOR
+counts too.
+
+**An App APPROVE needs a signer.** Every agent posts verdicts as the same App,
+so `.shipyard/config.toml` names who may sign one (`[auto_merge]
+reviewer_signers = ["pulp-review", "infra-review2"]`): Shipyard's guards count
+an App `verdict: APPROVE` only with a `reviewer: <name>` line naming one of
+them, and never one `ghapp` stamped with an `unattributed` session. A reviewer
+agent puts `reviewer: <its name>` on the line above the verdict. Adding a
+reviewer means adding it to that list.
 
 ## A failed batch's branch name is not the culprit
 
@@ -3499,6 +3511,24 @@ re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
 
+**An evidence gap that never closes is a mute button.** A degraded sweep
+(any failed read or truncated listing) suppresses alarms. On this repo the
+*completed* run listing truncates on every sweep, so for weeks every sweep was
+degraded. The watchdog listed the dead native Intel lane as a 322-minute `warn`
+each night and never opened a tracker. Now, when completed-listing truncation is
+the only gap, a job alarms after `2 x alarm_minutes` with no comparable job
+in progress, because that truncation can only hide a finished start, not a live
+one. When you add a new reason to degrade a sweep, check how often it fires.
+A gap that is present on every sweep disables the watchdog. Read
+`degraded=` across a day of sweeps before trusting a quiet tracker.
+
+**`cancelled` with an empty `runner_name` means no runner picked the job up.**
+Job-level `needs.<job>.result` reads `cancelled` both for a job that ran and
+timed out and for one that waited for a runner until GitHub gave up. A
+watchdog that files every `cancelled` as infra hides a lane with no runner at
+all. `tools/scripts/unserved_job_check.py` asks the jobs API which case it was.
+`nightly-intel.yml` uses it, and fails the run when no runner picked the job up.
+
 ### …but the same sweep DOES name the label, once a job is already stalled on it
 
 The paragraph above forbids a *scheduled* label census, and that still holds.
@@ -5025,6 +5055,17 @@ bisectable.
   build with `-DPULP_BUILD_EXAMPLES=OFF` (matching `build.yml`). If you add a
   new release/packaging workflow, configure with examples OFF (or a populated
   `SKIA_DIR`), or the design-tool Skia gate will block it.
+- **One packaging step, three callers.** `release-cli.yml` (Package CLI
+  (Unix)), `release-dry-run.yml` and `release-path-pr-gate.yml` all run
+  `tools/ci/release_package_cli.sh`, and all three isolate dependencies with
+  the same "Isolate the build from shared caches" body.
+  `tools/scripts/test_release_package_step.py` fails if any caller keeps a
+  private `package_cli.py` invocation or a drifted isolation body. Change how a
+  release packages in the script, never in one workflow. Before this, the PR
+  gate never packaged, so #10220's FetchContent move passed it and stalled
+  four releases, and the dry-run's copy drifted and went red unnoticed. The PR
+  gate also runs in `merge_group` when the batch touches its `paths:` list,
+  read by `tools/ci/release_path_changed.py` from the workflow itself.
 - **A release job's dependencies live in its isolated root, not the home
   cache.** `release-cli.yml` sets `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` /
   `PULP_FETCHCONTENT_BASE_DIR` to a fresh `$RUNNER_TEMP/pulp-isolated-*` root.
@@ -5309,6 +5350,16 @@ bisectable.
   exactly to the failing CTest cases and leave comments explaining the
   alternate coverage path; do not use sanitizer excludes to hide new targeted
   coverage tests.
+- **Gate-inventory checks never run in a sanitizer lane.** `script-test-inputs-drift`
+  and its siblings compare manifests generated from the gate configure against
+  the configured build's inventory. A sanitizer configure registers a different
+  set of tests (GPU off, other options), so there they report "stale entries"
+  that are not drift. Seen on 2026-10-14: the GPU-gated `pulp.vellum-closure-*`
+  tests read as stale under ASan and UBSan. They carry the `gate-inventory`
+  label, which every broad sanitizer ctest run excludes.
+  `sanitizer-gate-inventory-contract` fails if a new `--build-dir
+  ${CMAKE_BINARY_DIR} --check` test lacks the label, or if a sanitizer run
+  stops excluding it.
 - **ASan, TSan, and UBSan use `PULP_SANITIZER=<kind>`; ASan's
   example-bundle build does too.** Do not replace the named options with raw
   `CMAKE_*_FLAGS`: the option owns the compiler/linker flags and explicitly
@@ -6749,9 +6800,18 @@ and `tartci doctor fleet`. Per-host opt-out: `auto_apply = false` under
 pin converger existed and was removed: its pin lagged
 the fleet by ~78 releases, so installing it would have downgraded every host.
 
-Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
-Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
-signed/notarized `.dmg`, so the version and asset metadata must move together.
+Pin bumps go through `python3 tools/toolchain/deps.py update shipyard --to
+vX.Y.Z` (or `generate.py --shipyard vX.Y.Z`), not a hand edit and not
+`shipyard pin bump`. The authority is `[shipyard]` in
+`tools/toolchain/manifest.toml`: the tag, the repository and the sha256 of
+every release asset, taken from the release's `checksums.sha256`.
+`tools/shipyard.toml` and `tools/toolchain/shipyard.sha256` are generated from
+it, so `shipyard pin bump`, which edits `tools/shipyard.toml` alone, fails the
+`toolchain-test_generate-selftest` drift test until it calls the generator.
+The upstream installer verifies no digest; `install-shipyard.sh` refuses a
+downloaded asset whose sha256 differs from the pin, and an `install.sh` that
+differs from its pinned `installer_sha256`, before anything runs. If the
+installed binary still turns out different, it restores the previous one.
 
 - **Pinned at v0.68.0+: a killed `shipyard pr`/`ship` worker no longer wedges
   the PR.** Before v0.68.0, a worker that died (crash, `kill`, launching a
@@ -7797,9 +7857,9 @@ and the explicit `pr.workflow=github` bypass.
 After install, every Pulp checkout that has `~/.local/bin` on PATH gets
 the same pinned Shipyard version automatically. The pin lives in
 `tools/shipyard.toml` and is bumped via PR after each Shipyard release
-that passes Pulp's CI matrix. Use `shipyard pin bump --to vX.Y.Z`
-instead of hand-editing `tools/shipyard.toml`; the helper owns the pin
-edit and worktree-safety checks.
+that passes Pulp's CI matrix. Use `python3 tools/toolchain/deps.py update
+shipyard --to vX.Y.Z`: the version and every asset digest live in
+`tools/toolchain/manifest.toml`, and `tools/shipyard.toml` is generated.
 
 `shipyard pin bump` verifies by running the installer, which installs the
 new release into `~/.local/bin` on the host you run it on. Pass
@@ -8335,9 +8395,10 @@ form is only needed when a host has no Shipyard at all. Future
 upgrades on a host that already has Shipyard installed go through
 `shipyard update`.
 
-The repo-side pin lives in `tools/shipyard.toml`; bump it with
-`shipyard pin bump --to vX.Y.Z` (this triggers the ci skill-sync gate,
-which is why this section exists). The pin and a developer's local
+The repo-side pin lives in `[shipyard]` of `tools/toolchain/manifest.toml`
+(generated into `tools/shipyard.toml`); bump it with
+`python3 tools/toolchain/deps.py update shipyard --to vX.Y.Z` (this triggers
+the ci skill-sync gate, which is why this section exists). The pin and a developer's local
 install can drift — `pulp doctor` surfaces that, and `shipyard
 --version` is the local source of truth.
 
@@ -11922,9 +11983,23 @@ including blocks the branch never touched.
 
 The cost is the opposite of a false failure: the gate is advisory and not a
 required check, so nothing blocks — but an author who does the obvious thing
-commits output the formatter would not reproduce. **Diff a class body before
-committing the fixer's result**; if it de-indents, do not commit it. Tracked as
-issue #8753, which carries the full reproduction.
+commits output the formatter would not reproduce. Tracked as issue #8753, which
+carries the full reproduction.
+
+The mechanism: clang-format indents the first declaration under an access
+specifier relative to where the specifier actually sits. When a range starts
+just below a column-0 `private:` that is outside `--lines`, that declaration and
+every member after it in the block (out-of-range lines included) land at
+0 + 2. `hunk_ranges` therefore walks up from each hunk over blank and comment
+lines and, on reaching a `public:`/`protected:`/`private:`, starts the range at
+the specifier, so the block comes out as the whole-file run leaves it. The cost
+is that the specifier line is judged too: changing the first member under a
+column-0 specifier also asks to move that specifier to 2 spaces, which is the
+whole-file answer. Restoring its original indent was rejected: it needs
+clang-format's replacement offsets, or a marker comment that perturbs
+trailing-comment alignment. **Still diff a class body before committing the
+fixer's result**; the specifier rule covers the known trigger, not every way a
+partial range can disagree with a whole-file run.
 
 ## A workflow that matches a bypass trailer with its own grep will honour a quoted one
 

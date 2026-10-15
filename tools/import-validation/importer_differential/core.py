@@ -152,9 +152,38 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def canonical_json_sha256(path: Path) -> str:
+    """Hash JSON evidence after removing documented run-clock fields.
+
+    Capture and IR receipts retain elapsed/import timestamps for diagnostics.
+    Those fields must not make an otherwise identical campaign appear
+    nondeterministic, so the integrity digest covers the semantic document
+    while the raw file hash remains available for chain-of-custody evidence.
+    """
+    volatile_keys = {"elapsed_ms", "imported_at"}
+
+    def scrub(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: scrub(item)
+                for key, item in value.items()
+                if key not in volatile_keys
+            }
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+
+    canonical = json.dumps(
+        scrub(json.loads(path.read_text(encoding="utf-8"))),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=False) + "\n")
+    path.write_text(json.dumps(value, indent=2, sort_keys=False) + "\n", encoding="utf-8")
 
 
 def run_command(argv: list[str], timeout_seconds: int) -> CommandResult:
@@ -167,6 +196,7 @@ def run_command(argv: list[str], timeout_seconds: int) -> CommandResult:
             stderr=subprocess.PIPE,
             timeout=timeout_seconds,
             check=False,
+            encoding="utf-8",
         )
     except subprocess.TimeoutExpired as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -698,6 +728,54 @@ def capture_logical_size(capture: dict[str, Any]) -> tuple[int, int]:
     return width, height
 
 
+def import_lane_args(
+    importer: Path,
+    source_args: list[str],
+    output_ir: Path,
+    viewport_args: list[str],
+    interaction_args: list[str],
+    browser_path: Path | None,
+    *,
+    native: bool,
+) -> list[str]:
+    """The importer argv for one lane of a comparison.
+
+    Both lanes import the same authored source at the same viewport with the
+    same interaction plan and browser; the native lane only adds
+    --native-panel-lowering. Neither passes --offline, which would substitute
+    the legacy partial parser for the authored source.
+    """
+    args = [str(importer), *source_args, "--mode", "baked", "--emit", "ir-json",
+            "--output", str(output_ir)]
+    if native:
+        args.append("--native-panel-lowering")
+    args.extend([*viewport_args, *interaction_args])
+    if browser_path:
+        args.extend(["--browser", str(browser_path)])
+    return args
+
+
+def verify_capture_binding(
+    capture: dict[str, Any], native_capture: dict[str, Any], source_sha256: str,
+) -> None:
+    """Fail closed unless both captures came from the same authored input.
+
+    Each capture's source hash must equal the authored file's, and the native
+    lowering must have run at the browser capture's viewport and in the same
+    browser; otherwise the comparison measures two different inputs.
+    """
+    browser = capture.get("provenance", {})
+    native = native_capture.get("provenance", {})
+    if browser.get("source", {}).get("sha256") != source_sha256:
+        raise LabError("browser capture source hash is not bound to the authored input")
+    if native.get("source", {}).get("sha256") != source_sha256:
+        raise LabError("native lowering source hash is not bound to the authored input")
+    if native.get("viewport") != browser.get("viewport"):
+        raise LabError("browser and native lowering viewport provenance differs")
+    if native.get("browser") != browser.get("browser"):
+        raise LabError("browser and native lowering browser provenance differs")
+
+
 def compare_one(
     importer: Path,
     observer: Path,
@@ -727,18 +805,28 @@ def compare_one(
     native_layout = native_dir / "layout.json"
     native_receipt = native_dir / "render-receipt.json"
     source_args = ["--from", from_source, "--file", str(source)]
-    browser_args = [
-        str(importer), *source_args, "--mode", "baked", "--emit", "ir-json",
-        "--output", str(browser_ir),
-    ]
-    if browser_path:
-        browser_args.extend(["--browser", str(browser_path)])
-    native_args = [
-        str(importer), *source_args, "--offline", "--mode", "baked",
-        "--emit", "ir-json", "--output", str(native_ir),
-    ]
-    if from_source == "claude":
-        native_args.append("--execute-bundle")
+    # Both sides must evaluate the same authored source at the same viewport.
+    # The old candidate lane appended --offline, which silently substituted the
+    # legacy partial parser and made geometry/typography/pixel results unusable
+    # as a native capability baseline.
+    viewport = (fixture_metadata or {}).get("viewport", {})
+    viewport_width = int(viewport.get("width", 1280))
+    viewport_height = int(viewport.get("height", 800))
+    viewport_args = ["--render-size", f"{viewport_width}x{viewport_height}"]
+    interaction_path = (fixture_metadata or {}).get("browser_interactions")
+    interaction_args = []
+    if interaction_path:
+        interaction_file = (source.parent / interaction_path).resolve()
+        if not interaction_file.is_file():
+            raise LabError(
+                f"browser interaction plan does not exist: {interaction_file.name}")
+        interaction_args = ["--browser-interactions", str(interaction_file)]
+    browser_args = import_lane_args(
+        importer, source_args, browser_ir, viewport_args, interaction_args, browser_path,
+        native=False)
+    native_args = import_lane_args(
+        importer, source_args, native_ir, viewport_args, interaction_args, browser_path,
+        native=True)
     browser_run = run_command(browser_args, timeout_seconds)
     native_run = run_command(native_args, timeout_seconds)
     write_json(browser_dir / "command.json", command_record(browser_run))
@@ -750,8 +838,8 @@ def compare_one(
         raise LabError(
             f"native import failed ({native_run.returncode}): {native_run.stderr}")
 
-    browser_doc = json.loads(browser_ir.read_text())
-    native_doc = json.loads(native_ir.read_text())
+    browser_doc = json.loads(browser_ir.read_text(encoding="utf-8"))
+    native_doc = json.loads(native_ir.read_text(encoding="utf-8"))
     # The lab artifacts are designed to be shareable: retain source identity by
     # basename + hash, never by a machine-local absolute path.
     browser_doc["sourceFile"] = source.name
@@ -759,7 +847,11 @@ def compare_one(
     write_json(browser_ir, browser_doc)
     write_json(native_ir, native_doc)
     evidence = find_browser_evidence(browser_ir)
-    capture = json.loads((evidence / "capture.json").read_text())
+    capture = json.loads((evidence / "capture.json").read_text(encoding="utf-8"))
+    native_evidence = find_browser_evidence(native_ir)
+    native_capture = json.loads((native_evidence / "capture.json").read_text(encoding="utf-8"))
+    source_sha256 = sha256_file(source)
+    verify_capture_binding(capture, native_capture, source_sha256)
     viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
     render_args = [
@@ -791,9 +883,9 @@ def compare_one(
         source_evidence = evidence / name
         if source_evidence.exists():
             shutil.copy2(source_evidence, browser_dir / name)
-    recognition = source_recognition(source.read_text(errors="replace"))
-    browser_snapshot = json.loads((browser_dir / "dom-snapshot.json").read_text())
-    native_layout_doc = json.loads(native_layout.read_text())
+    recognition = source_recognition(source.read_text(encoding="utf-8", errors="replace"))
+    browser_snapshot = json.loads((browser_dir / "dom-snapshot.json").read_text(encoding="utf-8"))
+    native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
     browser_flat = browser_nodes(browser_snapshot)
     native_flat = native_nodes(native_doc, native_layout_doc)
     matches, missing, extra = match_nodes(browser_flat, native_flat)
@@ -872,6 +964,28 @@ def compare_one(
             browser_run.elapsed_ms / max(1, native_run.elapsed_ms), 3),
     }
     timing_budget = timing_budget_result(timings, timing_budgets_ms)
+    integrity = {
+        "schema": "pulp-importer-differential-integrity-v1",
+        "source_sha256": source_sha256,
+        "browser_ir_sha256": sha256_file(browser_ir),
+        "native_ir_sha256": sha256_file(native_ir),
+        "browser_capture_sha256": sha256_file(evidence / "capture.json"),
+        "native_capture_sha256": sha256_file(native_evidence / "capture.json"),
+        "browser_ir_canonical_sha256": canonical_json_sha256(browser_ir),
+        "native_ir_canonical_sha256": canonical_json_sha256(native_ir),
+        "browser_capture_canonical_sha256": canonical_json_sha256(evidence / "capture.json"),
+        "native_capture_canonical_sha256": canonical_json_sha256(native_evidence / "capture.json"),
+        "browser_screenshot_sha256": sha256_file(browser_dir / "browser.png"),
+        "native_render_sha256": sha256_file(native_render),
+        "native_layout_sha256": sha256_file(native_layout),
+        "native_render_receipt_sha256": sha256_file(native_receipt),
+        "source_bound": True,
+        "viewport_bound": True,
+        "browser_bound": True,
+        "backend_bound": render_receipt.get("backend_used") == "skia",
+        "offline_parser": False,
+        "eligibility": "diagnostic-only-until-three-run-digests-and-counters-agree",
+    }
     # These timings deliberately keep presentation claims fail-closed. The
     # importer and observer run headlessly and the observer emits a readback;
     # neither is proof of a real GPU present or native interaction event.
@@ -936,11 +1050,20 @@ def compare_one(
             "authority": "advisory",
             "capture_method": native_doc.get("capture_method"),
             "source_adapter": native_doc.get("source_adapter"),
+            "comparison_lane": "browser-native-panel-lowering",
+            "offline_parser": False,
+            "provenance": {
+                "source_sha256": source_sha256,
+                "browser": native_capture["provenance"]["browser"],
+                "viewport": native_capture["provenance"]["viewport"],
+                "capture_sha256": sha256_file(native_evidence / "capture.json"),
+            },
         },
         "source_recognition": recognition,
         "unsupported_dynamic_features": blockers,
         "timings": timings,
         "timing_budget": timing_budget,
+        "integrity": integrity,
         "observability": observability,
         "receipt_paths": {
             "fixture_report": "comparison/report.json",
@@ -961,7 +1084,7 @@ def compare_one(
     write_json(comparison_dir / "report.json", report)
     write_json(comparison_dir / "structural-diff.json", structural)
     write_json(comparison_dir / "classifications.json", classifications)
-    (comparison_dir / "summary.md").write_text(format_summary(report))
+    (comparison_dir / "summary.md").write_text(format_summary(report), encoding="utf-8")
     return report
 
 

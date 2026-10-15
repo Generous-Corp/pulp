@@ -804,88 +804,6 @@
       ],
       "nodes": [
         {
-          "factory": "make_chorus_node",
-          "baked_params": [
-            {
-              "id": "kRateHz",
-              "min": "static_cast<float>(kRateMinHz)",
-              "max": "static_cast<float>(kRateMaxHz)",
-              "default": "static_cast<float>(Engine::calibration(voicing).rate_hz)"
-            },
-            {
-              "id": "kDepth",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "100.0f"
-            },
-            {
-              "id": "kMix",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "mix_default"
-            },
-            {
-              "id": "kStereoWidth",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "100.0f"
-            }
-          ]
-        },
-        {
-          "factory": "make_phaser_node",
-          "baked_params": [
-            {
-              "id": "kRateHz",
-              "min": "static_cast<float>(kRateMinHz)",
-              "max": "static_cast<float>(kRateMaxHz)",
-              "default": "static_cast<float>(Engine::kRateDefaultHz)"
-            },
-            {
-              "id": "kDepth",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "100.0f"
-            },
-            {
-              "id": "kCenterHz",
-              "min": "static_cast<float>(kCenterMinHz)",
-              "max": "static_cast<float>(kCenterMaxHz)",
-              "default": "400.0f"
-            },
-            {
-              "id": "kFeedback",
-              "min": "-static_cast<float>(Engine::kFeedbackMax)",
-              "max": "static_cast<float>(Engine::kFeedbackMax)",
-              "default": "static_cast<float>(Engine::kColorOffFeedback)"
-            },
-            {
-              "id": "kMix",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "static_cast<float>(Engine::kMixDefault * 100.0)"
-            },
-            {
-              "id": "kStereoSpread",
-              "min": "0.0f",
-              "max": "0.5f",
-              "default": "0.25f"
-            },
-            {
-              "id": "kStaggerRatio",
-              "min": "static_cast<float>(Engine::kStaggerMin)",
-              "max": "static_cast<float>(Engine::kStaggerMax)",
-              "default": "static_cast<float>(Engine::kStaggerDefault)"
-            },
-            {
-              "id": "kWave",
-              "min": "kWaveSine",
-              "max": "kWaveSmoothRandom",
-              "default": "kWaveTriangle"
-            }
-          ]
-        },
-        {
           "factory": "make_delay_vibrato_node",
           "baked_params": [
             {
@@ -1004,6 +922,88 @@
               "min": "0.0f",
               "max": "100.0f",
               "default": "100.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_chorus_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "static_cast<float>(kRateMinHz)",
+              "max": "static_cast<float>(kRateMaxHz)",
+              "default": "static_cast<float>(Engine::calibration(voicing).rate_hz)"
+            },
+            {
+              "id": "kDepth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "mix_default"
+            },
+            {
+              "id": "kStereoWidth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_phaser_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "static_cast<float>(kRateMinHz)",
+              "max": "static_cast<float>(kRateMaxHz)",
+              "default": "static_cast<float>(Engine::kRateDefaultHz)"
+            },
+            {
+              "id": "kDepth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            },
+            {
+              "id": "kCenterHz",
+              "min": "static_cast<float>(kCenterMinHz)",
+              "max": "static_cast<float>(kCenterMaxHz)",
+              "default": "400.0f"
+            },
+            {
+              "id": "kFeedback",
+              "min": "-static_cast<float>(Engine::kFeedbackMax)",
+              "max": "static_cast<float>(Engine::kFeedbackMax)",
+              "default": "static_cast<float>(Engine::kColorOffFeedback)"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kMixDefault * 100.0)"
+            },
+            {
+              "id": "kStereoSpread",
+              "min": "0.0f",
+              "max": "0.5f",
+              "default": "0.25f"
+            },
+            {
+              "id": "kStaggerRatio",
+              "min": "static_cast<float>(Engine::kStaggerMin)",
+              "max": "static_cast<float>(Engine::kStaggerMax)",
+              "default": "static_cast<float>(Engine::kStaggerDefault)"
+            },
+            {
+              "id": "kWave",
+              "min": "kWaveSine",
+              "max": "kWaveSmoothRandom",
+              "default": "kWaveTriangle"
             }
           ]
         }

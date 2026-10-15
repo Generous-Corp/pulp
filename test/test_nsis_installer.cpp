@@ -212,8 +212,8 @@ TEST_CASE("NSIS script maps standalone and unknown formats to INSTDIR", "[ship][
     REQUIRE_THAT(script, ContainsSubstring("Section \"TestPlugin (Standalone)\""));
     REQUIRE_THAT(script, ContainsSubstring("Section \"TestPlugin (lv2)\""));
     REQUIRE_THAT(script, ContainsSubstring("SetOutPath \"$INSTDIR\""));
-    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$INSTDIR\\TestPlugin.exe\""));
-    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$INSTDIR\\TestPlugin.lv2\""));
+    REQUIRE_THAT(script, ContainsSubstring("Delete \"$INSTDIR\\TestPlugin.exe\""));
+    REQUIRE_THAT(script, ContainsSubstring("Delete \"$INSTDIR\\TestPlugin.lv2\""));
 }
 
 TEST_CASE("NSIS script handles empty plugin list with only post and uninstall sections",
@@ -253,7 +253,7 @@ TEST_CASE("NSIS script installs file plugins without recursive flag",
 
     REQUIRE_THAT(script, ContainsSubstring("File \"" + plugin.string() + "\""));
     REQUIRE(script.find("File /r \"" + plugin.string() + "\"") == std::string::npos);
-    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$COMMONFILES\\CLAP\\TestPlugin.clap\""));
+    REQUIRE_THAT(script, ContainsSubstring("Delete \"$COMMONFILES\\CLAP\\TestPlugin.clap\""));
 }
 
 TEST_CASE("NSIS script uses per-user plugin common directories",
@@ -264,8 +264,10 @@ TEST_CASE("NSIS script uses per-user plugin common directories",
 
     REQUIRE_THAT(script, ContainsSubstring("SetOutPath \"$LOCALAPPDATA\\Programs\\Common\\VST3\""));
     REQUIRE_THAT(script, ContainsSubstring("SetOutPath \"$LOCALAPPDATA\\Programs\\Common\\CLAP\""));
-    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$LOCALAPPDATA\\Programs\\Common\\VST3\\TestPlugin.vst3\""));
-    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$LOCALAPPDATA\\Programs\\Common\\CLAP\\TestPlugin.clap\""));
+    REQUIRE_THAT(script, ContainsSubstring(
+                             "Delete \"$LOCALAPPDATA\\Programs\\Common\\VST3\\TestPlugin.vst3\""));
+    REQUIRE_THAT(script, ContainsSubstring(
+                             "Delete \"$LOCALAPPDATA\\Programs\\Common\\CLAP\\TestPlugin.clap\""));
 }
 
 TEST_CASE("NSIS script keeps install_dir field non-authoritative for format destinations",

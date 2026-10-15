@@ -202,11 +202,21 @@ else()
     set(_pulp_skia_target_arch "")
 endif()
 if(_pulp_skia_target_arch MATCHES "^arm64(ec|x)-win$")
-    # ARM64EC and ARM64X need archives built for them; neither the pure ARM64
-    # slice nor the flat x64 layout is compatible, so fail closed.
-    set(SKIA_LIBRARY "SKIA_LIBRARY-NOTFOUND")
-    set(DAWN_LIBRARY "DAWN_LIBRARY-NOTFOUND")
-    message(STATUS "Skia: no Windows archive slice for ${_pulp_skia_target_arch}")
+    # ARM64EC/ARM64X are distinct COFF machine modes.  They must consume a
+    # matching producer slice; falling back to pure ARM64 or flat x64 creates
+    # a configure-success/link-failure mismatch.
+    string(REGEX REPLACE "-win$" "" _pulp_skia_arch_dir "${_pulp_skia_target_arch}")
+    if(EXISTS "${_skia_lib_dir}/${_pulp_skia_arch_dir}/${_skia_lib_name}")
+        set(_skia_lib_dir "${_skia_lib_dir}/${_pulp_skia_arch_dir}")
+        set(SKIA_LIBRARY "${_skia_lib_dir}/${_skia_lib_name}")
+        set(DAWN_LIBRARY "${_skia_lib_dir}/${_dawn_lib_name}")
+        message(STATUS "Skia: selecting Windows ${_pulp_skia_arch_dir} archive slice")
+    else()
+        set(SKIA_LIBRARY "SKIA_LIBRARY-NOTFOUND")
+        set(DAWN_LIBRARY "DAWN_LIBRARY-NOTFOUND")
+        message(STATUS "Skia: no Windows archive slice for ${_pulp_skia_target_arch}")
+    endif()
+    unset(_pulp_skia_arch_dir)
 elseif(_pulp_skia_target_arch STREQUAL "arm64-win")
     if(EXISTS "${_skia_lib_dir}/arm64/${_skia_lib_name}")
         set(_skia_lib_dir "${_skia_lib_dir}/arm64")

@@ -215,6 +215,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-manifest-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/agent_capability_manifest.py" --check)
+    add_test(NAME host-adapter-tracing-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/check_host_adapter_tracing_contract.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME host-adapter-tracing-contract-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_host_adapter_tracing_contract.py")
+    set_tests_properties(host-adapter-tracing-contract
+        host-adapter-tracing-contract-selftest PROPERTIES LABELS "pr;format")
     add_test(NAME agent-capability-manifest-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")
@@ -756,6 +765,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME vellum-workflow-dispatch COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_workflow_dispatch.py")
     set_tests_properties(vellum-workflow-dispatch PROPERTIES TIMEOUT 120)
+    # A sanitizer configure's inventory differs from the gate profile's, so the
+    # sanitizer lanes must exclude every gate-inventory check, and every such
+    # check must carry the label. Text-only: no PyYAML, no build tree.
+    add_test(NAME sanitizer-gate-inventory-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_sanitizer_gate_inventory.py")
+    set_tests_properties(sanitizer-gate-inventory-contract PROPERTIES TIMEOUT 120)
     # The privileged Vellum gate constructs its exact base+head candidate
     # locally. Exercise both a clean merge and a real content conflict so the
     # conflict path cannot degrade into an untested fail-open branch.
@@ -1214,6 +1229,9 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME portable-ci-timeout-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_run_with_timeout.py")
     endif()
+    # Pure Python against a recorded host observation; runs on every host.
+    add_test(NAME proxmox-host-watch-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_host_watch.py")
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME proxmox-ephemeral-linux-runner-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_runner_linux.py")
@@ -1474,6 +1492,9 @@ if(Python3_Interpreter_FOUND)
             # Diff-scoped like script-test-inputs-drift; see PULP_DIFF_SCOPED there.
             set_tests_properties(changed-surface-script-families-drift PROPERTIES
                 TIMEOUT 120 SKIP_RETURN_CODE 77 PULP_DIFF_SCOPED TRUE)
+            # gate-inventory: see script-test-inputs-drift.
+            set_property(TEST changed-surface-script-families-drift APPEND PROPERTY
+                LABELS gate-inventory)
             # A bounded run's base configure is FetchContent-disconnected, so a
             # marked dependency must download only through FetchContent. This
             # configured tree must hold its source, so an absent tree fails.

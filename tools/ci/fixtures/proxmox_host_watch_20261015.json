@@ -1,0 +1,296 @@
+{
+ "failed_units": [
+  {
+   "last_error": "[10:36:03] ERROR: no free clone id in 203..203",
+   "restarts": "96",
+   "result": "exit-code",
+   "since": "1791801393",
+   "unit": "pulp-ephemeral-pool@preamble.service"
+  },
+  {
+   "last_error": "",
+   "restarts": "0",
+   "result": "exit-code",
+   "since": "1792038666",
+   "unit": "pulp-ephemeral-reap.service"
+  }
+ ],
+ "health": {
+  "present": false,
+  "raw": ""
+ },
+ "now": 1792039479.6774306,
+ "skips": [
+  {
+   "pid": "1044810",
+   "reason": "clone is only 3596s old",
+   "ts": 1792018769.661997,
+   "vmid": "200"
+  },
+  {
+   "pid": "1044810",
+   "reason": "guest state cannot be proved",
+   "ts": 1792018776.604268,
+   "vmid": "203"
+  },
+  {
+   "pid": "1051361",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792019779.67917,
+   "vmid": "200"
+  },
+  {
+   "pid": "1051361",
+   "reason": "guest state cannot be proved",
+   "ts": 1792019786.62184,
+   "vmid": "203"
+  },
+  {
+   "pid": "1057764",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792020809.686229,
+   "vmid": "200"
+  },
+  {
+   "pid": "1057764",
+   "reason": "guest state cannot be proved",
+   "ts": 1792020816.667176,
+   "vmid": "203"
+  },
+  {
+   "pid": "1063978",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792021813.650999,
+   "vmid": "200"
+  },
+  {
+   "pid": "1063978",
+   "reason": "guest state cannot be proved",
+   "ts": 1792021820.574251,
+   "vmid": "203"
+  },
+  {
+   "pid": "1070273",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792022769.639062,
+   "vmid": "200"
+  },
+  {
+   "pid": "1070273",
+   "reason": "guest state cannot be proved",
+   "ts": 1792022776.622335,
+   "vmid": "203"
+  },
+  {
+   "pid": "1076805",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792023809.673282,
+   "vmid": "200"
+  },
+  {
+   "pid": "1076805",
+   "reason": "guest state cannot be proved",
+   "ts": 1792023816.586312,
+   "vmid": "203"
+  },
+  {
+   "pid": "1083394",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792024819.666089,
+   "vmid": "200"
+  },
+  {
+   "pid": "1083394",
+   "reason": "guest state cannot be proved",
+   "ts": 1792024826.513273,
+   "vmid": "203"
+  },
+  {
+   "pid": "1090418",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792025849.713575,
+   "vmid": "200"
+  },
+  {
+   "pid": "1090418",
+   "reason": "guest state cannot be proved",
+   "ts": 1792025856.659228,
+   "vmid": "203"
+  },
+  {
+   "pid": "1096647",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792026799.684149,
+   "vmid": "200"
+  },
+  {
+   "pid": "1096647",
+   "reason": "guest state cannot be proved",
+   "ts": 1792026806.594982,
+   "vmid": "203"
+  },
+  {
+   "pid": "1102673",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792027769.658713,
+   "vmid": "200"
+  },
+  {
+   "pid": "1102673",
+   "reason": "guest state cannot be proved",
+   "ts": 1792027776.559588,
+   "vmid": "203"
+  },
+  {
+   "pid": "1109545",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792028789.654094,
+   "vmid": "200"
+  },
+  {
+   "pid": "1109545",
+   "reason": "guest state cannot be proved",
+   "ts": 1792028796.598908,
+   "vmid": "203"
+  },
+  {
+   "pid": "1115830",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792029749.70142,
+   "vmid": "200"
+  },
+  {
+   "pid": "1115830",
+   "reason": "guest state cannot be proved",
+   "ts": 1792029756.644423,
+   "vmid": "203"
+  },
+  {
+   "pid": "1122451",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792030769.657472,
+   "vmid": "200"
+  },
+  {
+   "pid": "1122451",
+   "reason": "guest state cannot be proved",
+   "ts": 1792030776.463791,
+   "vmid": "203"
+  },
+  {
+   "pid": "1129072",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792031789.652213,
+   "vmid": "200"
+  },
+  {
+   "pid": "1129072",
+   "reason": "guest state cannot be proved",
+   "ts": 1792031796.590297,
+   "vmid": "203"
+  },
+  {
+   "pid": "1135295",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792032739.695293,
+   "vmid": "200"
+  },
+  {
+   "pid": "1135295",
+   "reason": "guest state cannot be proved",
+   "ts": 1792032746.61901,
+   "vmid": "203"
+  },
+  {
+   "pid": "1141343",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792033709.688922,
+   "vmid": "200"
+  },
+  {
+   "pid": "1141343",
+   "reason": "guest state cannot be proved",
+   "ts": 1792033716.669369,
+   "vmid": "203"
+  },
+  {
+   "pid": "1147749",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792034692.828226,
+   "vmid": "200"
+  },
+  {
+   "pid": "1147749",
+   "reason": "guest state cannot be proved",
+   "ts": 1792034699.750569,
+   "vmid": "203"
+  },
+  {
+   "pid": "1154153",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792035659.683733,
+   "vmid": "200"
+  },
+  {
+   "pid": "1154153",
+   "reason": "guest state cannot be proved",
+   "ts": 1792035666.809486,
+   "vmid": "203"
+  },
+  {
+   "pid": "1160489",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792036630.211343,
+   "vmid": "200"
+  },
+  {
+   "pid": "1160489",
+   "reason": "guest state cannot be proved",
+   "ts": 1792036637.263962,
+   "vmid": "203"
+  },
+  {
+   "pid": "1167275",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792037669.667389,
+   "vmid": "200"
+  },
+  {
+   "pid": "1167275",
+   "reason": "guest state cannot be proved",
+   "ts": 1792037676.620214,
+   "vmid": "203"
+  },
+  {
+   "pid": "1173573",
+   "reason": "supervisor lease is active or ambiguous",
+   "ts": 1792038629.698993,
+   "vmid": "200"
+  },
+  {
+   "pid": "1173573",
+   "reason": "guest state cannot be proved",
+   "ts": 1792038636.671605,
+   "vmid": "203"
+  }
+ ],
+ "unreadable": [],
+ "vms": {
+  "200": {
+   "name": "pulp-ci-ephemeral-200",
+   "status": "running"
+  },
+  "203": {
+   "name": "pulp-ci-ephemeral-203",
+   "status": "running"
+  },
+  "300": {
+   "name": "pulp-win-ci",
+   "status": "running"
+  },
+  "9001": {
+   "name": "pulp-linux-golden",
+   "status": "stopped"
+  }
+ }
+}

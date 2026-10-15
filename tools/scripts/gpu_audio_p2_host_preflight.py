@@ -215,9 +215,14 @@ def _gpu_health_identity(command: list[str], source_revision: str) -> dict[str, 
     """Verify a doctor executable belongs to this checkout's exact build."""
     executable = Path(command[0])
     try:
+        # Check the supplied path before resolving it.  Resolving first erases
+        # the symlink bit and could turn a redirected executable into apparently
+        # exact-head evidence.
+        if executable.is_symlink():
+            return {"status": "invalid", "reason": "executable_symlink"}
         executable = executable.resolve(strict=True)
         root = REPO_ROOT.resolve(strict=True)
-        if executable.is_symlink() or root not in executable.parents:
+        if root not in executable.parents:
             return {"status": "invalid", "reason": "executable_outside_checkout"}
         manifest = None
         for parent in (executable.parent, *executable.parents):

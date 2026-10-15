@@ -2,8 +2,36 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace pulp::gpu_audio::detail {
+
+// Identity observed directly from the native graphics runtime. This is a
+// private qualification seam: adapter metadata and environment labels never
+// populate it. The revision is owned by the native observer (for Metal this
+// is the selected device's immutable registry identity), while the Dawn
+// provider revision remains separate in SharedIoProviderIdentity.
+struct NativeRuntimeIdentity {
+    bool authenticated = false;
+    std::string name;
+    std::string backend;
+    std::string revision;
+    std::uint64_t registry_id = 0;
+};
+
+// The observer receives the selected Dawn adapter's observed identity and
+// must prove that the native device it reports is the same adapter. Platforms
+// without a first-party observer return an unauthenticated value.
+NativeRuntimeIdentity observe_native_metal(std::string_view selected_name,
+                                           std::uint64_t selected_vendor_id,
+                                           std::uint64_t selected_device_id) noexcept;
+
+// Resolve the native device that Dawn actually created. The opaque handle is
+// a WGPUDevice so this private header stays free of Dawn and Objective-C
+// types; implementations without a first-party observer return unavailable.
+NativeRuntimeIdentity observe_native_metal_device(void* dawn_device, std::string_view selected_name,
+                                                  std::uint64_t selected_vendor_id,
+                                                  std::uint64_t selected_device_id) noexcept;
 
 // Host/quiescent-only identity of the provider that owns a prepared shared-I/O
 // session. A false authenticated value is fail-closed and is never physical

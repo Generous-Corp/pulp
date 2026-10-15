@@ -717,6 +717,15 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
     // invalid so a failure can't leave a stale-but-valid routing behind.
     out.valid = false;
     out.snapshot_keepalive.reset();
+
+    // Slot::live() is publisher-owned and intentionally unsynchronized.  The
+    // resolver callbacks below return raw pointers into that snapshot, while
+    // the topology accessors return references into the graph's authoring
+    // vectors.  Keep the graph mutation/publication lock across the complete
+    // translation and keepalive capture so a concurrent prepare()/release()
+    // cannot pair one generation's topology with another generation's
+    // bindings (or reclaim the snapshot between resolver calls).
+    SignalGraph::GraphMutationLock mutation_lock(graph);
     if (!graph.is_prepared()) return false;
 
     const ExecutorSnapshotBinders binders{

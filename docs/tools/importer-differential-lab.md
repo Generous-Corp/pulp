@@ -101,8 +101,12 @@ python3 tools/import-validation/importer_differential_lab.py benchmark \
 ```
 
 The benchmark preserves the caller's `--cache-state` declaration on every
-run; it does not infer `cold` or `warm` from run order. Each receipt records
-the source, browser provenance, importer and observer hashes, host identity,
+run; it does not infer `cold` or `warm` from run order. The `first_invocation`
+and `repeat_runs` fields describe sequence position only. The legacy `cold`
+and `warm` fields are populated only when every run was explicitly declared in
+that state; otherwise they carry an `unverified` status and a reason. Run
+separate campaigns when both cache states are needed. Each receipt records the
+source, browser provenance, importer and observer hashes, host identity,
 per-run report links, fidelity comparison, and the native Skia render receipt.
 Browser and native processes still run sequentially within a trial, so their
 timing difference remains diagnostic until a controlled, alternated protocol

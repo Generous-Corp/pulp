@@ -1,7 +1,7 @@
 {
   "_generated": "by tools/toolchain/generate.py from tools/toolchain/manifest.toml; do not edit",
   "schema": 1,
-  "source_sha256": "16f5e000715571ede64022989167d427afa48045aacf0432ac77622481b7219b",
+  "source_sha256": "2c41230c8cc4091c9549efcd00480366a7422dbe60027653d2c55d2677dd6c15",
   "enforcement": "warn",
   "tools": {
     "python": "3.14.4",

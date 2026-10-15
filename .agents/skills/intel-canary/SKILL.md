@@ -142,7 +142,16 @@ lint alone does not establish Intel configuration or native execution.
   limitation in the guide.
 - **`macos-15-intel` is real but flaky** (linker-image errors, CPU-peg). It is
   the fallback for Tier-2 job A, which has an infra-vs-product watchdog
-  classifier. The physical Tier-4 runner uses only
+  classifier.
+- **`cancelled` does not mean a flaky runner.** A job that waits for a runner
+  until GitHub gives up also concludes `cancelled`, with an empty `runner_name`
+  and no steps. The infra-vs-product classifier calls that infra and keeps the
+  product verdict green. So the watchdog also asks the jobs API
+  (`tools/scripts/unserved_job_check.py`) whether a runner ever picked job A up.
+  If none did, it fails the run and keeps its own tracker, "Nightly Intel: no
+  runner picked up the native Intel job". Without this check, a deleted runner
+  registration left the lane dead for sixteen nights while the watchdog stayed
+  green. The physical Tier-4 runner uses only
   `pulp-intel-native,pulp-host-macmini`; never give it the required Studio pool
   labels and never route Intel work to Namespace.
 - **A universal wgpu dylib must be re-signed after `lipo`** (G3 lesson): a raw

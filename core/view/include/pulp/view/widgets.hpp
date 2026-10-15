@@ -769,7 +769,8 @@ private:
                                  int visible_lines, bool append_ellipsis,
                                  bool single_line_ellipsis,
                                  bool captured_positions);
-    LabelAlign resolve_effective_align_();            ///< text-align cascade (auto/match-parent resolved)
+    LabelAlign
+    resolve_effective_align_() const; ///< text-align cascade (auto/match-parent resolved)
     bool has_own_font_size_ = false;
     bool has_own_font_weight_ = false;
     bool has_own_letter_spacing_ = false;
@@ -855,8 +856,16 @@ private:
 
     /// Build a ShapedLayout from the captured boxes, so the rest of paint —
     /// line-clamp, vertical-align, alignment — is the same code either way.
-    canvas::ShapedLayout layout_from_cached_lines(const std::string& text,
-                                                  float line_height) const;
+    /// A single captured line whose copy changed (`cached_line_basis_retired_`)
+    /// keeps the box's vertical placement and its left edge, adjusted for the
+    /// new width under the label's alignment, with the width measured for the
+    /// live text: the font and the box are unchanged, so where the line sits
+    /// is still Chromium's answer and only how wide it is has to be asked
+    /// again.
+    canvas::ShapedLayout layout_from_cached_lines(const std::string& text, float line_height,
+                                                  const std::string& family,
+                                                  float effective_font_size,
+                                                  float effective_letter_spacing) const;
     canvas::ShapedLayout layout_attributed_from_cached_lines(
         const canvas::AttributedString& text, float line_height) const;
 

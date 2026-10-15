@@ -320,6 +320,25 @@ makes the reinstall a single verified command:
   as unknown, never as healthy.
   It reports drift older than an hour, any non-healthy state, and a
   `checked_at` older than 30 minutes, since the reaper runs every 15 minutes.
+- `tools/ci/proxmox_host_watch.py` is that reader. It runs every 15 minutes
+  from one non-gate fleet Mac
+  (`tools/ci/com.danielraffel.pulp.proxmox-host-watch.plist.template`). It
+  reaches the host over ssh by its fleet name and only reads. Each problem gets
+  one issue in the private infrastructure-issues repository. The issue is
+  updated in place and closed when the problem clears. It covers four signals:
+  - a `pulp-*` unit that has been `failed` for over 15 minutes (a slot at its
+    restart limit), shown with its last error line. For `no free clone id in
+    A..B`, it also names the orphan clone that holds the slot's VMID.
+  - `health.json` that is absent, unreadable or stale. This counts as unknown,
+    never as healthy.
+  - a non-healthy state, or drift older than an hour, with the
+    `reinstall_command`.
+  - a VM the reaper has skipped on 4 or more passes over at least 45 minutes
+    while no online runner registration names it. A live job's lease skip stays
+    quiet because its runner is online.
+
+  An observation that could not be read never closes an issue. Every issue
+  carries what, evidence, likely cause, fix, safe-to-auto-apply and verify.
 
 Create separate root-owned role environments; never share one:
 
@@ -2014,6 +2033,12 @@ annotations are where drift between them shows up first; for example, the
 hosted Linux leg's apt CMake is reported against the 4.3.3 pin, labelled as
 the manifest's declared Linux exception. See [mise](mise.md#checking-your-environment).
 
+The step costs well under a second (0.45 s on the macOS gate VM, 0.10 s on
+hosted Linux), each version probe is capped at 5 s, and the step at 2 minutes,
+so a hung tool cannot stall a leg. It stays report only under `bash -e`
+whatever is missing: no Python on the runner, or a check that cannot read its
+expected versions (exit 3), becomes a warning annotation, never a failed step.
+
 ## Build-time Node dependencies are installed before the build, never inside it
 
 The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an
@@ -3424,10 +3449,14 @@ of `tools/ci/merge_group_hold_check.py` (fetched from
 `merge_group.base_ref`; the token never reaches a queue entry's code). It reads the group's pull requests from
 the first-parent chain of queue merge commits (each lands its second parent),
 and fails when one's latest trusted verdict on that head is
-`verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. "Trusted" means the
-fleet App or an OWNER, MEMBER or COLLABORATOR who is not the author,
-Shipyard's rule, except that the author's own HOLD counts (never their
-APPROVE). The chain is read one commit at a time and comments and reviews are
+`verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. An APPROVE counts
+only from the fleet App itself, a `Bot` (GraphQL names it `shipyard-local`, a
+login anyone can register as a user, so a user of that name never counts;
+every agent posts verdicts as the App through `ghapp`),
+never from a human account, so a human APPROVE posted after the App's HOLD
+cannot clear it: an agent holding the owner's personal `gh` login posted such
+approvals. A HOLD counts from the fleet App, an OWNER, MEMBER or COLLABORATOR,
+or the pull request's own author. The chain is read one commit at a time and comments and reviews are
 paginated, so a large group or a long pull request is read in full. The failure names the pull request, the HOLD's URL and the
 fix, and a failed classify fails `macos` closed through the bootstrap above,
 before any VM. It is the backstop for a HOLD on a head that was already armed
@@ -3438,6 +3467,14 @@ fetch of the base branch) fails the group with an error naming the pull request
 or group, the error and the fix (re-run the classify job, or re-queue). A
 stalled queue is the deliberate lesser harm. Only a base branch that does not
 carry the check yet passes, with a notice.
+
+Who may sign the fleet App's approvals is set in `.shipyard/config.toml`:
+`[auto_merge] reviewer_signers = ["pulp-review", "infra-review2"]`. Every
+agent posts verdicts as the same App, so Shipyard's guards count an App
+`verdict: APPROVE` only with a `reviewer: <name>` line naming one of these, and
+never one `ghapp` stamped with an `unattributed` session. Shipyard's
+server-side `review-verdict` reads the list only from this file and refuses
+every App approval when it is missing, so a new reviewer is added here first.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
@@ -4487,8 +4524,38 @@ holding the workflow concurrency group, not to Tart capacity. This alert is the
 off-fleet backstop when a current-head run is stranded.
 
 Any failed API read or truncated run listing makes the sweep degraded. A
-degraded sweep suppresses alarms and cannot create, update, reopen, or close the
-tracking issue; absence is not evidence of recovery until a complete sweep.
+degraded sweep suppresses alarms and never closes the tracking issue; absence is
+not evidence of recovery until a complete sweep. There is one exception. On this
+repo the **completed** listing truncates on every sweep, and a truncated
+completed listing can hide only a comparable job that started after the stalled
+one queued and has already finished. It can't hide an in-progress job, because
+in-progress jobs come from their own listing. So when the completed listing's
+truncation is the sweep's only gap, a queued job alarms once it has waited past
+`2 x alarm_minutes` (`TRUNCATED_COMPLETED_ALARM_FACTOR`) with no comparable job
+in progress. That alarm can open, update or reopen the tracker. It can't close
+it.
+
+Before this exception existed, every sweep was degraded, so the watchdog could
+never alarm. A native Intel lane whose only runner had been deleted showed up as
+a `warn` row 322 minutes deep, night after night, and no tracker opened.
+
+**A deaf watchdog is itself an alarm.** A sweep with a gap other than the
+completed-listing exception can't alarm, so it is *blind*. The sweep records that
+by running a `Record blind sweep` step, and the next sweep reads that step back
+from the jobs API, so no state is stored anywhere. When 4 sweeps in a row are
+blind (about two hours), the watchdog opens its own tracker,
+`Queue watchdog blind: <reason>`. The tracker names the gap, such as failing
+reads or truncated listings, along with the likely cause and the fix. The first
+sweep that isn't blind closes it. An unreadable history can delay this alarm but
+can't invent one.
+
+**Org runner census authentication.** Label reconciliation reads
+`orgs/<org>/actions/runners`, which needs Administration: Read on the org. The
+workflow uses `RELEASE_BOT_TOKEN` and falls back to `GITHUB_TOKEN`. When the
+fallback is in effect, the org scope refuses the read, and every
+`runner_census_blind` row says so. The fix is a GitHub App installation token
+that has org self-hosted-runner read, minted in the job with
+`actions/create-github-app-token`. Adding that secret is an owner decision.
 
 The issue is edited in place each sweep and closes automatically on recovery —
 the same open/update/auto-close contract as the release watchdogs (see

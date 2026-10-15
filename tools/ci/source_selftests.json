@@ -619,6 +619,12 @@
       ]
     },
     {
+      "name": "proxmox-host-watch-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_proxmox_host_watch.py"
+      ]
+    },
+    {
       "name": "pulp-editor-bridge-contract-gate-selftest",
       "argv": [
         "{repo}/tools/bridge/bridge_contract_gate_checks.py"
@@ -997,6 +1003,12 @@
       "name": "toolchain-test_generate-selftest",
       "argv": [
         "{repo}/tools/toolchain/test_generate.py"
+      ]
+    },
+    {
+      "name": "toolchain-update-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_update.py"
       ]
     },
     {

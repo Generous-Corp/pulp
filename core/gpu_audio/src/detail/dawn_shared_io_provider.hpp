@@ -139,6 +139,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     struct AdapterIdentity {
         std::string name;
         std::string backend;
+        // Native runtime identity is observed independently from AdapterInfo.
         std::string native_runtime_name;
         std::string native_runtime_revision;
         std::uint32_t vendor_id = 0;
