@@ -279,7 +279,8 @@ class CombinedInstallerTest(unittest.TestCase):
                     "#!/bin/bash\n"
                     'printf "%s\\n" "$*" >> "$CAPTURE_WRAPTOOL_ARGV"\n'
                     + ("exit 0\n" if wraptool == "pass"
-                       else '[[ "$1" == verify ]] && { echo "wrap invalid" >&2; exit 1; }\nexit 0\n')
+                       else '[[ "$1" == verify ]] && { echo "wrap invalid" >&2; exit 1; }\nexit 0\n'),
+                    encoding="utf-8",
                 )
                 wraptool_path.chmod(0o755)
 
@@ -536,7 +537,7 @@ class CombinedInstallerTest(unittest.TestCase):
             )
             self._last_returncode = completed.returncode
             self._last_wraptool_argv = (
-                wraptool_argv_capture.read_text()
+                wraptool_argv_capture.read_text(encoding="utf-8")
                 if wraptool_argv_capture.is_file()
                 else ""
             )
