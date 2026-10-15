@@ -63,6 +63,10 @@ add_test(NAME script-test-inputs-drift
 # nothing about the base (tools/ci/pr_head_affected_tests.py).
 set_tests_properties(script-test-inputs-drift PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
     PULP_DIFF_SCOPED TRUE)
+# gate-inventory: compares a manifest generated from the gate configure against
+# this build's ctest inventory, so it only means something on the gate profile.
+# The sanitizer lanes exclude the label (tools/ci/test_sanitizer_gate_inventory.py).
+set_property(TEST script-test-inputs-drift APPEND PROPERTY LABELS gate-inventory)
 add_test(NAME script-test-inputs-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_test_inputs.py")

@@ -11075,6 +11075,13 @@
    ],
    "kind": "python"
   },
+  "sanitizer-gate-inventory-contract": {
+   "entry": "tools/ci/test_sanitizer_gate_inventory.py",
+   "inputs": [
+    "tools/ci/test_sanitizer_gate_inventory.py"
+   ],
+   "kind": "python"
+  },
   "scene3d-cmake-boundary": {
    "entry": "tools/scene3d/verify_scene3d_cmake_boundary.py",
    "inputs": [

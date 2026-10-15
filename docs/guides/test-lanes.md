@@ -133,6 +133,15 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   artifact. A plain `add_test` cannot be labelled from a helper, so
   `commit-bound-labels-selftest` fails such a registration of a literally
   named bound executable that lacks the label.
+- **`gate-inventory`** — a check that compares a manifest generated from the
+  gate configure (`test/ctest_script_inputs.json`, the changed-surface
+  families, the consumption census, `tools/ci/source_selftests.json`) against
+  the configured build's own ctest inventory. It runs on the required gate as
+  normal. The sanitizer lanes exclude it, because a sanitizer configure
+  registers a different set of tests by design and the check would report drift
+  that is not drift. `sanitizer-gate-inventory-contract` fails if a test
+  registered as `--build-dir ${CMAKE_BINARY_DIR}` with a bare `--check` lacks the
+  label, or if a sanitizer ctest run stops excluding it.
 - **no special label** — a normal unit/integration test. Runs on the **required
   gate**. This is where the vast majority of tests belong.
 

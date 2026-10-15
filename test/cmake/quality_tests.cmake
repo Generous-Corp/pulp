@@ -765,6 +765,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME vellum-workflow-dispatch COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_workflow_dispatch.py")
     set_tests_properties(vellum-workflow-dispatch PROPERTIES TIMEOUT 120)
+    # A sanitizer configure's inventory differs from the gate profile's, so the
+    # sanitizer lanes must exclude every gate-inventory check, and every such
+    # check must carry the label. Text-only: no PyYAML, no build tree.
+    add_test(NAME sanitizer-gate-inventory-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_sanitizer_gate_inventory.py")
+    set_tests_properties(sanitizer-gate-inventory-contract PROPERTIES TIMEOUT 120)
     # The privileged Vellum gate constructs its exact base+head candidate
     # locally. Exercise both a clean merge and a real content conflict so the
     # conflict path cannot degrade into an untested fail-open branch.
@@ -1483,6 +1489,9 @@ if(Python3_Interpreter_FOUND)
             # Diff-scoped like script-test-inputs-drift; see PULP_DIFF_SCOPED there.
             set_tests_properties(changed-surface-script-families-drift PROPERTIES
                 TIMEOUT 120 SKIP_RETURN_CODE 77 PULP_DIFF_SCOPED TRUE)
+            # gate-inventory: see script-test-inputs-drift.
+            set_property(TEST changed-surface-script-families-drift APPEND PROPERTY
+                LABELS gate-inventory)
             # A bounded run's base configure is FetchContent-disconnected, so a
             # marked dependency must download only through FetchContent. This
             # configured tree must hold its source, so an absent tree fails.

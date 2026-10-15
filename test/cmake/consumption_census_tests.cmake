@@ -287,6 +287,9 @@ add_test(NAME consumption-census-drift
 set_tests_properties(consumption-census-drift PROPERTIES
     SKIP_RETURN_CODE 77
     PASS_REGULAR_EXPRESSION "consumption_census_verified=true")
+# gate-inventory: the committed census is generated from the gate configure,
+# so a sanitizer or other profile's build tree is not its subject.
+set_property(TEST consumption-census-drift APPEND PROPERTY LABELS gate-inventory)
 
 # A drift gate's value is what it SAYS. `public_headers_by_root` lists the
 # headers walked live from each target's exported include roots, so one new
