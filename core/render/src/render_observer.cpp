@@ -1,4 +1,4 @@
-#include <pulp/render/render_observer.hpp>
+#include "render_observer_private.hpp"
 #include <pulp/render/gpu_surface.hpp>
 
 #if defined(PULP_HAS_SKIA)

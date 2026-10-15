@@ -212,7 +212,9 @@ target_link_libraries(pulp-design-import-bench PRIVATE
 # when measuring the candidate importer's native tree.
 add_executable(pulp-design-ir-observe
     design_ir_observe.cpp)
-target_include_directories(pulp-design-ir-observe PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(pulp-design-ir-observe PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core/render/src)
 target_link_libraries(pulp-design-ir-observe PRIVATE
     pulp::view
     pulp::state
