@@ -4,7 +4,6 @@
 #include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
-#include <pulp/view/step_grid_view.hpp>
 #include <pulp/view/waveform_recorder_view.hpp>
 
 namespace pulp::audio {
