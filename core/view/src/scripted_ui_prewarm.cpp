@@ -34,11 +34,20 @@ namespace {
 constexpr std::size_t kWorkerStackBytes = 8u * 1024u * 1024u;
 
 bool prewarm_enabled() {
+#if defined(_WIN32)
+    // A plug-in DLL can be unloaded while its host-created worker is still
+    // draining. Until a module-level Windows lifecycle callback is available,
+    // fail closed here: no worker means no thread can run under
+    // DLL_PROCESS_DETACH, and the editor remains fully functional (it simply
+    // pays the normal first-open compile cost).
+    return false;
+#else
     static const bool on = [] {
         const char* value = std::getenv("PULP_EDITOR_PREWARM");
         return !(value != nullptr && std::string_view{value} == "0");
     }();
     return on;
+#endif
 }
 
 // The bytecode cache only serves the QuickJS backend.
