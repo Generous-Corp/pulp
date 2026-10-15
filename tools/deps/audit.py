@@ -651,11 +651,6 @@ KNOWN_UNLISTED_FETCHES: dict[tuple[str, str], str] = {
     ("tools/ci/tart-provision.sh", "https://sh.rustup.rs"):
         "CI-host provisioning: rustup installer piped to sh in a CI VM image, "
         "not redistributed. Follow-up: same decision as the other CI-host tools.",
-    ("tools/install-shipyard.sh",
-     "https://raw.githubusercontent.com/danielraffel/Shipyard/refs/tags/${VERSION}/install.sh"):
-        "Developer tooling pinned in tools/shipyard.toml and governed by the "
-        "dependency-update workflow, not redistributed. Follow-up: give it a "
-        "manifest row so its pin is audited with the rest.",
 }
 
 

@@ -517,6 +517,19 @@ scalar fails that check. Verify with:
 python3 -c "import yaml; yaml.safe_load(open('docs/status/cli-commands.yaml')); print('OK')"
 ```
 
+`::` is the same trap: a plain scalar such as `github (::warning:: annotations)`
+fails to parse, and `tools/scripts/pulp_tooling_disposition.py` reports it as
+"cannot parse cli-commands.yaml", not as your entry.
+
+A new command (a script command too) is also a new Vellum tooling surface:
+`python3 tools/scripts/pulp_tooling_disposition.py --write` adds it to
+`docs/status/pulp-tooling-disposition.json` as `UNCLASSIFIED`, which fails the
+check until you set its disposition by hand (`pulp-owned` for a Pulp-only
+workflow). Editing `cli-commands.yaml` also touches the
+`design-output-and-packaging` Vellum watch family, so the push needs a watch
+event (`python3 tools/scripts/vellum_watch_preflight.py --write-event
+--rationale "..."`, then commit it).
+
 ### 3. Decide: does this need a slash command?
 
 **Create a slash command** (`.claude/commands/<name>.md`) if:

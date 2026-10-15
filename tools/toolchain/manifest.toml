@@ -95,6 +95,29 @@ backend = "conda:clang-format"
 url_prefixes = ["https://conda.anaconda.org/conda-forge/"]
 unlocked = { windows-arm64 = "conda-forge publishes no windows-arm64 clang-format; that platform keeps its own" }
 
+[shipyard]
+# Shipyard is CI and PR orchestration, never a build input: it is not in
+# .mise.toolchain.toml, check_env.py never reports it, and no build or test
+# path runs it. generate.py writes this version and repo into
+# tools/shipyard.toml (which Shipyard itself reads) and the digests into
+# tools/toolchain/shipyard.sha256, which tools/install-shipyard.sh checks every
+# download against before installing. The digests are the release's own
+# checksums.sha256; `generate.py --shipyard <tag>` rewrites this table from it.
+version = "v0.269.1"
+repo = "danielraffel/Shipyard"
+# sha256 of install.sh at refs/tags/<version>: install-shipyard.sh runs that
+# script, so it is pinned like a binary and refused if it differs.
+installer_sha256 = "c6ad3645c90cbe91ab6c5caef20b3cc11d4a71abf2443f59aef38fee7387c9a8"
+
+[shipyard.assets]
+"shipyard-linux-arm64" = "8d723c275e8ae8f01d07b5ca15234baabe7b043b6919e43af9eaf96f003ff738"
+"shipyard-linux-x64" = "327dd4b5f72a9dcc225655a61cdd10aefada94960b5611649f90b03f32b4e689"
+"shipyard-macos-arm64.dmg" = "73c426a8a6f949b22c96818d2bc5c60685fbbfcca870318b65fec58d2f056588"
+"shipyard-windows-x64.exe" = "789f53ee7fae7b28fc349e6da9fce1c127ad50a26e8010135acd4a77414f28a8"
+"shipyard-workstream-provider-linux-arm64" = "6999564bde0f70d0b98dd9118c00da6ef8a5a52a71f927298df2094ca1d074fe"
+"shipyard-workstream-provider-linux-x64" = "6ee621c2f60b0ad27407b383f977e9e2b2776db241199b068920769cdfd7837d"
+"shipyard-workstream-provider-windows-x64.exe" = "27ff9704767de3c59dfcde418beba55dd87f9ecfa43f79d763c7de59f2618ea7"
+
 [npm]
 # Project dependencies install with `npm ci` from these committed lockfiles,
 # never `npm install`, so a configure cannot run against a partial tree.

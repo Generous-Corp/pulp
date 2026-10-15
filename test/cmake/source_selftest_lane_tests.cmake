@@ -48,6 +48,9 @@ add_test(NAME toolchain-mise_profile-selftest
 add_test(NAME toolchain-check_env-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/toolchain/test_check_env.py")
+add_test(NAME toolchain-update-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/toolchain/test_update.py")
 add_test(NAME dsp-capability-registry-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_dsp_capability_registry.py")

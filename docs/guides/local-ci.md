@@ -2014,6 +2014,12 @@ annotations are where drift between them shows up first; for example, the
 hosted Linux leg's apt CMake is reported against the 4.3.3 pin, labelled as
 the manifest's declared Linux exception. See [mise](mise.md#checking-your-environment).
 
+The step costs well under a second (0.45 s on the macOS gate VM, 0.10 s on
+hosted Linux), each version probe is capped at 5 s, and the step at 2 minutes,
+so a hung tool cannot stall a leg. It stays report only under `bash -e`
+whatever is missing: no Python on the runner, or a check that cannot read its
+expected versions (exit 3), becomes a warning annotation, never a failed step.
+
 ## Build-time Node dependencies are installed before the build, never inside it
 
 The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an

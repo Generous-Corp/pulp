@@ -1392,6 +1392,31 @@ fi
 
 fi # full environment audit (full setup, or CI --deps-only host admission)
 
+# ── Report: host tools against the toolchain manifest ──────────────────────
+# Names every tool whose version differs from tools/toolchain/manifest.toml,
+# with the fix. It only reads (no install, no network). While the manifest is
+# in warn mode it never fails setup; in enforce mode a difference stops it
+# here, before any dependency is fetched. CI runs the same check as its own
+# build step, so --ci skips it here.
+TOOLCHAIN_CHECK="$REPO_ROOT/tools/toolchain/check_env.py"
+if ! $CI_MODE && [ -f "$TOOLCHAIN_CHECK" ]; then
+    step "Comparing host tools with tools/toolchain/manifest.toml"
+    if TOOLCHAIN_PY="$(command -v python3 || command -v python)"; then
+        TOOLCHAIN_RC=0
+        "$TOOLCHAIN_PY" "$TOOLCHAIN_CHECK" --root "$REPO_ROOT" || TOOLCHAIN_RC=$?
+        case "$TOOLCHAIN_RC" in
+            0) ;;
+            1)
+                echo "  ✗ The toolchain differs from tools/toolchain/manifest.toml (enforce mode); fix the lines above." >&2
+                exit 1
+                ;;
+            *) warn "the toolchain check could not run (exit $TOOLCHAIN_RC); continuing without it" ;;
+        esac
+    else
+        warn "no python3 on PATH; the toolchain check did not run"
+    fi
+fi
+
 # ── Check: External SDKs ───────────────────────────────────────────────────
 
 step "Setting up external SDKs"
