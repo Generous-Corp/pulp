@@ -57,7 +57,23 @@ pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
 # all read it. The per-asset digests live in tools/deps/manifest.json, whose
 # wgpu-native version must equal it (PulpWgpuNative.cmake checks).
 set(PULP_WGPU_NATIVE_VERSION v24.0.3.1)
-if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
+set(_pulp_windows_arm64ec_skia_dawn FALSE)
+if(WIN32 AND CMAKE_GENERATOR_PLATFORM MATCHES "^[Aa][Rr][Mm]64(E[Cc]|[Xx])$")
+    # wgpu-native has no ARM64EC/ARM64X asset.  If the selected Skia
+    # provider ships a matching Dawn archive, it is the complete WebGPU
+    # implementation and the incompatible wgpu-native FetchContent path must
+    # be skipped.  FindSkia re-checks the exact archive during provider setup.
+    foreach(_pulp_skia_candidate
+            "${PULP_SDK_DIR}/external/skia-build/build/win-gpu/lib/Release/arm64ec/dawn_combined.lib"
+            "${SKIA_DIR}/build/win-gpu/lib/Release/arm64ec/dawn_combined.lib"
+            "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build/build/win-gpu/lib/Release/arm64ec/dawn_combined.lib")
+        if(EXISTS "${_pulp_skia_candidate}")
+            set(_pulp_windows_arm64ec_skia_dawn TRUE)
+            break()
+        endif()
+    endforeach()
+endif()
+if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS AND NOT _pulp_windows_arm64ec_skia_dawn)
     pulp_register_fetchcontent_source(webgpu REF 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab)
     FetchContent_Declare(
         webgpu
@@ -170,6 +186,11 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     message(STATUS "Pulp: WebGPU (Dawn) enabled")
 
 endif()
+if(_pulp_windows_arm64ec_skia_dawn)
+    message(STATUS "Pulp: Windows ${CMAKE_GENERATOR_PLATFORM} uses the matching Skia/Dawn provider; skipping wgpu-native")
+endif()
+unset(_pulp_skia_candidate)
+unset(_pulp_windows_arm64ec_skia_dawn)
 
 # Skia Graphite — GPU-accelerated 2D rendering (BSD-3-Clause)
 # Pre-built via skia-builder (desktop) or build-skia-android.sh (Android)

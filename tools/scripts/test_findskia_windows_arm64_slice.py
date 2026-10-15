@@ -24,14 +24,21 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
-    def _make_fixture(self, *, arm64: bool, flat: bool = False) -> pathlib.Path:
-        name = "skia-" + "-".join(n for n, on in (("arm64", arm64), ("flat", flat)) if on)
+    def _make_fixture(self, *, arm64: bool = False, arm64ec: bool = False,
+                      arm64x: bool = False, flat: bool = False) -> pathlib.Path:
+        name = "skia-" + "-".join(n for n, on in (("arm64", arm64),
+                                                   ("arm64ec", arm64ec),
+                                                   ("arm64x", arm64x),
+                                                   ("flat", flat)) if on)
         skia = self.tmp / name
         release = skia / "build" / "win-gpu" / "lib" / "Release"
         (skia / "build" / "include").mkdir(parents=True, exist_ok=True)
         # FindSkia only needs archive-shaped paths for this configure test; the
         # real linkable contents are supplied by skia-builder.
-        for libdir, present in ((release / "arm64", arm64), (release, flat)):
+        for libdir, present in ((release / "arm64", arm64),
+                                (release / "arm64ec", arm64ec),
+                                (release / "arm64x", arm64x),
+                                (release, flat)):
             if present:
                 libdir.mkdir(parents=True, exist_ok=True)
                 for lib in ("skia.lib", "dawn_combined.lib"):
@@ -51,9 +58,9 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         project.mkdir()
         expected = "TRUE" if expect_found else "FALSE"
         checks = ""
-        if expect_slice == "arm64":
-            checks = ('if(NOT SKIA_LIBRARY MATCHES "/arm64/skia\\.lib$")\n'
-                      '  message(FATAL_ERROR "ARM64 archive slice was not selected: ${SKIA_LIBRARY}")\n'
+        if expect_slice in {"arm64", "arm64ec", "arm64x"}:
+            checks = (f'if(NOT SKIA_LIBRARY MATCHES "/{expect_slice}/skia\\.lib$")\n'
+                      f'  message(FATAL_ERROR "{expect_slice} archive slice was not selected: ${{SKIA_LIBRARY}}")\n'
                       "endif()\n")
         elif expect_slice == "flat":
             checks = ('if(SKIA_LIBRARY MATCHES "/arm64/")\n'
@@ -105,13 +112,19 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
                                  expect_found=True, expect_slice="flat")
         self.assertNotIn("selecting Windows ARM64 archive slice", output)
 
-    def test_arm64ec_and_arm64x_targets_take_no_slice(self) -> None:
-        for arch in ("ARM64EC", "ARM64X"):
+    def test_arm64ec_and_arm64x_targets_select_matching_slices(self) -> None:
+        for arch, slice_name, kwargs in (("ARM64EC", "arm64ec", {"arm64ec": True}),
+                                         ("ARM64X", "arm64x", {"arm64x": True})):
             with self.subTest(target=arch):
-                output = self._configure(self._make_fixture(arm64=True, flat=True),
-                                         target_arch=arch, expect_found=False)
-                self.assertNotIn("selecting Windows ARM64 archive slice", output)
-                self.assertIn(f"no Windows archive slice for {arch.lower()}-win", output)
+                output = self._configure(self._make_fixture(**kwargs),
+                                         target_arch=arch, expect_found=True,
+                                         expect_slice=slice_name)
+                self.assertIn(f"selecting Windows {slice_name} archive slice", output)
+
+    def test_arm64ec_without_matching_slice_fails_closed(self) -> None:
+        output = self._configure(self._make_fixture(arm64=True, flat=True),
+                                 target_arch="ARM64EC", expect_found=False)
+        self.assertIn("no Windows archive slice for arm64ec-win", output)
 
 
 if __name__ == "__main__":
