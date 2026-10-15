@@ -4713,6 +4713,7 @@
    "entry": "tools/scripts/test_findskia_windows_arm64_slice.py",
    "inputs": [
     "tools/cmake/FindSkia.cmake",
+    "tools/cmake/PulpDependencies.cmake",
     "tools/cmake/PulpWindowsSkiaProvider.cmake",
     "tools/scripts/test_findskia_windows_arm64_slice.py"
    ],
