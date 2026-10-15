@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from PIL import Image
@@ -270,6 +271,90 @@ class DifferentialLabTests(unittest.TestCase):
             empty.write_text("{}")
             with self.assertRaisesRegex(ValueError, "at least one"):
                 LAB_CLI.read_timing_budgets(empty)
+
+    def test_benchmark_cache_buckets_require_an_explicit_campaign_state(self) -> None:
+        reports = [
+            {"timings": {"browser_import_ms": 100, "native_total_ms": 20}},
+            {"timings": {"browser_import_ms": 80, "native_total_ms": 10}},
+        ]
+        unknown_cold = LAB_CLI.cache_bucket(reports, "unknown", "cold")
+        self.assertEqual(unknown_cold["status"], "unverified")
+        self.assertIn("not measured", unknown_cold["reason"])
+        declared_warm = LAB_CLI.cache_bucket(reports, "warm", "warm")
+        self.assertEqual(declared_warm["status"], "measured")
+        self.assertEqual(declared_warm["cache_state"], "warm")
+        self.assertEqual(declared_warm["browser_import_p50_ms"], 90.0)
+
+    def test_benchmark_sequence_stats_are_named_by_position(self) -> None:
+        reports = [
+            {"timings": {"browser_import_ms": 100, "native_total_ms": 20}},
+            {"timings": {"browser_import_ms": 80, "native_total_ms": 10}},
+        ]
+        self.assertEqual(
+            LAB_CLI.timing_summary(reports),
+            {
+                "browser_import_p50_ms": 90.0,
+                "browser_import_p95_ms": 100,
+                "native_total_p50_ms": 15.0,
+                "native_total_p95_ms": 20,
+                "p50_ms_saved": 75.0,
+            },
+        )
+
+    def test_benchmark_receipt_does_not_infer_cache_state_from_run_order(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            importer = root / "importer"
+            observer = root / "observer"
+            source = root / "fixture.html"
+            importer.write_text("importer", encoding="utf-8")
+            observer.write_text("observer", encoding="utf-8")
+            source.write_text("<main>fixture</main>", encoding="utf-8")
+            output = root / "benchmark"
+
+            def fake_compare(*_args, **kwargs):
+                return {
+                    "fixture": {"id": "fixture"},
+                    "source": {"path": source.name, "sha256": "source"},
+                    "oracle": {"authority": "chromium"},
+                    "timings": {
+                        "browser_import_ms": 100,
+                        "native_import_ms": 10,
+                        "native_render_ms": 5,
+                        "native_total_ms": 15,
+                        "browser_to_native_import_speedup": 10.0,
+                    },
+                    "observability": {
+                        "cache_state": {"identity": kwargs["cache_state"]},
+                        "ttni_proxy": {"value_ms": 10},
+                    },
+                    "timing_budget": {"status": "not-requested"},
+                    "promotion": {"classification": "browser-required"},
+                    "comparison": {},
+                }
+
+            args = Namespace(
+                importer=importer,
+                observer=observer,
+                file=source,
+                output=output,
+                runs=2,
+                timeout_seconds=1,
+                from_source="html",
+                browser=None,
+                cache_state="unknown",
+                timing_budget=None,
+            )
+            with patch.object(LAB_CLI, "compare_one", side_effect=fake_compare):
+                with redirect_stdout(io.StringIO()):
+                    result = LAB_CLI.command_benchmark(args)
+            self.assertEqual(result, 0)
+            benchmark = json.loads(
+                (output / "benchmark.json").read_text(encoding="utf-8"))
+            self.assertEqual(benchmark["cold"]["status"], "unverified")
+            self.assertEqual(benchmark["warm"]["status"], "unverified")
+            self.assertEqual(benchmark["first_invocation"]["browser_import_ms"], 100)
+            self.assertEqual(benchmark["repeat_runs"]["browser_import_p50_ms"], 100.0)
 
     def test_missing_corpus_fixture_is_counted_in_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
