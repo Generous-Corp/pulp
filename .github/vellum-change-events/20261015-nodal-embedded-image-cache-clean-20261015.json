@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261015-nodal-embedded-image-cache-clean-20261015",
+  "kind": "change",
+  "created_at": "2026-10-15T10:59:09Z",
+  "slices": [
+    "canvas-kernel",
+    "render-skia-dawn"
+  ],
+  "rationale": "The Pulp-owned embedded image cache now coalesces same-key builds, synchronizes enablement, and invalidates backend-specific entries during Graphite and Ganesh surface teardown. This is a Pulp-only cache lifetime and concurrency fix with no public API removal and no authority boundary move.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "build/test/pulp-test-group-canvas [image-cache]"
+  ],
+  "disposition": "pulp-only"
+}
