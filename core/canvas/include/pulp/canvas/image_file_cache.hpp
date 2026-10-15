@@ -79,6 +79,10 @@ public:
     /// (see the semantic-change note above) and for GPU-context teardown.
     void clear();
 
+    /// Drop entries tied to one GPU backend before that backend is destroyed.
+    /// A null backend key is ignored because it denotes the shared CPU-raster entry.
+    void clear_backend(const void* backend_key);
+
     /// Toggle caching globally. When false, get_or_build still works but always
     /// rebuilds and stores nothing (used to A/B against the uncached path and to
     /// keep golden / micro-benchmark harnesses deterministic).
