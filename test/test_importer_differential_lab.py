@@ -356,6 +356,34 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertEqual(benchmark["first_invocation"]["browser_import_ms"], 100)
             self.assertEqual(benchmark["repeat_runs"]["browser_import_p50_ms"], 100.0)
 
+            try:
+                import jsonschema
+            except ImportError:
+                self.skipTest("requires jsonschema")
+            schema = json.loads(
+                (REPO / "tools/import-validation/schemas/"
+                 "importer-differential-benchmark-v1.schema.json")
+                .read_text(encoding="utf-8"))
+            validator = jsonschema.Draft202012Validator(schema)
+            validator.validate(benchmark)
+
+            legacy = dict(benchmark)
+            legacy["cold"] = {
+                "browser_import_ms": 100,
+                "native_import_ms": 10,
+                "native_render_ms": 5,
+                "native_total_ms": 15,
+                "browser_to_native_import_speedup": 10.0,
+            }
+            legacy["warm"] = {
+                "browser_import_p50_ms": 100.0,
+                "browser_import_p95_ms": 100,
+                "native_total_p50_ms": 15.0,
+                "native_total_p95_ms": 15,
+                "p50_ms_saved": 85.0,
+            }
+            validator.validate(legacy)
+
     def test_missing_corpus_fixture_is_counted_in_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
