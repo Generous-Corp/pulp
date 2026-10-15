@@ -10,8 +10,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/canvas/image_file_cache.hpp>
+#include <pulp/canvas/skia_canvas.hpp>
 
 #include "include/core/SkImage.h"
+#include "include/core/SkBitmap.h"
 #include "include/core/SkSurface.h"
 
 #include <atomic>
@@ -27,6 +29,42 @@ sk_sp<SkImage> make_dummy_image() {
 }
 
 } // namespace
+
+TEST_CASE("Static embedded sprite decodes once across canvas frames",
+          "[canvas][image-cache][embedded]") {
+    // 2x1 RGBA PNG: red, blue. Static storage is part of this API's contract.
+    static constexpr std::uint8_t png[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0xf4, 0x22, 0x7f, 0x8a,
+        0x00, 0x00, 0x00, 0x0e, 0x49, 0x44, 0x41, 0x54,
+        0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x42,
+        0xff, 0x01, 0x0f, 0xf9, 0x03, 0xfd, 0x85, 0x11,
+        0x99, 0x76, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+        0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    };
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+
+    for (int frame = 0; frame < 2; ++frame) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(4, 2));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        REQUIRE(canvas.draw_image_from_static_data_rect(
+            png, sizeof(png), 1, 0, 1, 1, 0, 0, 4, 2));
+        SkBitmap pixels;
+        REQUIRE(pixels.tryAllocN32Pixels(4, 2));
+        REQUIRE(surface->readPixels(pixels, 0, 0));
+        const auto color = pixels.getColor(2, 1);
+        REQUIRE(SkColorGetB(color) > 200);
+        REQUIRE(SkColorGetR(color) < 50);
+    }
+    REQUIRE(cache.stats().builds == 1);
+    REQUIRE(cache.stats().hits == 1);
+}
 
 TEST_CASE("ImageFileCache: miss builds, hit reuses", "[canvas][image-cache][issue-6223]") {
     auto& cache = ImageFileCache::instance();
