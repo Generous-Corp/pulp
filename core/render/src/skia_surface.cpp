@@ -2,6 +2,7 @@
 
 #ifdef PULP_HAS_SKIA
 
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/render/gpu_render_time.hpp>
 #include <pulp/runtime/log.hpp>
@@ -101,6 +102,10 @@ public:
         canvas_.reset();
         retained_layers_.reset();
         if (image_provider_) image_provider_->clear();
+        // Cached textures are recorder-bound; invalidate them before the
+        // recorder/context are destroyed so a recycled pointer cannot alias
+        // stale GPU images in a future surface.
+        canvas::ImageFileCache::instance().clear_backend(recorder_.get());
         if (context_) {
             // Drain any outstanding finished callbacks (GPU stats and the
             // in-flight count) before `this` dies — they capture `this` as their context, so a
