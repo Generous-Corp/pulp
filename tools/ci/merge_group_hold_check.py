@@ -74,13 +74,13 @@ COMMENTS_QUERY = (
     "query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,"
     "name:$name){pullRequest(number:$number){author{login} comments(first:100,after:$after)"
     "{totalCount pageInfo{hasNextPage endCursor}"
-    " nodes{author{login} authorAssociation body createdAt url}}}}}"
+    " nodes{author{__typename login} authorAssociation body createdAt url}}}}}"
 )
 REVIEWS_QUERY = (
     "query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,"
     "name:$name){pullRequest(number:$number){author{login} reviews(first:100,after:$after)"
     "{totalCount pageInfo{hasNextPage endCursor}"
-    " nodes{author{login} authorAssociation state submittedAt url commit{oid}}}}}}"
+    " nodes{author{__typename login} authorAssociation state submittedAt url commit{oid}}}}}}"
 )
 # A merge queue builds at most 100 entries; anything longer is not a queue group.
 MAX_ENTRIES = 512
@@ -116,14 +116,19 @@ def normalized(login: str) -> str:
 
 
 def trusted(login: Optional[str], association: Optional[str], author: Optional[str],
-            approve: bool = True) -> bool:
-    """Whether a verdict counts: an APPROVE only from the fleet App; a HOLD from
-    the fleet App, an OWNER/MEMBER/COLLABORATOR, or the pull request's author."""
+            approve: bool = True, bot: bool = False) -> bool:
+    """Whether a verdict counts: an APPROVE only from the fleet App itself (a
+    `Bot` named `shipyard-local`); a HOLD from the fleet App, an
+    OWNER/MEMBER/COLLABORATOR, or the pull request's author.
+
+    GraphQL names the App `shipyard-local`, a login anyone can register as a
+    user, so an APPROVE needs the author's `__typename` to be `Bot`. A HOLD
+    from such a user still counts: it can only stop a landing."""
     if not login:
         return False
     fleet = normalized(login) == FLEET_APP
     if approve:
-        return fleet
+        return fleet and bot
     own = author is not None and normalized(author) == normalized(login)
     return fleet or own or association in TRUSTED_ASSOCIATIONS
 
@@ -147,7 +152,8 @@ def latest_verdict(pr: Dict[str, Any], head: str) -> Optional[Dict[str, Any]]:
         parsed = verdict_line(comment.get("body") or "")
         login = (comment.get("author") or {}).get("login")
         if parsed and parsed[1] == head.lower() \
-                and trusted(login, comment.get("authorAssociation"), author, parsed[0]):
+                and trusted(login, comment.get("authorAssociation"), author, parsed[0],
+                            (comment.get("author") or {}).get("__typename") == "Bot"):
             found.append({"approve": parsed[0], "at": comment.get("createdAt") or "",
                           "url": comment.get("url")})
     for review in ((pr.get("reviews") or {}).get("nodes") or []):
@@ -157,7 +163,8 @@ def latest_verdict(pr: Dict[str, Any], head: str) -> Optional[Dict[str, Any]]:
         login = (review.get("author") or {}).get("login")
         if ((review.get("commit") or {}).get("oid") or "").lower() == head.lower() \
                 and trusted(login, review.get("authorAssociation"), author,
-                            state == "APPROVED"):
+                            state == "APPROVED",
+                            (review.get("author") or {}).get("__typename") == "Bot"):
             found.append({"approve": state == "APPROVED", "at": review.get("submittedAt") or "",
                           "url": review.get("url")})
     # The newest wins; at the same time a HOLD wins.

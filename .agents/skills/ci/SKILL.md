@@ -384,8 +384,9 @@ when a queued pull request's latest trusted verdict on the head it lands is
 HOLD. Its error annotation names the pull request, the HOLD's URL and the fix:
 a new head plus the fleet App's APPROVE, or the App's APPROVE on that head if
 the HOLD no longer applies, then re-queue. Only the fleet App's APPROVE (a
-verdict posted through `ghapp`) clears a HOLD here; a human account's APPROVE,
-comment or review, never does. It fails closed: an "(unreadable)" error annotation
+verdict posted through `ghapp`, whose author is a `Bot`) clears a HOLD here; a
+human account's APPROVE, comment or review, never does, and neither does a
+user account named `shipyard-local`. It fails closed: an "(unreadable)" error annotation
 means it could not read the group (a commit on the chain, a missing token) or a
 pull request's comments or reviews in full (a failed read, a GraphQL `errors`
 answer, a list short of its `totalCount`), and that fails the group too. A
