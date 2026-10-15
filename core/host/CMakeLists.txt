@@ -11,6 +11,7 @@ target_include_directories(pulp-host
 target_sources(pulp-host PRIVATE
     src/scanner.cpp
     src/signal_graph.cpp
+    src/signal_graph_authoring.cpp
     src/signal_graph_process.cpp
     src/signal_graph_diagnostics.cpp
     src/signal_graph_control.cpp
