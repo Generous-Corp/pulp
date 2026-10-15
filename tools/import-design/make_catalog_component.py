@@ -83,7 +83,7 @@ def main():
         f"  static const char* const kParts[] = {{\n{arr}\n  }};\n"
         f"  static const std::string kJoined = [] {{ std::string s; for (const char* p : kParts) s += p; return s; }}();\n"
         f"  return kJoined.c_str();\n}}\n\n}}  // namespace pulp::view::detail\n")
-    open(os.path.join(source_dir, f"{snk}_svg.cpp"), "w").write(data_cpp)
+    open(os.path.join(source_dir, f"{snk}_svg.cpp"), "w", encoding="utf-8").write(data_cpp)
 
     # 2) header
     hpp = (
@@ -95,7 +95,7 @@ def main():
         f"// reskin/extend via the faithful-vector lane, never by hand-painting.\n"
         f"class {a.cls} : public DesignFrameView {{\npublic:\n    {a.cls}();\n}};\n\n"
         f"}}  // namespace pulp::view\n")
-    open(os.path.join(include_dir, f"{snk}.hpp"), "w").write(hpp)
+    open(os.path.join(include_dir, f"{snk}.hpp"), "w", encoding="utf-8").write(hpp)
 
     # 3) impl
     cpp = (
@@ -107,7 +107,7 @@ def main():
         f"        return std::string(bytes->begin(), bytes->end());\n    return {{}};\n}}\n}}  // namespace\n\n"
         f"{a.cls}::{a.cls}() : DesignFrameView(decode_{snk}_svg(), /*elements=*/{{}}) {{}}\n\n"
         f"}}  // namespace pulp::view\n")
-    open(os.path.join(source_dir, f"{snk}.cpp"), "w").write(cpp)
+    open(os.path.join(source_dir, f"{snk}.cpp"), "w", encoding="utf-8").write(cpp)
 
     rel_root = a.output_root.rstrip("/")
     print(f"[2/3] wrote {rel_root}/{{include/pulp/view/{snk}.hpp, src/{snk}.cpp, src/{snk}_svg.cpp}}")
