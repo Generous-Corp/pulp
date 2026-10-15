@@ -1413,6 +1413,9 @@ class GeneratedDigestTests(unittest.TestCase):
                     "foreach(_prelude ${PULP_JS_PRELUDES} ${PULP_JS_PRELUDES})", 1)),
                 ("entire producer block comment", "#[[\n" + original + "\n]]\n"),
                 ("entire equals-delimited block comment", "#[=[\n" + original + "\n]=]\n"),
+                ("trailing raw text", original + "\nnot_a_cmake_command\n"),
+                ("unterminated quoted argument", original + '\nset(foo "unterminated\n'),
+                ("unterminated bracket comment", original + "\n#[=[ unterminated\n"),
             )
             for description, mutation in adversarial_mutations:
                 producer.write_text(mutation, encoding="utf-8")
