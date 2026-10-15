@@ -4996,6 +4996,7 @@
   "gpu-audio-p2-campaign-contract-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
    "inputs": [
+    "tools/deps/manifest.json",
     "tools/scripts/gpu_audio_p2_campaign.py",
     "tools/scripts/test_gpu_audio_p2_campaign.py"
    ],
