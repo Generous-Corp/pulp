@@ -7,6 +7,7 @@
   "owned_paths": [
     "core/view/audio/include/pulp/view/eq_curve_view.hpp",
     "core/view/audio/include/pulp/view/visualization_bridge.hpp",
+    "core/timeline_view/CMakeLists.txt",
     "docs/status/sequencer-exposure/rows/view-audio-sdk-carve.json"
   ],
   "evidence": [
@@ -21,12 +22,16 @@
     {
       "path": "core/view/CMakeLists.txt",
       "needles": ["add_library(pulp-view-audio)", "target_link_libraries(pulp-view-audio PUBLIC pulp::audio pulp::signal pulp::midi)"]
+    },
+    {
+      "path": "core/timeline_view/CMakeLists.txt",
+      "needles": ["pulp::view-audio"]
     }
   ],
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "The public header names stay under pulp/view and the installed SDK copies the audio include tree. The separate view-audio target supplies their audio and signal dependencies and remains in the view umbrella. Release and installed-consumer evidence remain pending.",
+      "rationale": "The public header names stay under pulp/view and the installed SDK copies the audio include tree. The separate view-audio target supplies their audio and signal dependencies and remains in the view umbrella; the timeline piano-roll ruler now consumes that target explicitly after the shared MIDI keyboard moved into the audio slice. Release and installed-consumer evidence remain pending.",
       "evidence": [
         {
           "kind": "sdk_header",
