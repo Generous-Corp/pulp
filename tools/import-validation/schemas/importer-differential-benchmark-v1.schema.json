@@ -10,10 +10,50 @@
     "runs": {"type": "integer", "minimum": 1},
     "provenance": {"type": "object"},
     "run_receipts": {"type": "array", "minItems": 1},
-    "cold": {"type": "object"},
-    "warm": {
+    "cold": {"$ref": "#/$defs/cacheBucket"},
+    "warm": {"$ref": "#/$defs/cacheBucket"},
+    "first_invocation": {"type": "object"},
+    "repeat_runs": {"type": "object"}
+  },
+  "$defs": {
+    "cacheBucket": {
       "type": "object",
-      "required": ["browser_import_p50_ms", "browser_import_p95_ms", "native_total_p50_ms", "native_total_p95_ms", "p50_ms_saved"]
+      "oneOf": [
+        {
+          "required": ["status", "cache_state", "browser_import_p50_ms", "browser_import_p95_ms", "native_total_p50_ms", "native_total_p95_ms", "p50_ms_saved"],
+          "properties": {
+            "status": {"const": "measured"},
+            "cache_state": {"enum": ["cold", "warm"]},
+            "browser_import_p50_ms": {"type": "number"},
+            "browser_import_p95_ms": {"type": "number"},
+            "native_total_p50_ms": {"type": "number"},
+            "native_total_p95_ms": {"type": "number"},
+            "p50_ms_saved": {"type": "number"}
+          }
+        },
+        {
+          "required": ["status", "cache_state", "reason"],
+          "properties": {
+            "status": {"const": "unverified"},
+            "cache_state": {"enum": ["cold", "warm", "unknown"]},
+            "reason": {"type": "string"}
+          }
+        },
+        {
+          "required": ["browser_import_ms", "native_import_ms", "native_render_ms", "native_total_ms", "browser_to_native_import_speedup"],
+          "properties": {
+            "browser_import_ms": {"type": "number"},
+            "native_import_ms": {"type": "number"},
+            "native_render_ms": {"type": "number"},
+            "native_total_ms": {"type": "number"},
+            "browser_to_native_import_speedup": {"type": "number"}
+          }
+        },
+        {
+          "not": {"required": ["status"]},
+          "required": ["browser_import_p50_ms", "browser_import_p95_ms", "native_total_p50_ms", "native_total_p95_ms", "p50_ms_saved"]
+        }
+      ]
     }
   }
 }

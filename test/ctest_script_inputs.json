@@ -6434,7 +6434,8 @@
   "importer-differential-lab": {
    "entry": "test/test_importer_differential_lab.py",
    "inputs": [
-    "test/test_importer_differential_lab.py"
+    "test/test_importer_differential_lab.py",
+    "tools/import-validation/schemas"
    ],
    "kind": "python"
   },
