@@ -4512,6 +4512,24 @@ Before this exception existed, every sweep was degraded, so the watchdog could
 never alarm. A native Intel lane whose only runner had been deleted showed up as
 a `warn` row 322 minutes deep, night after night, and no tracker opened.
 
+**A deaf watchdog is itself an alarm.** A sweep with a gap other than the
+completed-listing exception can't alarm, so it is *blind*. The sweep records that
+by running a `Record blind sweep` step, and the next sweep reads that step back
+from the jobs API, so no state is stored anywhere. When 4 sweeps in a row are
+blind (about two hours), the watchdog opens its own tracker,
+`Queue watchdog blind: <reason>`. The tracker names the gap, such as failing
+reads or truncated listings, along with the likely cause and the fix. The first
+sweep that isn't blind closes it. An unreadable history can delay this alarm but
+can't invent one.
+
+**Org runner census authentication.** Label reconciliation reads
+`orgs/<org>/actions/runners`, which needs Administration: Read on the org. The
+workflow uses `RELEASE_BOT_TOKEN` and falls back to `GITHUB_TOKEN`. When the
+fallback is in effect, the org scope refuses the read, and every
+`runner_census_blind` row says so. The fix is a GitHub App installation token
+that has org self-hosted-runner read, minted in the job with
+`actions/create-github-app-token`. Adding that secret is an owner decision.
+
 The issue is edited in place each sweep and closes automatically on recovery —
 the same open/update/auto-close contract as the release watchdogs (see
 [release-watchdog.md](release-watchdog.md)). A runner-lane report names the

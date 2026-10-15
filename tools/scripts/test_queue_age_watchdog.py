@@ -355,6 +355,74 @@ class TestCompletedListingTruncation(unittest.TestCase):
         self.assertIn("steps.scan.outputs.count != '0'", step)
 
 
+class TestBlindWatchdog(unittest.TestCase):
+    """A watchdog that cannot alarm for 4 sweeps in a row is itself an alarm."""
+
+    FAILED = {"errors": [{"run_id": 7, "status": "in_progress", "error": "HTTP 502"}]}
+
+    def blind_snapshot(self, prior):
+        return dict(self.FAILED, prior_sweeps_blind=list(prior))
+
+    def test_four_blind_sweeps_alarm_and_three_do_not(self):
+        three = qaw.analyze_blindness(self.blind_snapshot([True, True]))
+        four = qaw.analyze_blindness(self.blind_snapshot([True, True, True]))
+        self.assertEqual((three["streak"], three["alarm"]), (3, False))
+        self.assertEqual((four["streak"], four["alarm"]), (4, True))
+        self.assertIn("1 API read(s) failing", four["reason"])
+
+    def test_a_sighted_or_unreadable_sweep_breaks_the_streak(self):
+        for prior in ([True, False, True], [True, None, True]):
+            with self.subTest(prior=prior):
+                self.assertEqual(
+                    qaw.analyze_blindness(self.blind_snapshot(prior))["streak"], 2)
+
+    def test_a_sighted_sweep_is_never_blind(self):
+        # Negative control: no gap, and a history of blindness, still no alarm.
+        result = qaw.analyze_blindness({"prior_sweeps_blind": [True, True, True]})
+        self.assertEqual((result["blind"], result["alarm"]), (False, False))
+
+    def test_completed_truncation_alone_is_not_blindness(self):
+        # That gap cannot hide a live lane and is excepted, so the permanent
+        # truncation on this repo must not keep the blind tracker open forever.
+        snap = {"truncated": ["completed"], "prior_sweeps_blind": [True, True, True]}
+        self.assertFalse(qaw.analyze_blindness(snap)["blind"])
+        snap["truncated"] = ["completed", "in_progress"]
+        result = qaw.analyze_blindness(snap)
+        self.assertTrue(result["alarm"])
+        self.assertIn("run listing truncated (completed, in_progress)", result["reason"])
+
+    def test_history_reads_the_record_step_from_each_prior_sweep(self):
+        runs = {"workflow_runs": [
+            {"id": 9, "run_started_at": "2026-10-14T18:00:00Z"},
+            {"id": 8, "run_started_at": "2026-10-14T17:30:00Z"},
+            {"id": 7, "run_started_at": "2026-10-14T17:00:00Z"},
+            {"id": 6, "run_started_at": "2026-10-14T16:30:00Z"},
+        ]}
+        steps = {
+            9: [{"name": qaw.BLIND_STEP_NAME, "conclusion": "success"}],
+            8: [{"name": qaw.BLIND_STEP_NAME, "conclusion": "skipped"}],
+            7: [{"name": "Scan queued jobs", "conclusion": "success"}],
+        }
+
+        def api(path):
+            if "/workflows/" in path:
+                return runs
+            run_id = int(path.split("/runs/")[1].split("/")[0])
+            return {"jobs": [{"steps": steps[run_id]}]}
+
+        snap = {}
+        with mock.patch.object(qaw, "_gh_api", side_effect=api), \
+             mock.patch.dict("os.environ", {"GITHUB_RUN_ID": "10"}):
+            self.assertEqual(qaw._prior_sweeps_blind("o/r", snap), [True, False, None])
+
+    def test_workflow_records_blindness_under_the_step_name_the_reader_uses(self):
+        workflow = (Path(__file__).resolve().parents[2]
+                    / ".github/workflows/runner-health-check.yml").read_text(encoding="utf-8")
+        self.assertIn(f"- name: {qaw.BLIND_STEP_NAME}\n        if: steps.scan.outputs.blind == 'true'",
+                      workflow)
+        self.assertIn(f"prefix='{qaw.BLIND_TITLE_PREFIX}'", workflow)
+
+
 class TestCollection(unittest.TestCase):
     def test_collects_pending_build_and_test_run_only_after_empty_jobs_response(self):
         pending_runs = {

@@ -103,6 +103,16 @@ MAX_RUNS_PER_STATUS = 60
 # with no comparable job in progress alarms even when the completed listing
 # truncated. The multiple is the price paid for the one blind spot left.
 TRUNCATED_COMPLETED_ALARM_FACTOR = 2.0
+# A sweep that cannot alarm is a blind sweep. One blind sweep is a hiccup; a
+# run of them is a monitor that has gone deaf, which is how this watchdog spent
+# weeks unable to fire. BLIND_SWEEP_THRESHOLD consecutive blind sweeps (two
+# hours at the requested cadence) are themselves an alarm, on their own
+# tracker. Each sweep records its blindness as the presence of the
+# BLIND_STEP_NAME step in its job, so the history is read from the jobs API
+# with no state stored anywhere.
+BLIND_SWEEP_THRESHOLD = 4
+BLIND_STEP_NAME = "Record blind sweep"
+BLIND_TITLE_PREFIX = "Queue watchdog blind"
 COMPLETED_LOOKBACK_HOURS = 3
 UNEXPANDED_WORKFLOW = "Build and Test"
 UNEXPANDED_WORKFLOW_PATH = ".github/workflows/build.yml"
@@ -246,6 +256,57 @@ def evidence_gaps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return gaps
 
 
+def completed_truncation_only(snapshot: dict[str, Any]) -> bool:
+    """The one gap that cannot hide a live lane: see TRUNCATED_COMPLETED_ALARM_FACTOR."""
+    return not snapshot.get("errors") and set(snapshot.get("truncated") or []) == {"completed"}
+
+
+def blinding_gaps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Gaps that leave this sweep unable to alarm on a stalled lane."""
+    if completed_truncation_only(snapshot):
+        return []
+    return evidence_gaps(snapshot)
+
+
+def blind_reason(gaps: list[dict[str, Any]]) -> str:
+    truncated = sorted({g["status"] for g in gaps if g.get("error") == "run listing truncated"})
+    failed = [g for g in gaps if g.get("error") != "run listing truncated"]
+    parts = []
+    if failed:
+        parts.append(f"{len(failed)} API read(s) failing")
+    if truncated:
+        parts.append(f"run listing truncated ({', '.join(truncated)})")
+    return "; ".join(parts) or "evidence incomplete"
+
+
+def analyze_blindness(
+    snapshot: dict[str, Any], threshold: int = BLIND_SWEEP_THRESHOLD
+) -> dict[str, Any]:
+    """Whether this sweep is blind, and how many sweeps in a row have been.
+
+    `prior_sweeps_blind` lists the newest earlier sweeps first: True when that
+    sweep recorded BLIND_STEP_NAME, False when it ran and did not, None when its
+    record is unreadable or predates the record. Only an unbroken run of True
+    extends the streak, so an unreadable history can delay this alarm but
+    never invent one.
+    """
+    gaps = blinding_gaps(snapshot)
+    if not gaps:
+        return {"blind": False, "streak": 0, "alarm": False, "gaps": [], "reason": ""}
+    streak = 1
+    for flag in snapshot.get("prior_sweeps_blind") or []:
+        if flag is not True:
+            break
+        streak += 1
+    return {
+        "blind": True,
+        "streak": streak,
+        "alarm": streak >= threshold,
+        "gaps": gaps,
+        "reason": blind_reason(gaps),
+    }
+
+
 def is_target_unexpanded_run(run: dict[str, Any]) -> bool:
     """Whether a recorded run belongs to the one pre-expansion alert surface."""
     return (
@@ -274,9 +335,7 @@ def analyze(
     every 30 min, so the cost of waiting for complete evidence is one cycle.
     """
     degraded = bool(evidence_gaps(snapshot))
-    completed_truncation_only = degraded and not snapshot.get("errors") and set(
-        snapshot.get("truncated") or []
-    ) == {"completed"}
+    truncation_only = degraded and completed_truncation_only(snapshot)
 
     live = []
     for entry in snapshot.get("live_jobs", []):
@@ -359,7 +418,7 @@ def analyze(
             level = "alarm"
         elif (
             served_by is None
-            and completed_truncation_only
+            and truncation_only
             and age >= alarm_minutes * TRUNCATED_COMPLETED_ALARM_FACTOR
         ):
             level = "alarm"
@@ -1225,7 +1284,77 @@ def collect_snapshot(repo: str, now: dt.datetime) -> dict[str, Any]:
     # depend on it. runner_census_gaps() is its own evidence predicate.
     snapshot["runner_census"] = collect_runner_census(repo)
     snapshot["previous_sweep_at"] = _previous_sweep_at(repo, snapshot)
+    snapshot["prior_sweeps_blind"] = _prior_sweeps_blind(repo, snapshot)
     return snapshot
+
+
+def _prior_sweeps_blind(
+    repo: str, snapshot: dict[str, Any], count: int = BLIND_SWEEP_THRESHOLD - 1
+) -> list[bool | None]:
+    """Blindness of the newest `count` earlier sweeps, newest first.
+
+    One run listing plus one jobs call per sweep read. A failure is recorded
+    and returns an empty history, which can only delay the blind alarm.
+    """
+    current = os.environ.get("GITHUB_RUN_ID", "")
+    flags: list[bool | None] = []
+    try:
+        data = _gh_api(
+            f"/repos/{repo}/actions/workflows/{SWEEP_WORKFLOW_FILE}"
+            "/runs?status=completed&per_page=10"
+        )
+        runs = [r for r in data.get("workflow_runs") or []
+                if not (current and str(r.get("id")) == current)]
+        runs.sort(key=lambda r: parse_ts(r.get("run_started_at") or r.get("created_at") or "1970-01-01T00:00:00Z"),
+                  reverse=True)
+        for run in runs[:count]:
+            jobs = _gh_api(f"/repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100")
+            steps = [st for job in jobs.get("jobs") or [] for st in job.get("steps") or []]
+            names = {st.get("name"): st.get("conclusion") for st in steps}
+            if BLIND_STEP_NAME not in names:
+                flags.append(None)
+            else:
+                flags.append(names[BLIND_STEP_NAME] == "success")
+    except (subprocess.CalledProcessError, json.JSONDecodeError, TypeError, KeyError) as exc:
+        snapshot.setdefault("blind_history_error", str(exc)[:200])
+        return []
+    return flags
+
+
+def render_blind_body(blindness: dict[str, Any], now: dt.datetime) -> str:
+    gaps = blindness["gaps"]
+    lines = [
+        f"_Auto-generated by `.github/workflows/runner-health-check.yml` on "
+        f"{now.strftime('%Y-%m-%d %H:%M UTC')}._",
+        "",
+        f"**What:** the queue-age watchdog has been unable to alarm for "
+        f"{blindness['streak']} consecutive sweeps. Every sweep in that run had an "
+        "evidence gap, and a sweep with a gap suppresses its queue-stall alarms, so a "
+        "dead runner lane would stay silent for as long as this lasts.",
+        "",
+        f"**Evidence gap:** {blindness['reason']}.",
+        "",
+    ]
+    for gap in gaps[:20]:
+        lines.append(f"- `{json.dumps(gap, sort_keys=True)[:300]}`")
+    lines += [
+        "",
+        "**Likely cause:** an API read that now fails on every sweep (a token that "
+        "lost a permission, a rate limit, an endpoint that moved), or a listing that "
+        "truncates on every sweep because the repo got busier than its page cap.",
+        "",
+        "**Fix:** open the newest sweep's log, find the failing read in "
+        "`snapshot.json` (`errors` / `truncated`), and fix the read or raise the cap "
+        "in `tools/scripts/queue_age_watchdog.py`. A gap that is present on every "
+        "sweep must either be fixed or be proved unable to hide a live lane and "
+        "excepted, as the completed-listing truncation is.",
+        "",
+        "**Safe to auto-apply:** no; a suppression rule is a judgment call.",
+        "",
+        "**Verify:** a sweep with `degraded=false` (or only the completed-listing "
+        "truncation) closes this issue automatically.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def _previous_sweep_at(repo: str, snapshot: dict[str, Any]) -> str:
@@ -1532,6 +1661,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--snapshot-out", default="")
     ap.add_argument("--body-out", default="body.md")
     ap.add_argument("--contribution-body-out", default="")
+    ap.add_argument("--blind-body-out", default="")
     ap.add_argument("--summary-out", default="")
     ap.add_argument(
         "--expected-macos-hosts",
@@ -1647,6 +1777,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"alarm_count={len(queue_alarms)}")
     print(f"contribution_alarm_count={len(contribution_alarms)}")
     print(f"degraded={'true' if gaps else 'false'}")
+    blindness = analyze_blindness(snapshot)
+    if blindness["alarm"] and args.blind_body_out:
+        with open(args.blind_body_out, "w", encoding="utf-8") as fh:
+            fh.write(render_blind_body(blindness, now))
+    print(f"blind={'true' if blindness['blind'] else 'false'}")
+    print(f"blind_streak={blindness['streak']}")
+    print(f"blind_alarm={'true' if blindness['alarm'] else 'false'}")
+    print(f"blind_title={BLIND_TITLE_PREFIX}: {blindness['reason']}" if blindness["blind"]
+          else "blind_title=")
     return 0
 
 

@@ -180,6 +180,7 @@ jobs:
               --snapshot-out snapshot.json \
               --body-out body.md \
               --contribution-body-out contribution-body.md \
+              --blind-body-out blind-body.md \
               --summary-out "${GITHUB_STEP_SUMMARY}" \
               > scan.log
           cat scan.log
@@ -197,10 +198,21 @@ jobs:
                    "report health off a sweep that did not finish." >&2
               exit 1
           fi
+          blind=$(grep -m1 '^blind=' scan.log | cut -d= -f2 || true)
+          blind_alarm=$(grep -m1 '^blind_alarm=' scan.log | cut -d= -f2 || true)
+          blind_title=$(grep -m1 '^blind_title=' scan.log | cut -d= -f2- || true)
+          if [ -z "${blind}" ] || [ -z "${blind_alarm}" ]; then
+              echo "queue_age_watchdog did not emit its blindness; refusing to" \
+                   "report a sweep that did not finish." >&2
+              exit 1
+          fi
           {
             echo "count=${count}"
             echo "contribution=${contribution}"
             echo "degraded=${degraded}"
+            echo "blind=${blind}"
+            echo "blind_alarm=${blind_alarm}"
+            echo "blind_title=${blind_title}"
           } >> "$GITHUB_OUTPUT"
           echo "Alarm count: ${count}"
           echo "Contribution alarm count: ${contribution}"
@@ -318,6 +330,51 @@ jobs:
               echo "Updating fleet-contribution tracking issue #${existing} in place."
               gh api -X PATCH "/repos/${repo}/issues/${existing}" -F body=@contribution-issue-body.md
               gh api -X PATCH "/repos/${repo}/issues/${existing}" -f state=open 2>/dev/null || true
+          fi
+
+      # The presence of this step in a run's job is the record the next sweeps
+      # read (BLIND_STEP_NAME in queue_age_watchdog.py), so the blind streak
+      # needs no stored state. Keep the name in sync with that constant.
+      - name: Record blind sweep
+        if: steps.scan.outputs.blind == 'true'
+        shell: bash
+        run: echo "::warning::this sweep could not alarm on a stalled lane (evidence gap)"
+
+      - name: Maintain blind-watchdog tracking issue
+        if: env.DRY_RUN != 'true' && (steps.scan.outputs.blind_alarm == 'true' || steps.scan.outputs.blind == 'false')
+        shell: bash
+        env:
+          BLIND_ALARM: ${{ steps.scan.outputs.blind_alarm }}
+          BLIND_TITLE: ${{ steps.scan.outputs.blind_title }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          prefix='Queue watchdog blind'
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          search_json=$(gh api --method GET "/search/issues" -f q="repo:${repo} is:issue in:title \"${prefix}\"")
+          existing_json=$(printf '%s' "$search_json" | PREFIX="$prefix" python3 -c 'import json, os, sys; p = os.environ["PREFIX"]; data = json.load(sys.stdin); items = sorted((i for i in data.get("items", []) if i.get("title", "").startswith(p + ":")), key=lambda i: i.get("state") != "open"); m = items[0] if items else None; print(json.dumps({"number": m.get("number", ""), "state": str(m.get("state", "")).upper()}) if m else "{}")')
+          existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "$BLIND_ALARM" != "true" ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  gh api -X POST "/repos/${repo}/issues/${existing}/comments" \
+                      -f body="Sweep on $(date -u '+%Y-%m-%d %H:%M UTC') had no blinding evidence gap and could alarm again. Closing. (${run_url})"
+                  gh api -X PATCH "/repos/${repo}/issues/${existing}" -f state=closed -f state_reason=completed
+              fi
+              exit 0
+          fi
+
+          { cat blind-body.md; echo; echo "**Sweep:** ${run_url}"; } > blind-issue-body.md
+          if [ -z "${existing:-}" ]; then
+              TITLE="$BLIND_TITLE" python3 -c 'import json, os; print(json.dumps({"title": os.environ["TITLE"], "body": open("blind-issue-body.md", encoding="utf-8").read(), "labels": ["bug", "ci"]}))' > blind-issue.json
+              gh api -X POST "/repos/${repo}/issues" --input blind-issue.json 2>&1 || {
+                  TITLE="$BLIND_TITLE" python3 -c 'import json, os; print(json.dumps({"title": os.environ["TITLE"], "body": open("blind-issue-body.md", encoding="utf-8").read()}))' > blind-issue.json
+                  gh api -X POST "/repos/${repo}/issues" --input blind-issue.json
+              }
+          else
+              TITLE="$BLIND_TITLE" python3 -c 'import json, os; print(json.dumps({"title": os.environ["TITLE"], "body": open("blind-issue-body.md", encoding="utf-8").read(), "state": "open"}))' > blind-issue.json
+              gh api -X PATCH "/repos/${repo}/issues/${existing}" --input blind-issue.json
           fi
 
       - name: Upload snapshot + findings
