@@ -187,6 +187,29 @@ is_untracked() {
     printf '%s\n' "$untracked" | grep -Fxq -- "$1"
 }
 
+# The line a hunk starting at $2 in file $1 must be formatted from. clang-format
+# indents the first declaration under an access specifier relative to where that
+# specifier actually sits, not where the config would put it. So when the
+# specifier is outside --lines, a column-0 `private:` (AccessModifierOffset -2
+# wants it at 2) re-indents that declaration and every member after it to 2
+# spaces, lines outside the range included, while a whole-file format leaves
+# them at 4. Walking up over blank and comment lines to a governing specifier
+# and starting the range there formats the block the way the whole-file run
+# does; the price is that the specifier line itself is judged too.
+anchor_start() {
+    awk -v s="$2" '
+        NR < s { line[NR] = $0 }
+        NR >= s { exit }
+        END {
+            i = s - 1
+            while (i > 0 && (line[i] ~ /^[ \t]*$/ || line[i] ~ /^[ \t]*(\/\/|\/\*|\*)/)) i--
+            if (i > 0 && line[i] ~ /^[ \t]*(public|protected|private)([ \t]+(Q_SLOTS|slots))?[ \t]*:[ \t]*(\/\/.*)?$/)
+                print i
+            else
+                print s
+        }' "$1"
+}
+
 # Lines of `--lines=a:b` for the hunks of $1 that differ from base.
 hunk_ranges() {
     git diff -U0 --find-renames "$base_mb" -- "$1" | sed -n 's/^@@ -[0-9][0-9,]* +\([0-9][0-9,]*\) @@.*/\1/p' | while IFS= read -r range; do
@@ -198,6 +221,7 @@ hunk_ranges() {
         fi
         [ "$count" -gt 0 ] || continue
         end=$((start + count - 1))
+        start="$(anchor_start "$1" "$start")"
         printf -- '--lines=%s:%s\n' "$start" "$end"
     done
 }

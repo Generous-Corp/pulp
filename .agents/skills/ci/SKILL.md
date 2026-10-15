@@ -11943,9 +11943,23 @@ including blocks the branch never touched.
 
 The cost is the opposite of a false failure: the gate is advisory and not a
 required check, so nothing blocks — but an author who does the obvious thing
-commits output the formatter would not reproduce. **Diff a class body before
-committing the fixer's result**; if it de-indents, do not commit it. Tracked as
-issue #8753, which carries the full reproduction.
+commits output the formatter would not reproduce. Tracked as issue #8753, which
+carries the full reproduction.
+
+The mechanism: clang-format indents the first declaration under an access
+specifier relative to where the specifier actually sits. When a range starts
+just below a column-0 `private:` that is outside `--lines`, that declaration and
+every member after it in the block (out-of-range lines included) land at
+0 + 2. `hunk_ranges` therefore walks up from each hunk over blank and comment
+lines and, on reaching a `public:`/`protected:`/`private:`, starts the range at
+the specifier, so the block comes out as the whole-file run leaves it. The cost
+is that the specifier line is judged too: changing the first member under a
+column-0 specifier also asks to move that specifier to 2 spaces, which is the
+whole-file answer. Restoring its original indent was rejected: it needs
+clang-format's replacement offsets, or a marker comment that perturbs
+trailing-comment alignment. **Still diff a class body before committing the
+fixer's result**; the specifier rule covers the known trigger, not every way a
+partial range can disagree with a whole-file run.
 
 ## A workflow that matches a bypass trailer with its own grep will honour a quoted one
 
