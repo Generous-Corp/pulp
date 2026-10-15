@@ -237,6 +237,58 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertIn("--native-panel-lowering", native)
         self.assertNotIn("--offline", native)
 
+    @requires_pillow
+    def test_compare_one_success_records_source_digest(self) -> None:
+        """Exercise the success path past capture binding and integrity output."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "panel.html"
+            source.write_text("<div></div>", encoding="utf-8")
+            evidence = root / "evidence"
+            evidence.mkdir()
+            source_sha256 = LAB.sha256_file(source)
+            provenance = {
+                "source": {"sha256": source_sha256},
+                "viewport": {"requested": {"width": 1, "height": 1},
+                             "resolved": {"width": 1, "height": 1}},
+                "browser": {"product": "Chrome", "version": "140.0"},
+            }
+            capture = {
+                "provenance": provenance,
+                "reference": {"logical_width": 1, "logical_height": 1,
+                               "device_scale_factor": 1},
+            }
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
+            Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            (evidence / "dom-snapshot.json").write_text(
+                json.dumps({"documents": []}), encoding="utf-8")
+
+            def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                if "--render" in argv:
+                    Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(
+                        Path(argv[argv.index("--render") + 1]))
+                    Path(argv[argv.index("--layout") + 1]).write_text(
+                        json.dumps({"views": []}), encoding="utf-8")
+                    Path(argv[argv.index("--render-receipt") + 1]).write_text(
+                        json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
+                                    "backend_requested": "skia", "backend_used": "skia",
+                                    "ok": True}), encoding="utf-8")
+                else:
+                    output = Path(argv[argv.index("--output") + 1])
+                    output.write_text(json.dumps({"root": {"type": "frame",
+                                                              "children": []}}),
+                                      encoding="utf-8")
+                return LAB.CommandResult(argv, 1, 0, "", "")
+
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1}})
+            self.assertEqual(report["integrity"]["source_sha256"], source_sha256)
+            self.assertTrue(report["integrity"]["source_bound"])
+
     def test_canonical_json_digest_ignores_run_clock_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             first = Path(directory) / "first.json"

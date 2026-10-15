@@ -850,7 +850,8 @@ def compare_one(
     capture = json.loads((evidence / "capture.json").read_text(encoding="utf-8"))
     native_evidence = find_browser_evidence(native_ir)
     native_capture = json.loads((native_evidence / "capture.json").read_text(encoding="utf-8"))
-    verify_capture_binding(capture, native_capture, sha256_file(source))
+    source_sha256 = sha256_file(source)
+    verify_capture_binding(capture, native_capture, source_sha256)
     viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
     render_args = [
@@ -882,7 +883,7 @@ def compare_one(
         source_evidence = evidence / name
         if source_evidence.exists():
             shutil.copy2(source_evidence, browser_dir / name)
-    recognition = source_recognition(source.read_text(errors="replace"))
+    recognition = source_recognition(source.read_text(encoding="utf-8", errors="replace"))
     browser_snapshot = json.loads((browser_dir / "dom-snapshot.json").read_text(encoding="utf-8"))
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
     browser_flat = browser_nodes(browser_snapshot)
