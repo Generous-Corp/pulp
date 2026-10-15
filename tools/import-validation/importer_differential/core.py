@@ -728,6 +728,54 @@ def capture_logical_size(capture: dict[str, Any]) -> tuple[int, int]:
     return width, height
 
 
+def import_lane_args(
+    importer: Path,
+    source_args: list[str],
+    output_ir: Path,
+    viewport_args: list[str],
+    interaction_args: list[str],
+    browser_path: Path | None,
+    *,
+    native: bool,
+) -> list[str]:
+    """The importer argv for one lane of a comparison.
+
+    Both lanes import the same authored source at the same viewport with the
+    same interaction plan and browser; the native lane only adds
+    --native-panel-lowering. Neither passes --offline, which would substitute
+    the legacy partial parser for the authored source.
+    """
+    args = [str(importer), *source_args, "--mode", "baked", "--emit", "ir-json",
+            "--output", str(output_ir)]
+    if native:
+        args.append("--native-panel-lowering")
+    args.extend([*viewport_args, *interaction_args])
+    if browser_path:
+        args.extend(["--browser", str(browser_path)])
+    return args
+
+
+def verify_capture_binding(
+    capture: dict[str, Any], native_capture: dict[str, Any], source_sha256: str,
+) -> None:
+    """Fail closed unless both captures came from the same authored input.
+
+    Each capture's source hash must equal the authored file's, and the native
+    lowering must have run at the browser capture's viewport and in the same
+    browser; otherwise the comparison measures two different inputs.
+    """
+    browser = capture.get("provenance", {})
+    native = native_capture.get("provenance", {})
+    if browser.get("source", {}).get("sha256") != source_sha256:
+        raise LabError("browser capture source hash is not bound to the authored input")
+    if native.get("source", {}).get("sha256") != source_sha256:
+        raise LabError("native lowering source hash is not bound to the authored input")
+    if native.get("viewport") != browser.get("viewport"):
+        raise LabError("browser and native lowering viewport provenance differs")
+    if native.get("browser") != browser.get("browser"):
+        raise LabError("browser and native lowering browser provenance differs")
+
+
 def compare_one(
     importer: Path,
     observer: Path,
@@ -773,19 +821,12 @@ def compare_one(
             raise LabError(
                 f"browser interaction plan does not exist: {interaction_file.name}")
         interaction_args = ["--browser-interactions", str(interaction_file)]
-    browser_args = [
-        str(importer), *source_args, "--mode", "baked", "--emit", "ir-json",
-        "--output", str(browser_ir),
-        *viewport_args, *interaction_args]
-    if browser_path:
-        browser_args.extend(["--browser", str(browser_path)])
-    native_args = [
-        str(importer), *source_args, "--mode", "baked", "--emit", "ir-json",
-        "--output", str(native_ir), "--native-panel-lowering",
-        *viewport_args, *interaction_args,
-    ]
-    if browser_path:
-        native_args.extend(["--browser", str(browser_path)])
+    browser_args = import_lane_args(
+        importer, source_args, browser_ir, viewport_args, interaction_args, browser_path,
+        native=False)
+    native_args = import_lane_args(
+        importer, source_args, native_ir, viewport_args, interaction_args, browser_path,
+        native=True)
     browser_run = run_command(browser_args, timeout_seconds)
     native_run = run_command(native_args, timeout_seconds)
     write_json(browser_dir / "command.json", command_record(browser_run))
@@ -809,15 +850,7 @@ def compare_one(
     capture = json.loads((evidence / "capture.json").read_text(encoding="utf-8"))
     native_evidence = find_browser_evidence(native_ir)
     native_capture = json.loads((native_evidence / "capture.json").read_text(encoding="utf-8"))
-    source_sha256 = sha256_file(source)
-    if capture.get("provenance", {}).get("source", {}).get("sha256") != source_sha256:
-        raise LabError("browser capture source hash is not bound to the authored input")
-    if native_capture.get("provenance", {}).get("source", {}).get("sha256") != source_sha256:
-        raise LabError("native lowering source hash is not bound to the authored input")
-    if native_capture.get("provenance", {}).get("viewport") != capture.get("provenance", {}).get("viewport"):
-        raise LabError("browser and native lowering viewport provenance differs")
-    if native_capture.get("provenance", {}).get("browser") != capture.get("provenance", {}).get("browser"):
-        raise LabError("browser and native lowering browser provenance differs")
+    verify_capture_binding(capture, native_capture, sha256_file(source))
     viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
     render_args = [
