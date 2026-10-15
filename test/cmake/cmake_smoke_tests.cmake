@@ -898,6 +898,16 @@ if(Python3_Interpreter_FOUND)
         LABELS "import;fidelity"
         TIMEOUT 30)
 
+    # An undefined module-level read raises only when its line runs, so a
+    # refactor can leave one on a path no test reaches. Scans the import
+    # validation tools with the stdlib symtable (no pyflakes dependency).
+    add_test(NAME import-validation-undefined-names
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_undefined_names_check.py)
+    set_tests_properties(import-validation-undefined-names PROPERTIES
+        LABELS "import"
+        TIMEOUT 60)
+
     # Golden re-import regression tool (tools/import-validation/golden_regression.py)
     # — self-test for its structural edge map. Guards the uint8-wraparound fix
     # (a 255->0 dark-on-light edge must not vanish). Exits 77 (skips) when numpy

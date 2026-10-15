@@ -329,6 +329,15 @@ class TestCompletedListingTruncation(unittest.TestCase):
         self.assertEqual(levels(qaw.analyze(self.snap(queued(just_under, INTEL)), NOW)), ["warn"])
         self.assertEqual(levels(qaw.analyze(self.snap(queued(just_under + 2, INTEL)), NOW)), ["alarm"])
 
+    def test_truncated_only_sweep_stays_a_warn_between_45_and_90_minutes(self):
+        # Literal ages, not derived from the factor: a factor edited to 1.0
+        # would otherwise move this band with it and the test could not fail.
+        for minutes in (46, 60, 89):
+            with self.subTest(minutes=minutes):
+                findings = qaw.analyze(self.snap(queued(minutes, INTEL)), NOW)
+                self.assertEqual(levels(findings), ["warn"])
+        self.assertEqual(levels(qaw.analyze(self.snap(queued(91, INTEL)), NOW)), ["alarm"])
+
     def test_a_comparable_job_in_progress_still_keeps_it_quiet(self):
         findings = qaw.analyze(
             self.snap(queued(322.6, INTEL), live_jobs=[live(200, INTEL)]), NOW)
@@ -414,6 +423,19 @@ class TestBlindWatchdog(unittest.TestCase):
         with mock.patch.object(qaw, "_gh_api", side_effect=api), \
              mock.patch.dict("os.environ", {"GITHUB_RUN_ID": "10"}):
             self.assertEqual(qaw._prior_sweeps_blind("o/r", snap), [True, False, None])
+
+    def test_workflow_closes_the_blind_tracker_on_a_sighted_sweep(self):
+        workflow = (Path(__file__).resolve().parents[2]
+                    / ".github/workflows/runner-health-check.yml").read_text(encoding="utf-8")
+        step = workflow.split("- name: Maintain blind-watchdog tracking issue", 1)[1]
+        step = step.split("\n      - name:", 1)[0]
+        # The step must run on a sighted sweep, not only on an alarm; without
+        # the blind == 'false' clause the tracker could never close.
+        self.assertIn("if: env.DRY_RUN != 'true' && (steps.scan.outputs.blind_alarm == 'true' "
+                      "|| steps.scan.outputs.blind == 'false')", step)
+        close, rest = step.split('if [ "$BLIND_ALARM" != "true" ]; then', 1)[1].split("exit 0", 1)
+        self.assertIn("state=closed", close)
+        self.assertIn('existing_state" = "OPEN"', close)
 
     def test_workflow_records_blindness_under_the_step_name_the_reader_uses(self):
         workflow = (Path(__file__).resolve().parents[2]

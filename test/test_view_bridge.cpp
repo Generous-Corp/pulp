@@ -781,9 +781,18 @@ TEST_CASE("Editor prewarm: an instantiated plug-in's editor scripts are requeste
     const auto before = view::scripted_ui_prewarm_stats();
     CHECK(format::request_editor_prewarm(viewed));
     REQUIRE(view::wait_for_scripted_ui_prewarm(std::chrono::seconds(20)));
+#if defined(_WIN32)
+    // Windows deliberately keeps prewarm off until the plug-in module has an
+    // unload-safe lifecycle callback. The editor path remains functional and
+    // compiles on first open instead of starting an unload-sensitive worker.
+    CHECK(view::scripted_ui_prewarm_stats().scripts_compiled == before.scripts_compiled);
+    CHECK_FALSE(view::script_bytecode_cached(
+        view::WidgetBridge::loaded_script_source(std::string(viewed.editor_prewarm().scripts[0]))));
+#else
     CHECK(view::scripted_ui_prewarm_stats().scripts_compiled == before.scripts_compiled + 1);
     CHECK(view::script_bytecode_cached(
         view::WidgetBridge::loaded_script_source(std::string(viewed.editor_prewarm().scripts[0]))));
+#endif
     format::detail::reset_editor_prewarm_requests_for_tests();
     view::clear_script_bytecode_cache();
 }

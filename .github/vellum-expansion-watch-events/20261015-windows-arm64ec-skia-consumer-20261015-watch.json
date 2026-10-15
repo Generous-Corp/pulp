@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261015-windows-arm64ec-skia-consumer-20261015-watch",
+  "created_at": "2026-10-15T04:58:34Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "This change teaches Pulp to select a producer-matched Windows ARM64EC/ARM64X Skia and Dawn archive slice and to avoid the incompatible wgpu-native fallback when that provider exists. It changes only consumer compatibility and test/skill documentation; no design-import, Chromium, rendering, packaging, or source-of-truth authority moves.",
+  "tests": [
+    "python3 tools/scripts/test_findskia_windows_arm64_slice.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

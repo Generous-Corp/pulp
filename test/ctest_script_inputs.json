@@ -4713,6 +4713,8 @@
    "entry": "tools/scripts/test_findskia_windows_arm64_slice.py",
    "inputs": [
     "tools/cmake/FindSkia.cmake",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpWindowsSkiaProvider.cmake",
     "tools/scripts/test_findskia_windows_arm64_slice.py"
    ],
    "kind": "python"
@@ -6424,6 +6426,15 @@
    ],
    "kind": "python"
   },
+  "import-validation-undefined-names": {
+   "entry": "tools/scripts/test_undefined_names_check.py",
+   "inputs": [
+    "tools/import-validation",
+    "tools/scripts/test_undefined_names_check.py",
+    "tools/scripts/undefined_names_check.py"
+   ],
+   "kind": "python"
+  },
   "import-vendored-runtime-staleness": {
    "entry": "tools/import-validation/test_check_vendored_runtime.py",
    "inputs": [
@@ -6991,6 +7002,7 @@
     "tools/cmake/PulpPlugin.cmake",
     "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
+    "tools/import-validation/importer_differential/core.py",
     "tools/motion/visual/requirements.lock",
     "tools/scripts",
     "tools/scripts/affected_targets.py",
@@ -7130,6 +7142,14 @@
   "project-package-mutation-control": {
    "entry": "${CMAKE_BINARY_DIR}/test/run_project_package_mutation_control.py",
    "inputs": [],
+   "kind": "python"
+  },
+  "proxmox-host-watch-selftest": {
+   "entry": "tools/ci/test_proxmox_host_watch.py",
+   "inputs": [
+    "tools/ci/proxmox_host_watch.py",
+    "tools/ci/test_proxmox_host_watch.py"
+   ],
    "kind": "python"
   },
   "pulp-browser-capture-node-integration": {

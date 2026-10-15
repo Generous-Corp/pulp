@@ -152,6 +152,166 @@ class DifferentialLabTests(unittest.TestCase):
         }
         self.assertEqual(LAB.capture_logical_size(capture), (1440, 1200))
 
+    @staticmethod
+    def _bound_captures() -> tuple[dict, dict, str]:
+        source_sha256 = "a" * 64
+        provenance = {
+            "source": {"sha256": source_sha256},
+            "viewport": {"requested": {"width": 1280, "height": 800},
+                         "resolved": {"width": 1280, "height": 800}},
+            "browser": {"product": "Chrome", "version": "140.0"},
+        }
+        return ({"provenance": json.loads(json.dumps(provenance))},
+                {"provenance": json.loads(json.dumps(provenance))}, source_sha256)
+
+    def test_capture_binding_accepts_captures_of_the_same_input(self) -> None:
+        capture, native_capture, source_sha256 = self._bound_captures()
+        LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+    def test_capture_binding_fails_closed_on_each_mismatch(self) -> None:
+        cases = {
+            "browser capture source hash is not bound":
+                lambda browser, native: browser["provenance"]["source"].update(sha256="b" * 64),
+            "native lowering source hash is not bound":
+                lambda browser, native: native["provenance"]["source"].update(sha256="b" * 64),
+            "viewport provenance differs":
+                lambda browser, native: native["provenance"]["viewport"]["resolved"].update(width=1440),
+            "browser provenance differs":
+                lambda browser, native: native["provenance"]["browser"].update(version="141.0"),
+        }
+        for message, mutate in cases.items():
+            with self.subTest(message=message):
+                capture, native_capture, source_sha256 = self._bound_captures()
+                mutate(capture, native_capture)
+                with self.assertRaisesRegex(LAB.LabError, message):
+                    LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+    def test_capture_binding_refuses_a_capture_without_provenance(self) -> None:
+        _, native_capture, source_sha256 = self._bound_captures()
+        with self.assertRaisesRegex(LAB.LabError, "browser capture source hash"):
+            LAB.verify_capture_binding({}, native_capture, source_sha256)
+
+    def test_native_lane_lowers_the_authored_source_not_the_offline_parser(self) -> None:
+        source_args = ["--from", "claude", "--file", "panel.html"]
+        viewport_args = ["--render-size", "1280x800"]
+        interactions = ["--browser-interactions", "plan.json"]
+        native = LAB.import_lane_args(
+            Path("importer"), source_args, Path("native.json"), viewport_args, interactions,
+            Path("chrome"), native=True)
+        browser = LAB.import_lane_args(
+            Path("importer"), source_args, Path("browser.json"), viewport_args, interactions,
+            Path("chrome"), native=False)
+        self.assertIn("--native-panel-lowering", native)
+        self.assertNotIn("--native-panel-lowering", browser)
+        for args in (native, browser):
+            self.assertNotIn("--offline", args)
+            self.assertNotIn("--execute-bundle", args)
+            for flag in (*source_args, *viewport_args, *interactions, "--browser", "chrome"):
+                self.assertIn(flag, args)
+
+    def test_compare_one_checks_the_binding_before_rendering(self) -> None:
+        # Both imports "succeed" with captures that carry no provenance; the
+        # comparison must refuse there, before any render command runs.
+        calls: list[list[str]] = []
+
+        def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+            calls.append(argv)
+            out = Path(argv[argv.index("--output") + 1])
+            out.write_text("{}", encoding="utf-8")
+            return LAB.CommandResult(argv, 1, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "panel.html"
+            source.write_text("<div></div>", encoding="utf-8")
+            evidence = root / "evidence"
+            evidence.mkdir()
+            (evidence / "capture.json").write_text("{}", encoding="utf-8")
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                with self.assertRaisesRegex(LAB.LabError, "source hash is not bound"):
+                    LAB.compare_one(Path("importer"), Path("observer"), source, root / "out",
+                                    60, "claude", Path("chrome"))
+        self.assertEqual(len(calls), 2)
+        native = calls[1]
+        self.assertIn("--native-panel-lowering", native)
+        self.assertNotIn("--offline", native)
+
+    @requires_pillow
+    def test_compare_one_success_records_source_digest(self) -> None:
+        """Exercise the success path past capture binding and integrity output."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "panel.html"
+            source.write_text("<div></div>", encoding="utf-8")
+            evidence = root / "evidence"
+            evidence.mkdir()
+            source_sha256 = LAB.sha256_file(source)
+            provenance = {
+                "source": {"sha256": source_sha256},
+                "viewport": {"requested": {"width": 1, "height": 1},
+                             "resolved": {"width": 1, "height": 1}},
+                "browser": {"product": "Chrome", "version": "140.0"},
+            }
+            capture = {
+                "provenance": provenance,
+                "reference": {"logical_width": 1, "logical_height": 1,
+                               "device_scale_factor": 1},
+            }
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
+            Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            (evidence / "dom-snapshot.json").write_text(
+                json.dumps({"documents": []}), encoding="utf-8")
+
+            def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                if "--render" in argv:
+                    Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(
+                        Path(argv[argv.index("--render") + 1]))
+                    Path(argv[argv.index("--layout") + 1]).write_text(
+                        json.dumps({"views": []}), encoding="utf-8")
+                    Path(argv[argv.index("--render-receipt") + 1]).write_text(
+                        json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
+                                    "backend_requested": "skia", "backend_used": "skia",
+                                    "ok": True}), encoding="utf-8")
+                else:
+                    output = Path(argv[argv.index("--output") + 1])
+                    output.write_text(json.dumps({"root": {"type": "frame",
+                                                              "children": []}}),
+                                      encoding="utf-8")
+                return LAB.CommandResult(argv, 1, 0, "", "")
+
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1}})
+            self.assertEqual(report["integrity"]["source_sha256"], source_sha256)
+            self.assertTrue(report["integrity"]["source_bound"])
+
+    def test_canonical_json_digest_ignores_run_clock_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "first.json"
+            second = Path(directory) / "second.json"
+            first.write_text(json.dumps({
+                "imported_at": "2026-10-15T00:00:00Z",
+                "capture": {"elapsed_ms": 12, "source": "same"},
+            }), encoding="utf-8")
+            second.write_text(json.dumps({
+                "imported_at": "2026-10-15T00:01:00Z",
+                "capture": {"elapsed_ms": 99, "source": "same"},
+            }), encoding="utf-8")
+            self.assertEqual(
+                LAB.canonical_json_sha256(first),
+                LAB.canonical_json_sha256(second))
+            second.write_text(json.dumps({
+                "imported_at": "2026-10-15T00:01:00Z",
+                "capture": {"elapsed_ms": 99, "source": "changed"},
+            }), encoding="utf-8")
+            self.assertNotEqual(
+                LAB.canonical_json_sha256(first),
+                LAB.canonical_json_sha256(second))
+
     def test_intrinsic_sizing_gap_is_emitted(self) -> None:
         recognition = LAB.source_recognition(
             "<!doctype html><html><body><div>Panel</div></body></html>")

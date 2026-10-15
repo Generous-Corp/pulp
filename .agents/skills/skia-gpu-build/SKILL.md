@@ -230,8 +230,13 @@ shipping artifact.
   `pulp_windows_target_arch()` (generator platform, then
   `CMAKE_CXX_COMPILER_ARCHITECTURE_ID`), never `CMAKE_SYSTEM_PROCESSOR`. In a
   Visual Studio `-A` configure that is the host, so an x64 build on an ARM64
-  host would take the ARM64 slice. ARM64EC and ARM64X targets find no
-  compatible slice and fail closed. The regression is
+  host would take the ARM64 slice. ARM64EC and ARM64X are distinct COFF
+  machine modes and must consume matching `arm64ec/` or `arm64x/` producer
+  slices; pure `arm64/` and flat x64 libraries are not compatible substitutes.
+  When a matching Skia `dawn_combined.lib` exists, the consumer must also skip
+  the incompatible wgpu-native FetchContent path because wgpu-native currently
+  has no ARM64EC/ARM64X asset. Select the matching Skia Dawn provider and fail
+  closed when that slice is absent. The regression is
   `tools/scripts/test_findskia_windows_arm64_slice.py`.
 
 - **A failed `fetch_skia_for_release.py` is not always a bad pin.** The pinned
