@@ -24,7 +24,8 @@ with the Shipyard changed-surface families), plus these rules:
   * the extra time is capped: tests run in batches, no batch starts once the
     budget is spent, and every test that did not run is listed as skipped;
   * merge-only checks (selected because the diff changes their declared
-    inputs, or by a path family) run first. If the budget still pushes one
+    inputs, adds or edits their registration, or by a path family) run first,
+    then the tests built from the sources the diff edits. If the budget still pushes one
     out, the step fails, because nothing else runs it before the merge group.
     An ordinary affected test the budget pushes out is deferred to the merge
     queue, which runs the full suite, and the step stays neutral.
@@ -426,6 +427,7 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
         plan["reason"] = "the diff is empty"
         return plan
     chosen: list[str] = []
+    own: list[str] = []
     docs_only = all(is_non_test_path(p) for p in paths)
     rebuilt_why: list[str] = []
     rebuilt = [] if docs_only else rebuilt_binary_tests(build, rebuilt_why)
@@ -473,16 +475,21 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     for tests in families.values():
         chosen.extend(tests)
     # Merge-only checks reach a pull-request head only through their declared
-    # inputs or a path family. Nothing else runs them before the merge group,
-    # so they go first, where the budget is sure to reach them.
-    merge_only = set(inputs)
+    # inputs, a path family, or a registration the diff adds or edits (a new
+    # test has no declared inputs until the manifest is regenerated). Nothing
+    # else runs them before the merge group, so they go first, where the
+    # budget is sure to reach them. The tests built from the sources the diff
+    # edits come next, ahead of the wider projection.
+    merge_only = set(inputs) | set(registered)
     for tests in families.values():
         merge_only.update(tests)
     seen: set[str] = set()
     tests = [t for t in chosen if t in names and PR_FAST_LABEL not in names[t]
              and not (t in seen or seen.add(t))]
     plan["merge_only"] = [t for t in tests if t in merge_only]
-    plan["tests"] = plan["merge_only"] + [t for t in tests if t not in merge_only]
+    own_first = [t for t in tests if t in set(own) and t not in merge_only]
+    plan["tests"] = plan["merge_only"] + own_first + [
+        t for t in tests if t not in merge_only and t not in set(own)]
     return plan
 
 

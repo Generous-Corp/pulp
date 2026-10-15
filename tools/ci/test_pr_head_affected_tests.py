@@ -45,13 +45,13 @@ NAMES = {
 class SelectionTests(unittest.TestCase):
     def plan(self, paths: list[str], projected: step.inventory.Selection,
              *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = (),
-             rebuilt: list[str] = ()) -> dict:
+             rebuilt: list[str] = (), registered: list[str] = ()) -> dict:
         with mock.patch.object(step, "project", return_value=projected) as project, \
                 mock.patch.object(step, "script_reference_tests", return_value=list(scripts)), \
                 mock.patch.object(step, "script_input_tests", return_value=list(inputs)), \
                 mock.patch.object(step, "own_tests", return_value=list(own)), \
                 mock.patch.object(step, "rebuilt_binary_tests", return_value=list(rebuilt)), \
-                mock.patch.object(step, "registration_tests", return_value=[]):
+                mock.patch.object(step, "registration_tests", return_value=list(registered)):
             plan = step.select(Path("/b"), paths, NAMES)
         plan["_projected"] = project.called
         return plan
@@ -182,6 +182,22 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(sorted(plan["merge_only"]), sorted(merge_only))
         self.assertEqual(sorted(plan["tests"][:len(merge_only)]), sorted(merge_only))
         self.assertEqual(sorted(plan["tests"][len(merge_only):]), ["unit-a", "unit-b"])
+
+    def test_a_registration_the_diff_adds_is_a_merge_only_check(self) -> None:
+        # A brand-new test has no declared inputs yet; its registration is the
+        # only edge that reaches it.
+        plan = self.plan(["core/x/a.cpp"], selection("focused", ["unit-a"]),
+                         registered=["other"])
+        self.assertEqual(plan["merge_only"], ["other"])
+        self.assertEqual(plan["tests"][0], "other")
+
+    def test_the_diffs_own_tests_run_right_after_the_merge_only_checks(self) -> None:
+        # A rebuilt binary is collected before the own tests; the plan moves the
+        # tests built from the edited sources ahead of it.
+        plan = self.plan(["core/x/a.cpp", "test/test_a.cpp"],
+                         selection("all", [], "too wide"), rebuilt=["unit-b"],
+                         own=["unit-a"], inputs=["sample-region-compat-baseline"])
+        self.assertEqual(plan["tests"], ["sample-region-compat-baseline", "unit-a", "unit-b"])
 
     def test_control_a_plan_without_merge_only_checks_keeps_its_order(self) -> None:
         plan = self.plan(["core/x/a.cpp"], selection("focused", ["unit-a"]), rebuilt=["unit-b"])
@@ -737,6 +753,27 @@ class ExitCodeTests(unittest.TestCase):
     def test_a_merge_only_skip_fails_even_beside_ordinary_deferrals(self) -> None:
         self.assertEqual(self._main({}, skipped=["b", "c"], merge_only=["b"]), 1)
         self.assertIn('"merge_only_skipped_for_budget": 1', self.output)
+
+    def test_a_newly_registered_test_skipped_for_budget_fails_the_real_step(self) -> None:
+        # The plan comes from the real select(): the diff registers "other",
+        # which has no declared inputs, and the budget pushes it out.
+        with mock.patch.object(step, "project", return_value=selection("focused", ["unit-a"])), \
+                mock.patch.object(step, "script_reference_tests", return_value=[]), \
+                mock.patch.object(step, "script_input_tests", return_value=[]), \
+                mock.patch.object(step, "own_tests", return_value=[]), \
+                mock.patch.object(step, "rebuilt_binary_tests", return_value=[]), \
+                mock.patch.object(step, "registration_tests", return_value=["other"]):
+            plan = step.select(Path("/b"), ["core/x/a.cpp"], NAMES)
+        results = {"passed": ["unit-a"], "failed": [], "skipped": ["other"], "notrun": [],
+                   "excluded_or_absent": [], "seconds": 1.0}
+        out = io.StringIO()
+        with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=plan), \
+                mock.patch.object(step, "run_budgeted", return_value=results), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 1)
+        self.assertIn("SKIPPED, NOT RUN", out.getvalue())
 
     def test_control_a_real_failure_still_fails_beside_ordinary_deferrals(self) -> None:
         self.assertEqual(self._main({"a": (False, "passes on base")}, skipped=["c"]), 1)
