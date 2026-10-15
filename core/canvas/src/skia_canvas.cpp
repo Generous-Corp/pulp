@@ -1043,26 +1043,26 @@ bool SkiaCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size,
     return true;
 }
 
-bool SkiaCanvas::draw_image_from_static_data_rect(const uint8_t* data, size_t size,
-                                                   float sx, float sy, float sw, float sh,
-                                                   float dx, float dy, float dw, float dh) {
-    if (!canvas_ || !data || size == 0) return false;
+bool SkiaCanvas::draw_image_from_static_data_rect(const uint8_t* data, size_t size, float sx,
+                                                  float sy, float sw, float sh, float dx, float dy,
+                                                  float dw, float dh) {
+    if (!canvas_ || !data || size == 0)
+        return false;
     // Embedded assets have process-lifetime addresses. A leading NUL makes
     // this key impossible to alias a filesystem path in ImageFileCache.
     const std::string key = std::string("\0static-data:", 13) +
-        std::to_string(reinterpret_cast<std::uintptr_t>(data)) + ":" +
-        std::to_string(size);
+                            std::to_string(reinterpret_cast<std::uintptr_t>(data)) + ":" +
+                            std::to_string(size);
     auto image = ImageFileCache::instance().get_or_build(
         key, image_cache_backend_key(), [&]() -> sk_sp<SkImage> {
             auto bytes = SkData::MakeWithoutCopy(data, size);
             auto decoded = SkImages::DeferredFromEncodedData(bytes);
             return decoded ? ensure_gpu_image(std::move(decoded)) : nullptr;
         });
-    if (!image) return false;
-    canvas_->drawImageRect(image,
-                           SkRect::MakeXYWH(sx, sy, sw, sh),
-                           SkRect::MakeXYWH(dx, dy, dw, dh),
-                           sampling_options_for_image_smoothing(),
+    if (!image)
+        return false;
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(sx, sy, sw, sh),
+                           SkRect::MakeXYWH(dx, dy, dw, dh), sampling_options_for_image_smoothing(),
                            nullptr, SkCanvas::kStrict_SrcRectConstraint);
     return true;
 }
