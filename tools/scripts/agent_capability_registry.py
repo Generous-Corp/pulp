@@ -476,7 +476,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/lfo.hpp",
-        "fingerprint": "sha256:f32f95b0419070cf5ff33f93cdfd85296d09ffed85dbdfff2e49a320bdae0bbb",
+        "fingerprint": "sha256:cf8ba3b89400e1807b5cc4576bafd5f58046780ad68d073bdbda6131762d8adf",
         "disposition": "capability_support",
         "capability_keys": ["signal.unison-voice-primitives"],
         "rationale": (
@@ -487,7 +487,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/lfo_sampling.hpp",
-        "fingerprint": "sha256:0f7127ce62fc8f134ff4c8ba80e6a01ddcbbd2ec43bb8b4df16aac128d7e6a4f",
+        "fingerprint": "sha256:214e987fd3a805efa820889090dfd2bbb662fc58052f49ca959d7606306c3837",
         "disposition": "capability_support",
         "capability_keys": ["signal.unison-voice-primitives"],
         "rationale": (
