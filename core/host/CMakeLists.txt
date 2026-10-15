@@ -35,6 +35,7 @@ target_sources(pulp-host PRIVATE
     src/forge_catalog_export_dynamics.cpp
     src/forge_dynamics_catalog.cpp
     src/forge_catalog_export_modulation.cpp
+    src/forge_modulation_catalog.cpp
     src/forge_effect_modulation_catalog.cpp
     src/forge_catalog_export_lofi.cpp
     src/forge_lofi_catalog.cpp
