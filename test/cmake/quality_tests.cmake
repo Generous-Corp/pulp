@@ -1229,6 +1229,9 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME portable-ci-timeout-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_run_with_timeout.py")
     endif()
+    # Pure Python against a recorded host observation; runs on every host.
+    add_test(NAME proxmox-host-watch-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_host_watch.py")
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME proxmox-ephemeral-linux-runner-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_runner_linux.py")

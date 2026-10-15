@@ -7132,6 +7132,14 @@
    "inputs": [],
    "kind": "python"
   },
+  "proxmox-host-watch-selftest": {
+   "entry": "tools/ci/test_proxmox_host_watch.py",
+   "inputs": [
+    "tools/ci/proxmox_host_watch.py",
+    "tools/ci/test_proxmox_host_watch.py"
+   ],
+   "kind": "python"
+  },
   "pulp-browser-capture-node-integration": {
    "entry": "tools/import-design/browser_capture/run_integration.mjs",
    "inputs": [
