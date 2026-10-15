@@ -7351,6 +7351,7 @@ tests = [
   "raw-this-async-check",
   "raw-this-async-selftest",
   "release-trailer-guard-selftest",
+  "sanitizer-gate-inventory-contract",
   "script-test-inputs-drift",
   "setup-bootstrap-plan-guard",
   "setup-bootstrap-plan-guard-selftest",

@@ -5332,6 +5332,16 @@ bisectable.
   exactly to the failing CTest cases and leave comments explaining the
   alternate coverage path; do not use sanitizer excludes to hide new targeted
   coverage tests.
+- **Gate-inventory checks never run in a sanitizer lane.** `script-test-inputs-drift`
+  and its siblings compare manifests generated from the gate configure against
+  the configured build's inventory. A sanitizer configure registers a different
+  set of tests (GPU off, other options), so there they report "stale entries"
+  that are not drift. Seen on 2026-10-14: the GPU-gated `pulp.vellum-closure-*`
+  tests read as stale under ASan and UBSan. They carry the `gate-inventory`
+  label, which every broad sanitizer ctest run excludes.
+  `sanitizer-gate-inventory-contract` fails if a new `--build-dir
+  ${CMAKE_BINARY_DIR} --check` test lacks the label, or if a sanitizer run
+  stops excluding it.
 - **ASan, TSan, and UBSan use `PULP_SANITIZER=<kind>`; ASan's
   example-bundle build does too.** Do not replace the named options with raw
   `CMAKE_*_FLAGS`: the option owns the compiler/linker flags and explicitly

@@ -314,12 +314,14 @@ jobs:
           # hold here. Exclude the same label groups the required `macos` gate
           # excludes, for the same reason it excludes them. Race and RT-safety
           # tests are deliberately NOT excluded — catching those is why this
-          # lane exists.
+          # lane exists. gate-inventory tests compare manifests generated from
+          # the gate configure against this build's inventory, which a
+          # sanitizer configure differs from by design.
           ctest --test-dir build-asan --output-on-failure \
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --label-exclude 'validation|slow|performance|bench|quality-lab' \
+            --label-exclude 'validation|slow|performance|bench|quality-lab|gate-inventory' \
             --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|cmake-ios-auv3-configure|cmake-ios-hostapp-links|fdn reverb stays bounded and decaying for every parameter vector|WebSocketChannel echoes a >126-byte message'
 
   tsan:
@@ -495,12 +497,14 @@ jobs:
           # hold here. Exclude the same label groups the required `macos` gate
           # excludes, for the same reason it excludes them. Race and RT-safety
           # tests are deliberately NOT excluded — catching those is why this
-          # lane exists.
+          # lane exists. gate-inventory tests compare manifests generated from
+          # the gate configure against this build's inventory, which a
+          # sanitizer configure differs from by design.
           ctest --test-dir build-ubsan --output-on-failure \
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --label-exclude 'validation|slow|performance|bench|quality-lab' \
+            --label-exclude 'validation|slow|performance|bench|quality-lab|gate-inventory' \
             --exclude-regex 'Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|cmake-ios-hostapp-links|MountedVolumeListChangeDetector stop wakes a long poll promptly|ConnectedChildProcess'
 
   rtsan:
@@ -599,8 +603,10 @@ jobs:
           # Validation, benchmark, and performance labels measure unavailable lane
           # services or wall-clock throughput rather than RTSan findings.
           # Native Skia/capture names below are likewise provider-backed fixtures.
+          # gate-inventory tests judge manifests generated from the gate
+          # configure, which this configure differs from by design.
           ctest --test-dir build-rtsan --output-on-failure \
             -j$(nproc) \
             --timeout 600 \
-            --label-exclude 'validation|slow|performance|bench|quality-lab|skia|browser-capture|gpu-health|slow-affected|agent-capability-installed-sdk' \
+            --label-exclude 'validation|slow|performance|bench|quality-lab|gate-inventory|skia|browser-capture|gpu-health|slow-affected|agent-capability-installed-sdk' \
             --exclude-regex 'sdk-consumer|install-layout|clean-consumer|project-package-compile-out|cmake-pulp-install|GpuSurface|compileShader|realtime factor reported|GPU health|native tree draws|IR text|serialized DesignIR resolves portable capture|filter list without blur|zero or negative blur radius'
