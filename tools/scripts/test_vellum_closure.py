@@ -1374,7 +1374,9 @@ class GeneratedDigestTests(unittest.TestCase):
                 "\nunset ( PULP_JS_PRELUDES )\n",
                 "\nSET ( PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
                 "\nset ( \"PULP_JS_PRELUDES\" ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
+                "\nset ( [[PULP_JS_PRELUDES]] ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
                 "\nunset ( \"PULP_JS_PRELUDES\" )\n",
+                "\nstring ( APPEND PULP_JS_PRELUDES \";replaced\" )\n",
             ):
                 producer.write_text(original + mutation, encoding="utf-8")
                 self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), mutation)
