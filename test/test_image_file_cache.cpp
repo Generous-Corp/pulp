@@ -197,6 +197,54 @@ TEST_CASE("ImageFileCache: clear_backend waits for an in-flight build",
     REQUIRE(builds.load() == 2);
 }
 
+TEST_CASE("ImageFileCache: disabling wakes a coalesced waiter",
+          "[canvas][image-cache][embedded]") {
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const void* backend = reinterpret_cast<const void*>(0xD1D1);
+    std::atomic<int> builds{0};
+    std::atomic<bool> first_started{false};
+    std::atomic<bool> release_first{false};
+    std::mutex gate_mutex;
+    std::condition_variable gate_cv;
+    auto build = [&]() -> sk_sp<SkImage> {
+        const int n = ++builds;
+        if (n == 1) {
+            first_started.store(true, std::memory_order_release);
+            gate_cv.notify_all();
+            std::unique_lock<std::mutex> lock(gate_mutex);
+            gate_cv.wait_for(lock, std::chrono::seconds(10), [&] {
+                return release_first.load(std::memory_order_acquire);
+            });
+        }
+        return make_dummy_image();
+    };
+    std::thread first([&] { cache.get_or_build("/tmp/disable.png", backend, build); });
+    {
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        REQUIRE(gate_cv.wait_for(lock, std::chrono::seconds(10), [&] {
+            return first_started.load(std::memory_order_acquire);
+        }));
+    }
+    std::atomic<bool> second_done{false};
+    std::thread second([&] {
+        cache.get_or_build("/tmp/disable.png", backend, build);
+        second_done.store(true, std::memory_order_release);
+    });
+    cache.set_enabled(false);
+    for (int i = 0; i < 1000 && !second_done.load(std::memory_order_acquire); ++i)
+        std::this_thread::yield();
+    REQUIRE(second_done.load(std::memory_order_acquire));
+    release_first.store(true, std::memory_order_release);
+    gate_cv.notify_all();
+    first.join();
+    second.join();
+    REQUIRE(builds.load() == 2);
+    cache.set_enabled(true);
+}
+
 TEST_CASE("ImageFileCache: clear() forces a rebuild (invalidation hook)",
           "[canvas][image-cache][issue-6223]") {
     auto& cache = ImageFileCache::instance();

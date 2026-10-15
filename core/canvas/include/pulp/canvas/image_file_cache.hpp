@@ -80,6 +80,8 @@ public:
     void clear();
 
     /// Drop entries tied to one GPU backend before that backend is destroyed.
+    /// The caller must stop painting through the backend before calling this;
+    /// this method waits for already-started builds, then removes their entries.
     /// A null backend key is ignored because it denotes the shared CPU-raster entry.
     void clear_backend(const void* backend_key);
 

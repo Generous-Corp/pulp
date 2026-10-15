@@ -211,8 +211,13 @@ void ImageFileCache::clear_backend(const void* backend_key) {
 
 void ImageFileCache::set_enabled(bool enabled) {
     Impl& d = impl();
-    std::lock_guard<std::mutex> lock(d.mutex);
-    d.enabled = enabled;
+    {
+        std::lock_guard<std::mutex> lock(d.mutex);
+        d.enabled = enabled;
+    }
+    // A disabled cache lets waiters take the uncached path. Wake them now
+    // instead of making them wait for an unrelated in-flight build to finish.
+    d.build_cv.notify_all();
 }
 
 bool ImageFileCache::enabled() const {
