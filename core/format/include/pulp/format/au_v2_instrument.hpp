@@ -164,64 +164,64 @@ protected:
     void publish_parameter_display_changes();
 
 private:
-  // AU v2 instruments are a separate adapter path from PulpAUEffect. Keep
-  // the tracing attachment on the actual host-facing object so a traced AU
-  // instrument retains a live reference to the runtime trace controller.
-  // Without this member, the traced SDK can carry its sentinel and Perfetto
-  // archive while the linker dead-strips Tracing::attach/start/stop from
-  // instrument bundles, making the advertised tracing mode inert.
-  runtime::ScopedTracingAttachment tracing_;
+    // AU v2 instruments are a separate adapter path from PulpAUEffect. Keep
+    // the tracing attachment on the actual host-facing object so a traced AU
+    // instrument retains a live reference to the runtime trace controller.
+    // Without this member, the traced SDK can carry its sentinel and Perfetto
+    // archive while the linker dead-strips Tracing::attach/start/stop from
+    // instrument bundles, making the advertised tracing mode inert.
+    runtime::ScopedTracingAttachment tracing_;
 
-  // The store is declared before the Processor so it is destroyed after it.
-  // `Processor::state()` dereferences a pointer to this store, and a Processor
-  // may read it from its destructor or from a worker thread that destructor is
-  // about to join. Reversing these two lines hands that thread a freed store.
-  state::StateStore store_;
-  std::unique_ptr<Processor> processor_;
-  // Factory presets, bound to store_ in the constructor. Declared after
-  // store_ so reverse member destruction retires the PresetManager while the
-  // store it holds a reference to is still alive.
-  FactoryPresetTable factory_presets_;
-  // Keeps a host class-info restore off the processor while Render() is
-  // inside it. Declared after processor_ so it outlives every render that
-  // consults it.
-  StateRestoreGate state_restore_gate_;
-  // Declared after processor_ so reverse member destruction retires retained
-  // editor handles before either referenced object is released.
-  runtime::AliveToken owner_alive_;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
+    state::StateStore store_;
+    std::unique_ptr<Processor> processor_;
+    // Factory presets, bound to store_ in the constructor. Declared after
+    // store_ so reverse member destruction retires the PresetManager while the
+    // store it holds a reference to is still alive.
+    FactoryPresetTable factory_presets_;
+    // Keeps a host class-info restore off the processor while Render() is
+    // inside it. Declared after processor_ so it outlives every render that
+    // consults it.
+    StateRestoreGate state_restore_gate_;
+    // Declared after processor_ so reverse member destruction retires retained
+    // editor handles before either referenced object is released.
+    runtime::AliveToken owner_alive_;
 
-  // Immutable plugin metadata, cached once in the constructor. Owns the bus
-  // name strings that the per-block `ProcessBusBufferInfo`s view — copying it
-  // per render block would allocate (std::string members) on the audio thread.
-  PluginDescriptor descriptor_{};
+    // Immutable plugin metadata, cached once in the constructor. Owns the bus
+    // name strings that the per-block `ProcessBusBufferInfo`s view — copying it
+    // per render block would allocate (std::string members) on the audio thread.
+    PluginDescriptor descriptor_{};
 
-  // Host accommodations, resolved once at init via the runtime policy.
-  HostQuirks host_quirks_{};
+    // Host accommodations, resolved once at init via the runtime policy.
+    HostQuirks host_quirks_{};
 
-  // Per-output-bus channel-pointer storage. One vector per AU output element
-  // (bus); index 0 is the main bus, 1..N-1 the aux buses. Pre-reserved in
-  // Initialize() so the per-block resize to the host buffer count is a no-op
-  // realloc and the render path never grows a vector on the audio thread.
-  static constexpr std::size_t kMaxOutputBuses = BusBufferSet::kMaxBuses;
-  std::array<std::vector<float*>, kMaxOutputBuses> output_bus_ptrs_{};
+    // Per-output-bus channel-pointer storage. One vector per AU output element
+    // (bus); index 0 is the main bus, 1..N-1 the aux buses. Pre-reserved in
+    // Initialize() so the per-block resize to the host buffer count is a no-op
+    // realloc and the render path never grows a vector on the audio thread.
+    static constexpr std::size_t kMaxOutputBuses = BusBufferSet::kMaxBuses;
+    std::array<std::vector<float*>, kMaxOutputBuses> output_bus_ptrs_{};
 
-  // Main-thread listener that pushes editor parameter edits to the host
-  // (never from the render thread). Kept alive for the adapter's lifetime.
-  state::ListenerToken ui_push_listener_;
-  ParameterDisplayNamePublisher parameter_display_names_;
+    // Main-thread listener that pushes editor parameter edits to the host
+    // (never from the render thread). Kept alive for the adapter's lifetime.
+    state::ListenerToken ui_push_listener_;
+    ParameterDisplayNamePublisher parameter_display_names_;
 
-  // Lock-free MIDI note input (single producer = host MIDI/render thread via
-  // HandleNoteOn/Off; single consumer = Render). No audio-thread mutex.
-  runtime::SpscQueue<midi::MidiEvent, 1024> midi_in_queue_;
+    // Lock-free MIDI note input (single producer = host MIDI/render thread via
+    // HandleNoteOn/Off; single consumer = Render). No audio-thread mutex.
+    runtime::SpscQueue<midi::MidiEvent, 1024> midi_in_queue_;
 
-  // Previous-block transport snapshot used to derive change flags on
-  // `ProcessContext`. Default-constructed so the first Render() call
-  // after Initialize() reports no changes.
-  detail::PlayheadSnapshot playhead_prev_{};
+    // Previous-block transport snapshot used to derive change flags on
+    // `ProcessContext`. Default-constructed so the first Render() call
+    // after Initialize() reports no changes.
+    detail::PlayheadSnapshot playhead_prev_{};
 
-  // Host offline-render intent (kAudioUnitProperty_OfflineRender), written by
-  // the host before a faster-than-realtime bounce and read each render block.
-  OfflineRenderProperty offline_render_;
+    // Host offline-render intent (kAudioUnitProperty_OfflineRender), written by
+    // the host before a faster-than-realtime bounce and read each render block.
+    OfflineRenderProperty offline_render_;
 };
 
 } // namespace pulp::format::au
