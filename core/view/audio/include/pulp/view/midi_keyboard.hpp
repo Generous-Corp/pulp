@@ -1,7 +1,7 @@
 #pragma once
 
-#include <pulp/view/view.hpp>
 #include <functional>
+#include <pulp/view/view.hpp>
 #include <set>
 
 namespace pulp::view {
@@ -10,13 +10,17 @@ namespace pulp::view {
 // Piano keyboard widget for note input/display.
 
 class MidiKeyboard : public View {
-public:
+  public:
     MidiKeyboard();
 
     // Range (MIDI note numbers 0-127)
     void set_range(int first_note, int last_note);
-    int first_note() const { return first_note_; }
-    int last_note() const { return last_note_; }
+    int first_note() const {
+        return first_note_;
+    }
+    int last_note() const {
+        return last_note_;
+    }
 
     // Active/held notes (for display from external MIDI)
     void note_on(int note, float velocity = 1.0f);
@@ -31,37 +35,50 @@ public:
     /// Keyboard geometry.
     enum class Orientation {
         horizontal,
-        vertical,                 ///< Physical piano-key proportions.
-        vertical_chromatic_rows,  ///< Equal semitone rows, with last_note() at the top.
+        vertical,                ///< Physical piano-key proportions.
+        vertical_chromatic_rows, ///< Equal semitone rows, with last_note() at the top.
     };
 
     /// Select geometry. Chromatic rows are an explicitly vertical mode.
     void set_orientation(Orientation o) {
-        if (orientation_ == o) return;
+        if (orientation_ == o)
+            return;
         orientation_ = o;
         request_repaint();
     }
-    Orientation orientation() const { return orientation_; }
+    Orientation orientation() const {
+        return orientation_;
+    }
 
     // Display options
     /// Show C octave labels using the MIDI convention where note 60 is C4.
-    void set_show_note_names(bool show) { show_names_ = show; }
-    bool show_note_names() const { return show_names_; }
+    void set_show_note_names(bool show) {
+        show_names_ = show;
+    }
+    bool show_note_names() const {
+        return show_names_;
+    }
 
-    void set_highlight_color(Color c) { highlight_color_ = c; }
+    void set_highlight_color(Color c) {
+        highlight_color_ = c;
+    }
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_up(Point pos) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_event(const MouseEvent& event) override;
-    bool wants_mouse_input() const override { return true; }
+    bool wants_mouse_input() const override {
+        return true;
+    }
 
-    float intrinsic_height() const override { return 80.0f; }
+    float intrinsic_height() const override {
+        return 80.0f;
+    }
 
-private:
-    int first_note_ = 36;   // C2
-    int last_note_ = 96;    // C7
+  private:
+    int first_note_ = 36; // C2
+    int last_note_ = 96;  // C7
     Orientation orientation_ = Orientation::horizontal;
     bool show_names_ = false;
     // Transparent sentinel (a==0) means "no explicit highlight set" — paint()

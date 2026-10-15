@@ -6,9 +6,11 @@
 // include + the queryable component catalog.
 //
 // Two things live here:
-//   1. The umbrella include — pull in <pulp/design/design_system.hpp> and you
-//      have every native widget the design system covers, plus a one-call theme
-//      helper (apply_ink_signal) and the token-true light/dark themes.
+//   1. The catalog API — pull in <pulp/design/design_system.hpp> for the
+//      component metadata and one-call theme helper. Audio widget declarations
+//      are supplied by <pulp/view/audio_widgets.hpp> when Pulp::view-audio is
+//      linked; keeping them out of this core header lets the extracted view
+//      layer remain audio-free.
 //   2. The component CATALOG — rich, queryable metadata bridging each Figma
 //      component to its native C++ class: category, native class, source header,
 //      Figma component-set name, a one-line usage note, and the theme tokens it
@@ -22,7 +24,8 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
 
-// Umbrella component surface — everything the catalog references.
+// Generic component surface. Audio components are included by the audio target
+// through pulp/view/audio_widgets.hpp, not by this view-core header.
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/widgets.hpp>
@@ -34,8 +37,6 @@
 #include <pulp/view/side_panel.hpp>
 #include <pulp/view/breadcrumb.hpp>
 #include <pulp/view/context_menu.hpp>
-#include <pulp/view/midi_keyboard.hpp>
-#include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/channel_strip_view.hpp>
 #include <pulp/view/range_slider_view.hpp>
 #include <pulp/view/inline_value_editor_view.hpp>
@@ -43,7 +44,6 @@
 #include <pulp/view/group_box_view.hpp>
 #include <pulp/view/number_box_states_view.hpp>
 #include <pulp/view/knob_modulation_view.hpp>
-#include <pulp/view/waveform_recorder_view.hpp>
 #include <pulp/view/text_editor.hpp>
 
 #include <string>

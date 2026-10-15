@@ -6042,6 +6042,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-46e01cbb9683"
+paths = ["tools/scripts/test_view_audio_carve.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "pulp-view-audio-carve",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-c74df102fec8"
 paths = ["tools/scripts/test_view_audio_symbol_floor.py"]
 tests = [
@@ -7291,6 +7325,7 @@ paths = [
   "tools/scripts/test_version_at_land.py",
   "tools/scripts/test_version_consistency_check.py",
   "tools/scripts/test_version_consistency_check_extra.py",
+  "tools/scripts/test_view_audio_carve.py",
   "tools/scripts/test_view_audio_symbol_floor.py",
   "tools/scripts/test_visual_python_deps_step.py",
   "tools/scripts/test_web_timeline_source_closure_check.py",
@@ -7847,6 +7882,7 @@ paths = [
   "tools/scripts/test_version_at_land.py",
   "tools/scripts/test_version_consistency_check.py",
   "tools/scripts/test_version_consistency_check_extra.py",
+  "tools/scripts/test_view_audio_carve.py",
   "tools/scripts/test_view_audio_symbol_floor.py",
   "tools/scripts/test_visual_python_deps_step.py",
   "tools/scripts/test_web_timeline_source_closure_check.py",

@@ -7,19 +7,23 @@
 
 namespace pulp::view {
 
-StepGridViewBase::StepGridViewBase(std::uint8_t lanes, std::uint8_t steps,
-                                   std::uint8_t patterns)
+StepGridViewBase::StepGridViewBase(std::uint8_t lanes, std::uint8_t steps, std::uint8_t patterns)
     : lanes_(lanes), steps_(steps), patterns_(patterns),
       visible_cache_(static_cast<std::size_t>(lanes) * steps) {
     set_focusable(true);
 }
 
-StepGridViewBase::~StepGridViewBase() { unsubscribe_probe(); }
+StepGridViewBase::~StepGridViewBase() {
+    unsubscribe_probe();
+}
 
-void StepGridViewBase::detach_probe() { unsubscribe_probe(); }
+void StepGridViewBase::detach_probe() {
+    unsubscribe_probe();
+}
 
 void StepGridViewBase::set_displayed_pattern(std::uint8_t pattern) {
-    if (pattern >= patterns_ || pattern == displayed_pattern_) return;
+    if (pattern >= patterns_ || pattern == displayed_pattern_)
+        return;
     displayed_pattern_ = pattern;
     rebuild_visible();
     request_repaint();
@@ -27,7 +31,8 @@ void StepGridViewBase::set_displayed_pattern(std::uint8_t pattern) {
 
 StepGridViewBase::PumpResult StepGridViewBase::pump() {
     PumpResult r;
-    if (!channel_bound()) return r;
+    if (!channel_bound())
+        return r;
 
     // Reset per-pump dirty accounting; the shim's apply_next_echo/rebuild_visible
     // repopulate it as they replay this tick's echoes.
@@ -50,12 +55,14 @@ StepGridViewBase::PumpResult StepGridViewBase::pump() {
     auto drain = [&] {
         for (;;) {
             EchoResult er = apply_next_echo(last_engine_sequence_);
-            if (er.status == EchoStatus::Drained) break;
+            if (er.status == EchoStatus::Drained)
+                break;
             if (er.status == EchoStatus::Applied) {
                 last_engine_sequence_ = er.engine_sequence;
                 ++r.echoes_applied;
                 r.rebuilt_cells += er.rebuilt_cells;
-                if (er.full_rebuild) pump_full_ = true;
+                if (er.full_rebuild)
+                    pump_full_ = true;
             }
             // SkippedStale: keep draining without advancing the sequence bar.
         }
@@ -78,8 +85,7 @@ StepGridViewBase::PumpResult StepGridViewBase::pump() {
     const PlayheadProjection ph = read_playhead();
     const bool now_visible = ph.playing && ph.active_pattern == displayed_pattern_;
     const bool playhead_changed =
-        now_visible != playhead_visible_ ||
-        (now_visible && ph.active_step != playhead_step_);
+        now_visible != playhead_visible_ || (now_visible && ph.active_step != playhead_step_);
     playhead_visible_ = now_visible;
     playhead_step_ = ph.active_step;
     playhead_pattern_ = ph.active_pattern;
@@ -112,10 +118,8 @@ Rect StepGridViewBase::cell_rect(std::uint8_t lane, std::uint8_t step) const {
     const float cw = b.width / static_cast<float>(steps_);
     const float ch = b.height / static_cast<float>(lanes_);
     constexpr float gap = 1.0f;
-    return Rect{static_cast<float>(step) * cw + gap,
-                static_cast<float>(lane) * ch + gap,
-                std::max(0.0f, cw - 2 * gap),
-                std::max(0.0f, ch - 2 * gap)};
+    return Rect{static_cast<float>(step) * cw + gap, static_cast<float>(lane) * ch + gap,
+                std::max(0.0f, cw - 2 * gap), std::max(0.0f, ch - 2 * gap)};
 }
 
 Rect StepGridViewBase::playhead_column_rect(std::uint8_t step) const {
@@ -128,11 +132,14 @@ Rect StepGridViewBase::playhead_column_rect(std::uint8_t step) const {
 
 std::optional<StepGridViewBase::Cell> StepGridViewBase::cell_at(Point pos) const {
     const Rect b = local_bounds();
-    if (b.width <= 0 || b.height <= 0) return std::nullopt;
-    if (pos.x < 0 || pos.y < 0 || pos.x >= b.width || pos.y >= b.height) return std::nullopt;
+    if (b.width <= 0 || b.height <= 0)
+        return std::nullopt;
+    if (pos.x < 0 || pos.y < 0 || pos.x >= b.width || pos.y >= b.height)
+        return std::nullopt;
     const int step = static_cast<int>(pos.x / (b.width / static_cast<float>(steps_)));
     const int lane = static_cast<int>(pos.y / (b.height / static_cast<float>(lanes_)));
-    if (lane < 0 || lane >= lanes_ || step < 0 || step >= steps_) return std::nullopt;
+    if (lane < 0 || lane >= lanes_ || step < 0 || step >= steps_)
+        return std::nullopt;
     return Cell{static_cast<std::uint8_t>(lane), static_cast<std::uint8_t>(step)};
 }
 
@@ -166,8 +173,7 @@ void StepGridViewBase::paint(canvas::Canvas& canvas) {
     // Re-check the pattern here: set_displayed_pattern() can change the shown
     // pattern after the last pump, and a synchronous repaint would otherwise draw
     // the previous pattern's playhead over the new one.
-    if (playhead_visible_ && playhead_pattern_ == displayed_pattern_ &&
-        playhead_step_ < steps_) {
+    if (playhead_visible_ && playhead_pattern_ == displayed_pattern_ && playhead_step_ < steps_) {
         const Rect col = playhead_column_rect(playhead_step_);
         Color ph = resolve_color("overlay.bg", Color::rgba8(255, 255, 255));
         ph.a = 0.14f;
@@ -179,7 +185,8 @@ void StepGridViewBase::paint(canvas::Canvas& canvas) {
 // ── Interaction (submit-only; render copy advances from echoes) ──────────────
 void StepGridViewBase::on_mouse_down(Point pos) {
     auto cell = cell_at(pos);
-    if (!cell) return;
+    if (!cell)
+        return;
     current_txn_ = next_txn_++;
     dragging_ = true;
     // Toggle relative to current authoritative state (as reflected in the visual
@@ -190,35 +197,41 @@ void StepGridViewBase::on_mouse_down(Point pos) {
 }
 
 void StepGridViewBase::on_mouse_drag(Point pos) {
-    if (!dragging_) return;
+    if (!dragging_)
+        return;
     auto cell = cell_at(pos);
-    if (!cell) return;
+    if (!cell)
+        return;
     if (last_drag_cell_ && last_drag_cell_->lane == cell->lane &&
         last_drag_cell_->step == cell->step)
-        return;  // same cell, no repeat command
+        return; // same cell, no repeat command
     last_drag_cell_ = cell;
     submit_set_cell(cell->lane, cell->step, drag_sets_enabled_, state::GesturePhase::Update);
 }
 
 void StepGridViewBase::on_mouse_up(Point /*pos*/) {
-    if (!dragging_) return;
+    if (!dragging_)
+        return;
     dragging_ = false;
     // Close the gesture with an IDEMPOTENT End marker on the last cell the drag
     // actually touched, re-applying the SAME value the drag set. Gating on
     // last_drag_cell_ avoids a stray default-cell edit on release-outside-grid.
     if (channel_bound() && last_drag_cell_)
-        submit_set_cell(last_drag_cell_->lane, last_drag_cell_->step,
-                        drag_sets_enabled_, state::GesturePhase::End);
+        submit_set_cell(last_drag_cell_->lane, last_drag_cell_->step, drag_sets_enabled_,
+                        state::GesturePhase::End);
     last_drag_cell_.reset();
     current_txn_ = 0;
 }
 
 // ── FrameClock activity probe ────────────────────────────────────────────────
-void StepGridViewBase::on_frame_clock_changed() { subscribe_probe(); }
+void StepGridViewBase::on_frame_clock_changed() {
+    subscribe_probe();
+}
 
 void StepGridViewBase::subscribe_probe() {
     FrameClock* clock = frame_clock();
-    if (clock == subscribed_clock_) return;
+    if (clock == subscribed_clock_)
+        return;
     unsubscribe_probe();
     if (clock) {
         probe_id_ = clock->subscribe_activity([this](float) { pump(); });

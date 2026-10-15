@@ -15,7 +15,7 @@ Pipeline (faithful-vector):
      #16191E (bottom). Toolbar/overview teal (solid #16DAC2, not a ramp) is
      left untouched. This is content-based (no byte offsets), so it survives
      Figma edits. Proven to reproduce the committed SVGs byte-exact.
-  3. Emit core/view/src/musical_typing_keyboard_svg.cpp (chunked base64).
+  3. Emit core/view/audio/src/musical_typing_keyboard_svg.cpp (chunked base64).
 
 Usage:
   reembed_mtk.py [--token <T>] [--repo <path>] [--date YYYY-MM-DD]
@@ -95,7 +95,7 @@ def render_cpp(typing_svg: str, piano_svg: str, date: str) -> str:
         f"// Source file {FILE_KEY}, re-imported {date}. The combined\n"
         "// spec frame (187:2) stacks both modes to show their states at once; the live\n"
         "// component shows one at a time. The design's baked \"selected keys shown\" demo\n"
-        "// chord (pure-#16DAC2 lit key gradients in the key-bed) is NEUTRALIZED to the\n"
+        "// chord with pure teal lit-key gradients in the key-bed is NEUTRALIZED to the\n"
         "// resting key color here — white→#EBEEF1, black→#3A3F47/#16191E — so the live\n"
         "// momentary overlay owns every pressed-state highlight (matching the combined\n"
         "// frame's invariant). Toolbar/overview teal is untouched. Stored as chunked\n"
@@ -136,7 +136,7 @@ def main():
     typing = neutralize(fetch_svg(TYPING_NODE, token))
     piano = neutralize(fetch_svg(PIANO_NODE, token))
     cpp = render_cpp(typing, piano, a.date)
-    out_path = os.path.join(a.repo, "core/view/src/musical_typing_keyboard_svg.cpp")
+    out_path = os.path.join(a.repo, "core/view/audio/src/musical_typing_keyboard_svg.cpp")
 
     if a.validate:
         cur = open(out_path).read()

@@ -13,7 +13,8 @@
     {
       "path": "tools/scripts/timeline_engine_dependency_floor_check.py",
       "needles": [
-        "Every row that admits `runtime` also admits `simd`"
+        "Every row that admits `runtime` also admits `simd`",
+        "view-audio"
       ]
     },
     {

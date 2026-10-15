@@ -542,6 +542,12 @@
       "timeout": 120.0
     },
     {
+      "name": "make-catalog-component-selftest",
+      "argv": [
+        "{repo}/tools/import-design/test_make_catalog_component.py"
+      ]
+    },
+    {
       "name": "measure-min-os-selftest",
       "argv": [
         "{repo}/tools/scripts/test_measure_min_os.py"

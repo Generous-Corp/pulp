@@ -172,25 +172,20 @@ int run_baseline() {
                     return 4;
             } else {
                 const auto produced = sequence - SharedIoStampedBridge::kLeadBlocks;
-                if (produced == 0) {
-                    if (delivery != SharedIoConvolutionSession::Delivery::Missing)
-                        return 5;
-                } else {
-                    if (delivery != SharedIoConvolutionSession::Delivery::Ready)
-                        return 6;
-                    const auto offset = static_cast<std::size_t>(produced) * frames;
-                    for (std::uint32_t channel = 0; channel < channels; ++channel)
-                        for (std::uint32_t frame = 0; frame < frames; ++frame) {
-                            const auto expected = offset + frame < reference[channel].size()
-                                                      ? reference[channel][offset + frame]
-                                                      : 0.0;
-                            const auto actual =
-                                callback_output[static_cast<std::size_t>(channel) * frames + frame];
-                            if (!std::isfinite(actual) ||
-                                std::abs(actual - expected) > 2.0e-2 * (1.0 + std::abs(expected)))
-                                return 7;
-                        }
-                }
+                if (delivery != SharedIoConvolutionSession::Delivery::Ready)
+                    return 5;
+                const auto offset = static_cast<std::size_t>(produced) * frames;
+                for (std::uint32_t channel = 0; channel < channels; ++channel)
+                    for (std::uint32_t frame = 0; frame < frames; ++frame) {
+                        const auto expected = offset + frame < reference[channel].size()
+                                                  ? reference[channel][offset + frame]
+                                                  : 0.0;
+                        const auto actual =
+                            callback_output[static_cast<std::size_t>(channel) * frames + frame];
+                        if (!std::isfinite(actual) ||
+                            std::abs(actual - expected) > 2.0e-2 * (1.0 + std::abs(expected)))
+                            return 6;
+                    }
             }
         }
         // Two callback-owned ingress records are published before this call.

@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.977.1
+    VERSION 0.978.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -1156,19 +1156,22 @@ pulp_install_forge_catalog()
 # specific targets one by one, but each release-cli cycle reveals a
 # new failing target (most recently examples/view-bridge-demo).
 #
-# This final pass walks every executable defined in the project tree
-# and applies `pulp_link_fontconfig_after_skia` so fontconfig appears
-# at the END of every consumer's link line. No-op on macOS/Windows/Android.
+# This final pass walks every executable and shared/module library defined in
+# the project tree and applies `pulp_link_fontconfig_after_skia` so fontconfig
+# appears at the END of every consumer's link line. MODULE targets matter here:
+# plug-in fixtures are loaded by a host after the link, so an unresolved Skia
+# fontconfig symbol can otherwise escape the linker's usual executable checks.
+# No-op on macOS/Windows/Android.
 if(UNIX AND NOT APPLE AND NOT ANDROID)
     include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake")
     include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCollectTargets.cmake")
     pulp_collect_targets_recursive(
-        _all_executables
+        _all_link_consumers
         "${PULP_ROOT_DIR}"
-        TYPES EXECUTABLE
+        TYPES EXECUTABLE MODULE_LIBRARY SHARED_LIBRARY
     )
-    foreach(_exec ${_all_executables})
-        pulp_link_fontconfig_after_skia(${_exec})
+    foreach(_consumer ${_all_link_consumers})
+        pulp_link_fontconfig_after_skia(${_consumer})
     endforeach()
 endif()
 

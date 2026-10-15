@@ -2,8 +2,9 @@
 # gestures that edit it.
 #
 # The link list is the contract. This rung may reach the editor kernel below it
-# and the view/canvas stack beside it, and nothing else. `pulp::playback` is
-# absent by design: a view learns where the playhead is through
+# and the view/canvas stack beside it. The shared piano-roll ruler is part of
+# `pulp::view-audio`, so this arranger consumes that concrete widget target as
+# well as the audio-free view core. `pulp::playback` is absent by design: a view learns where the playhead is through
 # SequencerUiHost, whose implementation lives with whoever owns audio.
 # `pulp::project_package` is absent for the same reason in the other direction
 # — storage is a sibling rung, not a base of the editor, so an arranger is
@@ -35,5 +36,6 @@ target_link_libraries(pulp-timeline-view
         pulp::timeline
         pulp::timebase
         pulp::view-core
+        pulp::view-audio
         pulp::canvas
 )
