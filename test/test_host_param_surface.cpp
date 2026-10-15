@@ -1556,32 +1556,33 @@ TEST_CASE("a changed host readout repaints when its value stays fixed",
 TEST_CASE("unchanged custom controls do not repaint on every host tick",
           "[view][host-param][design-import][frame][custom]") {
     class RepaintingControl final : public view::View, public view::DesignControl {
-    public:
+      public:
         void set_control_value(float value) override {
             value_ = value;
             ++pushes;
             request_repaint();
         }
-        float control_value() const override { return value_; }
+        float control_value() const override {
+            return value_;
+        }
         float value_ = 0.0f;
         int pushes = 0;
     };
 
     view::clear_design_control_factories();
     RepaintingControl* control = nullptr;
-    view::register_design_control_factory(
-        "host-tick-control", [&](const view::DesignControlContext&) {
-            auto widget = std::make_unique<RepaintingControl>();
-            control = widget.get();
-            return widget;
-        });
+    view::register_design_control_factory("host-tick-control",
+                                          [&](const view::DesignControlContext&) {
+                                              auto widget = std::make_unique<RepaintingControl>();
+                                              control = widget.get();
+                                              return widget;
+                                          });
     DesignFrameElement element;
     element.kind = DesignFrameElement::Kind::custom;
     element.factory_id = "host-tick-control";
     element.param_key = "gain";
-    DesignFrameView frame(
-        R"(<svg width="100" height="100"><rect width="100" height="100"/></svg>)",
-        {element}, 0, 0, 100, 100);
+    DesignFrameView frame(R"(<svg width="100" height="100"><rect width="100" height="100"/></svg>)",
+                          {element}, 0, 0, 100, 100);
     REQUIRE(control != nullptr);
 
     CountingPluginViewHost host;
@@ -1594,7 +1595,8 @@ TEST_CASE("unchanged custom controls do not repaint on every host tick",
 
     const int pushes = control->pushes;
     int before = host.repaints;
-    for (int tick = 0; tick < 8; ++tick) frame.sync_from_host_params();
+    for (int tick = 0; tick < 8; ++tick)
+        frame.sync_from_host_params();
     CHECK(control->pushes == pushes);
     CHECK(host.repaints == before);
 

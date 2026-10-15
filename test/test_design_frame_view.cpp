@@ -1209,7 +1209,7 @@ TEST_CASE("DesignFrameView pushes host->view values to a conduit custom control 
 
     const int pushes = ctl->pushes_;
     v.set_element_value(0, 0.8f);
-    CHECK(ctl->pushes_ == pushes);                       // steady host tick is inert
+    CHECK(ctl->pushes_ == pushes); // steady host tick is inert
 
     v.set_element_value(0, 1.7f);                      // out-of-range is clamped
     CHECK(ctl->value_ == Catch::Approx(1.0f));
