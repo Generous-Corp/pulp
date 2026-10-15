@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09740"></a>
+## [0.974.0] - 2026-10-15
+
+- release/version bump ([#10332](https://github.com/Generous-Corp/pulp/pull/10332))
+- fix/pr head budget defers ordinary ([#10326](https://github.com/Generous-Corp/pulp/pull/10326))
+- release/version bump ([#10330](https://github.com/Generous-Corp/pulp/pull/10330))
+- fix/merge group backstop app bot type ([#10328](https://github.com/Generous-Corp/pulp/pull/10328))
+- fix/importer benchmark receipt 20261014 ([#10318](https://github.com/Generous-Corp/pulp/pull/10318))
+- codex/nodal au pointer coalescing 20261014 ([#10312](https://github.com/Generous-Corp/pulp/pull/10312))
+- ci/regen script inputs staged ([#10325](https://github.com/Generous-Corp/pulp/pull/10325))
+- release/version bump ([#10327](https://github.com/Generous-Corp/pulp/pull/10327))
+- codex/g2h b census repair 20261014 ([#10317](https://github.com/Generous-Corp/pulp/pull/10317))
+- fix/merge group backstop app only ([#10323](https://github.com/Generous-Corp/pulp/pull/10323))
+- fix/format changed access modifier ([#10322](https://github.com/Generous-Corp/pulp/pull/10322))
+
 <a id="v09730"></a>
 ## [0.973.0] - 2026-10-15
 
@@ -10760,6 +10775,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.974.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.974.0
 [0.973.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.973.0
 [0.972.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.972.0
 [0.971.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.971.1
