@@ -84,7 +84,8 @@ if(WIN32)
         unset(_pulp_windows_skia_slice)
     endif()
 endif()
-if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS AND NOT _pulp_windows_arm64ec_target)
+pulp_windows_skia_provider_should_declare_wgpu(_pulp_declare_wgpu)
+if(_pulp_declare_wgpu)
     pulp_register_fetchcontent_source(webgpu REF 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab)
     FetchContent_Declare(
         webgpu
@@ -208,6 +209,7 @@ unset(_pulp_skia_candidate)
 unset(_pulp_windows_target_arch)
 unset(_pulp_windows_arm64ec_target)
 unset(_pulp_windows_arm64ec_skia_dawn)
+unset(_pulp_declare_wgpu)
 
 # Skia Graphite — GPU-accelerated 2D rendering (BSD-3-Clause)
 # Pre-built via skia-builder (desktop) or build-skia-android.sh (Android)

@@ -153,8 +153,13 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
             f'include("{WINDOWS_PROVIDER.as_posix()}")\n'
             "pulp_windows_skia_provider_target(_target)\n"
             "pulp_windows_skia_provider_requires_skia_dawn(${_target} _skip)\n"
+            "set(PULP_ENABLE_GPU TRUE)\n"
+            "pulp_windows_skia_provider_should_declare_wgpu(_declare)\n"
             f'if(NOT _skip STREQUAL "{expected_skip}")\n'
             "  message(FATAL_ERROR \"unexpected skip=${_skip} target=${_target}\")\n"
+            "endif()\n"
+            f'if(NOT _declare STREQUAL "{"FALSE" if expected_skip == "TRUE" else "TRUE"}")\n'
+            "  message(FATAL_ERROR \"unexpected declare=${_declare}\")\n"
             "endif()\n"
             f'set(PULP_SKIA_PROVIDES_DAWN {provider_value})\n'
             "pulp_windows_skia_provider_require_dawn(${_target})\n"
