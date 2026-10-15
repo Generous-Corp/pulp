@@ -1144,7 +1144,7 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     pulp_collect_targets_recursive(
         _all_link_consumers
         "${PULP_ROOT_DIR}"
-        TYPES EXECUTABLE MODULE SHARED_LIBRARY
+        TYPES EXECUTABLE MODULE_LIBRARY SHARED_LIBRARY
     )
     foreach(_consumer ${_all_link_consumers})
         pulp_link_fontconfig_after_skia(${_consumer})
