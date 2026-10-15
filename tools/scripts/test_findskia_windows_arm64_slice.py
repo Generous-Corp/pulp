@@ -17,6 +17,7 @@ import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 FINDSKIA = REPO / "tools/cmake/FindSkia.cmake"
+WINDOWS_PROVIDER = REPO / "tools/cmake/PulpWindowsSkiaProvider.cmake"
 
 
 class FindSkiaWindowsArm64Slice(unittest.TestCase):
@@ -140,6 +141,42 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
                                  target_arch="ARM64EC", expect_found=True,
                                  expect_slice="arm64ec", expect_provider=False)
         self.assertIn("selecting Windows arm64ec archive slice", output)
+
+    def _configure_provider_policy(self, target_arch: str, provider: bool) -> subprocess.CompletedProcess[str]:
+        project = self.tmp / f"provider-{target_arch}-{provider}"
+        project.mkdir()
+        expected_skip = "TRUE" if target_arch.upper() in {"ARM64EC", "ARM64X"} else "FALSE"
+        provider_value = "TRUE" if provider else "FALSE"
+        (project / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.20)\n"
+            "project(windows_skia_provider NONE)\n"
+            f'include("{WINDOWS_PROVIDER.as_posix()}")\n'
+            "pulp_windows_skia_provider_target(_target)\n"
+            "pulp_windows_skia_provider_requires_skia_dawn(${_target} _skip)\n"
+            f'if(NOT _skip STREQUAL "{expected_skip}")\n'
+            "  message(FATAL_ERROR \"unexpected skip=${_skip} target=${_target}\")\n"
+            "endif()\n"
+            f'set(PULP_SKIA_PROVIDES_DAWN {provider_value})\n'
+            "pulp_windows_skia_provider_require_dawn(${_target})\n"
+            + ("if(NOT PULP_HAS_WEBGPU)\n  message(FATAL_ERROR \"Skia Dawn did not enable PULP_HAS_WEBGPU\")\nendif()\n"
+               if provider and expected_skip == "TRUE" else "")
+            , encoding="utf-8")
+        return subprocess.run(
+            ["cmake", "-S", str(project), "-B", str(project / "build"),
+             "-DCMAKE_SYSTEM_NAME=Windows",
+             f"-DCMAKE_CXX_COMPILER_ARCHITECTURE_ID={target_arch}"],
+            check=False, capture_output=True, text=True, encoding="utf-8")
+
+    def test_provider_policy_skips_wgpu_and_enables_webgpu_for_matching_dawn(self) -> None:
+        for arch in ("ARM64EC", "ARM64X"):
+            with self.subTest(target=arch):
+                result = self._configure_provider_policy(arch, provider=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_provider_policy_fails_closed_without_dawn(self) -> None:
+        result = self._configure_provider_policy("ARM64EC", provider=False)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("requires a matching Skia/Dawn archive", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

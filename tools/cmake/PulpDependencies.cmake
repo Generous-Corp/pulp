@@ -60,10 +60,11 @@ set(PULP_WGPU_NATIVE_VERSION v24.0.3.1)
 set(_pulp_windows_arm64ec_target FALSE)
 set(_pulp_windows_arm64ec_skia_dawn FALSE)
 if(WIN32)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake)
-    pulp_windows_target_arch(_pulp_windows_target_arch)
-    if(_pulp_windows_target_arch MATCHES "^arm64(ec|x)-win$")
-        set(_pulp_windows_arm64ec_target TRUE)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsSkiaProvider.cmake)
+    pulp_windows_skia_provider_target(_pulp_windows_target_arch)
+    pulp_windows_skia_provider_requires_skia_dawn(
+        "${_pulp_windows_target_arch}" _pulp_windows_arm64ec_target)
+    if(_pulp_windows_arm64ec_target)
         # wgpu-native has no ARM64EC/ARM64X asset.  Do not even declare its
         # FetchContent path for these targets: FindSkia below is the sole
         # provider decision and will fail closed if the matching Dawn archive
@@ -419,21 +420,8 @@ pulp_record_skia_dawn_provider(SKIA_FOUND FALSE)
 if(PULP_ENABLE_GPU)
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake)
     if(WIN32)
-        pulp_windows_target_arch(_pulp_provider_target_arch)
-        if(_pulp_provider_target_arch MATCHES "^arm64(ec|x)-win$")
-            if(NOT PULP_SKIA_PROVIDES_DAWN)
-                message(FATAL_ERROR
-                    "Pulp: Windows ${_pulp_provider_target_arch} requires a matching "
-                    "Skia/Dawn archive. FindSkia resolved SKIA_FOUND=${SKIA_FOUND} "
-                    "and DAWN_LIBRARY='${DAWN_LIBRARY}'; refusing the incompatible "
-                    "wgpu-native fallback.")
-            endif()
-            # This lane intentionally has no `webgpu` target: Skia's Dawn
-            # archive is the WebGPU implementation. Keep the public feature
-            # definition enabled so core/render compiles its Dawn path.
-            set(PULP_HAS_WEBGPU TRUE CACHE INTERNAL
-                "Pulp feature flag (Skia supplies Dawn)" FORCE)
-        endif()
+        pulp_windows_skia_provider_target(_pulp_provider_target_arch)
+        pulp_windows_skia_provider_require_dawn("${_pulp_provider_target_arch}")
         unset(_pulp_provider_target_arch)
     endif()
     if(SKIA_FOUND)
