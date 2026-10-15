@@ -1936,7 +1936,6 @@ protected:
                                                   float dw, float dh) {
         return draw_image_from_data_rect(data, size, sx, sy, sw, sh, dx, dy, dw, dh);
     }
-
 };
 
 } // namespace pulp::canvas
