@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261015-nodal-embedded-image-cache-20261015-watch",
+  "slices": [
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the immutable embedded-image decode and upload cache behavior into Vellum's native rendering asset path when the corresponding Pulp target adopts Vellum.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261015-nodal-embedded-image-cache-20261015-watch.json",
+    "pulp-test-image-file-cache",
+    "native Nodal Perfetto frame and PNG decode comparison"
+  ]
+}

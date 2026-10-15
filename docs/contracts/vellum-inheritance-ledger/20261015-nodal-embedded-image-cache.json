@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261015-nodal-embedded-image-cache",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "When the Pulp canvas target adopts Vellum, provide a process-lifetime cache for immutable embedded images with a source-rectangle draw and backend-scoped decoded/uploaded image reuse.",
+  "evidence": [
+    ".github/vellum-change-events/20261015-nodal-embedded-image-cache.json",
+    "pulp-test-image-file-cache",
+    "native Nodal Perfetto frame and PNG decode comparison"
+  ]
+}

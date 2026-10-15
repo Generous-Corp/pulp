@@ -1,7 +1,10 @@
 #pragma once
 
 /// @file image_file_cache.hpp
-/// Process-wide cache for decoded (and GPU-uploaded) file images (SkImage).
+/// Process-wide cache for decoded (and GPU-uploaded) file and immutable
+/// embedded images (SkImage). Embedded images use a NUL-prefixed synthetic
+/// key derived from their static address and size, so they cannot collide
+/// with a filesystem path.
 ///
 /// `SkiaCanvas::draw_image_from_file` used to re-read the PNG/JPEG bytes off
 /// disk (`SkData::MakeFromFileName`), re-decode them
