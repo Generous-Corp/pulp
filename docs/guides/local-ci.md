@@ -4505,8 +4505,38 @@ holding the workflow concurrency group, not to Tart capacity. This alert is the
 off-fleet backstop when a current-head run is stranded.
 
 Any failed API read or truncated run listing makes the sweep degraded. A
-degraded sweep suppresses alarms and cannot create, update, reopen, or close the
-tracking issue; absence is not evidence of recovery until a complete sweep.
+degraded sweep suppresses alarms and never closes the tracking issue; absence is
+not evidence of recovery until a complete sweep. There is one exception. On this
+repo the **completed** listing truncates on every sweep, and a truncated
+completed listing can hide only a comparable job that started after the stalled
+one queued and has already finished. It can't hide an in-progress job, because
+in-progress jobs come from their own listing. So when the completed listing's
+truncation is the sweep's only gap, a queued job alarms once it has waited past
+`2 x alarm_minutes` (`TRUNCATED_COMPLETED_ALARM_FACTOR`) with no comparable job
+in progress. That alarm can open, update or reopen the tracker. It can't close
+it.
+
+Before this exception existed, every sweep was degraded, so the watchdog could
+never alarm. A native Intel lane whose only runner had been deleted showed up as
+a `warn` row 322 minutes deep, night after night, and no tracker opened.
+
+**A deaf watchdog is itself an alarm.** A sweep with a gap other than the
+completed-listing exception can't alarm, so it is *blind*. The sweep records that
+by running a `Record blind sweep` step, and the next sweep reads that step back
+from the jobs API, so no state is stored anywhere. When 4 sweeps in a row are
+blind (about two hours), the watchdog opens its own tracker,
+`Queue watchdog blind: <reason>`. The tracker names the gap, such as failing
+reads or truncated listings, along with the likely cause and the fix. The first
+sweep that isn't blind closes it. An unreadable history can delay this alarm but
+can't invent one.
+
+**Org runner census authentication.** Label reconciliation reads
+`orgs/<org>/actions/runners`, which needs Administration: Read on the org. The
+workflow uses `RELEASE_BOT_TOKEN` and falls back to `GITHUB_TOKEN`. When the
+fallback is in effect, the org scope refuses the read, and every
+`runner_census_blind` row says so. The fix is a GitHub App installation token
+that has org self-hosted-runner read, minted in the job with
+`actions/create-github-app-token`. Adding that secret is an owner decision.
 
 The issue is edited in place each sweep and closes automatically on recovery —
 the same open/update/auto-close contract as the release watchdogs (see

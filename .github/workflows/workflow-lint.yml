@@ -72,6 +72,9 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/queue_age_watchdog.py'
       - 'tools/scripts/test_queue_age_watchdog.py'
+      - 'tools/scripts/unserved_job_check.py'
+      - 'tools/scripts/test_unserved_job_check.py'
+      - 'tools/scripts/fixtures/nightly_intel_unserved_jobs.json'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
       - 'tools/scripts/stale_run_reaper.py'
@@ -202,6 +205,9 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/queue_age_watchdog.py'
       - 'tools/scripts/test_queue_age_watchdog.py'
+      - 'tools/scripts/unserved_job_check.py'
+      - 'tools/scripts/test_unserved_job_check.py'
+      - 'tools/scripts/fixtures/nightly_intel_unserved_jobs.json'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
       - 'tools/scripts/stale_run_reaper.py'
@@ -398,6 +404,7 @@ jobs:
           python3 tools/scripts/test_ios_gate_skip_contract.py
           python3 tools/scripts/test_api_contracts_workflow.py
           python3 tools/scripts/test_queue_age_watchdog.py
+          python3 tools/scripts/test_unserved_job_check.py
           python3 tools/scripts/test_merge_stall_watchdog.py
           python3 tools/scripts/test_stale_run_reaper.py
           python3 tools/scripts/test_gpu_provenance_ci_wiring.py
