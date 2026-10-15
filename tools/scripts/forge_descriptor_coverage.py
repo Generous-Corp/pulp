@@ -75,7 +75,7 @@ CATALOG = (
       "lofi_reverb", "lofi_compressor", "lofi_gate", "lofi_lfo", "lofi_vca",
       "lofi_env_follower", "lofi_filter_cv", "lofi_delay_cv", "lofi_auto_pan",
       "lofi_width", "lofi_phaser")),
-    ("forge_modulation_catalog.hpp", "forge_modulation_catalog.hpp",
+    ("forge_modulation_catalog.hpp", "core/host/src/forge_modulation_catalog.cpp",
      ("mod_lfo", "mod_lpg", "mod_slew", "mod_transient", "mod_env")),
     ("forge_multiband_catalog.hpp", "forge_multiband_catalog.hpp",
      ("multiband_compressor",)),
