@@ -29,6 +29,7 @@
 // needs WebGPU (emdawnwebgpu), which is a separate, Skia-free module that does
 // not exist yet.
 
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/render/skia_surface.hpp>
 
 #if defined(__EMSCRIPTEN__) && defined(PULP_HAS_SKIA)
@@ -89,6 +90,9 @@ public:
         retained_layers_.reset();
         frame_surface_.reset();
         offscreen_surface_.reset();
+        // Cached textures are context-bound; remove them before abandoning
+        // the context so a recycled pointer cannot alias stale GPU images.
+        canvas::ImageFileCache::instance().clear_backend(context_.get());
         if (context_) {
             if (!lost_) context_->flushAndSubmit();
             context_->releaseResourcesAndAbandonContext();
@@ -164,6 +168,10 @@ public:
         frame_surface_.reset();
         offscreen_surface_.reset();
         if (context_) {
+            // The context's GPU textures become invalid as soon as WebGL
+            // abandons it. Stop painting before this callback and invalidate
+            // the cache while the context pointer is still stable.
+            canvas::ImageFileCache::instance().clear_backend(context_.get());
             // Do NOT flush: the GL context is dead and every call is a no-op or
             // an error. Abandon so Skia stops trying to talk to it and so
             // is_available() reports the truth.
