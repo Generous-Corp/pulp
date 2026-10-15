@@ -2628,6 +2628,32 @@ class ReleaseBuildParallelismExplicit(unittest.TestCase):
                     "tools/ci/governed-build.sh.",
                 )
 
+    def test_release_cli_builds_use_governed_build_contract(self) -> None:
+        source = RELEASE_CLI.read_text(encoding="utf-8")
+        build_lines = self._build_invocations(source)
+        self.assertEqual(
+            len(build_lines),
+            3,
+            "release-cli.yml should retain its CLI build plus the two SDK builds",
+        )
+        for line in build_lines:
+            self.assertIn(
+                "tools/ci/governed-build.sh cmake --build",
+                line,
+                f"release-cli.yml build bypasses governed parallelism: {line}",
+            )
+            self.assertNotRegex(
+                line,
+                r"(?:--parallel|-j)\s*",
+                f"governed-build owns the parallelism contract: {line}",
+            )
+        self.assertIn(
+            'PULP_BUILD_JOBS="$jobs"',
+            source,
+            "release-cli.yml must preserve its visible-core request as a lower cap "
+            "while allowing governed-build to narrow it to the lease",
+        )
+
     def test_release_dry_run_uses_governed_build_contract(self) -> None:
         source = RELEASE_DRY_RUN.read_text(encoding="utf-8")
         build_lines = self._build_invocations(source)

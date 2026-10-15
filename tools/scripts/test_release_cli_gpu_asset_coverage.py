@@ -139,21 +139,40 @@ class SharedAudioSdkRecipe(unittest.TestCase):
             "- name: Build SDK tarball (Unix)", 1)[0]
         script = block.split("run: |\n", 1)[1].split("        shell: bash", 1)[0]
         script = "\n".join(line[10:] for line in script.splitlines())
+        # Keep this recipe test side-effect free: exercise governed-build's
+        # command construction in dry-run mode, while fake cmake below still
+        # captures the real configure arguments.
+        script = script.replace(
+            "tools/ci/governed-build.sh cmake --build",
+            "tools/ci/governed-build.sh --dry-run cmake --build",
+        )
         # Execute the actual recipe with command stubs: no build or configure.
         # This tests argument expansion/platform branching, not string presence.
         for platform in ("darwin-arm64", "darwin-x64"):
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as temp:
                 capture = pathlib.Path(temp) / "configure.args"
-                prelude = r'''
-cmake() { if [ "$1" = "-S" ]; then printf '%s\n' "$@" > "$CAPTURE"; fi; }
-python3() { return 0; }
-sysctl() { echo 2; }
-'''
+                # The recipe now invokes governed-build.sh.  A shell function
+                # named cmake is not inherited by that child, so provide a
+                # real executable in PATH.  This
+                # keeps the fixture focused on configure-argument expansion;
+                # governed-build still runs its production admission path.
+                fake_cmake = pathlib.Path(temp) / "cmake"
+                fake_cmake.write_text(
+                    "#!/usr/bin/env bash\n"
+                    "if [ \"$1\" = \"-S\" ]; then\n"
+                    "  printf '%s\\n' \"$@\" > \"$CAPTURE\"\n"
+                    "fi\n",
+                    encoding="utf-8",
+                )
+                fake_cmake.chmod(0o755)
                 env = dict(os.environ, RELEASE_TAG="v9.8.7", CAPTURE=str(capture),
-                           NUMBER_OF_PROCESSORS="2")
-                result = subprocess.run(["bash", "-c", prelude + script.replace(
-                    "${{ matrix.platform }}", platform)], env=env,
-                    text=True, capture_output=True)
+                           NUMBER_OF_PROCESSORS="2",
+                           HOME=temp, XDG_STATE_HOME=temp,
+                           PATH=f"{temp}:{os.environ.get('PATH', '')}")
+                result = subprocess.run(
+                    ["bash", "-c", script.replace("${{ matrix.platform }}", platform)],
+                    env=env, text=True, encoding="utf-8", capture_output=True,
+                )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 args = capture.read_text().splitlines()
                 state = "ON" if platform == "darwin-arm64" else "OFF"

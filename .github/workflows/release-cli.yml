@@ -950,23 +950,18 @@ jobs:
         # Makefiles `[ NN%]` progress lines, strictly monotonic (a parallel
         # make interleaves them out of order).
         #
-        # Full visible core count is the DELIBERATE bound on this lane, not an
-        # oversight: every release leg runs on an ephemeral, single-tenant
-        # runner (GitHub-hosted image or a dedicated release Tart VM), so the
-        # host-melt concern behind the governed-share rule in build.yml does
-        # not apply — admission control happens at the VM/runner level (how
-        # many release VMs a host boots), not by throttling each build. The
-        # count is still explicit, so build_parallelism_guard.py's bare-flag
-        # class stays satisfied. The cores/memory echo exists so run logs
-        # record what the runner actually offered — if a leg ever OOMs here,
-        # the fix is more RAM per release VM or fewer concurrent VMs, and the
-        # log carries the numbers to decide with.
+        # Request the visible core count as the upper bound, then route the
+        # build through governed-build.sh. A tartci lease may narrow that
+        # request when the release leg shares a host; the wrapper exports the
+        # effective CMAKE_BUILD_PARALLEL_LEVEL and records the granted share.
+        # The cores/memory echo remains so run logs record what the runner
+        # offered when diagnosing an OOM or a constrained lease.
         run: |
           set -euo pipefail
           jobs="${NUMBER_OF_PROCESSORS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
           mem="$(sysctl -n hw.memsize 2>/dev/null || awk '/MemTotal/ {print $2 * 1024; exit}' /proc/meminfo 2>/dev/null || echo unknown)"
           echo "Build parallelism: --parallel ${jobs} (visible cores=${jobs}, mem_bytes=${mem})"
-          cmake --build build --config Release --parallel "$jobs"
+          PULP_BUILD_JOBS="$jobs" tools/ci/governed-build.sh cmake --build build --config Release
         shell: bash
 
       - name: Normalize CLI binary layout (Unix)
@@ -1178,12 +1173,12 @@ jobs:
           # Build everything the SDK install step needs. This is a full
           # second build on Linux, but it's required to keep the CLI
           # binary (built in `build/` with WebView=OFF) portable.
-          # Explicit full-core parallelism, same rationale + guard contract as
-          # the "Build" step above (ephemeral single-tenant runner; a bare
-          # `cmake --build` here is a silent -j1 under Unix Makefiles).
+          # Request the visible core count, then let governed-build.sh acquire
+          # and report the effective lease share. A bare `cmake --build` here
+          # would be a silent -j1 under Unix Makefiles.
           jobs="${NUMBER_OF_PROCESSORS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
-          echo "SDK build parallelism: --parallel ${jobs}"
-          cmake --build build-sdk --config Release --parallel "$jobs"
+          echo "SDK build parallelism request: --parallel ${jobs}"
+          PULP_BUILD_JOBS="$jobs" tools/ci/governed-build.sh cmake --build build-sdk --config Release
         shell: bash
 
       - name: Report Linux SDK glibc floor (min-OS validation)
@@ -1242,8 +1237,8 @@ jobs:
             "${GPU_AUDIO_FLAGS[@]}" \
             $EXTRA_ARCH
           jobs="${NUMBER_OF_PROCESSORS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
-          echo "SDK build parallelism: --parallel ${jobs}"
-          cmake --build build-sdk --config Release --parallel "$jobs"
+          echo "SDK build parallelism request: --parallel ${jobs}"
+          PULP_BUILD_JOBS="$jobs" tools/ci/governed-build.sh cmake --build build-sdk --config Release
         shell: bash
 
       - name: Build SDK tarball (Unix)
