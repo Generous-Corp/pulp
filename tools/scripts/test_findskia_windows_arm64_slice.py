@@ -194,6 +194,21 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         result = self._configure_provider_policy("X64", provider=False, gpu=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_pulp_dependencies_uses_the_guard_helper_at_fetchcontent_callsite(self) -> None:
+        source = (REPO / "tools/cmake/PulpDependencies.cmake").read_text(encoding="utf-8")
+        self.assertIn(
+            'include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsSkiaProvider.cmake)',
+            source,
+        )
+        self.assertIn(
+            'pulp_windows_skia_provider_should_declare_wgpu(_pulp_declare_wgpu)',
+            source,
+        )
+        self.assertIn(
+            'if(_pulp_declare_wgpu)\n    pulp_register_fetchcontent_source(webgpu',
+            source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
