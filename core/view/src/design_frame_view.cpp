@@ -720,7 +720,9 @@ void DesignFrameView::sync_from_host_params() {
         // which is the stale lie this channel exists to avoid. Memoization is the
         // HOST's call because only the host knows whether its formatting is pure
         // in the value; HostParamSurface asks for it in the contract.
-        e.display_text = surface->param_display_text(e.param_key, norm);
+        std::string display_text = surface->param_display_text(e.param_key, norm);
+        const bool display_changed = !e.display_text_bound || e.display_text != display_text;
+        if (display_changed) e.display_text = std::move(display_text);
         e.display_text_bound = true;
 
         if (e.kind == DesignFrameElement::Kind::value_label) {
@@ -735,7 +737,9 @@ void DesignFrameView::sync_from_host_params() {
             set_element_text(i, e.display_text);
         } else {
             // Silent host->view push (no echo back to the surface).
+            const float prior_value = element_value(i);
             set_element_value(i, static_cast<float>(norm));
+            if (display_changed && prior_value == element_value(i)) request_repaint();
         }
     }
 }
@@ -1044,10 +1048,12 @@ void DesignFrameView::set_element_value(int i, float v) {
             // conduit; a control that didn't is unchanged (the factory owns its
             // own state). No on_element_changed echo, matching the other kinds.
             if (View* w = overlay_widget(i))
-                if (auto* dc = dynamic_cast<DesignControl*>(w))
-                    dc->set_control_value(std::clamp(v, 0.0f, 1.0f));
-            request_repaint();  // guarantee the push reflects even if the control
-                                // doesn't self-invalidate (automation/preset recall)
+                if (auto* dc = dynamic_cast<DesignControl*>(w)) {
+                    const float clamped = std::clamp(v, 0.0f, 1.0f);
+                    if (dc->control_value() == clamped) return;
+                    dc->set_control_value(clamped);
+                    request_repaint();  // also covers controls that do not self-invalidate
+                }
             return;
         case DesignFrameElement::Kind::swap:
         case DesignFrameElement::Kind::action:

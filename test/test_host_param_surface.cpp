@@ -42,6 +42,7 @@ namespace {
 class FakeHostParamSurface : public HostParamSurface {
 public:
     std::unordered_map<std::string, double> values;
+    std::string display_suffix;
     // Value cardinality per key. A key absent here reports 0 — the surface's
     // "continuous / no index domain" signal — which is also the base class's
     // default, so an existing test that never populates this is unaffected.
@@ -74,7 +75,7 @@ protected:
     }
     std::string do_param_display_text(std::string_view key, double v) override {
         (void)v;
-        return "disp:" + std::string(key);
+        return "disp:" + std::string(key) + display_suffix;
     }
 };
 
@@ -1529,6 +1530,80 @@ TEST_CASE("an unchanged host push does not repaint the editor",
     dfv.sync_from_host_params();
     CHECK(dfv.element_value(0) == Catch::Approx(0.75f));
     CHECK(host.repaints == before + 1);
+}
+
+TEST_CASE("a changed host readout repaints when its value stays fixed",
+          "[view][host-param][design-import][frame]") {
+    DesignFrameView dfv = make_single_knob("gain");
+    CountingPluginViewHost host;
+    dfv.set_plugin_view_host(&host);
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.5;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+
+    int before = host.repaints;
+    dfv.sync_from_host_params();
+    CHECK(host.repaints == before);
+
+    params.display_suffix = " synced";
+    dfv.sync_from_host_params();
+    CHECK(dfv.element_value(0) == Catch::Approx(0.5f));
+    CHECK(dfv.element_display_text(0) == "disp:gain synced");
+    CHECK(host.repaints == before + 1);
+}
+
+TEST_CASE("unchanged custom controls do not repaint on every host tick",
+          "[view][host-param][design-import][frame][custom]") {
+    class RepaintingControl final : public view::View, public view::DesignControl {
+    public:
+        void set_control_value(float value) override {
+            value_ = value;
+            ++pushes;
+            request_repaint();
+        }
+        float control_value() const override { return value_; }
+        float value_ = 0.0f;
+        int pushes = 0;
+    };
+
+    view::clear_design_control_factories();
+    RepaintingControl* control = nullptr;
+    view::register_design_control_factory(
+        "host-tick-control", [&](const view::DesignControlContext&) {
+            auto widget = std::make_unique<RepaintingControl>();
+            control = widget.get();
+            return widget;
+        });
+    DesignFrameElement element;
+    element.kind = DesignFrameElement::Kind::custom;
+    element.factory_id = "host-tick-control";
+    element.param_key = "gain";
+    DesignFrameView frame(
+        R"(<svg width="100" height="100"><rect width="100" height="100"/></svg>)",
+        {element}, 0, 0, 100, 100);
+    REQUIRE(control != nullptr);
+
+    CountingPluginViewHost host;
+    frame.set_plugin_view_host(&host);
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.5;
+    frame.set_host_params(&params);
+    frame.sync_from_host_params();
+    CHECK(control->value_ == Catch::Approx(0.5f));
+
+    const int pushes = control->pushes;
+    int before = host.repaints;
+    for (int tick = 0; tick < 8; ++tick) frame.sync_from_host_params();
+    CHECK(control->pushes == pushes);
+    CHECK(host.repaints == before);
+
+    params.values["gain"] = 0.75;
+    frame.sync_from_host_params();
+    CHECK(control->value_ == Catch::Approx(0.75f));
+    CHECK(control->pushes == pushes + 1);
+    CHECK(host.repaints > before);
+    view::clear_design_control_factories();
 }
 
 // ── Paint-safe host readout ──────────────────────────────────────────────────
