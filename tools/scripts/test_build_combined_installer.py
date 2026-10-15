@@ -257,6 +257,8 @@ class CombinedInstallerTest(unittest.TestCase):
         legacy_evidence: bool = False,
         unsigned_bundles: set[str] | None = None,
         refused_after_verification: bool = False,
+        wraptool: str = "pass",
+        allow_unverified_aax_wrap: bool = False,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -268,7 +270,18 @@ class CombinedInstallerTest(unittest.TestCase):
             codesign_argv_capture = tmp / "codesign-argv.txt"
             productbuild_argv_capture = tmp / "productbuild-argv.txt"
             productsign_argv_capture = tmp / "productsign-argv.txt"
+            wraptool_argv_capture = tmp / "wraptool-argv.txt"
             output = tmp / "out"
+            wraptool_path = tmp / "pace" / "wraptool"
+            if wraptool != "absent":
+                wraptool_path.parent.mkdir()
+                wraptool_path.write_text(
+                    "#!/bin/bash\n"
+                    'printf "%s\\n" "$*" >> "$CAPTURE_WRAPTOOL_ARGV"\n'
+                    + ("exit 0\n" if wraptool == "pass"
+                       else '[[ "$1" == verify ]] && { echo "wrap invalid" >&2; exit 1; }\nexit 0\n')
+                )
+                wraptool_path.chmod(0o755)
 
             # `codesign --verify` passes for every bundle except those named
             # in UNSIGNED_BUNDLES (space-separated bundle leaf names), which
@@ -385,6 +398,8 @@ class CombinedInstallerTest(unittest.TestCase):
                 str(output),
                 "--no-notarize",
             ]
+            if allow_unverified_aax_wrap:
+                args.append("--allow-unverified-aax-wrap")
             if architectures:
                 args.extend(("--architectures", architectures))
             plugin_bundles: list[Path] = []
@@ -502,10 +517,11 @@ class CombinedInstallerTest(unittest.TestCase):
                 "PULP_SIGN_IDENTITY_HASH": "ABC",
                 "ANALYZE_OMITS_RELOCATABLE": "1" if analyze_omits_relocatable else "0",
                 "UNSIGNED_BUNDLES": " ".join(sorted(unsigned_bundles or set())),
-                # Point the recipe at a wraptool that is not installed, so the
-                # graph test exercises the "PACE wrap not verified" branch
-                # without PACE's tooling on the test host.
-                "PULP_AAX_WRAPTOOL": str(tmp / "no-wraptool"),
+                # A fake PACE wraptool, so no test depends on PACE's tooling:
+                # "pass" verifies every bundle, "fail" rejects every bundle,
+                # and "absent" names a path that does not exist.
+                "PULP_AAX_WRAPTOOL": str(wraptool_path),
+                "CAPTURE_WRAPTOOL_ARGV": str(wraptool_argv_capture),
             }
             Path(env["PULP_SIGN_KEYCHAIN"]).touch()
             Path(env["PULP_SIGN_P12"]).touch()
@@ -517,6 +533,12 @@ class CombinedInstallerTest(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=False,
+            )
+            self._last_returncode = completed.returncode
+            self._last_wraptool_argv = (
+                wraptool_argv_capture.read_text()
+                if wraptool_argv_capture.is_file()
+                else ""
             )
             if not expect_success:
                 self.assertNotEqual(completed.returncode, 0)
@@ -817,6 +839,44 @@ class CombinedInstallerTest(unittest.TestCase):
             "--force" in line and "Kick.component" in line
             for line in self._last_codesign_argv.splitlines()
         ))
+
+    def test_an_aax_that_fails_wraptool_verify_refuses_the_package(self) -> None:
+        # Signed by Apple's standard, but the PACE wrap does not verify: that
+        # AAX would not load in Pro Tools, so nothing is packaged.
+        output, _ = self._run_installer(
+            [("Kick", "aax")],
+            wraptool="fail",
+            expect_success=False,
+            refused_after_verification=True,
+        )
+        self.assertEqual(self._last_returncode, 2)
+        self.assertIn("fails wraptool verify; Pro Tools will not load it", output)
+        self.assertIn("verify -i", self._last_wraptool_argv)
+        self.assertIn("Kick.aaxplugin", self._last_wraptool_argv)
+
+    def test_control_an_aax_that_passes_wraptool_verify_is_packaged(self) -> None:
+        xml, _ = self._run_installer([("Kick", "aax")], wraptool="pass")
+        self.assertEqual(self._last_returncode, 0)
+        self.assertIn('choice id="plugin-0-aax"', xml)
+        self.assertIn("verify -i", self._last_wraptool_argv)
+
+    def test_an_aax_without_wraptool_refuses_the_package_by_default(self) -> None:
+        output, _ = self._run_installer(
+            [("Kick", "aax")],
+            wraptool="absent",
+            expect_success=False,
+            refused_after_verification=True,
+        )
+        self.assertEqual(self._last_returncode, 2)
+        self.assertIn("cannot verify the PACE wrap", output)
+        self.assertIn("--allow-unverified-aax-wrap", output)
+
+    def test_an_aax_without_wraptool_is_packaged_only_when_explicitly_allowed(self) -> None:
+        xml, _ = self._run_installer(
+            [("Kick", "aax")], wraptool="absent", allow_unverified_aax_wrap=True,
+        )
+        self.assertEqual(self._last_returncode, 0)
+        self.assertIn('choice id="plugin-0-aax"', xml)
 
     def test_an_unsigned_aax_plugin_refuses_the_package(self) -> None:
         output, _ = self._run_installer(

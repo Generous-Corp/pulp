@@ -1694,11 +1694,14 @@ the build machine never ships. **An `aax` bundle is the exception: it must
 arrive already PACE-wrapped and Developer-ID signed** (`wraptool sign` wraps the
 executable and seals the bundle in one step; Pro Tools refuses a merely
 codesigned AAX, and a `codesign --force` after wraptool strips the wrap). The
-recipe only verifies it — `codesign --verify`, `wraptool verify` when PACE's
-tooling is installed (`PULP_AAX_WRAPTOOL` overrides the path), and the same
-relocatability check — and installs it as a "Pro Tools" choice under
-`/Library/Application Support/Avid/Audio/Plug-Ins`. An unsigned AAX refuses the
-whole package. Identities are the
+recipe only verifies it — `codesign --verify`, `wraptool verify`
+(`PULP_AAX_WRAPTOOL` overrides the path), and the same relocatability check —
+and installs it as a "Pro Tools" choice under
+`/Library/Application Support/Avid/Audio/Plug-Ins`. An unsigned AAX, or one that
+fails `wraptool verify`, refuses the whole package. **Without wraptool it fails
+closed too**: a merely codesigned AAX looks shippable and Pro Tools will not load
+it, so the build machine must have PACE's tooling, or the caller must pass
+`--allow-unverified-aax-wrap` and own that risk. Identities are the
 `security find-identity` hashes from the dedicated `pulp-signing` keychain (NOT
 the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
 copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.

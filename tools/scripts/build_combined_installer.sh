@@ -24,6 +24,9 @@
 #                                          already be PACE-wrapped and
 #                                          Developer-ID signed -- the recipe
 #                                          verifies it and never re-signs it)
+#     [--allow-unverified-aax-wrap]       (package an aax even when PACE's
+#                                          wraptool is not installed to verify
+#                                          the wrap; refused by default)
 #     [--product-title BUNDLE "Display Title"]...  (repeatable; renames the
 #                                                   expandable group for that
 #                                                   plugin, e.g. PulpDesignSynth
@@ -60,6 +63,7 @@ CLI="${PULP_CPP:-$ROOT/build/tools/cli/pulp-cpp}"
 NOTARIZE_HEARTBEAT_SECS="${PULP_NOTARIZE_HEARTBEAT_SECS:-30}"
 
 NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
+ALLOW_UNVERIFIED_AAX_WRAP=0
 HOST_ARCHITECTURES=""
 # Parallel arrays of components.
 declare -a P_KIND=() P_PATH=()      # plugins: kind + bundle path
@@ -79,6 +83,7 @@ while [[ $# -gt 0 ]]; do
     --out) OUT="$2"; shift 2;;
     --architectures) HOST_ARCHITECTURES="$2"; shift 2;;
     --no-notarize) NOTARIZE=0; shift;;
+    --allow-unverified-aax-wrap) ALLOW_UNVERIFIED_AAX_WRAP=1; shift;;
     --plugin) P_KIND+=("$2"); P_PATH+=("$3"); shift 3;;
     --product-title) PT_NAME+=("$2"); PT_TITLE+=("$3"); shift 3;;
     --uninstaller-in) UNINSTALL_IN="$2"; shift 2;;
@@ -334,8 +339,11 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
 # refuses an AAX that is merely codesigned. Re-running codesign --force here
 # would strip that wrap and ship a plugin Pro Tools will not load, so an aax
 # plugin arrives already signed and is only VERIFIED: Apple's seal, PACE's wrap
-# where wraptool is installed, and the same relocatability check every other
-# bundle passes. Any failure refuses the package; nothing re-signs.
+# by wraptool, and the same relocatability check every other bundle passes.
+# Any failure refuses the package; nothing re-signs. Without wraptool the wrap
+# cannot be checked, and a merely codesigned AAX would ship as if it were
+# shippable, so that refuses too unless --allow-unverified-aax-wrap says the
+# caller accepts an unverified wrap.
 verify_presigned_aax() {
   local b="$1"
   echo "  verifying pre-signed AAX (not re-signed): $(basename "$b")"
@@ -349,8 +357,13 @@ verify_presigned_aax() {
       echo "error: $b fails wraptool verify; Pro Tools will not load it" >&2
       exit 2
     }
+  elif [[ "$ALLOW_UNVERIFIED_AAX_WRAP" == 1 ]]; then
+    echo "  warning: wraptool not installed; PACE wrap NOT verified for $(basename "$b") (--allow-unverified-aax-wrap)" >&2
   else
-    echo "  wraptool not installed; PACE wrap not verified for $(basename "$b")"
+    echo "error: cannot verify the PACE wrap of $b: wraptool not found at $wraptool." >&2
+    echo "  Install PACE's tooling or point PULP_AAX_WRAPTOOL at wraptool; pass" >&2
+    echo "  --allow-unverified-aax-wrap only to package it without that check." >&2
+    exit 2
   fi
   [[ -f "$VALIDATOR" ]] && python3 "$VALIDATOR" "$b" --strict
 }

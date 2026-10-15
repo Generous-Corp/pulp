@@ -386,9 +386,10 @@ format — so a product with three AU plugins, two VST3s and three CLAPs passes
 eight `--plugin` flags and gets one installer with a nested Customize tree.
 An `aax` bundle is the one input the recipe does not sign: hand it the bundle
 `wraptool sign` already wrapped and sealed, and the recipe verifies that
-signature (and the PACE wrap, where wraptool is installed) before packaging it
-as a "Pro Tools" choice. See the `ship` skill for why re-signing an AAX breaks
-it.
+signature and the PACE wrap (`wraptool verify`) before packaging it as a "Pro
+Tools" choice. On a machine without wraptool the AAX is refused unless you pass
+`--allow-unverified-aax-wrap`. See the `ship` skill for why re-signing an AAX
+breaks it.
 Notarization is **on by default** (`--no-notarize` opts out), and the signing
 preflight runs automatically, so no separate `pulp ship doctor` is needed.
 
