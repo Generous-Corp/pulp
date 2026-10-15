@@ -129,6 +129,8 @@ MODULE_FLOORS = {
         "music",
         "timebase",
         "view",
+        "view_audio",
+        "view-audio",
         "canvas",
         "platform",
         "runtime",

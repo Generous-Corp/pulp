@@ -14,7 +14,6 @@
 #include <pulp/view/animation.hpp>
 #include <pulp/view/inspector_facts.hpp>
 #include <pulp/view/data_display.hpp>
-#include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/caret.hpp>
 #include <pulp/view/custom_shader_host.hpp>
 #include <pulp/view/frame_clock.hpp>

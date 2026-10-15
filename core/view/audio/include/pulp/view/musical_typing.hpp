@@ -35,22 +35,27 @@
 namespace pulp::view {
 
 class MusicalTypingController {
-public:
+  public:
     /// MIDI note for the first key ('a'). Default 60 (middle C). For a slice
     /// sampler set this to the slice root so 'a' triggers slice 0, 'w' slice 1, …
-    void set_base_note(int note) { base_note_ = note; }
-    int base_note() const { return base_note_; }
+    void set_base_note(int note) {
+        base_note_ = note;
+    }
+    int base_note() const {
+        return base_note_;
+    }
 
     std::function<void(int note, float velocity)> on_note_on;
     std::function<void(int note)> on_note_off;
     float velocity = 0.8f;
-    static constexpr float kVelStep = 1.0f / 16.0f;  // c / v keyboard velocity step
+    static constexpr float kVelStep = 1.0f / 16.0f; // c / v keyboard velocity step
 
     /// Feed a key event. Returns true iff it was a mapped note/octave key with no
     /// Cmd/Ctrl/Alt/Meta modifier (i.e. consumed). Everything else returns false
     /// so the host keeps its shortcuts and other keys.
     bool handle_key(const KeyEvent& e) {
-        if (e.modifiers & (kModCmd | kModCtrl | kModAlt | kModMeta)) return false;
+        if (e.modifiers & (kModCmd | kModCtrl | kModAlt | kModMeta))
+            return false;
 
         if (e.key == KeyCode::z || e.key == KeyCode::x) {
             if (e.is_down && !e.is_repeat)
@@ -61,23 +66,27 @@ public:
         // mirroring the z / x octave keys.
         if (e.key == KeyCode::c || e.key == KeyCode::v) {
             if (e.is_down && !e.is_repeat)
-                velocity = std::clamp(velocity + (e.key == KeyCode::v ? kVelStep : -kVelStep),
-                                      0.0f, 1.0f);
+                velocity =
+                    std::clamp(velocity + (e.key == KeyCode::v ? kVelStep : -kVelStep), 0.0f, 1.0f);
             return true;
         }
         const int semi = semitone_for_key(e.key);
-        if (semi < 0) return false;
+        if (semi < 0)
+            return false;
 
         const int kc = static_cast<int>(e.key);
         if (e.is_down) {
-            if (held_.count(kc)) return true;  // auto-repeat — already sounding
+            if (held_.count(kc))
+                return true; // auto-repeat — already sounding
             const int note = std::clamp(base_note_ + octave_shift_ * 12 + semi, 0, 127);
             held_[kc] = note;
-            if (on_note_on) on_note_on(note, velocity);
+            if (on_note_on)
+                on_note_on(note, velocity);
         } else {
             auto it = held_.find(kc);
             if (it != held_.end()) {
-                if (on_note_off) on_note_off(it->second);
+                if (on_note_off)
+                    on_note_off(it->second);
                 held_.erase(it);
             }
         }
@@ -86,7 +95,9 @@ public:
 
     /// Current octave shift (in octaves; z/x decrement/increment). Lets a view
     /// compute the MIDI note a typing key maps to for non-keyboard input (clicks).
-    int octave_shift() const { return octave_shift_; }
+    int octave_shift() const {
+        return octave_shift_;
+    }
 
     /// Set the octave shift directly. BOTH bounds are BASE-RELATIVE so the
     /// play-window reaches the true range edges (C-2 … G8) regardless of base note.
@@ -98,8 +109,8 @@ public:
     /// what this clamp honored. Lets an on-screen octave −/+ control, the z/x keys,
     /// and the overview-strip drag all agree.
     void set_octave_shift(int s) {
-        const int lo = -((base_note_ + 11) / 12);              // reach C-2 (base > C2)
-        const int hi = std::max(5, (92 - base_note_ + 11) / 12);  // reach G8 (low roots)
+        const int lo = -((base_note_ + 11) / 12);                // reach C-2 (base > C2)
+        const int hi = std::max(5, (92 - base_note_ + 11) / 12); // reach G8 (low roots)
         octave_shift_ = std::clamp(s, lo, hi);
     }
 
@@ -107,32 +118,63 @@ public:
     /// time; a no-op when nothing is held.
     void all_notes_off() {
         for (const auto& [kc, note] : held_)
-            if (on_note_off) on_note_off(note);
+            if (on_note_off)
+                on_note_off(note);
         held_.clear();
     }
 
-    bool any_held() const { return !held_.empty(); }
+    bool any_held() const {
+        return !held_.empty();
+    }
 
     /// QWERTY key -> semitone offset within the layout, or -1 if not a note key.
     static int semitone_for_key(KeyCode k) {
         switch (k) {
-            case KeyCode::a: return 0;   case KeyCode::w: return 1;
-            case KeyCode::s: return 2;   case KeyCode::e: return 3;
-            case KeyCode::d: return 4;   case KeyCode::f: return 5;
-            case KeyCode::t: return 6;   case KeyCode::g: return 7;
-            case KeyCode::y: return 8;   case KeyCode::h: return 9;
-            case KeyCode::u: return 10;  case KeyCode::j: return 11;
-            case KeyCode::k: return 12;  case KeyCode::o: return 13;
-            case KeyCode::l: return 14;  case KeyCode::p: return 15;
-            case KeyCode::semicolon: return 16;  case KeyCode::apostrophe: return 17;
-            default: return -1;
+        case KeyCode::a:
+            return 0;
+        case KeyCode::w:
+            return 1;
+        case KeyCode::s:
+            return 2;
+        case KeyCode::e:
+            return 3;
+        case KeyCode::d:
+            return 4;
+        case KeyCode::f:
+            return 5;
+        case KeyCode::t:
+            return 6;
+        case KeyCode::g:
+            return 7;
+        case KeyCode::y:
+            return 8;
+        case KeyCode::h:
+            return 9;
+        case KeyCode::u:
+            return 10;
+        case KeyCode::j:
+            return 11;
+        case KeyCode::k:
+            return 12;
+        case KeyCode::o:
+            return 13;
+        case KeyCode::l:
+            return 14;
+        case KeyCode::p:
+            return 15;
+        case KeyCode::semicolon:
+            return 16;
+        case KeyCode::apostrophe:
+            return 17;
+        default:
+            return -1;
         }
     }
 
-private:
+  private:
     int base_note_ = 60;
     int octave_shift_ = 0;
-    std::unordered_map<int, int> held_;  // keyCode -> note currently sounding
+    std::unordered_map<int, int> held_; // keyCode -> note currently sounding
 };
 
-}  // namespace pulp::view
+} // namespace pulp::view

@@ -737,6 +737,16 @@ add_test(NAME view-audio-seam-debts
         --root "${CMAKE_SOURCE_DIR}")
 set_tests_properties(view-audio-seam-debts PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
 
+# G2h Pulp C: the remaining audio widget implementations and public headers
+# belong to pulp-view-audio.  This source-level check complements the target
+# link and include-boundary checks above; a clean link list alone cannot prove
+# that a moved file was not silently re-added to view-core.
+add_test(NAME pulp-view-audio-carve
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_view_audio_carve.py"
+        --root "${CMAKE_SOURCE_DIR}")
+set_tests_properties(pulp-view-audio-carve PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+
 # The symbol half: neither header nor link checks see an object that needs
 # another library's code (a dynamic_cast to Meter compiles against a view-core
 # header but needs Meter's typeinfo from pulp-view-audio). This reads the

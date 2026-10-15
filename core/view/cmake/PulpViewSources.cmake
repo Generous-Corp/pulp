@@ -97,10 +97,6 @@ target_sources(pulp-view-core PRIVATE
     src/motion_geometry.cpp
     src/motion_cost.cpp
     src/window_manager.cpp
-    src/step_grid_view.cpp
-    src/midi_keyboard.cpp
-    src/musical_typing_keyboard.cpp
-    src/musical_typing_keyboard_svg.cpp
     src/channel_strip_view.cpp
     src/channel_strip_view_svg.cpp
     src/range_slider_view.cpp
@@ -115,8 +111,6 @@ target_sources(pulp-view-core PRIVATE
     src/number_box_states_view_svg.cpp
     src/knob_modulation_view.cpp
     src/knob_modulation_view_svg.cpp
-    src/waveform_recorder_view.cpp
-    src/waveform_recorder_view_svg.cpp
     src/color_picker.cpp
     src/theme_editor.cpp
     src/file_drop_zone.cpp
@@ -186,6 +180,15 @@ target_sources(pulp-view-audio PRIVATE
     audio/src/widget_gallery.cpp
     audio/src/sampler_starter.cpp
     audio/src/register_audio_widgets.cpp
+    # Pulp-owned audio widgets whose public include paths remain stable.  They
+    # are deliberately outside view-core so a Vellum view-core consumer cannot
+    # acquire state/audio widget implementations by linking the generic target.
+    audio/src/step_grid_view.cpp
+    audio/src/midi_keyboard.cpp
+    audio/src/musical_typing_keyboard.cpp
+    audio/src/musical_typing_keyboard_svg.cpp
+    audio/src/waveform_recorder_view.cpp
+    audio/src/waveform_recorder_view_svg.cpp
     $<$<BOOL:${PULP_ENABLE_DESIGN_IMPORT}>:audio/src/register_audio_import_binders.cpp>
 )
 

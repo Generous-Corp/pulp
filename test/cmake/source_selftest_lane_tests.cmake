@@ -55,6 +55,12 @@ add_test(NAME dsp-capability-registry-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_dsp_capability_registry.py")
 
+# The catalog generator regression is source-only and must be visible to the
+# source-selftest lane as well as the manifest runner.
+add_test(NAME make-catalog-component-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-design/test_make_catalog_component.py")
+
 # Build-governance path coverage is source-only and must run on the required
 # build-free self-test lane, where it protects every local build helper.
 add_test(NAME build-governance-paths-selftest
