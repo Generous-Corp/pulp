@@ -146,7 +146,7 @@ class SharedAudioSdkRecipe(unittest.TestCase):
                 capture = pathlib.Path(temp) / "configure.args"
                 # The recipe now invokes governed-build.sh.  A shell function
                 # named cmake is not inherited by that child, so provide a
-                # real executable in PATH and a fake build directory.  This
+                # real executable in PATH.  This
                 # keeps the fixture focused on configure-argument expansion;
                 # governed-build still runs its production admission path.
                 fake_cmake = pathlib.Path(temp) / "cmake"
@@ -158,18 +158,13 @@ class SharedAudioSdkRecipe(unittest.TestCase):
                     encoding="utf-8",
                 )
                 fake_cmake.chmod(0o755)
-                build_dir = REPO_ROOT / "build-sdk"
-                build_dir.mkdir(exist_ok=True)
                 env = dict(os.environ, RELEASE_TAG="v9.8.7", CAPTURE=str(capture),
                            NUMBER_OF_PROCESSORS="2",
                            PATH=f"{temp}:{os.environ.get('PATH', '')}")
-                try:
-                    result = subprocess.run(
-                        ["bash", "-c", script.replace("${{ matrix.platform }}", platform)],
-                        env=env, text=True, capture_output=True,
-                    )
-                finally:
-                    build_dir.rmdir()
+                result = subprocess.run(
+                    ["bash", "-c", script.replace("${{ matrix.platform }}", platform)],
+                    env=env, text=True, capture_output=True,
+                )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 args = capture.read_text().splitlines()
                 state = "ON" if platform == "darwin-arm64" else "OFF"
