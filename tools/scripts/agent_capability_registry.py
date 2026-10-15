@@ -91,6 +91,8 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/tempo_delay_wrapper.hpp": "Pulp::signal",
     "pulp/signal/freeze_hold.hpp": "Pulp::signal",
     "pulp/signal/headphone_crossfeed.hpp": "Pulp::signal",
+    "pulp/signal/lfo.hpp": "Pulp::signal",
+    "pulp/signal/lfo_sampling.hpp": "Pulp::signal",
     "pulp/signal/lfsr.hpp": "Pulp::signal",
     "pulp/signal/linkwitz_riley.hpp": "Pulp::signal",
     "pulp/signal/mid_side.hpp": "Pulp::signal",
@@ -470,6 +472,29 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "rationale": (
             "Control-side velvet tap design consumes deterministic coordinate draws; it is "
             "design support rather than a runtime entrypoint."
+        ),
+    },
+    {
+        "include": "pulp/signal/lfo.hpp",
+        "fingerprint": "sha256:f32f95b0419070cf5ff33f93cdfd85296d09ffed85dbdfff2e49a320bdae0bbb",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.unison-voice-primitives"],
+        "rationale": (
+            "The house LFO gains opt-in band limiting and a block-mean read built on "
+            "lfo_sampling.hpp; its wave vocabulary moved there. A modulation-source "
+            "contract for generators is a separate slice."
+        ),
+    },
+    {
+        "include": "pulp/signal/lfo_sampling.hpp",
+        "fingerprint": "sha256:0f7127ce62fc8f134ff4c8ba80e6a01ddcbbd2ec43bb8b4df16aac128d7e6a4f",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.unison-voice-primitives"],
+        "rationale": (
+            "Pure sampling of an LFO waveform without aliasing: the interval mean a "
+            "block-rate consumer takes and the polyBLEP / polyBLAMP waveform an audio-rate "
+            "consumer takes. DSP support used by LfoT and by plugins; not a generator-facing "
+            "capability contract in this slice."
         ),
     },
     {
