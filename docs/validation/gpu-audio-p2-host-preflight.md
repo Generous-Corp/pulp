@@ -20,3 +20,32 @@ The campaign records the preflight's SHA-256, path, and host identity in
 preflight input fails before the negative control or any provider submission.
 The preflight is an admission check, not a performance verdict; the campaign
 still remains `performance_verdict: "unassigned"` until its independent review.
+
+## Required campaign inputs
+
+A hardware campaign (anything but `--plan-only`) refuses to start unless it is
+given all three of these:
+
+- `--host-preflight PATH`: the host admission receipt described above.
+- `--expected-source-revision SHA`: the 40-character Pulp commit the campaign is
+  meant to measure. The campaign compares it with the checkout it runs from and
+  fails if the measured source differs. The host-preflight's `source_revision`
+  must name the same commit.
+- `--provider-identity-receipt PATH`: a passed exact-provider receipt (schema
+  `pulp.gpu-audio-provider-identity.v1`). It must be a regular file, not a
+  symlink. Its `manifest_sha256` must equal the current
+  `tools/deps/manifest.json`. Its expected and validated provider asset hashes
+  must agree, as must its expected and header Dawn revisions. Every raw
+  provenance row must then match the receipt's Dawn revision, provider asset,
+  linked Dawn archive and manifest bindings.
+
+The campaign reads the provider receipt once and records the SHA-256 of the
+bytes it validated, with its path, in `campaign.json`.
+
+```sh
+python3 tools/scripts/gpu_audio_p2_campaign.py \
+  --probe build/test/pulp-gpu-shared-io-paced-convolution-probe --output-dir /path/to/new/campaign \
+  --host-preflight host-preflight.json \
+  --expected-source-revision "$(git rev-parse HEAD)" \
+  --provider-identity-receipt provider-identity.json
+```

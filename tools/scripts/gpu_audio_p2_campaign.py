@@ -88,10 +88,22 @@ def _nonnegative_integer(value: Any) -> bool:
 def validate_provider_identity_fixture(path: Path) -> dict[str, Any]:
     """Load an exact-provider receipt and bind it to this checkout's manifest."""
 
+    return load_provider_identity_receipt(path)[0]
+
+
+def load_provider_identity_receipt(path: Path) -> tuple[dict[str, Any], str]:
+    """The validated receipt and the SHA-256 of the exact bytes validated.
+
+    The file is read once. Hashing a second read for the campaign manifest
+    would record whatever the path held then, which need not be the receipt
+    that passed these checks.
+    """
+
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("provider identity fixture must be a regular file")
     try:
-        if path.is_symlink() or not path.is_file():
-            raise RuntimeError("provider identity fixture must be a regular file")
-        fixture = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_bytes()
+        fixture = json.loads(raw.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeError("provider identity fixture is not valid JSON") from exc
     if not isinstance(fixture, dict) or fixture.get("schema") != PROVIDER_IDENTITY_SCHEMA \
@@ -109,7 +121,7 @@ def validate_provider_identity_fixture(path: Path) -> dict[str, Any]:
     if fixture["expected_asset_sha256"] != fixture["validated_asset_sha256"] \
             or fixture["expected_dawn_revision"] != fixture["header_dawn_revision"]:
         raise RuntimeError("provider identity fixture contains inconsistent provider identity")
-    return fixture
+    return fixture, hashlib.sha256(raw).hexdigest()
 
 
 def _validate_provider_identity(provenance: dict[str, Any],
@@ -810,7 +822,8 @@ def run(args: argparse.Namespace) -> int:
     if args.provider_identity_receipt is None:
         raise RuntimeError("--provider-identity-receipt is required for a hardware campaign")
     host_preflight = validate_host_preflight(args.host_preflight, source_revision)
-    provider_identity = validate_provider_identity_fixture(args.provider_identity_receipt)
+    provider_identity, provider_identity_receipt_sha256 = load_provider_identity_receipt(
+        args.provider_identity_receipt)
     host_preflight_sha256 = sha256(args.host_preflight)
     if args.expected_source_revision is not None and args.expected_source_revision != source_revision:
         raise RuntimeError("expected source revision does not match the measured source")
@@ -929,7 +942,7 @@ def run(args: argparse.Namespace) -> int:
                 "probe_sha256": probe_sha256, "probe_path": str(args.probe.resolve()),
                 "host_preflight_sha256": host_preflight_sha256,
                 "host_preflight_path": str(args.host_preflight.resolve()),
-                "provider_identity_receipt_sha256": sha256(args.provider_identity_receipt),
+                "provider_identity_receipt_sha256": provider_identity_receipt_sha256,
                 "provider_identity_receipt_path": str(args.provider_identity_receipt.resolve()),
                 "host_id": host_preflight["host_id"],
                 "machine_id": platform.node() or "unavailable", "host_platform": platform.platform(),
