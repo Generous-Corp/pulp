@@ -464,6 +464,12 @@
                 pulp::gpu-audio)
             target_include_directories(pulp-gpu-shared-io-private-convolution-probe PRIVATE
                 ../core/gpu_audio/src)
+            target_include_directories(pulp-gpu-shared-io-private-convolution-probe PRIVATE
+                ${SKIA_INCLUDE_DIRS})
+            if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+                target_include_directories(pulp-gpu-shared-io-private-convolution-probe PRIVATE
+                    "${SKIA_INCLUDE_DIRS}/dawn")
+            endif()
             add_dependencies(pulp-gpu-shared-io-private-convolution-probe
                 pulp-gpu-dawn-shared-io-provider-probe)
             add_test(NAME pulp-gpu-shared-io-private-convolution-probe
@@ -562,6 +568,12 @@
                 pulp::gpu-audio)
             target_include_directories(pulp-gpu-shared-io-convolution-session-probe PRIVATE
                 ../core/gpu_audio/src)
+            target_include_directories(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                ${SKIA_INCLUDE_DIRS})
+            if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+                target_include_directories(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                    "${SKIA_INCLUDE_DIRS}/dawn")
+            endif()
             target_compile_definitions(pulp-gpu-shared-io-convolution-session-probe PRIVATE
                 PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
             if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
