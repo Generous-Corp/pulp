@@ -17,13 +17,13 @@
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
-using pulp::signal::LfoShapeParams;
-using pulp::signal::LfoWave;
 using pulp::signal::lfo_wave;
 using pulp::signal::lfo_wave_bandlimited;
 using pulp::signal::lfo_wave_integral;
 using pulp::signal::lfo_wave_is_periodic;
 using pulp::signal::lfo_wave_mean;
+using pulp::signal::LfoShapeParams;
+using pulp::signal::LfoWave;
 using pulp::test::audio::AliasOptions;
 using pulp::test::audio::AliasReport;
 using pulp::test::audio::measure_aliasing;
@@ -76,31 +76,34 @@ std::vector<double> render(LfoWave wave, double f0, bool bandlimited,
 
 double variance(const std::vector<double>& x) {
     double mean = 0.0;
-    for (double v : x) mean += v;
+    for (double v : x)
+        mean += v;
     mean /= static_cast<double>(x.size());
     double var = 0.0;
-    for (double v : x) var += (v - mean) * (v - mean);
+    for (double v : x)
+        var += (v - mean) * (v - mean);
     return var / static_cast<double>(x.size());
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("the interval mean of every periodic wave matches a numeric integral",
           "[signal][lfo][sampling]") {
     const std::pair<double, double> intervals[] = {
-        {0.0, 1.0}, {0.1, 0.1 + 1.0 / 187.5 * 2048.0 / 48000.0}, {0.37, 0.41},
-        {0.45, 0.55}, {0.9, 1.3}, {2.25, 5.75}, {-0.3, 0.2}, {0.49, 0.51}};
+        {0.0, 1.0},   {0.1, 0.1 + 1.0 / 187.5 * 2048.0 / 48000.0},
+        {0.37, 0.41}, {0.45, 0.55},
+        {0.9, 1.3},   {2.25, 5.75},
+        {-0.3, 0.2},  {0.49, 0.51}};
     for (LfoWave wave : kPeriodic)
         for (const auto& params : kShapes)
             for (const auto& [from, to] : intervals) {
-                INFO("wave " << static_cast<int>(wave) << " pw " << params.pulse_width
-                             << " peak " << params.triangle_peak << " [" << from << ", "
-                             << to << "]");
+                INFO("wave " << static_cast<int>(wave) << " pw " << params.pulse_width << " peak "
+                             << params.triangle_peak << " [" << from << ", " << to << "]");
                 CHECK_THAT(lfo_wave_mean(wave, from, to, params),
                            WithinAbs(numeric_mean(wave, from, to, params), 2.0e-4));
                 // The interval the other way round is the same interval.
-                CHECK(lfo_wave_mean(wave, to, from, params)
-                      == lfo_wave_mean(wave, from, to, params));
+                CHECK(lfo_wave_mean(wave, to, from, params) ==
+                      lfo_wave_mean(wave, from, to, params));
             }
 }
 
@@ -133,9 +136,10 @@ TEST_CASE("the cumulative integral is continuous and a vanishing interval reads 
     }
 }
 
-TEST_CASE("at a sub-audio rate the band-limited wave is the trivial one except on the two samples at each corner",
+TEST_CASE("at a sub-audio rate the band-limited wave is the trivial one except on the two samples "
+          "at each corner",
           "[signal][lfo][sampling]") {
-    const double increment = 0.5 / kSampleRate;  // 0.5 Hz: 96 000 samples a cycle
+    const double increment = 0.5 / kSampleRate; // 0.5 Hz: 96 000 samples a cycle
     const std::size_t samples = 2 * 96000;
     for (LfoWave wave : {LfoWave::triangle, LfoWave::saw_up, LfoWave::saw_down, LfoWave::square}) {
         int differing = 0;
@@ -143,7 +147,8 @@ TEST_CASE("at a sub-audio rate the band-limited wave is the trivial one except o
         for (std::size_t i = 0; i < samples; ++i) {
             const double trivial = lfo_wave(wave, phase);
             const double bl = lfo_wave_bandlimited(wave, phase, increment);
-            if (std::fabs(bl - trivial) > 1.0e-12) ++differing;
+            if (std::fabs(bl - trivial) > 1.0e-12)
+                ++differing;
             phase += increment;
         }
         INFO("wave " << static_cast<int>(wave));
@@ -160,9 +165,14 @@ TEST_CASE("at a sub-audio rate the band-limited wave is the trivial one except o
 TEST_CASE("at audio rate the band-limited waves alias less than the trivial ones",
           "[signal][lfo][sampling]") {
     constexpr double kF0[] = {1103.0, 2153.0, 4100.0};
-    struct Case { LfoWave wave; double min_improvement_db; };
-    const Case cases[] = {{LfoWave::saw_up, 8.0}, {LfoWave::saw_down, 8.0},
-                          {LfoWave::square, 8.0}, {LfoWave::triangle, 3.0}};
+    struct Case {
+        LfoWave wave;
+        double min_improvement_db;
+    };
+    const Case cases[] = {{LfoWave::saw_up, 8.0},
+                          {LfoWave::saw_down, 8.0},
+                          {LfoWave::square, 8.0},
+                          {LfoWave::triangle, 3.0}};
     for (const auto& c : cases)
         for (double f0 : kF0) {
             const AliasReport trivial = analyze(render(c.wave, f0, false), f0);
@@ -176,8 +186,9 @@ TEST_CASE("at audio rate the band-limited waves alias less than the trivial ones
         }
 }
 
-TEST_CASE("block means of an LFO above the block Nyquist collapse to its average instead of aliasing",
-          "[signal][lfo][sampling]") {
+TEST_CASE(
+    "block means of an LFO above the block Nyquist collapse to its average instead of aliasing",
+    "[signal][lfo][sampling]") {
     // A 2048 Hz square read once per 256-sample block at 48 kHz (187.5 blocks
     // a second). The point sample is a stepper with the full swing; the
     // interval mean is the wave's average, flat to the box's precision.
@@ -199,7 +210,8 @@ TEST_CASE("block means of an LFO above the block Nyquist collapse to its average
     double worst = 0.0;
     for (int block = 0; block < 400; ++block) {
         const double centre = lfo_wave(LfoWave::sine, phase + 0.5 * slow);
-        worst = std::max(worst, std::fabs(lfo_wave_mean(LfoWave::sine, phase, phase + slow) - centre));
+        worst =
+            std::max(worst, std::fabs(lfo_wave_mean(LfoWave::sine, phase, phase + slow) - centre));
         phase += slow;
     }
     CHECK(worst < 0.02);
@@ -221,7 +233,8 @@ TEST_CASE("LfoT reads bit for bit as before unless band limiting is switched on"
         int differing = 0;
         for (int i = 0; i < 96000; ++i) {
             const float a = plain.next(), b = limited.next();
-            if (std::fabs(a - b) > 1.0e-6f) ++differing;
+            if (std::fabs(a - b) > 1.0e-6f)
+                ++differing;
         }
         INFO("wave " << static_cast<int>(wave));
         // Two cycles at 1 Hz: at most two samples per corner differ.
@@ -233,7 +246,8 @@ TEST_CASE("LfoT reads bit for bit as before unless band limiting is switched on"
 TEST_CASE("LfoT::next_mean is the mean of next() over the block and lands on the same phase",
           "[signal][lfo][sampling]") {
     using Lfo = pulp::signal::LfoT<float>;
-    for (auto wave : {Lfo::Wave::sine, Lfo::Wave::triangle, Lfo::Wave::saw_down, Lfo::Wave::square}) {
+    for (auto wave :
+         {Lfo::Wave::sine, Lfo::Wave::triangle, Lfo::Wave::saw_down, Lfo::Wave::square}) {
         Lfo stepped, summarized;
         for (Lfo* l : {&stepped, &summarized}) {
             l->prepare(kSampleRate);
@@ -244,7 +258,8 @@ TEST_CASE("LfoT::next_mean is the mean of next() over the block and lands on the
         }
         for (int block = 0; block < 60; ++block) {
             double acc = 0.0;
-            for (int i = 0; i < 256; ++i) acc += stepped.next();
+            for (int i = 0; i < 256; ++i)
+                acc += stepped.next();
             const float mean = summarized.next_mean(256);
             INFO("wave " << static_cast<int>(wave) << " block " << block);
             // A corner inside the block moves the discrete average by up to one
@@ -268,7 +283,8 @@ TEST_CASE("LfoT::next_mean is the mean of next() over the block and lands on the
     }
     for (int block = 0; block < 40; ++block) {
         double acc = 0.0;
-        for (int i = 0; i < 256; ++i) acc += stepped.next();
+        for (int i = 0; i < 256; ++i)
+            acc += stepped.next();
         CHECK_THAT(static_cast<double>(summarized.next_mean(256)), WithinAbs(acc / 256.0, 1.0e-6));
     }
 
@@ -279,6 +295,7 @@ TEST_CASE("LfoT::next_mean is the mean of next() over the block and lands on the
     fast.set_wave(Lfo::Wave::square);
     fast.set_rate_hz(2048.0);
     std::vector<double> means;
-    for (int block = 0; block < 200; ++block) means.push_back(fast.next_mean(256));
+    for (int block = 0; block < 200; ++block)
+        means.push_back(fast.next_mean(256));
     CHECK(variance(means) < 1.0e-3);
 }

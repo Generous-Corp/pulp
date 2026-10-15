@@ -895,7 +895,7 @@ struct ModulationSidebandOptions {
     Window window = Window::kaiser;
     double kaiser_beta = kDefaultKaiserBeta;
     int fft_length = 65536;
-    int analysis_offset = 0;  ///< Samples skipped (settling / plugin latency).
+    int analysis_offset = 0; ///< Samples skipped (settling / plugin latency).
     int channel = 0;
 };
 
@@ -932,9 +932,9 @@ struct ModulationSidebandReport {
 /// segment. Throws `std::invalid_argument` on a non-positive rate or carrier,
 /// a carrier at or above Nyquist, a negative modulation frequency, a band
 /// outside (0, Nyquist], or a segment that does not fit the signal.
-ModulationSidebandReport measure_modulation_sidebands(
-    const pulp::audio::BufferView<const float>& signal, double carrier_hz,
-    double modulation_hz, double sample_rate,
-    const ModulationSidebandOptions& options = {});
+ModulationSidebandReport
+measure_modulation_sidebands(const pulp::audio::BufferView<const float>& signal, double carrier_hz,
+                             double modulation_hz, double sample_rate,
+                             const ModulationSidebandOptions& options = {});
 
 } // namespace pulp::test::audio

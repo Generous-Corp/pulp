@@ -1202,17 +1202,16 @@ AliasReport measure_aliasing(const pulp::audio::BufferView<const float>& signal,
     return report;
 }
 
-
-ModulationSidebandReport measure_modulation_sidebands(
-    const pulp::audio::BufferView<const float>& signal, double carrier_hz,
-    double modulation_hz, double sample_rate,
-    const ModulationSidebandOptions& options) {
+ModulationSidebandReport
+measure_modulation_sidebands(const pulp::audio::BufferView<const float>& signal, double carrier_hz,
+                             double modulation_hz, double sample_rate,
+                             const ModulationSidebandOptions& options) {
     require(sample_rate > 0.0, "sample rate must be positive");
     require(carrier_hz > 0.0 && carrier_hz < 0.5 * sample_rate,
             "carrier must lie strictly between 0 and Nyquist");
     require(modulation_hz >= 0.0, "modulation frequency must not be negative");
-    require(options.band_low_hz > 0.0 && options.band_high_hz > options.band_low_hz
-                && options.band_high_hz <= 0.5 * sample_rate,
+    require(options.band_low_hz > 0.0 && options.band_high_hz > options.band_low_hz &&
+                options.band_high_hz <= 0.5 * sample_rate,
             "the band must lie within (0, Nyquist]");
     require(options.fft_length >= 16 && (options.fft_length & (options.fft_length - 1)) == 0,
             "fft_length must be a power of two");
@@ -1223,9 +1222,8 @@ ModulationSidebandReport measure_modulation_sidebands(
     const int N = options.fft_length;
     const auto win = window_coefficients(options.window, N, options.kaiser_beta);
     const auto chan = signal.channel(static_cast<std::size_t>(options.channel));
-    const auto segment = windowed_segment(
-        std::span<const float>(chan.data(), chan.size()), options.analysis_offset, N, win,
-        true);
+    const auto segment = windowed_segment(std::span<const float>(chan.data(), chan.size()),
+                                          options.analysis_offset, N, win, true);
     const auto mag = spectrum_magnitude(segment);
 
     const double bin_hz = sample_rate / N;
@@ -1236,7 +1234,8 @@ ModulationSidebandReport measure_modulation_sidebands(
     const int bins = N / 2 + 1;
     for (int bin = 1; bin < bins - 1; ++bin) {
         const double hz = bin * bin_hz;
-        if (hz < options.band_low_hz || hz > options.band_high_hz) continue;
+        if (hz < options.band_low_hz || hz > options.band_high_hz)
+            continue;
         const double p = mag[static_cast<std::size_t>(bin)] * mag[static_cast<std::size_t>(bin)];
         if (near(hz, carrier_hz)) {
             carrier += p;
@@ -1247,8 +1246,8 @@ ModulationSidebandReport measure_modulation_sidebands(
             for (int k = 1; k <= options.max_order && !own; ++k)
                 // A lower sideband below 0 Hz is a real signal's reflection
                 // of itself: it lands at the absolute frequency.
-                own = near(hz, carrier_hz + k * modulation_hz)
-                    || near(hz, std::fabs(carrier_hz - k * modulation_hz));
+                own = near(hz, carrier_hz + k * modulation_hz) ||
+                      near(hz, std::fabs(carrier_hz - k * modulation_hz));
         (own ? sidebands : residual) += p;
     }
     require(carrier > 0.0, "the signal has no energy at the carrier");
