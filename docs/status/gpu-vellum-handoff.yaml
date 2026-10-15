@@ -2027,8 +2027,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/src/skia_surface.cpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "e6ec169a5cf13f5b4a775a07015bdc212b5d5dcd",
-          "object_id": "e4cbd97b5a241fe342a744d8a70e141041cd3c6a",
+          "revision": "fa7d60146d35e364dea3dae8771570918c03c64a",
+          "object_id": "d9e871ef205f9bc79251b96ffeace4eb55157247",
           "object_type": "blob"
         },
         {
