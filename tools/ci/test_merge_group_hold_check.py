@@ -184,6 +184,25 @@ class MergeGroupHoldCheck(unittest.TestCase):
         self.assertIn("author{__typename login}", hold.COMMENTS_QUERY)
         self.assertIn("author{__typename login}", hold.REVIEWS_QUERY)
 
+    def test_a_hold_from_a_user_account_still_counts(self) -> None:
+        # Only an APPROVE needs the Bot: a HOLD from a User-type account (the
+        # owner, a member, or the PR's author) can only stop a landing.
+        approve = node("shipyard-local", "CONTRIBUTOR", "2026-10-12T10:00:00Z",
+                       f"verdict: APPROVE head:{PR_B}")
+        for login, association, author in (("danielraffel", "OWNER", "alice"),
+                                           ("someone", "MEMBER", "alice"),
+                                           ("alice", "CONTRIBUTOR", "alice")):
+            held = pr([approve, node(login, association, "2026-10-12T11:00:00Z",
+                                     f"verdict: HOLD head:{PR_B}", url="https://x/hold",
+                                     kind="User")], author=author)
+            code, out = run(Fake({12: held, 11: pr([])}))
+            self.assertEqual(code, 1, (login, out))
+            self.assertIn("#12 is held", out)
+        review = {"author": {"__typename": "User", "login": "danielraffel"},
+                  "authorAssociation": "OWNER", "state": "CHANGES_REQUESTED",
+                  "submittedAt": "2026-10-12T11:00:00Z", "url": "r", "commit": {"oid": PR_B}}
+        self.assertFalse(hold.latest_verdict(verdicts_of(pr([approve], [review])), PR_B)["approve"])
+
     def test_a_human_approve_after_the_apps_hold_leaves_it_held(self) -> None:
         # pulp#10293/#10302: the owner's personal login approved pull requests an
         # agent then armed. Posted after the App's HOLD, it must not clear it.
