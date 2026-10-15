@@ -186,12 +186,16 @@ class MergeGroupHoldCheck(unittest.TestCase):
 
     def test_a_hold_from_a_user_account_still_counts(self) -> None:
         # Only an APPROVE needs the Bot: a HOLD from a User-type account (the
-        # owner, a member, or the PR's author) can only stop a landing.
+        # owner, a member, the PR's author, or a user named like the App) can
+        # only stop a landing.
         approve = node("shipyard-local", "CONTRIBUTOR", "2026-10-12T10:00:00Z",
                        f"verdict: APPROVE head:{PR_B}")
         for login, association, author in (("danielraffel", "OWNER", "alice"),
                                            ("someone", "MEMBER", "alice"),
-                                           ("alice", "CONTRIBUTOR", "alice")):
+                                           ("alice", "CONTRIBUTOR", "alice"),
+                                           # A user registered as "shipyard-local", with no
+                                           # association, on someone else's pull request.
+                                           ("shipyard-local", "NONE", "alice")):
             held = pr([approve, node(login, association, "2026-10-12T11:00:00Z",
                                      f"verdict: HOLD head:{PR_B}", url="https://x/hold",
                                      kind="User")], author=author)
