@@ -23,7 +23,7 @@ FORBIDDEN = (
     "static_cast<wgpu",
 )
 REQUIRED = (
-    "pulp/render/render_observer.hpp",
+    '"render_observer_private.hpp"',
     "render_observer::inject_device_loss",
     "render_observer::device_lost",
     "render_observer::toolchain_versions",
@@ -37,6 +37,10 @@ def main() -> int:
     source = args.source.read_text(encoding="utf-8")
     errors = [f"forbidden provider reach-through: {token}" for token in FORBIDDEN if token in source]
     errors.extend(f"missing observer API use: {token}" for token in REQUIRED if token not in source)
+    repository_root = args.source.resolve().parents[2]
+    public_header = repository_root / "core/render/include/pulp/render/render_observer.hpp"
+    if public_header.exists():
+        errors.append(f"observer seam must stay private, found exported header: {public_header}")
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
