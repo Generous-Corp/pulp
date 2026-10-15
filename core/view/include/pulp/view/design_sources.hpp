@@ -245,13 +245,6 @@ std::string synthesize_runtime_envelope(const ClaudeBundle& bundle);
 DesignIR parse_claude_html_with_runtime(const std::string& html,
                                         ClaudeRuntimeOptions opts = {});
 
-/// Build the starter `bridge_handlers.cpp` text the CLI emits next to
-/// the generated JS view when `--from claude` runs. Pure string-builder;
-/// no I/O. The output references `pulp::view::EditorBridge` and shows
-/// add_handler() registrations + an attach_webview() call so users have
-/// a runnable shape to fill in (pulp #709 acceptance criterion).
-std::string render_claude_bridge_scaffold(const std::string& generated_js_path);
-
 // ── Claude Design classname extraction (pulp #1035) ─────────────────────
 //
 // Spectr's `tools/extract-html-bundle/extract.mjs` walks every `<style>`
