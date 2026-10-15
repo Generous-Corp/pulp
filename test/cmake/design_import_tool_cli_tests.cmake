@@ -515,6 +515,18 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
         TIMEOUT 120)
 endif()
 
+# The importer observer uses the narrow Pulp render observer seam. Keep provider
+# headers and opaque Dawn/WebGPU handles private to the render implementation.
+if(Python3_Interpreter_FOUND AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-provider-boundary
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_provider_boundary.py
+                --source ${CMAKE_SOURCE_DIR}/tools/import-design/design_ir_observe.cpp)
+    set_tests_properties(import-design-ir-observe-provider-boundary PROPERTIES
+        LABELS "parser-import;import;link-closure"
+        TIMEOUT 60)
+endif()
+
 # pulp-design-ir-observe --backend gpu / --render-receipt: a GPU request renders
 # through Skia Graphite on Dawn or fails (never a CPU render under a GPU name),
 # and the receipt records the adapter, frame outcome and device loss a GPU
