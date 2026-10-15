@@ -494,6 +494,10 @@ function(_pulp_configure_standalone_target target view_target)
         $<INSTALL_INTERFACE:include>)
     target_link_libraries(${target} PUBLIC
         pulp::format ${view_target}
+        # standalone.hpp includes the public audio bridge; keep the moved
+        # view-audio include root in every standalone consumer's compile
+        # closure instead of relying on an umbrella target's transitive path.
+        pulp::view-audio
         $<BUILD_INTERFACE:yogacore> $<INSTALL_INTERFACE:Pulp::yogacore>
         $<BUILD_INTERFACE:SDL3::SDL3-static> $<INSTALL_INTERFACE:Pulp::sdl3-static>)
     target_compile_definitions(${target} PRIVATE PULP_ENABLE_INSPECTOR=0)
