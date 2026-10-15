@@ -855,6 +855,31 @@ uninstall simpler; the generated `VST3/<name>.vst3/Contents/<arch>-win/`
 bundle is the installed consumer path, and discovering both forms creates
 duplicate NSIS entries and file/directory collisions.
 
+**Windows VST3 runtime proof is bundle-plus-sidecars, not DLL proof.** Each
+`Contents/<arch>-win/` slice is a consumer unit: keep its VST3 binary adjacent
+to the matching `*.pulp-build-info.json` and, when the built product/provider
+declares them, ICU data (for example `icudtl.dat`) and optional GPU runtime
+DLLs. A ZIP or installer that contains only the VST3/DLL is incomplete even
+when a descriptor scan succeeds. Spectr's Skia/Dawn Windows build declares
+ICU as required; a GPU DLL is required only when that exact build links and
+declares one. Before calling a Windows package
+usable, bind the exact archive digest to an entry listing and
+schema/architecture/source-SHA checks, install it into an isolated root, hash
+the installed slice and declared sidecars, then run a normal REAPER scan,
+instance, editor-open, and non-flat audio control. A cache row or `fx=0`
+without an editor/audio receipt is only discovery evidence. Keep a negative
+fixture that removes one sidecar declared required by that package and require
+the package validator or host smoke to reject it; restore the canonical bundle
+before any subsequent host run.
+
+For mixed ARM64/ARM64EC or x64 packages, validate every slice independently:
+sidecars and optional DLLs must be architecture-matched and named by the same
+slice. Do not reuse an ARM64EC sidecar for x64 (or vice versa), and do not
+promote a package from one host architecture based on a different slice's
+REAPER result. Preserve the archive, installed-file hashes, host log, and
+screenshot/audio receipt together so a later reviewer can reproduce the exact
+consumer path.
+
 **Auto-update decision (W7): DEFERRED.** No WinSparkle/auto-update is wired on
 Windows. Rationale: Pulp targets developers shipping their own apps/plugins,
 who pick their own update channel (DAW-scanned plugins don't self-update at
