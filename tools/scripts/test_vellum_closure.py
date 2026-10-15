@@ -1414,8 +1414,10 @@ class GeneratedDigestTests(unittest.TestCase):
                 ("entire producer block comment", "#[[\n" + original + "\n]]\n"),
                 ("entire equals-delimited block comment", "#[=[\n" + original + "\n]=]\n"),
                 ("trailing raw text", original + "\nnot_a_cmake_command\n"),
+                ("leading raw text", "EVIL\\n" + original),
                 ("unterminated quoted argument", original + '\nset(foo "unterminated\n'),
                 ("unterminated bracket comment", original + "\n#[=[ unterminated\n"),
+                ("unterminated bracket argument", original + "\nset(foo [=[# not closed\n"),
             )
             for description, mutation in adversarial_mutations:
                 producer.write_text(mutation, encoding="utf-8")
