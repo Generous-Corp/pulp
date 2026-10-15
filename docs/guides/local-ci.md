@@ -320,6 +320,25 @@ makes the reinstall a single verified command:
   as unknown, never as healthy.
   It reports drift older than an hour, any non-healthy state, and a
   `checked_at` older than 30 minutes, since the reaper runs every 15 minutes.
+- `tools/ci/proxmox_host_watch.py` is that reader. It runs every 15 minutes
+  from one non-gate fleet Mac
+  (`tools/ci/com.danielraffel.pulp.proxmox-host-watch.plist.template`). It
+  reaches the host over ssh by its fleet name and only reads. Each problem gets
+  one issue in the private infrastructure-issues repository. The issue is
+  updated in place and closed when the problem clears. It covers four signals:
+  - a `pulp-*` unit that has been `failed` for over 15 minutes (a slot at its
+    restart limit), shown with its last error line. For `no free clone id in
+    A..B`, it also names the orphan clone that holds the slot's VMID.
+  - `health.json` that is absent, unreadable or stale. This counts as unknown,
+    never as healthy.
+  - a non-healthy state, or drift older than an hour, with the
+    `reinstall_command`.
+  - a VM the reaper has skipped on 4 or more passes over at least 45 minutes
+    while no online runner registration names it. A live job's lease skip stays
+    quiet because its runner is online.
+
+  An observation that could not be read never closes an issue. Every issue
+  carries what, evidence, likely cause, fix, safe-to-auto-apply and verify.
 
 Create separate root-owned role environments; never share one:
 

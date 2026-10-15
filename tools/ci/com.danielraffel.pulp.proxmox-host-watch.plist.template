@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template for the off-host reader of the Proxmox CI host's health
+  signals (tools/ci/proxmox_host_watch.py). Install it on ONE fleet Mac that is
+  not a required-gate host, reaches the Proxmox host by its fleet ssh name, and
+  holds an App-identity `ghapp`:
+
+    sed -e "s|\$HOME|$HOME|g" -e "s|\$PULP_CHECKOUT|<a pulp checkout tracking main>|g" \
+      tools/ci/com.danielraffel.pulp.proxmox-host-watch.plist.template \
+      > "$HOME/Library/LaunchAgents/com.danielraffel.pulp.proxmox-host-watch.plist"
+    launchctl bootstrap "gui/$(id -u)" \
+      "$HOME/Library/LaunchAgents/com.danielraffel.pulp.proxmox-host-watch.plist"
+
+  Run it with --dry-run first and read the log; drop --dry-run to let it open
+  and close issues in the private infrastructure-issues repository.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danielraffel.pulp.proxmox-host-watch</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>python3</string>
+        <string>$PULP_CHECKOUT/tools/ci/proxmox_host_watch.py</string>
+        <string>--dry-run</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>Nice</key>
+    <integer>20</integer>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$HOME/Library/Logs/pulp-proxmox-host-watch.log</string>
+    <key>StandardErrorPath</key>
+    <string>$HOME/Library/Logs/pulp-proxmox-host-watch.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
