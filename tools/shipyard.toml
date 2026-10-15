@@ -13,12 +13,17 @@
 # To check what's installed vs what's pinned:
 #   ./tools/install-shipyard.sh --status
 #
-# To bump the pin (after verifying a new Shipyard release works on
-# Pulp's CI matrix), use:
-#   shipyard pin bump --to vX.Y.Z
-#
-# That flow owns the pin edit and worktree-safety checks; keep the
-# lockstep doc skim below as part of the bump PR.
+# The version and repo below are generated: tools/toolchain/manifest.toml
+# [shipyard] is the authority, together with the sha256 of every release
+# asset, which install-shipyard.sh checks each download against. To bump
+# the pin (after verifying a new Shipyard release works on Pulp's CI
+# matrix):
+#   python3 tools/toolchain/generate.py --shipyard vX.Y.Z
+# It reads the digests from the release's checksums.sha256 and rewrites
+# the manifest, this file and tools/toolchain/shipyard.sha256. Editing
+# `version` here alone (as `shipyard pin bump` does) fails the
+# toolchain-test_generate-selftest drift test. Keep the lockstep doc skim
+# below as part of the bump PR.
 #
 # Shipyard v0.50.0+ is Rust-backed, macOS is Apple-Silicon-only, and the
 # macOS asset is a signed/notarized/stapled `.dmg`; the upstream installer
@@ -187,7 +192,8 @@
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
 version = "v0.269.1"
 
-# Release repository. tools/install-shipyard.sh reads only `version` and runs
-# the upstream installer at refs/tags/{version}/install.sh, which resolves the
-# platform asset and its checksum itself; nothing reads per-asset names here.
+# Release repository. tools/install-shipyard.sh downloads the platform assets
+# from this repository's {version} release, refuses any whose sha256 differs
+# from tools/toolchain/shipyard.sha256, then runs the upstream installer at
+# refs/tags/{version}/install.sh (which checks no digest itself).
 repo = "danielraffel/Shipyard"

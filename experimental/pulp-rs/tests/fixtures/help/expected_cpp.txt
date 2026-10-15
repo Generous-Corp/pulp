@@ -45,6 +45,7 @@ Commands:
   tweaks         Inspect the pulp-tweaks.json sidecar (diff against a design)
 
   ci-local       Local-first CI across configured hosts
+  deps           Toolchain pins: check, resolve, update (tools/toolchain/manifest.toml)
   harness        Catalog-driven coverage harness (compat.json verifier)
   design-debug   Headless design debug runner
   import-design  Import designs from Figma/Stitch/v0/Pencil

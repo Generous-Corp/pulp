@@ -1708,6 +1708,31 @@ commands:
             summary: Launch an app and capture screenshot plus available UI state; supports shared source flags (--source-mode, --branch, --sha, --prepare-command, --prepare-timeout)
     docs: guides/local-ci.md
 
+  - name: deps
+    status: experimental
+    summary: Pulp's own toolchain pins (tools/toolchain/manifest.toml), in a Pulp source checkout. Delegates to tools/toolchain/deps.py. `check` names every host tool whose version differs from the manifest, with the fix; `resolve` fetches what a build needs once, before building (setup --deps-only, then npm ci for lockfile directories that differ) and never installs a host tool; `update` moves one pin, regenerates every derived file (the mise lock with the pinned mise) and prints the table of versions and digests that changed. It never commits, pushes, or installs.
+    subcommands:
+      - name: check
+        summary: Report host tools that differ from the manifest (exit 0 in warn mode, 1 in enforce mode, 3 when the expectation cannot be read)
+      - name: resolve
+        summary: Fetch pinned dependency sources and npm lockfile packages, then report host tools
+      - name: update
+        summary: Move one pin (`<tool> --to <version>`) and print what changed
+    args:
+      - name: --format
+        kind: option
+        required: false
+        description: For `check`, text (default), github (GitHub Actions warning annotations) or json.
+      - name: --to
+        kind: option
+        required: false
+        description: For `update`, the exact version, or the release tag for shipyard.
+      - name: --mise
+        kind: option
+        required: false
+        description: For `update`, the pinned mise binary; defaults to the installed one the manifest names.
+    docs: reference/cli.md#deps
+
   - name: harness
     status: experimental
     summary: Catalog and visual regression harness. Reports static compat coverage, validation-route accounting, and typed visual-golden coverage; delegates visual snapshots to tools/harness/visual/runner.py.

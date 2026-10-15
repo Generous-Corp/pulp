@@ -1275,6 +1275,44 @@
         "subcommands": []
       },
       {
+        "name": "deps",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--format",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--to",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--mise",
+            "kind": "option",
+            "required": false
+          }
+        ],
+        "subcommands": [
+          {
+            "name": "check",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "resolve",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "update",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "design",
         "disposition": "candidate-shared-later",
         "arguments": [

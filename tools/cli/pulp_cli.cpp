@@ -94,6 +94,8 @@ struct ScriptCommand {
 
 static const ScriptCommand script_commands[] = {
     {"ci-local", "tools/local-ci/local_ci.py", "Local-first CI across configured hosts"},
+    {"deps", "tools/toolchain/deps.py",
+     "Toolchain pins: check, resolve, update (tools/toolchain/manifest.toml)"},
     {"harness", "tools/harness/verifier.py",
      "Catalog-driven coverage harness (compat.json verifier)"},
 };
