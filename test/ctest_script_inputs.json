@@ -6253,6 +6253,27 @@
    ],
    "kind": "python"
   },
+  "host-adapter-tracing-contract": {
+   "entry": "tools/scripts/check_host_adapter_tracing_contract.py",
+   "inputs": [
+    "core/format/include/pulp/format/au_v2_adapter.hpp",
+    "core/format/include/pulp/format/au_v2_instrument.hpp",
+    "core/format/include/pulp/format/clap_adapter.hpp",
+    "core/format/include/pulp/format/standalone.hpp",
+    "core/format/include/pulp/format/vst3_adapter.hpp",
+    "core/format/src/aax_runtime.cpp",
+    "core/format/src/au_adapter.mm",
+    "tools/scripts/check_host_adapter_tracing_contract.py"
+   ],
+   "kind": "python"
+  },
+  "host-adapter-tracing-contract-selftest": {
+   "entry": "tools/scripts/test_check_host_adapter_tracing_contract.py",
+   "inputs": [
+    "tools/scripts/test_check_host_adapter_tracing_contract.py"
+   ],
+   "kind": "python"
+  },
   "host-lane-probe-requires-plugins": {
    "entry": "${CMAKE_BINARY_DIR}/test/\"$1\" >/dev/null 2>&1; test $? -eq 2",
    "inputs": [],
