@@ -216,6 +216,23 @@ expect_rc "external/ + .md + .py changes → nothing to format" 0
 expect_out "external/ + .md + .py changes → says so" "nothing to format"
 rm -rf "$repo"
 
+# ── generated SVG sources are excluded from diff-scoped formatting ───────────
+# Their base64 payloads are emitted by the checked-in generator; formatting the
+# changed literal would make the source drift from reproducible generator
+# output. Keep the exclusion covered for the extracted view/audio location.
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+mkdir -p "$repo/core/view/audio/src"
+printf 'const char* payload = "changed";\n' > "$repo/core/view/audio/src/example_svg.cpp"
+run "$repo" "$fake" --check
+expect_rc "generated SVG source → exit 0" 0
+expect_out "generated SVG source → nothing to format" "nothing to format"
+if grep -Fq -- "example_svg.cpp" "$repo/fake.log"; then
+    bad "generated SVG source → formatter not invoked" "log: $(cat "$repo/fake.log")"
+else
+    ok "generated SVG source → formatter not invoked"
+fi
+rm -rf "$repo"
+
 # ── another major: refused under --check, allowed for a local rewrite ───────
 # A binary of the wrong major reflows differently, so under --check its answer
 # would not be about .clang-format as pinned. That is the "measurement that
