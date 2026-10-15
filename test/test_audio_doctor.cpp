@@ -2123,3 +2123,79 @@ TEST_CASE("Doctor: THD rejects a DC-bin fundamental", "[audio][doctor]") {
                                   kSampleRate, topts),
                       std::invalid_argument);
 }
+
+// ── Modulation sidebands ───────────────────────────────────────────────────
+// A tone modulated by a periodic law carries all its energy at the carrier
+// and the carrier +/- k times the modulation frequency. The report's two
+// ratios separate that (the modulation) from everything else (what the
+// modulation path added), which is the A/B an LFO path is graded by. Both
+// controls here: a textbook AM fixture must read its sidebands and a residual
+// at the floor; the same law sampled and held once per block, faster than the
+// block rate can carry, must read NO sidebands and a loud residual.
+namespace {
+
+pulp::audio::Buffer<float> modulated_tone(double carrier_hz, double modulation_hz,
+                                          double depth, int length, int hold_samples) {
+    pulp::audio::Buffer<float> buffer(1, length);
+    constexpr double kTwoPi = 2.0 * std::numbers::pi;
+    double held = 1.0;
+    for (int i = 0; i < length; ++i) {
+        const double t = i / 48000.0;
+        const double law = 1.0 + depth * std::sin(kTwoPi * modulation_hz * t);
+        if (hold_samples <= 0) held = law;
+        else if (i % hold_samples == 0) held = law;
+        buffer.channel(0)[i] = static_cast<float>(0.5 * held * std::sin(kTwoPi * carrier_hz * t));
+    }
+    return buffer;
+}
+
+}  // namespace
+
+TEST_CASE("Doctor: modulation sidebands separate a faithful modulation from a block-held one",
+          "[audio][doctor][modulation]") {
+    using pulp::test::audio::measure_modulation_sidebands;
+    using pulp::test::audio::ModulationSidebandOptions;
+    constexpr int kLength = 1 << 16;
+    ModulationSidebandOptions opts;
+    opts.fft_length = kLength;
+
+    // Textbook AM at 64 Hz, 50 % depth: two sidebands at a quarter of the
+    // carrier's amplitude (-12 dB each, -9 dB together), nothing elsewhere.
+    const auto am = modulated_tone(1000.0, 64.0, 0.5, kLength, 0);
+    const auto faithful = measure_modulation_sidebands(std::as_const(am).view(), 1000.0, 64.0,
+                                                       48000.0, opts);
+    CHECK_THAT(faithful.sideband_db, Catch::Matchers::WithinAbs(-9.0, 0.5));
+    CHECK(faithful.residual_db < -80.0);
+
+    // The unmodulated control claims no sidebands: everything but the carrier
+    // is residual, and there is nothing there.
+    const auto plain = modulated_tone(1000.0, 64.0, 0.0, kLength, 0);
+    const auto control = measure_modulation_sidebands(std::as_const(plain).view(), 1000.0, 0.0,
+                                                      48000.0, opts);
+    CHECK(control.sideband_db <= pulp::test::audio::kSilenceFloorDb);
+    CHECK(control.residual_db < -80.0);
+
+    // The 64 Hz law sampled once per 256 samples (187.5 Hz) and held: the
+    // hold's images land between the lines, so the residual rises while the
+    // sidebands keep most of their energy.
+    const auto held_slow = modulated_tone(1000.0, 64.0, 0.5, kLength, 256);
+    const auto slow = measure_modulation_sidebands(std::as_const(held_slow).view(), 1000.0,
+                                                   64.0, 48000.0, opts);
+    CHECK(slow.sideband_db > -15.0);
+    CHECK(slow.residual_db > faithful.residual_db + 40.0);
+
+    // A 2048 Hz law held once per 256 samples cannot be represented at all:
+    // no energy at its own sidebands, all of it elsewhere.
+    const auto held_fast = modulated_tone(1000.0, 2048.0, 0.5, kLength, 256);
+    const auto aliased = measure_modulation_sidebands(std::as_const(held_fast).view(), 1000.0,
+                                                      2048.0, 48000.0, opts);
+    CHECK(aliased.sideband_db < -40.0);
+    CHECK(aliased.residual_db > -20.0);
+
+    // The same 2048 Hz law applied every sample is a faithful modulation.
+    const auto fast = modulated_tone(1000.0, 2048.0, 0.5, kLength, 0);
+    const auto true_am = measure_modulation_sidebands(std::as_const(fast).view(), 1000.0,
+                                                      2048.0, 48000.0, opts);
+    CHECK_THAT(true_am.sideband_db, Catch::Matchers::WithinAbs(-9.0, 0.5));
+    CHECK(true_am.residual_db < -80.0);
+}

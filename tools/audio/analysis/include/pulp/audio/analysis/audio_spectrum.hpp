@@ -877,4 +877,64 @@ AliasReport measure_aliasing(const pulp::audio::BufferView<const float>& signal,
                              double fundamental_hz, double sample_rate,
                              const AliasOptions& options = {});
 
+/// Options for `measure_modulation_sidebands`.
+struct ModulationSidebandOptions {
+    /// Lines counted as the modulation's own: the carrier +/- k times the
+    /// modulation frequency for k = 1..max_order.
+    int max_order = 8;
+    /// Half-width of each expected line, in bins: the window's main lobe,
+    /// so a line's own skirt is counted as the line and not as residual.
+    double tolerance_bins = 8.0;
+    /// The residual is summed over [band_low_hz, band_high_hz].
+    double band_low_hz = 20.0;
+    double band_high_hz = 20000.0;
+    /// A Kaiser window: a Hann window's side lobes (-31 dB, falling 18 dB an
+    /// octave) around a carrier that is not bin-centred sum to a -40 dB
+    /// "residual" with nothing there, which is the floor a Hann measurement
+    /// of this kind has. The Kaiser at the default beta reads below -100 dB.
+    Window window = Window::kaiser;
+    double kaiser_beta = kDefaultKaiserBeta;
+    int fft_length = 65536;
+    int analysis_offset = 0;  ///< Samples skipped (settling / plugin latency).
+    int channel = 0;
+};
+
+/// Where a steady tone's energy went after a periodic modulation was applied
+/// to it. A carrier whose level (or any parameter) is moved by a periodic law
+/// at `modulation_hz` carries all of its energy at the carrier and at the
+/// carrier +/- k times that frequency: the sidebands are the modulation, and
+/// anything else in the band is what the modulation PATH added -- a stepper's
+/// hold images, the fold of a modulation the path sampled too slowly to
+/// represent, noise. The two ratios are the A/B of a modulation path: a
+/// faithful path reads a high `sideband_db` and a `residual_db` at the floor a
+/// run without modulation establishes.
+struct ModulationSidebandReport {
+    double carrier_hz = 0.0;
+    double modulation_hz = 0.0;
+    /// Power at the carrier's own line (the carrier itself); the reference the
+    /// two ratios are relative to. Backend-scaled: use only as a ratio.
+    double carrier_power = 0.0;
+    /// Power at the carrier +/- k * modulation_hz, re the carrier, dB.
+    double sideband_db = kSilenceFloorDb;
+    /// Power everywhere else in the band, re the carrier, dB.
+    double residual_db = kSilenceFloorDb;
+    int fft_length = 0;
+    double bin_hz = 0.0;
+};
+
+/// Classify `signal` (one channel of an already-rendered buffer) as a tone at
+/// `carrier_hz` modulated at `modulation_hz`, and report the energy at the
+/// modulation's own sidebands against the energy anywhere else in the band.
+/// A `modulation_hz` of zero claims no sidebands, so every bin but the
+/// carrier's is residual: the control a modulated run is compared to.
+///
+/// The caller is responsible for the signal being steady over the analysis
+/// segment. Throws `std::invalid_argument` on a non-positive rate or carrier,
+/// a carrier at or above Nyquist, a negative modulation frequency, a band
+/// outside (0, Nyquist], or a segment that does not fit the signal.
+ModulationSidebandReport measure_modulation_sidebands(
+    const pulp::audio::BufferView<const float>& signal, double carrier_hz,
+    double modulation_hz, double sample_rate,
+    const ModulationSidebandOptions& options = {});
+
 } // namespace pulp::test::audio

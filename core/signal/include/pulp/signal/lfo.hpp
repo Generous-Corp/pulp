@@ -42,6 +42,7 @@
 /// envelope rides the LFO's depth" is the matrix's `via` slot. The LFO stays a
 /// pure source.
 
+#include <pulp/signal/lfo_sampling.hpp>
 #include <pulp/signal/mod_tools.hpp>
 #include <pulp/signal/rng.hpp>
 
@@ -55,15 +56,9 @@ namespace pulp::signal {
 /// modulation toolkit's nested `LfoT::Wave`: selecting this overload also
 /// selects the effect convention whose triangle is sine-aligned (zero at phase
 /// 0, positive peak at 0.25) instead of the toolkit convention (-1 at phase 0).
-enum class LfoWave : std::uint8_t {
-    sine,
-    triangle,
-    saw_up,
-    saw_down,
-    square,
-    sample_hold,
-    smooth_random,
-};
+// `LfoWave`, the effect-wave vocabulary, lives with the stateless sampling
+// functions (`lfo_wave`, `lfo_wave_mean`, `lfo_wave_bandlimited`) that share
+// it; this header carries the stateful oscillator built on them.
 
 namespace detail {
 
@@ -299,6 +294,64 @@ public:
 
     void set_mode(Mode m) { mode_ = m; }
     Mode mode() const { return mode_; }
+
+    // ── sampling without aliasing ────────────────────────────────────────────
+
+    /// Band-limit the deterministic waves at audio rates: the triangle, saws and
+    /// square take the polyBLEP / polyBLAMP corrections of
+    /// `lfo_wave_bandlimited` at every corner. Off by default, so an existing
+    /// patch reads bit for bit as before; on, a slow LFO differs from the
+    /// trivial waveform only on the two samples straddling each corner, and an
+    /// audio-rate one no longer folds its harmonics into the band. The sine and
+    /// the random waves are unchanged either way.
+    void set_band_limited(bool on) requires (!kEffectConvention) { band_limited_ = on; }
+    bool band_limited() const requires (!kEffectConvention) { return band_limited_; }
+
+    /// The mean of the next @p samples outputs, advancing by that many samples:
+    /// the band-limited value for a consumer that takes ONE value per block (a
+    /// spectral mask, a filter restage). Closed form (`lfo_wave_mean`) while the
+    /// LFO sustains a deterministic wave, so a cycle shorter than the block
+    /// collapses to its average instead of aliasing and a long block costs the
+    /// same as a short one; a fading, delayed or random LFO, or a block in which
+    /// a repeat limit would end the LFO, averages `next()` over the block
+    /// instead, so the lifecycle reads exactly as it does sample by sample.
+    /// Zero samples read the current value without advancing. The closed form
+    /// integrates over the samples' own centres, so for a curved wave it is the
+    /// discrete average to within the midpoint rule's error, and for a square
+    /// or saw to within one sample's share of the block.
+    SampleType next_mean(int samples) requires (!kEffectConvention) {
+        if (samples <= 0) {
+            const double p = wrap01(phase_ + static_cast<double>(phase_offset_));
+            update_chain_(chains_[0], p);
+            return static_cast<SampleType>(envelope_() * shape_(p, chains_[0]));
+        }
+        const double span = static_cast<double>(samples) * increment_;
+        const bool deterministic = random_blend_ <= 0.0f
+            && wave_ != Wave::sh_random && wave_ != Wave::smooth_random;
+        const int limit = effective_repeat_();
+        const bool ends_this_block = limit > 0
+            && cycles_ + static_cast<long long>(std::floor(phase_ + span)) >= limit;
+        if (stage_ != Stage::sustain || !deterministic || ends_this_block) {
+            double acc = 0.0;
+            for (int i = 0; i < samples; ++i) acc += static_cast<double>(next());
+            return static_cast<SampleType>(acc / static_cast<double>(samples));
+        }
+        // Each output sample stands for the half-sample on either side of its
+        // phase, so the mean of the next N outputs is the integral from half a
+        // step before the first to half a step before the one after the last.
+        const double p = wrap01(phase_ + static_cast<double>(phase_offset_)) - 0.5 * increment_;
+        const float env = envelope_();
+        const double mean = morph_enabled_ ? morph_mean_(p, p + span)
+                                           : wave_mean_(wave_, p, p + span);
+        phase_ += span;
+        if (phase_ >= 1.0) {
+            const double whole = std::floor(phase_);
+            phase_ -= whole;
+            cycles_ += static_cast<long long>(whole);
+            on_cycles_completed_();
+        }
+        return static_cast<SampleType>(static_cast<double>(env) * mean);
+    }
 
     Stage stage() const { return stage_; }
     bool finished() const { return stage_ == Stage::done; }
@@ -541,7 +594,50 @@ private:
         c.seg_frac = std::clamp(scaled - static_cast<float>(seg), 0.0f, 1.0f);
     }
 
+    static constexpr LfoWave sampling_wave_(Wave w) noexcept {
+        switch (w) {
+            case Wave::sine: return LfoWave::sine;
+            case Wave::triangle: return LfoWave::triangle;
+            case Wave::saw_up: return LfoWave::saw_up;
+            case Wave::saw_down: return LfoWave::saw_down;
+            case Wave::square: return LfoWave::square;
+            case Wave::sh_random: return LfoWave::sample_hold;
+            case Wave::smooth_random:
+            default: return LfoWave::smooth_random;
+        }
+    }
+
+    LfoShapeParams shape_params_() const noexcept {
+        LfoShapeParams params;
+        params.pulse_width = static_cast<double>(pulse_width_);
+        params.triangle_peak = static_cast<double>(
+            std::clamp(0.5f + 0.5f * tri_bias_, 1.0e-4f, 1.0f - 1.0e-4f));
+        return params;
+    }
+
+    double wave_mean_(Wave w, double from, double to) const noexcept {
+        return lfo_wave_mean(sampling_wave_(w), from, to, shape_params_());
+    }
+
+    double morph_mean_(double from, double to) const noexcept {
+        static constexpr Wave kMorphOrder[4] = {
+            Wave::sine, Wave::triangle, Wave::saw_up, Wave::square};
+        int index = static_cast<int>(shape_morph_);
+        index = std::clamp(index, 0, 2);
+        const double w = static_cast<double>(shape_morph_ - static_cast<float>(index));
+        const double a = wave_mean_(kMorphOrder[index], from, to);
+        if (w <= 0.0) return a;
+        const double b = wave_mean_(kMorphOrder[index + 1], from, to);
+        return a + w * (b - a);
+    }
+
     float pure_wave_(Wave w, double phase, const RandomChain& c) const {
+        if constexpr (!kEffectConvention) {
+            if (band_limited_ && w != Wave::sine && w != Wave::sh_random
+                && w != Wave::smooth_random)
+                return static_cast<float>(lfo_wave_bandlimited(
+                    sampling_wave_(w), phase, increment_, shape_params_()));
+        }
         const auto p = static_cast<float>(phase);
         switch (w) {
             case Wave::sine:
@@ -637,6 +733,7 @@ private:
     float tri_bias_ = 0.0f;
     float random_blend_ = 0.0f;
     float fade_out_start_ = 1.0f;
+    bool band_limited_ = false;
 
     std::uint32_t seed_ = 0x12345678u;
     int segments_ = 1;
