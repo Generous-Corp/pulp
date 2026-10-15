@@ -52,20 +52,26 @@ CLONE_ID_RE = re.compile(r"no free clone id in (\d+)\.\.(\d+)")
 REMOTE_PROBE = r'''
 import json, subprocess, time
 
-def run(*argv):
-    try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=60).stdout
-    except Exception:
-        return ""
+unreadable = set()
 
-def journal(unit, since=None, lines=None):
+def run(kind, *argv):
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    except Exception:
+        unreadable.add(kind)
+        return ""
+    if proc.returncode != 0:
+        unreadable.add(kind)
+    return proc.stdout
+
+def journal(kind, unit, since=None, lines=None):
     argv = ["journalctl", "-u", unit, "-o", "json", "--no-pager"]
     if since:
         argv += ["--since", since]
     if lines:
         argv += ["-n", str(lines)]
     rows = []
-    for line in run(*argv).splitlines():
+    for line in run(kind, *argv).splitlines():
         try:
             row = json.loads(line)
         except ValueError:
@@ -79,18 +85,18 @@ def journal(unit, since=None, lines=None):
     return rows
 
 failed = []
-listing = run("systemctl", "list-units", "--failed", "--plain", "--no-legend", "pulp-*")
+listing = run("unit", "systemctl", "list-units", "--failed", "--plain", "--no-legend", "pulp-*")
 for line in listing.splitlines():
     unit = line.split()[0] if line.split() else ""
     if not unit:
         continue
     props = {}
-    for kv in run("systemctl", "show", "--timestamp=unix", "-p",
+    for kv in run("unit", "systemctl", "show", "--timestamp=unix", "-p",
                   "Result,NRestarts,StateChangeTimestamp,ActiveState", unit).splitlines():
         if "=" in kv:
             k, v = kv.split("=", 1)
             props[k] = v
-    errors = [r["msg"] for r in journal(unit, lines=400)
+    errors = [r["msg"] for r in journal("unit", unit, lines=400)
               if r["comm"] != "systemd" and ("ERROR" in r["msg"] or "FATAL" in r["msg"])]
     failed.append({"unit": unit, "result": props.get("Result", ""),
                    "restarts": props.get("NRestarts", ""),
@@ -104,22 +110,23 @@ except FileNotFoundError:
     health = {"present": False, "raw": ""}
 except OSError as exc:
     health = {"present": True, "raw": "", "error": str(exc)}
+    unreadable.add("health")
 
 skips = []
-for r in journal("pulp-ephemeral-reap.service", since="-6h"):
+for r in journal("skip", "pulp-ephemeral-reap.service", since="-6h"):
     if r["msg"].startswith("SKIP "):
         head, _, reason = r["msg"][5:].partition(" ")
         skips.append({"ts": r["ts"], "pid": r["pid"], "vmid": head,
                       "reason": reason.lstrip("—- ").strip()})
 
 vms = {}
-for line in run("qm", "list").splitlines()[1:]:
+for line in run("skip", "qm", "list").splitlines()[1:]:
     parts = line.split()
     if len(parts) >= 3:
         vms[parts[0]] = {"name": parts[1], "status": parts[2]}
 
 print(json.dumps({"now": time.time(), "failed_units": failed, "health": health,
-                  "skips": skips, "vms": vms}))
+                  "skips": skips, "vms": vms, "unreadable": sorted(unreadable)}))
 '''
 
 
@@ -261,6 +268,19 @@ class GitHub:
         return json.loads(proc.stdout or "null")
 
 
+def unreadable_kinds(obs: dict[str, Any], runners: list[dict[str, Any]] | None) -> set[str]:
+    """Finding kinds whose evidence this pass could not read.
+
+    An issue of such a kind is never closed: a probe that failed reads as
+    "nothing wrong", which is the one conclusion it cannot support. An
+    observation without the field predates it and is treated as unreadable.
+    """
+    kinds = set(obs.get("unreadable", ["unit", "health", "skip"]))
+    if runners is None:
+        kinds.add("skip")
+    return kinds
+
+
 def runner_census(gh: GitHub, repo: str) -> list[dict[str, Any]] | None:
     try:
         return gh.api(f"repos/{repo}/actions/runners?per_page=100").get("runners") or []
@@ -273,7 +293,8 @@ def key_of(body: str) -> str:
     return match.group(1) if match else ""
 
 
-def reconcile(gh: GitHub, repo: str, findings: list[dict[str, str]], dry_run: bool) -> list[str]:
+def reconcile(gh: GitHub, repo: str, findings: list[dict[str, str]], dry_run: bool,
+              unreadable: set[str] | frozenset[str] = frozenset()) -> list[str]:
     issues = gh.api("--method", "GET", "/search/issues", "-f",
                     f'q=repo:{repo} is:issue in:title "{TITLE_PREFIX}"').get("items") or []
     mine: dict[str, dict[str, Any]] = {}
@@ -300,6 +321,9 @@ def reconcile(gh: GitHub, repo: str, findings: list[dict[str, str]], dry_run: bo
                 gh.api("-X", "PATCH", f"/repos/{repo}/issues/{issue['number']}", "--input", "-",
                        stdin=json.dumps({"title": f["title"], "body": body, "state": "open"}))
     for key, issue in mine.items():
+        if key.split(":", 1)[0] in unreadable and key not in firing:
+            actions.append(f"keep #{issue['number']} {key} (evidence unreadable)")
+            continue
         if key not in firing and issue.get("state") == "open":
             actions.append(f"close #{issue['number']} {key}")
             if not dry_run:
@@ -338,9 +362,11 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(json.dumps({"error": f"observation failed: {exc}"}))
         return 2
-    findings = analyze(obs, runner_census(gh, args.runner_repo))
+    runners = runner_census(gh, args.runner_repo)
+    findings = analyze(obs, runners)
     try:
-        actions = reconcile(gh, args.issue_repo, findings, args.dry_run)
+        actions = reconcile(gh, args.issue_repo, findings, args.dry_run,
+                            unreadable_kinds(obs, runners))
     except (RuntimeError, ValueError) as exc:
         print(json.dumps({"findings": [f["key"] for f in findings], "error": str(exc)}))
         return 2

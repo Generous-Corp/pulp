@@ -129,6 +129,46 @@ class ReconcileTests(unittest.TestCase):
         self.assertIn("close #6 unit:old.service", actions)
         self.assertNotIn("close #7 health:unknown", actions)
 
+    def test_an_unreadable_runner_census_never_closes_a_skip_issue(self) -> None:
+        o = obs()
+        o["unreadable"] = []
+        gh = FakeGh([issue(5, "skip:203")])
+        actions = w.reconcile(gh, "o/r", w.analyze(o, None), dry_run=False,
+                              unreadable=w.unreadable_kinds(o, None))
+        self.assertNotIn("close #5 skip:203", actions)
+        self.assertIn("keep #5 skip:203 (evidence unreadable)", actions)
+
+    def test_a_failed_probe_command_never_closes_its_kind(self) -> None:
+        # systemctl failed on the host: the empty unit list is not "all healthy".
+        o = obs()
+        o["failed_units"] = []
+        o["unreadable"] = ["unit"]
+        gh = FakeGh([issue(6, "unit:pulp-ephemeral-pool@preamble.service")])
+        actions = w.reconcile(gh, "o/r", w.analyze(o, LIVE_200), dry_run=False,
+                              unreadable=w.unreadable_kinds(o, LIVE_200))
+        self.assertIn("keep #6 unit:pulp-ephemeral-pool@preamble.service (evidence unreadable)",
+                      actions)
+        # Negative control: with the probe readable, the cleared unit closes.
+        o["unreadable"] = []
+        actions = w.reconcile(FakeGh([issue(6, "unit:pulp-ephemeral-pool@preamble.service")]),
+                              "o/r", w.analyze(o, LIVE_200), dry_run=False,
+                              unreadable=w.unreadable_kinds(o, LIVE_200))
+        self.assertIn("close #6 unit:pulp-ephemeral-pool@preamble.service", actions)
+
+    @unittest.skipUnless(sys.platform != "win32", "the stubbed tools are POSIX shell scripts")
+    def test_the_probe_marks_a_failing_command_unreadable(self) -> None:
+        # Run the real probe with systemctl, journalctl and qm all failing.
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as td:
+            for tool in ("systemctl", "journalctl", "qm"):
+                path = pathlib.Path(td) / tool
+                path.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+                path.chmod(0o755)
+            env = dict(os.environ, PATH=f"{td}:/usr/bin:/bin")
+            out = subprocess.run([sys.executable, "-"], input=w.REMOTE_PROBE, env=env,
+                                 capture_output=True, text=True, encoding="utf-8", timeout=60)
+        self.assertEqual(sorted(json.loads(out.stdout)["unreadable"]), ["skip", "unit"])
+
     def test_dry_run_changes_nothing(self) -> None:
         gh = FakeGh([issue(6, "unit:old.service")])
         w.reconcile(gh, "o/r", w.analyze(obs(), LIVE_200), dry_run=True)
