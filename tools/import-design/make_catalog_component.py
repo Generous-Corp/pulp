@@ -109,13 +109,22 @@ def main():
         f"}}  // namespace pulp::view\n")
     open(os.path.join(source_dir, f"{snk}.cpp"), "w", encoding="utf-8").write(cpp)
 
-    rel_root = a.output_root.rstrip("/")
+    rel_root = os.path.normpath(a.output_root)
     print(f"[2/3] wrote {rel_root}/{{include/pulp/view/{snk}.hpp, src/{snk}.cpp, src/{snk}_svg.cpp}}")
     print(f"[3/3] paste these in:\n")
-    print(f"# {rel_root}/CMakeLists.txt (with the other src/ entries):")
-    print(f"    src/{snk}.cpp\n    src/{snk}_svg.cpp")
-    print(f"\n# core/view/include/pulp/design/design_system.hpp (umbrella includes):")
-    print(f"#include <pulp/view/{snk}.hpp>")
+    if rel_root == "core/view/audio":
+        print("# core/view/cmake/PulpViewSources.cmake (target_sources(pulp-view-audio PRIVATE):)")
+        print(f"    audio/src/{snk}.cpp\n    audio/src/{snk}_svg.cpp")
+        print(f"\n# core/view/audio/include/pulp/view/audio_widgets.hpp (umbrella includes):")
+        print(f"#include <pulp/view/{snk}.hpp>")
+    elif rel_root == "core/view":
+        print("# core/view/cmake/PulpViewSources.cmake (target_sources(pulp-view-core PRIVATE):)")
+        print(f"    src/{snk}.cpp\n    src/{snk}_svg.cpp")
+        print(f"\n# core/view/include/pulp/design/design_system.hpp (umbrella includes):")
+        print(f"#include <pulp/view/{snk}.hpp>")
+    else:
+        print(f"# Add the two sources under {rel_root}/src to the target that owns that source root:")
+        print(f"    src/{snk}.cpp\n    src/{snk}_svg.cpp")
     print(f"\n# core/view/src/design_system.cpp (catalog vector):")
     print(f'        {{"{a.name}", C::{a.category}, "pulp::view::{a.cls}",')
     print(f'         "pulp/view/{snk}.hpp", "{a.name}",')

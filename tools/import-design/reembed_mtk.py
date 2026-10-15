@@ -95,7 +95,7 @@ def render_cpp(typing_svg: str, piano_svg: str, date: str) -> str:
         f"// Source file {FILE_KEY}, re-imported {date}. The combined\n"
         "// spec frame (187:2) stacks both modes to show their states at once; the live\n"
         "// component shows one at a time. The design's baked \"selected keys shown\" demo\n"
-        "// chord (pure-#16DAC2 lit key gradients in the key-bed) is NEUTRALIZED to the\n"
+        "// chord with pure teal lit-key gradients in the key-bed is NEUTRALIZED to the\n"
         "// resting key color here — white→#EBEEF1, black→#3A3F47/#16191E — so the live\n"
         "// momentary overlay owns every pressed-state highlight (matching the combined\n"
         "// frame's invariant). Toolbar/overview teal is untouched. Stored as chunked\n"
