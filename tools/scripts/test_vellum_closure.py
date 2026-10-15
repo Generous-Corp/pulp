@@ -1410,6 +1410,18 @@ class GeneratedDigestTests(unittest.TestCase):
         selected = manifest["targets"][0]["sources"]
         self.assertIn(self.PRELUDE_CPP, selected)
         self.assertNotIn("@build/core/view/unsupported.cpp", selected)
+        prelude_sources = {
+            path for path in manifest["files"]
+            if path.startswith("core/view/js/") and path.endswith(".js")
+        }
+        self.assertEqual(len(prelude_sources), 26)
+        self.assertEqual(
+            prelude_sources,
+            {
+                str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+                for path in __import__("vellum_closure").prelude_inputs(REPO_ROOT)
+            },
+        )
 
     def test_export_refuses_a_generated_input_without_a_reproducible_digest(self):
         from vellum_closure import exportable_closure

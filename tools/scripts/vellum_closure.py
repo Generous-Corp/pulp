@@ -1625,6 +1625,14 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
                 normalized.append(norm_path(str(candidate), source, build))
                 all_files.add(candidate.resolve())
     if "pulp-view-script" in selected_names:
+        # The prelude generator consumes tracked JavaScript inputs directly.
+        # They are not reported by CMake's file API, so add the exact ordered
+        # list declared by PulpViewJsPreludes.cmake to the closure.  Without
+        # these source files a Vellum export carries only the generated C++
+        # and header and cannot reproduce the prelude bytes.
+        for input_path in prelude_inputs(source) or []:
+            all_files.add(input_path.resolve())
+            normalized.append(norm_path(str(input_path), source, build))
         for suffix in ("web_compat_preludes_gen.hpp", "web_compat_preludes_gen.cpp"):
             candidate = build / "core/view" / suffix
             if candidate.is_file():
