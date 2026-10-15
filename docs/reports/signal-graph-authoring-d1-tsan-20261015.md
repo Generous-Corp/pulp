@@ -8,9 +8,11 @@ their `GraphMutationLock` and `invalidate_live_locked_()` ordering.
 
 ## Provenance and ownership
 
-- Protected base: `origin/main` at
+- Original Release and TSan validation base: `origin/main` at
   [`bcde1146d8d82c932d71b47037cfc4e7fe83a019`](https://github.com/Generous-Corp/pulp/commit/bcde1146d8d82c932d71b47037cfc4e7fe83a019).
-- Worktree: `/Users/danielraffel/Code/pulp-signalgraph-authoring-20261015`.
+- PR rebase base: `origin/main` at
+  [`666157bda2acaee99fa7c667c20af774040ad0a3`](https://github.com/Generous-Corp/pulp/commit/666157bda2acaee99fa7c667c20af774040ad0a3).
+- Validation used an isolated worktree at the protected base.
 - `signal_graph.cpp` shrank from 2,413 to 1,737 lines; the new private TU is
   725 lines after repository formatting.
 - The existing `signal_graph_prepare.cpp`, `signal_graph_live_swap.cpp`,
@@ -27,6 +29,12 @@ Focused CTest discovery and execution for `SignalGraph|Translated routing|Parall
 routing|Standalone translated routing|Lowerable Custom|Routed PDC` both found
 207 cases; all 207 passed. This includes the prepared-edit and live-swap cases
 registered in the grouped graph binary.
+
+After rebasing onto the PR base above, the three focused targets rebuilt in
+Release through the governed wrapper. The full host and parity binaries passed
+the same 11,977/136 and 48,742/63 assertion/case totals; the sample-region
+sequencer binary passed 250 assertions in 10 cases, including its source
+authority check against the moved authoring method.
 
 ## Dedicated Debug/TSan refresh
 
