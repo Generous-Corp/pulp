@@ -57,23 +57,33 @@ pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
 # all read it. The per-asset digests live in tools/deps/manifest.json, whose
 # wgpu-native version must equal it (PulpWgpuNative.cmake checks).
 set(PULP_WGPU_NATIVE_VERSION v24.0.3.1)
+set(_pulp_windows_arm64ec_target FALSE)
 set(_pulp_windows_arm64ec_skia_dawn FALSE)
-if(WIN32 AND CMAKE_GENERATOR_PLATFORM MATCHES "^[Aa][Rr][Mm]64(E[Cc]|[Xx])$")
-    # wgpu-native has no ARM64EC/ARM64X asset.  If the selected Skia
-    # provider ships a matching Dawn archive, it is the complete WebGPU
-    # implementation and the incompatible wgpu-native FetchContent path must
-    # be skipped.  FindSkia re-checks the exact archive during provider setup.
-    foreach(_pulp_skia_candidate
-            "${PULP_SDK_DIR}/external/skia-build/build/win-gpu/lib/Release/arm64ec/dawn_combined.lib"
-            "${SKIA_DIR}/build/win-gpu/lib/Release/arm64ec/dawn_combined.lib"
-            "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build/build/win-gpu/lib/Release/arm64ec/dawn_combined.lib")
-        if(EXISTS "${_pulp_skia_candidate}")
-            set(_pulp_windows_arm64ec_skia_dawn TRUE)
-            break()
-        endif()
-    endforeach()
+if(WIN32)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake)
+    pulp_windows_target_arch(_pulp_windows_target_arch)
+    if(_pulp_windows_target_arch MATCHES "^arm64(ec|x)-win$")
+        set(_pulp_windows_arm64ec_target TRUE)
+        # wgpu-native has no ARM64EC/ARM64X asset.  Do not even declare its
+        # FetchContent path for these targets: FindSkia below is the sole
+        # provider decision and will fail closed if the matching Dawn archive
+        # is absent.  Probe every installed/explicit/local SDK spelling here
+        # only to provide the diagnostic below; the authoritative decision is
+        # pulp_record_skia_dawn_provider after FindSkia runs.
+        string(REGEX REPLACE "-win$" "" _pulp_windows_skia_slice "${_pulp_windows_target_arch}")
+        foreach(_pulp_skia_candidate
+                "${PULP_SDK_DIR}/external/skia-build/build/win-gpu/lib/Release/${_pulp_windows_skia_slice}/dawn_combined.lib"
+                "${SKIA_DIR}/build/win-gpu/lib/Release/${_pulp_windows_skia_slice}/dawn_combined.lib"
+                "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build/build/win-gpu/lib/Release/${_pulp_windows_skia_slice}/dawn_combined.lib")
+            if(EXISTS "${_pulp_skia_candidate}")
+                set(_pulp_windows_arm64ec_skia_dawn TRUE)
+                break()
+            endif()
+        endforeach()
+        unset(_pulp_windows_skia_slice)
+    endif()
 endif()
-if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS AND NOT _pulp_windows_arm64ec_skia_dawn)
+if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS AND NOT _pulp_windows_arm64ec_target)
     pulp_register_fetchcontent_source(webgpu REF 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab)
     FetchContent_Declare(
         webgpu
@@ -186,10 +196,16 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS AND NOT _pulp_windows_arm64ec_ski
     message(STATUS "Pulp: WebGPU (Dawn) enabled")
 
 endif()
-if(_pulp_windows_arm64ec_skia_dawn)
-    message(STATUS "Pulp: Windows ${CMAKE_GENERATOR_PLATFORM} uses the matching Skia/Dawn provider; skipping wgpu-native")
+if(_pulp_windows_arm64ec_target)
+    if(_pulp_windows_arm64ec_skia_dawn)
+        message(STATUS "Pulp: Windows ${_pulp_windows_target_arch} has a matching Skia/Dawn provider; wgpu-native is disabled")
+    else()
+        message(STATUS "Pulp: Windows ${_pulp_windows_target_arch} requires a matching Skia/Dawn provider; wgpu-native is disabled")
+    endif()
 endif()
 unset(_pulp_skia_candidate)
+unset(_pulp_windows_target_arch)
+unset(_pulp_windows_arm64ec_target)
 unset(_pulp_windows_arm64ec_skia_dawn)
 
 # Skia Graphite — GPU-accelerated 2D rendering (BSD-3-Clause)
@@ -277,11 +293,32 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         elseif(_pulp_req_arch STREQUAL "x64" OR _pulp_req_arch STREQUAL "amd64" OR _pulp_req_arch STREQUAL "x86_64")
             set(_pulp_skia_plat "windows-x64")
             set(_pulp_skia_cache_suffix "-x64")
+        elseif(_pulp_req_arch STREQUAL "arm64ec" OR _pulp_req_arch STREQUAL "arm64x")
+            # ARM64EC/ARM64X assets are producer-specific and are not part of
+            # the ordinary auto-fetch matrix. Reuse a matching archive already
+            # staged in an installed SDK or checkout; otherwise fail before
+            # selecting an ARM64 or x64 substitute.
+            foreach(_pulp_ec_skia_root
+                    "${PULP_SDK_DIR}/external/skia-build"
+                    "${PULP_ROOT_DIR}/external/skia-build")
+                if(EXISTS "${_pulp_ec_skia_root}/build/win-gpu/lib/Release/${_pulp_req_arch}/skia.lib")
+                    set(SKIA_DIR "${_pulp_ec_skia_root}")
+                    message(STATUS "Skia: using staged Windows ${_pulp_req_arch} archive at ${SKIA_DIR}")
+                    break()
+                endif()
+            endforeach()
+            unset(_pulp_ec_skia_root)
+            if(NOT SKIA_DIR)
+                message(FATAL_ERROR
+                    "Pulp: cannot auto-fetch Windows ${_pulp_req_arch} Skia. "
+                    "Stage a matching producer archive and pass -DSKIA_DIR, "
+                    "or install it under PULP_SDK_DIR/external/skia-build.")
+            endif()
         else()
             message(FATAL_ERROR
                 "Pulp: cannot select a prebuilt Windows Skia slice for "
                 "target architecture '${_pulp_req_arch}'. Supported values "
-                "are ARM64 and x64 (set -A ARM64 or -A x64 when cross-compiling).")
+                "are ARM64, ARM64EC, ARM64X, and x64 (set -A when cross-compiling).")
         endif()
         unset(_pulp_req_arch)
     elseif(UNIX)
@@ -381,6 +418,24 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake)
 pulp_record_skia_dawn_provider(SKIA_FOUND FALSE)
 if(PULP_ENABLE_GPU)
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake)
+    if(WIN32)
+        pulp_windows_target_arch(_pulp_provider_target_arch)
+        if(_pulp_provider_target_arch MATCHES "^arm64(ec|x)-win$")
+            if(NOT PULP_SKIA_PROVIDES_DAWN)
+                message(FATAL_ERROR
+                    "Pulp: Windows ${_pulp_provider_target_arch} requires a matching "
+                    "Skia/Dawn archive. FindSkia resolved SKIA_FOUND=${SKIA_FOUND} "
+                    "and DAWN_LIBRARY='${DAWN_LIBRARY}'; refusing the incompatible "
+                    "wgpu-native fallback.")
+            endif()
+            # This lane intentionally has no `webgpu` target: Skia's Dawn
+            # archive is the WebGPU implementation. Keep the public feature
+            # definition enabled so core/render compiles its Dawn path.
+            set(PULP_HAS_WEBGPU TRUE CACHE INTERNAL
+                "Pulp feature flag (Skia supplies Dawn)" FORCE)
+        endif()
+        unset(_pulp_provider_target_arch)
+    endif()
     if(SKIA_FOUND)
         set(PULP_HAS_SKIA TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
         # On Android + iOS, Dawn is bundled in Skia's pre-built libs.

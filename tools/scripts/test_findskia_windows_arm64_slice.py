@@ -25,7 +25,8 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
     def _make_fixture(self, *, arm64: bool = False, arm64ec: bool = False,
-                      arm64x: bool = False, flat: bool = False) -> pathlib.Path:
+                      arm64x: bool = False, flat: bool = False,
+                      dawn: bool = True) -> pathlib.Path:
         name = "skia-" + "-".join(n for n, on in (("arm64", arm64),
                                                    ("arm64ec", arm64ec),
                                                    ("arm64x", arm64x),
@@ -41,12 +42,14 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
                                 (release, flat)):
             if present:
                 libdir.mkdir(parents=True, exist_ok=True)
-                for lib in ("skia.lib", "dawn_combined.lib"):
-                    (libdir / lib).write_bytes(b"fixture\n")
+                (libdir / "skia.lib").write_bytes(b"fixture\n")
+                if dawn:
+                    (libdir / "dawn_combined.lib").write_bytes(b"fixture\n")
         return skia
 
     def _configure(self, skia: pathlib.Path, *, target_arch: str, expect_found: bool,
-                   expect_slice: str | None = None, host: str = "ARM64") -> str:
+                   expect_slice: str | None = None, host: str = "ARM64",
+                   expect_provider: bool | None = None) -> str:
         """Configure a compiler-free project for ``target_arch`` on ``host``.
 
         A real MSVC configure records the target in
@@ -58,8 +61,13 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         project.mkdir()
         expected = "TRUE" if expect_found else "FALSE"
         checks = ""
+        if expect_provider is not None:
+            provider = "TRUE" if expect_provider else "FALSE"
+            checks += (f'if(NOT PULP_SKIA_PROVIDES_DAWN STREQUAL "{provider}")\n'
+                       f'  message(FATAL_ERROR "unexpected PULP_SKIA_PROVIDES_DAWN=${{PULP_SKIA_PROVIDES_DAWN}} DAWN_LIBRARY=${{DAWN_LIBRARY}}")\n'
+                       "endif()\n")
         if expect_slice in {"arm64", "arm64ec", "arm64x"}:
-            checks = (f'if(NOT SKIA_LIBRARY MATCHES "/{expect_slice}/skia\\.lib$")\n'
+            checks += (f'if(NOT SKIA_LIBRARY MATCHES "/{expect_slice}/skia\\.lib$")\n'
                       f'  message(FATAL_ERROR "{expect_slice} archive slice was not selected: ${{SKIA_LIBRARY}}")\n'
                       "endif()\n")
         elif expect_slice == "flat":
@@ -99,7 +107,8 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
 
     def test_arm64_slice_is_selected(self) -> None:
         output = self._configure(self._make_fixture(arm64=True), target_arch="ARM64",
-                                 expect_found=True, expect_slice="arm64")
+                                 expect_found=True, expect_slice="arm64",
+                                 expect_provider=True)
         self.assertIn("selecting Windows ARM64 archive slice", output)
 
     def test_flat_only_fixture_does_not_claim_arm64_support(self) -> None:
@@ -125,6 +134,12 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         output = self._configure(self._make_fixture(arm64=True, flat=True),
                                  target_arch="ARM64EC", expect_found=False)
         self.assertIn("no Windows archive slice for arm64ec-win", output)
+
+    def test_matching_skia_without_dawn_records_no_provider(self) -> None:
+        output = self._configure(self._make_fixture(arm64ec=True, dawn=False),
+                                 target_arch="ARM64EC", expect_found=True,
+                                 expect_slice="arm64ec", expect_provider=False)
+        self.assertIn("selecting Windows arm64ec archive slice", output)
 
 
 if __name__ == "__main__":
