@@ -139,6 +139,13 @@ class SharedAudioSdkRecipe(unittest.TestCase):
             "- name: Build SDK tarball (Unix)", 1)[0]
         script = block.split("run: |\n", 1)[1].split("        shell: bash", 1)[0]
         script = "\n".join(line[10:] for line in script.splitlines())
+        # Keep this recipe test side-effect free: exercise governed-build's
+        # command construction in dry-run mode, while fake cmake below still
+        # captures the real configure arguments.
+        script = script.replace(
+            "tools/ci/governed-build.sh cmake --build",
+            "tools/ci/governed-build.sh --dry-run cmake --build",
+        )
         # Execute the actual recipe with command stubs: no build or configure.
         # This tests argument expansion/platform branching, not string presence.
         for platform in ("darwin-arm64", "darwin-x64"):
@@ -160,8 +167,6 @@ class SharedAudioSdkRecipe(unittest.TestCase):
                 fake_cmake.chmod(0o755)
                 env = dict(os.environ, RELEASE_TAG="v9.8.7", CAPTURE=str(capture),
                            NUMBER_OF_PROCESSORS="2",
-                           PULP_TARTCI_LEASES="0", PULP_BUILD_DIR_LOCK="0",
-                           PULP_BUILD_DIR_LOCK_ROOT=temp,
                            HOME=temp, XDG_STATE_HOME=temp,
                            PATH=f"{temp}:{os.environ.get('PATH', '')}")
                 result = subprocess.run(
