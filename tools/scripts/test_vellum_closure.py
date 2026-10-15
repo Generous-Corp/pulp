@@ -1373,9 +1373,14 @@ class GeneratedDigestTests(unittest.TestCase):
                 "\nlist ( TRANSFORM PULP_JS_PRELUDES PREPEND nope )\n",
                 "\nunset ( PULP_JS_PRELUDES )\n",
                 "\nSET ( PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
+                "\nset ( \"PULP_JS_PRELUDES\" ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
+                "\nunset ( \"PULP_JS_PRELUDES\" )\n",
             ):
                 producer.write_text(original + mutation, encoding="utf-8")
                 self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), mutation)
+            producer.write_text(original + "\nSET ( pulp_js_preludes ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n", encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
+                             "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
 
     def test_target_manifest_only_exposes_the_supported_prelude_source(self):
         from vellum_closure import target_manifest
