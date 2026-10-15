@@ -3449,6 +3449,14 @@ or group, the error and the fix (re-run the classify job, or re-queue). A
 stalled queue is the deliberate lesser harm. Only a base branch that does not
 carry the check yet passes, with a notice.
 
+Who may sign the fleet App's approvals is set in `.shipyard/config.toml`:
+`[auto_merge] reviewer_signers = ["pulp-review", "infra-review2"]`. Every
+agent posts verdicts as the same App, so Shipyard's guards count an App
+`verdict: APPROVE` only with a `reviewer: <name>` line naming one of these, and
+never one `ghapp` stamped with an `unattributed` session. Shipyard's
+server-side `review-verdict` reads the list only from this file and refuses
+every App approval when it is missing, so a new reviewer is added here first.
+
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
 stdin script, so a wedged checkout volume can freeze the routing probe even
