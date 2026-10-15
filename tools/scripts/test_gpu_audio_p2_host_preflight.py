@@ -159,6 +159,22 @@ class HostPreflightTests(unittest.TestCase):
             ["/definitely/missing/pulp", "doctor", "gpu", "--json"], "a" * 40)
         self.assertEqual(identity["status"], "invalid")
 
+    def test_gpu_health_identity_rejects_symlink_before_resolution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "build" / "pulp-real"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"pulp-fixture")
+            target.chmod(target.stat().st_mode | stat.S_IXUSR)
+            manifest = root / "build/core/runtime/generated/Release/pulp/runtime/build_info.hpp"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('kGitSha = "' + "a" * 40 + '"\n', encoding="utf-8")
+            link = root / "build" / "pulp"
+            link.symlink_to(target.name)
+            with patch.object(preflight, "REPO_ROOT", root):
+                identity = preflight._gpu_health_identity([str(link), "doctor", "gpu"], "a" * 40)
+        self.assertEqual(identity, {"status": "invalid", "reason": "executable_symlink"})
+
     def test_positive_receipt_contains_hashed_real_observations(self):
         receipt = preflight.collect(runner=self.runner, source_revision="a" * 40)
         # IORegistry ``busy`` is diagnostic bookkeeping, not authenticated
