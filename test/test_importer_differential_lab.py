@@ -152,6 +152,29 @@ class DifferentialLabTests(unittest.TestCase):
         }
         self.assertEqual(LAB.capture_logical_size(capture), (1440, 1200))
 
+    def test_canonical_json_digest_ignores_run_clock_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "first.json"
+            second = Path(directory) / "second.json"
+            first.write_text(json.dumps({
+                "imported_at": "2026-10-15T00:00:00Z",
+                "capture": {"elapsed_ms": 12, "source": "same"},
+            }), encoding="utf-8")
+            second.write_text(json.dumps({
+                "imported_at": "2026-10-15T00:01:00Z",
+                "capture": {"elapsed_ms": 99, "source": "same"},
+            }), encoding="utf-8")
+            self.assertEqual(
+                LAB.canonical_json_sha256(first),
+                LAB.canonical_json_sha256(second))
+            second.write_text(json.dumps({
+                "imported_at": "2026-10-15T00:01:00Z",
+                "capture": {"elapsed_ms": 99, "source": "changed"},
+            }), encoding="utf-8")
+            self.assertNotEqual(
+                LAB.canonical_json_sha256(first),
+                LAB.canonical_json_sha256(second))
+
     def test_intrinsic_sizing_gap_is_emitted(self) -> None:
         recognition = LAB.source_recognition(
             "<!doctype html><html><body><div>Panel</div></body></html>")

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4250,
+  "total": 4242,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -163,7 +163,7 @@
     "tools/import-validation/chrome_gradient_oracle.py": 1,
     "tools/import-validation/diff_against_reference_regions.py": 1,
     "tools/import-validation/importer_differential/cli.py": 4,
-    "tools/import-validation/importer_differential/core.py": 9,
+    "tools/import-validation/importer_differential/core.py": 1,
     "tools/import-validation/score_native_panel.py": 6,
     "tools/import-validation/test_check_palette_health.py": 9,
     "tools/import-validation/test_check_panel_presence.py": 5,
