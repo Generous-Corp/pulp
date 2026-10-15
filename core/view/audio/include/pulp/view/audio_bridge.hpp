@@ -1,10 +1,10 @@
 #pragma once
 
-#include <pulp/runtime/triple_buffer.hpp>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <algorithm>
+#include <pulp/runtime/triple_buffer.hpp>
 
 namespace pulp::view {
 
@@ -14,8 +14,8 @@ namespace pulp::view {
 struct MeterData {
     static constexpr int max_channels = 8;
 
-    float peak[max_channels] = {};     // Peak level (linear, 0-1+)
-    float rms[max_channels] = {};      // RMS level (linear, 0-1+)
+    float peak[max_channels] = {}; // Peak level (linear, 0-1+)
+    float rms[max_channels] = {};  // RMS level (linear, 0-1+)
     int num_channels = 0;
 };
 
@@ -42,9 +42,8 @@ struct MeterBallistics {
     /// `MultiChannelBallistics::update` reports movement the same way. If you
     /// are only advancing the ballistics and will never paint, say so with
     /// `(void)`.
-    [[nodiscard]] bool update(float new_peak, float new_rms, float dt,
-                              float attack = 0.001f, float release = 0.3f,
-                              float hold_time = 1.5f) {
+    [[nodiscard]] bool update(float new_peak, float new_rms, float dt, float attack = 0.001f,
+                              float release = 0.3f, float hold_time = 1.5f) {
         const float prev_peak = display_peak;
         const float prev_rms = display_rms;
         const float prev_held = held_peak;
@@ -55,11 +54,16 @@ struct MeterBallistics {
         // unequal to itself forever — so `changed` would be true on every frame
         // for the rest of the process. Sanitise the input, and self-heal state
         // that arrived non-finite by another route.
-        if (!std::isfinite(new_peak)) new_peak = 0.0f;
-        if (!std::isfinite(new_rms)) new_rms = 0.0f;
-        if (!std::isfinite(display_peak)) display_peak = 0.0f;
-        if (!std::isfinite(display_rms)) display_rms = 0.0f;
-        if (!std::isfinite(held_peak)) held_peak = 0.0f;
+        if (!std::isfinite(new_peak))
+            new_peak = 0.0f;
+        if (!std::isfinite(new_rms))
+            new_rms = 0.0f;
+        if (!std::isfinite(display_peak))
+            display_peak = 0.0f;
+        if (!std::isfinite(display_rms))
+            display_rms = 0.0f;
+        if (!std::isfinite(held_peak))
+            held_peak = 0.0f;
 
         // Attack/release envelope
         float attack_coeff = 1.0f - std::exp(-dt / attack);
@@ -98,12 +102,14 @@ struct MeterBallistics {
         // resting value is NOT zero needs the general form —
         // `if (std::abs(v - target) < eps) v = target` — see
         // CorrelationMeter::update, which settles wherever the signal is.
-        if (display_peak < 1e-6f) display_peak = 0;
-        if (display_rms < 1e-6f) display_rms = 0;
-        if (held_peak < 1e-6f) held_peak = 0;
+        if (display_peak < 1e-6f)
+            display_peak = 0;
+        if (display_rms < 1e-6f)
+            display_rms = 0;
+        if (held_peak < 1e-6f)
+            held_peak = 0;
 
-        return display_peak != prev_peak || display_rms != prev_rms ||
-               held_peak != prev_held;
+        return display_peak != prev_peak || display_rms != prev_rms || held_peak != prev_held;
     }
 };
 
@@ -114,7 +120,7 @@ struct MeterBallistics {
 // latest meter data without risk of overflow, and the UI thread always reads
 // the most recent value. No data loss regardless of UI thread stalls.
 class AudioBridge {
-public:
+  public:
     AudioBridge() = default;
 
     // Called from audio thread: publish new meter data
@@ -140,7 +146,8 @@ public:
             float sum_sq = 0;
             for (int i = 0; i < num_samples; ++i) {
                 float s = std::abs(channels[ch][i]);
-                if (s > peak) peak = s;
+                if (s > peak)
+                    peak = s;
                 sum_sq += channels[ch][i] * channels[ch][i];
             }
             data.peak[ch] = peak;
@@ -150,7 +157,7 @@ public:
         push_meter(data);
     }
 
-private:
+  private:
     runtime::TripleBuffer<MeterData> meter_buf_;
 };
 

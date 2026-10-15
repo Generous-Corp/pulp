@@ -1,11 +1,13 @@
-#include <pulp/view/waveform_recorder_view.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/view/waveform_recorder_view.hpp>
 
 #include <string>
 
 namespace pulp::view {
 
-namespace detail { const char* waveform_recorder_view_svg_b64(); }
+namespace detail {
+const char* waveform_recorder_view_svg_b64();
+}
 
 namespace {
 std::string decode_waveform_recorder_view_svg() {
@@ -13,8 +15,9 @@ std::string decode_waveform_recorder_view_svg() {
         return std::string(bytes->begin(), bytes->end());
     return {};
 }
-}  // namespace
+} // namespace
 
-WaveformRecorderView::WaveformRecorderView() : DesignFrameView(decode_waveform_recorder_view_svg(), /*elements=*/{}) {}
+WaveformRecorderView::WaveformRecorderView()
+    : DesignFrameView(decode_waveform_recorder_view_svg(), /*elements=*/{}) {}
 
-}  // namespace pulp::view
+} // namespace pulp::view

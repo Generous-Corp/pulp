@@ -9,8 +9,8 @@ namespace pulp::view {
 // Figma node 215:2 by tools/import-design/make_catalog_component.py;
 // reskin/extend via the faithful-vector lane, never by hand-painting.
 class WaveformRecorderView : public DesignFrameView {
-public:
+  public:
     WaveformRecorderView();
 };
 
-}  // namespace pulp::view
+} // namespace pulp::view

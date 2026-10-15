@@ -33,7 +33,7 @@ inline constexpr int kPianoFrame = 1;
 // renders (DesignFrameView::set_active_frame) and the view's intrinsic size.
 // Reskin via that lane (re-export → re-embed), not by hand.
 class MusicalTypingKeyboard : public DesignFrameView {
-public:
+  public:
     MusicalTypingKeyboard();
 
     // The two keyboard modes. typing = the QWERTY/computer-typing keyboard
@@ -54,7 +54,9 @@ public:
 
     // The owned QWERTY→note controller (base note, octave, velocity). Exposed so
     // a host can set the base note / velocity or feed keys from its own path.
-    MusicalTypingController& controller() { return controller_; }
+    MusicalTypingController& controller() {
+        return controller_;
+    }
 
     // ── On-screen control callbacks (Logic-faithful) ─────────────────────────
     // The on-screen octave −/+ and velocity −/+ buttons drive the controller
@@ -96,7 +98,9 @@ public:
     // set_active_notes. Default true (standalone playable). Also drops keyboard
     // focusability so it won't steal first-responder key events.
     void set_input_capture(bool capture);
-    bool input_capture() const { return input_capture_; }
+    bool input_capture() const {
+        return input_capture_;
+    }
 
     // Set the controller's base note (e.g. a sampler's root) AND refresh the
     // OCTAVE readout + overview highlight. Prefer this over controller().
@@ -107,7 +111,7 @@ public:
     // a w s e d f t g y h u j k o l p play notes, z/x shift the octave. Returns
     // true when consumed (false when capture is off, so the host keeps the key).
     bool on_key_event(const KeyEvent& event) override;
-    void on_focus_changed(bool gained) override;  // release held notes on blur
+    void on_focus_changed(bool gained) override; // release held notes on blur
 
     // ── Overview-strip octave control (Logic-style) ──────────────────────────
     // The top overview strip's teal highlight is the canonical octave indicator:
@@ -121,7 +125,9 @@ public:
     void on_mouse_up(Point pos) override;
     void on_hover_move(Point pos) override;
     void on_mouse_leave() override;
-    bool wants_mouse_input() const override { return true; }
+    bool wants_mouse_input() const override {
+        return true;
+    }
 
     // MIDI note an element maps to: in the typing frame, base+octave+semitone; in
     // the piano frame, the windowed note (frame-low-note 48 offset onto the live
@@ -134,22 +140,22 @@ public:
     // (e.g. whether the sustain pad is still held).
     int element_for_action(const std::string& tag) const;
 
-protected:
+  protected:
     // On a mode swap (toggle button or set_mode): release any QWERTY-held notes
     // (so a held key can't sound forever after the typing frame goes away) and
     // re-apply the external held-note set to the NEW frame's keys (so a host's
     // sustained chord doesn't visually vanish across the swap).
     void on_active_frame_changed() override;
 
-private:
+  private:
     MusicalTypingController controller_;
     bool input_capture_ = true;   // false = host feeds QWERTY; we don't capture keys
     bool sustain_ = false;        // sustain-pad toggle state (surfaced via on_sustain)
     int pb_value_ = 0;            // live pitch-bend display value (−20 / 0 / +20)
     int mod_sel_ = 0;             // latched modulation selection (0 = "off" … 5 = "max")
     bool dragging_strip_ = false; // mid drag-to-octave on the overview strip
-    static constexpr float kVelStep = 1.0f / 16.0f;  // on-screen velocity −/+ increment
-    static constexpr int kPitchBendMax = 20;         // Logic-style ±20 readout extent
+    static constexpr float kVelStep = 1.0f / 16.0f; // on-screen velocity −/+ increment
+    static constexpr int kPitchBendMax = 20;        // Logic-style ±20 readout extent
 
     // The overview strip is a full-range (C-2…G8 / MIDI 0–127) mini-piano ruler
     // drawn procedurally in paint() over the design's strip background — white-key
@@ -196,4 +202,4 @@ private:
     void light_typing_semitone(int semitone, bool on);
 };
 
-}  // namespace pulp::view
+} // namespace pulp::view
