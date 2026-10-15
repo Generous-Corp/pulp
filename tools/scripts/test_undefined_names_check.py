@@ -17,6 +17,10 @@ sys.path.insert(0, str(HERE))
 import undefined_names_check as check  # noqa: E402
 
 REPO = HERE.parent.parent
+# Spelled as one literal so tools/scripts/script_test_inputs.py records the
+# directory as a declared input: a change under it then selects this test on
+# the pull-request head.
+SCANNED = REPO / "tools/import-validation"
 
 
 def found(source: str) -> list[tuple[int, str]] | None:
@@ -25,7 +29,7 @@ def found(source: str) -> list[tuple[int, str]] | None:
 
 class RepositoryScanTests(unittest.TestCase):
     def test_import_validation_has_no_undefined_names(self) -> None:
-        count, problems, _ = check.scan([REPO / "tools" / "import-validation"])
+        count, problems, _ = check.scan([SCANNED])
         self.assertGreater(count, 0, "the scan found no Python files")
         self.assertEqual(problems, [])
 
@@ -126,6 +130,25 @@ class FalsePositiveControls(unittest.TestCase):
                 return inner, late, bump
         """
         self.assertEqual(found(source), [])
+
+    def test_a_name_bound_only_by_a_global_statement_is_clean(self) -> None:
+        source = """\
+            def setup():
+                global READY
+                READY = True
+
+            def ready():
+                return READY
+        """
+        self.assertEqual(found(source), [])
+
+    def test_control_a_global_declared_but_never_assigned_is_reported(self) -> None:
+        source = """\
+            def peek():
+                global NEVER
+                return NEVER
+        """
+        self.assertEqual(found(source), [(3, "NEVER")])
 
     def test_a_star_import_is_skipped_not_passed(self) -> None:
         self.assertIsNone(found("from os.path import *\nprint(join)\n"))

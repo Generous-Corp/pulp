@@ -127,6 +127,10 @@ class SelectionTests(unittest.TestCase):
             # #9177: the compatibility baseline declares its fixture directory.
             "9177": (["test/fixtures/sample-region-compat/expected/abi.txt"],
                       "sample-region-compat-baseline"),
+            # An import-validation-only change: the undefined-name scan declares
+            # the directory it scans, so the pull-request head runs it.
+            "import-validation": (["tools/import-validation/importer_differential/core.py"],
+                                  "import-validation-undefined-names"),
         }
         for case, (paths, expected) in cases.items():
             with self.subTest(case=case):

@@ -9,9 +9,9 @@ on every successful run.
 
 This is the core of pyflakes' undefined-name check, built on the standard
 library's `symtable`, so the gate adds no dependency. In each scope, a name
-that resolves to the module's globals (not local, not a closure, not declared
-`global`) must be bound somewhere at module level, be a builtin, or be one of
-the module attributes Python provides. A module with a star import is skipped
+that resolves to the module's globals (not local, not a closure) must be bound
+somewhere at module level, including by a `global` statement and assignment in
+a function, be a builtin, or be one of the module attributes Python provides. A module with a star import is skipped
 and reported, because its globals cannot be known statically.
 
   python3 tools/scripts/undefined_names_check.py tools/import-validation
@@ -70,7 +70,9 @@ def undefined_names(source: str, filename: str) -> list[tuple[int, str]] | None:
             if table is module:
                 if not (symbol.is_assigned() or symbol.is_imported()):
                     offenders.append((table, name))
-            elif symbol.is_global() and not symbol.is_declared_global():
+            elif symbol.is_global():
+                # Implicit or declared `global`: either way the read needs a
+                # module binding, which includes a `global X; X = ...`.
                 offenders.append((table, name))
     found = set()
     for table, name in offenders:

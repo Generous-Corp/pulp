@@ -6427,6 +6427,7 @@
   "import-validation-undefined-names": {
    "entry": "tools/scripts/test_undefined_names_check.py",
    "inputs": [
+    "tools/import-validation",
     "tools/scripts/test_undefined_names_check.py",
     "tools/scripts/undefined_names_check.py"
    ],
@@ -6999,6 +7000,7 @@
     "tools/cmake/PulpPlugin.cmake",
     "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
+    "tools/import-validation/importer_differential/core.py",
     "tools/motion/visual/requirements.lock",
     "tools/scripts",
     "tools/scripts/affected_targets.py",
