@@ -3430,10 +3430,12 @@ of `tools/ci/merge_group_hold_check.py` (fetched from
 `merge_group.base_ref`; the token never reaches a queue entry's code). It reads the group's pull requests from
 the first-parent chain of queue merge commits (each lands its second parent),
 and fails when one's latest trusted verdict on that head is
-`verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. "Trusted" means the
-fleet App or an OWNER, MEMBER or COLLABORATOR who is not the author,
-Shipyard's rule, except that the author's own HOLD counts (never their
-APPROVE). The chain is read one commit at a time and comments and reviews are
+`verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. An APPROVE counts
+only from the fleet App (every agent posts verdicts as it through `ghapp`),
+never from a human account, so a human APPROVE posted after the App's HOLD
+cannot clear it: an agent holding the owner's personal `gh` login posted such
+approvals. A HOLD counts from the fleet App, an OWNER, MEMBER or COLLABORATOR,
+or the pull request's own author. The chain is read one commit at a time and comments and reviews are
 paginated, so a large group or a long pull request is read in full. The failure names the pull request, the HOLD's URL and the
 fix, and a failed classify fails `macos` closed through the bootstrap above,
 before any VM. It is the backstop for a HOLD on a head that was already armed
