@@ -15,15 +15,19 @@ request lands, and its subject names the pull request (`Merge pull request
 #N from ...`). For each of them the check reads the pull request's comments
 and reviews and takes the latest trusted verdict naming that head: a comment
 whose last non-blank line is `verdict: APPROVE|HOLD head:<sha>` or
-`reviewed: <sha>`, or an APPROVED / CHANGES_REQUESTED review on that commit,
-from the fleet App (`shipyard-local`) or an OWNER, MEMBER or COLLABORATOR who
-is not the pull request's distinguishable author. This is Shipyard's
-`head_approval::trusted_reviewer` rule; `test_merge_group_hold_check.py`
-reads the same captured answer Shipyard's scorecard tests read and must agree.
+`reviewed: <sha>`, or an APPROVED / CHANGES_REQUESTED review on that commit.
 
-One exception to that rule: a HOLD from the pull request's own author counts
-(the author asking to hold their own head is the conservative signal), while
-their APPROVE never does.
+An APPROVE counts only from the fleet App (`shipyard-local`), the identity
+every agent posts verdicts as through `ghapp`. A human account's APPROVE never
+counts here, whatever its association: an agent holding the owner's personal
+`gh` login posted APPROVED reviews and `verdict: APPROVE` comments on pull
+requests it then armed, and such an APPROVE after the App's HOLD would clear
+the HOLD. This matches Shipyard's default rule with no `human_reviewers`
+listed. A HOLD counts from the fleet App or an OWNER, MEMBER or COLLABORATOR,
+and from the pull request's own author (the author asking to hold their own
+head is the conservative signal): a HOLD can only stop a landing.
+`test_merge_group_hold_check.py` reads the same captured answer Shipyard's
+scorecard tests read and must agree.
 
 A HOLD as the latest trusted verdict fails the step, naming the pull request,
 the HOLD's URL and the fix.
@@ -113,15 +117,15 @@ def normalized(login: str) -> str:
 
 def trusted(login: Optional[str], association: Optional[str], author: Optional[str],
             approve: bool = True) -> bool:
-    """Whether a verdict counts: the fleet App or OWNER/MEMBER/COLLABORATOR, never
-    the distinguishable author's APPROVE; the author's own HOLD always counts."""
+    """Whether a verdict counts: an APPROVE only from the fleet App; a HOLD from
+    the fleet App, an OWNER/MEMBER/COLLABORATOR, or the pull request's author."""
     if not login:
         return False
     fleet = normalized(login) == FLEET_APP
-    own = author is not None and normalized(author) == normalized(login) and not fleet
-    if own:
-        return not approve
-    return fleet or association in TRUSTED_ASSOCIATIONS
+    if approve:
+        return fleet
+    own = author is not None and normalized(author) == normalized(login)
+    return fleet or own or association in TRUSTED_ASSOCIATIONS
 
 
 def verdict_line(body: str) -> Optional[Tuple[bool, str]]:
@@ -262,8 +266,9 @@ def check(fetch: Fetch, repo: str, base: str, head: str) -> Tuple[List[str], Lis
             holds.append(
                 f"#{number} is held: the latest trusted verdict on {pr_head} is HOLD "
                 f"({verdict['url']}). Fix: push a new head that addresses the HOLD and get a "
-                f"`verdict: APPROVE head:<new head>`, or post that APPROVE on {pr_head[:12]} "
-                f"if the HOLD no longer applies; then re-queue it. "
+                f"`verdict: APPROVE head:<new head>` from a reviewer through `ghapp` (the fleet "
+                f"App; a human account's APPROVE does not clear a HOLD), or have that reviewer "
+                f"post it on {pr_head[:12]} if the HOLD no longer applies; then re-queue it. "
                 f"https://github.com/{repo}/pull/{number}"
             )
     return holds, unreadable
