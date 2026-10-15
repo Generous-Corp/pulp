@@ -57,10 +57,10 @@ pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
 # all read it. The per-asset digests live in tools/deps/manifest.json, whose
 # wgpu-native version must equal it (PulpWgpuNative.cmake checks).
 set(PULP_WGPU_NATIVE_VERSION v24.0.3.1)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsSkiaProvider.cmake)
 set(_pulp_windows_arm64ec_target FALSE)
 set(_pulp_windows_arm64ec_skia_dawn FALSE)
 if(WIN32)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsSkiaProvider.cmake)
     pulp_windows_skia_provider_target(_pulp_windows_target_arch)
     pulp_windows_skia_provider_requires_skia_dawn(
         "${_pulp_windows_target_arch}" _pulp_windows_arm64ec_target)

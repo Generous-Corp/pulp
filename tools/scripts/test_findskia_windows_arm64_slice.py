@@ -142,10 +142,11 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
                                  expect_slice="arm64ec", expect_provider=False)
         self.assertIn("selecting Windows arm64ec archive slice", output)
 
-    def _configure_provider_policy(self, target_arch: str, provider: bool) -> subprocess.CompletedProcess[str]:
+    def _configure_provider_policy(self, target_arch: str, provider: bool, *, gpu: bool = True) -> subprocess.CompletedProcess[str]:
         project = self.tmp / f"provider-{target_arch}-{provider}"
         project.mkdir()
         expected_skip = "TRUE" if target_arch.upper() in {"ARM64EC", "ARM64X"} else "FALSE"
+        expected_declare = "TRUE" if gpu and expected_skip == "FALSE" else "FALSE"
         provider_value = "TRUE" if provider else "FALSE"
         (project / "CMakeLists.txt").write_text(
             "cmake_minimum_required(VERSION 3.20)\n"
@@ -153,12 +154,12 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
             f'include("{WINDOWS_PROVIDER.as_posix()}")\n'
             "pulp_windows_skia_provider_target(_target)\n"
             "pulp_windows_skia_provider_requires_skia_dawn(${_target} _skip)\n"
-            "set(PULP_ENABLE_GPU TRUE)\n"
+            f"set(PULP_ENABLE_GPU {'TRUE' if gpu else 'FALSE'})\n"
             "pulp_windows_skia_provider_should_declare_wgpu(_declare)\n"
             f'if(NOT _skip STREQUAL "{expected_skip}")\n'
             "  message(FATAL_ERROR \"unexpected skip=${_skip} target=${_target}\")\n"
             "endif()\n"
-            f'if(NOT _declare STREQUAL "{"FALSE" if expected_skip == "TRUE" else "TRUE"}")\n'
+            f'if(NOT _declare STREQUAL "{expected_declare}")\n'
             "  message(FATAL_ERROR \"unexpected declare=${_declare}\")\n"
             "endif()\n"
             f'set(PULP_SKIA_PROVIDES_DAWN {provider_value})\n'
@@ -182,6 +183,16 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         result = self._configure_provider_policy("ARM64EC", provider=False)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("requires a matching Skia/Dawn archive", result.stdout + result.stderr)
+
+    def test_provider_policy_preserves_arm64_x64_wgpu_controls(self) -> None:
+        for arch in ("ARM64", "X64"):
+            with self.subTest(target=arch):
+                result = self._configure_provider_policy(arch, provider=False)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_provider_policy_disables_wgpu_when_gpu_is_off(self) -> None:
+        result = self._configure_provider_policy("X64", provider=False, gpu=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
