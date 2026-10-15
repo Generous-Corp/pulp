@@ -1369,6 +1369,8 @@ class GeneratedDigestTests(unittest.TestCase):
                 "\nlist(APPEND PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js)\n",
                 "\nset(PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js)\n",
                 "\nLIST ( REMOVE_AT PULP_JS_PRELUDES 0 )\n",
+                "\nlist ( POP_FRONT PULP_JS_PRELUDES )\n",
+                "\nlist ( TRANSFORM PULP_JS_PRELUDES PREPEND nope )\n",
                 "\nunset ( PULP_JS_PRELUDES )\n",
                 "\nSET ( PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
             ):
