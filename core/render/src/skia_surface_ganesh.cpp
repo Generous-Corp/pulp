@@ -168,6 +168,10 @@ public:
         frame_surface_.reset();
         offscreen_surface_.reset();
         if (context_) {
+            // The context's GPU textures become invalid as soon as WebGL
+            // abandons it. Stop painting before this callback and invalidate
+            // the cache while the context pointer is still stable.
+            canvas::ImageFileCache::instance().clear_backend(context_.get());
             // Do NOT flush: the GL context is dead and every call is a no-op or
             // an error. Abandon so Skia stops trying to talk to it and so
             // is_available() reports the truth.

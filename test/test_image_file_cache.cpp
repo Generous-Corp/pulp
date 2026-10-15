@@ -197,6 +197,48 @@ TEST_CASE("ImageFileCache: clear_backend waits for an in-flight build",
     REQUIRE(builds.load() == 2);
 }
 
+TEST_CASE("ImageFileCache: clear waits for an in-flight build", "[canvas][image-cache][embedded]") {
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const void* backend = reinterpret_cast<const void*>(0xC1EA);
+    std::atomic<int> builds{0};
+    std::atomic<bool> started{false};
+    std::atomic<bool> release{false};
+    std::mutex gate_mutex;
+    std::condition_variable gate_cv;
+    auto build = [&]() -> sk_sp<SkImage> {
+        ++builds;
+        started.store(true, std::memory_order_release);
+        gate_cv.notify_all();
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        gate_cv.wait_for(lock, std::chrono::seconds(10),
+                         [&] { return release.load(std::memory_order_acquire); });
+        return make_dummy_image();
+    };
+    std::thread painter([&] { cache.get_or_build("/tmp/clear.png", backend, build); });
+    {
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        REQUIRE(gate_cv.wait_for(lock, std::chrono::seconds(10),
+                                 [&] { return started.load(std::memory_order_acquire); }));
+    }
+    std::atomic<bool> cleared{false};
+    std::thread invalidator([&] {
+        cache.clear();
+        cleared.store(true, std::memory_order_release);
+    });
+    for (int i = 0; i < 1000 && !cleared.load(std::memory_order_acquire); ++i)
+        std::this_thread::yield();
+    REQUIRE(!cleared.load(std::memory_order_acquire));
+    release.store(true, std::memory_order_release);
+    gate_cv.notify_all();
+    painter.join();
+    invalidator.join();
+    REQUIRE(cleared.load(std::memory_order_acquire));
+    REQUIRE(cache.stats().size == 0);
+}
+
 TEST_CASE("ImageFileCache: disabling wakes a coalesced waiter", "[canvas][image-cache][embedded]") {
     auto& cache = ImageFileCache::instance();
     cache.clear();

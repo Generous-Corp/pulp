@@ -77,6 +77,7 @@ public:
 
     /// Drop all cached images. The invalidation hook for on-disk file mutation
     /// (see the semantic-change note above) and for GPU-context teardown.
+    /// Stop painting before calling this; it waits for every in-flight build.
     void clear();
 
     /// Drop entries tied to one GPU backend before that backend is destroyed.
