@@ -1610,10 +1610,9 @@ private:
                        const PrepareLifecycleObserver* lifecycle_observer);
     // Build one routed-executor snapshot for compile_, defining the live-value
     // resolver set (gain / plugin slot / custom process / custom transport / load
-    // measurer / plugin latency / plugin params) ONCE. compile_ builds two
     // snapshots — the serial (parallel_safe=false) and the parallel-safe
     // (parallel_safe=true) path — and both go through here, so the resolvers can
-    // never drift between them. The plugin-metadata resolvers read
+    // The plugin-metadata resolvers read
     // prepared_plugin_meta_, never the live PluginSlot, so a swap-time recompile
     // makes no live metadata call. Called from compile_ (caller holds
     // graph_mutation_mutex_); load resolution takes node_load_mu_ internally.
@@ -1622,6 +1621,7 @@ private:
         std::vector<PluginBindingContext>& plugin_ctx,
         std::vector<CustomBindingContext>& custom_ctx,
         format::GraphRuntimeSnapshot& out);
+    std::shared_ptr<const void> live_snapshot_handle_locked_() const noexcept;
     // Shared preflight (generated-graph limits + audio-rate automation
     // event-capacity gate) for prepare() and prepare_swap(). PURE — mutates no
     // live state. Caller holds graph_mutation_mutex_. Returns false (logged) on

@@ -3466,6 +3466,62 @@ TEST_CASE("SignalGraph MIDI ingress and egress mailboxes are Race-free",
     graph.release();
 }
 
+TEST_CASE("SignalGraph snapshot keepalive copies are publication-serialized",
+          "[host][graph][threading][race][tsan]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto gain = graph.add_gain_node("gain");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::atomic<bool> publishing_done{false};
+    std::atomic<bool> prepare_failed{false};
+    std::atomic<bool> reader_timed_out{false};
+    std::atomic<int> handles_copied{0};
+
+    // Copying a shared_ptr from Slot::live() races with publication unless the
+    // caller serializes the copy with the graph mutation lock. This control-side
+    // stress case deliberately overlaps repeated prepare() publication with
+    // the public keepalive accessor; it does not dereference the returned
+    // opaque handle, so any failure is attributable to the ownership boundary.
+    std::thread publisher([&] {
+        for (int iteration = 0; iteration < 32; ++iteration) {
+            if (!graph.prepare(48000.0, 32)) {
+                prepare_failed.store(true, std::memory_order_relaxed);
+                break;
+            }
+        }
+        publishing_done.store(true, std::memory_order_release);
+    });
+    std::thread reader([&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!publishing_done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            if (graph.live_snapshot_handle()) {
+                handles_copied.fetch_add(1, std::memory_order_relaxed);
+            }
+            std::this_thread::yield();
+        }
+        if (!publishing_done.load(std::memory_order_acquire)) {
+            reader_timed_out.store(true, std::memory_order_release);
+        }
+        // Make the post-publication path observable as well.
+        if (graph.live_snapshot_handle()) {
+            handles_copied.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    publisher.join();
+    reader.join();
+
+    REQUIRE_FALSE(prepare_failed.load(std::memory_order_relaxed));
+    REQUIRE_FALSE(reader_timed_out.load(std::memory_order_acquire));
+    REQUIRE(handles_copied.load(std::memory_order_relaxed) > 0);
+    graph.release();
+}
+
 TEST_CASE("SignalGraph live controls and MIDI handoff are TSan-clean together",
           "[host][graph][threading][race][tsan][midi]") {
     SignalGraph graph;
