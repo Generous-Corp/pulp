@@ -171,7 +171,7 @@ class SharedAudioSdkRecipe(unittest.TestCase):
                            PATH=f"{temp}:{os.environ.get('PATH', '')}")
                 result = subprocess.run(
                     ["bash", "-c", script.replace("${{ matrix.platform }}", platform)],
-                    env=env, text=True, capture_output=True,
+                    env=env, text=True, encoding="utf-8", capture_output=True,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 args = capture.read_text().splitlines()
