@@ -2319,7 +2319,6 @@
   "pulp-generate-control-protocol-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
-  "pulp-gpu-wgpu-native-staged-diagnostic",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -6749,6 +6748,18 @@
    ],
    "kind": "shell"
   },
+  "make-catalog-component-selftest": {
+   "entry": "tools/import-design/test_make_catalog_component.py",
+   "inputs": [
+    "core/view",
+    "core/view/audio/CMakeLists.txt",
+    "core/view/audio/include/pulp/view/audio_widgets.hpp",
+    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/include/pulp/design/design_system.hpp",
+    "tools/import-design/test_make_catalog_component.py"
+   ],
+   "kind": "python"
+  },
   "measure-min-os-selftest": {
    "entry": "tools/scripts/test_measure_min_os.py",
    "inputs": [
@@ -7304,23 +7315,6 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-wgpu-native-staged-diagnostic": {
-   "entry": "tools/diagnostics/verify_wgpu_native_staged.py",
-   "inputs": [
-    "tools/deps/manifest.json",
-    "tools/diagnostics/verify_wgpu_native_staged.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-wgpu-native-staged-identity-negative-control": {
-   "entry": "tools/diagnostics/test_verify_wgpu_native_staged.py",
-   "inputs": [
-    "tools/deps/manifest.json",
-    "tools/diagnostics/test_verify_wgpu_native_staged.py",
-    "tools/diagnostics/verify_wgpu_native_staged.py"
    ],
    "kind": "python"
   },
