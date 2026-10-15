@@ -173,6 +173,12 @@ is_source() {
         *.cpp|*.hpp|*.h|*.mm|*.cc|*.cxx) ;;
         *) return 1 ;;
     esac
+    # Faithful-vector SVG payloads are generated from base64 chunks. Their
+    # compact wrapping is part of the generator's reproducible output; asking
+    # clang-format to reflow those literals would make regeneration drift.
+    case "$1" in
+        core/view/src/*_svg.cpp|core/view/*/src/*_svg.cpp) return 1 ;;
+    esac
     case "/$1" in
         /external/*|*/external/*|*/build/*|*/_deps/*|*/generated/*) return 1 ;;
     esac

@@ -7,9 +7,9 @@ and emit a `DesignFrameView` subclass that renders it 1:1 via SkSVGDOM. This is
 the repeatable replacement for hand-painting C++ widgets.
 
 For each component it writes:
-  core/view/include/pulp/view/<snake>.hpp        (Class : public DesignFrameView)
-  core/view/src/<snake>.cpp                       (ctor decodes embedded SVG)
-  core/view/src/<snake>_svg.cpp                   (chunked base64 SVG)
+  <output-root>/include/pulp/view/<snake>.hpp    (Class : public DesignFrameView)
+  <output-root>/src/<snake>.cpp                  (ctor decodes embedded SVG)
+  <output-root>/src/<snake>_svg.cpp              (chunked base64 SVG)
 and PRINTS the lines to paste into:
   core/view/CMakeLists.txt (2 sources), design_system.{hpp,cpp} (include+catalog),
   examples/ink-signal-showcase/main.cpp, test/CMakeLists.txt.
@@ -19,7 +19,7 @@ Validate the result with pulp-svg-probe + tools/figma-import/verify_region.py.
 Usage:
   make_catalog_component.py --name "Channel Strip" --class ChannelStripView \
     --node 182:2 --category containers --usage "Mixer channel strip" \
-    [--file-key q9iDYZzg86YrOQKr6I3bY0] [--repo <path>]
+    [--file-key q9iDYZzg86YrOQKr6I3bY0] [--output-root core/view] [--repo <path>]
 """
 import argparse, base64, json, os, re, subprocess, sys, tempfile
 
@@ -48,11 +48,19 @@ def main():
     ap.add_argument("--category", required=True, help="controls|inputs|indicators|navigation|containers|overlays|audio|feedback")
     ap.add_argument("--usage", default="", help="one-line usage note")
     ap.add_argument("--file-key", default=FILE_KEY)
+    ap.add_argument("--output-root", default="core/view",
+                    help="repository-relative source root (default: core/view; use "
+                         "core/view/audio for extracted audio widgets)")
     ap.add_argument("--repo", default=os.getcwd())
     a = ap.parse_args()
 
     repo = a.repo
     snk = snake(a.cls)
+    output_root = os.path.join(repo, a.output_root)
+    include_dir = os.path.join(output_root, "include", "pulp", "view")
+    source_dir = os.path.join(output_root, "src")
+    os.makedirs(include_dir, exist_ok=True)
+    os.makedirs(source_dir, exist_ok=True)
     tools = os.path.join(repo, "tools/import-design")
     tmp = tempfile.mkdtemp(prefix="catgen_")
     scene = os.path.join(tmp, "scene.pulp.json")
@@ -75,7 +83,7 @@ def main():
         f"  static const char* const kParts[] = {{\n{arr}\n  }};\n"
         f"  static const std::string kJoined = [] {{ std::string s; for (const char* p : kParts) s += p; return s; }}();\n"
         f"  return kJoined.c_str();\n}}\n\n}}  // namespace pulp::view::detail\n")
-    open(os.path.join(repo, f"core/view/src/{snk}_svg.cpp"), "w").write(data_cpp)
+    open(os.path.join(source_dir, f"{snk}_svg.cpp"), "w").write(data_cpp)
 
     # 2) header
     hpp = (
@@ -87,7 +95,7 @@ def main():
         f"// reskin/extend via the faithful-vector lane, never by hand-painting.\n"
         f"class {a.cls} : public DesignFrameView {{\npublic:\n    {a.cls}();\n}};\n\n"
         f"}}  // namespace pulp::view\n")
-    open(os.path.join(repo, f"core/view/include/pulp/view/{snk}.hpp"), "w").write(hpp)
+    open(os.path.join(include_dir, f"{snk}.hpp"), "w").write(hpp)
 
     # 3) impl
     cpp = (
@@ -99,11 +107,12 @@ def main():
         f"        return std::string(bytes->begin(), bytes->end());\n    return {{}};\n}}\n}}  // namespace\n\n"
         f"{a.cls}::{a.cls}() : DesignFrameView(decode_{snk}_svg(), /*elements=*/{{}}) {{}}\n\n"
         f"}}  // namespace pulp::view\n")
-    open(os.path.join(repo, f"core/view/src/{snk}.cpp"), "w").write(cpp)
+    open(os.path.join(source_dir, f"{snk}.cpp"), "w").write(cpp)
 
-    print(f"[2/3] wrote core/view/{{include/pulp/view/{snk}.hpp, src/{snk}.cpp, src/{snk}_svg.cpp}}")
+    rel_root = a.output_root.rstrip("/")
+    print(f"[2/3] wrote {rel_root}/{{include/pulp/view/{snk}.hpp, src/{snk}.cpp, src/{snk}_svg.cpp}}")
     print(f"[3/3] paste these in:\n")
-    print(f"# core/view/CMakeLists.txt (with the other src/ entries):")
+    print(f"# {rel_root}/CMakeLists.txt (with the other src/ entries):")
     print(f"    src/{snk}.cpp\n    src/{snk}_svg.cpp")
     print(f"\n# core/view/include/pulp/design/design_system.hpp (umbrella includes):")
     print(f"#include <pulp/view/{snk}.hpp>")
