@@ -300,6 +300,61 @@ class TestDegradedSweep(unittest.TestCase):
         self.assertEqual(findings[0]["lane_evidence"], "evidence incomplete this sweep")
 
 
+INTEL = ["self-hosted", "macOS", "X64", "pulp-intel-native", "pulp-host-macmini"]
+
+
+class TestCompletedListingTruncation(unittest.TestCase):
+    """The completed listing truncates on every sweep of this repo.
+
+    Replays the 2026-10-14 sweep: the native Intel job had waited 322 min on a
+    lane whose only runner had been deleted, every sweep read the completed
+    listing truncated, and the job was reported as `warn` night after night.
+    """
+
+    def snap(self, *jobs, live_jobs=(), truncated=("completed",), errors=()):
+        return {
+            "queued_jobs": list(jobs),
+            "live_jobs": list(live_jobs),
+            "truncated": list(truncated),
+            "errors": list(errors),
+        }
+
+    def test_dead_lane_alarms_through_a_truncated_completed_listing(self):
+        findings = qaw.analyze(self.snap(queued(322.6, INTEL)), NOW)
+        self.assertEqual(levels(findings), ["alarm"])
+        self.assertIn("no comparable job in progress", findings[0]["lane_evidence"])
+
+    def test_threshold_is_the_factor_times_the_alarm_age(self):
+        just_under = 45 * qaw.TRUNCATED_COMPLETED_ALARM_FACTOR - 1
+        self.assertEqual(levels(qaw.analyze(self.snap(queued(just_under, INTEL)), NOW)), ["warn"])
+        self.assertEqual(levels(qaw.analyze(self.snap(queued(just_under + 2, INTEL)), NOW)), ["alarm"])
+
+    def test_a_comparable_job_in_progress_still_keeps_it_quiet(self):
+        findings = qaw.analyze(
+            self.snap(queued(322.6, INTEL), live_jobs=[live(200, INTEL)]), NOW)
+        self.assertEqual(levels(findings), ["warn"])
+        self.assertEqual(findings[0]["lane_evidence"], "in_progress")
+
+    def test_other_gaps_still_suppress(self):
+        # Negative controls: a failed API call or a truncated in_progress
+        # listing can hide an in-progress job, so those keep suppressing.
+        for snap in (
+            self.snap(queued(322.6, INTEL), errors=[{"run_id": 7, "error": "HTTP 502"}]),
+            self.snap(queued(322.6, INTEL), truncated=("completed", "in_progress")),
+            self.snap(queued(322.6, INTEL), truncated=("queued",)),
+        ):
+            with self.subTest(snap=snap):
+                findings = qaw.analyze(snap, NOW)
+                self.assertEqual(levels(findings), ["warn"])
+                self.assertEqual(findings[0]["lane_evidence"], "evidence incomplete this sweep")
+
+    def test_workflow_maintains_the_tracker_on_a_degraded_sweep_with_alarms(self):
+        workflow = (Path(__file__).resolve().parents[2]
+                    / ".github/workflows/runner-health-check.yml").read_text(encoding="utf-8")
+        step = workflow.split("- name: Maintain tracking issue", 1)[1].split("- name:", 1)[0]
+        self.assertIn("steps.scan.outputs.count != '0'", step)
+
+
 class TestCollection(unittest.TestCase):
     def test_collects_pending_build_and_test_run_only_after_empty_jobs_response(self):
         pending_runs = {
@@ -693,19 +748,27 @@ class TestRendering(unittest.TestCase):
 
 
 class TestWorkflowWiring(unittest.TestCase):
-    def test_degraded_sweep_cannot_maintain_or_close_tracker(self):
+    def test_degraded_sweep_cannot_close_tracker(self):
         workflow = (
             Path(__file__).resolve().parents[2]
             / ".github/workflows/runner-health-check.yml"
         ).read_text(encoding="utf-8")
         self.assertIn('echo "degraded=${degraded}"', workflow)
         self.assertIn('} >> "$GITHUB_OUTPUT"', workflow)
-        # BOTH tracker steps, not just the queue one.
+        # The contribution tracker never runs on a degraded sweep. The queue
+        # tracker runs on one only when the sweep alarmed, so a degraded
+        # sweep can open or update it but never take the close branch,
+        # which requires a count of zero.
         self.assertEqual(
             workflow.count(
-                "if: env.DRY_RUN != 'true' && steps.scan.outputs.degraded != 'true'"
+                "if: env.DRY_RUN != 'true' && steps.scan.outputs.degraded != 'true'\n"
             ),
-            2,
+            1,
+        )
+        self.assertIn(
+            "if: env.DRY_RUN != 'true' && (steps.scan.outputs.degraded != 'true'"
+            " || steps.scan.outputs.count != '0')",
+            workflow,
         )
         # `degraded` comes from the watchdog's own output line, which it derives
         # from evidence_gaps(). Asserted as a property rather than by pinning

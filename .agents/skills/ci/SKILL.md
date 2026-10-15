@@ -3503,6 +3503,24 @@ re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
 
+**An evidence gap that never closes is a mute button.** A degraded sweep
+(any failed read or truncated listing) suppresses alarms. On this repo the
+*completed* run listing truncates on every sweep, so for weeks every sweep was
+degraded. The watchdog listed the dead native Intel lane as a 322-minute `warn`
+each night and never opened a tracker. Now, when completed-listing truncation is
+the only gap, a job alarms after `2 x alarm_minutes` with no comparable job
+in progress, because that truncation can only hide a finished start, not a live
+one. When you add a new reason to degrade a sweep, check how often it fires.
+A gap that is present on every sweep disables the watchdog. Read
+`degraded=` across a day of sweeps before trusting a quiet tracker.
+
+**`cancelled` with an empty `runner_name` means no runner picked the job up.**
+Job-level `needs.<job>.result` reads `cancelled` both for a job that ran and
+timed out and for one that waited for a runner until GitHub gave up. A
+watchdog that files every `cancelled` as infra hides a lane with no runner at
+all. `tools/scripts/unserved_job_check.py` asks the jobs API which case it was.
+`nightly-intel.yml` uses it, and fails the run when no runner picked the job up.
+
 ### …but the same sweep DOES name the label, once a job is already stalled on it
 
 The paragraph above forbids a *scheduled* label census, and that still holds.

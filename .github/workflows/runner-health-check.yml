@@ -207,7 +207,10 @@ jobs:
           echo "Degraded: ${degraded}"
 
       - name: Maintain tracking issue
-        if: env.DRY_RUN != 'true' && steps.scan.outputs.degraded != 'true'
+        # A degraded sweep may still alarm (see TRUNCATED_COMPLETED_ALARM_FACTOR);
+        # it can open or update the tracker but never close it, because a
+        # count of 0 from a sweep that could not see is not a recovery.
+        if: env.DRY_RUN != 'true' && (steps.scan.outputs.degraded != 'true' || steps.scan.outputs.count != '0')
         shell: bash
         env:
           COUNT: ${{ steps.scan.outputs.count }}

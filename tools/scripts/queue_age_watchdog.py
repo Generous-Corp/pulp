@@ -93,6 +93,16 @@ ALARM_MINUTES = 45
 # jobs call, so the caps keep a worst-case sweep well inside the budget even
 # when something upstream floods the queue.
 MAX_RUNS_PER_STATUS = 60
+# A truncated completed listing can hide only one kind of liveness evidence: a
+# comparable job that started after the stalled one queued and has already
+# finished. It cannot hide an in-progress job; those come from the in_progress
+# listing. On this repo the completed listing truncates on every sweep, so
+# letting it suppress alarms disarmed the watchdog outright: a dead native
+# Intel lane was reported as `warn` for sixteen consecutive nights, 322 minutes
+# deep, with no tracker. Past this multiple of the alarm age, a stalled job
+# with no comparable job in progress alarms even when the completed listing
+# truncated. The multiple is the price paid for the one blind spot left.
+TRUNCATED_COMPLETED_ALARM_FACTOR = 2.0
 COMPLETED_LOOKBACK_HOURS = 3
 UNEXPANDED_WORKFLOW = "Build and Test"
 UNEXPANDED_WORKFLOW_PATH = ".github/workflows/build.yml"
@@ -264,6 +274,9 @@ def analyze(
     every 30 min, so the cost of waiting for complete evidence is one cycle.
     """
     degraded = bool(evidence_gaps(snapshot))
+    completed_truncation_only = degraded and not snapshot.get("errors") and set(
+        snapshot.get("truncated") or []
+    ) == {"completed"}
 
     live = []
     for entry in snapshot.get("live_jobs", []):
@@ -341,8 +354,19 @@ def analyze(
                 served_by = "recent_start"
                 break
 
+        evidence = None
         if served_by is None and age >= alarm_minutes and not degraded:
             level = "alarm"
+        elif (
+            served_by is None
+            and completed_truncation_only
+            and age >= alarm_minutes * TRUNCATED_COMPLETED_ALARM_FACTOR
+        ):
+            level = "alarm"
+            evidence = (
+                "no comparable job in progress; the completed-run listing "
+                "truncated, so only an already-finished start is unverified"
+            )
         else:
             level = "warn"
 
@@ -359,6 +383,7 @@ def analyze(
                 "queued_at": job["queued_at"],
                 "lane_evidence": (
                     served_by
+                    or evidence
                     or ("evidence incomplete this sweep" if degraded else "no live runner observed")
                 ),
             }
@@ -1446,7 +1471,10 @@ def render_summary(
         lines.append(
             f"> **Degraded sweep** — {len(gaps)} collection gap(s), so the "
             "lane-liveness evidence is incomplete and alarms are suppressed for "
-            "this cycle. An unobserved lane is not a dead one. Next sweep in 30 min."
+            "this cycle, except a job stalled past "
+            f"{alarm_minutes * TRUNCATED_COMPLETED_ALARM_FACTOR:g} min with no "
+            "comparable job in progress when only the completed listing truncated. "
+            "An unobserved lane is not a dead one. Next sweep in 30 min."
         )
         lines.append("")
     if not queue_findings and not contribution_rows:
