@@ -3431,7 +3431,9 @@ of `tools/ci/merge_group_hold_check.py` (fetched from
 the first-parent chain of queue merge commits (each lands its second parent),
 and fails when one's latest trusted verdict on that head is
 `verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. An APPROVE counts
-only from the fleet App (every agent posts verdicts as it through `ghapp`),
+only from the fleet App itself, a `Bot` (GraphQL names it `shipyard-local`, a
+login anyone can register as a user, so a user of that name never counts;
+every agent posts verdicts as the App through `ghapp`),
 never from a human account, so a human APPROVE posted after the App's HOLD
 cannot clear it: an agent holding the owner's personal `gh` login posted such
 approvals. A HOLD counts from the fleet App, an OWNER, MEMBER or COLLABORATOR,

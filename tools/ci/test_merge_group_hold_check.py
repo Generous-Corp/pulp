@@ -70,8 +70,12 @@ def chain() -> dict:
     ]}
 
 
-def node(login: str, association: str, at: str, body: str, url: str = "u") -> dict:
-    return {"author": {"login": login}, "authorAssociation": association,
+def node(login: str, association: str, at: str, body: str, url: str = "u",
+         kind: str = "") -> dict:
+    """A comment as GraphQL answers it: the fleet App is a `Bot`, anyone else
+    a `User` unless `kind` says otherwise."""
+    kind = kind or ("Bot" if hold.normalized(login) == hold.FLEET_APP else "User")
+    return {"author": {"__typename": kind, "login": login}, "authorAssociation": association,
             "createdAt": at, "body": body, "url": url}
 
 
@@ -158,6 +162,27 @@ class MergeGroupHoldCheck(unittest.TestCase):
         code, out = run(Fake({12: cleared, 11: pr([])}))
         self.assertEqual(code, 0, out)
         self.assertIn("no queued pull request is held", out)
+
+    def test_a_user_account_named_like_the_app_cannot_clear_a_hold(self) -> None:
+        # GraphQL names the App `shipyard-local`, a login anyone can register
+        # as a user; only the Bot is the App.
+        hold_b = node("shipyard-local", "CONTRIBUTOR", "2026-10-12T10:00:00Z",
+                      f"verdict: HOLD head:{PR_B}", url="https://x/hold")
+        spoof = node("shipyard-local", "NONE", "2026-10-12T11:00:00Z",
+                     f"verdict: APPROVE head:{PR_B}", kind="User")
+        code, out = run(Fake({12: pr([hold_b, spoof]), 11: pr([])}))
+        self.assertEqual(code, 1, out)
+        self.assertIn("#12 is held", out)
+        app = node("shipyard-local", "CONTRIBUTOR", "2026-10-12T11:00:00Z",
+                   f"verdict: APPROVE head:{PR_B}")
+        self.assertEqual(run(Fake({12: pr([hold_b, app]), 11: pr([])}))[0], 0,
+                         "control: the App's own APPROVE clears it")
+        review = {"author": {"__typename": "User", "login": "shipyard-local"},
+                  "authorAssociation": "NONE", "state": "APPROVED",
+                  "submittedAt": "2026-10-12T11:00:00Z", "url": "r", "commit": {"oid": PR_B}}
+        self.assertFalse(hold.latest_verdict(verdicts_of(pr([hold_b], [review])), PR_B)["approve"])
+        self.assertIn("author{__typename login}", hold.COMMENTS_QUERY)
+        self.assertIn("author{__typename login}", hold.REVIEWS_QUERY)
 
     def test_a_human_approve_after_the_apps_hold_leaves_it_held(self) -> None:
         # pulp#10293/#10302: the owner's personal login approved pull requests an
