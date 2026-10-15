@@ -1362,6 +1362,14 @@ class GeneratedDigestTests(unittest.TestCase):
             producer.write_text(valid, encoding="utf-8")
             self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
                              "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
+            inline_comment = original.replace(
+                "target_sources(pulp-view-script PRIVATE ${PULP_JS_EMBEDDED_SOURCE})",
+                "target_sources(pulp-view-script PRIVATE ${PULP_JS_EMBEDDED_SOURCE}) # trailing comment",
+                1,
+            )
+            producer.write_text(inline_comment, encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
+                             "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
             for extra in ("    js/unbound.js\n", "    ${OTHER}/js/unbound.js\n", "    ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js\n"):
                 producer.write_text(original.replace(closing, "\n" + extra + ")", 1), encoding="utf-8")
                 self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), extra)
@@ -1381,8 +1389,7 @@ class GeneratedDigestTests(unittest.TestCase):
                 producer.write_text(original + mutation, encoding="utf-8")
                 self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), mutation)
             producer.write_text(original + "\nSET ( pulp_js_preludes ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n", encoding="utf-8")
-            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
-                             "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
             blocked = original.replace("set(PULP_JS_PRELUDES", "#[[\nset(PULP_JS_PRELUDES", 1)
             blocked = blocked.replace("\n)\n", "\n)\n]]\n", 1)
             producer.write_text(blocked, encoding="utf-8")
@@ -1391,6 +1398,25 @@ class GeneratedDigestTests(unittest.TestCase):
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
             producer.write_text(original.replace("extern const char* const ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            adversarial_mutations = (
+                ("NAME_WE -> NAME", original.replace("\"${_prelude}\" NAME_WE", "\"${_prelude}\" NAME", 1)),
+                ("duplicate APPEND", original.replace(
+                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")',
+                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")\n'
+                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")', 1)),
+                ("changed header prelude", original.replace("#pragma once\\n", "#pragma changed\\n", 1)),
+                ("extra custom output", original.replace(
+                    "OUTPUT ${PULP_JS_EMBEDDED_SOURCE}",
+                    "OUTPUT ${PULP_JS_EMBEDDED_SOURCE} ${CMAKE_CURRENT_BINARY_DIR}/extra.cpp", 1)),
+                ("duplicate foreach input", original.replace(
+                    "foreach(_prelude ${PULP_JS_PRELUDES})",
+                    "foreach(_prelude ${PULP_JS_PRELUDES} ${PULP_JS_PRELUDES})", 1)),
+                ("entire producer block comment", "#[[\n" + original + "\n]]\n"),
+                ("entire equals-delimited block comment", "#[=[\n" + original + "\n]=]\n"),
+            )
+            for description, mutation in adversarial_mutations:
+                producer.write_text(mutation, encoding="utf-8")
+                self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), description)
 
     def test_target_manifest_only_exposes_the_supported_prelude_source(self):
         from vellum_closure import target_manifest
