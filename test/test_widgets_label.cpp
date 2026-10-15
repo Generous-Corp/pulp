@@ -834,7 +834,8 @@ TEST_CASE("Label re-centres a retyped captured line on the captured box",
     // left edge moves by half the width change, so the wider text is centred
     // where the narrower one was rather than starting at its old left edge.
     const auto face = resolved_face_identity("Inter", 400.0f);
-    if (face.empty()) return;
+    if (face.empty())
+        return;
     Label label("8 BANDS");
     label.set_font_family("Inter");
     label.set_font_size(12.0f);
@@ -849,7 +850,8 @@ TEST_CASE("Label re-centres a retyped captured line on the captured box",
     const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
     REQUIRE(fills.size() == 1);
     const float width = pulp::canvas::global_text_shaper()
-        .prepare("128 BANDS", "Inter", 12.0f, 400, 0, 0.0f).total_width();
+                            .prepare("128 BANDS", "Inter", 12.0f, 400, 0, 0.0f)
+                            .total_width();
     REQUIRE(width > 0.0f);
     // Painted left-anchored at the recentred edge: its centre is the box's.
     CHECK(fills[0].f[0] + width * 0.5f == Catch::Approx(kBoxLeft + kBoxWidth * 0.5f).margin(0.05f));

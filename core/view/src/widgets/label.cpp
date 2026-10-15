@@ -217,19 +217,16 @@ bool Label::cached_line_layout_usable(
     // the line keeps its box (where Chromium put it) and is re-measured for
     // the live text. Anything that could change the LINE COUNT -- several
     // boxes, a wrap, a newline, attributed runs -- cannot, and reflows.
-    const bool retyped =
-        cached_line_basis_retired_ || display_text != cached_line_basis_text_;
-    if (retyped && (cached_line_boxes_.size() != 1 || has_attributed_ ||
-                    soft_wraps() || captured_wrap_fallback_ ||
-                    display_text.find('\n') != std::string::npos))
+    const bool retyped = cached_line_basis_retired_ || display_text != cached_line_basis_text_;
+    if (retyped && (cached_line_boxes_.size() != 1 || has_attributed_ || soft_wraps() ||
+                    captured_wrap_fallback_ || display_text.find('\n') != std::string::npos))
         return false;
 
     if (font_variant() != cached_line_basis_font_variant_ ||
         std::abs(effective_font_size - cached_line_basis_font_size_) > 0.001f ||
         effective_font_weight() != cached_line_basis_font_weight_ ||
         font_style_ != cached_line_basis_font_style_ ||
-        std::abs(effective_letter_spacing -
-                 cached_line_basis_letter_spacing_) > 0.001f)
+        std::abs(effective_letter_spacing - cached_line_basis_letter_spacing_) > 0.001f)
         return false;
 
     // 1. The face. Not the requested family — a family is a REQUEST, and the
@@ -292,7 +289,8 @@ bool Label::cached_line_layout_usable(
     }
     for (const auto& box : cached_line_boxes_) {
         // A retyped line is the whole live text; its captured slice is moot.
-        if (retyped) break;
+        if (retyped)
+            break;
         if (box.start < 0 || box.length <= 0) return false;
         if (box.length > units || box.start > units - box.length) return false;
         if (!canvas::is_utf16_scalar_boundary(
@@ -311,9 +309,10 @@ bool Label::cached_line_layout_usable(
     return true;
 }
 
-canvas::ShapedLayout Label::layout_from_cached_lines(
-    const std::string& text, float line_height, const std::string& family,
-    float effective_font_size, float effective_letter_spacing) const {
+canvas::ShapedLayout Label::layout_from_cached_lines(const std::string& text, float line_height,
+                                                     const std::string& family,
+                                                     float effective_font_size,
+                                                     float effective_letter_spacing) const {
     canvas::ShapedLayout layout;
     layout.lines.reserve(cached_line_boxes_.size());
     // Copy that changed after capture (one line, see
@@ -326,23 +325,27 @@ canvas::ShapedLayout Label::layout_from_cached_lines(
     float align_factor = 0.0f;
     if (retyped) {
         auto& shaper = canvas::global_text_shaper();
-        const auto prepared = shaper.prepare(
-            text, family, effective_font_size, effective_font_weight(),
-            font_style_, effective_letter_spacing, resolved_font_features());
+        const auto prepared =
+            shaper.prepare(text, family, effective_font_size, effective_font_weight(), font_style_,
+                           effective_letter_spacing, resolved_font_features());
         retyped_width = prepared.total_width();
         switch (resolve_effective_align_()) {
-            case LabelAlign::center: align_factor = 0.5f; break;
-            case LabelAlign::right:  align_factor = 1.0f; break;
-            default:                 align_factor = 0.0f; break;
+        case LabelAlign::center:
+            align_factor = 0.5f;
+            break;
+        case LabelAlign::right:
+            align_factor = 1.0f;
+            break;
+        default:
+            align_factor = 0.0f;
+            break;
         }
     }
     for (const auto& box : cached_line_boxes_) {
         canvas::ShapedLayout::Line line;
         line.text = retyped ? text : utf16_slice(text, box.start, box.length);
         line.width = retyped ? retyped_width : box.width;
-        line.x_offset = retyped
-            ? box.left + (box.width - retyped_width) * align_factor
-            : box.left;
+        line.x_offset = retyped ? box.left + (box.width - retyped_width) * align_factor : box.left;
         // Chromium's line rectangle is the layout evidence.  In particular,
         // its top is relative to the owning element's content box and is not
         // necessarily the value native vertical centering would derive from
@@ -1819,12 +1822,11 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             // produced it still hold, and reflowed the moment they do not.
             if (captured_cache_usable) {
                 ++line_break_counts().cached;
-                shaped_cache_layout_ = has_attributed_
-                    ? layout_attributed_from_cached_lines(
-                          resolved_attributed, lh)
-                    : layout_from_cached_lines(display_text, lh, family,
-                                               effective_font_size,
-                                               effective_letter_spacing);
+                shaped_cache_layout_ =
+                    has_attributed_
+                        ? layout_attributed_from_cached_lines(resolved_attributed, lh)
+                        : layout_from_cached_lines(display_text, lh, family, effective_font_size,
+                                                   effective_letter_spacing);
             } else {
                 if (cached_line_boxes_.empty()) ++line_break_counts().uncached;
                 else ++line_break_counts().reflowed;
