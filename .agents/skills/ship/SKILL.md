@@ -157,7 +157,7 @@ only helps keychains created *after* the change; an existing keychain keeps its
 old ACL.
 
 The combined installer also supports repeatable
-`--plugin-scripts <au|vst3|clap> <bundle name> <scripts directory>` entries.
+`--plugin-scripts <au|vst3|clap|aax> <bundle name> <scripts directory>` entries.
 Use this for format-specific postinstall work, such as refreshing the macOS
 Audio Unit registrar after replacing an AU. Match the bundle name exactly and
 attach the hook only to the format that needs it; attaching an AU refresh to an
@@ -1679,6 +1679,7 @@ tools/scripts/build_combined_installer.sh \
   --plugin au   build/AU/MyPlugin.component \
   --plugin vst3 build/VST3/MyPlugin.vst3 \
   --plugin clap build/CLAP/MyPlugin.clap \
+  --plugin aax  signed/MyPlugin.aaxplugin \
   --app "Standalone app" build/examples/myplugin/MyPlugin.app \
   --app "Diagnostics helper" "/path/MyPlugin Diagnostics.app" /path/Kit.entitlements \
   --content "Sample models" "Example .nam captures" \
@@ -1686,9 +1687,18 @@ tools/scripts/build_combined_installer.sh \
 ```
 
 It produces ONE component-selectable, notarized installer (Customize pane picks
-AU/VST3/CLAP/Standalone/Diagnostics). It deep-signs every bundle (inner dylibs
-first → `@loader_path`) and runs `check_bundle_relocatable.py --strict` on each,
-so a build that only works on the build machine never ships. Identities are the
+AU/VST3/CLAP/AAX/Standalone/Diagnostics). It deep-signs every AU/VST3/CLAP
+bundle (inner dylibs first → `@loader_path`) and runs
+`check_bundle_relocatable.py --strict` on each, so a build that only works on
+the build machine never ships. **An `aax` bundle is the exception: it must
+arrive already PACE-wrapped and Developer-ID signed** (`wraptool sign` wraps the
+executable and seals the bundle in one step; Pro Tools refuses a merely
+codesigned AAX, and a `codesign --force` after wraptool strips the wrap). The
+recipe only verifies it — `codesign --verify`, `wraptool verify` when PACE's
+tooling is installed (`PULP_AAX_WRAPTOOL` overrides the path), and the same
+relocatability check — and installs it as a "Pro Tools" choice under
+`/Library/Application Support/Avid/Audio/Plug-Ins`. An unsigned AAX refuses the
+whole package. Identities are the
 `security find-identity` hashes from the dedicated `pulp-signing` keychain (NOT
 the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
 copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.

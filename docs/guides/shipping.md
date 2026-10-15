@@ -377,12 +377,18 @@ tools/scripts/build_combined_installer.sh \
   --plugin au   "build/AU/MyPlugin.component" \
   --plugin vst3 "build/VST3/MyPlugin.vst3" \
   --plugin clap "build/CLAP/MyPlugin.clap" \
+  --plugin aax  "signed/MyPlugin.aaxplugin" \
   --app "Standalone app" "build/MyPlugin.app"
 ```
 
 `--plugin` and `--app` are **repeatable**, and `--plugin` accumulates per
 format — so a product with three AU plugins, two VST3s and three CLAPs passes
 eight `--plugin` flags and gets one installer with a nested Customize tree.
+An `aax` bundle is the one input the recipe does not sign: hand it the bundle
+`wraptool sign` already wrapped and sealed, and the recipe verifies that
+signature (and the PACE wrap, where wraptool is installed) before packaging it
+as a "Pro Tools" choice. See the `ship` skill for why re-signing an AAX breaks
+it.
 Notarization is **on by default** (`--no-notarize` opts out), and the signing
 preflight runs automatically, so no separate `pulp ship doctor` is needed.
 

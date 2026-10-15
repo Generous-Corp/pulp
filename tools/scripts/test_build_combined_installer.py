@@ -255,6 +255,8 @@ class CombinedInstallerTest(unittest.TestCase):
         embed_framework_in: str | None = None,
         embed_helper_in: str | None = None,
         legacy_evidence: bool = False,
+        unsigned_bundles: set[str] | None = None,
+        refused_after_verification: bool = False,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -268,10 +270,19 @@ class CombinedInstallerTest(unittest.TestCase):
             productsign_argv_capture = tmp / "productsign-argv.txt"
             output = tmp / "out"
 
+            # `codesign --verify` passes for every bundle except those named
+            # in UNSIGNED_BUNDLES (space-separated bundle leaf names), which
+            # models a bundle that never went through a signing step.
             self._write_tool(
                 fake_bin,
                 "codesign",
-                'printf "%s\\n" "$*" >> "$CAPTURE_CODESIGN_ARGV"\nexit 0\n',
+                'printf "%s\\n" "$*" >> "$CAPTURE_CODESIGN_ARGV"\n'
+                'if [[ "$*" == *--verify* ]]; then\n'
+                '  for leaf in ${UNSIGNED_BUNDLES:-}; do\n'
+                '    [[ "$*" == *"/$leaf"* ]] && exit 1\n'
+                '  done\n'
+                'fi\n'
+                'exit 0\n',
             )
             self._write_tool(
                 fake_bin,
@@ -378,7 +389,8 @@ class CombinedInstallerTest(unittest.TestCase):
                 args.extend(("--architectures", architectures))
             plugin_bundles: list[Path] = []
             for plugin_name, kind in plugins:
-                suffix = {"au": "component", "vst3": "vst3", "clap": "clap"}[kind]
+                suffix = {"au": "component", "vst3": "vst3", "clap": "clap",
+                          "aax": "aaxplugin"}[kind]
                 bundle = tmp / f"{plugin_name}.{suffix}"
                 macos = bundle / "Contents" / "MacOS"
                 macos.mkdir(parents=True)
@@ -489,6 +501,11 @@ class CombinedInstallerTest(unittest.TestCase):
                 "PULP_SIGN_P12_PW": "test-p12-password",
                 "PULP_SIGN_IDENTITY_HASH": "ABC",
                 "ANALYZE_OMITS_RELOCATABLE": "1" if analyze_omits_relocatable else "0",
+                "UNSIGNED_BUNDLES": " ".join(sorted(unsigned_bundles or set())),
+                # Point the recipe at a wraptool that is not installed, so the
+                # graph test exercises the "PACE wrap not verified" branch
+                # without PACE's tooling on the test host.
+                "PULP_AAX_WRAPTOOL": str(tmp / "no-wraptool"),
             }
             Path(env["PULP_SIGN_KEYCHAIN"]).touch()
             Path(env["PULP_SIGN_P12"]).touch()
@@ -503,6 +520,13 @@ class CombinedInstallerTest(unittest.TestCase):
             )
             if not expect_success:
                 self.assertNotEqual(completed.returncode, 0)
+                # A refusal that follows a verification step has, by design,
+                # already run `codesign --verify`; only a pre-signing refusal
+                # (D15, legacy evidence) must leave every release tool unrun.
+                if refused_after_verification:
+                    self.assertFalse(productbuild_argv_capture.exists())
+                    self.assertFalse(productsign_argv_capture.exists())
+                    return completed.stdout + completed.stderr, ""
                 for forbidden_capture in (
                     codesign_argv_capture,
                     pkg_argv_capture,
@@ -764,6 +788,45 @@ class CombinedInstallerTest(unittest.TestCase):
         self.assertEqual(len(plugin_invocations), 2)
         self.assertIn("--scripts", plugin_invocations[0])
         self.assertNotIn("--scripts", plugin_invocations[1])
+
+    def test_an_aax_plugin_is_a_pro_tools_choice_and_is_never_re_signed(self) -> None:
+        xml, _ = self._run_installer(
+            [("Kick", "au"), ("Kick", "aax")]
+        )
+
+        # Its own selectable format row, installed where Pro Tools scans.
+        self.assertEqual(xml.count('choice id="plugin-0-aax"'), 1)
+        self.assertIn('title="AAX" description="Pro Tools"', xml)
+        self.assertIn("Kick.aax.pkg", xml)
+        self.assertIn(
+            "--install-location\n/Library/Application Support/Avid/Audio/Plug-Ins\n",
+            self._last_pkgbuild_argv,
+        )
+        # wraptool already wrapped and sealed the bundle; a `codesign --force`
+        # here would strip that wrap, so the only codesign call that names the
+        # AAX is the verification. The AU beside it is still deep-signed.
+        aax_lines = [
+            line for line in self._last_codesign_argv.splitlines()
+            if "Kick.aaxplugin" in line
+        ]
+        self.assertTrue(aax_lines)
+        for line in aax_lines:
+            self.assertIn("--verify", line)
+            self.assertNotIn("--force", line)
+        self.assertTrue(any(
+            "--force" in line and "Kick.component" in line
+            for line in self._last_codesign_argv.splitlines()
+        ))
+
+    def test_an_unsigned_aax_plugin_refuses_the_package(self) -> None:
+        output, _ = self._run_installer(
+            [("Kick", "aax")],
+            unsigned_bundles={"Kick.aaxplugin"},
+            expect_success=False,
+            refused_after_verification=True,
+        )
+
+        self.assertIn("wrap and sign it with wraptool before packaging", output)
 
     def test_intel_installer_declares_x86_64_host_support(self) -> None:
         xml, _ = self._run_installer([], [("Fixture", "Fixture")],

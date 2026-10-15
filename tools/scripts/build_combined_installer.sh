@@ -20,7 +20,10 @@
 #     --installer-identity <Developer ID Installer hash> \
 #     --out DIR \
 #     [--architectures arm64|x86_64|arm64,x86_64]
-#     [--plugin au|vst3|clap PATH]...     (repeatable)
+#     [--plugin au|vst3|clap|aax PATH]... (repeatable; an aax bundle must
+#                                          already be PACE-wrapped and
+#                                          Developer-ID signed -- the recipe
+#                                          verifies it and never re-signs it)
 #     [--product-title BUNDLE "Display Title"]...  (repeatable; renames the
 #                                                   expandable group for that
 #                                                   plugin, e.g. PulpDesignSynth
@@ -326,9 +329,37 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
   [[ -f "$VALIDATOR" ]] && python3 "$VALIDATOR" "$b" --strict
 }
 
+# An AAX bundle is signed by PACE's wraptool, which wraps the main executable
+# and seals the bundle under the Developer ID identity in one step; Pro Tools
+# refuses an AAX that is merely codesigned. Re-running codesign --force here
+# would strip that wrap and ship a plugin Pro Tools will not load, so an aax
+# plugin arrives already signed and is only VERIFIED: Apple's seal, PACE's wrap
+# where wraptool is installed, and the same relocatability check every other
+# bundle passes. Any failure refuses the package; nothing re-signs.
+verify_presigned_aax() {
+  local b="$1"
+  echo "  verifying pre-signed AAX (not re-signed): $(basename "$b")"
+  codesign --verify --deep --strict "$b" || {
+    echo "error: $b is not signed; wrap and sign it with wraptool before packaging" >&2
+    exit 2
+  }
+  local wraptool="${PULP_AAX_WRAPTOOL:-/Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool}"
+  if [[ -x "$wraptool" ]]; then
+    "$wraptool" verify -i "$b" || {
+      echo "error: $b fails wraptool verify; Pro Tools will not load it" >&2
+      exit 2
+    }
+  else
+    echo "  wraptool not installed; PACE wrap not verified for $(basename "$b")"
+  fi
+  [[ -f "$VALIDATOR" ]] && python3 "$VALIDATOR" "$b" --strict
+}
+
 plugin_dir() { case "$1" in
     au) echo /Library/Audio/Plug-Ins/Components;; vst3) echo /Library/Audio/Plug-Ins/VST3;;
-    clap) echo /Library/Audio/Plug-Ins/CLAP;; *) echo "bad plugin kind: $1" >&2; exit 2;; esac; }
+    clap) echo /Library/Audio/Plug-Ins/CLAP;;
+    aax) echo "/Library/Application Support/Avid/Audio/Plug-Ins";;
+    *) echo "bad plugin kind: $1" >&2; exit 2;; esac; }
 
 xml_escape() {  # escape XML metacharacters so titles/descriptions with & < > " ' stay valid
   local s="$1"
@@ -435,7 +466,7 @@ MANIFEST_TEXT="${MANIFEST_TEXT}${MANIFEST_RECEIPTS}"
 
 for ((i=0; i<${#PS_KIND[@]}; i++)); do
   case "${PS_KIND[$i]}" in
-    au|vst3|clap) ;;
+    au|vst3|clap|aax) ;;
     *) echo "invalid plugin script format: ${PS_KIND[$i]}" >&2; exit 2;;
   esac
   [[ -n "${PS_TITLE[$i]}" ]] || {
@@ -453,7 +484,11 @@ done
 echo "== plugins =="
 for ((i=0; i<${#P_KIND[@]}; i++)); do
   k="${P_KIND[$i]}"; p="${P_PATH[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
-  deep_sign "$p"
+  case "$k" in
+    au|vst3|clap) deep_sign "$p";;
+    aax) verify_presigned_aax "$p";;
+    *) echo "bad plugin kind: $k" >&2; exit 2;;
+  esac
   pname="$(basename "$p")"; pname="${pname%.*}"        # e.g. VaDrum
   plugin_idx=-1
   for ((j=0; j<${#PLUGIN_NAMES[@]}; j++)); do
@@ -476,7 +511,8 @@ for ((i=0; i<${#P_KIND[@]}; i++)); do
   pkgbuild --component "$p" --identifier "com.pulp.$NAME.$cid.pkg" --version "$VERSION" \
     "${SCRIPT_ARGS[@]+${SCRIPT_ARGS[@]}}" \
     --install-location "$(plugin_dir "$k")" "$STAGE/comp/$f" >/dev/null
-  case "$k" in au) d="Logic, GarageBand";; vst3) d="Most DAWs";; clap) d="REAPER, Bitwig";; esac
+  case "$k" in au) d="Logic, GarageBand";; vst3) d="Most DAWs";; clap) d="REAPER, Bitwig";;
+               aax) d="Pro Tools";; esac
   add_ref "$cid" "$(echo "$k" | tr a-z A-Z)" "$d" "$f"
   PLUGIN_ENTRIES="${PLUGIN_ENTRIES}${plugin_idx}	${pname}	${cid}
 "
