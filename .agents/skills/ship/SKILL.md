@@ -846,6 +846,15 @@ apps get a Start-menu shortcut** under `$SMPROGRAMS\<publisher>` (removed on
 uninstall); plugins get none. When you touch the generator, add/extend the
 pure-output assertions.
 
+**Windows file-versus-bundle uninstall.** A plugin source may be either a
+single file (for example, a `.clap` DLL) or a directory bundle (for example,
+`Foo.vst3`). The NSIS uninstall command must match that shape: use `Delete`
+for files and `RMDir /r` for directories. Do not discover or install an
+additional staging DLL alongside the canonical VST3 bundle merely to make
+uninstall simpler; the generated `VST3/<name>.vst3/Contents/<arch>-win/`
+bundle is the installed consumer path, and discovering both forms creates
+duplicate NSIS entries and file/directory collisions.
+
 **Auto-update decision (W7): DEFERRED.** No WinSparkle/auto-update is wired on
 Windows. Rationale: Pulp targets developers shipping their own apps/plugins,
 who pick their own update channel (DAW-scanned plugins don't self-update at
