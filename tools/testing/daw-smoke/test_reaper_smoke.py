@@ -701,6 +701,41 @@ class DoesNotWreckSomebodysReaper(unittest.TestCase):
         proc.terminate.assert_not_called()
         proc.kill.assert_not_called()
 
+    def test_prewarm_settles_after_cache_publish_before_scripted_launch(self):
+        """A visible cache entry still needs a scanner settle window.
+
+        REAPER has been observed to write the CLAP descriptor and then finish
+        its scan asynchronously.  Launching the scripted instance immediately
+        after the write races that finalization and returns FX_NOT_FOUND.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            portable = pathlib.Path(temporary)
+            cache = portable / "reaper-clapplugins.ini"
+            cache.write_text("Native Nodal Proof")
+            status = portable / "status.txt"
+            status.write_text("FX_SHOWN")
+
+            session = rs.ReaperSession.__new__(rs.ReaperSession)
+            session.reaper = pathlib.Path("/fake/REAPER")
+            session.portable = portable
+            session.reaper_out = portable / "reaper.out.txt"
+            session.args = argparse.Namespace(plugin_name="Native Nodal Proof",
+                                               timeout=3)
+            session.proc = None
+
+            warm = mock.Mock()
+            warm.pid = 1
+            scripted = mock.Mock()
+            scripted.pid = 2
+            with mock.patch.object(rs.subprocess, "Popen",
+                                   side_effect=[warm, scripted]), \
+                 mock.patch.object(rs, "stop_reaper_process") as stop, \
+                 mock.patch.object(rs.time, "sleep") as sleep:
+                self.assertIsNone(session.run_until_fx_shown({}, status))
+
+            stop.assert_called_once_with(warm)
+            sleep.assert_any_call(rs.PREWARM_CACHE_SETTLE_SECONDS)
+
 
 if __name__ == "__main__":
     unittest.main()

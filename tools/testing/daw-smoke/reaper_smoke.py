@@ -86,6 +86,12 @@ from typing import NamedTuple
 
 EXIT_PASS, EXIT_FAIL, EXIT_SKIP, EXIT_INCONCLUSIVE = 0, 1, 2, 3
 
+# REAPER can publish a plugin-cache entry before its scanner has finished
+# committing the descriptor.  A second launch immediately after that publish
+# races the scanner and can report FX_NOT_FOUND.  Keep this short and bounded;
+# it only applies after the target entry is visible.
+PREWARM_CACHE_SETTLE_SECONDS = 2.0
+
 HERE = Path(__file__).resolve().parent
 LUA = HERE / "insert_and_float.lua"
 SEQ_LOOP_LUA = HERE / "sequence_loop_seek.lua"
@@ -416,6 +422,13 @@ class ReaperSession:
         if not cache_ready:
             log("pre-warm scan did not publish the target into REAPER's plugin "
                 "cache before timeout; scripted launch may remain inconclusive.")
+        else:
+            # The cache write is not the scanner's completion signal.  Give
+            # REAPER one settle window to finish publishing the descriptor
+            # before stopping the warm process and launching the scripted one.
+            # Without this, fresh CLAP scans intermittently produce
+            # FX_NOT_FOUND even though the cache already contains the target.
+            time.sleep(PREWARM_CACHE_SETTLE_SECONDS)
         stop_reaper_process(warm)
 
         with open(self.reaper_out, "a") as out:
