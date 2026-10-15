@@ -2319,7 +2319,6 @@
   "pulp-generate-control-protocol-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
-  "pulp-gpu-wgpu-native-staged-diagnostic",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -4410,7 +4409,6 @@
     "tools/ci/tart-provision.sh",
     "tools/deps/audit.py",
     "tools/deps/test_audit_extra.py",
-    "tools/install-shipyard.sh",
     "tools/packages/test-stubs"
    ],
    "kind": "python"
@@ -4424,7 +4422,6 @@
     "tools/deps/audit.py",
     "tools/deps/test_audit.py",
     "tools/deps/wgpu_native_digests.py",
-    "tools/install-shipyard.sh",
     "tools/packages/test-stubs"
    ],
    "kind": "python"
@@ -4434,7 +4431,6 @@
    "inputs": [
     "tools/ci/tart-provision.sh",
     "tools/deps/audit.py",
-    "tools/install-shipyard.sh",
     "tools/packages/test-stubs"
    ],
    "kind": "python"
@@ -6257,6 +6253,27 @@
    ],
    "kind": "python"
   },
+  "host-adapter-tracing-contract": {
+   "entry": "tools/scripts/check_host_adapter_tracing_contract.py",
+   "inputs": [
+    "core/format/include/pulp/format/au_v2_adapter.hpp",
+    "core/format/include/pulp/format/au_v2_instrument.hpp",
+    "core/format/include/pulp/format/clap_adapter.hpp",
+    "core/format/include/pulp/format/standalone.hpp",
+    "core/format/include/pulp/format/vst3_adapter.hpp",
+    "core/format/src/aax_runtime.cpp",
+    "core/format/src/au_adapter.mm",
+    "tools/scripts/check_host_adapter_tracing_contract.py"
+   ],
+   "kind": "python"
+  },
+  "host-adapter-tracing-contract-selftest": {
+   "entry": "tools/scripts/test_check_host_adapter_tracing_contract.py",
+   "inputs": [
+    "tools/scripts/test_check_host_adapter_tracing_contract.py"
+   ],
+   "kind": "python"
+  },
   "host-lane-probe-requires-plugins": {
    "entry": "${CMAKE_BINARY_DIR}/test/\"$1\" >/dev/null 2>&1; test $? -eq 2",
    "inputs": [],
@@ -6417,7 +6434,8 @@
   "importer-differential-lab": {
    "entry": "test/test_importer_differential_lab.py",
    "inputs": [
-    "test/test_importer_differential_lab.py"
+    "test/test_importer_differential_lab.py",
+    "tools/import-validation/schemas"
    ],
    "kind": "python"
   },
@@ -6535,7 +6553,9 @@
    "entry": "tools/scripts/test_install_shipyard_queue_repair.py",
    "inputs": [
     "tools/install-shipyard.sh",
-    "tools/scripts/test_install_shipyard_queue_repair.py"
+    "tools/scripts/test_install_shipyard_queue_repair.py",
+    "tools/shipyard.toml",
+    "tools/toolchain/shipyard.sha256"
    ],
    "kind": "python"
   },
@@ -7262,23 +7282,6 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-wgpu-native-staged-diagnostic": {
-   "entry": "tools/diagnostics/verify_wgpu_native_staged.py",
-   "inputs": [
-    "tools/deps/manifest.json",
-    "tools/diagnostics/verify_wgpu_native_staged.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-wgpu-native-staged-identity-negative-control": {
-   "entry": "tools/diagnostics/test_verify_wgpu_native_staged.py",
-   "inputs": [
-    "tools/deps/manifest.json",
-    "tools/diagnostics/test_verify_wgpu_native_staged.py",
-    "tools/diagnostics/verify_wgpu_native_staged.py"
    ],
    "kind": "python"
   },
@@ -11729,10 +11732,13 @@
   "toolchain-check_env-selftest": {
    "entry": "tools/toolchain/test_check_env.py",
    "inputs": [
+    ".github/workflows/build.yml",
     "experimental/pulp-rs",
+    "tools/cmake/PulpToolchainCheck.cmake",
     "tools/toolchain",
     "tools/toolchain/check_env.py",
     "tools/toolchain/expected.json",
+    "tools/toolchain/fleet_report.py",
     "tools/toolchain/test_check_env.py"
    ],
    "kind": "python"
@@ -11748,11 +11754,32 @@
   "toolchain-test_generate-selftest": {
    "entry": "tools/toolchain/test_generate.py",
    "inputs": [
+    "tools/cmake",
+    "tools/shipyard.toml",
     "tools/toolchain",
+    "tools/toolchain/check_env.py",
     "tools/toolchain/expected.json",
     "tools/toolchain/generate.py",
     "tools/toolchain/manifest.toml",
+    "tools/toolchain/shipyard.sha256",
     "tools/toolchain/test_generate.py"
+   ],
+   "kind": "python"
+  },
+  "toolchain-update-selftest": {
+   "entry": "tools/toolchain/test_update.py",
+   "inputs": [
+    "experimental/pulp-rs",
+    "tools/shipyard.toml",
+    "tools/toolchain",
+    "tools/toolchain/check_env.py",
+    "tools/toolchain/deps.py",
+    "tools/toolchain/expected.json",
+    "tools/toolchain/generate.py",
+    "tools/toolchain/manifest.toml",
+    "tools/toolchain/shipyard.sha256",
+    "tools/toolchain/test_update.py",
+    "tools/toolchain/update.py"
    ],
    "kind": "python"
   },

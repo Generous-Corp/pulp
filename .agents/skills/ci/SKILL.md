@@ -382,15 +382,19 @@ hosts that enable `hold-disarms`). Behind it, the merge-group classify job runs
 `tools/ci/merge_group_hold_check.py`, which fails `macos` closed, before any VM,
 when a queued pull request's latest trusted verdict on the head it lands is
 HOLD. Its error annotation names the pull request, the HOLD's URL and the fix:
-a new head plus an APPROVE, or an APPROVE on that head if the HOLD no longer
-applies, then re-queue. It fails closed: an "(unreadable)" error annotation
+a new head plus the fleet App's APPROVE, or the App's APPROVE on that head if
+the HOLD no longer applies, then re-queue. Only the fleet App's APPROVE (a
+verdict posted through `ghapp`, whose author is a `Bot`) clears a HOLD here; a
+human account's APPROVE, comment or review, never does, and neither does a
+user account named `shipyard-local`. It fails closed: an "(unreadable)" error annotation
 means it could not read the group (a commit on the chain, a missing token) or a
 pull request's comments or reviews in full (a failed read, a GraphQL `errors`
 answer, a list short of its `totalCount`), and that fails the group too. A
 stalled queue is the deliberate lesser harm: re-run the group's classify job or
 re-queue. A failed fetch of the base branch fails the same way; only a base
 that does not carry the check yet passes, with a notice. A HOLD from the pull
-request's own author counts; their APPROVE never does.
+request's own author counts; a HOLD from an OWNER, MEMBER or COLLABORATOR
+counts too.
 
 ## A failed batch's branch name is not the culprit
 
@@ -6760,9 +6764,18 @@ and `tartci doctor fleet`. Per-host opt-out: `auto_apply = false` under
 pin converger existed and was removed: its pin lagged
 the fleet by ~78 releases, so installing it would have downgraded every host.
 
-Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
-Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
-signed/notarized `.dmg`, so the version and asset metadata must move together.
+Pin bumps go through `python3 tools/toolchain/deps.py update shipyard --to
+vX.Y.Z` (or `generate.py --shipyard vX.Y.Z`), not a hand edit and not
+`shipyard pin bump`. The authority is `[shipyard]` in
+`tools/toolchain/manifest.toml`: the tag, the repository and the sha256 of
+every release asset, taken from the release's `checksums.sha256`.
+`tools/shipyard.toml` and `tools/toolchain/shipyard.sha256` are generated from
+it, so `shipyard pin bump`, which edits `tools/shipyard.toml` alone, fails the
+`toolchain-test_generate-selftest` drift test until it calls the generator.
+The upstream installer verifies no digest; `install-shipyard.sh` refuses a
+downloaded asset whose sha256 differs from the pin, and an `install.sh` that
+differs from its pinned `installer_sha256`, before anything runs. If the
+installed binary still turns out different, it restores the previous one.
 
 - **Pinned at v0.68.0+: a killed `shipyard pr`/`ship` worker no longer wedges
   the PR.** Before v0.68.0, a worker that died (crash, `kill`, launching a
@@ -7808,9 +7821,9 @@ and the explicit `pr.workflow=github` bypass.
 After install, every Pulp checkout that has `~/.local/bin` on PATH gets
 the same pinned Shipyard version automatically. The pin lives in
 `tools/shipyard.toml` and is bumped via PR after each Shipyard release
-that passes Pulp's CI matrix. Use `shipyard pin bump --to vX.Y.Z`
-instead of hand-editing `tools/shipyard.toml`; the helper owns the pin
-edit and worktree-safety checks.
+that passes Pulp's CI matrix. Use `python3 tools/toolchain/deps.py update
+shipyard --to vX.Y.Z`: the version and every asset digest live in
+`tools/toolchain/manifest.toml`, and `tools/shipyard.toml` is generated.
 
 `shipyard pin bump` verifies by running the installer, which installs the
 new release into `~/.local/bin` on the host you run it on. Pass
@@ -8346,9 +8359,10 @@ form is only needed when a host has no Shipyard at all. Future
 upgrades on a host that already has Shipyard installed go through
 `shipyard update`.
 
-The repo-side pin lives in `tools/shipyard.toml`; bump it with
-`shipyard pin bump --to vX.Y.Z` (this triggers the ci skill-sync gate,
-which is why this section exists). The pin and a developer's local
+The repo-side pin lives in `[shipyard]` of `tools/toolchain/manifest.toml`
+(generated into `tools/shipyard.toml`); bump it with
+`python3 tools/toolchain/deps.py update shipyard --to vX.Y.Z` (this triggers
+the ci skill-sync gate, which is why this section exists). The pin and a developer's local
 install can drift — `pulp doctor` surfaces that, and `shipyard
 --version` is the local source of truth.
 
@@ -11933,9 +11947,23 @@ including blocks the branch never touched.
 
 The cost is the opposite of a false failure: the gate is advisory and not a
 required check, so nothing blocks — but an author who does the obvious thing
-commits output the formatter would not reproduce. **Diff a class body before
-committing the fixer's result**; if it de-indents, do not commit it. Tracked as
-issue #8753, which carries the full reproduction.
+commits output the formatter would not reproduce. Tracked as issue #8753, which
+carries the full reproduction.
+
+The mechanism: clang-format indents the first declaration under an access
+specifier relative to where the specifier actually sits. When a range starts
+just below a column-0 `private:` that is outside `--lines`, that declaration and
+every member after it in the block (out-of-range lines included) land at
+0 + 2. `hunk_ranges` therefore walks up from each hunk over blank and comment
+lines and, on reaching a `public:`/`protected:`/`private:`, starts the range at
+the specifier, so the block comes out as the whole-file run leaves it. The cost
+is that the specifier line is judged too: changing the first member under a
+column-0 specifier also asks to move that specifier to 2 spaces, which is the
+whole-file answer. Restoring its original indent was rejected: it needs
+clang-format's replacement offsets, or a marker comment that perturbs
+trailing-comment alignment. **Still diff a class body before committing the
+fixer's result**; the specifier rule covers the known trigger, not every way a
+partial range can disagree with a whole-file run.
 
 ## A workflow that matches a bypass trailer with its own grep will honour a quoted one
 

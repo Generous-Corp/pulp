@@ -24,7 +24,7 @@ description = "Verify the visual-analysis dependencies with the Windows Python c
 run = "python tools/scripts/check_visual_python_deps.py"
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = 16f5e000715571ede64022989167d427afa48045aacf0432ac77622481b7219b
+# source_sha256 = 2c41230c8cc4091c9549efcd00480366a7422dbe60027653d2c55d2677dd6c15
 [tasks.npm-deps]
 description = "Install project npm dependencies from the committed lockfiles (npm ci)"
 run = [

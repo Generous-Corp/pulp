@@ -6,10 +6,12 @@ What must hold:
   commits from the group head to merge_group.base_sha, each landing its second
   parent; a pull request's own merge commits are not entries;
 - a HOLD as the latest trusted verdict on a queued head fails with the pull
-  request, the HOLD's URL and the fix; an APPROVE after it unblocks;
-- trust is Shipyard's rule: the fleet App or OWNER/MEMBER/COLLABORATOR, never
-  the distinguishable author's APPROVE; the author's own HOLD counts; a tie
-  goes to the HOLD;
+  request, the HOLD's URL and the fix; the fleet App's APPROVE after it
+  unblocks;
+- an APPROVE counts only from the fleet App: a human account's APPROVE (a
+  comment or a review, any association) after the App's HOLD leaves it held;
+- a HOLD counts from the fleet App, an OWNER/MEMBER/COLLABORATOR, or the
+  author; a tie goes to the HOLD;
 - on Shipyard's captured answer for #10114 (fixtures/merge_group_hold/, the
   same file Shipyard's scorecard tests read) the verdict is HOLD;
 - it fails closed: a failed read, a GraphQL `errors` answer, a missing token,
@@ -68,8 +70,12 @@ def chain() -> dict:
     ]}
 
 
-def node(login: str, association: str, at: str, body: str, url: str = "u") -> dict:
-    return {"author": {"login": login}, "authorAssociation": association,
+def node(login: str, association: str, at: str, body: str, url: str = "u",
+         kind: str = "") -> dict:
+    """A comment as GraphQL answers it: the fleet App is a `Bot`, anyone else
+    a `User` unless `kind` says otherwise."""
+    kind = kind or ("Bot" if hold.normalized(login) == hold.FLEET_APP else "User")
+    return {"author": {"__typename": kind, "login": login}, "authorAssociation": association,
             "createdAt": at, "body": body, "url": url}
 
 
@@ -147,14 +153,57 @@ class MergeGroupHoldCheck(unittest.TestCase):
         self.assertIn("https://github.com/o/r/pull/12", out)
         self.assertNotIn("#11 is held", out)
 
-    def test_an_approve_after_the_hold_unblocks(self) -> None:
+    def test_the_fleet_apps_approve_after_the_hold_unblocks(self) -> None:
         cleared = pr([
             node("shipyard-local", "CONTRIBUTOR", "2026-10-12T10:00:00Z", f"verdict: HOLD head:{PR_B}"),
-            node("daniel", "OWNER", "2026-10-12T11:00:00Z", f"verdict: APPROVE head:{PR_B}"),
+            node("shipyard-local[bot]", "CONTRIBUTOR", "2026-10-12T11:00:00Z",
+                 f"verdict: APPROVE head:{PR_B}"),
         ])
         code, out = run(Fake({12: cleared, 11: pr([])}))
         self.assertEqual(code, 0, out)
         self.assertIn("no queued pull request is held", out)
+
+    def test_a_user_account_named_like_the_app_cannot_clear_a_hold(self) -> None:
+        # GraphQL names the App `shipyard-local`, a login anyone can register
+        # as a user; only the Bot is the App.
+        hold_b = node("shipyard-local", "CONTRIBUTOR", "2026-10-12T10:00:00Z",
+                      f"verdict: HOLD head:{PR_B}", url="https://x/hold")
+        spoof = node("shipyard-local", "NONE", "2026-10-12T11:00:00Z",
+                     f"verdict: APPROVE head:{PR_B}", kind="User")
+        code, out = run(Fake({12: pr([hold_b, spoof]), 11: pr([])}))
+        self.assertEqual(code, 1, out)
+        self.assertIn("#12 is held", out)
+        app = node("shipyard-local", "CONTRIBUTOR", "2026-10-12T11:00:00Z",
+                   f"verdict: APPROVE head:{PR_B}")
+        self.assertEqual(run(Fake({12: pr([hold_b, app]), 11: pr([])}))[0], 0,
+                         "control: the App's own APPROVE clears it")
+        review = {"author": {"__typename": "User", "login": "shipyard-local"},
+                  "authorAssociation": "NONE", "state": "APPROVED",
+                  "submittedAt": "2026-10-12T11:00:00Z", "url": "r", "commit": {"oid": PR_B}}
+        self.assertFalse(hold.latest_verdict(verdicts_of(pr([hold_b], [review])), PR_B)["approve"])
+        self.assertIn("author{__typename login}", hold.COMMENTS_QUERY)
+        self.assertIn("author{__typename login}", hold.REVIEWS_QUERY)
+
+    def test_a_human_approve_after_the_apps_hold_leaves_it_held(self) -> None:
+        # pulp#10293/#10302: the owner's personal login approved pull requests an
+        # agent then armed. Posted after the App's HOLD, it must not clear it.
+        hold_b = node("shipyard-local", "CONTRIBUTOR", "2026-10-12T10:00:00Z",
+                      f"verdict: HOLD head:{PR_B}", url="https://x/hold")
+        comment = node("danielraffel", "OWNER", "2026-10-12T11:00:00Z",
+                       f"verdict: APPROVE head:{PR_B}")
+        review = {"author": {"login": "danielraffel"}, "authorAssociation": "OWNER",
+                  "state": "APPROVED", "submittedAt": "2026-10-12T11:00:00Z",
+                  "url": "r", "commit": {"oid": PR_B}}
+        for held in (pr([hold_b, comment]), pr([hold_b], [review])):
+            code, out = run(Fake({12: held, 11: pr([])}))
+            self.assertEqual(code, 1, out)
+            self.assertIn("#12 is held", out)
+            self.assertIn("https://x/hold", out)
+        for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+            approve = node("someone", association, "2026-10-12T11:00:00Z",
+                           f"verdict: APPROVE head:{PR_B}")
+            self.assertFalse(hold.latest_verdict(verdicts_of(pr([hold_b, approve])), PR_B)["approve"],
+                             association)
 
     def test_only_a_trusted_verdict_on_that_head_counts(self) -> None:
         hold_b = f"verdict: HOLD head:{PR_B}"

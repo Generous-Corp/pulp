@@ -2014,6 +2014,12 @@ annotations are where drift between them shows up first; for example, the
 hosted Linux leg's apt CMake is reported against the 4.3.3 pin, labelled as
 the manifest's declared Linux exception. See [mise](mise.md#checking-your-environment).
 
+The step costs well under a second (0.45 s on the macOS gate VM, 0.10 s on
+hosted Linux), each version probe is capped at 5 s, and the step at 2 minutes,
+so a hung tool cannot stall a leg. It stays report only under `bash -e`
+whatever is missing: no Python on the runner, or a check that cannot read its
+expected versions (exit 3), becomes a warning annotation, never a failed step.
+
 ## Build-time Node dependencies are installed before the build, never inside it
 
 The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an
@@ -3424,10 +3430,14 @@ of `tools/ci/merge_group_hold_check.py` (fetched from
 `merge_group.base_ref`; the token never reaches a queue entry's code). It reads the group's pull requests from
 the first-parent chain of queue merge commits (each lands its second parent),
 and fails when one's latest trusted verdict on that head is
-`verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. "Trusted" means the
-fleet App or an OWNER, MEMBER or COLLABORATOR who is not the author,
-Shipyard's rule, except that the author's own HOLD counts (never their
-APPROVE). The chain is read one commit at a time and comments and reviews are
+`verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. An APPROVE counts
+only from the fleet App itself, a `Bot` (GraphQL names it `shipyard-local`, a
+login anyone can register as a user, so a user of that name never counts;
+every agent posts verdicts as the App through `ghapp`),
+never from a human account, so a human APPROVE posted after the App's HOLD
+cannot clear it: an agent holding the owner's personal `gh` login posted such
+approvals. A HOLD counts from the fleet App, an OWNER, MEMBER or COLLABORATOR,
+or the pull request's own author. The chain is read one commit at a time and comments and reviews are
 paginated, so a large group or a long pull request is read in full. The failure names the pull request, the HOLD's URL and the
 fix, and a failed classify fails `macos` closed through the bootstrap above,
 before any VM. It is the backstop for a HOLD on a head that was already armed

@@ -215,6 +215,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-manifest-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/agent_capability_manifest.py" --check)
+    add_test(NAME host-adapter-tracing-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/check_host_adapter_tracing_contract.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME host-adapter-tracing-contract-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_host_adapter_tracing_contract.py")
+    set_tests_properties(host-adapter-tracing-contract
+        host-adapter-tracing-contract-selftest PROPERTIES LABELS "pr;format")
     add_test(NAME agent-capability-manifest-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")

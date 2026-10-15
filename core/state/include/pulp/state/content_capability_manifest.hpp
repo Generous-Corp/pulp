@@ -4,9 +4,8 @@
 /// The capabilities a plugin declares before consuming installed content
 /// packs, and the `pulp.plugin-runtime.v1` JSON form a plugin bundle embeds.
 /// pulp-state owns the value and its wire format; reading installed content
-/// packs is pulp-content's job (content_registry.hpp), so code that only needs
-/// to read or write a bundle's manifest does not depend on the content-pack
-/// reader.
+/// packs belongs to the optional content-pack layer, so code that only needs to
+/// read or write a bundle's manifest does not depend on the content-pack reader.
 
 #include <filesystem>
 #include <optional>

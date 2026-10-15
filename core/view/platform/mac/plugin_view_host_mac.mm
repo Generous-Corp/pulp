@@ -1597,12 +1597,15 @@ public:
     }
     void start_render_link() {
         if (!render_link_.open(&render_link_callback, this)) return;
-        render_link_.resume();
         // A frame driver is now running, so drag motion may be HELD until the
         // next presented frame. The opt-in belongs to "a driver is running",
         // not to this function — see the flush in render_link_callback, which
         // is the only thing that releases it.
         [view_ setCoalescePointerInput:YES];
+        // Arm coalescing before the display link can deliver its first tick.
+        // Resuming first creates a race where that callback sees coalescing
+        // disabled and dispatches the initial drag burst one event at a time.
+        render_link_.resume();
         if (const float nominal = render_link_.nominal_dt(); nominal > 0.0f) {
             frame_pump_.set_nominal_dt(nominal);
         }
