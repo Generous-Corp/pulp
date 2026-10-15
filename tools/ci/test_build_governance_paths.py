@@ -66,6 +66,14 @@ class BuildGovernancePathTests(unittest.TestCase):
             self.assertIn("governed-build.sh", line)
             self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
 
+    def test_windows_validate_build_routes_every_build_through_governor(self) -> None:
+        source = read_source("validate-build.ps1")
+        build_lines = [line for line in source.splitlines() if "cmake --build" in line]
+        self.assertEqual(len(build_lines), 2)
+        for line in build_lines:
+            self.assertIn("governed-build.sh", line)
+            self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
+
     def test_desktop_video_build_recipes_route_through_governor(self) -> None:
         # Exercise the published scenario data, rather than merely checking a
         # comment or a single fixture. Design/video-only scenarios have no
