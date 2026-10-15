@@ -336,6 +336,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-034f4617f85f"
+paths = ["tools/scripts/check_host_adapter_tracing_contract.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "host-adapter-tracing-contract",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-58fd64bc20ea"
 paths = ["tools/scripts/check_inspector_protocol_registry.py"]
 tests = [
@@ -1735,6 +1769,40 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-c53c51ce603a"
+paths = ["tools/scripts/test_check_host_adapter_tracing_contract.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "host-adapter-tracing-contract-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
@@ -6784,6 +6852,7 @@ paths = [
   "tools/scripts/check_codecov_receipts.py",
   "tools/scripts/check_daw_bench_evidence.py",
   "tools/scripts/check_headers_selfcontained.py",
+  "tools/scripts/check_host_adapter_tracing_contract.py",
   "tools/scripts/check_host_matrix_evidence.py",
   "tools/scripts/check_inspector_protocol_registry.py",
   "tools/scripts/check_sdk_complete.py",
@@ -6907,6 +6976,7 @@ paths = [
   "tools/scripts/test_check_daw_bench_evidence.py",
   "tools/scripts/test_check_docs_consistency.py",
   "tools/scripts/test_check_headers_selfcontained.py",
+  "tools/scripts/test_check_host_adapter_tracing_contract.py",
   "tools/scripts/test_check_host_matrix_evidence.py",
   "tools/scripts/test_check_installed_rpaths.py",
   "tools/scripts/test_check_manifest_mirrors.py",
@@ -7334,6 +7404,7 @@ paths = [
   "tools/scripts/check_codecov_receipts.py",
   "tools/scripts/check_daw_bench_evidence.py",
   "tools/scripts/check_headers_selfcontained.py",
+  "tools/scripts/check_host_adapter_tracing_contract.py",
   "tools/scripts/check_host_matrix_evidence.py",
   "tools/scripts/check_inspector_protocol_registry.py",
   "tools/scripts/check_sdk_complete.py",
@@ -7457,6 +7528,7 @@ paths = [
   "tools/scripts/test_check_daw_bench_evidence.py",
   "tools/scripts/test_check_docs_consistency.py",
   "tools/scripts/test_check_headers_selfcontained.py",
+  "tools/scripts/test_check_host_adapter_tracing_contract.py",
   "tools/scripts/test_check_host_matrix_evidence.py",
   "tools/scripts/test_check_installed_rpaths.py",
   "tools/scripts/test_check_manifest_mirrors.py",
