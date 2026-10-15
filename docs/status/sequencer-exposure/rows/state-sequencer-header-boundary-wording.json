@@ -1,0 +1,58 @@
+{
+  "id": "state-sequencer-header-boundary-wording",
+  "title": "SequencerStateChannel documents framework-neutral producer ownership",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g2h-b-state-core-20261014",
+  "owned_paths": [
+    "core/state/include/pulp/state/sequencer_state_channel.hpp",
+    "docs/status/sequencer-exposure/rows/state-sequencer-header-boundary-wording.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/state/include/pulp/state/sequencer_state_channel.hpp",
+      "needles": [
+        "need NOT be a framework processor",
+        "engine can own the channel and drive it directly"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The installed public header states that any single authoritative thread, including a non-framework engine, may own and drive the channel. This change clarifies the existing producer boundary without adding a type, symbol, or authority grant.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/state/include/pulp/state/sequencer_state_channel.hpp",
+          "needles": [
+            "need NOT be a framework processor",
+            "engine can own the channel and drive it directly"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The wording clarification adds no offline timeline command or document operation."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The wording clarification adds no timeline MCP definition, handler, or response shape."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The wording clarification adds no product control operation, executor binding, grant, or profile policy."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The wording clarification changes no design-time capability manifest or authoring contract."
+    }
+  }
+}

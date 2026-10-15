@@ -83,7 +83,7 @@ PresetManager::PresetManager(StateStore& store, const std::string& manufacturer,
     // all — so this class cannot resolve it. It stays empty (factory_presets()
     // then finds nothing) until a caller supplies it through
     // set_factory_presets_dir(); the AU adapters derive it from the loaded
-    // binary in pulp::format::au::FactoryPresetTable.
+    // binary in the format adapter's factory-preset table implementation.
     factory_dir_.clear();
 }
 
