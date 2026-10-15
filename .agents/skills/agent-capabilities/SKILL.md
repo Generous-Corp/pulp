@@ -98,6 +98,20 @@ evidence to the specific API or header fingerprint, not a literal global
 `SURFACE_INVENTORY_VERSION`; an unrelated inventory update must not invalidate
 that evidence. None of these source checks establishes installed execution.
 
+### A legacy header that changes bytes cannot be re-fingerprinted
+
+`tools/agent-capabilities/legacy-unreviewed-baseline.json` is FROZEN: it may
+only shrink, through explicit reviewed classifications, so editing a
+`legacy_unreviewed` header's fingerprint there (or adding a new header to it)
+fails with `legacy baseline digest changed` / `must retain exactly N frozen
+entries`. The recorded path when such a header changes (2026-10-15,
+`pulp/signal/lfo.hpp` gaining `set_band_limited` / `next_mean`): give the
+header a reviewed row in `agent_capability_registry.py` (`capability_support`
+with the key it serves and a durable rationale), register its owner in
+`REVIEWED_MINIMAL_TARGETS`, do the same for any new sibling header, then run
+`agent_capability_rederive.py` and `--check`. The baseline file itself is not
+edited; the header simply stops being legacy.
+
 ## Classify the change
 
 For a new public header or symbol:
