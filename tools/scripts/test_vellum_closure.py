@@ -5,6 +5,7 @@ import subprocess
 import unittest
 import unittest.mock
 import json
+import shutil
 import tempfile
 from pathlib import Path
 from argparse import Namespace
@@ -1286,6 +1287,8 @@ class ClosureMentionTests(unittest.TestCase):
 
 class GeneratedDigestTests(unittest.TestCase):
     BUILD_INFO = "@build/core/runtime/generated/Release/pulp/runtime/build_info.hpp"
+    PRELUDE_CPP = "@build/core/view/web_compat_preludes_gen.cpp"
+    PRELUDE_HPP = "@build/core/view/web_compat_preludes_gen.hpp"
 
     def build_info(self, td, stamp, dirty="false"):
         path = Path(td) / f"build_info_{stamp}_{dirty}.hpp"
@@ -1316,6 +1319,77 @@ class GeneratedDigestTests(unittest.TestCase):
             built = generated_digest(rel, out, REPO_ROOT)
             self.assertEqual(missing, built)
             self.assertEqual(missing["sha256"], __import__("hashlib").sha256(out.read_bytes()).hexdigest())
+
+    def test_view_prelude_digests_reproduce_without_build_outputs(self):
+        from vellum_closure import generated_digest, mirrorable_generated_source
+        with tempfile.TemporaryDirectory() as td:
+            missing = Path(td) / "never-built.cpp"
+            cpp = generated_digest(self.PRELUDE_CPP, missing, REPO_ROOT)
+            hpp = generated_digest(self.PRELUDE_HPP, Path(td) / "never-built.hpp", REPO_ROOT)
+            stale = Path(td) / "stale.cpp"
+            stale.write_text("stale output", encoding="utf-8")
+            rebuilt = generated_digest(self.PRELUDE_CPP, stale, REPO_ROOT)
+        self.assertEqual(cpp["sha256"], "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
+        self.assertEqual(hpp["sha256"], "7f9f354b1bfaf7dc68218ebc84c37ca30b72a59537720217aaf94291d2c76c0a")
+        self.assertEqual(cpp, rebuilt)
+        self.assertTrue(mirrorable_generated_source(self.PRELUDE_CPP))
+        self.assertFalse(mirrorable_generated_source("@build/core/view/other.cpp"))
+
+    def test_view_prelude_digest_fails_closed_when_producer_is_incomplete(self):
+        from vellum_closure import generated_digest
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td)
+            (source / "core/view/cmake").mkdir(parents=True)
+            (source / "core/view/js").mkdir(parents=True)
+            (source / "core/view/cmake/PulpViewJsPreludes.cmake").write_text(
+                "set(PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/missing.js\n)\n", encoding="utf-8")
+            (source / "core/view/js/embed_js.py").write_text("", encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            self.assertIsNone(generated_digest("@build/core/view/unsupported.cpp", source / "out.cpp", source))
+
+    def test_view_prelude_producer_rejects_unbound_or_duplicate_inputs(self):
+        from vellum_closure import generated_digest
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td)
+            (source / "core/view/cmake").mkdir(parents=True)
+            shutil.copytree(REPO_ROOT / "core/view/js", source / "core/view/js")
+            shutil.copy(REPO_ROOT / "core/view/cmake/PulpViewJsPreludes.cmake", source / "core/view/cmake")
+            shutil.copy(REPO_ROOT / "core/view/js/embed_js.py", source / "core/view/js")
+            producer = source / "core/view/cmake/PulpViewJsPreludes.cmake"
+            original = producer.read_text(encoding="utf-8")
+            closing = "\n)"
+            valid = original.replace(closing, "\n    # ${CMAKE_CURRENT_SOURCE_DIR}/js/commented.js\n)", 1)
+            producer.write_text(valid, encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
+                             "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
+            for extra in ("    js/unbound.js\n", "    ${OTHER}/js/unbound.js\n", "    ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js\n"):
+                producer.write_text(original.replace(closing, "\n" + extra + ")", 1), encoding="utf-8")
+                self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), extra)
+            for mutation in (
+                "\nlist(APPEND PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js)\n",
+                "\nset(PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js)\n",
+            ):
+                producer.write_text(original + mutation, encoding="utf-8")
+                self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), mutation)
+
+    def test_target_manifest_only_exposes_the_supported_prelude_source(self):
+        from vellum_closure import target_manifest
+        with tempfile.TemporaryDirectory() as td:
+            build = Path(td)
+            (build / "core/view").mkdir(parents=True)
+            (build / "core/view/web_compat_preludes_gen.cpp").write_text("generated", encoding="utf-8")
+            (build / "core/view/web_compat_preludes_gen.hpp").write_text("generated", encoding="utf-8")
+            sources = [
+                {"path": str(build / "core/view/web_compat_preludes_gen.cpp")},
+                {"path": str(build / "core/view/unsupported.cpp")},
+            ]
+            target = {"name": "pulp-view-script", "type": "STATIC_LIBRARY", "sources": sources,
+                      "sourceGroups": [{"sourceIndexes": [0, 1]}], "compileGroups": [], "dependencies": []}
+            with unittest.mock.patch("vellum_closure.codemodel", return_value=({"name": "Release"}, {"id": target})):
+                manifest = target_manifest(REPO_ROOT, build, ["pulp-view-script"])
+        selected = manifest["targets"][0]["sources"]
+        self.assertIn(self.PRELUDE_CPP, selected)
+        self.assertNotIn("@build/core/view/unsupported.cpp", selected)
 
     def test_export_refuses_a_generated_input_without_a_reproducible_digest(self):
         from vellum_closure import exportable_closure
