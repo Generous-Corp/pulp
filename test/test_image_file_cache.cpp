@@ -197,8 +197,7 @@ TEST_CASE("ImageFileCache: clear_backend waits for an in-flight build",
     REQUIRE(builds.load() == 2);
 }
 
-TEST_CASE("ImageFileCache: disabling wakes a coalesced waiter",
-          "[canvas][image-cache][embedded]") {
+TEST_CASE("ImageFileCache: disabling wakes a coalesced waiter", "[canvas][image-cache][embedded]") {
     auto& cache = ImageFileCache::instance();
     cache.clear();
     cache.reset_stats();
@@ -215,28 +214,31 @@ TEST_CASE("ImageFileCache: disabling wakes a coalesced waiter",
             first_started.store(true, std::memory_order_release);
             gate_cv.notify_all();
             std::unique_lock<std::mutex> lock(gate_mutex);
-            gate_cv.wait_for(lock, std::chrono::seconds(10), [&] {
-                return release_first.load(std::memory_order_acquire);
-            });
+            gate_cv.wait_for(lock, std::chrono::seconds(10),
+                             [&] { return release_first.load(std::memory_order_acquire); });
         }
         return make_dummy_image();
     };
     std::thread first([&] { cache.get_or_build("/tmp/disable.png", backend, build); });
     {
         std::unique_lock<std::mutex> lock(gate_mutex);
-        REQUIRE(gate_cv.wait_for(lock, std::chrono::seconds(10), [&] {
-            return first_started.load(std::memory_order_acquire);
-        }));
+        REQUIRE(gate_cv.wait_for(lock, std::chrono::seconds(10),
+                                 [&] { return first_started.load(std::memory_order_acquire); }));
     }
     std::atomic<bool> second_done{false};
+    std::condition_variable second_done_cv;
     std::thread second([&] {
         cache.get_or_build("/tmp/disable.png", backend, build);
         second_done.store(true, std::memory_order_release);
+        second_done_cv.notify_one();
     });
     cache.set_enabled(false);
-    for (int i = 0; i < 1000 && !second_done.load(std::memory_order_acquire); ++i)
-        std::this_thread::yield();
-    REQUIRE(second_done.load(std::memory_order_acquire));
+    {
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        REQUIRE(second_done_cv.wait_for(lock, std::chrono::seconds(10), [&] {
+            return second_done.load(std::memory_order_acquire);
+        }));
+    }
     release_first.store(true, std::memory_order_release);
     gate_cv.notify_all();
     first.join();
