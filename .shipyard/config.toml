@@ -805,3 +805,11 @@ base_branch = "main"
 # Closes every PR body `shipyard pr` composes, so agents stop editing the
 # attribution line in by hand after the PR opens.
 attribution = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+
+[auto_merge]
+# Who may sign the fleet App's `verdict: APPROVE`: an approval posted through
+# ghapp counts only with a `reviewer: <name>` line naming one of these. Every
+# agent posts as the same App, so the App's identity alone says nothing about
+# who reviewed. Shipyard's server-side `review-verdict` reads only this list
+# (never a host file), and refuses every App approval here if it is missing.
+reviewer_signers = ["pulp-review", "infra-review2"]

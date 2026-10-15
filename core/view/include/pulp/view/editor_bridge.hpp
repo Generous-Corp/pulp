@@ -216,4 +216,12 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+/// Build the starter `bridge_handlers.cpp` text the CLI emits next to
+/// the generated JS view when `--from claude` runs. Pure string-builder;
+/// no I/O. The output references `pulp::view::EditorBridge` and shows
+/// add_handler() registrations + an attach_webview() call so users have
+/// a runnable shape to fill in. Defined in pulp-view-tooling with the
+/// bridge itself, so the extracted design-import headers do not declare it.
+std::string render_claude_bridge_scaffold(const std::string& generated_js_path);
+
 } // namespace pulp::view

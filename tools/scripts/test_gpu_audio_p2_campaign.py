@@ -213,6 +213,54 @@ class P2CampaignContractTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             campaign.validate_identity_rows(changed, expected_sha)
 
+    def test_provider_identity_fixture_binds_raw_rows_independently(self):
+        rows = self._rows()
+        fixture = {
+            "schema": campaign.PROVIDER_IDENTITY_SCHEMA, "status": "passed",
+            "provider_identity_status": "passed",
+            "expected_asset_sha256": rows[0]["provider_asset_sha256"],
+            "validated_asset_sha256": rows[0]["provider_asset_sha256"],
+            "expected_dawn_revision": rows[0]["provider_revision"],
+            "header_dawn_revision": rows[0]["provider_revision"],
+            "linked_dawn_archive_sha256": rows[0]["dawn_archive_sha256"],
+            "manifest_sha256": "1" * 64,
+            "generation_receipt_sha256": "2" * 64,
+        }
+        rows[0]["manifest_bindings"]["provider_asset_manifest_sha256"] = fixture["manifest_sha256"]
+        rows[0]["manifest_bindings"]["dawn_archive_manifest_sha256"] = fixture["manifest_sha256"]
+        rows[0]["provenance_manifest_sha256"] = campaign.provenance_manifest_sha256(rows[0])
+        campaign.validate_identity_rows(rows, rows[0]["executable_observed_sha256"],
+                                        expected_provider_identity=fixture)
+        invalid = [dict(row) for row in rows]
+        invalid[0]["provider_revision"] = "f" * 40
+        with self.assertRaisesRegex(RuntimeError, "provider revision"):
+            campaign.validate_identity_rows(
+                invalid, invalid[0]["executable_observed_sha256"],
+                expected_provider_identity=fixture)
+
+    def test_provider_identity_fixture_requires_current_manifest(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            manifest = root_path / "tools/deps/manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("{}\n", encoding="utf-8")
+            fixture = root_path / "provider.json"
+            payload = {
+                "schema": campaign.PROVIDER_IDENTITY_SCHEMA, "status": "passed",
+                "provider_identity_status": "passed",
+                "expected_asset_sha256": "a" * 64, "validated_asset_sha256": "a" * 64,
+                "expected_dawn_revision": "b" * 40, "header_dawn_revision": "b" * 40,
+                "linked_dawn_archive_sha256": "c" * 64,
+                "manifest_sha256": campaign.sha256(manifest),
+                "generation_receipt_sha256": "d" * 64,
+            }
+            fixture.write_text(json.dumps(payload), encoding="utf-8")
+            with patch.object(campaign, "REPO_ROOT", root_path):
+                self.assertEqual(campaign.validate_provider_identity_fixture(fixture), payload)
+                manifest.write_text("changed\n", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "current provider manifest"):
+                    campaign.validate_provider_identity_fixture(fixture)
+
     def test_observed_device_id_zero_is_allowed(self):
         rows = self._rows()
         rows[0]["adapter_device_id"] = 0

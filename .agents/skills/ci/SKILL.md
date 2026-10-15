@@ -396,6 +396,14 @@ that does not carry the check yet passes, with a notice. A HOLD from the pull
 request's own author counts; a HOLD from an OWNER, MEMBER or COLLABORATOR
 counts too.
 
+**An App APPROVE needs a signer.** Every agent posts verdicts as the same App,
+so `.shipyard/config.toml` names who may sign one (`[auto_merge]
+reviewer_signers = ["pulp-review", "infra-review2"]`): Shipyard's guards count
+an App `verdict: APPROVE` only with a `reviewer: <name>` line naming one of
+them, and never one `ghapp` stamped with an `unattributed` session. A reviewer
+agent puts `reviewer: <its name>` on the line above the verdict. Adding a
+reviewer means adding it to that list.
+
 ## A failed batch's branch name is not the culprit
 
 A merge_group batch is NAMED for one pull request but CONTAINS every entry
