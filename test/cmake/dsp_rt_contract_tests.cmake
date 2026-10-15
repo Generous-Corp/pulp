@@ -248,6 +248,16 @@ pulp_add_test_suite(pulp-test-mod-utilities GROUP pulp-test-group-dsp-rt-signal
     LIBRARIES pulp::signal
     TIMEOUT 600)
 
+# Sampling an LFO waveform without aliasing: the exact interval mean a
+# block-rate consumer takes, the polyBLEP / polyBLAMP waveform an audio-rate
+# consumer takes, and LfoT's band-limited and block-mean modes built on them.
+# Its own executable: it grades the band-limited waves with the alias analyzer,
+# which the signal group does not link.
+pulp_add_test_suite(pulp-test-lfo-sampling
+    SOURCES test_lfo_sampling.cpp
+    LIBRARIES pulp::signal pulp::audio-analysis
+    TIMEOUT 300)
+
 # The saturation toolkit — the memoryless nonlinearity every drive/fuzz/tape/
 # tube stage composes. The suite is the spec's acceptance set A1-A12; harmonic
 # expectations are computed from the shipped closed forms, not restated.
