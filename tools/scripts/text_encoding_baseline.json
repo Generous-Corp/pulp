@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4242,
+  "total": 4238,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -149,7 +149,7 @@
     "tools/import-design/figma_rasterize_vector_frames.py": 4,
     "tools/import-design/figma_rest_export.py": 9,
     "tools/import-design/layout_parity.py": 3,
-    "tools/import-design/make_catalog_component.py": 4,
+    "tools/import-design/make_catalog_component.py": 1,
     "tools/import-design/montage.py": 1,
     "tools/import-design/reembed_mtk.py": 3,
     "tools/import-design/test_component_contract.py": 1,
@@ -163,7 +163,6 @@
     "tools/import-validation/chrome_gradient_oracle.py": 1,
     "tools/import-validation/diff_against_reference_regions.py": 1,
     "tools/import-validation/importer_differential/cli.py": 4,
-    "tools/import-validation/importer_differential/core.py": 0,
     "tools/import-validation/score_native_panel.py": 6,
     "tools/import-validation/test_check_palette_health.py": 9,
     "tools/import-validation/test_check_panel_presence.py": 5,
