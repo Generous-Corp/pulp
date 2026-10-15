@@ -6424,6 +6424,14 @@
    ],
    "kind": "python"
   },
+  "import-validation-undefined-names": {
+   "entry": "tools/scripts/test_undefined_names_check.py",
+   "inputs": [
+    "tools/scripts/test_undefined_names_check.py",
+    "tools/scripts/undefined_names_check.py"
+   ],
+   "kind": "python"
+  },
   "import-vendored-runtime-staleness": {
    "entry": "tools/import-validation/test_check_vendored_runtime.py",
    "inputs": [
