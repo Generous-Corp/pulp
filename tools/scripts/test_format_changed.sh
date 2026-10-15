@@ -314,6 +314,81 @@ else
 fi
 rm -rf "$repo"
 
+# ── a change under an access specifier starts the range at the specifier ────
+# clang-format indents the first declaration under `private:` relative to where
+# the specifier sits. Left outside --lines, a column-0 specifier re-indents the
+# whole member block to 2 spaces, which the whole-file run never does.
+# add_class_fixture <repo> <relative-path>: commit a class on main whose
+# `private:` sits at column 0, as most of the tree's classes do, then return to
+# `work`.
+add_class_fixture() {
+    git -C "$1" checkout -q main
+    mkdir -p "$(dirname "$1/$2")"
+    printf 'class Widget {\n  public:\n    void paint();\n\nprivate:\n    // Cached extent.\n    int width_ = 0;\n    int height_ = 0;\n    bool dirty_ = false;\n};\n' > "$1/$2"
+    git -C "$1" add "$2" && git -C "$1" commit -qm "class fixture"
+    git -C "$1" branch -qf work main
+    git -C "$1" checkout -q work
+}
+
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+add_class_fixture "$repo" core/w.hpp
+# Line 7 is the first declaration under `private:` (line 5), past a comment.
+sed -i.bak 's/int width_ = 0;/int width_ = 1;/' "$repo/core/w.hpp" && rm -f "$repo/core/w.hpp.bak"
+run "$repo" "$fake" --check
+if grep -q -- '--lines=5:7' "$repo/fake.log"; then
+    ok "first member under private: → range starts at the specifier (5:7)"
+else
+    bad "first member under private: → range starts at the specifier (5:7)" "log: $(cat "$repo/fake.log")"
+fi
+git -C "$repo" checkout -q -- core/w.hpp
+# Line 8 is not the first declaration, so the specifier does not govern it.
+sed -i.bak 's/int height_ = 0;/int height_ = 1;/' "$repo/core/w.hpp" && rm -f "$repo/core/w.hpp.bak"
+run "$repo" "$fake" --check
+if grep -q -- '--lines=8:8' "$repo/fake.log"; then
+    ok "a later member keeps its own range (8:8)"
+else
+    bad "a later member keeps its own range (8:8)" "log: $(cat "$repo/fake.log")"
+fi
+rm -rf "$repo"
+
+# The same change through the pinned real clang-format, against the repo's own
+# .clang-format: the touched block must come out exactly as a whole-file format
+# leaves it. Skipped, loudly and uncounted, without a clang-format 21.
+real_cf=""
+for c in "${PULP_CLANG_FORMAT:-}" "$(command -v clang-format 2>/dev/null || true)" \
+    /opt/homebrew/opt/llvm@21/bin/clang-format /usr/lib/llvm-21/bin/clang-format; do
+    [ -n "$c" ] && [ -x "$c" ] || continue
+    "$c" --version 2>/dev/null | grep -q 'clang-format version 21\.' || continue
+    real_cf="$c"; break
+done
+if [ -z "$real_cf" ]; then
+    echo "  SKIP  real clang-format 21 matches whole-file formatting under private: (no clang-format 21 found)"
+else
+    repo="$(make_repo)"
+    # The repo's own .clang-format on main, so the verdict is about the pinned
+    # config; add_class_fixture then rebases `work` onto it.
+    git -C "$repo" checkout -q main
+    cp "$(dirname "$SCRIPT")/../../.clang-format" "$repo/.clang-format"
+    git -C "$repo" commit -qam "repo config"
+    add_class_fixture "$repo" core/w.hpp
+    sed -i.bak 's/int width_ = 0;/int width_ = 1;/' "$repo/core/w.hpp" && rm -f "$repo/core/w.hpp.bak"
+    whole="$("$real_cf" --style=file "$repo/core/w.hpp" 2>/dev/null; printf x)"; whole="${whole%x}"
+    out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="$real_cf" PULP_CLANG_FORMAT_CANDIDATES="" \
+        /bin/bash "$SCRIPT" --base main 2>&1)"; rc=$?
+    expect_rc "real clang-format 21 rewrite under private: → exit 0" 0
+    # Compare from the specifier down; the whole-file run also re-indents the
+    # untouched `public:` above, which the wrapper rightly leaves alone.
+    got_block="$(sed -n '5,$p' "$repo/core/w.hpp")"
+    want_block="$(printf '%s' "$whole" | sed -n '5,$p')"
+    if [ "$got_block" = "$want_block" ]; then
+        ok "real clang-format 21: block under private: matches whole-file formatting"
+    else
+        bad "real clang-format 21: block under private: matches whole-file formatting" \
+            "got: $(printf '%s' "$got_block" | tr '\n' '|') want: $(printf '%s' "$want_block" | tr '\n' '|')"
+    fi
+    rm -rf "$repo"
+fi
+
 # ── path restriction ────────────────────────────────────────────────────────
 repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
 printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
