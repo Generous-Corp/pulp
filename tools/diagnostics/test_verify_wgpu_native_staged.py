@@ -67,6 +67,15 @@ def main() -> int:
         ) < 4:
             print("typed loss-session teardown control failed", file=sys.stderr)
             return 1
+        validated = source.split(
+            "if (loss_probe->device_loss_reason() != WGPUDeviceLostReason_Destroyed)",
+            1,
+        )
+        if len(validated) != 2 or "loss_probe.release();" not in validated[1].split(
+            "auto loss_provider", 1
+        )[0]:
+            print("typed capability-probe teardown control failed", file=sys.stderr)
+            return 1
         return 0
     if any(getattr(args, name.replace("-", "_")) is None
            for name in ("manifest", "asset", "source-tree", "linked-runtime",
