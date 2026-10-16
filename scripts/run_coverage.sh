@@ -180,8 +180,12 @@ if ! PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
     # last lines are usually unrelated warnings. Print the error lines from
     # both streams first; a failing custom command reports on stdout.
     echo "=== Coverage build failed; error lines from the full build log ===" >&2
-    grep -n -E "error:|Error [0-9]+|\*\*\*|undefined reference|FAILED|fatal|CMake Error" \
-        "${BUILD_LOG}" "${BUILD_STDOUT_LOG}" 2>/dev/null | head -n 100 >&2 || true
+    # Each log gets its own cap, so a stderr flood cannot crowd out a failing
+    # step that only reports on stdout.
+    for log in "${BUILD_LOG}" "${BUILD_STDOUT_LOG}"; do
+        grep -n -H -E "error:|Error [0-9]+|\*\*\*|undefined reference|FAILED|fatal|CMake Error" \
+            "${log}" 2>/dev/null | head -n 100 >&2 || true
+    done
     echo "=== last 200 stderr lines ===" >&2
     tail -n 200 "${BUILD_LOG}" >&2 || true
     exit 1

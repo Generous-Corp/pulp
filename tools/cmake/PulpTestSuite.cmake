@@ -54,6 +54,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/PulpTestData.cmake)
 #     clang accepts a consumer macro the PCH never saw *silently*, which is
 #     the one mismatch that changes semantics without an error;
 #   * an explicit CXX_STANDARD / CXX_EXTENSIONS other than the carrier's;
+#   * a POSITION_INDEPENDENT_CODE other than the tree's (the carrier compiles
+#     with the executable PIE option, and Linux clang rejects a PIE mismatch);
 #   * NO_PCH on the pulp_add_test_suite or pulp_add_test_group call (or
 #     PULP_TEST_NO_PCH on a raw add_executable target). A group is one compile
 #     line, so its members cannot opt out one at a time.
@@ -141,6 +143,18 @@ function(_pulp_test_pch_carrier out std)
         # a diagnostic. The carrier must carry no definition of its own.
         target_include_directories(${_carrier} PRIVATE
             $<TARGET_PROPERTY:Catch2::Catch2,INTERFACE_INCLUDE_DIRECTORIES>)
+        # Consumers are executables, which compile with the PIE option under
+        # POSITION_INDEPENDENT_CODE, while a static library gets the PIC one.
+        # Linux clang refuses a PCH whose PIE setting differs ("is pie differs
+        # in PCH file vs. current file"); Apple clang accepts it, so a mismatch
+        # only fails off macOS. Compile the carrier as an executable would.
+        set_target_properties(${_carrier} PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+        if(CMAKE_POSITION_INDEPENDENT_CODE AND CMAKE_CXX_COMPILE_OPTIONS_PIE)
+            target_compile_options(${_carrier} PRIVATE ${CMAKE_CXX_COMPILE_OPTIONS_PIE})
+            set_target_properties(${_carrier} PROPERTIES PULP_TEST_PCH_PIE ON)
+        else()
+            set_target_properties(${_carrier} PROPERTIES PULP_TEST_PCH_PIE OFF)
+        endif()
         if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             # Without this clang stamps the build time into the .pch, so a
             # regenerated PCH differs byte-for-byte and every consumer misses
@@ -355,6 +369,15 @@ function(_pulp_test_pch_classify out target)
     endforeach()
     if(NOT "${_ext}" STREQUAL "${_carrier_ext}")
         set(${out} "skip\tcxx-extensions:${_ext}" PARENT_SCOPE)
+        return()
+    endif()
+    # The carrier compiles as a position-independent executable when the tree
+    # sets CMAKE_POSITION_INDEPENDENT_CODE; a consumer that overrides that has
+    # a different PIE setting, which Linux clang rejects.
+    get_target_property(_pic ${target} POSITION_INDEPENDENT_CODE)
+    get_target_property(_carrier_pie ${_carrier} PULP_TEST_PCH_PIE)
+    if((_pic AND NOT _carrier_pie) OR (NOT _pic AND _carrier_pie))
+        set(${out} "skip\tposition-independent-code:${_pic}" PARENT_SCOPE)
         return()
     endif()
     get_target_property(_carrier_dir_opts ${_carrier} PULP_TEST_PCH_DIRECTORY_OPTIONS)
