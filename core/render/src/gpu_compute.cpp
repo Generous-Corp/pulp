@@ -28,7 +28,9 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <sstream>
 #include <string_view>
@@ -1038,17 +1040,21 @@ static constexpr wgpu::CallbackMode kAsyncCallbackMode =
 class DawnGpuCompute : public GpuCompute {
 public:
     ~DawnGpuCompute() override {
-        // Expire the liveness token first: the device-lost callback holds a
-        // weak_ptr to it and can fire during teardown (Dawn reports a destroyed
-        // device as lost), at which point `this` is already unwinding.
-        alive_.reset();
+        // Close callback publication before teardown. The callback state is
+        // shared with backend callbacks and outlives this object if Dawn reports
+        // a destroyed device as lost during teardown.
+        callback_state_->alive.store(false, std::memory_order_release);
+        destroying_ = true;
+        release_device_resources();
+    }
 
+    void release_device_resources(bool invoke_callbacks = true) {
+        std::vector<DeferredCompletion> deferred;
         // Outstanding async readbacks complete exactly once — the caller may be
         // waiting on that completion to route a block, so it fires here rather
-        // than being silently dropped. Draining first also marks each request
-        // abandoned, so a map callback that lands during teardown neither writes
-        // the caller's `dest` nor touches the pool.
-        drain_readbacks(ReadbackStatus::Failed);
+        // than being silently dropped. The callback only publishes map state;
+        // this owner thread drains and releases every Dawn handle.
+        drain_readbacks(ReadbackStatus::Failed, &deferred);
 
         // Release pool buffers before the device is torn down — their
         // destructors call into Dawn internals and need a live device.
@@ -1057,6 +1063,7 @@ public:
         conv_plans_.clear();
         batch_conv_plans_.clear();
         multi_conv_plans_.clear();
+        multi_fdl_plans_.clear();
         spectral_stack_plans_.clear();
         conv_stack_plans_.clear();
         wavenet_plans_.clear();
@@ -1083,15 +1090,34 @@ public:
         granular_pipeline_ = nullptr;
         dense_tanh_pipeline_ = nullptr;
         fft_pipeline_ = nullptr;
+        multi_fdl_mac_pipeline_ = nullptr;
+        dev_ts_qs_ = nullptr;
+        dev_ts_resolve_ = nullptr;
+        dev_ts_readback_ = nullptr;
         queue_ = nullptr;
         device_ = nullptr;
+        adapter_ = nullptr;
         instance_ = nullptr;
 #if !defined(__EMSCRIPTEN__)
         native_instance_.reset();
 #endif
+        owns_device_ = false;
+        has_timestamp_ = false;
+        initialized_.store(false, std::memory_order_release);
+
+        if (invoke_callbacks) {
+            if (initializing_) {
+                deferred_completions_.insert(deferred_completions_.end(),
+                                             std::make_move_iterator(deferred.begin()),
+                                             std::make_move_iterator(deferred.end()));
+            } else {
+                invoke_deferred_completions(deferred);
+            }
+        }
     }
 
     bool initialize_from_surface(GpuSurface& surface) override {
+        if (destroying_) return false;
         if (!surface.is_initialized()) return false;
 
         const auto surface_adapter = surface.adapter_info();
@@ -1106,15 +1132,20 @@ public:
         auto* inst = static_cast<wgpu::Instance*>(surface.dawn_instance_handle());
         if (!dev || !q || !inst) return false;
 
+        begin_initialization();
+
         device_ = *dev;
         queue_ = *q;
         instance_ = *inst;
         owns_device_ = false;
 
-        return create_pipelines();
+        const bool ok = create_pipelines();
+        finish_initialization();
+        return ok;
     }
 
     bool initialize_standalone() override {
+        if (destroying_) return false;
 #if defined(__EMSCRIPTEN__)
         // Structurally impossible in a browser, so it fails loudly instead of
         // returning a mysterious false: RequestAdapter/RequestDevice resolve only
@@ -1127,7 +1158,13 @@ public:
             "initialize_from_device()");
         return false;
 #else
-        if (!create_instance()) return false;
+        begin_initialization();
+        if (!create_instance()) {
+            finish_initialization();
+            return false;
+        }
+
+        const auto generation = device_generation();
 
         wgpu::RequestAdapterOptions opts{};
         opts.powerPreference = wgpu::PowerPreference::HighPerformance;
@@ -1147,7 +1184,10 @@ public:
                     adapter_ = std::move(result);
             });
         pump_events();
-        if (!adapter_) return false;
+        if (!adapter_) {
+            finish_initialization();
+            return false;
+        }
 
         wgpu::AdapterInfo adapter_info{};
         if (adapter_.GetInfo(&adapter_info) != wgpu::Status::Success ||
@@ -1160,6 +1200,7 @@ public:
             runtime::log_info(
                 "GpuCompute: no usable WebGPU compute adapter is available");
             adapter_ = nullptr;
+            finish_initialization();
             return false;
         }
 
@@ -1186,16 +1227,11 @@ public:
         // expire block after block with no way back.
         dev_desc.SetDeviceLostCallback(
             kAsyncCallbackMode,
-            [this, alive = std::weak_ptr<int>(alive_)](
+            [state = callback_state_, generation](
                 const wgpu::Device&, wgpu::DeviceLostReason reason,
-                wgpu::StringView msg) {
-                // Dawn reports a *destroyed* device as lost, so this can land
-                // while ~DawnGpuCompute() is unwinding. The token is expired
-                // first in the dtor, which makes that case a no-op.
-                if (alive.expired()) return;
-                const std::string text(msg.data, msg.length);
-                emit_gpu_diagnostic(GpuDiagnosticSeverity::fatal, "dawn.device_lost", text);
-                handle_device_lost(static_cast<int>(reason), text);
+                wgpu::StringView) {
+                if (!state->alive.load(std::memory_order_acquire)) return;
+                state->publish_loss(generation, static_cast<int>(reason));
             });
 
         adapter_.RequestDevice(
@@ -1205,12 +1241,17 @@ public:
                     device_ = std::move(result);
             });
         pump_events();
-        if (!device_) return false;
+        if (!device_) {
+            finish_initialization();
+            return false;
+        }
 
         queue_ = device_.GetQueue();
         owns_device_ = true;
 
-        return create_pipelines();
+        const bool ok = create_pipelines();
+        finish_initialization();
+        return ok;
 #endif
     }
 
@@ -1224,32 +1265,62 @@ public:
     // lives on the descriptor — so an adopted device's owner reports loss via
     // notify_device_lost() (in the browser, from the `device.lost` promise).
     bool initialize_from_device(void* wgpu_device) override {
-        if (!wgpu_device) return false;
+        if (destroying_ || !wgpu_device) return false;
+
+        begin_initialization();
 
         // The caller keeps ownership of the handle, so take a reference rather
         // than adopting the caller's: Acquire() would steal a refcount we do not
         // own and tear the device down under the JS side.
         device_ = wgpu::Device(static_cast<WGPUDevice>(wgpu_device));
-        if (!device_) return false;
+        if (!device_) {
+            finish_initialization();
+            return false;
+        }
 
         // Instance creation is independent of the device and is what
         // poll_readbacks() pumps natively; in the browser it is a formality (the
         // JS event loop is the event queue) but wgpuCreateInstance() is valid
         // there and costs nothing.
-        if (!instance_ && !create_instance()) return false;
+        if (!instance_ && !create_instance()) {
+            finish_initialization();
+            return false;
+        }
 
         queue_ = device_.GetQueue();
-        if (!queue_) return false;
+        if (!queue_) {
+            finish_initialization();
+            return false;
+        }
         owns_device_ = false;
-        device_lost_ = false;
-
-        return create_pipelines();
+        const bool ok = create_pipelines();
+        finish_initialization();
+        return ok;
     }
 
-    bool device_lost() const override { return device_lost_; }
+    bool device_lost() const override {
+        if (device_lost_.load(std::memory_order_acquire)) return true;
+        const auto pending = callback_state_->pending_generation.load(std::memory_order_acquire);
+        return pending != 0 && pending == device_generation();
+    }
 
-    void notify_device_lost() override {
-        handle_device_lost(-1, "reported by device owner");
+    std::uint64_t device_generation() const override {
+        return generation_.load(std::memory_order_acquire);
+    }
+
+    void notify_device_lost(std::uint64_t generation) override {
+        request_device_loss(generation, -1);
+        // Adopted-device owners call this on the same worker strand that owns
+        // submissions and readback delivery. Applying here preserves the
+        // synchronous notification contract while backend callbacks remain
+        // publish-only.
+        apply_pending_device_loss();
+    }
+
+    void notify_device_lost() override { notify_device_lost(device_generation()); }
+
+    void post_device_lost(std::uint64_t generation) override {
+        request_device_loss(generation, -1);
     }
 
     // Device loss is a state transition, not an error path. Everything in flight
@@ -1258,18 +1329,79 @@ public:
     // marked uninitialized so the owner re-acquires a device and re-prepare_*()s
     // rather than dispatching into a dead device.
     void handle_device_lost(int reason, const std::string& msg) {
-        if (device_lost_) return;
-        device_lost_ = true;
-        initialized_ = false;
+        if (device_lost_.exchange(true, std::memory_order_acq_rel)) return;
+        initialized_.store(false, std::memory_order_release);
+        emit_gpu_diagnostic(GpuDiagnosticSeverity::fatal, "dawn.device_lost", msg);
         runtime::log_error("GpuCompute: device lost (reason {}): {}", reason, msg);
         drain_readbacks(ReadbackStatus::Failed);
+    }
+
+    struct CallbackState {
+        std::atomic<bool> alive{true};
+        std::atomic<std::uint64_t> pending_generation{0};
+        std::atomic<int> pending_reason{-1};
+        mutable std::mutex loss_mutex;
+
+        void publish_loss(std::uint64_t generation, int reason) {
+            std::lock_guard<std::mutex> lock(loss_mutex);
+            if (generation > pending_generation.load(std::memory_order_relaxed)) {
+                pending_reason.store(reason, std::memory_order_relaxed);
+                pending_generation.store(generation, std::memory_order_release);
+            }
+        }
+
+        void clear_loss() {
+            std::lock_guard<std::mutex> lock(loss_mutex);
+            pending_generation.store(0, std::memory_order_release);
+        }
+
+        std::uint64_t take_loss(int& reason) {
+            std::lock_guard<std::mutex> lock(loss_mutex);
+            const auto generation = pending_generation.exchange(0, std::memory_order_acq_rel);
+            if (generation != 0) reason = pending_reason.load(std::memory_order_relaxed);
+            return generation;
+        }
+    };
+
+    struct DeferredCompletion {
+        ReadbackCallback callback;
+        ReadbackResult result;
+    };
+
+    void begin_initialization() {
+        initializing_ = true;
+        generation_.fetch_add(1, std::memory_order_acq_rel);
+        initialized_.store(false, std::memory_order_release);
+        callback_state_->clear_loss();
+        release_device_resources();
+    }
+
+    void finish_initialization() {
+        initializing_ = false;
+        auto deferred = std::move(deferred_completions_);
+        deferred_completions_.clear();
+        invoke_deferred_completions(deferred);
+    }
+
+    void request_device_loss(std::uint64_t generation, int reason) {
+        if (!callback_state_->alive.load(std::memory_order_acquire)) return;
+        if (generation != device_generation()) return;
+        callback_state_->publish_loss(generation, reason);
+    }
+
+    void apply_pending_device_loss() {
+        int reason = -1;
+        const auto pending_generation = callback_state_->take_loss(reason);
+        if (pending_generation == 0) return;
+        if (pending_generation != device_generation()) return;
+        handle_device_lost(reason, "reported by device owner");
     }
 
     // ── Compute operations ──────────────────────────────────────────────
 
     bool compute_magnitude(const float* complex_pairs, float* magnitudes,
                            uint32_t num_bins) override {
-        if (!initialized_) return false;
+        if (!ready_for_work()) return false;
 
         uint32_t input_bytes = num_bins * 2 * sizeof(float);
         uint32_t output_bytes = num_bins * sizeof(float);
@@ -1319,7 +1451,7 @@ public:
 
     bool complex_multiply(const float* a, const float* b, float* result,
                           uint32_t count) override {
-        if (!initialized_) return false;
+        if (!ready_for_work()) return false;
 
         uint32_t bytes = count * 2 * sizeof(float);
 
@@ -1367,7 +1499,7 @@ public:
 
     bool batch_magnitude(const float* complex_frames, float* magnitude_frames,
                          uint32_t bins_per_frame, uint32_t num_frames) override {
-        if (!initialized_) return false;
+        if (!ready_for_work()) return false;
 
         // Treat as one large magnitude computation — the shader is element-wise
         uint32_t total_bins = bins_per_frame * num_frames;
@@ -1396,7 +1528,7 @@ public:
     // ── GPU-resident convolution ───────────────────────────────────────────
 
     bool prepare_convolution(uint32_t n, const float* ir_spec) override {
-        if (!initialized_ || ir_spec == nullptr) return false;
+        if (!ready_for_work() || ir_spec == nullptr) return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
 
         ConvPlan plan;
@@ -1438,7 +1570,7 @@ public:
     }
 
     bool convolve(const float* in_complex, float* out_complex, uint32_t n) override {
-        if (!initialized_ || in_complex == nullptr || out_complex == nullptr) return false;
+        if (!ready_for_work() || in_complex == nullptr || out_complex == nullptr) return false;
         auto it = conv_plans_.find(n);
         if (it == conv_plans_.end()) return false;
         ConvPlan& plan = it->second;
@@ -1478,7 +1610,7 @@ public:
     }
 
     bool prepare_convolution_batch(uint32_t n, const float* ir_spec, uint32_t batch) override {
-        if (!initialized_ || ir_spec == nullptr || batch == 0) return false;
+        if (!ready_for_work() || ir_spec == nullptr || batch == 0) return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
         // Cap total packed size so batch*2*n*sizeof(float) stays within uint32_t
         // and a sane storage-buffer budget (here batch*n <= kMaxFftN → ≤32 MiB).
@@ -1520,7 +1652,7 @@ public:
 
     bool convolve_batch(const float* in_complex, float* out_complex,
                         uint32_t n, uint32_t batch) override {
-        if (!initialized_ || in_complex == nullptr || out_complex == nullptr) return false;
+        if (!ready_for_work() || in_complex == nullptr || out_complex == nullptr) return false;
         auto it = batch_conv_plans_.find(n);
         if (it == batch_conv_plans_.end() || it->second.batch != batch) return false;
         BatchConvPlan& plan = it->second;
@@ -1562,7 +1694,7 @@ public:
 
     bool prepare_multi_convolution(uint32_t n, const float* ir_specs,
                                    uint32_t num_ir) override {
-        if (!initialized_ || ir_specs == nullptr || num_ir == 0) return false;
+        if (!ready_for_work() || ir_specs == nullptr || num_ir == 0) return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
         // The batched intermediates (big_a/big_b/irspecs) are 2*num_ir*n floats
         // each — the storage-buffer-binding-limited resource. Gate on the
@@ -1649,7 +1781,7 @@ public:
 
     bool prepare_multi_fdl(uint32_t n, const float* ir_part_specs,
                            uint32_t num_ir, uint32_t num_part) override {
-        if (!initialized_ || !ir_part_specs || num_ir == 0 || num_part == 0) return false;
+        if (!ready_for_work() || !ir_part_specs || num_ir == 0 || num_part == 0) return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
 
         // ir_specs (2*n*num_ir*num_part floats) is the storage-buffer limiter.
@@ -1758,7 +1890,7 @@ public:
     bool multi_convolve_impl(const float* in_complex, const float* pan_l,
                              const float* pan_r, float* out_lr, uint32_t n,
                              uint32_t num_ir, double* gpu_ns) {
-        if (!initialized_ || !in_complex || !pan_l || !pan_r || !out_lr) return false;
+        if (!ready_for_work() || !in_complex || !pan_l || !pan_r || !out_lr) return false;
         auto it = multi_conv_plans_.find(n);
         if (it == multi_conv_plans_.end() || it->second.num_ir != num_ir) return false;
         MultiConvPlan& plan = it->second;
@@ -1833,7 +1965,7 @@ public:
     bool multi_fdl_convolve(const float* in_block, const float* pan_l,
                             const float* pan_r, float* out_block, uint32_t n,
                             uint32_t num_ir) override {
-        if (!initialized_ || !in_block || !pan_l || !pan_r || !out_block) return false;
+        if (!ready_for_work() || !in_block || !pan_l || !pan_r || !out_block) return false;
         auto it = multi_fdl_plans_.find(n);
         if (it == multi_fdl_plans_.end() || it->second.num_ir != num_ir) return false;
         MultiFdlPlan& plan = it->second;
@@ -1907,7 +2039,7 @@ public:
 
     bool prepare_spectral_stack(uint32_t n, uint32_t hop,
                                 uint32_t num_layers) override {
-        if (!initialized_ || num_layers == 0 || hop == 0) return false;
+        if (!ready_for_work() || num_layers == 0 || hop == 0) return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
         // The resident magnitude / phase buffers are num_layers*n floats — the
         // storage-buffer-binding-limited resource. Gate on the device's real
@@ -1983,7 +2115,7 @@ public:
     bool spectral_stack_set_layer(uint32_t layer, const float* mag,
                                   const float* phase, uint32_t n,
                                   uint32_t num_layers) override {
-        if (!initialized_ || !mag || !phase) return false;
+        if (!ready_for_work() || !mag || !phase) return false;
         auto it = spectral_stack_plans_.find(n);
         if (it == spectral_stack_plans_.end() || it->second.num_layers != num_layers)
             return false;
@@ -1999,7 +2131,7 @@ public:
     bool spectral_stack_render(const float* layer_weights, uint32_t num_layers,
                                float smear, float jitter, uint32_t rng_seed,
                                float* frame_out, uint32_t n) override {
-        if (!initialized_ || !layer_weights || !frame_out) return false;
+        if (!ready_for_work() || !layer_weights || !frame_out) return false;
         auto it = spectral_stack_plans_.find(n);
         if (it == spectral_stack_plans_.end() || it->second.num_layers != num_layers)
             return false;
@@ -2071,7 +2203,7 @@ public:
                             const uint32_t* dilations, uint32_t num_layers,
                             const float* weights, uint32_t weights_len,
                             uint32_t block_size, float head_scale) override {
-        if (!initialized_ || !dilations || !weights) return false;
+        if (!ready_for_work() || !dilations || !weights) return false;
         const uint32_t C = channels, K = kernel, L = num_layers, B = block_size;
         if (C == 0 || C > 64 || K == 0 || L == 0 || B == 0) return false;  // C<=64: fixed WGSL scratch
         const uint64_t per_layer = 2ull * C * C * K + 2ull * C + (uint64_t)C * C + C + (uint64_t)C * C + C;
@@ -2162,7 +2294,7 @@ public:
 
     bool conv_stack_forward(const float* in_block, float* out_block,
                             uint32_t block_size) override {
-        if (!initialized_ || !in_block || !out_block) return false;
+        if (!ready_for_work() || !in_block || !out_block) return false;
         auto it = conv_stack_plans_.find(block_size);
         if (it == conv_stack_plans_.end()) return false;
         ConvStackPlan& plan = it->second;
@@ -2214,7 +2346,7 @@ public:
                      const float* weights, uint32_t weights_len,
                      uint32_t block_size, float head_scale,
                      uint32_t instance) override {
-        if (!initialized_ || !arrays || !weights) return false;
+        if (!ready_for_work() || !arrays || !weights) return false;
         const uint32_t B = block_size;
         if (num_arrays == 0 || B == 0) return false;
 
@@ -2380,7 +2512,7 @@ public:
 
     bool wavenet_forward(const float* in_block, float* out_block,
                      uint32_t block_size, uint32_t instance) override {
-        if (!initialized_ || !in_block || !out_block) return false;
+        if (!ready_for_work() || !in_block || !out_block) return false;
         auto it = wavenet_plans_.find(wavenet_plan_key(block_size, instance));
         if (it == wavenet_plans_.end()) return false;
         WavenetPlan& plan = it->second;
@@ -2467,7 +2599,7 @@ public:
 
     bool matmul(const float* a, const float* b, float* c,
                 uint32_t m, uint32_t k, uint32_t n) override {
-        if (!initialized_ || a == nullptr || b == nullptr || c == nullptr) return false;
+        if (!ready_for_work() || a == nullptr || b == nullptr || c == nullptr) return false;
         if (m == 0u || k == 0u || n == 0u) return false;
         // Bound element counts so byte sizes stay within uint32_t and a sane
         // storage-buffer budget (≤ 2^24 elems = 64 MiB per matrix).
@@ -2506,7 +2638,7 @@ public:
 
     bool additive_synth(const float* partials, float* out, uint32_t num_partials,
                         uint32_t num_samples, float sample_rate, float t0_samples) override {
-        if (!initialized_ || partials == nullptr || out == nullptr) return false;
+        if (!ready_for_work() || partials == nullptr || out == nullptr) return false;
         if (num_partials == 0u || num_samples == 0u || sample_rate <= 0.0f) return false;
         if (static_cast<uint64_t>(num_samples) > (1u << 24) ||
             static_cast<uint64_t>(num_partials) > (1u << 22)) return false;
@@ -2552,7 +2684,7 @@ public:
 
     bool modal_strike(const float* modes, float* out, uint32_t num_modes,
                       uint32_t num_samples, float sample_rate, float t0_samples) override {
-        if (!initialized_ || modes == nullptr || out == nullptr) return false;
+        if (!ready_for_work() || modes == nullptr || out == nullptr) return false;
         if (num_modes == 0u || num_samples == 0u || sample_rate <= 0.0f) return false;
         if (static_cast<uint64_t>(num_samples) > (1u << 24) ||
             static_cast<uint64_t>(num_modes) > (1u << 22)) return false;
@@ -2598,7 +2730,7 @@ public:
     bool granular_cloud(const float* grains, const float* source, float* out,
                         uint32_t num_grains, uint32_t source_len,
                         uint32_t num_samples) override {
-        if (!initialized_ || grains == nullptr || source == nullptr || out == nullptr) return false;
+        if (!ready_for_work() || grains == nullptr || source == nullptr || out == nullptr) return false;
         if (num_grains == 0u || source_len == 0u || num_samples == 0u) return false;
         if (static_cast<uint64_t>(num_samples) > (1u << 24) ||
             static_cast<uint64_t>(source_len) > (1u << 24) ||
@@ -2634,7 +2766,7 @@ public:
 
     bool dense_tanh(const float* input, const float* weights, const float* bias,
                     float* output, uint32_t in_dim, uint32_t out_dim) override {
-        if (!initialized_ || !input || !weights || !bias || !output) return false;
+        if (!ready_for_work() || !input || !weights || !bias || !output) return false;
         if (in_dim == 0u || out_dim == 0u) return false;
         const uint64_t we = static_cast<uint64_t>(in_dim) * out_dim;
         if (we > (1u << 24) || in_dim > (1u << 20) || out_dim > (1u << 20)) return false;
@@ -3034,7 +3166,7 @@ public:
                                      uint32_t num_bins,
                                      std::chrono::microseconds deadline,
                                      ReadbackCallback on_complete) override {
-        if (!initialized_ || !complex_pairs || !magnitudes || num_bins == 0
+        if (!ready_for_work() || !complex_pairs || !magnitudes || num_bins == 0
             || !on_complete) {
             return 0;
         }
@@ -3090,7 +3222,7 @@ public:
                                   uint32_t n, uint32_t batch,
                                   std::chrono::microseconds deadline,
                                   ReadbackCallback on_complete) override {
-        if (!initialized_ || !in_complex || !out_complex || !on_complete) return 0;
+        if (!ready_for_work() || !in_complex || !out_complex || !on_complete) return 0;
         auto it = batch_conv_plans_.find(n);
         if (it == batch_conv_plans_.end() || it->second.batch != batch) return 0;
         if (readbacks_at_cap()) return 0;
@@ -3198,7 +3330,11 @@ public:
         max_readbacks_in_flight_ = (max_in_flight == 0) ? 1 : max_in_flight;
     }
 
-    AsyncStats async_stats() const override { return *stats_; }
+    AsyncStats async_stats() const override {
+        auto snapshot = *stats_;
+        snapshot.map_resolves = map_resolves_->load(std::memory_order_relaxed);
+        return snapshot;
+    }
 
     // ── Kernel-source seam ──────────────────────────────────────────────
 
@@ -3224,6 +3360,7 @@ public:
     }
 
     std::size_t poll_readbacks() override {
+        apply_pending_device_loss();
         // A completion callback that polls again would re-enter the queue while
         // it is being drained; the outer poll is already draining everything
         // that is ready, so the inner call has nothing to do.
@@ -3238,11 +3375,12 @@ public:
         // passed either way, and the substitute has already gone out.
         const auto now = std::chrono::steady_clock::now();
         pump_events();
+        apply_pending_device_loss();
 
         while (!async_readbacks_.empty()) {
             auto req = async_readbacks_.front();
 
-            if (!req->resolved && now < req->deadline) {
+            if (!req->resolved.load(std::memory_order_acquire) && now < req->deadline) {
                 // In-order delivery: a request whose map has not landed holds the
                 // queue until it resolves or its deadline passes. The deadline is
                 // what makes that bounded — the queue can never wedge.
@@ -3254,14 +3392,15 @@ public:
                 // Late. `dest` is never written; a map that is still pending must
                 // not go back on the free list where a later acquire() could hand
                 // it out mid-map, so the pool drops its reference instead.
-                req->abandoned = true;
-                if (req->resolved && req->ok) req->buffer.Unmap();
+                if (req->resolved.load(std::memory_order_acquire) &&
+                    req->ok.load(std::memory_order_acquire))
+                    req->buffer.Unmap();
                 if (pool_) pool_->discard(req->buffer);
                 complete(*req, ReadbackStatus::Expired, 0);
                 continue;
             }
 
-            const void* data = req->ok
+            const void* data = req->ok.load(std::memory_order_acquire)
                 ? req->buffer.GetConstMappedRange(0, req->size)
                 : nullptr;
             if (!data) {
@@ -3299,12 +3438,12 @@ private:
     std::unique_ptr<dawn::native::Instance> native_instance_;
 #endif
     bool owns_device_ = false;
-    bool device_lost_ = false;
-
-    // Liveness token for callbacks that outlive this object (the device-lost
-    // callback lives on the device, which Dawn may report as lost while it is
-    // being destroyed). Expired first in the dtor.
-    std::shared_ptr<int> alive_ = std::make_shared<int>(0);
+    std::atomic<bool> device_lost_{false};
+    std::atomic<std::uint64_t> generation_{0};
+    std::shared_ptr<CallbackState> callback_state_ = std::make_shared<CallbackState>();
+    bool initializing_ = false;
+    bool destroying_ = false;
+    std::vector<DeferredCompletion> deferred_completions_;
     bool has_timestamp_ = false;  // TimestampQuery feature enabled on device_
 
     // Device-level 2-slot timestamp probe, shared by any op that reports
@@ -3661,6 +3800,7 @@ private:
 
         has_timestamp_ = device_.HasFeature(wgpu::FeatureName::TimestampQuery);
 
+        device_lost_.store(false, std::memory_order_release);
         initialized_ = true;
         runtime::log_info("GpuCompute: pipelines created (device shared: {})",
             !owns_device_);
@@ -3869,7 +4009,7 @@ private:
                  float sign, bool normalize, double* gpu_ns = nullptr) {
         // kMaxFftN (file scope) rejects transforms that would overflow the
         // byte count and under-allocate GPU buffers.
-        if (!initialized_ || !complex_in || !complex_out) return false;
+        if (!ready_for_work() || !complex_in || !complex_out) return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
         if (gpu_ns) *gpu_ns = -1.0;
 
@@ -4155,10 +4295,8 @@ private:
         wgpu::Buffer buffer;
         std::chrono::steady_clock::time_point deadline;
         ReadbackCallback on_complete;
-        bool resolved = false;    // the map callback has fired
-        bool ok = false;          // ... and reported Success
-        bool abandoned = false;   // completed without the map: a late map must
-                                  // not write `dest` or touch the pool
+        std::atomic<bool> resolved{false}; // the map callback has fired
+        std::atomic<bool> ok{false};       // ... and reported Success
     };
 
     void complete(AsyncReadback& req, ReadbackStatus status, uint32_t bytes) {
@@ -4173,13 +4311,30 @@ private:
         cb(ReadbackResult{req.id, status, bytes});
     }
 
-    void drain_readbacks(ReadbackStatus status) {
-        while (!async_readbacks_.empty()) {
-            auto req = async_readbacks_.front();
-            async_readbacks_.pop_front();
-            req->abandoned = true;
+    void drain_readbacks(ReadbackStatus status,
+                         std::vector<DeferredCompletion>* deferred = nullptr) {
+        // Detach the pre-loss set before invoking user callbacks. A callback may
+        // reinitialize the device and submit replacement work; that work belongs
+        // to the replacement generation and must not be consumed by this drain.
+        auto pending = std::move(async_readbacks_);
+        async_readbacks_.clear();
+        while (!pending.empty()) {
+            auto req = pending.front();
+            pending.pop_front();
             if (pool_) pool_->discard(req->buffer);
-            complete(*req, status, 0);
+            if (deferred && req->on_complete) {
+                if (status == ReadbackStatus::Expired) ++stats_->expired;
+                else if (status == ReadbackStatus::Failed) ++stats_->failed;
+                deferred->push_back({std::move(req->on_complete), {req->id, status, 0}});
+            } else {
+                complete(*req, status, 0);
+            }
+        }
+    }
+
+    static void invoke_deferred_completions(std::vector<DeferredCompletion>& deferred) {
+        for (auto& completion : deferred) {
+            if (completion.callback) completion.callback(completion.result);
         }
     }
 
@@ -4187,6 +4342,11 @@ private:
     // buffer is acquired, so a rejected submit costs nothing.
     bool readbacks_at_cap() const {
         return async_readbacks_.size() >= max_readbacks_in_flight_;
+    }
+
+    bool ready_for_work() {
+        apply_pending_device_loss();
+        return initialized_.load(std::memory_order_acquire);
     }
 
     // Map `buffer` without blocking. Each in-flight request owns its own staging
@@ -4226,16 +4386,15 @@ private:
         ++stats_->map_async_calls;
         buffer.MapAsync(wgpu::MapMode::Read, 0, size,
             kAsyncCallbackMode,
-            [req, stats = std::weak_ptr<AsyncStats>(stats_)](
+            [req, resolves = std::weak_ptr<std::atomic<uint64_t>>(map_resolves_)](
                 wgpu::MapAsyncStatus status, wgpu::StringView) {
-                req->resolved = true;
-                req->ok = (status == wgpu::MapAsyncStatus::Success);
-                if (auto s = stats.lock()) ++s->map_resolves;
-                if (!req->abandoned) return;
-                // The deadline already fired: poll_readbacks() has delivered the
-                // completion and discarded the buffer from the pool. Release the
-                // map so the handle can be torn down cleanly.
-                if (req->ok) req->buffer.Unmap();
+                req->ok.store(status == wgpu::MapAsyncStatus::Success,
+                              std::memory_order_release);
+                req->resolved.store(true, std::memory_order_release);
+                if (auto counter = resolves.lock()) counter->fetch_add(1, std::memory_order_relaxed);
+                // The owner thread performs Unmap/discard. The callback only
+                // publishes completion, so it cannot race poll_readbacks() or
+                // teardown through the Dawn buffer handle.
             });
 
         return req->id;
@@ -4250,6 +4409,8 @@ private:
     // outlive this object (a map on a shared device resolves from whatever pumps
     // the queue next); the callback holds a weak_ptr and no-ops if it is gone.
     std::shared_ptr<AsyncStats> stats_ = std::make_shared<AsyncStats>();
+    std::shared_ptr<std::atomic<uint64_t>> map_resolves_ =
+        std::make_shared<std::atomic<uint64_t>>(0);
 
 #if defined(__EMSCRIPTEN__)
     // There is no correct blocking readback in a browser, so there is no browser

@@ -2,6 +2,7 @@
 
 #include <pulp/render/gpu_surface.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -62,7 +63,7 @@ public:
     /// Returns false on a null handle or pipeline-creation failure.
     virtual bool initialize_from_device(void* wgpu_device) = 0;
 
-    bool is_initialized() const { return initialized_; }
+    bool is_initialized() const { return initialized_.load(std::memory_order_acquire); }
 
     /// True once the WebGPU device has been lost. Device loss is normal — a
     /// browser tab can lose its device at any time — so it is reported as state,
@@ -71,14 +72,33 @@ public:
     /// expected to re-acquire a device and re-`prepare_*`.
     virtual bool device_lost() const = 0;
 
+    /// Monotonic device generation. A generation changes at every initialize
+    /// attempt, so an owner can tag an adopted-device loss notification and
+    /// reject a callback from an older device after reinitialization.
+    virtual std::uint64_t device_generation() const { return 0; }
+
     /// Report that an ADOPTED device (initialize_from_device /
     /// initialize_from_surface) has been lost. A device-lost callback can only be
     /// installed on the device *descriptor*, i.e. at creation, so a device this
     /// object did not create cannot observe its own loss — its owner must say so.
     /// In the browser that owner is the worker's JS, which awaits `device.lost`.
     /// Idempotent. A device created by initialize_standalone() observes loss on
-    /// its own and needs no call.
+    /// its own and needs no call. The owner must call this on the instance's
+    /// worker strand; backend callbacks use the generation-tagged overload only
+    /// to publish a transition and never drain readbacks directly.
     virtual void notify_device_lost() = 0;
+
+    virtual void notify_device_lost(std::uint64_t generation) {
+        if (generation == device_generation()) notify_device_lost();
+    }
+
+    /// Publish a loss from a backend callback without touching readback queues
+    /// or invoking user completions. The owner strand applies the transition on
+    /// its next operation. Implementations with asynchronous callbacks should
+    /// override this method rather than calling notify_device_lost() there.
+    virtual void post_device_lost(std::uint64_t generation) {
+        notify_device_lost(generation);
+    }
 
     // ── Compute operations ──────────────────────────────────────────────
 
@@ -687,7 +707,7 @@ public:
 #endif
 
 protected:
-    bool initialized_ = false;
+    std::atomic<bool> initialized_{false};
 };
 
 } // namespace pulp::render

@@ -711,3 +711,74 @@ TEST_CASE("A GPU device is not lost until it is",
     gpu->notify_device_lost();
     REQUIRE(gpu->device_lost());
 }
+
+TEST_CASE("GPU device loss notifications are generation-scoped across reinitialization",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu) SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+
+    const auto first_generation = gpu->device_generation();
+    REQUIRE(first_generation != 0);
+
+    gpu->notify_device_lost(first_generation - 1);
+    REQUIRE_FALSE(gpu->device_lost());
+    REQUIRE(gpu->is_initialized());
+
+    gpu->notify_device_lost(first_generation);
+    REQUIRE(gpu->device_lost());
+    REQUIRE_FALSE(gpu->is_initialized());
+
+    REQUIRE(gpu->initialize_standalone());
+    const auto second_generation = gpu->device_generation();
+    REQUIRE(second_generation > first_generation);
+    REQUIRE_FALSE(gpu->device_lost());
+    REQUIRE(gpu->is_initialized());
+
+    std::vector<float> recovered_dest(kBins, -1.0f);
+    GpuCompute::ReadbackResult recovered_result{};
+    REQUIRE(gpu->compute_magnitude_async(
+                pairs.data(), recovered_dest.data(), kBins, std::chrono::seconds(2),
+                [&recovered_result](const GpuCompute::ReadbackResult& r) {
+                    recovered_result = r;
+                }) != 0);
+    drain(*gpu);
+    REQUIRE(recovered_result.status == GpuCompute::ReadbackStatus::Success);
+
+    // A late callback from the prior device must not poison the replacement.
+    gpu->notify_device_lost(first_generation);
+    REQUIRE_FALSE(gpu->device_lost());
+    REQUIRE(gpu->is_initialized());
+
+    gpu->notify_device_lost(second_generation);
+    REQUIRE(gpu->device_lost());
+    REQUIRE_FALSE(gpu->is_initialized());
+}
+
+TEST_CASE("GPU loss completion may reinitialize without tearing down replacement resources",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu) SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> dest(kBins, -1.0f);
+    bool completed = false;
+    bool reinitialized = false;
+
+    const auto generation = gpu->device_generation();
+    REQUIRE(gpu->compute_magnitude_async(
+                pairs.data(), dest.data(), kBins, std::chrono::seconds(2),
+                [&](const GpuCompute::ReadbackResult& result) {
+                    completed = result.status == GpuCompute::ReadbackStatus::Failed;
+                    reinitialized = gpu->initialize_standalone();
+                }) != 0);
+
+    gpu->notify_device_lost(generation);
+    REQUIRE(completed);
+    REQUIRE(reinitialized);
+    REQUIRE(gpu->is_initialized());
+    REQUIRE(gpu->device_generation() > generation);
+}
