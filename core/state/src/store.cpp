@@ -531,12 +531,12 @@ StateStore::capture_feedback_baseline(ParamID id) const noexcept {
     const auto it = id_to_index_.find(id);
     if (it == id_to_index_.end())
         return std::nullopt;
-    return ParameterFeedbackBaseline{this, id, values_[it->second].versioned_value()};
+    return ParameterFeedbackBaseline{id, values_[it->second].versioned_value()};
 }
 
 ConditionalParameterApplyResult
 StateStore::set_value_rt_if_baseline(const ParameterFeedbackBaseline& baseline, float value) {
-    if (!baseline.valid() || baseline.owner_ != this)
+    if (!baseline.valid())
         return {ConditionalParameterApplyStatus::InvalidParameter, 0};
     const auto it = id_to_index_.find(baseline.id());
     if (it == id_to_index_.end())

@@ -637,22 +637,11 @@ class ParamValue {
         return revision <= std::numeric_limits<std::uint32_t>::max() - writes;
     }
 
-    /// Compatibility name retained for existing callers. Preserve its
-    /// generation ordering contract while the packed CAS remains the value
-    /// publication boundary.
+    /// Compatibility name retained for existing callers. The argument is
+    /// recorded in the diagnostic mirror; ordering is provided solely by the
+    /// packed per-parameter revision CAS.
     bool set_versioned_if_newer(float value, std::uint64_t generation,
                                 std::uint32_t max_attempts) {
-        auto committed = committed_generation_.load(std::memory_order_relaxed);
-        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-            if (committed >= generation)
-                return false;
-            if (committed_generation_.compare_exchange_strong(
-                    committed, generation, std::memory_order_relaxed,
-                    std::memory_order_relaxed))
-                break;
-        }
-        if (committed_generation_.load(std::memory_order_relaxed) != generation)
-            return false;
         return set_revisioned(value, generation, max_attempts);
     }
 
