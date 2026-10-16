@@ -119,8 +119,12 @@ def verify(args: argparse.Namespace) -> dict:
     manifest_before = digest(manifest)
     runtime_before = digest(linked_runtime)
     executable_before = digest(executable)
-    run = subprocess.run([str(executable)], capture_output=True, text=True,
-                         encoding="utf-8", timeout=30, check=False)
+    try:
+        run = subprocess.run([str(executable)], capture_output=True, text=True,
+                             encoding="utf-8", timeout=30, check=False)
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        raise ValueError(f"diagnostic_timeout_30s: {partial.strip()}") from exc
     if diagnostic_exit_disposition(run.returncode) == "provider_unavailable":
         raise RuntimeError("provider_unavailable")
     if diagnostic_exit_disposition(run.returncode) != "passed":
