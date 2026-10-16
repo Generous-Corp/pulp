@@ -202,15 +202,15 @@ struct GpuWaveNetRealtimeNode::Impl {
                c.session.slots >= 2 && c.completion_service_wait_ns <= 1'000'000 &&
                validate_gpu_wavenet_descriptor(c.session.descriptor).accepted() &&
                weights.size() == c.session.descriptor.weight_count &&
-               (c.miss_policy != MissPolicy::CpuFallback ||
-                (c.supports_cpu_fallback && fallback_prepared)) &&
+               (c.miss_policy != MissPolicy::CpuFallback || c.supports_cpu_fallback) &&
                (c.miss_policy == MissPolicy::Silence || c.miss_policy == MissPolicy::CpuFallback) &&
                epoch != UINT64_MAX && sequence < Bridge::kSequenceLimit &&
                (!include_prewarm || c.prewarm_blocks < Bridge::kSequenceLimit - sequence);
     }
     bool initialize() {
         const auto& c = config;
-        if (prepared || !valid_config(false) || channels.size() != c.channels)
+        if (prepared || !valid_config(false) || channels.size() != c.channels ||
+            (c.miss_policy == MissPolicy::CpuFallback && !fallback_prepared))
             return false;
         bridge = std::make_unique<Bridge>();
         if (!bridge->prepare({.capacity = c.capacity,
@@ -386,7 +386,6 @@ bool GpuWaveNetRealtimeNode::prepare() {
     if (!release())
         return false;
     auto& s = *impl_;
-    s.fallback_prepared = cpu_fallback_prepared();
     try {
         if (!s.valid_config())
             return false;
@@ -429,6 +428,7 @@ bool GpuWaveNetRealtimeNode::prepare() {
             }
         }
         s.sequence += s.config.prewarm_blocks;
+        s.fallback_prepared = cpu_fallback_prepared();
         if (s.initialize()) {
             s.production_provider = true;
             return true;
@@ -442,6 +442,7 @@ bool GpuWaveNetRealtimeNode::release() noexcept {
     auto& s = *impl_;
     s.prepared = false;
     s.production_provider = false;
+    s.fallback_prepared = false;
     if (s.bridge) {
         s.sequence = s.bridge->next_sequence();
         s.bridge->request_recovery(detail::SharedIoRecoveryReason::OfflineFence);
@@ -661,8 +662,10 @@ bool detail::WaveNetRealtimeTestAccess::prepare(
     if (!node.release())
         return false;
     node.impl_->sequence = first_sequence;
-    node.impl_->fallback_prepared = node.cpu_fallback_prepared();
+    if (!node.impl_->valid_config())
+        return false;
     node.impl_->channels = std::move(channels);
-    return node.impl_->valid_config() && node.impl_->initialize();
+    node.impl_->fallback_prepared = node.cpu_fallback_prepared();
+    return node.impl_->initialize();
 }
 } // namespace pulp::gpu_audio
