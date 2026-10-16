@@ -634,6 +634,27 @@ def geometry_metrics(
     return result
 
 
+def geometry_metrics_with_registration(
+    raw_matches: list[tuple[BrowserNode, NativeNode, float]],
+    registered_matches: list[tuple[BrowserNode, NativeNode, float]],
+    registration: dict[str, float],
+) -> dict[str, Any]:
+    """Return canonical page-space geometry plus an explicit diagnostic view.
+
+    Promotion and aggregate scores must remain based on the raw page-space
+    comparison.  The registered view explains an authenticated panel-local
+    frame contract without allowing that registration to hide a placement
+    mismatch from callers consuming the canonical score.
+    """
+    raw_geometry = geometry_metrics(raw_matches)
+    raw_geometry["registration"] = {
+        "x": 0.0, "y": 0.0, "source": "page-space",
+    }
+    raw_geometry["registered_geometry"] = geometry_metrics(registered_matches)
+    raw_geometry["registration_applied"] = registration
+    return raw_geometry
+
+
 def register_browser_nodes_to_native_frame(
     nodes: list[BrowserNode], capture: dict[str, Any],
     native_capture: dict[str, Any],
@@ -1271,10 +1292,10 @@ def compare_one(
     recognition = source_recognition(source.read_text(encoding="utf-8", errors="replace"))
     browser_snapshot = json.loads((browser_dir / "dom-snapshot.json").read_text(encoding="utf-8"))
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
-    browser_flat = browser_nodes(browser_snapshot)
+    browser_flat_raw = browser_nodes(browser_snapshot)
     native_flat = native_nodes(native_doc, native_layout_doc)
     browser_flat, geometry_registration = register_browser_nodes_to_native_frame(
-        browser_flat, capture, native_capture)
+        browser_flat_raw, capture, native_capture)
     comparison = structural_comparison(browser_flat, native_flat)
     matches = comparison["matches"]
     missing = comparison["missing"]
@@ -1319,8 +1340,12 @@ def compare_one(
             for browser, native, score in matches
         ],
     }
-    geometry = geometry_metrics(matches)
-    geometry["registration"] = geometry_registration
+    # Keep page-space geometry canonical. Registered panel-space geometry is a
+    # diagnostic view of the intentional panel-local contract and must never
+    # silently turn a placement mismatch into a promotion pass.
+    raw_comparison = structural_comparison(browser_flat_raw, native_flat)
+    geometry = geometry_metrics_with_registration(
+        raw_comparison["matches"], matches, geometry_registration)
     typography = typography_metrics(matches)
     visual = visual_metrics(
         browser_dir / "browser.png",

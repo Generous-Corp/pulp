@@ -31,6 +31,8 @@ BACKGROUND_SPEC.loader.exec_module(background)
 from importer_differential.core import (  # noqa: E402
     BrowserNode,
     LabError,
+    NativeNode,
+    geometry_metrics_with_registration,
     register_browser_nodes_to_native_frame,
 )
 
@@ -121,6 +123,22 @@ class HelperScoringTests(unittest.TestCase):
         with self.assertRaises(LabError):
             register_browser_nodes_to_native_frame(
                 [], self._capture(24.0, 24.0), self._capture(0.0, 0.0))
+
+    def test_registered_geometry_is_diagnostic_and_raw_geometry_stays_canonical(self) -> None:
+        browser = BrowserNode(
+            1, "main", -1, "", {}, (24.0, 24.0, 320.0, 18.0), {})
+        native = NativeNode(
+            "browser:main", "element", "main", "", None, {},
+            (0.0, 0.0, 320.0, 18.0))
+        raw_match = [(browser, native, 1.0)]
+        registered_browser = BrowserNode(
+            1, "main", -1, "", {}, (0.0, 0.0, 320.0, 18.0), {})
+        registered = [(registered_browser, native, 1.0)]
+        geometry = geometry_metrics_with_registration(
+            raw_match, registered, {"x": -24.0, "y": -24.0})
+        self.assertLess(geometry["score"], 1.0)
+        self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
+        self.assertEqual(geometry["registration_applied"]["x"], -24.0)
 
     @staticmethod
     def _panel_pixels(*, shift: int = 0, fill: tuple[int, int, int] = (220, 220, 220),
