@@ -1034,6 +1034,11 @@ if(UNIX)
     add_test(NAME pulp-test-timeout-scaling
         COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_test_timeout.cmake)
     set_tests_properties(pulp-test-timeout-scaling PROPERTIES TIMEOUT 60)
+    # Coverage flags are driver-specific: clang-cl rejects -g1, so the
+    # Windows coverage leg broke on every -Werror dependency.
+    add_test(NAME pulp-coverage-instrumentation-flags
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_instrumentation_flags.cmake)
+    set_tests_properties(pulp-coverage-instrumentation-flags PROPERTIES TIMEOUT 60)
     # Fail at CONFIGURE if the script is not where the registration says.
     # A wrong path here does not fail configure on its own -- it produces
     # `***Failed 0.00 sec  No such file or directory` at run time, which reads
