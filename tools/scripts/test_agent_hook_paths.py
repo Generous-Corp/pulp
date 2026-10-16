@@ -39,6 +39,7 @@ def run_git(cwd: Path, *arguments: str) -> None:
         text=True,
         capture_output=True,
         check=True,
+        encoding="utf-8",
     )
 
 
@@ -103,6 +104,7 @@ def check_post_tool_input_channels() -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
         )
         assert process.stdin is not None
         try:
@@ -141,6 +143,7 @@ def check_post_tool_input_channels() -> None:
             capture_output=True,
             timeout=15,
             check=False,
+            encoding="utf-8",
         )
         if result.returncode != 0 or expected not in result.stdout:
             raise RuntimeError(
@@ -150,9 +153,37 @@ def check_post_tool_input_channels() -> None:
             )
 
 
+def check_plugin_hooks_without_plugin_root() -> None:
+    """A missing plugin environment must not surface as an opaque exit 127."""
+    hooks_path = ROOT / "hooks/hooks.json"
+    environment = os.environ.copy()
+    environment.pop("CLAUDE_PLUGIN_ROOT", None)
+    with tempfile.TemporaryDirectory(prefix="pulp-plugin-hook-no-root-") as temp:
+        for hook in configured_hooks(hooks_path):
+            result = subprocess.run(
+                str(hook["command"]),
+                cwd=temp,
+                env=environment,
+                shell=True,
+                text=True,
+                input="{}",
+                capture_output=True,
+                timeout=15,
+                check=False,
+                encoding="utf-8",
+            )
+            if result.returncode != 0 or result.stdout or result.stderr:
+                raise RuntimeError(
+                    "Claude plugin hook failed without CLAUDE_PLUGIN_ROOT: "
+                    f"exit={result.returncode}, command={hook['command']!r}, "
+                    f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+                )
+
+
 def main() -> int:
     try:
         check_post_tool_input_channels()
+        check_plugin_hooks_without_plugin_root()
     except RuntimeError as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
@@ -196,6 +227,7 @@ def main() -> int:
             text=True,
             capture_output=True,
             check=True,
+            encoding="utf-8",
         ).stdout.strip()
         if Path(resolved).resolve() != superproject.resolve():
             print(
@@ -223,6 +255,7 @@ def main() -> int:
                         capture_output=True,
                         timeout=15,
                         check=False,
+                        encoding="utf-8",
                     )
                     if result.returncode != 0:
                         env_case = "unset" if project_dir is None else "nested"
