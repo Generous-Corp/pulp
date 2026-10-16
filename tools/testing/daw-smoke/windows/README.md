@@ -25,6 +25,11 @@ screenshot paths. Supplying `-ContextX/-ContextY` adds a right-click
 context-menu capture. `-ParamIndex` drives one real REAPER parameter; `-1`
 records that modulation was not attempted.
 
+REAPER's Windows scan cache stores the plug-in basename and loader metadata,
+not the scan directory. The packet therefore requires the exact staged
+basename and plug-in name in the cache, then records the staged path and hash
+as the separate artifact binding.
+
 ## Audio and performance companion gates
 
 The GUI smoke does not assert audio correctness. For the same exact artifact,

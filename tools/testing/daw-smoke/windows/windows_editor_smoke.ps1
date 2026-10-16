@@ -54,6 +54,7 @@ $sha = (Get-ChildItem -LiteralPath $staged -File -Recurse | Sort-Object FullName
 $status = Join-Path $run 'status.txt'; $reaperOut = Join-Path $run 'reaper.out.txt'
 $lua = Join-Path $PSScriptRoot 'windows_editor_smoke.lua'
 $ini = Join-Path $portable 'reaper.ini'
+$expectedCacheEntry = [IO.Path]::GetFileName($staged)
 @("[REAPER]","vstfullstate=33605","vstpath64=$scan","clap_path_windows-x86_64=$scan","lastproject=","loadlastproj=0") | Set-Content -LiteralPath $ini -Encoding ascii
 
 $env:PULP_DAW_SMOKE_FX = "$(if ($Format -eq 'vst3') { 'VST3:' } else { 'CLAP:' })$PluginName"
@@ -70,7 +71,10 @@ try {
   while ((Get-Date) -lt $deadline) {
     $cacheFiles = Get-ChildItem -LiteralPath $portable -Recurse -File -ErrorAction SilentlyContinue |
       Where-Object { $_.Name -match '(?i)reaper-(vstplugins|clap).*\.ini$' }
-    if ($cacheFiles.Count -gt 0) { break }
+    $cacheText = ($cacheFiles | Get-Content -ErrorAction SilentlyContinue) -join "`n"
+    # REAPER stores the plug-in basename and loader metadata, not the scan
+    # directory. Wait for the exact entry instead of an unrelated cache file.
+    if ($cacheText -match [regex]::Escape($expectedCacheEntry)) { break }
     Start-Sleep -Milliseconds 250
   }
   if ($warm -and -not $warm.HasExited) { Stop-Process -Id $warm.Id -Force }
@@ -97,10 +101,9 @@ try {
     Get-Content -ErrorAction SilentlyContinue
   $qualified = "$(if ($Format -eq 'vst3') { 'VST3:' } else { 'CLAP:' })$PluginName"
   $cacheText = ($cache -join "`n")
-  $cachePath = ($scan -replace '\\','/')
   $cacheHasName = $cacheText -match [regex]::Escape($PluginName)
-  $cacheHasPath = ($cacheText -replace '\\','/') -match [regex]::Escape($cachePath)
-  if (-not $cacheHasName -or -not $cacheHasPath) { Fail-Inconclusive 'portable REAPER scan cache lacks the exact staged plugin path/name; host insertion is unproven' }
+  $cacheHasEntry = $cacheText -match [regex]::Escape($expectedCacheEntry)
+  if (-not $cacheHasName -or -not $cacheHasEntry) { Fail-Inconclusive "portable REAPER scan cache lacks the exact plugin entry/name ($expectedCacheEntry); host insertion is unproven" }
   if ($hostStatus -match 'FX_NOT_FOUND|TRACK_NOT_AVAILABLE') { Fail-Inconclusive $hostStatus }
   if ($hostStatus -notmatch 'FX_SHOWN') { Fail-Inconclusive "unexpected host status: $hostStatus" }
 
@@ -144,7 +147,7 @@ public static class Mouse {
     $bmp = New-Object Drawing.Bitmap($screen.Bounds.Width,$screen.Bounds.Height); $g=[Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($screen.Bounds.Location,[Drawing.Point]::Empty,$screen.Bounds.Size); $g.Dispose(); $bmp.Save((Join-Path $run 'editor-context-menu.png'),[Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose(); [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
   }
   if ($ContextX -ge 0 -and $ContextY -ge 0 -and -not (Test-Path (Join-Path $run 'editor-context-menu.png'))) { Fail-Inconclusive 'context-menu screenshot was requested but not captured' }
-  @{format=$Format; plugin=$plugin; staged=$staged; plugin_sha256=$sha; host_status=$hostStatus; scan_cache_match=$true; scan_cache_path_match=$cacheHasPath; window_title=$windowTitle; screenshot_before=(Test-Path (Join-Path $run 'editor-before-context.png')); context_screenshot=(Test-Path (Join-Path $run 'editor-context-menu.png')); verdict='PASS'} | ConvertTo-Json | Set-Content (Join-Path $run 'receipt.json')
+  @{format=$Format; plugin=$plugin; staged=$staged; plugin_sha256=$sha; host_status=$hostStatus; scan_cache_match=$true; scan_cache_entry=$expectedCacheEntry; scan_cache_name_match=$cacheHasName; scan_cache_path_match='not_serialized_by_reaper'; window_title=$windowTitle; screenshot_before=(Test-Path (Join-Path $run 'editor-before-context.png')); context_screenshot=(Test-Path (Join-Path $run 'editor-context-menu.png')); verdict='PASS'} | ConvertTo-Json | Set-Content (Join-Path $run 'receipt.json')
   Write-Output "PASS evidence=$run"
   exit $ExitPass
 } finally {
