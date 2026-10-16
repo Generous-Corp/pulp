@@ -383,11 +383,18 @@ public:
         return d;
     }
 
+    // Host-thread witness: the allocation-free fallback is built and warmed
+    // before the transport may admit CpuFallback.
+    bool cpu_fallback_prepared() const noexcept override { return prepared_; }
+
     // Non-RT setup: create the device + upload static data here, never in process_block.
     bool prepare() override {
+        prepared_ = false;
         gpu_ = render::GpuCompute::create();
         if (!gpu_ || !gpu_->initialize_standalone()) { gpu_.reset(); return false; }
         // ... prepare Layer-1 plans (FFTs, convolution, matmul) on gpu_ ...
+        // ... build and warm the CPU fallback, then mark it prepared ...
+        prepared_ = true;
         return true;
     }
 
@@ -413,6 +420,7 @@ public:
     }
 private:
     uint32_t channels_, block_, sr_;
+    bool prepared_ = false;
     std::unique_ptr<render::GpuCompute> gpu_;
 };
 

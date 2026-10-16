@@ -77,11 +77,12 @@ public:
     /// Non-RT. Allocate/compile/upload static data here.
     virtual bool prepare() = 0;
 
-    /// Host-thread witness that the realtime CPU fallback was actually built.
-    /// A descriptor's `supports_cpu_fallback` bit is only a declaration; the
-    /// transport admits `MissPolicy::CpuFallback` after both the declaration
-    /// and this prepared witness are true. Nodes with no verified fallback
-    /// remain fail-closed and must use silence on a miss.
+    /// Host-thread witness that the realtime CPU fallback is already built
+    /// before prepare() returns. A descriptor's `supports_cpu_fallback` bit is
+    /// only a declaration; the transport admits `MissPolicy::CpuFallback`
+    /// after both the declaration and this prepared witness are true. Nodes
+    /// with no verified fallback remain fail-closed and must use silence on a
+    /// miss.
     virtual bool cpu_fallback_prepared() const noexcept {
         return false;
     }

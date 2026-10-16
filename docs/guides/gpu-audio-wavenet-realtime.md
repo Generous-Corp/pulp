@@ -5,14 +5,16 @@ shared-memory WaveNet session through `GpuAudioTransport`. It owns model metadat
 dilation arrays and weights copied at construction. There are no public Dawn,
 Metal, provider or queue handles.
 
-An application derives from the node to implement `prime_fallback()` and
-`process_cpu_fallback()`. These must advance the exact CPU model every callback
-and return the output delayed by `lead_blocks * block_size` samples. Set
-`miss_policy = CpuFallback` and `supports_cpu_fallback = true` only when both are
-implemented. The default is silence. A transport miss never executes a worker CPU
-model: the callback consumes its already prepared substitute. This removes a
-second CPU evaluation, but retains the full CPU shadow and does not establish
-CPU-offload savings.
+An application derives from the node to implement `prime_fallback()`,
+`process_cpu_fallback()`, and `cpu_fallback_prepared()`. The witness must return
+true only after the exact CPU model has been allocated and warmed during the
+host-thread prepare step. The fallback methods must advance that model every
+callback and return the output delayed by `lead_blocks * block_size` samples.
+Set `miss_policy = CpuFallback` and `supports_cpu_fallback = true` only when
+the witness and both methods are implemented. The default is silence. A
+transport miss never executes a worker CPU model: the callback consumes its
+already prepared substitute. This removes a second CPU evaluation, but retains
+the full CPU shadow and does not establish CPU-offload savings.
 
 ## Lifecycle and thread contract
 

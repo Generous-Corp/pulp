@@ -88,8 +88,8 @@ public:
     /// In the browser that owner is the worker's JS, which awaits `device.lost`.
     /// Idempotent. A device created by initialize_standalone() observes loss on
     /// its own and needs no call. The owner must call this on the instance's
-    /// worker strand; backend callbacks use the generation-tagged overload only
-    /// to publish a transition and never drain readbacks directly.
+    /// worker strand. Backend callbacks must call post_device_lost() to publish
+    /// a transition and never drain readbacks directly.
     virtual void notify_device_lost() = 0;
 
     virtual void notify_device_lost(std::uint64_t generation) {
@@ -99,12 +99,11 @@ public:
 
     /// Publish a loss from a backend callback without touching readback queues
     /// or invoking user completions. The owner strand applies the transition on
-    /// its next operation. Implementations with asynchronous callbacks should
-    /// override this method rather than calling notify_device_lost() there.
-    /// Publish-only loss reporting is overridden by backends with asynchronous
-    /// callbacks. Keep the compatibility default for existing downstream
-    /// implementations; new backends must override it so a callback thread
-    /// cannot synchronously drain queues or invoke completions.
+    /// its next operation. A backend with asynchronous callbacks must override
+    /// this method with a publish-only implementation. The compatibility
+    /// default forwards synchronously to notify_device_lost() for existing
+    /// downstream implementations, so it is only safe on the owner strand;
+    /// new backends must override it before publishing from a callback thread.
     virtual void post_device_lost(std::uint64_t generation) {
         notify_device_lost(generation);
     }
