@@ -1117,7 +1117,8 @@ public:
     }
 
     bool initialize_from_surface(GpuSurface& surface) override {
-        if (destroying_) return false;
+        if (destroying_)
+            return false;
         if (!surface.is_initialized()) return false;
 
         const auto surface_adapter = surface.adapter_info();
@@ -1145,7 +1146,8 @@ public:
     }
 
     bool initialize_standalone() override {
-        if (destroying_) return false;
+        if (destroying_)
+            return false;
 #if defined(__EMSCRIPTEN__)
         // Structurally impossible in a browser, so it fails loudly instead of
         // returning a mysterious false: RequestAdapter/RequestDevice resolve only
@@ -1227,10 +1229,10 @@ public:
         // expire block after block with no way back.
         dev_desc.SetDeviceLostCallback(
             kAsyncCallbackMode,
-            [state = callback_state_, generation](
-                const wgpu::Device&, wgpu::DeviceLostReason reason,
-                wgpu::StringView) {
-                if (!state->alive.load(std::memory_order_acquire)) return;
+            [state = callback_state_, generation](const wgpu::Device&,
+                                                  wgpu::DeviceLostReason reason, wgpu::StringView) {
+                if (!state->alive.load(std::memory_order_acquire))
+                    return;
                 state->publish_loss(generation, static_cast<int>(reason));
             });
 
@@ -1265,7 +1267,8 @@ public:
     // lives on the descriptor — so an adopted device's owner reports loss via
     // notify_device_lost() (in the browser, from the `device.lost` promise).
     bool initialize_from_device(void* wgpu_device) override {
-        if (destroying_ || !wgpu_device) return false;
+        if (destroying_ || !wgpu_device)
+            return false;
 
         begin_initialization();
 
@@ -1299,7 +1302,8 @@ public:
     }
 
     bool device_lost() const override {
-        if (device_lost_.load(std::memory_order_acquire)) return true;
+        if (device_lost_.load(std::memory_order_acquire))
+            return true;
         const auto pending = callback_state_->pending_generation.load(std::memory_order_acquire);
         return pending != 0 && pending == device_generation();
     }
@@ -1317,7 +1321,9 @@ public:
         apply_pending_device_loss();
     }
 
-    void notify_device_lost() override { notify_device_lost(device_generation()); }
+    void notify_device_lost() override {
+        notify_device_lost(device_generation());
+    }
 
     void post_device_lost(std::uint64_t generation) override {
         request_device_loss(generation, -1);
@@ -1329,7 +1335,8 @@ public:
     // marked uninitialized so the owner re-acquires a device and re-prepare_*()s
     // rather than dispatching into a dead device.
     void handle_device_lost(int reason, const std::string& msg) {
-        if (device_lost_.exchange(true, std::memory_order_acq_rel)) return;
+        if (device_lost_.exchange(true, std::memory_order_acq_rel))
+            return;
         initialized_.store(false, std::memory_order_release);
         emit_gpu_diagnostic(GpuDiagnosticSeverity::fatal, "dawn.device_lost", msg);
         runtime::log_error("GpuCompute: device lost (reason {}): {}", reason, msg);
@@ -1358,7 +1365,8 @@ public:
         std::uint64_t take_loss(int& reason) {
             std::lock_guard<std::mutex> lock(loss_mutex);
             const auto generation = pending_generation.exchange(0, std::memory_order_acq_rel);
-            if (generation != 0) reason = pending_reason.load(std::memory_order_relaxed);
+            if (generation != 0)
+                reason = pending_reason.load(std::memory_order_relaxed);
             return generation;
         }
     };
@@ -1384,16 +1392,20 @@ public:
     }
 
     void request_device_loss(std::uint64_t generation, int reason) {
-        if (!callback_state_->alive.load(std::memory_order_acquire)) return;
-        if (generation != device_generation()) return;
+        if (!callback_state_->alive.load(std::memory_order_acquire))
+            return;
+        if (generation != device_generation())
+            return;
         callback_state_->publish_loss(generation, reason);
     }
 
     void apply_pending_device_loss() {
         int reason = -1;
         const auto pending_generation = callback_state_->take_loss(reason);
-        if (pending_generation == 0) return;
-        if (pending_generation != device_generation()) return;
+        if (pending_generation == 0)
+            return;
+        if (pending_generation != device_generation())
+            return;
         handle_device_lost(reason, "reported by device owner");
     }
 
@@ -1401,7 +1413,8 @@ public:
 
     bool compute_magnitude(const float* complex_pairs, float* magnitudes,
                            uint32_t num_bins) override {
-        if (!ready_for_work()) return false;
+        if (!ready_for_work())
+            return false;
 
         uint32_t input_bytes = num_bins * 2 * sizeof(float);
         uint32_t output_bytes = num_bins * sizeof(float);
@@ -1451,7 +1464,8 @@ public:
 
     bool complex_multiply(const float* a, const float* b, float* result,
                           uint32_t count) override {
-        if (!ready_for_work()) return false;
+        if (!ready_for_work())
+            return false;
 
         uint32_t bytes = count * 2 * sizeof(float);
 
@@ -1499,7 +1513,8 @@ public:
 
     bool batch_magnitude(const float* complex_frames, float* magnitude_frames,
                          uint32_t bins_per_frame, uint32_t num_frames) override {
-        if (!ready_for_work()) return false;
+        if (!ready_for_work())
+            return false;
 
         // Treat as one large magnitude computation — the shader is element-wise
         uint32_t total_bins = bins_per_frame * num_frames;
@@ -1528,7 +1543,8 @@ public:
     // ── GPU-resident convolution ───────────────────────────────────────────
 
     bool prepare_convolution(uint32_t n, const float* ir_spec) override {
-        if (!ready_for_work() || ir_spec == nullptr) return false;
+        if (!ready_for_work() || ir_spec == nullptr)
+            return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
 
         ConvPlan plan;
@@ -1570,7 +1586,8 @@ public:
     }
 
     bool convolve(const float* in_complex, float* out_complex, uint32_t n) override {
-        if (!ready_for_work() || in_complex == nullptr || out_complex == nullptr) return false;
+        if (!ready_for_work() || in_complex == nullptr || out_complex == nullptr)
+            return false;
         auto it = conv_plans_.find(n);
         if (it == conv_plans_.end()) return false;
         ConvPlan& plan = it->second;
@@ -1610,7 +1627,8 @@ public:
     }
 
     bool prepare_convolution_batch(uint32_t n, const float* ir_spec, uint32_t batch) override {
-        if (!ready_for_work() || ir_spec == nullptr || batch == 0) return false;
+        if (!ready_for_work() || ir_spec == nullptr || batch == 0)
+            return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
         // Cap total packed size so batch*2*n*sizeof(float) stays within uint32_t
         // and a sane storage-buffer budget (here batch*n <= kMaxFftN → ≤32 MiB).
@@ -1652,7 +1670,8 @@ public:
 
     bool convolve_batch(const float* in_complex, float* out_complex,
                         uint32_t n, uint32_t batch) override {
-        if (!ready_for_work() || in_complex == nullptr || out_complex == nullptr) return false;
+        if (!ready_for_work() || in_complex == nullptr || out_complex == nullptr)
+            return false;
         auto it = batch_conv_plans_.find(n);
         if (it == batch_conv_plans_.end() || it->second.batch != batch) return false;
         BatchConvPlan& plan = it->second;
@@ -1694,7 +1713,8 @@ public:
 
     bool prepare_multi_convolution(uint32_t n, const float* ir_specs,
                                    uint32_t num_ir) override {
-        if (!ready_for_work() || ir_specs == nullptr || num_ir == 0) return false;
+        if (!ready_for_work() || ir_specs == nullptr || num_ir == 0)
+            return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
         // The batched intermediates (big_a/big_b/irspecs) are 2*num_ir*n floats
         // each — the storage-buffer-binding-limited resource. Gate on the
@@ -1781,7 +1801,8 @@ public:
 
     bool prepare_multi_fdl(uint32_t n, const float* ir_part_specs,
                            uint32_t num_ir, uint32_t num_part) override {
-        if (!ready_for_work() || !ir_part_specs || num_ir == 0 || num_part == 0) return false;
+        if (!ready_for_work() || !ir_part_specs || num_ir == 0 || num_part == 0)
+            return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
 
         // ir_specs (2*n*num_ir*num_part floats) is the storage-buffer limiter.
@@ -1890,7 +1911,8 @@ public:
     bool multi_convolve_impl(const float* in_complex, const float* pan_l,
                              const float* pan_r, float* out_lr, uint32_t n,
                              uint32_t num_ir, double* gpu_ns) {
-        if (!ready_for_work() || !in_complex || !pan_l || !pan_r || !out_lr) return false;
+        if (!ready_for_work() || !in_complex || !pan_l || !pan_r || !out_lr)
+            return false;
         auto it = multi_conv_plans_.find(n);
         if (it == multi_conv_plans_.end() || it->second.num_ir != num_ir) return false;
         MultiConvPlan& plan = it->second;
@@ -1965,7 +1987,8 @@ public:
     bool multi_fdl_convolve(const float* in_block, const float* pan_l,
                             const float* pan_r, float* out_block, uint32_t n,
                             uint32_t num_ir) override {
-        if (!ready_for_work() || !in_block || !pan_l || !pan_r || !out_block) return false;
+        if (!ready_for_work() || !in_block || !pan_l || !pan_r || !out_block)
+            return false;
         auto it = multi_fdl_plans_.find(n);
         if (it == multi_fdl_plans_.end() || it->second.num_ir != num_ir) return false;
         MultiFdlPlan& plan = it->second;
@@ -2039,7 +2062,8 @@ public:
 
     bool prepare_spectral_stack(uint32_t n, uint32_t hop,
                                 uint32_t num_layers) override {
-        if (!ready_for_work() || num_layers == 0 || hop == 0) return false;
+        if (!ready_for_work() || num_layers == 0 || hop == 0)
+            return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
         // The resident magnitude / phase buffers are num_layers*n floats — the
         // storage-buffer-binding-limited resource. Gate on the device's real
@@ -2115,7 +2139,8 @@ public:
     bool spectral_stack_set_layer(uint32_t layer, const float* mag,
                                   const float* phase, uint32_t n,
                                   uint32_t num_layers) override {
-        if (!ready_for_work() || !mag || !phase) return false;
+        if (!ready_for_work() || !mag || !phase)
+            return false;
         auto it = spectral_stack_plans_.find(n);
         if (it == spectral_stack_plans_.end() || it->second.num_layers != num_layers)
             return false;
@@ -2131,7 +2156,8 @@ public:
     bool spectral_stack_render(const float* layer_weights, uint32_t num_layers,
                                float smear, float jitter, uint32_t rng_seed,
                                float* frame_out, uint32_t n) override {
-        if (!ready_for_work() || !layer_weights || !frame_out) return false;
+        if (!ready_for_work() || !layer_weights || !frame_out)
+            return false;
         auto it = spectral_stack_plans_.find(n);
         if (it == spectral_stack_plans_.end() || it->second.num_layers != num_layers)
             return false;
@@ -2203,7 +2229,8 @@ public:
                             const uint32_t* dilations, uint32_t num_layers,
                             const float* weights, uint32_t weights_len,
                             uint32_t block_size, float head_scale) override {
-        if (!ready_for_work() || !dilations || !weights) return false;
+        if (!ready_for_work() || !dilations || !weights)
+            return false;
         const uint32_t C = channels, K = kernel, L = num_layers, B = block_size;
         if (C == 0 || C > 64 || K == 0 || L == 0 || B == 0) return false;  // C<=64: fixed WGSL scratch
         const uint64_t per_layer = 2ull * C * C * K + 2ull * C + (uint64_t)C * C + C + (uint64_t)C * C + C;
@@ -2294,7 +2321,8 @@ public:
 
     bool conv_stack_forward(const float* in_block, float* out_block,
                             uint32_t block_size) override {
-        if (!ready_for_work() || !in_block || !out_block) return false;
+        if (!ready_for_work() || !in_block || !out_block)
+            return false;
         auto it = conv_stack_plans_.find(block_size);
         if (it == conv_stack_plans_.end()) return false;
         ConvStackPlan& plan = it->second;
@@ -2346,7 +2374,8 @@ public:
                      const float* weights, uint32_t weights_len,
                      uint32_t block_size, float head_scale,
                      uint32_t instance) override {
-        if (!ready_for_work() || !arrays || !weights) return false;
+        if (!ready_for_work() || !arrays || !weights)
+            return false;
         const uint32_t B = block_size;
         if (num_arrays == 0 || B == 0) return false;
 
@@ -2512,7 +2541,8 @@ public:
 
     bool wavenet_forward(const float* in_block, float* out_block,
                      uint32_t block_size, uint32_t instance) override {
-        if (!ready_for_work() || !in_block || !out_block) return false;
+        if (!ready_for_work() || !in_block || !out_block)
+            return false;
         auto it = wavenet_plans_.find(wavenet_plan_key(block_size, instance));
         if (it == wavenet_plans_.end()) return false;
         WavenetPlan& plan = it->second;
@@ -2599,7 +2629,8 @@ public:
 
     bool matmul(const float* a, const float* b, float* c,
                 uint32_t m, uint32_t k, uint32_t n) override {
-        if (!ready_for_work() || a == nullptr || b == nullptr || c == nullptr) return false;
+        if (!ready_for_work() || a == nullptr || b == nullptr || c == nullptr)
+            return false;
         if (m == 0u || k == 0u || n == 0u) return false;
         // Bound element counts so byte sizes stay within uint32_t and a sane
         // storage-buffer budget (≤ 2^24 elems = 64 MiB per matrix).
@@ -2638,7 +2669,8 @@ public:
 
     bool additive_synth(const float* partials, float* out, uint32_t num_partials,
                         uint32_t num_samples, float sample_rate, float t0_samples) override {
-        if (!ready_for_work() || partials == nullptr || out == nullptr) return false;
+        if (!ready_for_work() || partials == nullptr || out == nullptr)
+            return false;
         if (num_partials == 0u || num_samples == 0u || sample_rate <= 0.0f) return false;
         if (static_cast<uint64_t>(num_samples) > (1u << 24) ||
             static_cast<uint64_t>(num_partials) > (1u << 22)) return false;
@@ -2684,7 +2716,8 @@ public:
 
     bool modal_strike(const float* modes, float* out, uint32_t num_modes,
                       uint32_t num_samples, float sample_rate, float t0_samples) override {
-        if (!ready_for_work() || modes == nullptr || out == nullptr) return false;
+        if (!ready_for_work() || modes == nullptr || out == nullptr)
+            return false;
         if (num_modes == 0u || num_samples == 0u || sample_rate <= 0.0f) return false;
         if (static_cast<uint64_t>(num_samples) > (1u << 24) ||
             static_cast<uint64_t>(num_modes) > (1u << 22)) return false;
@@ -2730,7 +2763,8 @@ public:
     bool granular_cloud(const float* grains, const float* source, float* out,
                         uint32_t num_grains, uint32_t source_len,
                         uint32_t num_samples) override {
-        if (!ready_for_work() || grains == nullptr || source == nullptr || out == nullptr) return false;
+        if (!ready_for_work() || grains == nullptr || source == nullptr || out == nullptr)
+            return false;
         if (num_grains == 0u || source_len == 0u || num_samples == 0u) return false;
         if (static_cast<uint64_t>(num_samples) > (1u << 24) ||
             static_cast<uint64_t>(source_len) > (1u << 24) ||
@@ -2766,7 +2800,8 @@ public:
 
     bool dense_tanh(const float* input, const float* weights, const float* bias,
                     float* output, uint32_t in_dim, uint32_t out_dim) override {
-        if (!ready_for_work() || !input || !weights || !bias || !output) return false;
+        if (!ready_for_work() || !input || !weights || !bias || !output)
+            return false;
         if (in_dim == 0u || out_dim == 0u) return false;
         const uint64_t we = static_cast<uint64_t>(in_dim) * out_dim;
         if (we > (1u << 24) || in_dim > (1u << 20) || out_dim > (1u << 20)) return false;
@@ -3166,8 +3201,7 @@ public:
                                      uint32_t num_bins,
                                      std::chrono::microseconds deadline,
                                      ReadbackCallback on_complete) override {
-        if (!ready_for_work() || !complex_pairs || !magnitudes || num_bins == 0
-            || !on_complete) {
+        if (!ready_for_work() || !complex_pairs || !magnitudes || num_bins == 0 || !on_complete) {
             return 0;
         }
         // Reject at the cap BEFORE doing any GPU work — a submit whose readback
@@ -3222,7 +3256,8 @@ public:
                                   uint32_t n, uint32_t batch,
                                   std::chrono::microseconds deadline,
                                   ReadbackCallback on_complete) override {
-        if (!ready_for_work() || !in_complex || !out_complex || !on_complete) return 0;
+        if (!ready_for_work() || !in_complex || !out_complex || !on_complete)
+            return 0;
         auto it = batch_conv_plans_.find(n);
         if (it == batch_conv_plans_.end() || it->second.batch != batch) return 0;
         if (readbacks_at_cap()) return 0;
@@ -3401,8 +3436,8 @@ public:
             }
 
             const void* data = req->ok.load(std::memory_order_acquire)
-                ? req->buffer.GetConstMappedRange(0, req->size)
-                : nullptr;
+                                   ? req->buffer.GetConstMappedRange(0, req->size)
+                                   : nullptr;
             if (!data) {
                 if (pool_) pool_->discard(req->buffer);
                 complete(*req, ReadbackStatus::Failed, 0);
@@ -4009,7 +4044,8 @@ private:
                  float sign, bool normalize, double* gpu_ns = nullptr) {
         // kMaxFftN (file scope) rejects transforms that would overflow the
         // byte count and under-allocate GPU buffers.
-        if (!ready_for_work() || !complex_in || !complex_out) return false;
+        if (!ready_for_work() || !complex_in || !complex_out)
+            return false;
         if (!is_power_of_two(n) || n > kMaxFftN) return false;
         if (gpu_ns) *gpu_ns = -1.0;
 
@@ -4323,8 +4359,10 @@ private:
             pending.pop_front();
             if (pool_) pool_->discard(req->buffer);
             if (deferred && req->on_complete) {
-                if (status == ReadbackStatus::Expired) ++stats_->expired;
-                else if (status == ReadbackStatus::Failed) ++stats_->failed;
+                if (status == ReadbackStatus::Expired)
+                    ++stats_->expired;
+                else if (status == ReadbackStatus::Failed)
+                    ++stats_->failed;
                 deferred->push_back({std::move(req->on_complete), {req->id, status, 0}});
             } else {
                 complete(*req, status, 0);
@@ -4334,7 +4372,8 @@ private:
 
     static void invoke_deferred_completions(std::vector<DeferredCompletion>& deferred) {
         for (auto& completion : deferred) {
-            if (completion.callback) completion.callback(completion.result);
+            if (completion.callback)
+                completion.callback(completion.result);
         }
     }
 
@@ -4384,18 +4423,18 @@ private:
         // complete Expired, and the browser stats block reports what the GPU
         // actually did.
         ++stats_->map_async_calls;
-        buffer.MapAsync(wgpu::MapMode::Read, 0, size,
-            kAsyncCallbackMode,
-            [req, resolves = std::weak_ptr<std::atomic<uint64_t>>(map_resolves_)](
-                wgpu::MapAsyncStatus status, wgpu::StringView) {
-                req->ok.store(status == wgpu::MapAsyncStatus::Success,
-                              std::memory_order_release);
-                req->resolved.store(true, std::memory_order_release);
-                if (auto counter = resolves.lock()) counter->fetch_add(1, std::memory_order_relaxed);
-                // The owner thread performs Unmap/discard. The callback only
-                // publishes completion, so it cannot race poll_readbacks() or
-                // teardown through the Dawn buffer handle.
-            });
+        buffer.MapAsync(wgpu::MapMode::Read, 0, size, kAsyncCallbackMode,
+                        [req, resolves = std::weak_ptr<std::atomic<uint64_t>>(map_resolves_)](
+                            wgpu::MapAsyncStatus status, wgpu::StringView) {
+                            req->ok.store(status == wgpu::MapAsyncStatus::Success,
+                                          std::memory_order_release);
+                            req->resolved.store(true, std::memory_order_release);
+                            if (auto counter = resolves.lock())
+                                counter->fetch_add(1, std::memory_order_relaxed);
+                            // The owner thread performs Unmap/discard. The callback only
+                            // publishes completion, so it cannot race poll_readbacks() or
+                            // teardown through the Dawn buffer handle.
+                        });
 
         return req->id;
     }

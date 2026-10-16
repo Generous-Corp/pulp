@@ -568,7 +568,9 @@ TEST_CASE("WaveNet transport primes one callback shadow on hits and misses",
     class ShadowNode final : public GpuWaveNetRealtimeNode {
       public:
         using GpuWaveNetRealtimeNode::GpuWaveNetRealtimeNode;
-        bool cpu_fallback_prepared() const noexcept override { return true; }
+        bool cpu_fallback_prepared() const noexcept override {
+            return true;
+        }
         int primes = 0, fallbacks = 0;
         std::array<float, 2> previous{}, due{};
         void prime_fallback(const pulp::audio::BufferView<const float>& in,

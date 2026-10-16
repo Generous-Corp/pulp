@@ -708,7 +708,9 @@ TEST_CASE("GpuAudioTransport rejects invalid descriptor / config", "[gpu_audio][
     {
         struct UnpreparedFallbackNode final : GainNode {
             using GainNode::GainNode;
-            bool cpu_fallback_prepared() const noexcept override { return false; }
+            bool cpu_fallback_prepared() const noexcept override {
+                return false;
+            }
         } node(1, 64, 1.0f, MissPolicy::CpuFallback, 2);
         GpuAudioTransport t;
         REQUIRE_FALSE(t.prepare(&node, {8}));

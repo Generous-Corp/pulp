@@ -82,7 +82,9 @@ public:
     /// transport admits `MissPolicy::CpuFallback` after both the declaration
     /// and this prepared witness are true. Nodes with no verified fallback
     /// remain fail-closed and must use silence on a miss.
-    virtual bool cpu_fallback_prepared() const noexcept { return false; }
+    virtual bool cpu_fallback_prepared() const noexcept {
+        return false;
+    }
 
     /// Non-RT worker context. Process exactly one block (n == block_size).
     virtual void process_block(const audio::BufferView<const float>& input,

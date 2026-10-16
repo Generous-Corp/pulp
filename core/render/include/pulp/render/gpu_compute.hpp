@@ -63,7 +63,9 @@ public:
     /// Returns false on a null handle or pipeline-creation failure.
     virtual bool initialize_from_device(void* wgpu_device) = 0;
 
-    bool is_initialized() const { return initialized_.load(std::memory_order_acquire); }
+    bool is_initialized() const {
+        return initialized_.load(std::memory_order_acquire);
+    }
 
     /// True once the WebGPU device has been lost. Device loss is normal — a
     /// browser tab can lose its device at any time — so it is reported as state,
@@ -75,7 +77,9 @@ public:
     /// Monotonic device generation. A generation changes at every initialize
     /// attempt, so an owner can tag an adopted-device loss notification and
     /// reject a callback from an older device after reinitialization.
-    virtual std::uint64_t device_generation() const { return 0; }
+    virtual std::uint64_t device_generation() const {
+        return 0;
+    }
 
     /// Report that an ADOPTED device (initialize_from_device /
     /// initialize_from_surface) has been lost. A device-lost callback can only be
@@ -89,7 +93,8 @@ public:
     virtual void notify_device_lost() = 0;
 
     virtual void notify_device_lost(std::uint64_t generation) {
-        if (generation == device_generation()) notify_device_lost();
+        if (generation == device_generation())
+            notify_device_lost();
     }
 
     /// Publish a loss from a backend callback without touching readback queues
@@ -706,7 +711,7 @@ public:
     virtual void set_bench_counters(bench::PerfCounters* counters) = 0;
 #endif
 
-protected:
+  protected:
     std::atomic<bool> initialized_{false};
 };
 
