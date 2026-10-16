@@ -764,8 +764,7 @@ LossProbeResult run_loss_capability_probe() noexcept {
             result.status = LossProbeStatus::Unavailable;
         } else {
             result.status = LossProbeStatus::Passed;
-            result.callback_registered =
-                loss_probe_provider->device_loss_callback_registered();
+            result.callback_registered = loss_probe_provider->device_loss_callback_registered();
             result.reason = loss_probe_provider->device_loss_reason();
         }
         // Never invoke native teardown in this capability-only child. The
@@ -810,8 +809,7 @@ LossProbeResult run_loss_capability_probe() noexcept {
     close(pipe_fds[0]);
     int child_status = 0;
     waitpid(child, &child_status, 0);
-    if (received != sizeof(result) || !WIFEXITED(child_status) ||
-        WEXITSTATUS(child_status) != 0)
+    if (received != sizeof(result) || !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
         return {.status = LossProbeStatus::Failed};
     return result;
 }
