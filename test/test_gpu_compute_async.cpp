@@ -604,12 +604,16 @@ TEST_CASE("Detached expired maps retain admission capacity after completion",
     // The completion is delivered as Expired while an unresolved map is kept
     // detached. The callback-pending count is zero, but admission remains full
     // until the late map callback or bounded cleanup releases the slot.
+    const auto before_poll = gpu->async_stats();
     gpu->poll_readbacks();
     REQUIRE(result.status == GpuCompute::ReadbackStatus::Expired);
     REQUIRE(gpu->readbacks_in_flight() == 0);
-    REQUIRE(gpu->compute_magnitude_async(
-                pairs.data(), second.data(), kBins, std::chrono::seconds(2),
-                [](const GpuCompute::ReadbackResult&) {}) == 0);
+    const auto after_poll = gpu->async_stats();
+    const auto second_id = gpu->compute_magnitude_async(
+        pairs.data(), second.data(), kBins, std::chrono::seconds(2),
+        [](const GpuCompute::ReadbackResult&) {});
+    if (after_poll.map_resolves == before_poll.map_resolves)
+        REQUIRE(second_id == 0);
 
     // Polling with no callback-pending requests still pumps the late map. The
     // detached slot is then reaped and admission reopens within the grace
