@@ -214,3 +214,37 @@ pulp import-design analyze-corpus --input fixtures --output analysis
 That integration should remain an orchestration layer over isolated importer
 transactions. It must never insert comparison side effects into
 `browser_import_session` or canonical publication.
+
+## Planning-only reference survey (2026-10-16)
+
+These references shape follow-up experiments only. They do not change the
+native importer, the comparator, or the `0.995` visual threshold.
+
+- **Octane / Inferno benchmark discipline.** Keep phase counters separate for
+  source discovery, parse, plan, materialize, layout, paint, and readback.
+  Receipts must declare `cold` or `warm` rather than infer cache state from run
+  order. Report median and tail distributions, with a held-out fixture split
+  and a named worst-case fixture; an aggregate mean is not a promotion gate.
+  Octane's retained-plan and Inferno's keyed-list cases are useful shapes for
+  the receipt schema, but their runtimes are not Pulp performance baselines.
+- **Taffy differential layout.** Generate fixtures from Chrome's resolved DOM
+  rectangles and computed styles, including fractional widths, nested flex/grid
+  containers, and repeated siblings. Compare Taffy and Chrome at every node,
+  preserving unrounded coordinates. Add a cumulative-rounding experiment that
+  sums signed per-depth residuals and separately records the maximum local
+  residual; a passing total can hide a single large child error. Keep Chrome
+  authoritative and retain the generated HTML, viewport, DPR, font receipt,
+  and both layout dumps with each run.
+- **RmlUi visual capture/compare.** Define an explicit conformance subset
+  before capture (for example, static boxes, text, flex, and supported colors;
+  exclude scripts, canvas, unsupported controls, and animation). Capture both
+  sides at the same authored frame, viewport, DPR, and device scale, then emit
+  source/font hashes, fallback decisions, backend, and image dimensions in the
+  receipt. Compare registered regions plus full-frame pixels, with planted
+  dropped-node, geometry, color, blank-render, crop, and DPR-shift negatives.
+  RmlUi output is a calibration reference only; it does not establish Pulp
+  lifecycle, host, or production-rendering parity.
+
+The next safe step is to add these as advisory fixtures and receipts, run them
+repeatedly across cold/warm and held-out splits, and review the residuals before
+considering any threshold or promotion change.
