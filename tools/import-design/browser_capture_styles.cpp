@@ -218,6 +218,7 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
     if (!snapshot.isObject()) return std::nullopt;
 
     CapturedStyleIndex index;
+    index.document_canvas_paint_ = detail::extract_document_canvas_paint(snapshot);
 
     // Without the request order the style rows cannot be read at all: entry N
     // is meaningless on its own. Refusing here is what keeps an older capture

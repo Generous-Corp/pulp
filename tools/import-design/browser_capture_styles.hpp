@@ -1,5 +1,7 @@
 #pragma once
 
+#include "browser_capture_canvas.hpp"
+
 #include <pulp/view/design_ir.hpp>
 
 #include <filesystem>
@@ -82,7 +84,11 @@ struct CapturedPaintNode {
 /// owns that three-hop join (backend id → node index → layout index → style row)
 /// so callers can ask for an element's appearance directly.
 class CapturedStyleIndex {
-public:
+  public:
+    const std::optional<detail::DocumentCanvasPaint>& document_canvas_paint() const {
+        return document_canvas_paint_;
+    }
+
     /// Read a `dom-snapshot.json` sidecar. Returns nullopt when the file is
     /// absent, unreadable, or does not carry per-node computed styles — a
     /// capture without solved styles still lowers, it just gains no appearance.
@@ -213,7 +219,8 @@ public:
 
     bool empty() const noexcept { return style_rows_.empty(); }
 
-private:
+  private:
+    std::optional<detail::DocumentCanvasPaint> document_canvas_paint_;
     std::optional<int> layout_for_node(int node_index) const;
     bool is_descendant(int node_index, int ancestor_index) const;
     std::string string_at(int index) const;
