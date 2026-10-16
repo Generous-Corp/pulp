@@ -70,6 +70,11 @@ def main() -> int:
         if "loss_session.release();" not in source:
             print("typed successful-loss teardown control failed", file=sys.stderr)
             return 1
+        if "auto session = std::make_unique<SharedIoProgramSession>();" not in source or (
+            "session.release();" not in source
+        ):
+            print("typed initial-session teardown control failed", file=sys.stderr)
+            return 1
         validated = source.split(
             "const bool loss_probe_registered = loss_probe->device_loss_callback_registered();",
             1,
