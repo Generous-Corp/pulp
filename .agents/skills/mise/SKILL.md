@@ -66,6 +66,21 @@ configure of a Pulp checkout sets `Python3_FIND_FRAMEWORK=LAST` when
 `MISE_ENV=toolchain` is set so the pinned interpreter wins. A build directory
 configured before opting in keeps its cached interpreter: configure a fresh one.
 
+## The pinned-toolchain golden (CI images)
+
+`.shipyard/vm-image.mise.toml` bakes a candidate image,
+`pulp-build-runner-mise-candidate`, on top of the runner golden with
+`tools/ci/mise-golden-layer.sh` (run by `tart-provision.sh manifest`). Its
+`[mise]` table is generated from the manifest; regenerate it with
+`generate.py`, never by hand. The layer refuses a host or guest mise binary
+whose sha256 or `--version` differs from the pin, and toolchain files that
+differ from the checkout's commit, so bake from a clean `main`. It installs
+with `mise install --locked`, turns rustup self-update off and installs the
+manifest's Rust by name, then writes a receipt the guest itself reports
+(on the host: `~/.cache/pulp-ci/golden-receipts/<vm>-mise.json`).
+The candidate changes no lane: promoting it to `:latest` or routing a lane to
+it is a separate, reviewed step.
+
 ## Platform exceptions in the lock
 
 Some tools are not locked on every platform, by declaration in the manifest's

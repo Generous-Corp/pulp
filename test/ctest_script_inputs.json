@@ -6437,6 +6437,14 @@
    ],
    "kind": "python"
   },
+  "import-validation-visual-residual-diagnostic-selftest": {
+   "entry": "tools/import-validation/test_visual_residual_diagnostic.py",
+   "inputs": [
+    "tools/import-validation/test_visual_residual_diagnostic.py",
+    "tools/import-validation/visual_residual_diagnostic.py"
+   ],
+   "kind": "python"
+  },
   "import-vendored-runtime-staleness": {
    "entry": "tools/import-validation/test_check_vendored_runtime.py",
    "inputs": [
@@ -11798,6 +11806,17 @@
     "tools/toolchain/expected.json",
     "tools/toolchain/fleet_report.py",
     "tools/toolchain/test_check_env.py"
+   ],
+   "kind": "python"
+  },
+  "toolchain-mise_golden_layer-selftest": {
+   "entry": "tools/ci/test_mise_golden_layer.py",
+   "inputs": [
+    "tools/ci",
+    "tools/ci/mise-golden-layer.sh",
+    "tools/ci/tart-provision.sh",
+    "tools/ci/test_mise_golden_layer.py",
+    "tools/toolchain/manifest.toml"
    ],
    "kind": "python"
   },

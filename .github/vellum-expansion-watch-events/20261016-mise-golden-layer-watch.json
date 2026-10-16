@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261016-mise-golden-layer-watch",
+  "created_at": "2026-10-16T03:37:40Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Adds a pinned-toolchain golden layer: .shipyard/vm-image.mise.toml (a candidate image layered on the runner golden, with a generated [mise] table), tools/ci/mise-golden-layer.sh run by tart-provision.sh manifest, and its source selftest. It installs build tools into a CI VM image at bake time from the committed mise lock; it changes no design import, Chromium, rendering or packaging behaviour, and no lane uses the candidate.",
+  "tests": [
+    "python3 tools/ci/test_mise_golden_layer.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

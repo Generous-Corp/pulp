@@ -488,6 +488,46 @@ class StrictPinTests(unittest.TestCase):
             mise.chmod(0o755)
             generate.require_pinned_mise(mise, data)
 
+    def mise_image(self, root: Path) -> Path:
+        path = root / generate.MISE_IMAGE
+        path.write_bytes((REPO / generate.MISE_IMAGE).read_bytes())
+        return path
+
+    def test_stale_mise_block_is_detected_and_repaired(self) -> None:
+        # The golden layer reads its mise pin from this block, so a stale block
+        # bakes the wrong binary. --check names it; a write restores it.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            image = self.mise_image(root)
+            good = image.read_text(encoding="utf-8")
+            version = generate.load(self.manifest(root))[0]["mise"]["version"]
+            stale = good.replace(f'version = "{version}"', 'version = "2020.1.1"', 1)
+            self.assertNotEqual(good, stale)
+            image.write_text(stale, encoding="utf-8")
+            self.assert_check_refuses(root, "generated [mise] block differs")
+            self.assertEqual(stale, image.read_text(encoding="utf-8"))
+            generate.generate(root, None, False)
+            self.assertEqual(good, image.read_text(encoding="utf-8"))
+            generate.generate(root, None, True)
+
+    def test_missing_mise_markers_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            image = self.mise_image(root)
+            unmarked = (
+                image.read_text(encoding="utf-8")
+                .replace(generate.BEGIN + "\n", "")
+                .replace(generate.END + "\n", "")
+            )
+            image.write_text(unmarked, encoding="utf-8")
+            for check in (True, False):
+                with self.assertRaises(ValueError) as ctx:
+                    generate.generate(root, None, check)
+                self.assertIn("generated toolchain block is missing", str(ctx.exception))
+                self.assertEqual(unmarked, image.read_text(encoding="utf-8"))
+
     def test_lock_is_written_only_by_the_pinned_mise(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
