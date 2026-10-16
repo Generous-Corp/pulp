@@ -1059,6 +1059,7 @@ public:
         // than being silently dropped. The callback only publishes map state;
         // this owner thread drains and releases every Dawn handle.
         drain_readbacks(ReadbackStatus::Failed, &deferred);
+        discard_detached_readbacks();
 
         // Release pool buffers before the device is torn down — their
         // destructors call into Dawn internals and need a live device.
@@ -1346,6 +1347,7 @@ public:
         emit_gpu_diagnostic(GpuDiagnosticSeverity::fatal, "dawn.device_lost", msg);
         runtime::log_error("GpuCompute: device lost (reason {}): {}", reason, msg);
         drain_readbacks(ReadbackStatus::Failed);
+        discard_detached_readbacks();
     }
 
     struct CallbackState {
@@ -3459,8 +3461,10 @@ public:
                     req->ok.load(std::memory_order_acquire))
                     req->buffer.Unmap();
                 if (pool_) pool_->discard(req->buffer);
-                if (!req->resolved.load(std::memory_order_acquire))
+                if (!req->resolved.load(std::memory_order_acquire)) {
+                    req->detached_at = std::chrono::steady_clock::now();
                     detached_readbacks_.push_back(req);
+                }
                 complete(*req, ReadbackStatus::Expired, 0);
                 continue;
             }
@@ -4363,17 +4367,32 @@ private:
         ReadbackCallback on_complete;
         std::atomic<bool> resolved{false}; // the map callback has fired
         std::atomic<bool> ok{false};       // ... and reported Success
+        std::chrono::steady_clock::time_point detached_at{};
     };
 
+    static constexpr auto kDetachedReadbackGrace = std::chrono::seconds(1);
+
     void reap_detached_readbacks() {
-        while (!detached_readbacks_.empty()) {
-            auto& req = detached_readbacks_.front();
-            if (!req->resolved.load(std::memory_order_acquire))
-                break;
-            if (req->ok.load(std::memory_order_acquire))
-                req->buffer.Unmap();
-            detached_readbacks_.pop_front();
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = detached_readbacks_.begin(); it != detached_readbacks_.end();) {
+            auto& req = *it;
+            if (req->resolved.load(std::memory_order_acquire)) {
+                if (req->ok.load(std::memory_order_acquire))
+                    req->buffer.Unmap();
+                it = detached_readbacks_.erase(it);
+            } else if (now - req->detached_at >= kDetachedReadbackGrace) {
+                req->buffer = nullptr;
+                it = detached_readbacks_.erase(it);
+            } else {
+                ++it;
+            }
         }
+    }
+
+    void discard_detached_readbacks() {
+        for (auto& req : detached_readbacks_)
+            req->buffer = nullptr;
+        detached_readbacks_.clear();
     }
 
     void complete(AsyncReadback& req, ReadbackStatus status, uint32_t bytes) {
@@ -4403,6 +4422,7 @@ private:
                 req->buffer.Unmap();
             else {
                 if (pool_) pool_->discard(req->buffer);
+                req->detached_at = std::chrono::steady_clock::now();
                 detached_readbacks_.push_back(req);
             }
             if (deferred && req->on_complete) {
