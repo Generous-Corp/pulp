@@ -1418,6 +1418,9 @@ class GeneratedDigestTests(unittest.TestCase):
                 ("unterminated quoted argument", original + '\nset(foo "unterminated\n'),
                 ("unterminated bracket comment", original + "\n#[=[ unterminated\n"),
                 ("unterminated bracket argument", original + "\nset(foo [=[# not closed\n"),
+                ("NBSP is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set\u00a0(PULP_JS_PRELUDES", 1)),
+                ("vertical tab is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set\v(PULP_JS_PRELUDES", 1)),
+                ("form feed is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set(PULP_JS_PRELUDES\f", 1)),
             )
             for description, mutation in adversarial_mutations:
                 producer.write_text(mutation, encoding="utf-8")
