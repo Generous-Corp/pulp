@@ -598,8 +598,8 @@ check_has_binary() {
     if [[ -z "$binary" ]]; then
         echo "EMPTY BUNDLE: $bundle has no executable in Contents/MacOS." >&2
         echo "  Its target was configured but never built. Build it first:" >&2
-        echo "  cmake --build \"$BUILD_DIR\" --target ForgeModularApp_AU \\" >&2
-        echo "      ForgeModularApp_VST3 ForgeModularApp_CLAP ForgeModularApp_Standalone -j8" >&2
+        echo "  bash \"$REPO/tools/ci/governed-build.sh\" cmake --build \"$BUILD_DIR\" --target ForgeModularApp_AU \\" >&2
+        echo "      ForgeModularApp_VST3 ForgeModularApp_CLAP ForgeModularApp_Standalone" >&2
         return 1
     fi
     size=$(stat -f%z "$binary" 2>/dev/null || stat -c%s "$binary" 2>/dev/null || echo 0)

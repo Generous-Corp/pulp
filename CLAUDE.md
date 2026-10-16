@@ -995,6 +995,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 - Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`
   - ⚠ **Cannot see:** Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
+- Determine whether a browser/native residual comes from html/body/viewport background registration outside the imported root. → `tools/import-validation/viewport_background_diagnostic.py`
+  - ⚠ **Cannot see:** Does not score fidelity or identify the CSS declaration that caused a background mismatch; pair it with the authenticated capture receipt and residual profile.
 
 **design-import** — get a design into Pulp
 - Run the browser capture integration harness against an imported panel. → `tools/import-design/browser_capture/run_integration.mjs`
@@ -1013,6 +1015,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Acceptance evidence for a named fixture only; it does not prove general HTML importer coverage or semantic native-widget reconstruction.
 - Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
 - Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
+- Validate authored keyed identity declarations, a deterministic reorder digest, and planted duplicate or unknown-key negatives. → `tools/import-design/keyed_identity_reorder_validation.mjs`
+  - ⚠ **Cannot see:** This is an identity-contract measurement only; it does not prove importer DesignIR reorder behavior, native rendering parity, or lifecycle safety.
 - Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget. → `tools/import-design/make_catalog_component.py`
 - Run the deterministic materialized-runtime contract and its planted vendor-tag negative control. → `tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs`
 - Preserve executable React behavior behind a Chromium-computed DesignIR without making the behavior tree the visual authority. → `tools/import-design/jsx-runtime/materialized-runtime-transform.mjs`

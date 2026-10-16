@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<body>
+  <main id="panel" data-pulp-id="keyed-list-panel">
+    <ol id="items" data-pulp-id="keyed-items">
+      <li data-pulp-key="drive" data-pulp-id="item-drive">Drive</li>
+      <li data-pulp-key="tone" data-pulp-id="item-tone">Tone</li>
+      <li data-pulp-key="mix" data-pulp-id="item-mix">Mix</li>
+    </ol>
+    <button id="reorder" type="button">Reorder</button>
+  </main>
+  <script>
+    document.getElementById('reorder').addEventListener('click', () => {
+      const list = document.getElementById('items');
+      [...list.children].reverse().forEach((item) => list.append(item));
+    });
+  </script>
+</body>
+</html>

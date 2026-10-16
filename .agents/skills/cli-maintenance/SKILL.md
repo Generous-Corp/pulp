@@ -358,6 +358,12 @@ a host whose role QoS is background. Against a class-aware tartci
 `tools/ci/governed-build.sh`; `test/test_cli_tartci_lease.cpp` pins both
 classes against a fake class-aware tartci.
 
+The checkout and development SDK installers (`tools/cli/cli_sdk.cpp` and
+`tools/cli/local_sdk_install.cpp`) must call `run_governed_cmake_build` for
+their install targets. Pass their existing spinner label and lease-error
+prefix through the helper so user-facing diagnostics remain stable while
+lease, QoS, watchdog, lock, and bounded-parallelism policy stays centralized.
+
 ### Build-shaped commands consult the focused-build selector
 
 `pulp build`, `pulp dev`, `pulp loop`, `pulp test`, and `pulp-cpp build --watch`

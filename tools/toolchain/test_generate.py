@@ -541,6 +541,24 @@ class StrictPinTests(unittest.TestCase):
             self.assertIn("must be written by mise", str(ctx.exception))
             self.assertEqual(before, (root / generate.MISE_LOCK).read_bytes())
 
+    def test_lock_runs_never_ask_for_a_newer_mise(self) -> None:
+        data, _ = generate.load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            seen = root / "seen-env"
+            fake = root / "mise"
+            fake.write_text(
+                "#!/bin/sh\n"
+                f'if [ "$1" = --version ]; then echo "{data["mise"]["version"]} macos-arm64"; exit 0; fi\n'
+                f'echo "$1 MISE_DISABLE_UPDATE_WARNING=$MISE_DISABLE_UPDATE_WARNING" >> "{seen}"\n',
+                encoding="utf-8")
+            fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+            generate.write_mise_lock(root, data, fake)
+            lines = seen.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(lines)  # control: the lock command ran
+            self.assertTrue(all(line == "lock MISE_DISABLE_UPDATE_WARNING=1" for line in lines), lines)
+
 
 if __name__ == "__main__":
     unittest.main()

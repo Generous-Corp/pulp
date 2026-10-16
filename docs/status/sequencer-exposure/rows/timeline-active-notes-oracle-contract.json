@@ -1,0 +1,50 @@
+{
+  "id": "timeline-active-notes-oracle-contract",
+  "title": "Timeline active-note queries are quiescent test oracles",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "timeline-active-notes-quiescent-oracle-20261015",
+  "owned_paths": [
+    "examples/timeline-phase1/timeline_example_engine.hpp",
+    "examples/timeline-phase1/timeline_step_sequencer.hpp",
+    "docs/status/sequencer-exposure/rows/timeline-active-notes-oracle-contract.json"
+  ],
+  "evidence": [
+    {
+      "path": "examples/timeline-phase1/timeline_example_engine.hpp",
+      "needles": [
+        "Test oracle for synth voice state",
+        "audio processing is stopped"
+      ]
+    },
+    {
+      "path": "examples/timeline-phase1/timeline_step_sequencer.hpp",
+      "needles": [
+        "Test oracle; call only while audio processing is stopped",
+        "audio processing is stopped"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The comments document an example-only test oracle and change no installed header, target, or exported symbol."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler, or output contract changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The comments clarify that no concurrent live polling contract is being declared; runtime behavior is unchanged."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No agent capability, manifest, or design-time surface changes."
+    }
+  }
+}

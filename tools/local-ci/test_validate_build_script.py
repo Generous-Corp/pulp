@@ -46,7 +46,7 @@ class ValidateBuildScriptTests(unittest.TestCase):
 
         ps1 = VALIDATE_BUILD_PATH.with_suffix(".ps1").read_text()
         self.assertIn('"-DCMAKE_BUILD_TYPE=Release"', ps1)
-        self.assertIn("cmake --build $BuildDir --config Release", ps1)
+        self.assertIn("tools/ci/governed-build.sh cmake --build '$BuildDirBash' --config Release", ps1)
         self.assertIn("cmake --install $BuildDir --prefix $InstallDir --config Release", ps1)
         self.assertIn("ctest --test-dir $BuildDir --output-on-failure -C Release", ps1)
 

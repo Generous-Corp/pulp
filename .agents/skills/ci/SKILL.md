@@ -847,6 +847,14 @@ and not another: they name the version each one actually ran (for example the
 hosted Linux leg's apt CMake 3.x against the 4.3.3 pin, which is how a
 CMake-4-only script fails only there).
 
+### A Rust step that fails with "toolchain ... is not installed" is the image, not the PR
+
+The `build.yml` build legs set `RUSTUP_AUTO_INSTALL=0`, so a rustup proxy
+never downloads the toolchain `rust-toolchain.toml` names mid-build. If a cargo
+step fails naming a missing toolchain, the runner image or the resolve step
+lacks it: fix the golden (install the manifest's Rust by name), never by
+re-enabling auto-install in the workflow.
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both
@@ -890,6 +898,17 @@ nightly `schedule`, and on `workflow_dispatch`. Consequences worth holding:
   (`workflow_dispatch`) and read `android-build` there. A PR run cannot tell you.
 - When reading history, filter runs by `event` — mixing `pull_request` runs into
   a health count inflates the pass rate with runs that skipped the build.
+
+## A red Linux coverage leg: read which step actually failed
+
+`Coverage report (Linux, Clang)` goes red when its C++ build fails, because
+"Verify Cobertura XML exists" then finds no XML. The Python tools pass is
+`continue-on-error`, so a list of failing `tools/scripts/test_*.py` there is
+real but is not what turned the job red. When the C++ build fails,
+`scripts/run_coverage.sh` prints the error lines from the full build log
+(`build.log` for stderr, `build.stdout.log` for stdout) before the last 200
+lines; under a parallel build, the tail alone is warnings from sibling
+targets that kept compiling.
 
 ## Compiler coverage is asymmetric — GCC sees only `core/**`
 

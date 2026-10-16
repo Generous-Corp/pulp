@@ -202,10 +202,14 @@ int resolve_local_build_jobs() {
 
 int run_governed_cmake_build(const fs::path& project_root, const fs::path& build_dir,
                              const std::vector<std::string>& args, const std::string& command_kind,
-                             GovernedBuildOutput output) {
+                             GovernedBuildOutput output, const std::string& spinner_label,
+                             const std::string& lease_error_prefix) {
     auto lease = TartciAgentBuildLease::acquire({project_root, command_kind, false});
     if (!lease.ok()) {
-        std::cerr << command_kind << ": " << lease.error() << "\n";
+        if (lease_error_prefix.empty())
+            std::cerr << command_kind << ": " << lease.error() << "\n";
+        else
+            std::cerr << lease_error_prefix << lease.error() << "\n";
         return lease.exit_code();
     }
     ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
@@ -219,7 +223,7 @@ int run_governed_cmake_build(const fs::path& project_root, const fs::path& build
         project_root, build_dir);
     if (output == GovernedBuildOutput::Quiet)
         return run(command + output_to_null());
-    return run_with_spinner(command, "Building");
+    return run_with_spinner(command, spinner_label);
 }
 
 namespace {
