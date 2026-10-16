@@ -710,12 +710,13 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
                     mkdir -p "$BUILD"
                     printf 'PULP_ENABLE_COVERAGE:BOOL=ON\n' > "$BUILD/CMakeCache.txt"
                     """
-                ).lstrip()
+                ).lstrip(),
+                encoding="utf-8",
             )
             stub_cmake.chmod(0o755)
             for tool in ("clang", "llvm-profdata", "llvm-cov"):
                 stub = stub_bin / tool
-                stub.write_text("#!/usr/bin/env bash\nexit 0\n")
+                stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
                 stub.chmod(0o755)
 
             repo = tmp_path / "repo"
@@ -725,7 +726,7 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
             # The governed wrapper's lease logic is not under test here.
             (repo / "tools" / "ci").mkdir(parents=True)
             wrapper = repo / "tools" / "ci" / "governed-build.sh"
-            wrapper.write_text('#!/usr/bin/env bash\nexec "$@"\n')
+            wrapper.write_text('#!/usr/bin/env bash\nexec "$@"\n', encoding="utf-8")
             wrapper.chmod(0o755)
 
             env = os.environ.copy()
@@ -736,6 +737,7 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
                 env=env,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
 
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
