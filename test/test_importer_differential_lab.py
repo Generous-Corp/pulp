@@ -580,6 +580,42 @@ class DifferentialLabTests(unittest.TestCase):
                 finally:
                     outside.unlink(missing_ok=True)
 
+    def test_snapshot_binding_refuses_oversize_before_open_for_bound_and_legacy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            snapshot.write_bytes(b"123456789")
+            capture = {"documents": [{"snapshot_asset": "dom-snapshot.json",
+                                      "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+            for envelope in ({}, capture):
+                with self.subTest(bound=bool(envelope)), \
+                        patch.object(LAB, "MAX_SNAPSHOT_BYTES", 8), \
+                        patch.object(Path, "open") as opened, \
+                        self.assertRaisesRegex(LAB.LabError, "exceeds 256 MiB"):
+                    LAB.verify_capture_snapshot_binding(envelope, evidence)
+                opened.assert_not_called()
+
+    def test_snapshot_binding_rejects_growth_and_truncation_during_bounded_read(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            original = b'{"documents":[]}\n'
+            fstat = LAB.os.fstat
+            for replacement in (original + b"extra", original[:-1]):
+                snapshot.write_bytes(original)
+                capture = {"documents": [{"snapshot_asset": "dom-snapshot.json",
+                                          "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+
+                def mutate_after_measurement(descriptor):
+                    info = fstat(descriptor)
+                    snapshot.write_bytes(replacement)
+                    return info
+
+                with self.subTest(length=len(replacement)), \
+                        patch.object(LAB.os, "fstat", side_effect=mutate_after_measurement), \
+                        self.assertRaisesRegex(LAB.LabError, "changed during bounded read"):
+                    LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+
     def test_snapshot_binding_rejects_malformed_declarations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             evidence = Path(directory)

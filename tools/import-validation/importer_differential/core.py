@@ -7,8 +7,10 @@ from collections import Counter
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
+import stat
 import statistics
 import subprocess
 import time
@@ -23,6 +25,7 @@ SCHEMA_VERSION = 1
 REPORT_SCHEMA = "pulp-importer-differential-report-v1"
 CORPUS_SCHEMA = "pulp-importer-differential-corpus-v1"
 OBSERVABILITY_SCHEMA = "pulp-importer-observability-v1"
+MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
 TIMING_BUDGET_KEYS = (
     "browser_import_ms", "native_import_ms", "native_render_ms", "native_total_ms",
 )
@@ -1198,7 +1201,21 @@ def verify_capture_snapshot_binding(
         try:
             if not snapshot.resolve().is_relative_to(evidence.resolve()):
                 raise LabError("capture snapshot sidecar escapes evidence directory")
-            return snapshot.read_bytes()
+            info = snapshot.stat()
+            if not stat.S_ISREG(info.st_mode):
+                raise LabError("capture snapshot sidecar is not a regular file")
+            if info.st_size > MAX_SNAPSHOT_BYTES:
+                raise LabError("capture snapshot sidecar exceeds 256 MiB")
+            with snapshot.open("rb") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode):
+                    raise LabError("capture snapshot sidecar is not a regular file")
+                if info.st_size > MAX_SNAPSHOT_BYTES:
+                    raise LabError("capture snapshot sidecar exceeds 256 MiB")
+                snapshot_bytes = stream.read(info.st_size + 1)
+                if len(snapshot_bytes) != info.st_size:
+                    raise LabError("capture snapshot sidecar changed during bounded read")
+                return snapshot_bytes
         except OSError as exc:
             raise LabError("capture snapshot sidecar is unavailable") from exc
 
