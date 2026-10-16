@@ -1317,6 +1317,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     // hint, and the simulator toolchain. The target selector is the build
     // target, not a no-op CMake cache variable.
     REQUIRE(contains(combined, "-G Xcode"));
+    REQUIRE(contains(combined, "tools/ci/governed-build.sh"));
+    REQUIRE(contains(combined, "cmake --build"));
     REQUIRE(contains(combined, "build/xcode/MyPlugin-iphonesimulator"));
     REQUIRE(contains(combined, "--target"));
     REQUIRE(contains(combined, "MyPlugin_AUv3"));
