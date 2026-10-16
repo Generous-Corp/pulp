@@ -61,10 +61,11 @@ def check(bundle: pathlib.Path) -> list[str]:
                        for p in arch_dir.iterdir()):
                 problems.append(
                     f"{bundle.name}: {arch_dir.name} contains no loadable .vst3 module")
-            build_info = arch_dir / "pulp-build-info.json"
+            expected_build_info_name = f"{bundle.stem}.pulp-build-info.json"
+            build_info = arch_dir / expected_build_info_name
             if not build_info.is_file():
                 problems.append(
-                    f"{bundle.name}: {arch_dir.name} is missing pulp-build-info.json")
+                    f"{bundle.name}: {arch_dir.name} is missing {expected_build_info_name}")
                 continue
             try:
                 info = json.loads(build_info.read_text(encoding="utf-8"))
