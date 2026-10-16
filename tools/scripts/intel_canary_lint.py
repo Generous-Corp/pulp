@@ -72,6 +72,7 @@ CLASS_TITLES = {
     4: "CMAKE_SYSTEM_PROCESSOR used for an Apple target-arch decision "
        "(use CMAKE_OSX_ARCHITECTURES)",
     5: "hardcoded CMAKE_OSX_ARCHITECTURES=arm64 (arm64-only)",
+    6: "allowlist entry that suppresses nothing (stale exemption)",
 }
 
 
@@ -152,15 +153,19 @@ class Allowlist:
     files shift, and force each exemption to document the specific construct.
     """
 
-    def __init__(self, entries: list[tuple[str, str]]):
+    def __init__(self, entries: list[tuple[str, str]], lines: list[int] | None = None):
         self._entries = entries
+        # Allowlist line of each entry, for reporting a stale one.
+        self._lines = lines if lines is not None else [0] * len(entries)
+        self._used: set[int] = set()
 
     @classmethod
     def load(cls, path: Path) -> "Allowlist":
         entries: list[tuple[str, str]] = []
+        lines: list[int] = []
         if not path.is_file():
             return cls(entries)
-        for raw in path.read_text(encoding="utf-8").splitlines():
+        for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             line = raw.rstrip("\n")
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
@@ -168,15 +173,41 @@ class Allowlist:
                 continue
             file_part, sub = line.split("::", 1)
             entries.append((file_part.strip(), sub.strip()))
-        return cls(entries)
+            lines.append(number)
+        return cls(entries, lines)
 
     def allows(self, rel_path: str, line_text: str) -> bool:
-        for file_part, sub in self._entries:
+        allowed = False
+        for index, (file_part, sub) in enumerate(self._entries):
             if file_part != rel_path:
                 continue
             if sub and sub in line_text:
-                return True
-        return False
+                # Record every matching entry: a redundant duplicate is not
+                # stale, only one that matches no finding at all.
+                self._used.add(index)
+                allowed = True
+        return allowed
+
+    def stale(self, scanned: set[str], allowlist_rel: str) -> list[Finding]:
+        """Entries for a scanned file that suppressed no finding.
+
+        An exemption whose construct was deleted or rewritten no longer
+        excuses anything, but it would silently pre-approve the next
+        occurrence of that substring in the file, so it is a finding itself.
+        Only entries for files this run scanned are judged: a changed-mode
+        run cannot tell whether an entry for an unscanned file still matches.
+        """
+        stale = []
+        for index, (file_part, sub) in enumerate(self._entries):
+            if index in self._used or file_part not in scanned:
+                continue
+            stale.append(Finding(
+                allowlist_rel, self._lines[index], 6,
+                f"allowlist entry for {file_part} suppresses no finding; delete it "
+                "(the construct it excused is gone, so it would only pre-approve "
+                "a future one)",
+                f"{file_part} :: {sub}"))
+        return stale
 
 
 # ── C/C++/ObjC analysis (classes 1 & 2) ──────────────────────────────────────
@@ -458,9 +489,12 @@ def run(mode: str, base: str, root: Path, allowlist_path: Path) -> list[Finding]
         rels = _iter_tree_files(root)
 
     findings: list[Finding] = []
+    scanned: set[str] = set()
     for rel in rels:
         if not (is_core_source(rel) or is_cmake_or_fetch(rel) or is_cmake(rel)):
             continue
+        # A deleted file's entries are stale too, in either mode.
+        scanned.add(rel)
         fpath = root / rel
         if not fpath.is_file():
             continue  # deleted in `changed` mode
@@ -469,6 +503,11 @@ def run(mode: str, base: str, root: Path, allowlist_path: Path) -> list[Finding]
         except OSError:
             continue
         findings.extend(scan_file(rel, text, allow))
+    try:
+        allowlist_rel = str(allowlist_path.resolve().relative_to(root))
+    except ValueError:
+        allowlist_rel = str(allowlist_path)
+    findings.extend(allow.stale(scanned, allowlist_rel))
     return findings
 
 

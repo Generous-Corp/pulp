@@ -96,3 +96,23 @@ elseif(WIN32)
 endif()
 
 target_link_libraries(pulp-events PUBLIC pulp::runtime)
+
+# Public-header manifest: every header this target ships, relative to this
+# directory. The Vellum closure exports exactly these (plus what they include),
+# and the closure tool refuses a header under include/ that is not listed.
+set(PULP_EVENTS_UNIT_HEADERS
+    include/pulp/events/child_process_manager.hpp
+    include/pulp/events/coalesced_updater.hpp
+    include/pulp/events/event_loop.hpp
+    include/pulp/events/events.hpp
+    include/pulp/events/in_app_purchase.hpp
+    include/pulp/events/interprocess_connection.hpp
+    include/pulp/events/main_thread_dispatcher.hpp
+    include/pulp/events/message_loop_integration.hpp
+    include/pulp/events/plugin_main_thread.hpp
+    include/pulp/events/push_notifications.hpp
+    include/pulp/events/service_discovery.hpp
+    include/pulp/events/timer.hpp
+    include/pulp/events/volume_detector.hpp
+)
+set_property(TARGET pulp-events PROPERTY PULP_UNIT_HEADERS ${PULP_EVENTS_UNIT_HEADERS})

@@ -14,7 +14,6 @@
 # ── Class 3: aarch64/darwin-arm64/mac-arm64 inside correct arch selection ─────
 # wgpu-native prebuilt arch is chosen conditionally (arm64 slice OR x86_64 slice)
 # and keyed off CMAKE_OSX_ARCHITECTURES for the TARGET on Apple.
-tools/cmake/PulpDependencies.cmake :: STREQUAL "aarch64"
 tools/cmake/PulpDependencies.cmake :: set(ARCH "aarch64")
 tools/cmake/PulpDependencies.cmake :: forcing WebGPU prebuilt architecture to aarch64
 # HOST-arch probe used only to name the per-slice Skia cache dir, not to pick the
@@ -87,14 +86,6 @@ tools/cmake/ios.toolchain.cmake :: CACHE STRING "Device architecture"
 tools/cmake/toolchains/macos-arm64-osxcross.cmake :: set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING "macOS architectures" FORCE)
 # Help text in a FATAL_ERROR message showing how to build a single arch.
 tools/cmake/FindSkia.cmake :: Build a single arch: -DCMAKE_OSX_ARCHITECTURES=arm64
-
-# Windows VST3 packaging selects the guest target architecture from the Windows
-# toolchain processor spelling; this is intentionally unrelated to Apple target
-# architecture and is guarded by if(WIN32).
-tools/cmake/PulpPluginFormats.cmake :: CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$"
-tools/cmake/PulpPluginFormats.cmake :: CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$"
-tools/cmake/PulpPluginFormats.cmake :: "arm64-win"
-tools/cmake/PulpPluginFormats.cmake :: "x86_64-win"
 
 # Windows wgpu-native archive token is selected from the resolved Windows
 # TARGET. The adjacent x86_64-win branch selects the x86_64 archive.

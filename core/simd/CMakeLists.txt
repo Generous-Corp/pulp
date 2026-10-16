@@ -87,3 +87,12 @@ unset(_pulp_simd_sources)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(pulp-simd PRIVATE -Wno-gnu-zero-variadic-macro-arguments)
 endif()
+
+# Public-header manifest: every header this target ships, relative to this
+# directory. The Vellum closure exports exactly these (plus what they include),
+# and the closure tool refuses a header under include/ that is not listed.
+set(PULP_SIMD_UNIT_HEADERS
+    include/pulp/simd/scalar_kernels.hpp
+    include/pulp/simd/simd.hpp
+)
+set_property(TARGET pulp-simd PROPERTY PULP_UNIT_HEADERS ${PULP_SIMD_UNIT_HEADERS})
