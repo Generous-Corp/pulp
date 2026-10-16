@@ -927,6 +927,12 @@ int main() {
         if (loss_probe->device_loss_reason() != WGPUDeviceLostReason_Destroyed)
             return kDiagnosticFailureExit;
 
+        // The probe above is a capability gate for the session path: only a
+        // runtime that delivered the exact callback userdata and Destroyed
+        // reason is allowed to enter the outstanding-submission scenario.
+        // Its normal callback path therefore keeps the regular drain/release
+        // cleanup below; only the probe's typed-unavailable branch abandons
+        // ownership to avoid the pinned runtime's blocked fence teardown.
         auto loss_provider = WgpuNativeStagedProvider::create();
         if (loss_provider == nullptr)
             return kProviderUnavailableExit;
