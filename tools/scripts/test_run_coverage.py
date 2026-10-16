@@ -309,7 +309,7 @@ class ObjectDiscoveryTests(unittest.TestCase):
     def test_coverage_build_output_does_not_fill_runner_logs(self) -> None:
         script = SCRIPT.read_text()
         self.assertIn(
-            'cmake --build "${BUILD_DIR}" > /dev/null 2>"${BUILD_LOG}"',
+            'cmake --build "${BUILD_DIR}" > "${BUILD_STDOUT_LOG}" 2>"${BUILD_LOG}"',
             script,
         )
         self.assertNotIn(
@@ -673,6 +673,76 @@ class StaleCacheTests(unittest.TestCase):
         self.assertIn("PULP_ENABLE_COVERAGE", combined)
         self.assertIn("rm -rf", combined)
         self.assertIn("#570", combined)
+
+
+class BuildFailureDiagnosticsTests(unittest.TestCase):
+    """A failed coverage build must name its first error, not only the tail.
+
+    With parallel jobs, sibling targets keep compiling after the first error,
+    so the last lines of the build log are usually unrelated warnings. The
+    stub build fails with one error line followed by 300 warning lines, more
+    than the tail shows.
+    """
+
+    def test_first_error_is_printed_even_when_buried_before_the_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            stub_bin = tmp_path / "bin"
+            stub_bin.mkdir()
+            stub_cmake = stub_bin / "cmake"
+            stub_cmake.write_text(
+                textwrap.dedent(
+                    """
+                    #!/usr/bin/env bash
+                    if [[ "$1" == "--build" ]]; then
+                        echo "custom command FAILED: stdout-only-marker"
+                        echo "core/x.cpp:1:1: error: buried-compile-error" >&2
+                        for i in $(seq 1 300); do echo "warning: noise $i" >&2; done
+                        exit 2
+                    fi
+                    BUILD=""
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            -B) BUILD="$2"; shift 2 ;;
+                            *) shift ;;
+                        esac
+                    done
+                    mkdir -p "$BUILD"
+                    printf 'PULP_ENABLE_COVERAGE:BOOL=ON\n' > "$BUILD/CMakeCache.txt"
+                    """
+                ).lstrip()
+            )
+            stub_cmake.chmod(0o755)
+            for tool in ("clang", "llvm-profdata", "llvm-cov"):
+                stub = stub_bin / tool
+                stub.write_text("#!/usr/bin/env bash\nexit 0\n")
+                stub.chmod(0o755)
+
+            repo = tmp_path / "repo"
+            (repo / "scripts").mkdir(parents=True)
+            (repo / "scripts" / "run_coverage.sh").symlink_to(SCRIPT)
+            (repo / "scripts" / "coverage_ctest_policy.sh").symlink_to(CTEST_POLICY)
+            # The governed wrapper's lease logic is not under test here.
+            (repo / "tools" / "ci").mkdir(parents=True)
+            wrapper = repo / "tools" / "ci" / "governed-build.sh"
+            wrapper.write_text('#!/usr/bin/env bash\nexec "$@"\n')
+            wrapper.chmod(0o755)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{stub_bin}:{env['PATH']}"
+            result = subprocess.run(
+                ["bash", str(repo / "scripts" / "run_coverage.sh")],
+                cwd=repo,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Coverage build failed", result.stderr)
+        self.assertIn("buried-compile-error", result.stderr)
+        self.assertIn("stdout-only-marker", result.stderr)
+        self.assertIn("warning: noise 300", result.stderr)
 
 
 class LcovCoberturaTests(unittest.TestCase):
