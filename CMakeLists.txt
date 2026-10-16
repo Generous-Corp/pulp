@@ -575,16 +575,22 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     set(_pulp_vellum_header_lines "")
     set(_pulp_vellum_header_targets "")
     foreach(_unit_index RANGE ${_pulp_vellum_unit_last})
-        string(JSON _target_count LENGTH "${_pulp_vellum_units}" units ${_unit_index} targets)
-        math(EXPR _target_last "${_target_count} - 1")
-        foreach(_target_index RANGE ${_target_last})
-            string(JSON _target GET "${_pulp_vellum_units}" units ${_unit_index} targets ${_target_index})
-            if(TARGET ${_target} AND NOT _target IN_LIST _pulp_vellum_header_targets)
-                list(APPEND _pulp_vellum_header_targets ${_target})
-                string(APPEND _pulp_vellum_header_lines
-                    "${_target}\t$<TARGET_PROPERTY:${_target},SOURCE_DIR>\t$<TARGET_PROPERTY:${_target},PULP_UNIT_HEADERS>\n")
-            endif()
-        endforeach()
+        # Alias and carried-by units describe the graph but do not own CMake
+        # targets. Only walk a declared target array when one is present.
+        string(JSON _targets_type ERROR_VARIABLE _targets_error TYPE
+            "${_pulp_vellum_units}" units ${_unit_index} targets)
+        if(_targets_error STREQUAL "NOTFOUND" AND _targets_type STREQUAL "ARRAY")
+            string(JSON _target_count LENGTH "${_pulp_vellum_units}" units ${_unit_index} targets)
+            math(EXPR _target_last "${_target_count} - 1")
+            foreach(_target_index RANGE ${_target_last})
+                string(JSON _target GET "${_pulp_vellum_units}" units ${_unit_index} targets ${_target_index})
+                if(TARGET ${_target} AND NOT _target IN_LIST _pulp_vellum_header_targets)
+                    list(APPEND _pulp_vellum_header_targets ${_target})
+                    string(APPEND _pulp_vellum_header_lines
+                        "${_target}\t$<TARGET_PROPERTY:${_target},SOURCE_DIR>\t$<TARGET_PROPERTY:${_target},PULP_UNIT_HEADERS>\n")
+                endif()
+            endforeach()
+        endif()
     endforeach()
     file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/vellum-unit-headers.txt"
         CONTENT "${_pulp_vellum_header_lines}")
