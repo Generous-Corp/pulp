@@ -476,7 +476,7 @@ private:
     ///   jobs [0, channels)           forward transform of each audio channel's
     ///                                closed frame into its FDL slot
     ///   remaining jobs: per cell, or per destination for a four-channel
-    ///                   true-stereo IR: spectral MAC, Hermitian mirror,
+    ///                   true-stereo IR: spectral MAC, spectrum packing,
     ///                   inverse transform, and overlap-save extract
     void run_group_work(Group& g, long budget) {
         if (!g.armed || budget <= 0) return;
@@ -511,9 +511,9 @@ private:
                 g.has_result = true;
                 break;
             }
-            // Keep fused output in the always-active diagonal cell. The
-            // off-diagonal emit buffers remain zero, so render_chunk and its
-            // routing behavior need no special case.
+            // A destination's diagonal accumulator holds the packed inverse:
+            // real output is diagonal, imaginary output is crossfeed. Extract
+            // both into separate cell buffers so render_chunk can gate them.
             const int cell = fused_stereo ? (output_job == 0 ? 0 : 3) : output_job;
             if (!cell_active(cell)) {
                 std::fill(g.ready[static_cast<std::size_t>(cell)].begin(),
@@ -555,6 +555,9 @@ private:
                                 a[i] += x[i] * h[i];
                     }
                 } else {
+                    // Compute the cross tail even while its render gate is off.
+                    // An enable during partial work then exposes complete state,
+                    // rather than a spectrum assembled under mixed gate values.
                     const int cross_cell = output_job == 0 ? 2 : 1;
                     auto& cross_acc = g.accum[static_cast<std::size_t>(cross_cell)];
                     for (int i = g.job_cursor; i < g.job_cursor + take; ++i) {
@@ -913,8 +916,9 @@ private:
         }
 
         // Metered cost of one period: one forward per audio channel and one
-        // spectral MAC per cell. A four-cell stereo IR needs only one inverse
-        // and extract per destination after the cell spectra are summed.
+        // spectral MAC per cell. For a four-cell stereo IR, pack two real
+        // outputs into one complex inverse per destination; packing and both
+        // output extractions are included in the distributed work budget.
         g.total_cost = static_cast<long>(channels_) * g.plan.forward_cost();
         g.total_cost +=
             static_cast<long>(cell_count_) *

@@ -451,17 +451,20 @@ void run_processors(int B) {
             clobber(out2.data());
         });
     }
-    if (selected("conv.zero_latency IR 2s true stereo 4IR")) {
+    for (bool true_stereo : {false, true}) {
+        const std::string name = true_stereo ? "conv.zero_latency IR 2s true stereo 4IR"
+                                             : "conv.zero_latency IR 2s diagonal 4IR";
+        if (!selected(name)) continue;
         ZeroLatencyConvolver z;
         z.prepare(kSampleRate, B, 2);
-        z.set_true_stereo(true);
+        z.set_true_stereo(true_stereo);
         const auto ll = decaying_ir(96000, 9, 5.0f);
         const auto lr = decaying_ir(96000, 10, 5.0f);
         const auto rl = decaying_ir(96000, 11, 5.0f);
         const auto rr = decaying_ir(96000, 12, 5.0f);
         const float* ir_channels[4] = {ll.data(), lr.data(), rl.data(), rr.data()};
         z.load_impulse_response(ir_channels, 4, 96000, kSampleRate);
-        bench("conv.zero_latency IR 2s true stereo 4IR", B, [&](int n) {
+        bench(name, B, [&](int n) {
             fill_stereo();
             const float* in[2] = {left.data(), right.data()};
             float* o[2] = {out.data(), out2.data()};

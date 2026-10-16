@@ -808,10 +808,119 @@ TEST_CASE("Tail trim ends on an exact zero through the shipped fade",
     for (std::size_t i = static_cast<std::size_t>(keep); i < y.size(); ++i)
         REQUIRE(std::abs(y[i]) < 1e-12);
 }
-TEST_CASE("Packed spectral stereo toggle clears cross tails", "[signal][convolution][diagnostic]") {
- constexpr int ir_len=12000,n=20000; std::vector<std::vector<double>> ir(4,std::vector<double>(ir_len));
- for(int i=3000;i<9000;++i) ir[1][i]=0.25; const double* p[4]={ir[0].data(),ir[1].data(),ir[2].data(),ir[3].data()};
- ZeroLatencyConvolver64 c; c.prepare(kFs,kBlock,2); c.set_normalize_mode(IrNormalizeMode::none); REQUIRE(c.load_impulse_response(p,4,ir_len,kFs)); c.set_true_stereo(true);
- std::vector<std::vector<double>> a(2,std::vector<double>(4000)); a[0][0]=1; (void)render(c,a,kBlock); c.set_true_stereo(false);
- std::vector<std::vector<double>> b(2,std::vector<double>(n-4000)); auto y=render(c,b,kBlock); double m=0; for(double v:y[1]) m=std::max(m,std::abs(v)); REQUIRE(m < 1e-12);
+TEST_CASE("Disabling true stereo mutes an active cross tail",
+          "[signal][convolution][stereo]") {
+    constexpr int ir_len = 12000;
+    constexpr int frames = 20000;
+    std::vector<std::vector<double>> ir(4, std::vector<double>(ir_len));
+    for (int i = 3000; i < 9000; ++i) ir[1][i] = 0.25;
+    const double* p[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    ZeroLatencyConvolver64 conv;
+    conv.prepare(kFs, kBlock, 2);
+    conv.set_normalize_mode(IrNormalizeMode::none);
+    REQUIRE(conv.load_impulse_response(p, 4, ir_len, kFs));
+    conv.set_true_stereo(true);
+
+    std::vector<std::vector<double>> first(2, std::vector<double>(4000));
+    first[0][0] = 1.0;
+    const auto before = render(conv, first, kBlock);
+    double before_peak = 0.0;
+    for (double v : before[1]) before_peak = std::max(before_peak, std::abs(v));
+    REQUIRE(before_peak > 0.01);
+
+    conv.set_true_stereo(false);
+    std::vector<std::vector<double>> rest(2, std::vector<double>(frames - 4000));
+    const auto after = render(conv, rest, kBlock);
+    double after_peak = 0.0;
+    for (double v : after[1]) after_peak = std::max(after_peak, std::abs(v));
+    REQUIRE(after_peak < 1e-12);
+}
+
+TEST_CASE("Packed stereo preserves DC and Nyquist components",
+          "[signal][convolution][stereo]") {
+    constexpr int ir_len = 1537;
+    constexpr int frames = 4096;
+    std::vector<std::vector<float>> ir(4, std::vector<float>(ir_len));
+    for (int c = 0; c < 4; ++c) {
+        ir[c][0] = 0.125f * (c + 1);
+        ir[c][67 + c] = -0.03f;
+        ir[c][710 + c] = 0.015f;
+        ir[c][1300 + c] = -0.007f;
+    }
+    const float* p[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    for (int block : {16, 64, 128, 512}) {
+        for (int source = 0; source < 2; ++source) {
+            ZeroLatencyConvolver conv;
+            conv.prepare(kFs, block, 2);
+            conv.set_normalize_mode(IrNormalizeMode::none);
+            conv.set_true_stereo(true);
+            REQUIRE(conv.load_impulse_response(p, 4, ir_len, kFs));
+            std::vector<std::vector<float>> input(2, std::vector<float>(frames));
+            for (int i = 0; i < frames; ++i)
+                input[source][i] = 0.25f + ((i & 1) ? -0.125f : 0.125f);
+            const std::vector<double> x(input[source].begin(), input[source].end());
+            const auto got = render(conv, input, block);
+            for (int dst = 0; dst < 2; ++dst) {
+                INFO("block " << block << ", source " << source << ", destination " << dst);
+                const auto want = direct_convolve(x, prepared_taps(conv, source * 2 + dst));
+                const std::vector<double> actual(got[dst].begin(), got[dst].end());
+                REQUIRE(rms_error_db(actual, want) < -100.0);
+                REQUIRE(amplitude_db(max_abs_error(actual, want)) < -100.0);
+            }
+        }
+    }
+}
+
+TEST_CASE("True-stereo tail state survives render gating during partial work",
+          "[signal][convolution][stereo]") {
+    constexpr int frames = 8192;
+    constexpr int ir_len = 4096;
+    std::vector<std::vector<float>> ir(4, std::vector<float>(ir_len));
+    for (int i = 900; i < 3000; ++i) {
+        ir[1][i] = 0.03f;
+        ir[2][i] = -0.02f;
+    }
+    const float* p[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    ZeroLatencyConvolver gated, reference;
+    for (auto* conv : {&gated, &reference}) {
+        conv->prepare(kFs, kBlock, 2);
+        conv->set_normalize_mode(IrNormalizeMode::none);
+        conv->set_true_stereo(true);
+        REQUIRE(conv->load_impulse_response(p, 4, ir_len, kFs));
+    }
+    std::vector<std::vector<float>> input(2, std::vector<float>(frames));
+    input[0][0] = 1.0f;
+    input[1][11] = 0.5f;
+    std::vector<std::vector<float>> got(2, std::vector<float>(frames));
+    std::vector<std::vector<float>> want(2, std::vector<float>(frames));
+    double reference_tail_peak = 0.0;
+    double muted_peak = 0.0;
+    double enabled_error = 0.0;
+    // Seven-frame calls leave transforms partially complete when the gate changes.
+    for (int pos = 0; pos < frames; pos += 7) {
+        const int n = std::min(7, frames - pos);
+        const bool enabled = pos < 1001 || pos >= 2002;
+        gated.set_true_stereo(enabled);
+        const float* in[2] = {input[0].data() + pos, input[1].data() + pos};
+        float* out[2] = {got[0].data() + pos, got[1].data() + pos};
+        float* ref[2] = {want[0].data() + pos, want[1].data() + pos};
+        gated.process(in, out, n);
+        reference.process(in, ref, n);
+        for (int c = 0; c < 2; ++c) {
+            for (int i = 0; i < n; ++i) {
+                if (enabled) {
+                    enabled_error = std::max(enabled_error,
+                        std::abs(double(out[c][i]) - double(ref[c][i])));
+                    if (pos >= 2002)
+                        reference_tail_peak = std::max(reference_tail_peak,
+                                                       std::abs(double(ref[c][i])));
+                } else {
+                    muted_peak = std::max(muted_peak, std::abs(double(out[c][i])));
+                }
+            }
+        }
+    }
+    REQUIRE(reference_tail_peak > 0.001);
+    REQUIRE(enabled_error < 1e-7);
+    REQUIRE(muted_peak < 1e-7);
 }
