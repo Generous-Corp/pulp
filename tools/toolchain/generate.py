@@ -280,6 +280,45 @@ def update_file(path: Path, data: dict, digest: str, platform: str, check: bool)
         path.write_text(result, encoding="utf-8")
     return result != text
 
+MISE_IMAGE = ".shipyard/vm-image.mise.toml"
+
+
+def render_mise_image_block(data: dict, digest: str) -> str:
+    """The generated [mise] table of the pinned-toolchain golden layer
+    (tools/ci/mise-golden-layer.sh reads it)."""
+    mise, tc = data["mise"], data["toolchain"]
+    lines = [
+        BEGIN,
+        f"# source_sha256 = {digest}",
+        "[mise]",
+        f'version = "{mise["version"]}"',
+        f'path = "{mise["binary"]["path"]}"',
+        f'sha256 = "{mise["binary"]["sha256"]["macos-arm64"]}"',
+        f'rust = "{tc["rust"]}"',
+        f"rust_components = {toml_value(tc.get('rust_components', []))}",
+        f"rust_targets = {toml_value(tc.get('rust_targets', []))}",
+        END,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def update_mise_image(path: Path, data: dict, digest: str, check: bool) -> bool:
+    text = path.read_text(encoding="utf-8")
+    marker = re.compile(re.escape(BEGIN) + r"\n.*?" + re.escape(END) + r"\n", re.S)
+    if not marker.search(text):
+        raise ValueError(f"{path}: generated toolchain block is missing")
+    result = marker.sub(lambda _m: render_mise_image_block(data, digest), text, count=1)
+    if check and result != text:
+        raise ValueError(
+            f"{path}: the generated [mise] block differs from tools/toolchain/manifest.toml "
+            "(stale or hand-edited); fix: python3 tools/toolchain/generate.py"
+        )
+    if not check:
+        path.write_text(result, encoding="utf-8")
+    return result != text
+
+
 def _mise_tool_line(data: dict, key: str, spec: dict) -> str:
     version = data["toolchain"][key]
     name = mise_name(key, spec)
@@ -729,6 +768,8 @@ def generate(
                 (tartci_root / "manifests/pulp.windows.toml", "windows"),
             ]
         )
+    if (pulp_root / MISE_IMAGE).exists():
+        update_mise_image(pulp_root / MISE_IMAGE, data, digest, check)
     for path, platform in targets:
         update_file(path, data, digest, platform, check)
     return [path for path, _ in targets]

@@ -11801,6 +11801,16 @@
    ],
    "kind": "python"
   },
+  "toolchain-mise_golden_layer-selftest": {
+   "entry": "tools/ci/test_mise_golden_layer.py",
+   "inputs": [
+    "tools/ci/mise-golden-layer.sh",
+    "tools/ci/tart-provision.sh",
+    "tools/ci/test_mise_golden_layer.py",
+    "tools/toolchain/manifest.toml"
+   ],
+   "kind": "python"
+  },
   "toolchain-mise_profile-selftest": {
    "entry": "tools/toolchain/test_mise_profile.py",
    "inputs": [
