@@ -1046,10 +1046,11 @@ public:
         // a destroyed device as lost during teardown.
         callback_state_->alive.store(false, std::memory_order_release);
         destroying_ = true;
-        // Destruction is the terminal lifetime boundary. Do not invoke user
-        // completions while members and the owning object are being torn down;
-        // a completion may re-enter the object or release its last owner.
-        release_device_resources(false);
+        // The async contract requires every accepted request to complete exactly
+        // once, including when destruction is what terminates the request. The
+        // deferred callback owns no reference back to this object, so it remains
+        // safe to invoke after the Dawn handles have been detached below.
+        release_device_resources(true);
     }
 
     void release_device_resources(bool invoke_callbacks = true) {

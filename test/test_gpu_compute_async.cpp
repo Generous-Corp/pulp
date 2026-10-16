@@ -758,6 +758,37 @@ TEST_CASE("GPU device loss notifications are generation-scoped across reinitiali
     REQUIRE_FALSE(gpu->is_initialized());
 }
 
+TEST_CASE("Accepted async readback completes failed when its owner is destroyed",
+          "[render][gpu][compute][async]") {
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> dest(kBins, -1.0f);
+    GpuCompute::ReadbackResult result{};
+    uint32_t completions = 0;
+    uint64_t id = 0;
+
+    {
+        auto gpu = make_gpu();
+        if (!gpu)
+            SKIP(kNoGpu);
+
+        id = gpu->compute_magnitude_async(
+            pairs.data(), dest.data(), kBins, std::chrono::seconds(2),
+            [&](const GpuCompute::ReadbackResult& completion) {
+                result = completion;
+                ++completions;
+            });
+        REQUIRE(id != 0);
+        REQUIRE(gpu->readbacks_in_flight() == 1);
+    }
+
+    REQUIRE(completions == 1);
+    REQUIRE(result.id == id);
+    REQUIRE(result.status == GpuCompute::ReadbackStatus::Failed);
+    REQUIRE(result.bytes == 0);
+    REQUIRE(std::all_of(dest.begin(), dest.end(), [](float value) { return value == -1.0f; }));
+}
+
 TEST_CASE("GPU loss completion may reinitialize without tearing down replacement resources",
           "[render][gpu][compute][async]") {
     auto gpu = make_gpu();
