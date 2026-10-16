@@ -519,3 +519,13 @@ When a prebuilt Skia release gains a Windows platform slice, keep the exact
 asset URL and SHA-256 in `tools/deps/manifest.json` and mirror the digest in
 `external/skia-build/VERSION.md`; a dependency inventory entry alone is not a
 complete platform publication.
+
+## Developer-tool inventory and mise boundary
+
+When documenting a build tool such as mise in `DEPENDENCIES.md`, keep the
+inventory truthful: mise is developer-installed and its locked profile describes
+Pulp's build tools, but it is not redistributed by Pulp and does not belong in
+`NOTICE.md`. Reproducibility-sensitive builds and disposable Windows VM probes
+should run through `MISE_ENV=toolchain mise exec -- ...`; a host-toolchain run
+must be identified as such. Update `docs/reference/licensing.md` with the same
+boundary when the dependency row changes.
