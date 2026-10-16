@@ -61,6 +61,22 @@ TYPOGRAPHY_MAP = {
     "color": "color",
 }
 
+# Native DesignIR intentionally omits CSS properties whose authored value is
+# the CSS initial/inherited default. Treat those omissions as equivalent only
+# for the documented defaults; an authored non-default value must still be
+# present and equal in the native style.
+CSS_INITIAL_EQUIVALENTS = {
+    "font-style": {"normal"},
+    # "left" equals the initial "start" only for left-to-right content; an RTL
+    # fixture would need "right" here instead.
+    "text-align": {"start", "left"},
+    "letter-spacing": {"normal", "0px"},
+    "line-height": {"normal"},
+    "text-transform": {"none"},
+    "text-decoration-line": {"none"},
+    "white-space": {"normal"},
+}
+
 PROMOTION_THRESHOLDS = {
     "structural": 0.99,
     "geometry": 0.98,
@@ -131,6 +147,7 @@ class BrowserNode:
     attributes: dict[str, str]
     bounds: tuple[float, float, float, float] | None
     styles: dict[str, str]
+    backend_node_id: int | None = None
 
 
 @dataclass
@@ -142,6 +159,7 @@ class NativeNode:
     parent_anchor: str | None
     style: dict[str, Any]
     bounds: tuple[float, float, float, float] | None
+    backend_node_id: int | None = None
 
 
 def sha256_file(path: Path) -> str:
@@ -238,6 +256,7 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
     types = raw_nodes.get("nodeType", [])
     names = raw_nodes.get("nodeName", [])
     values = raw_nodes.get("nodeValue", [])
+    backend_node_ids = raw_nodes.get("backendNodeId", [])
     raw_attributes = raw_nodes.get("attributes", [])
     children: dict[int, list[int]] = {}
     for index, parent in enumerate(parents):
@@ -302,6 +321,12 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
             attributes=attrs,
             bounds=bounds,
             styles=styles,
+            backend_node_id=(
+                int(backend_node_ids[index])
+                if index < len(backend_node_ids)
+                and isinstance(backend_node_ids[index], int)
+                and backend_node_ids[index] > 0
+                else None),
         ))
     return result
 
@@ -341,6 +366,11 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
             parent_anchor=parent,
             style=node.get("style") if isinstance(node.get("style"), dict) else {},
             bounds=layout_by_anchor.get(anchor),
+            backend_node_id=(
+                int(node.get("attributes", {}).get("backend_node_id"))
+                if isinstance(node.get("attributes"), dict)
+                and str(node.get("attributes", {}).get("backend_node_id", "")).isdigit()
+                else None),
         ))
         for child in node.get("children", []):
             if isinstance(child, dict):
@@ -354,6 +384,9 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
 
 def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
     score = 0.0
+    if (browser.backend_node_id is not None
+            and browser.backend_node_id == native.backend_node_id):
+        score += 100.0
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
         score += 5.0
@@ -376,6 +409,10 @@ def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
 
 
 def has_identity_signal(browser: BrowserNode, native: NativeNode) -> bool:
+    if browser.backend_node_id is not None and native.backend_node_id is not None:
+        # Both captures have an authoritative DOM identity. Never let a
+        # same-text/same-tag heuristic hide a mismatched capture node.
+        return browser.backend_node_id == native.backend_node_id
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
         return True
@@ -411,6 +448,68 @@ def match_nodes(
         node for index, node in enumerate(browser) if index not in used_browser]
     extra = [node for index, node in enumerate(native) if index not in used_native]
     return matches, missing, extra
+
+
+def comparable_native_nodes(native: list[NativeNode]) -> tuple[list[NativeNode], list[NativeNode]]:
+    """Split native nodes into browser-element comparables and representation wrappers.
+
+    Chromium's DOM snapshot reader intentionally exposes element nodes only;
+    native DesignIR also contains synthetic frame roots, html/body capture
+    wrappers, and explicit text children. Counting those implementation nodes
+    as unmatched browser elements makes an exact element join look like a
+    structural failure. Keep them in the report as ignored representation
+    nodes, but exclude them from precision/recall.
+    """
+    ignored_names = {"html", "body"}
+    comparable: list[NativeNode] = []
+    ignored: list[NativeNode] = []
+    for node in native:
+        if (node.node_type.lower() == "text"
+                or node.anchor == "browser:root"
+                or node.name.lower() in ignored_names):
+            ignored.append(node)
+        else:
+            comparable.append(node)
+    return comparable, ignored
+
+
+def structural_comparison(
+    browser_flat: list[BrowserNode], native_flat: list[NativeNode]
+) -> dict[str, Any]:
+    """Join browser elements to comparable native nodes and score the join.
+
+    Matching runs against comparable native nodes only. A representation node
+    (a text child, the browser root, an html/body wrapper) is excluded from the
+    precision denominator, so it must not be able to supply a match either:
+    a browser element whose only counterpart is a bare text node was lost in
+    lowering and counts as missing. Precision and recall therefore share one
+    population and neither can exceed 1.
+    """
+    comparable_native, ignored_native = comparable_native_nodes(native_flat)
+    matches, missing, extra = match_nodes(browser_flat, comparable_native)
+    matched_parent_by_browser = {
+        browser.index: native.anchor for browser, native, _ in matches}
+    parentage_errors = []
+    for browser, native, _ in matches:
+        expected_parent = matched_parent_by_browser.get(browser.parent)
+        if expected_parent is not None and native.parent_anchor != expected_parent:
+            parentage_errors.append({
+                "browser_node": browser.index,
+                "native_anchor": native.anchor,
+                "expected_native_parent": expected_parent,
+                "actual_native_parent": native.parent_anchor,
+            })
+    structurally_valid_matches = max(0, len(matches) - len(parentage_errors))
+    recall = structurally_valid_matches / max(1, len(browser_flat))
+    precision = structurally_valid_matches / max(1, len(comparable_native))
+    score = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return {
+        "matches": matches, "missing": missing, "extra": extra,
+        "comparable_native": comparable_native, "ignored_native": ignored_native,
+        "parentage_errors": parentage_errors,
+        "structurally_valid_matches": structurally_valid_matches,
+        "precision": precision, "recall": recall, "score": score,
+    }
 
 
 def relative_error(reference: float, candidate: float) -> float:
@@ -473,7 +572,10 @@ def typography_metrics(
             if not browser_value:
                 continue
             comparable += 1
-            if native_value and browser_value == native_value:
+            if (native_value and browser_value == native_value) or (
+                    not native_value
+                    and browser_value in CSS_INITIAL_EQUIVALENTS.get(
+                        browser_key, set())):
                 equal += 1
             else:
                 differences.append({
@@ -888,27 +990,14 @@ def compare_one(
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
     browser_flat = browser_nodes(browser_snapshot)
     native_flat = native_nodes(native_doc, native_layout_doc)
-    matches, missing, extra = match_nodes(browser_flat, native_flat)
-    matched_parent_by_browser = {
-        browser.index: native.anchor for browser, native, _ in matches}
-    parentage_errors = []
-    for browser, native, _ in matches:
-        expected_parent = matched_parent_by_browser.get(browser.parent)
-        if expected_parent is not None and native.parent_anchor != expected_parent:
-            parentage_errors.append({
-                "browser_node": browser.index,
-                "native_anchor": native.anchor,
-                "expected_native_parent": expected_parent,
-                "actual_native_parent": native.parent_anchor,
-            })
-    denominator = max(1, len(browser_flat))
-    precision_denominator = max(1, len(native_flat))
-    structurally_valid_matches = max(0, len(matches) - len(parentage_errors))
-    recall = structurally_valid_matches / denominator
-    precision = structurally_valid_matches / precision_denominator
-    structural_score = (
-        2 * precision * recall / (precision + recall)
-        if precision + recall else 0.0)
+    comparison = structural_comparison(browser_flat, native_flat)
+    matches = comparison["matches"]
+    missing = comparison["missing"]
+    extra = comparison["extra"]
+    ignored_native = comparison["ignored_native"]
+    parentage_errors = comparison["parentage_errors"]
+    structurally_valid_matches = comparison["structurally_valid_matches"]
+    structural_score = comparison["score"]
     structural = {
         "score": round(structural_score, 6),
         "browser_node_count": len(browser_flat),
@@ -919,6 +1008,12 @@ def compare_one(
         "incorrect_parentage": parentage_errors,
         "missing_count": len(missing),
         "extra_count": len(extra),
+        "ignored_representation_node_count": len(ignored_native),
+        "ignored_representation_nodes": [
+            {"anchor": node.anchor, "type": node.node_type, "name": node.name,
+             "text": node.text}
+            for node in ignored_native
+        ],
         "missing": [
             {"index": node.index, "tag": node.tag, "text": node.text}
             for node in missing

@@ -527,6 +527,15 @@ knowing before you touch that file:
   Production native promotion is disabled; `threshold_eligible` is advisory
   evidence only. See `docs/tools/importer-differential-lab.md`.
 
+  **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
+  evidence. The differential matcher must join captured elements by
+  `backendNodeId` when both sides provide one and fail closed on a mismatch;
+  otherwise a same-text fallback can hide a wrong DOM identity. Native
+  synthetic roots, `html`/`body` wrappers, and explicit text children are
+  representation nodes and must be reported separately from browser element
+  precision/recall. Keep the visual threshold intact: text antialiasing can
+  dominate the pixel diff even when structure and geometry are exact.
+
 - `pulp-design-ir-observe` replays input headlessly: ordered `--click x,y`,
   `--drag x1,y1:x2,y2` and `--key <name>` (`tab`/`shift+tab` traverse focus
   as the window hosts do; other keys go to the focused view) run after layout
