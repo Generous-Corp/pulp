@@ -610,6 +610,16 @@ absorbed only when `kill -0` on the PID embedded in its filename fails — never
 on mtime, which would eventually reclaim a slow test's live shard and drop its
 coverage silently.
 
+The hosted **Linux** coverage leg has its own "Reclaim hosted Linux coverage
+disk" step. The ubuntu image arrives with roughly 14 GiB free, and a full Linux
+run exhausted it about 93 minutes in; a runner that fills its disk dies without
+a log. The step deletes preinstalled SDKs the job never uses (.NET, Android,
+GHC, CodeQL, Boost, Swift and similar) on GitHub-hosted runners only. While the
+suite runs, the coverage step prints a `disk-sample:` line every five minutes:
+free space plus the sizes of `build-coverage`, its `profraw` and `coverage`
+subdirectories, and `~/.cache/pulp`. Read those lines to see which writer grew
+before changing anything else.
+
 
 ## Shipyard-binary pin bumps
 

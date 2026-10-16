@@ -494,6 +494,28 @@ jobs:
           python3 -m pip install --user --upgrade numpy || \
             python3 -m pip install --break-system-packages --user --upgrade numpy
 
+      - name: Reclaim hosted Linux coverage disk
+        # The hosted ubuntu image ships ~14 GiB root free, and a full Linux
+        # coverage run (instrumented build of every target plus ~20k tests'
+        # profiles) exhausted it about 93 minutes in. On disposable
+        # GitHub-hosted runners only, delete preinstalled SDKs this job never
+        # uses. Self-hosted machines are never mutated by this step.
+        if: matrix.os == 'linux' && runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "before:"; df -h /
+          for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+                     /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift \
+                     /usr/local/julia* /usr/local/share/powershell /usr/local/share/chromium; do
+            if [ -e "${dir}" ]; then
+              echo "Removing ${dir} ($(sudo du -sh "${dir}" 2>/dev/null | cut -f1))"
+              sudo rm -rf -- "${dir}"
+            fi
+          done
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          echo "after:"; df -h /
+
       - name: Reclaim hosted macOS coverage disk
         # GitHub's standard arm64 image has a tight root disk and the native
         # coverage link previously failed at 98% with ENOSPC. On disposable
@@ -640,6 +662,22 @@ jobs:
           # write or warning echo can NEVER skip the kill — terminating the suite
           # before the job cap is the entire point. The marker is best-effort; the
           # kill is mandatory.
+          # Disk evidence: a hosted runner that fills its disk dies without a
+          # log, so print free space and the largest writers every 5 minutes
+          # while the suite runs.
+          sampler=""
+          if [ "${RUNNER_OS}" != "Windows" ]; then
+            ( while kill -0 "${cov}" 2>/dev/null; do
+                free_gib=$(df -Pk . | awk 'NR==2 {printf "%.1f", $4/1048576}')
+                sizes=""
+                for d in build-coverage build-coverage/profraw build-coverage/coverage \
+                         "${HOME}/.cache/pulp"; do
+                  [ -e "${d}" ] && sizes="${sizes} ${d##*/}=$(du -sk "${d}" 2>/dev/null | awk '{printf "%.1fG", $1/1048576}')"
+                done
+                echo "disk-sample: $(date -u +%H:%M:%SZ) free=${free_gib}G${sizes}"
+                sleep 300
+              done ) & sampler=$!
+          fi
           ( sleep "${budget}"
             echo "::warning::coverage suite hit the ${budget}s best-effort budget; terminating the coverage process tree."
             : > "${budget_hit}" 2>/dev/null || true
@@ -647,6 +685,11 @@ jobs:
           set +e; wait "${cov}"; rc=$?; set -e
           kill -TERM "${watch}" 2>/dev/null || true
           wait "${watch}" 2>/dev/null || true
+          if [ -n "${sampler}" ]; then
+            kill -TERM "${sampler}" 2>/dev/null || true
+            wait "${sampler}" 2>/dev/null || true
+            echo "disk after suite:"; df -h .
+          fi
           # Best-effort timeout cleanup. Trigger on EITHER the marker OR a
           # signal-kill exit (143=SIGTERM, 137=SIGKILL — our watchdog's signals),
           # so a marker-write that failed on a Windows RUNNER_TEMP path can't
