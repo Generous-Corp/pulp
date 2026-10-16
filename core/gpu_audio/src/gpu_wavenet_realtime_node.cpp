@@ -180,6 +180,7 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::uint64_t next_input = 0, sequence = 0, epoch = 0;
     std::uint64_t all_channels_mask = 0;
     bool prepared = false, production_provider = false;
+    bool fallback_prepared = false;
 
     explicit Impl(const Config& source)
         : config(source),
@@ -201,7 +202,8 @@ struct GpuWaveNetRealtimeNode::Impl {
                c.session.slots >= 2 && c.completion_service_wait_ns <= 1'000'000 &&
                validate_gpu_wavenet_descriptor(c.session.descriptor).accepted() &&
                weights.size() == c.session.descriptor.weight_count &&
-               (c.miss_policy != MissPolicy::CpuFallback || c.supports_cpu_fallback) &&
+               (c.miss_policy != MissPolicy::CpuFallback ||
+                (c.supports_cpu_fallback && fallback_prepared)) &&
                (c.miss_policy == MissPolicy::Silence || c.miss_policy == MissPolicy::CpuFallback) &&
                epoch != UINT64_MAX && sequence < Bridge::kSequenceLimit &&
                (!include_prewarm || c.prewarm_blocks < Bridge::kSequenceLimit - sequence);
@@ -244,7 +246,7 @@ struct GpuWaveNetRealtimeNode::Impl {
             contract.active_path = detail::SharedIoPath::SharedHostPointer;
             contract.shared_host_pointer_capable = true;
             contract.miss_policy = c.miss_policy;
-            contract.cpu_fallback_prepared = c.supports_cpu_fallback;
+            contract.cpu_fallback_prepared = fallback_prepared;
             trace = std::make_unique<detail::SharedIoTraceRecorder>(
                 detail::SharedIoTraceConfig{.engine_id = trace_engine,
                                             .generation = epoch,
@@ -384,6 +386,7 @@ bool GpuWaveNetRealtimeNode::prepare() {
     if (!release())
         return false;
     auto& s = *impl_;
+    s.fallback_prepared = cpu_fallback_prepared();
     try {
         if (!s.valid_config())
             return false;
@@ -658,6 +661,7 @@ bool detail::WaveNetRealtimeTestAccess::prepare(
     if (!node.release())
         return false;
     node.impl_->sequence = first_sequence;
+    node.impl_->fallback_prepared = node.cpu_fallback_prepared();
     node.impl_->channels = std::move(channels);
     return node.impl_->valid_config() && node.impl_->initialize();
 }
