@@ -17,6 +17,7 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <cerrno>
+#include <fcntl.h>
 #include <memory>
 #include <poll.h>
 #include <span>
@@ -24,6 +25,9 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 #include <thread>
 #include <unistd.h>
 #include <utility>
@@ -739,6 +743,26 @@ struct LossProbeResult {
     WGPUDeviceLostReason reason = WGPUDeviceLostReason_Unknown;
 };
 
+bool wait_for_child(pid_t child, int& status) noexcept {
+    while (waitpid(child, &status, 0) < 0) {
+        if (errno != EINTR)
+            return false;
+    }
+    return true;
+}
+
+void terminate_child_group(pid_t child) noexcept {
+    if (child <= 0)
+        return;
+    // The child establishes its own process group before entering native code.
+    // Signal both the group and the direct child to cover the short fork/setpgid
+    // race, then reap it so no zombie survives the typed return.
+    (void)kill(-child, SIGKILL);
+    (void)kill(child, SIGKILL);
+    int status = 0;
+    (void)wait_for_child(child, status);
+}
+
 // wgpuDeviceDestroy can block inside a native Metal call on some pinned
 // images. Run this capability-only probe in a child so the parent verifier's
 // watchdog can kill the child and classify the capability gap as unavailable.
@@ -746,6 +770,17 @@ LossProbeResult run_loss_capability_probe() noexcept {
     int pipe_fds[2]{};
     if (pipe(pipe_fds) != 0)
         return {.status = LossProbeStatus::Failed};
+    const auto close_on_exec = [](int fd) noexcept {
+        const auto flags = fcntl(fd, F_GETFD);
+        return flags >= 0 && fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0;
+    };
+    const auto nonblocking = fcntl(pipe_fds[0], F_GETFL);
+    if (!close_on_exec(pipe_fds[0]) || !close_on_exec(pipe_fds[1]) || nonblocking < 0 ||
+        fcntl(pipe_fds[0], F_SETFL, nonblocking | O_NONBLOCK) != 0) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        return {.status = LossProbeStatus::Failed};
+    }
     const auto child = fork();
     if (child < 0) {
         close(pipe_fds[0]);
@@ -754,6 +789,22 @@ LossProbeResult run_loss_capability_probe() noexcept {
     }
     if (child == 0) {
         close(pipe_fds[0]);
+        (void)setpgid(0, 0);
+#if defined(__linux__)
+        (void)prctl(PR_SET_PDEATHSIG, SIGKILL);
+        if (getppid() == 1)
+            _exit(1);
+#endif
+        const auto null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd >= 0) {
+            (void)dup2(null_fd, STDOUT_FILENO);
+            (void)dup2(null_fd, STDERR_FILENO);
+            if (null_fd > STDERR_FILENO)
+                close(null_fd);
+        } else {
+            close(STDOUT_FILENO);
+            close(STDERR_FILENO);
+        }
         LossProbeResult result{};
         auto loss_probe_provider = WgpuNativeStagedProvider::create();
         if (loss_probe_provider == nullptr) {
@@ -783,18 +834,18 @@ LossProbeResult run_loss_capability_probe() noexcept {
     }
 
     close(pipe_fds[1]);
+    (void)setpgid(child, child);
     LossProbeResult result{};
     pollfd descriptor{.fd = pipe_fds[0], .events = POLLIN};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
     const auto poll_status = poll(&descriptor, 1, 8'000);
     if (poll_status == 0) {
-        kill(child, SIGKILL);
-        waitpid(child, nullptr, 0);
+        terminate_child_group(child);
         close(pipe_fds[0]);
         return {.status = LossProbeStatus::Unavailable};
     }
     if (poll_status < 0) {
-        kill(child, SIGKILL);
-        waitpid(child, nullptr, 0);
+        terminate_child_group(child);
         close(pipe_fds[0]);
         return {.status = LossProbeStatus::Failed};
     }
@@ -802,14 +853,36 @@ LossProbeResult run_loss_capability_probe() noexcept {
     std::size_t received = 0;
     while (received < sizeof(result)) {
         const auto count = read(pipe_fds[0], bytes + received, sizeof(result) - received);
-        if (count <= 0)
+        if (count > 0) {
+            received += static_cast<std::size_t>(count);
+            continue;
+        }
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       deadline - std::chrono::steady_clock::now())
+                                       .count();
+            if (remaining <= 0) {
+                terminate_child_group(child);
+                close(pipe_fds[0]);
+                return {.status = LossProbeStatus::Unavailable};
+            }
+            const auto followup = poll(&descriptor, 1, static_cast<int>(remaining));
+            if (followup > 0)
+                continue;
+            terminate_child_group(child);
+            close(pipe_fds[0]);
+            return {.status = followup == 0 ? LossProbeStatus::Unavailable
+                                            : LossProbeStatus::Failed};
+        }
+        if (count == 0 || count < 0)
             break;
-        received += static_cast<std::size_t>(count);
     }
     close(pipe_fds[0]);
     int child_status = 0;
-    waitpid(child, &child_status, 0);
-    if (received != sizeof(result) || !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
+    if (!wait_for_child(child, child_status) || received != sizeof(result) ||
+        !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
         return {.status = LossProbeStatus::Failed};
     return result;
 }
