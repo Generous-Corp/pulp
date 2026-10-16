@@ -15,13 +15,18 @@ on a shared machine is noisy and a flaky perf gate is worse than none.
   meter, biquad/SVF/ladder filters, oscillators, gain, FFT and resampling.
   Each row reports:
   - **mean** ns/frame: median over repetitions of the whole-run time;
-  - **p99** and **max** ns/frame of individually timed blocks. Realtime
+  - **p50**, **p99** and **max** ns/frame of individually timed blocks. Realtime
     headroom is set by the worst block, not the average: a partitioned
     convolver's mean hides blocks that run an FFT and cost many times more.
 - **Kernels** in ns/element at N = 64 and 512: the scalar loop shapes
   (`sum`, `sum_squares`, `max_abs`, `dot`, `ramp_mul`, per-output
   `correlate`) and every compiled `pulp::simd` backend (`scalar-backend`,
   `highway`, `accelerate` on Apple) for the same kernels plus `decimate2`.
+- **Multiple convolution instances**: 1, 4, 8, 16 and 32 independent stereo
+  convolvers, each with four 96,000-tap IRs, processed serially in one aggregate
+  callback at the same block sizes. These rows report callback p50/p95/p99/max,
+  thread/process CPU demand, deadline overruns and actual warmup/measurement
+  callback counts.
 
 Every case feeds a rolling window of noise and publishes its output through a
 compiler memory barrier, so no loop can be hoisted out of the timing. A kernel
@@ -44,12 +49,33 @@ tools/ci/governed-build.sh cmake --build build-bench \
 Options: `--filter SUBSTRING` runs matching rows only (`--filter conv.`,
 `--filter kernel.dot`), `--seconds S` sets the audio per repetition (default
 2), `--host NAME` labels the run, and `--smoke` exercises every case in about a
-second (its numbers mean nothing). A run takes about 30 seconds.
+second (its numbers mean nothing). A full run can take several minutes; use a
+filter when investigating one processor.
 
 Confirm the binary is optimized before trusting a number: the JSON records
 `"optimized"` and `"ndebug"`, and both must be `true`. It also records the
 host, CPU, OS, compiler, commit, the active `pulp::simd` backend and the
 measured cost of one timer read.
+
+### Multiple convolution instances
+
+```bash
+./build-bench/test/pulp-dsp-throughput-benchmark \
+  --filter multi_instance.zero_latency.4IR.96k --seconds 2 \
+  --commit "$(git rev-parse HEAD)" --json convolution-instances.json
+```
+
+IR loading and seeded input generation happen before timing. Warmup covers at
+least four periods of the largest partition. Instances have independent state
+and matching seeded inputs/IRs, with synchronized partition phases.
+
+CPU demand is CPU time divided by the represented audio duration. A value above
+100% means the serial audio workload needs more than one CPU second per audio
+second; it is not whole-machine utilization. Missing CPU clocks are reported as
+unavailable. A deadline overrun means the measured aggregate callback took longer
+than `block_size / 48000`. These unpaced measurements do not establish
+multithreaded DAW capacity or real-time scheduling guarantees. Retain host-load
+receipts and repeat in both execution orders before interpreting a capacity gain.
 
 ## Comparing two runs
 
