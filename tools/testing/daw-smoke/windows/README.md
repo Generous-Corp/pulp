@@ -1,74 +1,101 @@
-# Windows REAPER editor acceptance packet
+# Windows REAPER editor evidence
 
-`windows_editor_smoke.ps1` is the Windows counterpart to the macOS-only
-`reaper_smoke.py` editor path. It starts one portable REAPER process, stages one
-exact VST3 or CLAP artifact in a temporary directory, inserts a
-**format-qualified** FX (`VST3:` or `CLAP:`), and records a receipt. It never
-installs into the system plugin directory or kills an existing REAPER process.
+`windows_editor_smoke.ps1` starts an isolated REAPER profile, stages an exact
+VST3/CLAP artifact, inserts a format-qualified FX, and captures its editor.
+Its PASS is scoped to host insertion, editor capture and optional host parameter
+readback. Product control semantics, actual UI modulation, animation and live
+audio continuity require a product scenario and remain `NOT_EVALUATED` here.
 
 ```powershell
 .\windows_editor_smoke.ps1 `
   -ReaperExe 'C:\Program Files\REAPER\reaper.exe' `
-  -Format vst3 `
-  -PluginPath 'C:\build\Spectr.vst3' `
-  -PluginName 'Spectr' `
-  -EvidenceDir 'C:\evidence\spectr-arm64-reaper' `
-  -ParamIndex 0 `
-  -ContextX 900 -ContextY 500
+  -SeedProfile "$env:APPDATA\REAPER" `
+  -Format vst3 -PluginPath 'C:\build\Example.vst3' -PluginName 'Example' `
+  -EvidenceDir 'C:\evidence\example-arm64-reaper' `
+  -ParamIndex 0 -AutomationSec 8 -TimeoutSec 60
 ```
 
-Exit codes are **0 PASS**, **1 FAIL**, and **3 INCONCLUSIVE**. The last state is
-used for missing scan-cache evidence, a headless session, or an absent status
-handshake; it is never treated as a pass. The receipt records source/staged
-paths, a staged file hash manifest, format, host status, scan-cache match, and
-screenshot paths. Supplying `-ContextX/-ContextY` adds a right-click
-context-menu capture. `-ParamIndex` drives one real REAPER parameter; `-1`
-records that modulation was not attempted.
+Use an initialized, registered profile whose first-run dialogs have already
+been dismissed. The harness copies only `reaper.ini` and an existing license
+file into a private temporary profile outside the evidence directory. Cleanup
+removes that copied profile. It never edits the source profile or prints license
+contents. Exported evidence contains no profile or license. Keep user REAPER
+processes and projects untouched.
 
-REAPER's Windows scan cache stores the plug-in basename and loader metadata,
-not the scan directory. The packet therefore requires the exact staged
-basename and plug-in name in the cache, then records the staged path and hash
-as the separate artifact binding.
+For CLAP, pass required adjacent files explicitly, for example
+`-SidecarPath 'C:\build\icudtl.dat'`. VST3 bundles are copied recursively.
+The receipt contains a named SHA256/size manifest for staged files, the actual
+REAPER PE architecture, and the exact loaded plugin module path/hash/machine.
+The cache basename only establishes scan progress; it is never artifact proof.
+The isolated scan root is last in the VST3 scan list for duplicate-class
+resolution. A mismatching live module makes the run INCONCLUSIVE.
 
-## Audio and performance companion gates
+The host executable determines the VST scan key: `vstpath64` for x64 and
+`vstpath_winarm64` for ARM64/ARM64EC/ARM64X. CLAP uses `clap_path`.
+Startup, scan and parameter action have separate bounded budgets. A unique run
+token prevents stale host status from satisfying the handshake. Terminal
+status retains insertion evidence, actual normalized parameter observations,
+changes and readback error, and a saved project. Host automation is not proof
+that an LFO was assigned through the plugin UI.
 
-The GUI smoke does not assert audio correctness. For the same exact artifact,
-run the cross-platform Pulp audio harness from the Windows SDK build:
+Exit code **0** means scoped PASS; **3** means INCONCLUSIVE. Every failure after
+the evidence directory is created writes a terminal receipt, including cleanup
+errors. Cleanup verifies retained process/start identity. The Lua driver binds the actual floating editor HWND; the wrapper requires that
+window to be present, visible and owned. Foreground and pointer targets must
+belong to that editor or its children/popups before capture/input. Optional `-ContextX/-ContextY`
+captures before and after a guarded right click; inspect the image to establish
+that a menu painted. Screenshot existence alone does not prove menu contents.
+
+## Fixture controls
 
 ```powershell
-pulp audio render --plugin C:\build\Spectr.vst3 --format vst3 `
-  --out C:\evidence\spectr-wet.wav --duration-ms 2000 `
-  --input-signal noise:123 --sample-rate 48000 --block 128 `
-  --wav-format float32 --json
-pulp audio validate summarize C:\evidence\spectr-wet.wav --json
-pulp audio validate doctor C:\evidence\spectr-wet.wav --thd --json
+pwsh -NoProfile -File .\test_windows_editor_smoke.ps1
 ```
 
-Repeat with Spectr's documented bypass/dry parameter and `--latency-report`,
-then require the delayed null to pass. Keep wet, bypass, modulation-on, and
-modulation-off WAVs plus JSON reports. The offline harness proves the bundle's
-audio path; only the REAPER run proves host insertion and editor behavior.
+With Lua 5.3+ and an existing scratch directory:
 
-For UI/GPU timing, use a separate **dev-only** traced build with the exact same
-source and SDK SHA, never the release installer:
-
-```powershell
-$env:PULP_TRACE_PATH='C:\evidence\spectr-arm64-reaper.pftrace'
-$env:PULP_TRACE_SECONDS='20'
-& 'C:\Program Files\REAPER\reaper.exe' -portable -cfgfile C:\evidence\run\reaper.ini
-pulp trace doctor
-pulp trace query 'select name,dur from slice order by dur desc limit 30' `
-  --trace C:\evidence\spectr-arm64-reaper.pftrace
+```sh
+lua test_windows_editor_smoke.lua windows_editor_smoke.lua /absolute/scratch/path
 ```
 
-Run this packet once on ARM64 and once on x64. Compare p95/p99 frame/render
-spans and host-reported xruns against a predeclared baseline; do not invent a
-threshold after observing the result. Perfetto does not instrument the live
-audio thread, so no trace replaces WAV/null/xrun evidence.
+These run parser, PE architecture, path quoting, status/readback, stale token,
+wrong-module and durable failure controls. The Lua test executes the actual
+driver with a mocked host, including ignored parameter writes. They establish
+harness behavior; a fresh Windows runtime receipt and image review are still
+required for each architecture and exact PE.
 
-## Installer status
+## Product interaction and audio companion gates
 
-This packet accepts a portable plugin artifact. It does not imply that an NSIS
-installer exists. An installer is a separate gate: run `pulp ship package` only
-when NSIS is available, record the `.exe` SHA/size and install/uninstall logs,
-then rerun this packet against the installed VST3/CLAP paths.
+Keep product names, control geometry, settings schema, preset comparison and
+modulation targets in a product scenario. Require before/after screenshots and
+fresh token-acknowledged host state for knobs, dropdown choices, actual context
+menu selection, drawn bands, settings and preset save/change/reload. Prove an
+assigned LFO from enabled/target/depth readback and successive changing frames
+of the target region. API parameter oscillation is a different test.
+
+For continuity during interactions, record real-time wet output plus a known
+continuous dry reference in REAPER. Retain device/backend, latency, transport
+position versus monotonic wall time, last underrun timestamps, actual recorded
+files and exact binary identities. Check finite/unclipped output, unexpected
+interior silence, reference corruption, capture length and transport drift.
+Offline render/null tests supplement this evidence. Dummy Audio establishes
+only bounded host-engine behavior, not physical speaker/hardware continuity.
+
+For UI/GPU timing use a separate development trace build from the same source.
+Windows REAPER uses `-newinst -cfgfile <ini> <startup.lua>`; the Lua script is
+its final positional input. Neither `-portable` nor `-script` is supported.
+Compare the same assigned modulation with mouse still versus band drawing, and
+settings mouse-still versus scrolling. Buffer input QPC/UTC timing records and
+capture screenshots/state outside the measured windows. Verify received event
+spans and actual changed state because Windows can coalesce pointer messages.
+Queue-inclusive input latency is not the duration of a window-procedure span.
+Keep guest processing time distinct from VNC/RDP/mobile display transport.
+
+Perfetto does not instrument the live audio thread. Absent DSP spans do not
+prove zero xruns. Verify trace completeness and use live recording/host telemetry
+for audio. An incomplete modulation setup can still have a diagnostic band-draw
+capture, explicitly marked modulation unverified; full acceptance remains open.
+
+Run fresh evidence on ARM64 and x64, then repeat against the final release
+artifact. Portable plugin evidence does not establish installer acceptance;
+install/uninstall and installed-path rebinding are separate gates.

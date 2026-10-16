@@ -1,10 +1,7 @@
 <#!
 .SYNOPSIS
-  Bounded Windows REAPER evidence run for a format-qualified Pulp plugin.
-
-This is an opt-in operator test. It never installs a plugin or kills a REAPER
-process it did not start. A missing scan-cache entry, missing host status, or
-missing interactive desktop is INCONCLUSIVE (exit 3), never PASS (exit 0).
+  Opt-in Windows host insertion/editor evidence, with exact loaded-PE binding.
+  Product interaction, animation and live audio acceptance are separate gates.
 #>
 [CmdletBinding()]
 param(
@@ -13,148 +10,183 @@ param(
   [Parameter(Mandatory=$true)][string]$PluginPath,
   [Parameter(Mandatory=$true)][string]$PluginName,
   [Parameter(Mandatory=$true)][string]$EvidenceDir,
+  [Parameter(Mandatory=$true)][string]$SeedProfile,
+  [string[]]$SidecarPath = @(),
   [int]$ParamIndex = -1,
-  [int]$TimeoutSec = 60,
+  [ValidateRange(1,60)][int]$AutomationSec = 8,
+  [ValidateRange(5,300)][int]$TimeoutSec = 60,
   [int]$ContextX = -1,
   [int]$ContextY = -1
 )
 $ErrorActionPreference = 'Stop'
-$ExitPass = 0; $ExitFail = 1; $ExitSkip = 2; $ExitInconclusive = 3
-
-function Fail-Inconclusive([string]$Reason) {
-  $script:Verdict = @{ verdict='INCONCLUSIVE'; reason=$Reason }
-  Write-Warning $Reason
-  exit $ExitInconclusive
-}
-function Require-File([string]$Path,[string]$Label) {
-  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { Fail-Inconclusive "$Label not found: $Path" }
-  return (Resolve-Path -LiteralPath $Path).Path
-}
-
-$reaper = Require-File $ReaperExe 'REAPER executable'
-$plugin = (Resolve-Path -LiteralPath $PluginPath -ErrorAction SilentlyContinue)
-if (-not $plugin) { Fail-Inconclusive "plugin not found: $PluginPath" }
-$plugin = $plugin.Path
-if ($Format -eq 'vst3' -and -not ($plugin -match '(?i)\.vst3$')) { Fail-Inconclusive 'vst3 run received a non-vst3 path' }
-if ($Format -eq 'clap' -and -not ($plugin -match '(?i)\.clap$')) { Fail-Inconclusive 'clap run received a non-clap path' }
+. (Join-Path $PSScriptRoot 'windows_editor_common.ps1')
+$token = [Guid]::NewGuid().ToString('N')
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
-$EvidenceDir = (Resolve-Path -LiteralPath $EvidenceDir).Path
-$run = Join-Path $EvidenceDir ('run-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))
-$portable = Join-Path $run 'portable'; $scan = Join-Path $run 'scan'
-New-Item -ItemType Directory -Force -Path $portable,$scan | Out-Null
-
-# Stage the exact artifact into an isolated scan directory. REAPER's portable
-# path keys are intentionally explicit; the cache is checked below before any
-# host verdict is accepted. Windows REAPER expects -cfgfile to name reaper.ini.
-if ($Format -eq 'vst3') { Copy-Item -LiteralPath $plugin -Destination $scan -Recurse }
-else { Copy-Item -LiteralPath $plugin -Destination $scan }
-$staged = Join-Path $scan (Split-Path $plugin -Leaf)
-$sha = (Get-ChildItem -LiteralPath $staged -File -Recurse | Sort-Object FullName |
-  Get-FileHash -Algorithm SHA256 | ForEach-Object Hash | Out-String).Trim()
-$status = Join-Path $run 'status.txt'; $reaperOut = Join-Path $run 'reaper.out.txt'
-$lua = Join-Path $PSScriptRoot 'windows_editor_smoke.lua'
-$ini = Join-Path $portable 'reaper.ini'
-$expectedCacheEntry = [IO.Path]::GetFileName($staged)
-@("[REAPER]","vstfullstate=33605","vstpath64=$scan","clap_path_windows-x86_64=$scan","lastproject=","loadlastproj=0") | Set-Content -LiteralPath $ini -Encoding ascii
-
-$env:PULP_DAW_SMOKE_FX = "$(if ($Format -eq 'vst3') { 'VST3:' } else { 'CLAP:' })$PluginName"
-$env:PULP_DAW_SMOKE_STATUS = $status
-$env:PULP_DAW_SMOKE_PARAM_INDEX = "$ParamIndex"
-$env:PULP_DAW_SMOKE_DURATION = "$TimeoutSec"
-$args = @('-newinst','-cfgfile', $ini, $lua)
-# REAPER executes a startup script only when it is the final positional input;
-# `-script`/`-portable` are not Windows REAPER options. Warm the same profile
-# first so plugin scanning is durable before the scripted instance starts.
-$warm = Start-Process -FilePath $reaper -ArgumentList @('-newinst','-cfgfile',$ini) -WorkingDirectory $run -RedirectStandardOutput $reaperOut -RedirectStandardError ($reaperOut + '.err') -PassThru
+$run = Join-Path (Resolve-Path -LiteralPath $EvidenceDir).Path ('run-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + $token.Substring(0,8))
+New-Item -ItemType Directory -Path $run | Out-Null
+$receipt = [ordered]@{schema=2;token=$token;verdict='INCONCLUSIVE';scope='host insertion/editor/optional host parameter readback';started_utc=[DateTime]::UtcNow.ToString('o');error=$null;cleanup_errors=@()}
+$owned = New-Object 'System.Collections.Generic.List[object]'
+$priorEnv = @{}
+$envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}
+foreach($name in $envNames){$priorEnv[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
+$exitCode=3
+$privateProfile=$null
+function Stop-Owned($Entry) {
+  if ($Entry.process.HasExited) { return }
+  Assert-OwnedIdentity $Entry.process $Entry.started
+  $Entry.process.Kill(); $Entry.process.WaitForExit(5000) | Out-Null
+}
+function Start-Owned([string[]]$Arguments,[string]$Label) {
+  $command=Join-WindowsArguments $Arguments
+  $p=Start-Process -FilePath $script:reaper -ArgumentList $command -WorkingDirectory $run -RedirectStandardOutput (Join-Path $run ($Label+'.stdout.txt')) -RedirectStandardError (Join-Path $run ($Label+'.stderr.txt')) -PassThru
+  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command}
+  $owned.Add($entry); return $entry
+}
 try {
-  $deadline = (Get-Date).AddSeconds($TimeoutSec)
-  while ((Get-Date) -lt $deadline) {
-    $cacheFiles = Get-ChildItem -LiteralPath $portable -Recurse -File -ErrorAction SilentlyContinue |
-      Where-Object { $_.Name -match '(?i)reaper-(vstplugins|clap).*\.ini$' }
-    $cacheText = ($cacheFiles | Get-Content -ErrorAction SilentlyContinue) -join "`n"
-    # REAPER stores the plug-in basename and loader metadata, not the scan
-    # directory. Wait for the exact entry instead of an unrelated cache file.
-    if ($cacheText -match [regex]::Escape($expectedCacheEntry)) { break }
+  if(-not(Test-Path -LiteralPath $ReaperExe -PathType Leaf)){throw "REAPER executable missing: $ReaperExe"}
+  $script:reaper=(Resolve-Path -LiteralPath $ReaperExe).Path
+  $machine=Get-PeMachine $reaper; $keys=Get-ReaperScanKeys $machine
+  $receipt.host=@{path=$reaper;machine=$machine;sha256=(Get-FileHash -LiteralPath $reaper -Algorithm SHA256).Hash}
+  if(-not(Test-Path -LiteralPath (Join-Path $SeedProfile 'reaper.ini') -PathType Leaf)){throw 'SeedProfile must contain an initialized reaper.ini'}
+  if(-not(Test-Path -LiteralPath $PluginPath)){throw "Plugin missing: $PluginPath"}
+  $plugin=(Resolve-Path -LiteralPath $PluginPath).Path
+  if([IO.Path]::GetExtension($plugin) -ine ('.'+$Format)){throw 'Plugin format/path mismatch'}
+  $privateProfile=Join-Path ([IO.Path]::GetTempPath()) ('pulp-reaper-profile-'+$token)
+  $portable=$privateProfile;$scan=Join-Path $run 'scan'
+  New-Item -ItemType Directory -Path $scan | Out-Null
+  # Sensitive copied settings/license remain outside exported evidence.
+  Copy-PrivateProfile $SeedProfile $privateProfile (Resolve-Path -LiteralPath $EvidenceDir).Path
+  $receipt.seed_profile=@{path=(Resolve-Path -LiteralPath $SeedProfile).Path;license_present=(Test-Path -LiteralPath (Join-Path $portable 'reaper-license.rk'))}
+  Copy-Item -LiteralPath $plugin -Destination $scan -Recurse
+  $staged=Join-Path $scan (Split-Path $plugin -Leaf)
+  foreach($sidecar in $SidecarPath){
+    if(-not(Test-Path -LiteralPath $sidecar -PathType Leaf)){throw "Sidecar missing: $sidecar"}
+    $destination=Join-Path $scan (Split-Path $sidecar -Leaf)
+    if(Test-Path -LiteralPath $destination){throw 'Sidecar filename collision'}
+    Copy-Item -LiteralPath $sidecar -Destination $destination
+  }
+  $manifest=@(Get-ChildItem -LiteralPath $scan -File -Recurse | Sort-Object FullName | ForEach-Object {
+    @{path=$_.FullName;relative=$_.FullName.Substring($scan.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}
+  })
+  $receipt.staged_manifest=$manifest
+  $ini=Join-Path $portable 'reaper.ini'
+  $lines=@(Get-Content -LiteralPath $ini)
+  $section=$null;$out=New-Object 'System.Collections.Generic.List[string]';$inserted=$false
+  foreach($line in $lines){
+    if($line -match '^\[(.+)\]$'){$section=$Matches[1]}
+    if($section -eq 'REAPER' -and $line -match '^(vstpath64|vstpath_winarm64|clap_path(?:_windows-[^=]+)?|lastproject|loadlastproj|vstfullstate)='){continue}
+    $out.Add($line)
+    if($line -eq '[REAPER]'){
+      # Staged root last wins duplicate VST3 class IDs; loaded-PE binding below
+      # remains authoritative even when system roots are scanned implicitly.
+      $out.Add($keys[0]+'='+$env:COMMONPROGRAMFILES+'\VST3;'+$env:LOCALAPPDATA+'\Programs\Common\VST3;'+$scan)
+      $out.Add($keys[1]+'='+$scan);$out.Add('vstfullstate=33605');$out.Add('lastproject=');$out.Add('loadlastproj=0');$inserted=$true
+    }
+  }
+  if(-not $inserted){throw 'Seed profile lacks REAPER section'}
+  $out | Set-Content -LiteralPath $ini -Encoding utf8
+  $status=Join-Path $run 'status.txt';$lua=Join-Path $PSScriptRoot 'windows_editor_smoke.lua'
+  $env:PULP_DAW_SMOKE_FX="$(if($Format -eq 'vst3'){'VST3:'}else{'CLAP:'}) $PluginName"
+  $env:PULP_DAW_SMOKE_STATUS=$status;$env:PULP_DAW_SMOKE_TOKEN=$token
+  $env:PULP_DAW_SMOKE_PROJECT=Join-Path $run 'host-state.rpp'
+  $env:PULP_DAW_SMOKE_PARAM_INDEX="$ParamIndex";$env:PULP_DAW_SMOKE_DURATION="$AutomationSec"
+  $warm=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash') 'warm'
+  $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$cacheMatch=$false
+  while([DateTime]::UtcNow -lt $deadline){
+    Assert-OwnedIdentity $warm.process $warm.started
+    $cacheText=(Get-ChildItem -LiteralPath $portable -File | Where-Object {$_.Name -match '^reaper-(vstplugins|clap).*\.ini$'} | Get-Content) -join "`n"
+    if($cacheText -match [regex]::Escape([IO.Path]::GetFileName($staged))){$cacheMatch=$true;break}
     Start-Sleep -Milliseconds 250
   }
-  if ($warm -and -not $warm.HasExited) { Stop-Process -Id $warm.Id -Force }
-  $args = @('-newinst','-cfgfile', $ini, $lua)
-  # The warm scan has its own deadline. Always grant the scripted instance a
-  # full bounded window, even when scanning consumed the entire warm budget.
-  $scriptDeadline = (Get-Date).AddSeconds($TimeoutSec)
-  $proc = Start-Process -FilePath $reaper -ArgumentList $args -WorkingDirectory $run -RedirectStandardOutput $reaperOut -RedirectStandardError ($reaperOut + '.err') -PassThru
-  while ((Get-Date) -lt $scriptDeadline -and -not (Test-Path -LiteralPath $status)) { Start-Sleep -Milliseconds 250 }
-  if (-not (Test-Path -LiteralPath $status)) { Fail-Inconclusive 'REAPER never reported editor status' }
-  $hostStatus = Get-Content -Raw -LiteralPath $status
-  # FX_SHOWN is only the insertion handshake. If modulation was requested,
-  # wait for the Lua driver to finish and report the terminal marker; otherwise
-  # a fast wrapper could PASS while the automation never ran.
-  $final = if ($ParamIndex -ge 0) { 'MODULATION_DONE' } else { 'EDITOR_SHOWN_NO_MODULATION' }
-  while ((Get-Date) -lt $scriptDeadline -and $hostStatus -notmatch [regex]::Escape($final)) {
-    Start-Sleep -Milliseconds 250
-    $hostStatus = Get-Content -Raw -LiteralPath $status
+  Stop-Owned $warm
+  if(-not $cacheMatch){throw 'Scan cache did not acquire staged basename'}
+  $proc=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash',$lua) 'scripted'
+  $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command}
+  $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$hostStatus=$null
+  while([DateTime]::UtcNow -lt $deadline){
+    Assert-OwnedIdentity $proc.process $proc.started
+    $hostStatus=Read-HostStatus $status $token
+    if($hostStatus -and ($hostStatus.fx_shown -eq '1' -or $hostStatus.error)){break}
+    Start-Sleep -Milliseconds 100
   }
-  if ($hostStatus -notmatch [regex]::Escape($final)) { Fail-Inconclusive "REAPER did not reach terminal status $final (last: $hostStatus)" }
-  if ($ParamIndex -ge 0) {
-    if ($hostStatus -notmatch ('param_count=([0-9]+)') -or [int]$Matches[1] -le $ParamIndex) { Fail-Inconclusive "REAPER did not report the requested parameter index/count: $hostStatus" }
-    if ($hostStatus -notmatch 'value=([0-9]+(?:\.[0-9]+)?)') { Fail-Inconclusive "REAPER did not report a final normalized parameter value: $hostStatus" }
+  if(-not $hostStatus -or $hostStatus.error){throw "Missing/failed insertion handshake: $($hostStatus.error)"}
+  # Start the action deadline after observing insertion, independently of launch.
+  $deadline=[DateTime]::UtcNow.AddSeconds($AutomationSec+$TimeoutSec)
+  $terminal=if($ParamIndex -ge 0){'AUTOMATION_DONE'}else{'EDITOR_READY'}
+  while([DateTime]::UtcNow -lt $deadline){
+    Assert-OwnedIdentity $proc.process $proc.started
+    $hostStatus=Read-HostStatus $status $token
+    if($hostStatus -and ($hostStatus.phase -eq $terminal -or $hostStatus.error)){break}
+    Start-Sleep -Milliseconds 100
   }
-  $cache = Get-ChildItem -LiteralPath $portable -Recurse -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match '(?i)reaper-(vstplugins|clap).*\.ini$' } |
-    Get-Content -ErrorAction SilentlyContinue
-  $qualified = "$(if ($Format -eq 'vst3') { 'VST3:' } else { 'CLAP:' })$PluginName"
-  $cacheText = ($cache -join "`n")
-  $cacheHasName = $cacheText -match [regex]::Escape($PluginName)
-  $cacheHasEntry = $cacheText -match [regex]::Escape($expectedCacheEntry)
-  if (-not $cacheHasName -or -not $cacheHasEntry) { Fail-Inconclusive "portable REAPER scan cache lacks the exact plugin entry/name ($expectedCacheEntry); host insertion is unproven" }
-  if ($hostStatus -match 'FX_NOT_FOUND|TRACK_NOT_AVAILABLE') { Fail-Inconclusive $hostStatus }
-  if ($hostStatus -notmatch 'FX_SHOWN') { Fail-Inconclusive "unexpected host status: $hostStatus" }
-
-  # Screenshot requires an interactive Windows desktop. Capture the foreground
-  # editor only; a headless/RDP-without-desktop run is explicitly incomplete.
+  Assert-TerminalStatus $hostStatus $ParamIndex
+  $receipt.host_status=$hostStatus
+  $modules=@($proc.process.Modules | Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
+  $bound=@()
+  foreach($module in $modules){
+    $hash=(Get-FileHash -LiteralPath $module.FileName -Algorithm SHA256).Hash
+    Assert-ModuleBinding $module.FileName $hash $manifest
+    $bound+=@{path=$module.FileName;sha256=$hash;machine=(Get-PeMachine $module.FileName)}
+  }
+  if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
+  $receipt.loaded_plugin=$bound[0]
   Add-Type -AssemblyName System.Drawing
   Add-Type -AssemblyName System.Windows.Forms
-  Add-Type @"
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-public static class WindowProbe {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
-  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
-  public struct RECT { public int Left, Top, Right, Bottom; }
-  public static string Title() { var b=new StringBuilder(512); GetWindowText(GetForegroundWindow(),b,b.Capacity); return b.ToString(); }
-  public static RECT Rect() { RECT r; GetWindowRect(GetForegroundWindow(),out r); return r; }
-}
-"@
-  $windowTitle = [WindowProbe]::Title()
-  if ($windowTitle -notmatch [regex]::Escape($PluginName)) { Fail-Inconclusive "foreground window is not the Spectr editor (title: $windowTitle)" }
-  $windowRect = [WindowProbe]::Rect()
-  $screen = [System.Windows.Forms.Screen]::PrimaryScreen
-  if ($null -eq $screen) { Fail-Inconclusive 'no interactive Windows desktop for screenshot' }
-  $bmp = New-Object Drawing.Bitmap($screen.Bounds.Width,$screen.Bounds.Height)
-  $g = [Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($screen.Bounds.Location,[Drawing.Point]::Empty,$screen.Bounds.Size); $g.Dispose()
-  $before = Join-Path $run 'editor-before-context.png'; $bmp.Save($before,[Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
-  if ($ContextX -ge 0 -and $ContextY -ge 0) {
-    if ($ContextX -lt $windowRect.Left -or $ContextX -gt $windowRect.Right -or $ContextY -lt $windowRect.Top -or $ContextY -gt $windowRect.Bottom) { Fail-Inconclusive 'context coordinates are outside the foreground plugin editor window' }
-    [System.Windows.Forms.Cursor]::Position = New-Object Drawing.Point($ContextX,$ContextY)
-    Add-Type @"
+  Add-Type @'
 using System;
 using System.Runtime.InteropServices;
-public static class Mouse {
-  [DllImport("user32.dll")]
-  public static extern void mouse_event(uint f, uint dx, uint dy, uint d, uint e);
+public static class OwnedWindow {
+ [StructLayout(LayoutKind.Sequential)] public struct Point {public int X,Y;public Point(int x,int y){X=x;Y=y;}}
+ [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
+ [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p);
+ [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+ [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
+ [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool IsChild(IntPtr parent,IntPtr child);
+ [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h,uint command);
+ public static bool Belongs(IntPtr editor,IntPtr window){
+  if(window==editor||IsChild(editor,window))return true;
+  for(int i=0;i<32&&window!=IntPtr.Zero;i++){window=GetWindow(window,4);if(window==editor||IsChild(editor,window))return true;}
+  return false;
+ }
+ public static bool IsOwned(IntPtr h,uint pid){uint p;GetWindowThreadProcessId(h,out p);return p==pid;}
+ public static void GuardPoint(IntPtr editor,uint pid,int x,int y){var w=WindowFromPoint(new Point(x,y));if(!IsOwned(w,pid)||!Belongs(editor,w))throw new Exception("Point is outside bound editor");}
 }
-"@
-    [Mouse]::mouse_event(0x0008,0,0,0,0); [Mouse]::mouse_event(0x0010,0,0,0,0); Start-Sleep -Milliseconds 300
-    $bmp = New-Object Drawing.Bitmap($screen.Bounds.Width,$screen.Bounds.Height); $g=[Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($screen.Bounds.Location,[Drawing.Point]::Empty,$screen.Bounds.Size); $g.Dispose(); $bmp.Save((Join-Path $run 'editor-context-menu.png'),[Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose(); [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+'@
+  $editor=[IntPtr]([long]$hostStatus.editor_hwnd)
+  function Guard-Editor {
+    Assert-OwnedIdentity $proc.process $proc.started
+    Assert-EditorEvidence $editor.ToInt64() ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id)) ([OwnedWindow]::Belongs($editor,[OwnedWindow]::GetForegroundWindow()))
   }
-  if ($ContextX -ge 0 -and $ContextY -ge 0 -and -not (Test-Path (Join-Path $run 'editor-context-menu.png'))) { Fail-Inconclusive 'context-menu screenshot was requested but not captured' }
-  @{format=$Format; plugin=$plugin; staged=$staged; plugin_sha256=$sha; host_status=$hostStatus; scan_cache_match=$true; scan_cache_entry=$expectedCacheEntry; scan_cache_name_match=$cacheHasName; scan_cache_path_match='not_serialized_by_reaper'; window_title=$windowTitle; screenshot_before=(Test-Path (Join-Path $run 'editor-before-context.png')); context_screenshot=(Test-Path (Join-Path $run 'editor-context-menu.png')); verdict='PASS'} | ConvertTo-Json | Set-Content (Join-Path $run 'receipt.json')
-  Write-Output "PASS evidence=$run"
-  exit $ExitPass
-} finally {
-  if ($warm -and -not $warm.HasExited) { Stop-Process -Id $warm.Id -Force }
-  if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
-  Remove-Item Env:PULP_DAW_SMOKE_FX,Env:PULP_DAW_SMOKE_STATUS,Env:PULP_DAW_SMOKE_PARAM_INDEX,Env:PULP_DAW_SMOKE_DURATION -ErrorAction SilentlyContinue
+  function Capture([string]$Name){
+    Assert-OwnedIdentity $proc.process $proc.started
+    Guard-Editor
+    $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $image=New-Object Drawing.Bitmap($b.Width,$b.Height);$g=[Drawing.Graphics]::FromImage($image)
+    try{$g.CopyFromScreen($b.Location,[Drawing.Point]::Empty,$b.Size);$image.Save((Join-Path $run $Name),[Drawing.Imaging.ImageFormat]::Png)}finally{$g.Dispose();$image.Dispose()}
+  }
+  Capture 'editor-before-context.png'
+  $receipt.editor_hwnd=$editor.ToInt64();$receipt.foreground_hwnd=[OwnedWindow]::GetForegroundWindow().ToInt64()
+  if($ContextX -ge 0 -and $ContextY -ge 0){
+    Guard-Editor
+    [OwnedWindow]::GuardPoint($editor,[uint32]$proc.process.Id,$ContextX,$ContextY)
+    if(-not[OwnedWindow]::SetCursorPos($ContextX,$ContextY)){throw 'Pointer positioning failed'}
+    [OwnedWindow]::mouse_event(8,0,0,0,[UIntPtr]::Zero);[OwnedWindow]::mouse_event(16,0,0,0,[UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 300;Capture 'editor-context-menu.png'
+    Guard-Editor
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+  }
+  $receipt.verdict='PASS';$receipt.product_ui_acceptance='NOT_EVALUATED';$receipt.live_audio='NOT_EVALUATED';$exitCode=0
+} catch {$receipt.error=$_.Exception.Message;Write-Warning $receipt.error} finally {
+  foreach($entry in $owned){try{Stop-Owned $entry}catch{$receipt.cleanup_errors+= $_.Exception.Message;$exitCode=3;$receipt.verdict='INCONCLUSIVE'}}
+  if($privateProfile -and (Test-Path -LiteralPath $privateProfile)){
+    try{Remove-Item -LiteralPath $privateProfile -Recurse -Force}catch{$receipt.cleanup_errors+='Private profile cleanup failed';$exitCode=3;$receipt.verdict='INCONCLUSIVE'}
+  }
+  foreach($name in $envNames){[Environment]::SetEnvironmentVariable($name,$priorEnv[$name],'Process')}
+  $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
+  $receipt | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $run 'receipt.json') -Encoding utf8
 }
+Write-Output "$($receipt.verdict) evidence=$run"
+exit $exitCode
