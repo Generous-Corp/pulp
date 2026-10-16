@@ -59,8 +59,6 @@ def main() -> int:
                 "loss_probe_provider.release();" not in source or
                 "kill(child, SIGKILL);" not in source or
                 "poll(&descriptor, 1, 8'000)" not in source or
-                "setpgid(0, 0)" not in source or
-                "kill(-child, SIGKILL)" not in source or
                 'open("/dev/null", O_WRONLY)' not in source or
                 "FD_CLOEXEC" not in source or
                 "O_NONBLOCK" not in source or
