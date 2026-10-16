@@ -1188,8 +1188,9 @@ def verify_capture_snapshot_binding(
     if not isinstance(documents, list):
         raise LabError("capture snapshot documents are malformed")
     if documents and (len(documents) != 1 or not isinstance(documents[0], dict)
-                      or documents[0].get("snapshot_asset") != "dom-snapshot.json"):
-        raise LabError("capture snapshot requires exactly one dom-snapshot.json document")
+                      or not isinstance(documents[0].get("snapshot_asset"), str)
+                      or not documents[0]["snapshot_asset"]):
+        raise LabError("capture snapshot requires exactly one document with a snapshot asset")
     declared = [item for item in documents
                 if isinstance(item, dict) and "snapshot_sha256" in item]
     snapshot = evidence / "dom-snapshot.json"
@@ -1211,7 +1212,7 @@ def verify_capture_snapshot_binding(
         raise LabError("capture snapshot requires exactly one document")
     document = declared[0]
     if document.get("snapshot_asset") != "dom-snapshot.json":
-        raise LabError("capture snapshot asset is not dom-snapshot.json")
+        raise LabError("capture snapshot requires a dom-snapshot.json document")
     expected = document["snapshot_sha256"]
     if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
         raise LabError("capture snapshot producer digest is malformed")

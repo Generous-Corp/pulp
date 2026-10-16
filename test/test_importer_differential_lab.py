@@ -547,6 +547,12 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertEqual(LAB.verify_capture_snapshot_binding(
                 {"documents": [{"snapshot_asset": "dom-snapshot.json"}]}, evidence)[0],
                 {"status": "legacy-unbound", "sha256": None})
+            # Legacy native envelopes may name the snapshot through an asset ID.
+            legacy = {"documents": [{"snapshot_asset": "snapshot:main"}]}
+            self.assertEqual(LAB.verify_capture_snapshot_binding(legacy, evidence)[0],
+                             {"status": "legacy-unbound", "sha256": None})
+            with self.assertRaisesRegex(LAB.LabError, "no producer digest"):
+                LAB.verify_capture_snapshot_binding(legacy, evidence, required=True)
             with self.assertRaisesRegex(LAB.LabError, "no producer digest"):
                 LAB.verify_capture_snapshot_binding({}, evidence, required=True)
             capture = {"documents": [{"snapshot_asset": "dom-snapshot.json",
