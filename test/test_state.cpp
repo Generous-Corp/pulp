@@ -1313,8 +1313,13 @@ TEST_CASE("versioned parameter writes use a monotonic packed revision",
     ParamValue value(0.0f);
     REQUIRE(value.set_versioned_if_newer(0.25f, 1, 1));
     REQUIRE(value.set_versioned_if_newer(0.75f, 2, 1));
-    REQUIRE(value.set_versioned_if_newer(0.5f, 1, 2));
-    CHECK_THAT(value.get(), WithinAbs(0.5f, 0.001f));
+    CHECK_FALSE(value.set_versioned_if_newer(0.5f, 1, 2));
+    CHECK_THAT(value.get(), WithinAbs(0.75f, 0.001f));
+
+    ParamValue packed(0.0f);
+    REQUIRE(packed.set_packed_revisioned(0.25f, 1, 1));
+    REQUIRE(packed.set_packed_revisioned(0.25f, 1, 1));
+    CHECK(ParamValue::revision_from_versioned(packed.versioned_value()) == 2);
 
     ParamValue long_lived(0.0f);
     constexpr auto wrap = std::uint64_t{std::numeric_limits<std::uint32_t>::max()};

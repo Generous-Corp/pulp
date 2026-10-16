@@ -494,8 +494,8 @@ void StateStore::set_value(ParamID id, float value) {
     const auto older_writers =
         active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
     const auto generation = advance_state_generation();
-    const bool applied = values_[it->second].set_versioned_if_newer(
-        clamped, generation, older_writers + 1);
+    const bool applied =
+        values_[it->second].set_packed_revisioned(clamped, generation, older_writers + 1);
     active_state_writers_.fetch_sub(1, std::memory_order_release);
 
     // Wait-free fan-out: notify() does a single atomic pointer load and
@@ -513,8 +513,8 @@ void StateStore::set_value_rt(ParamID id, float value) {
     const auto older_writers =
         active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
     const auto generation = advance_state_generation();
-    const bool applied = values_[it->second].set_versioned_if_newer(
-        clamped, generation, older_writers + 1);
+    const bool applied =
+        values_[it->second].set_packed_revisioned(clamped, generation, older_writers + 1);
     active_state_writers_.fetch_sub(1, std::memory_order_release);
     if (applied && registry_) registry_->notify_rt(id, clamped);
 }
@@ -788,7 +788,7 @@ bool StateStore::reset_triggers_rt() {
                 active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
             }
             const auto generation = advance_state_generation();
-            values_[index].set_versioned_if_newer(
+            values_[index].set_packed_revisioned(
                 default_value, generation,
                 active_state_writers_.load(std::memory_order_acquire) + 1);
             any = true;
@@ -1232,7 +1232,7 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         if (it != id_to_index_.end()) {
             const auto index = it->second;
             const auto restore_generation = advance_state_generation();
-            values_[index].set_versioned_if_newer(
+            values_[index].set_packed_revisioned(
                 constrain_stored_value(params_[index], value), restore_generation,
                 active_state_writers_.load(std::memory_order_acquire) + 1);
             wrote_parameter = true;

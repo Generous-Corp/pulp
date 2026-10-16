@@ -637,11 +637,39 @@ class ParamValue {
         return revision <= std::numeric_limits<std::uint32_t>::max() - writes;
     }
 
-    /// Compatibility name retained for existing callers. The argument is
-    /// recorded in the diagnostic mirror; ordering is provided solely by the
-    /// packed per-parameter revision CAS.
+    /// Legacy generation-ordered writer retained for source compatibility.
+    /// StateStore uses set_packed_revisioned() instead; this split API is not
+    /// suitable for conditional authorization.
     bool set_versioned_if_newer(float value, std::uint64_t generation,
                                 std::uint32_t max_attempts) {
+        auto committed = committed_generation_.load(std::memory_order_relaxed);
+        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+            if (committed >= generation)
+                return false;
+            if (committed_generation_.compare_exchange_strong(
+                    committed, generation, std::memory_order_relaxed,
+                    std::memory_order_relaxed))
+                break;
+        }
+        if (committed_generation_.load(std::memory_order_relaxed) != generation)
+            return false;
+        auto current = value_.load(std::memory_order_acquire);
+        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+            if (committed_generation_.load(std::memory_order_relaxed) != generation)
+                return false;
+            const auto revision = unpack_generation(current);
+            if (revision == std::numeric_limits<std::uint32_t>::max())
+                return false;
+            if (value_.compare_exchange_weak(current, pack(value, revision + 1),
+                                             std::memory_order_acq_rel, std::memory_order_acquire))
+                return true;
+        }
+        return false;
+    }
+
+    /// StateStore's ordinary base-value publication boundary.
+    bool set_packed_revisioned(float value, std::uint64_t generation,
+                               std::uint32_t max_attempts) noexcept {
         return set_revisioned(value, generation, max_attempts);
     }
 
