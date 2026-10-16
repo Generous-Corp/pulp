@@ -21,6 +21,13 @@ diff = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = diff
 SPEC.loader.exec_module(diff)
 
+BACKGROUND_SCRIPT = Path(__file__).with_name("viewport_background_diagnostic.py")
+BACKGROUND_SPEC = importlib.util.spec_from_file_location(
+    "viewport_background_diagnostic", BACKGROUND_SCRIPT)
+assert BACKGROUND_SPEC is not None and BACKGROUND_SPEC.loader is not None
+background = importlib.util.module_from_spec(BACKGROUND_SPEC)
+BACKGROUND_SPEC.loader.exec_module(background)
+
 
 class FakeImage:
     def __init__(
@@ -167,6 +174,25 @@ class HelperScoringTests(unittest.TestCase):
             FakeRGBAImage(reference, (8, 4)), FakeRGBAImage(candidate, (8, 4)))
         self.assertEqual(result["classification"], "text-edge/rasterization")
         self.assertEqual(result["edge_band_pixels"], result["differing_pixels"])
+
+    def test_viewport_background_diagnostic_records_outside_root_pixels(self) -> None:
+        from PIL import Image
+
+        reference = Image.new("RGBA", (4, 4), (10, 20, 30, 255))
+        candidate = Image.new("RGBA", (4, 4), (10, 20, 30, 255))
+        candidate.putpixel((0, 0), (99, 88, 77, 255))
+        candidate.putpixel((3, 3), (99, 88, 77, 255))
+        result = background.measure(reference, candidate, (1, 1, 2, 2))
+        self.assertEqual(result["schema"], "pulp-viewport-background-diagnostic-v1")
+        self.assertEqual(result["corners"]["top_left"]["candidate"], [99, 88, 77])
+        self.assertEqual(result["outside_root"]["differing_pixels"], 2)
+
+    def test_viewport_background_diagnostic_rejects_out_of_bounds_root(self) -> None:
+        from PIL import Image
+
+        image = Image.new("RGBA", (4, 4), "black")
+        with self.assertRaises(ValueError):
+            background.measure(image, image, (0, 0, 5, 4))
 
 
 class MainFlowTests(unittest.TestCase):
