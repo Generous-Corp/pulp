@@ -6413,6 +6413,9 @@
   "import-validation-diff-against-reference-selftest": {
    "entry": "tools/import-validation/test_diff_against_reference.py",
    "inputs": [
+    "tools/import-validation/importer_differential/core.py",
+    "tools/import-validation/importer_differential/recognition.py",
+    "tools/import-validation/importer_differential/reports.py",
     "tools/import-validation/test_diff_against_reference.py"
    ],
    "kind": "python"
