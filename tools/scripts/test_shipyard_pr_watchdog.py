@@ -26,6 +26,35 @@ class WatchdogUnitTests(unittest.TestCase):
             run.return_value.returncode = 1
             self.assertIsNone(WATCHDOG.process_snapshot())
 
+    def test_cpu_seconds_reads_both_ps_time_formats(self) -> None:
+        cases = {
+            "0:00.12": 0.12,         # macOS mm:ss.ff
+            "1:02.50": 62.5,
+            "00:00:07": 7.0,          # Linux hh:mm:ss
+            "01:00:00": 3600.0,
+            "2-03:00:01": 2 * 86400 + 3 * 3600 + 1,
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertAlmostEqual(WATCHDOG.cpu_seconds(value), expected)
+
+    def test_cpu_rate_comes_from_the_change_between_polls(self) -> None:
+        # Busy at startup, idle since: the cumulative total is large, but it
+        # has not moved, so the rate is zero. A lifetime average would still
+        # read as busy here, which is the Linux `%cpu` behaviour.
+        self.assertEqual(WATCHDOG.cpu_percent((10.0, 4.0), 12.0, 4.0), 0.0)
+        self.assertAlmostEqual(WATCHDOG.cpu_percent((10.0, 4.0), 12.0, 5.0), 50.0)
+        self.assertIsNone(WATCHDOG.cpu_percent(None, 12.0, 4.0))
+        self.assertIsNone(WATCHDOG.cpu_percent((10.0, 4.0), 12.0, None))
+
+    def test_snapshot_parses_cumulative_cpu(self) -> None:
+        with mock.patch.object(WATCHDOG.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "  10     1 0:01.50\n  11    10 00:00:02\n"
+            children, cpu = WATCHDOG.process_snapshot()
+        self.assertEqual(children, {1: [10], 10: [11]})
+        self.assertEqual(cpu, {10: 1.5, 11: 2.0})
+
     def test_success_exit_is_preserved(self) -> None:
         result = self.run_watchdog("print('ok')")
         self.assertEqual(result.returncode, 0, result.stderr)
