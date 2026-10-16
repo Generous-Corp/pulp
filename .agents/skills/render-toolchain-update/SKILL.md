@@ -222,6 +222,13 @@ retain those fields in the PR/landing evidence.
 
 ## Common traps
 
+- On Windows ARM64, a Ninja build using the ARM-hosted x64 MSVC compiler has
+  an empty `CMAKE_GENERATOR_PLATFORM` and an ARM64 host processor. Choose the
+  Skia release/cache key and wgpu-native asset from
+  `pulp_windows_target_arch()`, which reads the compiler target. The x64 Skia
+  release may place libraries under `build/win-gpu/lib/Release/x64/`; older
+  releases can be flat. Test a fresh x64 configure on ARM64 without an explicit
+  `SKIA_DIR` as well as an explicit nested archive.
 - The Vellum closure gate identifies Skia inputs by `determinism.skia_commit` and
   by the asset digest sealed in the cache generation's
   `.skia-generation-manifest.json`, which must be one of
