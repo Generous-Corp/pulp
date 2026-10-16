@@ -15,6 +15,7 @@ from verify_wgpu_native_staged import (diagnostic_exit_disposition, parse_output
 
 
 ADAPTER_SOURCE = Path(__file__).with_name("pulp_wgpu_native_staged_adapter.cpp")
+VERIFIER_SOURCE = Path(__file__).with_name("verify_wgpu_native_staged.py")
 
 
 def main() -> int:
@@ -53,6 +54,7 @@ def main() -> int:
             return 1
     if args.typed_only:
         source = ADAPTER_SOURCE.read_text(encoding="utf-8")
+        verifier_source = VERIFIER_SOURCE.read_text(encoding="utf-8")
         if ("run_loss_capability_probe()" not in source or
                 "loss_probe_provider.release();" not in source or
                 "kill(child, SIGKILL);" not in source or
@@ -66,6 +68,10 @@ def main() -> int:
                 "getppid() == 1" not in source or
                 "wait_for_child(child, child_status)" not in source):
             print("typed unavailable probe watchdog control failed", file=sys.stderr)
+            return 1
+        if ("start_new_session=True" not in verifier_source or
+                "os.killpg(process.pid, signal.SIGKILL)" not in verifier_source):
+            print("verifier timeout process-group control failed", file=sys.stderr)
             return 1
         if "const auto abandon_loss_session" not in source or source.count(
             "return abandon_loss_session();"

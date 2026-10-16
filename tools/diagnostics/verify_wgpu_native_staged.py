@@ -7,7 +7,9 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -119,12 +121,22 @@ def verify(args: argparse.Namespace) -> dict:
     manifest_before = digest(manifest)
     runtime_before = digest(linked_runtime)
     executable_before = digest(executable)
+    process = subprocess.Popen([str(executable)], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                               start_new_session=True)
     try:
-        run = subprocess.run([str(executable)], capture_output=True, text=True,
-                             encoding="utf-8", timeout=30, check=False)
+        stdout, stderr = process.communicate(timeout=30)
     except subprocess.TimeoutExpired as exc:
-        partial = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = process.communicate()
+        partial = stderr or exc.stderr or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode(errors="replace")
         raise ValueError(f"diagnostic_timeout_30s: {partial.strip()}") from exc
+    run = subprocess.CompletedProcess([str(executable)], process.returncode, stdout, stderr)
     if diagnostic_exit_disposition(run.returncode) == "provider_unavailable":
         raise RuntimeError("provider_unavailable")
     if diagnostic_exit_disposition(run.returncode) != "passed":
