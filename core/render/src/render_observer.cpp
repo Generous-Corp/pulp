@@ -2,8 +2,8 @@
 #include <pulp/render/gpu_surface.hpp>
 
 #if defined(PULP_HAS_SKIA)
-#include "include/core/SkMilestone.h"
 #include "dawn/dawn_version.h"
+#include "include/core/SkMilestone.h"
 #include "webgpu/webgpu_cpp.h"
 #endif
 
@@ -40,7 +40,7 @@ bool device_lost(const GpuSurface& surface) {
     auto* device = static_cast<wgpu::Device*>(surface.dawn_device_handle());
     auto* instance = static_cast<wgpu::Instance*>(surface.dawn_instance_handle());
     if (!device || !*device || !instance || !*instance)
-        return false;
+        return true;
     wgpu::FutureWaitInfo wait{device->GetLostFuture()};
     return instance->WaitAny(1, &wait, 0) == wgpu::WaitStatus::Success && wait.completed;
 #else
