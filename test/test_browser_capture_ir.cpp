@@ -558,7 +558,10 @@ std::string root_canvas_envelope(std::string_view png_hash) {
     auto capture = envelope("browser.png", png_hash);
     // Match the frozen producer's actual viewport and authored frame.
     for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{
-             {"1912", "2560"}, {"1272", "1600"}, {"956", "1280"}, {"636", "800"}}) {
+             {"\"width_px\":1912", "\"width_px\":2560"},
+             {"\"height_px\":1272", "\"height_px\":1600"},
+             {"\"logical_width\":956", "\"logical_width\":1280"},
+             {"\"logical_height\":636", "\"logical_height\":800"}}) {
         auto at = capture.find(from);
         while (at != std::string::npos) {
             capture.replace(at, from.size(), to);
@@ -751,6 +754,48 @@ TEST_CASE("unsupported document canvas facts preserve complete legacy lowering",
     SECTION("missing authored frame") {
         replace_canvas_fact(capture, "\"authored_frame\"", "\"missing\"");
     }
+    SECTION("viewport DPR disagrees with reference") {
+        // The first scale factor belongs to provenance.viewport; the later
+        // reference stays at the accepted DPR 2, so this tests registration.
+        replace_canvas_fact(capture, "\"device_scale_factor\":2", "\"device_scale_factor\":1");
+    }
+    SECTION("missing primary frame") {
+        replace_canvas_fact(capture, "\"primary_surface\"", "\"missing_surface\"");
+    }
+    SECTION("authored width disagrees") {
+        replace_canvas_fact(capture, "\"authored_frame\":{\"x\":0,\"y\":0,\"width\":1280",
+                            "\"authored_frame\":{\"x\":0,\"y\":0,\"width\":1279");
+    }
+    SECTION("authored height disagrees") {
+        replace_canvas_fact(capture,
+                            "\"authored_frame\":{\"x\":0,\"y\":0,\"width\":1280,\"height\":200}",
+                            "\"authored_frame\":{\"x\":0,\"y\":0,\"width\":1280,\"height\":199}");
+    }
+    SECTION("missing snapshot extent") {
+        replace_canvas_fact(snapshot, "\"contentWidth\"", "\"missingWidth\"");
+    }
+    SECTION("nonnumeric snapshot extent") {
+        replace_canvas_fact(snapshot, "\"contentWidth\": 1280", "\"contentWidth\": \"Infinity\"");
+    }
+    SECTION("nonnumeric envelope document extent") {
+        replace_canvas_fact(capture, "\"document\":{\"width\":1280",
+                            "\"document\":{\"width\":\"Infinity\"");
+    }
+    SECTION("HTML origin offset") {
+        const auto parsed = choc::json::parse(snapshot);
+        const auto box = choc::json::toString(parsed["documents"][0]["layout"]["bounds"][1], false);
+        replace_canvas_fact(snapshot, box, "[1, 0, 1280, 200]");
+    }
+    SECTION("HTML outside canvas") {
+        const auto parsed = choc::json::parse(snapshot);
+        const auto box = choc::json::toString(parsed["documents"][0]["layout"]["bounds"][1], false);
+        replace_canvas_fact(snapshot, box, "[0, 0, 1281, 200]");
+    }
+    SECTION("HTML empty bounds") {
+        const auto parsed = choc::json::parse(snapshot);
+        const auto box = choc::json::toString(parsed["documents"][0]["layout"]["bounds"][1], false);
+        replace_canvas_fact(snapshot, box, "[0, 0, 0, 200]");
+    }
     SECTION("direct body pseudo metadata") {
         replace_canvas_fact(snapshot, "\"pseudoType\": {\"index\": [], \"value\": []}",
                             "\"pseudoType\": {\"index\": [9], \"value\": [4]}");
@@ -784,7 +829,8 @@ TEST_CASE("document canvas lowering retains the existing DPR1 import refusal",
     temp.write("browser.png", png);
     write_valid_reports(temp);
     auto capture = root_canvas_envelope(pulp::runtime::sha256_hex(png));
-    replace_canvas_fact(capture, "\"device_scale_factor\":2", "\"device_scale_factor\":1");
+    replace_canvas_fact(capture, "\"device_scale_factor\":2,\"authored_frame\"",
+                        "\"device_scale_factor\":1,\"authored_frame\"");
     const auto result = lower_root_canvas(temp, root_canvas_snapshot(), capture, true);
     REQUIRE_FALSE(result);
     CHECK(result.error == "browser capture reference requires DPR 2");

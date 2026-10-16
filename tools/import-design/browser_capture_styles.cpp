@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "browser_capture_styles.hpp"
+#include "browser_capture_canvas_impl.hpp"
 
 #include <choc/text/choc_JSON.h>
 #include <pulp/canvas/text_utf8.hpp>
