@@ -87,7 +87,9 @@ TEST_CASE("AU v2 instrument lookup dispatches MusicDeviceMIDIEvent; "
           "[au][midi][au-v2][dispatch]")
 {
     REQUIRE(ausdk::AUMusicLookup::Lookup(kMusicDeviceMIDIEventSelect) != nullptr);
+    REQUIRE(ausdk::AUMusicLookup::Lookup(kMusicDeviceSysExSelect) != nullptr);
     REQUIRE(ausdk::AUBaseLookup::Lookup(kMusicDeviceMIDIEventSelect) == nullptr);
+    REQUIRE(ausdk::AUBaseLookup::Lookup(kMusicDeviceSysExSelect) == nullptr);
     // Sanity: the instrument lookup also dispatches a core selector.
     REQUIRE(ausdk::AUMusicLookup::Lookup(kAudioUnitInitializeSelect) != nullptr);
 }
