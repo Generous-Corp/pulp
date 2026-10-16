@@ -13,6 +13,15 @@ class MiseProfileTests(unittest.TestCase):
         self.assertNotIn("auto_update", text)
         self.assertIn("install_visual_python_deps.sh", text)
 
+    def test_visual_task_uses_authoritative_hashed_lock(self) -> None:
+        installer = (ROOT / "tools/ci/install_visual_python_deps.sh").read_text(encoding="utf-8")
+        self.assertIn("--require-hashes", installer)
+        self.assertIn("tools/motion/visual/requirements.lock", installer)
+        self.assertTrue((ROOT / "tools/motion/visual/requirements.lock").is_file())
+
+    def test_notice_records_optional_mise_dependency(self) -> None:
+        self.assertIn("mise", (ROOT / "NOTICE.md").read_text(encoding="utf-8").lower())
+
     def test_no_lane_invokes_mise(self) -> None:
         for path in (ROOT / ".github", ROOT / ".shipyard", ROOT / "tools/ci"):
             if not path.exists():
