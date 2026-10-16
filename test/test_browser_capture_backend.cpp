@@ -310,10 +310,8 @@ TEST_CASE("browser capture provenance verifies a declared DOM snapshot binding",
         const auto outside = outside_tree.root() / "snapshot.json";
         std::error_code ec;
         fs::create_symlink(outside, tree.root() / "escaped-snapshot.json", ec);
-        if (ec) {
-            WARN("symlink creation unavailable: " << ec.message());
-            return;
-        }
+        if (ec)
+            SKIP("symlink creation unavailable: " << ec.message());
         auto escaped = replace_once(
             envelope, "dom-snapshot.json", "escaped-snapshot.json");
         tree.write("capture.json", escaped);
