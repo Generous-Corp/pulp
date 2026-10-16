@@ -318,8 +318,7 @@ public:
                         const int j = b & (half - 1);
                         const int i = group * len;
                         const auto& tw = plan.twiddles_[static_cast<std::size_t>(j * step)];
-                        const std::complex<SampleType> w(static_cast<SampleType>(tw.real()),
-                                                         static_cast<SampleType>(tw.imag()));
+                        const auto w = tw;
                         const auto u = data[i + j];
                         const auto v = data[i + j + half] * w;
                         data[i + j] = u + v;
@@ -398,8 +397,7 @@ public:
             for (int i = 0; i < size_; i += len) {
                 for (int j = 0; j < half; ++j) {
                     const auto& tw = twiddles_[static_cast<std::size_t>(j * step)];
-                    const std::complex<SampleType> w(static_cast<SampleType>(tw.real()),
-                                                     static_cast<SampleType>(tw.imag()));
+                    const auto w = tw;
                     const auto u = dst[i + j];
                     const auto v = dst[i + j + half] * w;
                     dst[i + j] = u + v;
