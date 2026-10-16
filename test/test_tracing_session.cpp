@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -119,6 +120,40 @@ TEST_CASE("tracing session lifecycle", "[tracing]") {
     REQUIRE(bytes.find("block_b") != std::string::npos);
     // The runtime-computed name survived as UTF-8, proving the DynamicString path.
     REQUIRE(bytes.find("node_42") != std::string::npos);
+}
+
+TEST_CASE("attach timer arms without moving ownership before reading generation",
+          "[tracing][ownership][timeout]") {
+    if (!pulp::runtime::kTracingEnabled)
+        return;
+
+    const auto out = std::filesystem::temp_directory_path() /
+                     "pulp-trace-attach-timer.pftrace";
+    std::error_code ec;
+    std::filesystem::remove(out, ec);
+    ScopedEnvironment path_environment("PULP_TRACE_PATH", out.string());
+    ScopedEnvironment seconds_environment("PULP_TRACE_SECONDS", "1");
+
+    REQUIRE_FALSE(Tracing::active());
+    Tracing::attach();
+    REQUIRE(Tracing::active());
+    { PULP_TRACE_SCOPE_NAMED("render", "attach_timer_armed"); }
+
+    // The timer must flush and end the session while the attachment remains
+    // held. This exercises the same positive-seconds path used by a traced
+    // plug-in host, including the callback's moved ownership token.
+    for (int i = 0; i < 200 && Tracing::active(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK_FALSE(Tracing::active());
+
+    Tracing::detach();
+    REQUIRE(std::filesystem::exists(out));
+    CHECK(std::filesystem::file_size(out) > 0);
+    std::ifstream trace(out, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(trace)),
+                            std::istreambuf_iterator<char>());
+    CHECK(bytes.find("attach_timer_armed") != std::string::npos);
+    std::filesystem::remove(out, ec);
 }
 
 TEST_CASE("runtime detach stops only its attach-owned capture",
