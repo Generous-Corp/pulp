@@ -245,6 +245,58 @@ class DifferentialLabTests(unittest.TestCase):
             with self.assertRaises(LAB.LabError):
                 LAB.visual_metrics(reference, candidate, root / "mismatch")
 
+    @requires_pillow
+    def test_visual_lens_keeps_renderer_floor_advisory_and_kills_gate_controls(self) -> None:
+        """The strict visual gate tolerates tiny edge AA variance only.
+
+        This is a deterministic calibration control, not a Chromium/Skia
+        claim. A real floor campaign must replace the synthetic pair with
+        authenticated same-source captures and retain its receipt.
+        """
+        from PIL import Image, ImageDraw
+
+        def panel(*, shift=0, fill=(220, 220, 220), border=2, rounded=False):
+            image = Image.new("RGBA", (64, 48), (24, 28, 36, 255))
+            draw = ImageDraw.Draw(image)
+            box = (14 + shift, 10, 49 + shift, 37)
+            draw.rectangle(box, fill=fill, outline=(120, 130, 145, 255), width=border)
+            if rounded:
+                draw.rounded_rectangle(box, radius=12, fill=fill, outline=(120, 130, 145, 255), width=border)
+            return image
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            reference_image = panel()
+            reference = root / "reference.png"
+            reference_image.save(reference)
+
+            healthy_image = reference_image.copy()
+            healthy_pixels = healthy_image.load()
+            for x in range(14, 50):
+                for y in (10, 37):
+                    red, green, blue, alpha = healthy_pixels[x, y]
+                    healthy_pixels[x, y] = (min(255, red + 12), min(255, green + 12), min(255, blue + 12), alpha)
+            healthy = root / "healthy.png"
+            healthy_image.save(healthy)
+            healthy_metrics = LAB.visual_metrics(reference, healthy, root / "healthy-artifacts")
+            self.assertGreaterEqual(healthy_metrics["score"], LAB.PROMOTION_THRESHOLDS["visual"])
+            self.assertGreater(healthy_metrics["differing_pixel_count"], 0)
+
+            controls = {
+                "one-pixel-shift": panel(shift=1),
+                "color-change": panel(fill=(90, 220, 160)),
+                "missing-border": panel(border=0),
+                "wrong-weight": panel(border=4),
+                "corner-radius": panel(rounded=True),
+            }
+            for name, image in controls.items():
+                with self.subTest(control=name):
+                    candidate = root / f"{name}.png"
+                    image.save(candidate)
+                    metrics = LAB.visual_metrics(reference, candidate, root / f"{name}-artifacts")
+                    self.assertLess(metrics["score"], LAB.PROMOTION_THRESHOLDS["visual"])
+                    self.assertGreater(metrics["differing_pixel_count"], 0)
+
     def test_missing_typography_counts_as_missing_coverage(self) -> None:
         browser = LAB.BrowserNode(
             1, "span", -1, "Gain", {}, (0, 0, 40, 20),
@@ -292,12 +344,55 @@ class DifferentialLabTests(unittest.TestCase):
                          "resolved": {"width": 1280, "height": 800}},
             "browser": {"product": "Chrome", "version": "140.0"},
         }
-        return ({"provenance": json.loads(json.dumps(provenance))},
-                {"provenance": json.loads(json.dumps(provenance))}, source_sha256)
+        return ({"provenance": json.loads(json.dumps(provenance)),
+                 "reference": {"device_scale_factor": 1}},
+                {"provenance": json.loads(json.dumps(provenance)),
+                 "reference": {"device_scale_factor": 1}}, source_sha256)
 
     def test_capture_binding_accepts_captures_of_the_same_input(self) -> None:
         capture, native_capture, source_sha256 = self._bound_captures()
         LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+    def test_interaction_plan_identity_matches_capture_redaction(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            plan = Path(raw) / "plan.json"
+            plan.write_text(json.dumps({
+                "schema": "pulp-browser-interactions-v1",
+                "version": 1,
+                "actions": [{"action": "click", "selector": "#go"}],
+            }), encoding="utf-8")
+            self.assertEqual(
+                LAB.interaction_plan_sha256(plan),
+                "92231b6cd069d5bd57b91c23334cbe13456cd987664773ca070806f49df1d40c",
+            )
+
+    def test_interaction_plan_identity_matches_javascript_utf16_length(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            plan = Path(raw) / "plan.json"
+            plan.write_text(json.dumps({
+                "schema": "pulp-browser-interactions-v1",
+                "version": 1,
+                "actions": [{"action": "type", "selector": "#name", "text": "😀"}],
+            }), encoding="utf-8")
+            expected = {
+                "schema": "pulp-browser-interactions-v1", "version": 1,
+                "actions": [{"action": "type", "selector": "#name",
+                              "timeout_ms": 5000, "text_length": 2}],
+            }
+            canonical = json.dumps(expected, separators=(",", ":"), ensure_ascii=False).encode()
+            import hashlib
+            self.assertEqual(LAB.interaction_plan_sha256(plan), hashlib.sha256(canonical).hexdigest())
+
+    def test_capture_binding_rejects_unbound_interaction_plan(self) -> None:
+        capture, native_capture, source_sha256 = self._bound_captures()
+        interactions = {"plan_sha256": "a" * 64}
+        capture["provenance"]["interactions"] = interactions
+        native_capture["provenance"]["interactions"] = dict(interactions)
+        with self.assertRaisesRegex(LAB.LabError, "not bound"):
+            LAB.verify_capture_binding(
+                capture, native_capture, source_sha256,
+                expected_interaction_plan_sha256="b" * 64,
+            )
 
     def test_capture_binding_fails_closed_on_each_mismatch(self) -> None:
         cases = {
@@ -316,6 +411,46 @@ class DifferentialLabTests(unittest.TestCase):
                 mutate(capture, native_capture)
                 with self.assertRaisesRegex(LAB.LabError, message):
                     LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+    def test_capture_binding_checks_dpr_and_interaction_provenance(self) -> None:
+        capture, native_capture, source_sha256 = self._bound_captures()
+        capture["reference"] = {"device_scale_factor": 2}
+        native_capture["reference"] = {"device_scale_factor": 1}
+        with self.assertRaisesRegex(LAB.LabError, "device scale factor"):
+            LAB.verify_capture_binding(capture, native_capture, source_sha256)
+        native_capture["reference"]["device_scale_factor"] = 2
+        capture["provenance"]["interactions"] = {"plan_sha256": "a" * 64}
+        native_capture["provenance"]["interactions"] = {"plan_sha256": "b" * 64}
+        with self.assertRaisesRegex(LAB.LabError, "interaction provenance"):
+            LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+        for missing in ("browser", "native"):
+            with self.subTest(missing=missing):
+                browser, native, source = self._bound_captures()
+                target = browser if missing == "browser" else native
+                target["reference"].pop("device_scale_factor")
+                with self.assertRaisesRegex(LAB.LabError, "device scale factor"):
+                    LAB.verify_capture_binding(browser, native, source)
+
+    @requires_pillow
+    def test_capture_image_binding_rejects_stale_png(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            image_path = root / "browser.png"
+            Image.new("RGBA", (2, 1), (0, 0, 0, 255)).save(image_path)
+            capture = {
+                "reference": {"asset_id": "reference:browser"},
+                "assets": [{"id": "reference:browser", "sha256": LAB.sha256_file(image_path),
+                            "width_px": 2, "height_px": 1}],
+            }
+            LAB.verify_capture_image_binding(capture, image_path)
+            Image.new("RGBA", (2, 1), (255, 0, 0, 255)).save(image_path)
+            with self.assertRaisesRegex(LAB.LabError, "digest"):
+                LAB.verify_capture_image_binding(capture, image_path)
+            Image.new("RGBA", (3, 1), (0, 0, 0, 255)).save(image_path)
+            capture["assets"][0]["sha256"] = LAB.sha256_file(image_path)
+            with self.assertRaisesRegex(LAB.LabError, "dimensions"):
+                LAB.verify_capture_image_binding(capture, image_path)
 
     def test_capture_binding_refuses_a_capture_without_provenance(self) -> None:
         _, native_capture, source_sha256 = self._bound_captures()
@@ -375,22 +510,34 @@ class DifferentialLabTests(unittest.TestCase):
             root = Path(directory)
             source = root / "panel.html"
             source.write_text("<div></div>", encoding="utf-8")
+            plan = root / "plan.json"
+            plan.write_text(json.dumps({
+                "schema": "pulp-browser-interactions-v1",
+                "version": 1,
+                "actions": [{"action": "click", "selector": "#go"}],
+            }), encoding="utf-8")
             evidence = root / "evidence"
             evidence.mkdir()
             source_sha256 = LAB.sha256_file(source)
+            plan_sha256 = LAB.interaction_plan_sha256(plan)
             provenance = {
                 "source": {"sha256": source_sha256},
                 "viewport": {"requested": {"width": 1, "height": 1},
                              "resolved": {"width": 1, "height": 1}},
                 "browser": {"product": "Chrome", "version": "140.0"},
+                "interactions": {"plan_sha256": plan_sha256},
             }
             capture = {
                 "provenance": provenance,
-                "reference": {"logical_width": 1, "logical_height": 1,
+                "reference": {"asset_id": "reference:browser",
+                               "logical_width": 1, "logical_height": 1,
                                "device_scale_factor": 1},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            capture["assets"] = [{"id": "reference:browser", "sha256": LAB.sha256_file(evidence / "browser.png"),
+                                  "width_px": 1, "height_px": 1}]
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             (evidence / "dom-snapshot.json").write_text(
                 json.dumps({"documents": []}), encoding="utf-8")
 
@@ -412,13 +559,20 @@ class DifferentialLabTests(unittest.TestCase):
                 return LAB.CommandResult(argv, 1, 0, "", "")
 
             with patch.object(LAB, "run_command", side_effect=fake_run), \
-                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    patch.object(LAB, "verify_capture_binding", wraps=LAB.verify_capture_binding) as binding, \
+                    patch.object(LAB, "verify_capture_image_binding", wraps=LAB.verify_capture_image_binding) as image_binding:
                 report = LAB.compare_one(
                     Path("importer"), Path("observer"), source, root / "out", 60,
                     "claude", Path("chrome"),
-                    fixture_metadata={"viewport": {"width": 1, "height": 1}})
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
             self.assertEqual(report["integrity"]["source_sha256"], source_sha256)
             self.assertTrue(report["integrity"]["source_bound"])
+            binding.assert_called_once()
+            self.assertEqual(binding.call_args.kwargs["expected_interaction_plan_sha256"], plan_sha256)
+            self.assertEqual(image_binding.call_count, 2)
+            image_binding.assert_any_call(capture, evidence / "browser.png")
 
     @requires_pillow
     def test_compare_one_scores_structure_through_the_shared_comparison(self) -> None:
@@ -438,11 +592,15 @@ class DifferentialLabTests(unittest.TestCase):
             }
             capture = {
                 "provenance": provenance,
-                "reference": {"logical_width": 1, "logical_height": 1,
+                "reference": {"asset_id": "reference:browser",
+                               "logical_width": 1, "logical_height": 1,
                                "device_scale_factor": 1},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            capture["assets"] = [{"id": "reference:browser", "sha256": LAB.sha256_file(evidence / "browser.png"),
+                                  "width_px": 1, "height_px": 1}]
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             (evidence / "dom-snapshot.json").write_text(
                 json.dumps({"documents": []}), encoding="utf-8")
 
@@ -650,6 +808,25 @@ class DifferentialLabTests(unittest.TestCase):
             },
         )
 
+    def test_determinism_receipt_requires_three_runs(self) -> None:
+        reports = [{"integrity": {field: "a" for field in LAB_CLI.DETERMINISM_FIELDS}}]
+        receipt = LAB_CLI.determinism_receipt(reports)
+        self.assertEqual(receipt["status"], "unverified")
+        self.assertEqual(receipt["required_runs"], 3)
+
+    def test_determinism_receipt_passes_only_when_all_authenticated_digests_agree(self) -> None:
+        def report(seed: str) -> dict:
+            return {"integrity": {field: seed for field in LAB_CLI.DETERMINISM_FIELDS}}
+
+        self.assertEqual(
+            LAB_CLI.determinism_receipt([report("a"), report("a"), report("a")])["status"],
+            "pass",
+        )
+        self.assertEqual(
+            LAB_CLI.determinism_receipt([report("a"), report("a"), report("b")])["status"],
+            "fail",
+        )
+
     def test_benchmark_receipt_does_not_infer_cache_state_from_run_order(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -732,6 +909,46 @@ class DifferentialLabTests(unittest.TestCase):
                 "p50_ms_saved": 85.0,
             }
             validator.validate(legacy)
+
+    def test_command_benchmark_fails_when_authenticated_runs_disagree(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "fixture.html"
+            importer = root / "importer"
+            observer = root / "observer"
+            source.write_text("<main>fixture</main>", encoding="utf-8")
+            importer.write_text("importer", encoding="utf-8")
+            observer.write_text("observer", encoding="utf-8")
+            reports = iter((
+                {"integrity": {field: "a" for field in LAB_CLI.DETERMINISM_FIELDS},
+                 "observability": {"cache_state": {"identity": "unknown"},
+                                    "ttni_proxy": {"value_ms": 1}},
+                 "timings": {"browser_import_ms": 1, "native_total_ms": 1},
+                 "timing_budget": {"status": "not-requested"},
+                 "fixture": {}, "source": {}, "oracle": {}, "promotion": {},
+                 "comparison": {}},
+                {"integrity": {field: "a" for field in LAB_CLI.DETERMINISM_FIELDS},
+                 "observability": {"cache_state": {"identity": "unknown"},
+                                    "ttni_proxy": {"value_ms": 1}},
+                 "timings": {"browser_import_ms": 1, "native_total_ms": 1},
+                 "timing_budget": {"status": "not-requested"},
+                 "fixture": {}, "source": {}, "oracle": {}, "promotion": {},
+                 "comparison": {}},
+                {"integrity": {field: "b" for field in LAB_CLI.DETERMINISM_FIELDS},
+                 "observability": {"cache_state": {"identity": "unknown"},
+                                    "ttni_proxy": {"value_ms": 1}},
+                 "timings": {"browser_import_ms": 1, "native_total_ms": 1},
+                 "timing_budget": {"status": "not-requested"},
+                 "fixture": {}, "source": {}, "oracle": {}, "promotion": {},
+                 "comparison": {}},
+            ))
+            args = Namespace(importer=importer, observer=observer, file=source,
+                             output=root / "benchmark", runs=3, timeout_seconds=1,
+                             from_source="html", browser=None, cache_state="unknown",
+                             timing_budget=None)
+            with patch.object(LAB_CLI, "compare_one", side_effect=lambda *args, **kwargs: next(reports)), \
+                    redirect_stdout(io.StringIO()):
+                self.assertEqual(LAB_CLI.command_benchmark(args), 1)
 
     def test_missing_corpus_fixture_is_counted_in_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

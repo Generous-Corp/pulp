@@ -170,6 +170,48 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def interaction_plan_sha256(path: Path) -> str:
+    """Match interaction_plan.mjs's redacted identity without a Node runtime."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        actions = document["actions"]
+        if document["schema"] != "pulp-browser-interactions-v1" or document["version"] != 1:
+            raise ValueError
+        normalized = []
+        for candidate in actions:
+            action = candidate["action"]
+            if action == "wait-ms":
+                normalized.append({"action": "wait-ms", "milliseconds": candidate["milliseconds"]})
+                continue
+            item = {
+                "action": action,
+                "selector": candidate["selector"],
+                "timeout_ms": candidate.get("timeout_ms", 5000),
+            }
+            expected = candidate.get("expect")
+            if expected is not None:
+                item["expect"] = {
+                    "selector": expected["selector"],
+                    "state": expected.get("state", "visible"),
+                    "timeout_ms": expected.get("timeout_ms", 5000),
+                }
+            if action == "type":
+                # JavaScript String.length counts UTF-16 code units.
+                item["text_length"] = len(candidate["text"].encode("utf-16-le")) // 2
+            elif action == "dispatch-event":
+                item["event"] = candidate["event"]
+            elif action == "wait-for":
+                item["state"] = candidate.get("state", "visible")
+            normalized.append(item)
+        payload = json.dumps(
+            {"schema": "pulp-browser-interactions-v1", "version": 1, "actions": normalized},
+            separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise LabError("browser interaction plan could not be canonically authenticated") from exc
+    return hashlib.sha256(payload).hexdigest()
+
+
 def canonical_json_sha256(path: Path) -> str:
     """Hash JSON evidence after removing documented run-clock fields.
 
@@ -859,6 +901,7 @@ def import_lane_args(
 
 def verify_capture_binding(
     capture: dict[str, Any], native_capture: dict[str, Any], source_sha256: str,
+    *, expected_interaction_plan_sha256: str | None = None,
 ) -> None:
     """Fail closed unless both captures came from the same authored input.
 
@@ -868,14 +911,83 @@ def verify_capture_binding(
     """
     browser = capture.get("provenance", {})
     native = native_capture.get("provenance", {})
-    if browser.get("source", {}).get("sha256") != source_sha256:
+    if not isinstance(browser, dict) or not isinstance(native, dict):
+        raise LabError("capture provenance is malformed")
+    browser_source = browser.get("source", {})
+    native_source = native.get("source", {})
+    if not isinstance(browser_source, dict) or not isinstance(native_source, dict):
+        raise LabError("capture source provenance is malformed")
+    if browser_source.get("sha256") != source_sha256:
         raise LabError("browser capture source hash is not bound to the authored input")
-    if native.get("source", {}).get("sha256") != source_sha256:
+    if native_source.get("sha256") != source_sha256:
         raise LabError("native lowering source hash is not bound to the authored input")
     if native.get("viewport") != browser.get("viewport"):
         raise LabError("browser and native lowering viewport provenance differs")
     if native.get("browser") != browser.get("browser"):
         raise LabError("browser and native lowering browser provenance differs")
+    browser_reference = capture.get("reference", {})
+    native_reference = native_capture.get("reference", {})
+    if not isinstance(browser_reference, dict) or not isinstance(native_reference, dict):
+        raise LabError("capture reference provenance is malformed")
+    browser_dpr = browser_reference.get("device_scale_factor")
+    native_dpr = native_reference.get("device_scale_factor")
+    if (not isinstance(browser_dpr, (int, float)) or isinstance(browser_dpr, bool)
+            or browser_dpr <= 0):
+        raise LabError("browser capture device scale factor is missing or invalid")
+    if (not isinstance(native_dpr, (int, float)) or isinstance(native_dpr, bool)
+            or native_dpr <= 0):
+        raise LabError("native lowering device scale factor is missing or invalid")
+    if browser_dpr != native_dpr:
+        raise LabError("browser and native lowering device scale factor differs")
+    browser_interactions = browser.get("interactions")
+    native_interactions = native.get("interactions")
+    if (browser_interactions is None) != (native_interactions is None):
+        raise LabError("browser and native lowering interaction provenance is incomplete")
+    if browser_interactions != native_interactions:
+        raise LabError("browser and native lowering interaction provenance differs")
+    if browser_interactions is not None:
+        if not isinstance(browser_interactions, dict):
+            raise LabError("interaction provenance is malformed")
+        plan_identity = browser_interactions.get("plan_sha256")
+        if (not isinstance(plan_identity, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", plan_identity)):
+            raise LabError("interaction provenance plan hash is malformed")
+    if expected_interaction_plan_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_interaction_plan_sha256):
+            raise LabError("requested interaction plan hash is malformed")
+        browser_plan = browser_interactions.get("plan_sha256") if isinstance(browser_interactions, dict) else None
+        native_plan = native_interactions.get("plan_sha256") if isinstance(native_interactions, dict) else None
+        if (not isinstance(browser_plan, str) or not re.fullmatch(r"[0-9a-f]{64}", browser_plan)
+                or not isinstance(native_plan, str) or not re.fullmatch(r"[0-9a-f]{64}", native_plan)
+                or browser_plan != expected_interaction_plan_sha256
+                or native_plan != expected_interaction_plan_sha256):
+            raise LabError("capture interaction provenance is not bound to the requested plan")
+
+
+def verify_capture_image_binding(capture: dict[str, Any], image_path: Path) -> None:
+    """Fail closed when the capture envelope does not name the PNG we compare."""
+    reference = capture.get("reference", {})
+    assets = capture.get("assets", [])
+    if not isinstance(reference, dict) or not isinstance(assets, list):
+        raise LabError("capture image provenance is malformed")
+    asset_id = reference.get("asset_id")
+    asset = next((item for item in assets if isinstance(item, dict) and item.get("id") == asset_id), None)
+    if not isinstance(asset, dict):
+        raise LabError("capture reference asset is missing")
+    expected_sha = asset.get("sha256")
+    if not isinstance(expected_sha, str) or expected_sha != sha256_file(image_path):
+        raise LabError("capture reference PNG digest does not match capture envelope")
+    if (not isinstance(asset.get("width_px"), int) or isinstance(asset.get("width_px"), bool)
+            or not isinstance(asset.get("height_px"), int) or isinstance(asset.get("height_px"), bool)):
+        raise LabError("capture reference PNG dimensions are missing from capture envelope")
+    try:
+        from PIL import Image
+        with Image.open(image_path) as image:
+            expected_size = (asset.get("width_px"), asset.get("height_px"))
+            if image.size != expected_size:
+                raise LabError("capture reference PNG dimensions do not match capture envelope")
+    except ImportError as exc:
+        raise LabError("Pillow is required to verify capture PNG dimensions") from exc
 
 
 def compare_one(
@@ -953,7 +1065,15 @@ def compare_one(
     native_evidence = find_browser_evidence(native_ir)
     native_capture = json.loads((native_evidence / "capture.json").read_text(encoding="utf-8"))
     source_sha256 = sha256_file(source)
-    verify_capture_binding(capture, native_capture, source_sha256)
+    expected_interaction_plan_sha256 = None
+    if interaction_path:
+        expected_interaction_plan_sha256 = interaction_plan_sha256(interaction_file)
+    verify_capture_binding(
+        capture, native_capture, source_sha256,
+        expected_interaction_plan_sha256=expected_interaction_plan_sha256,
+    )
+    verify_capture_image_binding(capture, evidence / "browser.png")
+    verify_capture_image_binding(native_capture, native_evidence / "browser.png")
     viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
     render_args = [
@@ -980,7 +1100,7 @@ def compare_one(
     for name in (
         ".pulp-browser-capture-v1", "browser.png", "capture.json",
         "dom-snapshot.json", "semantic-report.json", "tokens.json",
-        "interaction-report.json",
+        "interaction-report.json", "platform-fonts.json",
     ):
         source_evidence = evidence / name
         if source_evidence.exists():
@@ -1062,8 +1182,12 @@ def compare_one(
     integrity = {
         "schema": "pulp-importer-differential-integrity-v1",
         "source_sha256": source_sha256,
+        "importer_sha256": sha256_file(importer) if importer.is_file() else None,
+        "observer_sha256": sha256_file(observer) if observer.is_file() else None,
         "browser_ir_sha256": sha256_file(browser_ir),
         "native_ir_sha256": sha256_file(native_ir),
+        # Raw hashes preserve chain of custody. Canonical hashes scrub capture
+        # clocks so repeated equivalent runs can actually reach determinism.
         "browser_capture_sha256": sha256_file(evidence / "capture.json"),
         "native_capture_sha256": sha256_file(native_evidence / "capture.json"),
         "browser_ir_canonical_sha256": canonical_json_sha256(browser_ir),
@@ -1074,6 +1198,15 @@ def compare_one(
         "native_render_sha256": sha256_file(native_render),
         "native_layout_sha256": sha256_file(native_layout),
         "native_render_receipt_sha256": sha256_file(native_receipt),
+        "platform_fonts_sha256": (
+            sha256_file(evidence / "platform-fonts.json")
+            if (evidence / "platform-fonts.json").is_file() else None),
+        "interaction_plan_sha256": (
+            capture.get("provenance", {}).get("interactions", {}).get("plan_sha256")
+            or "none"),
+        "device_scale_factor": capture.get("provenance", {}).get("viewport", {}).get(
+            "device_scale_factor", capture.get("reference", {}).get("device_scale_factor")),
+        "browser_build_hash": capture.get("provenance", {}).get("browser", {}).get("build_hash"),
         "source_bound": True,
         "viewport_bound": True,
         "browser_bound": True,
