@@ -1416,6 +1416,71 @@ TEST_CASE("native resolver names every repeat of a stable anchor",
           "$/children[3] duplicate stable anchor 'swatch' (first at $/children[0])");
 }
 
+TEST_CASE("native materializer preserves stable identity while applying child order",
+          "[design-import][native][identity][reorder]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.direction = LayoutDirection::row;
+    ir.root.style.width = 300.0f;
+    ir.root.style.height = 40.0f;
+
+    const std::array<std::pair<const char*, int>, 3> children = {{
+        {"drive", 2}, {"tone", 0}, {"mix", 1},
+    }};
+    for (const auto& [anchor, order] : children) {
+        IRNode child;
+        child.type = "frame";
+        child.name = anchor;
+        child.stable_anchor_id = anchor;
+        child.style.width = 100.0f;
+        child.style.height = 40.0f;
+        child.layout.order = order;
+        ir.root.children.push_back(std::move(child));
+    }
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    REQUIRE(root);
+    CHECK_FALSE(has_code(diagnostics, "identity-duplicate"));
+    root->set_bounds({0, 0, 300, 40});
+    root->layout_children();
+
+    REQUIRE(root->child_count() == 3);
+    // Materialization keeps authored child storage order while Yoga applies
+    // the CSS order to solved geometry. The identity must stay attached to
+    // the authored view, rather than being inferred from its visual position.
+    CHECK(root->child_at(0)->anchor_id() == "drive");
+    CHECK(root->child_at(1)->anchor_id() == "tone");
+    CHECK(root->child_at(2)->anchor_id() == "mix");
+    CHECK(root->child_at(0)->bounds().x == Catch::Approx(200.0f));
+    CHECK(root->child_at(1)->bounds().x == Catch::Approx(0.0f));
+    CHECK(root->child_at(2)->bounds().x == Catch::Approx(100.0f));
+}
+
+TEST_CASE("native materializer rejects duplicate stable identity before reorder proof",
+          "[design-import][native][identity][fail-closed]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    for (int order = 0; order < 2; ++order) {
+        IRNode child;
+        child.type = "frame";
+        child.stable_anchor_id = "duplicate";
+        child.style.width = 100.0f;
+        child.style.height = 40.0f;
+        child.layout.order = order;
+        ir.root.children.push_back(std::move(child));
+    }
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    REQUIRE(root);
+    CHECK(has_code(diagnostics, "identity-duplicate"));
+}
+
 TEST_CASE("native materializer names an image asset the renderer cannot decode",
           "[design-import][native][fail-closed]") {
     TempTree tree;
