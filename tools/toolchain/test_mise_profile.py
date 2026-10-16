@@ -17,6 +17,19 @@ class MiseProfileTests(unittest.TestCase):
         self.assertNotRegex(text, r"(?m)^\s*self_update")
         self.assertIn("install_visual_python_deps.sh", text)
 
+    def test_visual_task_uses_authoritative_hashed_lock(self) -> None:
+        installer = (ROOT / "tools/ci/install_visual_python_deps.sh").read_text(encoding="utf-8")
+        self.assertIn("--require-hashes", installer)
+        self.assertIn("tools/motion/visual/requirements.lock", installer)
+        self.assertTrue((ROOT / "tools/motion/visual/requirements.lock").is_file())
+
+    def test_mise_is_credited_as_developer_tooling(self) -> None:
+        # mise is developer-installed and never redistributed, so it is
+        # credited in DEPENDENCIES.md and the licensing reference, not in
+        # NOTICE.md, which covers redistributed code.
+        self.assertIn("| mise | MIT |", (ROOT / "DEPENDENCIES.md").read_text(encoding="utf-8"))
+        self.assertIn("[jdx/mise]", (ROOT / "docs/reference/licensing.md").read_text(encoding="utf-8"))
+
     def test_no_lane_invokes_mise(self) -> None:
         for path in (ROOT / ".github", ROOT / ".shipyard", ROOT / "tools/ci"):
             if not path.exists():

@@ -661,7 +661,15 @@ release below the pin, or under another major, is a pin mismatch. The pin is
 the oldest release the repository's `.shipyard/config.toml` parses under, so a
 change that needs a newer Shipyard raises the pin in the same PR.
 
-The current v0.269.1 pin parses `executable_reuse` in a target's
+The current v0.335.0 pin carries `shipyard review-verdict --pr N [--head SHA]
+--json`, the repository-side review rule (exit 0 approved, 1 refused, 2
+unreadable) that the merge-group backstop calls. It reads the signers who may
+sign the fleet App's APPROVE only from the base's `[auto_merge]
+reviewer_signers`. Its `shipyard changelog regenerate` renders CHANGELOG.md
+byte-identically to v0.269.1 for the same tag graph, and `shipyard config show`
+merges Pulp's configuration identically under both.
+
+The earlier v0.269.1 pin parses `executable_reuse` in a target's
 `changed_surface_selection`. Shipyard reads that table with
 `deny_unknown_fields`, so a host on an older release cannot parse a policy that
 declares it and plans the full suite on every PR: the pin and the lane hosts
