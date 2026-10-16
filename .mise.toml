@@ -6,6 +6,12 @@
 [settings]
 auto_install = false
 locked = true
+# A pinned mise never asks whether a newer release exists: the update warning
+# is the only path that queries in normal use. Automatic self-update is off by
+# default and only a global config may turn it on (mise ignores, with a warning,
+# self_update.* in a project file). The pin moves only through
+# `pulp deps update mise`.
+disable_update_warning = true
 
 [tasks.visual-deps]
 description = "Install Pulp's hash-pinned visual-analysis Python dependencies"

@@ -461,6 +461,17 @@ class StrictPinTests(unittest.TestCase):
             self.assertTrue((REPO / prefix / "package-lock.json").is_file(), prefix)
             self.assertIn(f"npm ci --prefix {prefix}", base)
 
+    def test_the_pinned_mise_is_asked_its_version_without_an_update_check(self) -> None:
+        data, _ = generate.load()
+        with tempfile.TemporaryDirectory() as td:
+            mise = Path(td) / "mise"
+            # Reports the pinned version only when the update check is off.
+            mise.write_text(
+                '#!/bin/sh\n[ "$MISE_DISABLE_UPDATE_WARNING" = 1 ] && echo "%s macos-arm64" || echo "0.0.0"\n'
+                % data["mise"]["version"], encoding="utf-8")
+            mise.chmod(0o755)
+            generate.require_pinned_mise(mise, data)
+
     def test_lock_is_written_only_by_the_pinned_mise(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

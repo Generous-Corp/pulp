@@ -249,6 +249,25 @@ agents get, and prints one table of the version every host runs against the
 pin. It copies the check into a temporary directory, removes it afterwards, and
 installs nothing; a host it cannot reach is shown as `unreachable`.
 
+For a host rollout step (a fleet host or a CI image moving to the pinned
+toolchain), run the check the way the step judges it:
+
+```bash
+MISE_ENV=toolchain mise exec -- python3 tools/toolchain/check_env.py --fleet-path --require-tools
+```
+
+`--fleet-path` also looks in the pinned mise's directory and the rustup proxies
+(`~/.cargo/bin`), which a non-login ssh or launchd PATH lacks; without it an
+installed Rust is reported missing. `--require-tools` exits 1 on any host-tool
+difference whatever the manifest's mode, while still only reporting the npm
+trees each checkout installs for itself (`pulp deps resolve`).
+
+The pinned mise never asks whether a newer release exists:
+`.mise.toml` sets `disable_update_warning = true`, and every version probe the
+toolchain scripts run sets `MISE_DISABLE_UPDATE_WARNING=1`, since `mise
+--version` is the one command that would otherwise query GitHub. Automatic
+self-update is off by default.
+
 A platform the manifest lists as an exception (Linux and Windows still take
 CMake from the system package manager) is still reported, labelled as the
 declared exception, so the difference stays visible.

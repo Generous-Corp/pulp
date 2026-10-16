@@ -616,7 +616,12 @@ def check_mise_lock(path: Path, data: dict) -> None:
 
 def require_pinned_mise(mise: Path, data: dict) -> None:
     try:
-        out = subprocess.run([str(mise), "--version"], capture_output=True, text=True, encoding="utf-8", check=False)
+        # MISE_DISABLE_UPDATE_WARNING: `--version` would otherwise ask GitHub
+        # for a newer mise; the pinned binary never queries.
+        out = subprocess.run(
+            [str(mise), "--version"], capture_output=True, text=True, encoding="utf-8", check=False,
+            env=dict(os.environ, MISE_DISABLE_UPDATE_WARNING="1"),
+        )
     except OSError as exc:
         raise ValueError(f"cannot run {mise}: {exc}") from exc
     words = out.stdout.split()
@@ -647,6 +652,7 @@ def write_mise_lock(pulp_root: Path, data: dict, mise: Path) -> str:
             "MISE_GLOBAL_CONFIG_FILE": str(scratch / "config/none.toml"),
             "MISE_TRUSTED_CONFIG_PATHS": str(pulp_root),
             "MISE_YES": "1",
+            "MISE_DISABLE_UPDATE_WARNING": "1",
             "MISE_ENV": MISE_ENV,
         }
         for key in ("GITHUB_TOKEN", "MISE_GITHUB_TOKEN", "SSL_CERT_FILE"):
