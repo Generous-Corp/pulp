@@ -7793,7 +7793,6 @@ tests = [
   "pulp-browser-capture-node-integration",
   "pulp-browser-capture-node-unit",
   "pulp-browser-capture-process-lifecycle",
-  "pulp-gpu-wgpu-native-staged-diagnostic",
   "pulp-materialized-runtime-conformance",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
@@ -7802,10 +7801,7 @@ tests = [
   "pulp.vellum-closure-gate-negative",
   "pulp_bundle_threejs_for_jsc_smoke",
 ]
-build_targets = [
-  "pulp-cli",
-  "pulp-gpu-wgpu-native-staged-diagnostic",
-]
+build_targets = ["pulp-cli"]
 supported_build_types = [
   "debug",
   "release",
