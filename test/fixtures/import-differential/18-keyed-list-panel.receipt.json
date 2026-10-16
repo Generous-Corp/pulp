@@ -1,0 +1,29 @@
+{
+  "schema": "pulp-keyed-identity-reorder-v1",
+  "fixture": "18-keyed-list-panel.html",
+  "source_sha256": "6e789f8044d72e5a8875008a12214d84b285b11dbe28da0c5b1c0327cc84fb25",
+  "source_bytes": 659,
+  "initial": {
+    "keys": [
+      "drive",
+      "tone",
+      "mix"
+    ],
+    "digest": "8f5f4ed20a90fd3578acfe75385bf9c76c01c8b78dc4f7f2eb353654a32c56fe"
+  },
+  "reordered": {
+    "keys": [
+      "mix",
+      "tone",
+      "drive"
+    ],
+    "digest": "fea6387dd8a2c206df61087a1d439b41d300092d1be9ac6ec7d0014b50b8d55a",
+    "set_preserved": true
+  },
+  "planted_negatives": {
+    "duplicate_key_rejected": true,
+    "unknown_key_rejected": true,
+    "duplicate_key": "tone",
+    "unknown_key": "presence"
+  }
+}
