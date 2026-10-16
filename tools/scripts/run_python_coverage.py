@@ -370,6 +370,15 @@ def _write_coveragerc(surfaces: list[CoverageSurface]) -> None:
     )
 
 
+# The skip status CTest is told about with SKIP_RETURN_CODE across this tree.
+SKIP_EXIT = 77
+# argparse's message when a script was started without arguments it requires.
+# Such a script is a CTest-driven check (`--build-dir`, `--ndk`, `--root`, ...)
+# that this pass cannot supply; it is reported as not runnable here, not as a
+# failure.
+_MISSING_ARGUMENTS = "the following arguments are required"
+
+
 def _run_test(test_path: Path, env: dict[str, str]) -> int:
     rel = test_path.relative_to(REPO_ROOT)
     print(f"=== Python coverage: {rel} ===", flush=True)
@@ -386,7 +395,17 @@ def _run_test(test_path: Path, env: dict[str, str]) -> int:
         ],
         cwd=REPO_ROOT,
         env=env,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
+    stderr = proc.stderr if isinstance(proc.stderr, str) else ""
+    if stderr:
+        sys.stderr.write(stderr)
+        sys.stderr.flush()
+    if proc.returncode == 2 and _MISSING_ARGUMENTS in stderr:
+        return SKIP_EXIT
     return proc.returncode
 
 
@@ -444,9 +463,12 @@ def main(argv: list[str] | None = None) -> int:
     env["COVERAGE_FILE"] = str(DATA_FILE)
 
     failures: list[str] = []
+    skipped: list[str] = []
     for test_path in tests:
         rc = _run_test(test_path, env)
-        if rc != 0:
+        if rc == SKIP_EXIT:
+            skipped.append(str(test_path.relative_to(REPO_ROOT)))
+        elif rc != 0:
             failures.append(f"{test_path.relative_to(REPO_ROOT)} (exit {rc})")
 
     try:
@@ -458,6 +480,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"HTML report: {HTML_DIR / 'index.html'}")
     print(f"Summary:     {SUMMARY_FILE}")
     print(f"Cobertura:   {XML_FILE}")
+
+    if skipped:
+        # Exit 77, or a CTest-driven script started without its required
+        # arguments: neither ran its checks here, so neither is a pass.
+        print(f"Skipped {len(skipped)} test file(s) that did not run here:")
+        for path in skipped:
+            print(f"  - {path}")
 
     if failures:
         print("", file=sys.stderr)

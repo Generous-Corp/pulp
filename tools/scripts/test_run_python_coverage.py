@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import pathlib
 import sys
 import tempfile
@@ -482,6 +484,38 @@ class MainFlowTests(unittest.TestCase):
             [surface.source_roots for surface in surfaces],
             [("tools", "core/view/js")],
         )
+
+    def test_missing_required_arguments_is_reported_as_a_skip(self) -> None:
+        # A CTest-driven script started without its --build-dir cannot run its
+        # checks here; that is a skip, not a pass and not a failure.
+        stderr = "usage: x.py [-h] --build-dir BUILD_DIR\nx.py: error: the following arguments are required: --build-dir\n"
+        fake_proc = mock.Mock(returncode=2, stderr=stderr)
+        with mock.patch.object(rpc.subprocess, "run", return_value=fake_proc), \
+             mock.patch.object(rpc.sys, "stderr"):
+            rc = rpc._run_test(rpc.REPO_ROOT / "tools/scripts/test_alpha.py", {})
+        self.assertEqual(rc, rpc.SKIP_EXIT)
+
+    def test_control_any_other_exit_two_is_still_a_failure(self) -> None:
+        fake_proc = mock.Mock(returncode=2, stderr="Traceback ...\nKeyError: 'x'\n")
+        with mock.patch.object(rpc.subprocess, "run", return_value=fake_proc), \
+             mock.patch.object(rpc.sys, "stderr"):
+            rc = rpc._run_test(rpc.REPO_ROOT / "tools/scripts/test_alpha.py", {})
+        self.assertEqual(rc, 2)
+
+    def test_skip_exit_does_not_fail_the_run_but_is_listed(self) -> None:
+        returns = iter([0, rpc.SKIP_EXIT, 0])
+        stdout = io.StringIO()
+        with mock.patch.object(rpc, "_require_supported_coverage"), \
+             mock.patch.object(rpc, "_discover_tests", return_value=self.tests), \
+             mock.patch.object(rpc, "_write_coveragerc"), \
+             mock.patch.object(rpc.shutil, "rmtree"), \
+             mock.patch.object(rpc, "_run_test", side_effect=lambda *_: next(returns)), \
+             mock.patch.object(rpc, "_build_reports"), \
+             contextlib.redirect_stdout(stdout):
+            rc = rpc.main([])
+        self.assertEqual(rc, 0)
+        self.assertIn("Skipped 1 test file(s)", stdout.getvalue())
+        self.assertIn(str(self.tests[1].relative_to(rpc.REPO_ROOT)), stdout.getvalue())
 
     def test_run_test_invokes_coverage_cli(self) -> None:
         fake_proc = mock.Mock(returncode=7)
