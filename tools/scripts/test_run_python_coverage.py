@@ -370,10 +370,12 @@ class CoveragercTests(unittest.TestCase):
 
 class MainFlowTests(unittest.TestCase):
     def setUp(self) -> None:
+        # Made-up names: the runner prints these into the job log, and real
+        # suite names there read as real failures.
         self.tests = [
             rpc.REPO_ROOT / "tools/scripts/test_alpha.py",
-            rpc.REPO_ROOT / "tools/deps/test_audit.py",
-            rpc.REPO_ROOT / "tools/local-ci/test_local_ci.py",
+            rpc.REPO_ROOT / "tools/deps/test_fake_suite_b.py",
+            rpc.REPO_ROOT / "tools/local-ci/test_fake_suite_c.py",
         ]
 
     def test_returns_one_when_no_tests_match(self) -> None:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import pathlib
 import os
@@ -54,6 +55,34 @@ class WatchdogUnitTests(unittest.TestCase):
             children, cpu = WATCHDOG.process_snapshot()
         self.assertEqual(children, {1: [10], 10: [11]})
         self.assertEqual(cpu, {10: 1.5, 11: 2.0})
+
+    def test_first_cpu_reading_never_stops_a_process(self) -> None:
+        # With zero stall and confirm windows, a process whose CPU total never
+        # moves is stopped as soon as it reads idle. The first reading has no
+        # rate yet, so it must count as busy: the stop comes on the second
+        # snapshot, never the first.
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            start_new_session=True)
+        self.addCleanup(lambda: (child.kill(), child.wait(), child.stdout.close()))
+        snapshots: list[int] = []
+
+        def snapshot():
+            snapshots.append(1)
+            return {}, {child.pid: 1.0}
+
+        args = argparse.Namespace(
+            poll_seconds=0.01, stall_seconds=0.0, confirm_seconds=0.0,
+            stop_grace_seconds=0.1, max_idle_cpu=0.5)
+        with mock.patch.object(WATCHDOG.subprocess, "Popen", return_value=child), \
+                mock.patch.object(WATCHDOG, "process_snapshot", side_effect=snapshot), \
+                mock.patch.object(WATCHDOG, "capture_diagnostic"), \
+                mock.patch.object(WATCHDOG, "stop_process_group",
+                                  side_effect=lambda proc, _grace: (proc.kill(), proc.wait())):
+            _rc, stalled = WATCHDOG.run_once(["unused"], args)
+        self.assertTrue(stalled)
+        self.assertEqual(len(snapshots), 2)
 
     def test_success_exit_is_preserved(self) -> None:
         result = self.run_watchdog("print('ok')")
