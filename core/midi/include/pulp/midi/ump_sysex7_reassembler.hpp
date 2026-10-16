@@ -69,6 +69,9 @@
 // also makes N the admission limit; packets that would exceed it are dropped
 // atomically with an overflow diagnostic.
 //
+// Copies retain prepared capacity and partial state; copy/move operations are
+// non-RT. A moved-from instance must be reserved again before RT reuse.
+//
 // Unit tests live in `test/test_ump_sysex7_reassembler.cpp`.
 
 #include <cstddef>
@@ -307,7 +310,30 @@ public:
     }
 
 private:
+    // Copying is non-RT configuration work. Preserve prepared capacity even
+    // for empty vectors so the copied instance has the same hot-path budget.
     struct StreamState {
+        StreamState() = default;
+        StreamState(const StreamState& other) { *this = other; }
+        StreamState& operator=(const StreamState& other) {
+            if (this == &other) return *this;
+            payload.reserve(other.payload.capacity());
+            scratch.reserve(other.scratch.capacity());
+            payload.assign(other.payload.begin(), other.payload.end());
+            scratch.assign(other.scratch.begin(), other.scratch.end());
+            in_progress = other.in_progress;
+            return *this;
+        }
+        StreamState(StreamState&& other) noexcept
+            : payload(std::move(other.payload)), scratch(std::move(other.scratch)),
+              in_progress(std::exchange(other.in_progress, false)) {}
+        StreamState& operator=(StreamState&& other) noexcept {
+            if (this == &other) return *this;
+            payload = std::move(other.payload);
+            scratch = std::move(other.scratch);
+            in_progress = std::exchange(other.in_progress, false);
+            return *this;
+        }
         std::vector<std::uint8_t> payload;
         std::vector<std::uint8_t> scratch;
         bool in_progress = false;

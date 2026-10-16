@@ -522,3 +522,54 @@ TEST_CASE("UmpSysex7Reassembler: reserved hot path is allocation-free",
     REQUIRE(sink.sysex[1][0] == 0x01);
     REQUIRE(sink.sysex[1][17] == 0x12);
 }
+
+TEST_CASE("UmpSysex7Reassembler: copies preserve prepared storage and partial groups",
+          "[midi][ump][sysex7][rt-safety]") {
+    UmpSysex7Reassembler source;
+    source.reserve(18);
+    REQUIRE(source.feed_packet(make_word0(1, 6, 1, 2) | (15u << 24),
+                               make_word1(3, 4, 5, 6), nullptr, nullptr) == Status::start);
+    UmpSysex7Reassembler copied(source);
+    UmpSysex7Reassembler assigned;
+    assigned = source;
+    for (auto* instance : {&copied, &assigned}) {
+        RtEmitSink sink;
+        {
+            pulp::test::RtAllocationProbe probe;
+            REQUIRE(instance->feed_packet(make_word0(0, 3, 7, 8),
+                                           make_word1(9), capture_rt, &sink) == Status::single_packet);
+            REQUIRE(instance->feed_packet(make_word0(3, 6, 10, 11) | (15u << 24),
+                                           make_word1(12, 13, 14, 15), capture_rt, &sink) == Status::ended);
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
+        REQUIRE(sink.count == 2);
+        REQUIRE(sink.sizes[1] == 12);
+        REQUIRE(sink.sysex[1][0] == 1);
+        REQUIRE(sink.sysex[1][11] == 15);
+        REQUIRE(instance->maximum_payload_bytes() == 18);
+    }
+    REQUIRE(source.in_progress());
+}
+
+TEST_CASE("UmpSysex7Reassembler: moves transfer prepared partial state",
+          "[midi][ump][sysex7][rt-safety]") {
+    UmpSysex7Reassembler source;
+    source.reserve(18);
+    REQUIRE(source.feed_packet(make_word0(1, 1, 42), 0, nullptr, nullptr) == Status::start);
+    UmpSysex7Reassembler moved(std::move(source));
+    REQUIRE_FALSE(source.in_progress());
+    UmpSysex7Reassembler assigned;
+    assigned = std::move(moved);
+    REQUIRE_FALSE(moved.in_progress());
+    RtEmitSink sink;
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(assigned.feed_packet(make_word0(3, 1, 43), 0, capture_rt, &sink) == Status::ended);
+        REQUIRE(assigned.feed_packet(make_word0(0, 1, 44) | (15u << 24), 0, capture_rt, &sink) == Status::single_packet);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(sink.count == 2);
+    REQUIRE(sink.sizes[0] == 2);
+    REQUIRE(sink.sysex[0][0] == 42);
+    REQUIRE(sink.sysex[0][1] == 43);
+}

@@ -427,3 +427,7 @@ getters inline; put anything with branches/loops in the .cpp.
   plan, not here.
 - Hosting MPE plugins (MPE output, dispatching MPE into a loaded
   plugin) — covered by the SignalGraph hosting work, not this skill.
+
+## SysEx core storage and representation
+
+UmpBuffer sorting retains arrival order at equal sample offsets using reserved scratch; reserve before limiting RT growth. UmpSysex7Reassembler reserve(N) resets partial streams and sets the per-group admission bound. Copies preserve prepared capacity; copy/move are non-RT operations, and moved-from instances require reserve before RT reuse. Its callbacks return UMP payload without MIDI1 F0/F7 framing.
