@@ -600,7 +600,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/ump_sysex7_reassembler.hpp",
-        "fingerprint": "sha256:41275de461d493e07b147f7e017c072be3b55f1581f2dc01fc694c1205681777",
+        "fingerprint": "sha256:fffeda45fe0d210f401d566951f9fcde269f29c50b4f3384cc6312bdecbbd4d5",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

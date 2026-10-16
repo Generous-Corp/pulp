@@ -89,7 +89,7 @@ namespace pulp::midi {
 ///
 /// The reassembler invokes this callback exactly once per logical
 /// sysex (either a single complete packet, or a start → continue* →
-/// end span). Orphaned continue/end packets (i.e. arrival without a
+/// end span), including a zero-byte payload. Orphaned continue/end packets (i.e. arrival without a
 /// preceding start) are dropped silently — corrupting the downstream
 /// sink with a partial payload is worse than dropping one malformed
 /// sysex.
@@ -195,7 +195,7 @@ public:
                 return Status::dropped;
             }
             extract_bytes(word0, word1, size, stream.scratch);
-            if (!stream.scratch.empty() && emit) {
+            if (emit) {
                 emit(stream.scratch, user);
             }
             return Status::single_packet;
@@ -242,7 +242,7 @@ public:
                     return Status::dropped;
                 }
                 extract_bytes(word0, word1, size, stream.payload);
-                if (!stream.payload.empty() && emit) {
+                if (emit) {
                     emit(stream.payload, user);
                 }
                 stream.payload.clear();

@@ -573,3 +573,20 @@ TEST_CASE("UmpSysex7Reassembler: moves transfer prepared partial state",
     REQUIRE(sink.sysex[0][0] == 42);
     REQUIRE(sink.sysex[0][1] == 43);
 }
+
+TEST_CASE("UmpSysex7Reassembler: empty completions preserve message boundaries",
+          "[midi][ump][sysex7][rt-safety]") {
+    UmpSysex7Reassembler reassembler;
+    reassembler.reserve(0);
+    RtEmitSink sink;
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(reassembler.feed_packet(make_word0(0, 0), 0, capture_rt, &sink) == Status::single_packet);
+        REQUIRE(reassembler.feed_packet(make_word0(1, 0) | (15u << 24), 0, capture_rt, &sink) == Status::start);
+        REQUIRE(reassembler.feed_packet(make_word0(3, 0) | (15u << 24), 0, capture_rt, &sink) == Status::ended);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(sink.count == 2);
+    REQUIRE(sink.sizes[0] == 0);
+    REQUIRE(sink.sizes[1] == 0);
+}
