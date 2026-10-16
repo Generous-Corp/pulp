@@ -31,6 +31,7 @@
 // WIN32_LEAN_AND_MEAN + NOMINMAX guarded before <windows.h> (SendMessageW,
 // WM_SIZE, MAKELPARAM, GetClientRect).
 #include <pulp/platform/win32_sane.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <cstdint>
 #endif
 
@@ -400,6 +401,12 @@ TEST_CASE("Windows attached editor fails closed when frame timer install fails",
         CreateWindowExW(0, L"STATIC", L"Pulp timer failure regression", WS_OVERLAPPEDWINDOW, 0, 0,
                         128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     REQUIRE(parent != nullptr);
+    struct ParentWindowCleanup {
+        HWND hwnd;
+        ~ParentWindowCleanup() { DestroyWindow(hwnd); }
+    } cleanup_parent{parent};
+    ShowWindow(parent, SW_SHOWNOACTIVATE);
+    REQUIRE(IsWindowVisible(parent));
 
     View root;
     root.set_bounds({0, 0, 64, 64});
@@ -423,22 +430,42 @@ TEST_CASE("Windows attached editor fails closed when frame timer install fails",
     // invalidates the HWND; the subsequent WM_PAINT performs the idle work.
     SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr);
     REQUIRE(host->try_attach_to_parent(parent));
+    REQUIRE(IsWindowVisible(child));
     int idle_calls = 0;
     host->set_idle_callback([&] { ++idle_calls; });
     REQUIRE(ValidateRect(child, nullptr)); // discard attach-time invalidation
-    SendMessageW(child, WM_TIMER, 1, 0);
+    // Receive the installed timer through the real message queue. Keep the
+    // fixture visible so CPU paint invalidation is observable.
+    MSG frame_timer{};
+    bool timer_received = false;
+    const auto timer_deadline = GetTickCount64() + 2000;
+    while (!timer_received && GetTickCount64() < timer_deadline) {
+        if (PeekMessageW(&frame_timer, child, WM_TIMER, WM_TIMER, PM_REMOVE) &&
+            frame_timer.wParam == 1) {
+            timer_received = true;
+            DispatchMessageW(&frame_timer);
+        } else {
+            MsgWaitForMultipleObjectsEx(0, nullptr, 20, QS_TIMER, MWMO_INPUTAVAILABLE);
+        }
+    }
+    REQUIRE(timer_received);
     CHECK(idle_calls == 0);
     REQUIRE(GetUpdateRect(child, nullptr, FALSE));
-    SendMessageW(child, WM_PAINT, 0, 0);
+    REQUIRE(UpdateWindow(child));
     CHECK(idle_calls == 1);
     CHECK_FALSE(GetUpdateRect(child, nullptr, FALSE));
+    // A detached window is hidden, so its update region alone cannot prove
+    // that a stale timer did no work. Arm animation and watch the frame clock.
+    REQUIRE(root.frame_clock() != nullptr);
+    root.set_continuous_repaint(true);
     host->detach();
     REQUIRE(ValidateRect(child, nullptr)); // discard native detach invalidation
+    const auto frames_before_stale_timer = root.frame_clock()->frame();
     SendMessageW(child, WM_TIMER, 1, 0); // stale queued timer must be inert
+    CHECK(root.frame_clock()->frame() == frames_before_stale_timer);
     CHECK_FALSE(GetUpdateRect(child, nullptr, FALSE));
     CHECK(idle_calls == 1);
     host->set_idle_callback({});
-    DestroyWindow(parent);
 }
 
 // The real HWND/Dawn host must not recurse when scripted idle work requests a
