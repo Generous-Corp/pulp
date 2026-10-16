@@ -321,6 +321,14 @@ cmd_manifest(){ # $1=manifest-path  $2=vm-name(optional)
     note "enabling Rosetta 2 (to run cross-built x86_64 binaries in-guest)"
     vm_ssh "$ip" 'arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license 2>/dev/null || true'
   fi
+  # Pinned toolchain layer: only manifests with [mise] (.shipyard/vm-image.mise.toml).
+  if grep -q '^\[mise\]' "$path"; then
+    local receipt_dir="${PULP_GOLDEN_RECEIPT_DIR:-$HOME/.cache/pulp-ci/golden-receipts}"
+    mkdir -p "$receipt_dir"
+    note "installing the pinned toolchain (mise --locked, Rust by name); receipt in $receipt_dir/$vm-mise.json"
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mise-golden-layer.sh" "$path" "$ip" "$receipt_dir/$vm-mise.json" \
+      || { stop_vm "$vm" "$rpid"; die "pinned toolchain layer failed; $vm is incomplete: tart delete $vm"; }
+  fi
   # Toolchain: only repos that declare toolchain.xcode pay the Xcode cost.
   if [ -n "$MF_XCODE" ]; then
     warn "manifest declares Xcode $MF_XCODE — run '$0 apple-xcode $vm $vm' or set PULP_HOST_XCODE_APP to copy a host Xcode; skipping in manifest bake to keep it unattended"
