@@ -59,7 +59,11 @@ class EvidenceTest(unittest.TestCase):
             with self.assertRaisesRegex(evidence.EvidenceError, "merged_at"):
                 evidence.validate(item)
         item = self.valid(); item["merge_commit_sha"] = item["head_sha"]; self.signed(item)
-        with self.assertRaisesRegex(evidence.EvidenceError, "identities"):
+        self.assertEqual(evidence.validate(item), item)
+        item = self.valid(); item["merge_group_sha"] = item["merge_commit_sha"]; self.signed(item)
+        self.assertEqual(evidence.validate(item), item)
+        item = self.valid(); item["head_sha"] = item["base_sha"]; self.signed(item)
+        with self.assertRaisesRegex(evidence.EvidenceError, "base and head"):
             evidence.validate(item)
 
     def test_failed_review_check_and_unknown_fields_fail_closed(self):

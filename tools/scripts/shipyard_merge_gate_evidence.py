@@ -99,9 +99,12 @@ def validate(value: Any) -> dict[str, Any]:
         raise EvidenceError("repository must be owner/name")
     for field in ("base_sha", "head_sha", "merge_group_sha", "merge_commit_sha"):
         _sha(value[field], field)
-    identities = [value[field] for field in ("base_sha", "head_sha", "merge_group_sha", "merge_commit_sha")]
-    if len(set(identities)) != len(identities):
-        raise EvidenceError("base, head, merge-group, and merge-commit identities must differ")
+    # A fast-forward merge may retain the PR head as the merge commit, and a
+    # queue's tested merge-group commit may be the final merge commit. The
+    # producer must prove those identities against live GitHub state; the
+    # schema must not reject valid equality before that check occurs.
+    if value["base_sha"] == value["head_sha"]:
+        raise EvidenceError("base and head identities must differ")
     _merged_at(value["merged_at"])
     review = value["review"]
     if not isinstance(review, dict):
