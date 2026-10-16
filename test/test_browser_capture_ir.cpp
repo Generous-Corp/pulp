@@ -208,12 +208,12 @@ std::string with_reference_member(std::string capture,
 std::string with_snapshot_sha256(std::string capture,
                                  std::string_view hash,
                                  std::string_view asset = "snapshot:main") {
-    const std::string anchor = R"JSON("snapshot_asset":")JSON" +
-                               std::string(asset) + R"JSON(")JSON";
+    const std::string anchor = R"JSON("snapshot_asset":"snapshot:main")JSON";
     const auto position = capture.find(anchor);
     REQUIRE(position != std::string::npos);
     capture.replace(position, anchor.size(),
-                    anchor + R"JSON(,"snapshot_sha256":")JSON" +
+                    R"JSON("snapshot_asset":")JSON" + std::string(asset) +
+                        R"JSON(","snapshot_sha256":")JSON" +
                         std::string(hash) + R"JSON(")JSON");
     return capture;
 }
