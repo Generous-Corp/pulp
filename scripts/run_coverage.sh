@@ -172,9 +172,17 @@ fi
 
 echo "=== Building ==="
 BUILD_LOG="${BUILD_DIR}/build.log"
+BUILD_STDOUT_LOG="${BUILD_DIR}/build.stdout.log"
 if ! PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
-    cmake --build "${BUILD_DIR}" > /dev/null 2>"${BUILD_LOG}"; then
-    echo "=== Coverage build failed; last 200 log lines ===" >&2
+    cmake --build "${BUILD_DIR}" > "${BUILD_STDOUT_LOG}" 2>"${BUILD_LOG}"; then
+    # The failing step is rarely in the tail: with parallel jobs, sibling
+    # targets keep compiling (and warning) after the first error, so the
+    # last lines are usually unrelated warnings. Print the error lines from
+    # both streams first; a failing custom command reports on stdout.
+    echo "=== Coverage build failed; error lines from the full build log ===" >&2
+    grep -n -E "error:|Error [0-9]+|\*\*\*|undefined reference|FAILED|fatal|CMake Error" \
+        "${BUILD_LOG}" "${BUILD_STDOUT_LOG}" 2>/dev/null | head -n 100 >&2 || true
+    echo "=== last 200 stderr lines ===" >&2
     tail -n 200 "${BUILD_LOG}" >&2 || true
     exit 1
 fi
