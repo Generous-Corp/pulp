@@ -1,6 +1,14 @@
+import sys
 import unittest
 
-from PIL import Image, ImageDraw
+try:
+    from PIL import Image, ImageDraw
+except ModuleNotFoundError as exc:
+    if exc.name != "PIL":
+        raise
+    print("SKIP: Pillow is required for the visual residual selftest", file=sys.stderr)
+    raise SystemExit(77)
+
 from visual_residual_diagnostic import measure
 
 

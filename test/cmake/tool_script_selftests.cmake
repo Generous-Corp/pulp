@@ -95,7 +95,7 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(import-validation-diff-against-reference-regions-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     add_test(NAME import-validation-visual-residual-diagnostic-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_visual_residual_diagnostic.py")
-    set_tests_properties(import-validation-visual-residual-diagnostic-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120 ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/import-validation")
+    set_tests_properties(import-validation-visual-residual-diagnostic-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120 SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/import-validation")
     add_test(NAME import-validation-score-native-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_score_native_panel.py")
     set_tests_properties(import-validation-score-native-panel-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
