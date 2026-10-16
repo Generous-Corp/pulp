@@ -207,8 +207,8 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
     return load_bytes(bytes.str(), snapshot_path);
 }
 
-std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(
-    std::string_view snapshot_bytes, fs::path snapshot_path) {
+std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_view snapshot_bytes,
+                                                                 fs::path snapshot_path) {
     choc::value::Value snapshot;
     try {
         snapshot = choc::json::parse(std::string(snapshot_bytes));

@@ -205,16 +205,14 @@ std::string with_reference_member(std::string capture,
     return capture;
 }
 
-std::string with_snapshot_sha256(std::string capture,
-                                 std::string_view hash,
+std::string with_snapshot_sha256(std::string capture, std::string_view hash,
                                  std::string_view asset = "snapshot:main") {
     const std::string anchor = R"JSON("snapshot_asset":"snapshot:main")JSON";
     const auto position = capture.find(anchor);
     REQUIRE(position != std::string::npos);
     capture.replace(position, anchor.size(),
                     R"JSON("snapshot_asset":")JSON" + std::string(asset) +
-                        R"JSON(","snapshot_sha256":")JSON" +
-                        std::string(hash) + R"JSON(")JSON");
+                        R"JSON(","snapshot_sha256":")JSON" + std::string(hash) + R"JSON(")JSON");
     return capture;
 }
 
@@ -509,12 +507,12 @@ TEST_CASE("browser capture verifies a declared DOM snapshot SHA-256 before parsi
     write_valid_reports(temp);
     const std::string snapshot = valid_snapshot();
     temp.write("snapshot.json", snapshot);
-    temp.write("capture.json", with_snapshot_sha256(
-        envelope("browser.png", pulp::runtime::sha256_hex(png)),
-        pulp::runtime::sha256_hex(snapshot), "snapshot.json"));
+    temp.write("capture.json",
+               with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                                    pulp::runtime::sha256_hex(snapshot), "snapshot.json"));
 
-    const auto result = pulp::import_design::lower_browser_capture_to_ir(
-        temp.root / "capture.json");
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
 
     REQUIRE(result);
 }
@@ -526,16 +524,15 @@ TEST_CASE("browser capture rejects a malformed DOM snapshot SHA-256 declaration"
     temp.write("browser.png", png);
     write_valid_reports(temp);
     temp.write("snapshot.json", "{}");
-    temp.write("capture.json", with_snapshot_sha256(
-        envelope("browser.png", pulp::runtime::sha256_hex(png)),
-        "ABCDEF", "snapshot.json"));
+    temp.write("capture.json",
+               with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                                    "ABCDEF", "snapshot.json"));
 
-    const auto result = pulp::import_design::lower_browser_capture_to_ir(
-        temp.root / "capture.json");
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
 
     REQUIRE_FALSE(result);
-    REQUIRE(result.error.find("declaration is malformed") !=
-            std::string::npos);
+    REQUIRE(result.error.find("declaration is malformed") != std::string::npos);
 }
 
 TEST_CASE("browser capture rejects a hash-matching malformed DOM snapshot",
@@ -546,12 +543,12 @@ TEST_CASE("browser capture rejects a hash-matching malformed DOM snapshot",
     write_valid_reports(temp);
     const std::string snapshot = "{}";
     temp.write("snapshot.json", snapshot);
-    temp.write("capture.json", with_snapshot_sha256(
-        envelope("browser.png", pulp::runtime::sha256_hex(png)),
-        pulp::runtime::sha256_hex(snapshot), "snapshot.json"));
+    temp.write("capture.json",
+               with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                                    pulp::runtime::sha256_hex(snapshot), "snapshot.json"));
 
-    const auto result = pulp::import_design::lower_browser_capture_to_ir(
-        temp.root / "capture.json");
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
 
     REQUIRE_FALSE(result);
     REQUIRE(result.error.find("sidecar is malformed") != std::string::npos);
@@ -564,17 +561,17 @@ TEST_CASE("browser capture rejects a mismatched DOM snapshot SHA-256",
     temp.write("browser.png", png);
     write_valid_reports(temp);
     temp.write("snapshot.json", "snapshot bytes");
-    temp.write("capture.json", with_snapshot_sha256(
-        envelope("browser.png", pulp::runtime::sha256_hex(png)),
-        "0000000000000000000000000000000000000000000000000000000000000000",
-        "snapshot.json"));
+    temp.write(
+        "capture.json",
+        with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                             "0000000000000000000000000000000000000000000000000000000000000000",
+                             "snapshot.json"));
 
-    const auto result = pulp::import_design::lower_browser_capture_to_ir(
-        temp.root / "capture.json");
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
 
     REQUIRE_FALSE(result);
-    REQUIRE(result.error.find("does not match its sidecar") !=
-            std::string::npos);
+    REQUIRE(result.error.find("does not match its sidecar") != std::string::npos);
 }
 
 TEST_CASE("browser capture rejects a declared DOM snapshot with no sidecar",
@@ -583,13 +580,14 @@ TEST_CASE("browser capture rejects a declared DOM snapshot with no sidecar",
     const auto png = png_header(1912, 1272);
     temp.write("browser.png", png);
     write_valid_reports(temp);
-    temp.write("capture.json", with_snapshot_sha256(
-        envelope("browser.png", pulp::runtime::sha256_hex(png)),
-        "0000000000000000000000000000000000000000000000000000000000000000",
-        "snapshot.json"));
+    temp.write(
+        "capture.json",
+        with_snapshot_sha256(envelope("browser.png", pulp::runtime::sha256_hex(png)),
+                             "0000000000000000000000000000000000000000000000000000000000000000",
+                             "snapshot.json"));
 
-    const auto result = pulp::import_design::lower_browser_capture_to_ir(
-        temp.root / "capture.json");
+    const auto result =
+        pulp::import_design::lower_browser_capture_to_ir(temp.root / "capture.json");
 
     REQUIRE_FALSE(result);
     REQUIRE(result.error.find("sidecar is missing") != std::string::npos);

@@ -120,11 +120,10 @@ std::optional<fs::path> contained_path(const fs::path& envelope, std::string_vie
 }
 } // namespace
 
-std::optional<VerifiedDomSnapshot> read_verified_dom_snapshot(
-    const fs::path& envelope,
-    std::string_view snapshot_asset,
-    std::string_view snapshot_sha256,
-    std::string& error) {
+std::optional<VerifiedDomSnapshot> read_verified_dom_snapshot(const fs::path& envelope,
+                                                              std::string_view snapshot_asset,
+                                                              std::string_view snapshot_sha256,
+                                                              std::string& error) {
     const bool lowercase_sha256 =
         snapshot_sha256.size() == 64 &&
         std::all_of(snapshot_sha256.begin(), snapshot_sha256.end(), [](unsigned char c) {
@@ -231,22 +230,18 @@ CaptureProvenanceResult validate_capture_provenance(const CaptureProvenanceReque
                 ++declared_snapshot_hashes;
         }
         const auto document = documents[0];
-        if (declared_snapshot_hashes > 0 &&
-            (documents.size() != 1 || !document.isObject() ||
-             !document.hasObjectMember("snapshot_sha256")))
+        if (declared_snapshot_hashes > 0 && (documents.size() != 1 || !document.isObject() ||
+                                             !document.hasObjectMember("snapshot_sha256")))
             return fail("browser DOM snapshot binding requires exactly one document");
         if (declared_snapshot_hashes == 1) {
-            const auto snapshot_asset =
-                required_string(document, "snapshot_asset");
-            const auto snapshot_sha256 =
-                required_string(document, "snapshot_sha256");
+            const auto snapshot_asset = required_string(document, "snapshot_asset");
+            const auto snapshot_sha256 = required_string(document, "snapshot_sha256");
             std::string snapshot_error;
             if (!snapshot_asset || !snapshot_sha256 ||
-                !read_verified_dom_snapshot(request.envelope, *snapshot_asset,
-                                            *snapshot_sha256, snapshot_error))
-                return fail(snapshot_error.empty()
-                                ? "browser DOM snapshot provenance is invalid"
-                                : snapshot_error);
+                !read_verified_dom_snapshot(request.envelope, *snapshot_asset, *snapshot_sha256,
+                                            snapshot_error))
+                return fail(snapshot_error.empty() ? "browser DOM snapshot provenance is invalid"
+                                                   : snapshot_error);
         }
     }
 

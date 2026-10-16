@@ -1684,14 +1684,11 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     }
     const bool has_snapshot_hash =
         document.isObject() && document.hasObjectMember("snapshot_sha256");
-    if (declared_snapshot_hashes > 0 &&
-        (documents.size() != 1 || !has_snapshot_hash)) {
-        result.error =
-            "browser DOM snapshot binding requires exactly one document";
+    if (declared_snapshot_hashes > 0 && (documents.size() != 1 || !has_snapshot_hash)) {
+        result.error = "browser DOM snapshot binding requires exactly one document";
         return result;
     }
-    const std::string snapshot_hash =
-        string_member(document, "snapshot_sha256");
+    const std::string snapshot_hash = string_member(document, "snapshot_sha256");
     if (has_snapshot_hash) {
         // New producers bind the exact raw sidecar bytes. Keep legacy
         // envelopes without this member valid, but fail closed as soon as a
@@ -1703,8 +1700,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             result.error = snapshot_error;
             return result;
         }
-        captured_styles = CapturedStyleIndex::load_bytes(
-            verified->bytes, verified->path);
+        captured_styles = CapturedStyleIndex::load_bytes(verified->bytes, verified->path);
         if (!captured_styles) {
             result.error = "browser DOM snapshot sidecar is malformed";
             return result;
@@ -1712,8 +1708,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     }
     if (!snapshot_asset.empty() && !has_snapshot_hash) {
         std::string ignored;
-        if (const auto snapshot_path =
-                contained_sidecar(envelope_path, snapshot_asset, ignored))
+        if (const auto snapshot_path = contained_sidecar(envelope_path, snapshot_asset, ignored))
             captured_styles = CapturedStyleIndex::load(*snapshot_path);
     }
     // Native drawing needs the painted tree; without a snapshot there is
