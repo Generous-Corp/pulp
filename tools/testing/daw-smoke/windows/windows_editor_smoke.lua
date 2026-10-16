@@ -25,10 +25,16 @@ fields.param_count = reaper.TrackFX_GetNumParams(tr,fx)
 if param_index >= fields.param_count then fail('PARAM_INDEX_OUT_OF_RANGE');return end
 reaper.TrackFX_Show(tr,fx,3)
 local window=reaper.TrackFX_GetFloatingWindow(tr,fx)
+-- Lua/REAPER pointer formatting differs by CRT: Windows commonly omits 0x.
+-- Accept explicit userdata/HWND hexadecimal forms, never arbitrary text.
 local window_text=tostring(window)
-local window_hex=window_text:match('0x(%x+)')
+local window_hex=window_text:match('^userdata:%s*0[xX](%x+)$')
+  or window_text:match('^userdata:%s*(%x+)$')
+  or window_text:match('^%(HWND%*%)%s*0[xX](%x+)$')
+  or window_text:match('^%(HWND%*%)%s*(%x+)$')
 local window_number=type(window)=='number' and window or (window_hex and tonumber(window_hex,16))
-if not window_number or window_number==0 then fail('FLOATING_EDITOR_ABSENT');return end
+if not window_number or window_number<=0 or window_number~=math.floor(window_number)
+  or window_number>9007199254740991 then fail('FLOATING_EDITOR_ABSENT');return end
 fields.editor_hwnd=string.format('%.0f',window_number)
 fields.fx_shown=1;fields.phase='EDITOR_SHOWN';status()
 if param_index < 0 then
