@@ -117,6 +117,15 @@ class GenerateTests(unittest.TestCase):
 
 
 
+def pinned_shipyard() -> dict:
+    """The checkout's [shipyard] table, so these cases follow every pin bump."""
+    return tomllib.loads(generate.SOURCE.read_text(encoding="utf-8"))["shipyard"]
+
+
+# A tag newer than any real pin, for cases that bump the copy.
+LATER_TAG = "v9.0.0"
+
+
 class StrictPinTests(unittest.TestCase):
     """The manifest pins exact versions, and every generated file agrees."""
 
@@ -254,10 +263,11 @@ class StrictPinTests(unittest.TestCase):
             self.fixture(root)
             generate.generate(root, None, True)  # control: the copy is current
             pin = root / generate.SHIPYARD_PIN
-            pin.write_text(pin.read_text(encoding="utf-8").replace('version = "v0.269.1"', 'version = "v0.270.0"'), encoding="utf-8")
+            current = pinned_shipyard()["version"]
+            pin.write_text(pin.read_text(encoding="utf-8").replace(f'version = "{current}"', f'version = "{LATER_TAG}"'), encoding="utf-8")
             self.assert_check_refuses(root, "generate.py --shipyard <tag>")
             generate.generate(root, None, False)
-            self.assertIn('version = "v0.269.1"', pin.read_text(encoding="utf-8"))
+            self.assertIn(f'version = "{current}"', pin.read_text(encoding="utf-8"))
             self.assertIn("# Pulp's pinned Shipyard release.", pin.read_text(encoding="utf-8"))
 
     def test_hand_edited_shipyard_digests_refuse(self) -> None:
@@ -265,7 +275,11 @@ class StrictPinTests(unittest.TestCase):
             root = Path(td)
             self.fixture(root)
             sums = root / generate.SHIPYARD_SUMS
-            sums.write_text(sums.read_text(encoding="utf-8").replace("8d723c27", "0d723c27"), encoding="utf-8")
+            digest = pinned_shipyard()["assets"]["shipyard-linux-x64"]
+            flipped = ("0" if digest[0] != "0" else "1") + digest[1:]
+            text = sums.read_text(encoding="utf-8")
+            self.assertIn(digest, text)
+            sums.write_text(text.replace(digest, flipped), encoding="utf-8")
             self.assert_check_refuses(root, "stale or hand-edited")
 
     def test_shipyard_bump_takes_every_digest_from_the_release(self) -> None:
@@ -278,14 +292,14 @@ class StrictPinTests(unittest.TestCase):
             generate.fetch_shipyard_assets = lambda repo, tag: seen.append((repo, tag)) or dict(assets)
             generate.fetch_shipyard_installer_sha256 = lambda repo, tag: "d" * 64
             try:
-                generate.generate(root, None, False, shipyard="v0.270.0")
+                generate.generate(root, None, False, shipyard=LATER_TAG)
             finally:
                 generate.fetch_shipyard_assets, generate.fetch_shipyard_installer_sha256 = original
-            self.assertEqual([("danielraffel/Shipyard", "v0.270.0")], seen)
+            self.assertEqual([("danielraffel/Shipyard", LATER_TAG)], seen)
             data, _ = generate.load(root / "tools/toolchain/manifest.toml")
-            self.assertEqual("v0.270.0", data["shipyard"]["version"])
+            self.assertEqual(LATER_TAG, data["shipyard"]["version"])
             self.assertEqual(assets, data["shipyard"]["assets"])  # old asset rows are gone
-            self.assertIn('version = "v0.270.0"', (root / generate.SHIPYARD_PIN).read_text(encoding="utf-8"))
+            self.assertIn(f'version = "{LATER_TAG}"', (root / generate.SHIPYARD_PIN).read_text(encoding="utf-8"))
             sums = (root / generate.SHIPYARD_SUMS).read_text(encoding="utf-8")
             self.assertIn("a" * 64 + "  shipyard-linux-x64", sums)
             self.assertIn("d" * 64 + "  install.sh", sums)
@@ -294,16 +308,18 @@ class StrictPinTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 generate.record_shipyard_pin(root / "tools/toolchain/manifest.toml", "latest", assets, "d" * 64)
             with self.assertRaises(ValueError) as ctx:
-                generate.generate(root, None, False, shipyard="v0.269.9")
-            self.assertIn("older than the pinned v0.270.0", str(ctx.exception))
+                generate.generate(root, None, False, shipyard="v0.0.1")
+            self.assertIn(f"older than the pinned {LATER_TAG}", str(ctx.exception))
 
     def test_shipyard_pin_must_be_exact(self) -> None:
         source = generate.SOURCE.read_text(encoding="utf-8")
+        pin = pinned_shipyard()
+        linux, installer = pin["assets"]["shipyard-linux-x64"], pin["installer_sha256"]
         cases = (
-            ('version = "v0.269.1"', 'version = "latest"', "exact release tag"),
-            ('"shipyard-linux-x64" = "327dd4b5', '"shipyard-linux-x64" = "327dd4b', "64-hex"),
+            (f'version = "{pin["version"]}"', 'version = "latest"', "exact release tag"),
+            (f'"shipyard-linux-x64" = "{linux}"', f'"shipyard-linux-x64" = "{linux[:-1]}"', "64-hex"),
             ('repo = "danielraffel/Shipyard"', 'repo = "Shipyard"', "owner/name"),
-            ('installer_sha256 = "c6ad3645', 'installer_sha256 = "c6ad364', "sha256 of install.sh"),
+            (f'installer_sha256 = "{installer}"', f'installer_sha256 = "{installer[:-1]}"', "sha256 of install.sh"),
         )
         for old, new, needle in cases:
             with self.subTest(new=new), tempfile.TemporaryDirectory() as td:
