@@ -800,13 +800,13 @@ int main() {
         return 77;
     }
     auto program = provider->make_program();
-    SharedIoProgramSession session;
+    auto session = std::make_unique<SharedIoProgramSession>();
     if (program == nullptr ||
-        !session.prepare({std::move(provider), std::move(program)},
-                         {.slots = 2,
-                          .input_bytes_per_slot = 64 * sizeof(float),
-                          .output_bytes_per_slot = 64 * 3 * sizeof(float),
-                          .storage_kind = SharedIoArenaProvider::StorageKind::Staged})) {
+        !session->prepare({std::move(provider), std::move(program)},
+                          {.slots = 2,
+                           .input_bytes_per_slot = 64 * sizeof(float),
+                           .output_bytes_per_slot = 64 * 3 * sizeof(float),
+                           .storage_kind = SharedIoArenaProvider::StorageKind::Staged})) {
         std::puts("wgpu_native_session=failed");
         return 2;
     }
@@ -816,25 +816,25 @@ int main() {
     // not realtime or product/provider evidence.
     std::array<std::optional<SharedIoProgramSession::InputLease>, 2> inflight;
     for (std::size_t i = 0; i < inflight.size(); ++i) {
-        inflight[i] = session.acquire_input(100 + i, 0);
-        if (!inflight[i] || !session.submit({inflight[i]->token, 0}))
+        inflight[i] = session->acquire_input(100 + i, 0);
+        if (!inflight[i] || !session->submit({inflight[i]->token, 0}))
             return 13;
     }
     std::array<std::optional<SharedIoProgramSession::Completion>, 2> inflight_completions;
     for (int attempt = 0;
          attempt < 10'000 && (!inflight_completions[0] || !inflight_completions[1]); ++attempt) {
-        (void)session.service(0);
+        (void)session->service(0);
         for (auto& completion : inflight_completions)
             if (!completion)
-                completion = session.pop_completion();
+                completion = session->pop_completion();
         if (!inflight_completions[0] || !inflight_completions[1])
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     for (const auto& completion : inflight_completions) {
         if (!completion || completion->status != SharedIoTerminalStatus::RetiredSuccess)
             return 14;
-        auto output = session.acquire_output(*completion);
-        if (!output || !session.release_output({output->token}))
+        auto output = session->acquire_output(*completion);
+        if (!output || !session->release_output({output->token}))
             return 15;
     }
     constexpr std::array<float, 3> weights{{-0.6180188f, 1.0314025f, -1.0111561f}};
@@ -843,7 +843,7 @@ int main() {
     float max_error = 0.0f;
     std::array<float, 6 * 64> submitted_inputs{};
     for (std::uint64_t sequence = 0; sequence < 6; ++sequence) {
-        auto lease = session.acquire_input(sequence, 0);
+        auto lease = session->acquire_input(sequence, 0);
         if (!lease || lease->bytes.size() != 64 * sizeof(float))
             return 3;
         auto* input = reinterpret_cast<float*>(lease->bytes.data());
@@ -851,12 +851,12 @@ int main() {
             input[t] = static_cast<float>(0.17 * std::sin(0.11 * (sequence * 64 + t)) +
                                           0.03 * std::cos(0.037 * (sequence * 64 + t)));
         std::memcpy(submitted_inputs.data() + sequence * 64, input, 64 * sizeof(float));
-        if (!session.submit({lease->token, 0}))
+        if (!session->submit({lease->token, 0}))
             return 4;
         std::optional<SharedIoProgramSession::Completion> completion;
         for (int attempt = 0; attempt < 10'000 && !completion; ++attempt) {
-            (void)session.service(0);
-            completion = session.pop_completion();
+            (void)session->service(0);
+            completion = session->pop_completion();
             if (!completion)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -864,14 +864,14 @@ int main() {
             return 5;
         if (sequence == 4) {
             if (completion->status != SharedIoTerminalStatus::RetiredFailed ||
-                session.acquire_output(*completion) || !session.discard_completion(*completion))
+                session->acquire_output(*completion) || !session->discard_completion(*completion))
                 return 6;
             ++failures;
             continue;
         }
         if (completion->status != SharedIoTerminalStatus::RetiredSuccess)
             return 7;
-        auto output = session.acquire_output(*completion);
+        auto output = session->acquire_output(*completion);
         if (!output || output->bytes.size() != 64 * 3 * sizeof(float))
             return 8;
         const auto* values = reinterpret_cast<const float*>(output->bytes.data());
@@ -883,12 +883,16 @@ int main() {
                     return 9;
                 max_error = std::max(max_error, std::abs(actual - expected));
             }
-        if (!session.release_output({output->token}))
+        if (!session->release_output({output->token}))
             return 10;
         ++successes;
     }
-    if (!session.release() || successes != 5 || failures != 1 || max_error > 1.0e-5f)
+    if (successes != 5 || failures != 1 || max_error > 1.0e-5f)
         return 11;
+    // This process-scoped diagnostic has already captured all scheduler and
+    // CPU-oracle evidence. The pinned Metal runtime may block while tearing
+    // down the completed provider, so abandon it before native destruction.
+    session.release();
 
     // Exercise the pinned runtime's controlled loss path in a fresh, bounded
     // session. The device is destroyed while one submission is outstanding;
