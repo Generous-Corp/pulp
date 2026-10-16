@@ -229,6 +229,12 @@
         ],
         "stale_sources": [],
         "message": "fresh: newest sample 2026-10-16T14:21:54+00:00 (51m ago; threshold 1d) for project pulp"
+      },
+      "observed_sample_window": {
+        "oldest_sample_at": "2026-10-16T13:44:53+00:00",
+        "newest_sample_at": "2026-10-16T14:21:54+00:00",
+        "span_seconds": 2221,
+        "span_human": "0:37:01"
       }
     },
     "tartci": {
@@ -446,6 +452,12 @@
         ],
         "stale_sources": [],
         "message": "fresh: newest sample 2026-10-16T14:36:09+00:00 (37m ago; threshold 1d) for project danielraffel/tartci"
+      },
+      "observed_sample_window": {
+        "oldest_sample_at": "2026-10-16T03:15:37+00:00",
+        "newest_sample_at": "2026-10-16T14:36:09+00:00",
+        "span_seconds": 40832,
+        "span_human": "11:20:32"
       }
     },
     "shipyard": {
@@ -663,6 +675,12 @@
         ],
         "stale_sources": [],
         "message": "fresh: newest sample 2026-10-16T14:03:36+00:00 (1h 9m ago; threshold 1d) for project danielraffel/Shipyard"
+      },
+      "observed_sample_window": {
+        "oldest_sample_at": "2026-10-15T03:16:26+00:00",
+        "newest_sample_at": "2026-10-16T14:03:36+00:00",
+        "span_seconds": 125230,
+        "span_human": "1 day, 10:47:10"
       }
     }
   },
