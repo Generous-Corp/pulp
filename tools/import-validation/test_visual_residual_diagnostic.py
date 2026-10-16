@@ -34,9 +34,24 @@ class VisualResidualDiagnosticTests(unittest.TestCase):
         candidate = Image.new("RGBA", self.reference.size, (20, 20, 20, 255))
         ImageDraw.Draw(candidate).rectangle((7, 4, 18, 11), fill=(220, 220, 220, 255))
         report = measure(self.reference, candidate, root=(2, 2, 20, 12), edge_width=1)
-        edge = report["categories"]["edge_band_residual"]["differing_pixels"]
-        mask = report["categories"]["mask_or_placement_interior"]["differing_pixels"]
-        self.assertGreater(edge + mask, 0)
+        self.assertGreater(report["categories"]["edge_band_residual"]["differing_pixels"], 0)
+        self.assertEqual(report["categories"]["mask_or_placement_interior"]["differing_pixels"], 0)
+
+    def test_wider_edge_band_absorbs_near_edge_residual_after_two_pixel_shift(self):
+        reference = Image.new("RGBA", (40, 30), (20, 20, 20, 255))
+        ImageDraw.Draw(reference).rectangle((5, 5, 20, 24), fill=(220, 220, 220, 255))
+        candidate = Image.new("RGBA", reference.size, (20, 20, 20, 255))
+        ImageDraw.Draw(candidate).rectangle((7, 5, 22, 24), fill=(220, 220, 220, 255))
+        candidate.putpixel((7, 10), (180, 180, 180, 255))
+
+        narrow = measure(reference, candidate, root=(2, 2, 36, 26), edge_width=1)
+        wide = measure(reference, candidate, root=(2, 2, 36, 26), edge_width=2)
+        self.assertGreater(narrow["categories"]["edge_band_residual"]["differing_pixels"], 0)
+        self.assertEqual(narrow["categories"]["mask_or_placement_interior"]["differing_pixels"], 0)
+        self.assertEqual(narrow["categories"]["shared_foreground_interior"]["differing_pixels"], 1)
+        self.assertEqual(wide["categories"]["shared_foreground_interior"]["differing_pixels"], 0)
+        self.assertEqual(wide["categories"]["edge_band_residual"]["differing_pixels"],
+                         narrow["categories"]["edge_band_residual"]["differing_pixels"] + 1)
 
     def test_alpha_only_change_is_counted(self):
         candidate = self.reference.copy()
