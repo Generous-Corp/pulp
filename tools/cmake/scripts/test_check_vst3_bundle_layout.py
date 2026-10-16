@@ -67,6 +67,42 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
         problems = check(bundle)
         self.assertTrue(any("must be a JSON list" in problem for problem in problems))
 
+    def test_non_object_runtime_entry_fails_diagnostically(self) -> None:
+        _root, bundle = self.make_bundle()
+        (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": [None]})
+        )
+        problems = check(bundle)
+        self.assertTrue(any("entries must be JSON objects" in problem for problem in problems))
+
+    def test_non_string_file_fails_diagnostically(self) -> None:
+        _root, bundle = self.make_bundle()
+        (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": [{"file": 7}]})
+        )
+        problems = check(bundle)
+        self.assertTrue(any("file must be a JSON string" in problem for problem in problems))
+
+    def test_empty_file_fails_diagnostically(self) -> None:
+        _root, bundle = self.make_bundle()
+        (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": [{"file": ""}]})
+        )
+        problems = check(bundle)
+        self.assertTrue(any("non-empty basename" in problem for problem in problems))
+
+    def test_path_file_fails_diagnostically(self) -> None:
+        _root, bundle = self.make_bundle()
+        manifest = bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json"
+        for value in ("sub/icu.dat", "..", "../icu.dat", "/tmp/icu.dat", r"C:\\icu.dat"):
+            manifest.write_text(json.dumps({
+                "schema": "pulp.build-info.v1",
+                "bundled_runtime_libraries": [{"file": value}],
+            }))
+            problems = check(bundle)
+            self.assertTrue(any("plain basename" in problem or "relative basename" in problem
+                                for problem in problems), value)
+
     def test_generic_filename_is_rejected_by_consumer_contract(self) -> None:
         _root, bundle = self.make_bundle()
         arch = bundle / "Contents" / "x86_64-win"
