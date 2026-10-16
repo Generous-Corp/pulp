@@ -80,6 +80,7 @@ struct MapWait {
 
 struct DeviceLossWait {
     bool observed = false;
+    const void* callback_userdata = nullptr;
     WGPUDeviceLostReason reason = WGPUDeviceLostReason_Unknown;
     std::string message;
 };
@@ -133,6 +134,7 @@ void uncaptured_error(const WGPUDevice*, WGPUErrorType type, WGPUStringView mess
 void device_lost_callback(const WGPUDevice*, WGPUDeviceLostReason reason, WGPUStringView message,
                           void* userdata, void*) {
     auto* loss = static_cast<DeviceLossWait*>(userdata);
+    loss->callback_userdata = userdata;
     loss->reason = reason;
     loss->message = string_view(message);
     loss->observed = true;
@@ -402,7 +404,9 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
     }
 
     bool device_loss_callback_registered() const noexcept {
-        return loss_callback_registered_;
+        // Registration is established by the native callback invoking this
+        // exact state object, never by re-reading the descriptor we assigned.
+        return device_loss_.observed && device_loss_.callback_userdata == &device_loss_;
     }
 
     // wgpu-native v24 exposes device destruction as the only portable,
@@ -564,9 +568,6 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         }
         device_ = device_wait.device;
         queue_ = wgpuDeviceGetQueue(device_);
-        loss_callback_registered_ = queue_ != nullptr &&
-                                    device_loss_callback_info.callback == device_lost_callback &&
-                                    device_loss_callback_info.userdata1 == &device_loss_;
         return queue_ != nullptr;
     }
 
@@ -639,7 +640,6 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
     // declared after it and therefore destroyed first during teardown.
     DeviceLossWait device_loss_;
     bool loss_forced_ = false;
-    bool loss_callback_registered_ = false;
     bool physical_drain_ = false;
     WGPUInstance instance_ = nullptr;
     WGPUAdapter adapter_ = nullptr;
@@ -909,14 +909,14 @@ int main() {
         auto loss_probe = WgpuNativeStagedProvider::create();
         if (loss_probe == nullptr)
             return kProviderUnavailableExit;
-        if (!loss_probe->device_loss_callback_registered())
-            return kProviderUnavailableExit;
         if (!loss_probe->force_device_loss_for_diagnostic())
             return kDiagnosticFailureExit;
         if (!loss_probe->wait_for_device_loss_callback()) {
             std::fputs("wgpu staged device-loss observation unavailable\n", stderr);
             return kProviderUnavailableExit;
         }
+        if (!loss_probe->device_loss_callback_registered())
+            return kDiagnosticFailureExit;
         if (loss_probe->device_loss_reason() != WGPUDeviceLostReason_Destroyed)
             return kDiagnosticFailureExit;
 
@@ -933,9 +933,6 @@ int main() {
                                    .storage_kind = SharedIoArenaProvider::StorageKind::Staged}))
             return kDiagnosticFailureExit;
         auto* loss_native = static_cast<WgpuNativeStagedProvider*>(loss_session.owned_provider());
-        loss_callback_registered = loss_native->device_loss_callback_registered();
-        if (!loss_callback_registered)
-            return kDiagnosticFailureExit;
         auto loss_input = loss_session.acquire_input(902, 0);
         if (!loss_input || !loss_session.submit({loss_input->token, 0}) ||
             !loss_native->force_device_loss_for_diagnostic())
@@ -943,9 +940,10 @@ int main() {
         loss_scenario_triggered = true;
 
         std::optional<SharedIoProgramSession::Completion> loss_completion;
-        (void)loss_native->wait_for_device_loss_callback();
+        loss_callback_registered = loss_native->wait_for_device_loss_callback() &&
+                                   loss_native->device_loss_callback_registered();
         (void)loss_session.service(0);
-        if (!loss_native->device_loss_observed() || !loss_native->drain())
+        if (!loss_callback_registered || !loss_native->drain())
             return kDiagnosticFailureExit;
         for (int attempt = 0; attempt < 10'000 && !loss_completion; ++attempt) {
             (void)loss_session.service(0);
