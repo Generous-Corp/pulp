@@ -155,6 +155,13 @@ or export `MISE_ENV=toolchain` and
 the pinned `cmake`, `ninja`, `python3`, `node` and `clang-format` come first on
 your `PATH` inside the checkout.
 
+With `MISE_ENV=toolchain` set, the configure of the Pulp checkout makes
+`find_package(Python3)` take the pinned Python that mise puts first on `PATH`
+(`Python3_FIND_FRAMEWORK=LAST`). Without it, CMake on macOS prefers any
+Python.framework install, such as Homebrew's, over the pinned one. A build
+directory configured before you opted in keeps its cached interpreter, so
+configure a fresh one.
+
 ### Project tasks
 
 `.mise.toml` also defines tasks you can run with `mise run <task>`:
