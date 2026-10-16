@@ -25,6 +25,7 @@ have been built.
 """
 
 import argparse
+import json
 import pathlib
 import sys
 
@@ -60,6 +61,23 @@ def check(bundle: pathlib.Path) -> list[str]:
                        for p in arch_dir.iterdir()):
                 problems.append(
                     f"{bundle.name}: {arch_dir.name} contains no loadable .vst3 module")
+            build_info = arch_dir / "pulp-build-info.json"
+            if not build_info.is_file():
+                problems.append(
+                    f"{bundle.name}: {arch_dir.name} is missing pulp-build-info.json")
+                continue
+            try:
+                info = json.loads(build_info.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                problems.append(f"{bundle.name}: invalid {build_info.name}: {exc}")
+                continue
+            if info.get("schema") != "pulp.build-info.v1":
+                problems.append(f"{bundle.name}: {build_info.name} has the wrong schema")
+            for library in info.get("bundled_runtime_libraries", []):
+                name = library.get("file") if isinstance(library, dict) else None
+                if not name or not (arch_dir / name).is_file():
+                    problems.append(
+                        f"{bundle.name}: {arch_dir.name} is missing declared runtime sidecar {name!r}")
     return problems
 
 

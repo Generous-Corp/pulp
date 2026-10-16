@@ -20,6 +20,7 @@
 #                      signing step and is covered by the bundle's sealed
 #                      resources.
 #   * LV2            — <bundle>.lv2/pulp-build-info.json
+#   * Windows VST3 bundles — Contents/<arch>-win/pulp-build-info.json
 #   * other modules  — <binary>.pulp-build-info.json beside the binary
 #
 # Product source commit: pass SOURCE_GIT_SHA / SOURCE_GIT_DIRTY to
@@ -339,6 +340,11 @@ function(_pulp_attach_build_info target format_target format name bundle_id vers
     get_target_property(_is_app_bundle ${format_target} MACOSX_BUNDLE)
     if("${format_target}" MATCHES "_LV2$")
         set(_output "$<TARGET_FILE_DIR:${format_target}>/pulp-build-info.json")
+    elseif(WIN32 AND "${format}" STREQUAL "VST3")
+        include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpWindowsTargetArch.cmake")
+        pulp_windows_target_arch(_windows_arch)
+        set(_output
+            "${CMAKE_BINARY_DIR}/VST3/${name}.vst3/Contents/${_windows_arch}/pulp-build-info.json")
     elseif(APPLE AND (_is_bundle OR _is_app_bundle))
         _pulp_build_info_apple_resource_subdir("${CMAKE_SYSTEM_NAME}" _resource_subdir)
         if(NOT _resource_subdir)
