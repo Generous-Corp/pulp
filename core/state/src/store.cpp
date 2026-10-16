@@ -698,6 +698,7 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
         if (state_generation() == reserved) {
             value_written = values_[index].compare_exchange_versioned(expected_value, reserved,
                                                                       desired, reserved);
+            if (value_written && registry_) registry_->notify(id, desired);
         }
         release_gesture(id);
         gesture_acquired = false;
@@ -718,23 +719,16 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
         active_state_writers_.load(std::memory_order_acquire) == 1;
     if (!callback_failed && value_written && !concurrent &&
         control_value_current && sole_writer) {
-        if (registry_)
-            registry_->notify(id, desired);
         active_state_writers_.fetch_sub(1, std::memory_order_release);
         return {ParameterGestureApplyStatus::Applied, reserved};
     }
 
     bool rolled_back = !value_written;
-    if (value_written && (callback_failed || concurrent) && sole_writer && control_value_current) {
+    if (value_written && callback_failed && !concurrent && sole_writer &&
+        control_value_current) {
         auto rollback_expected = applied_value;
-        auto rollback_observed = state_generation();
-        if (rollback_observed == std::numeric_limits<std::uint64_t>::max()) {
-            active_state_writers_.fetch_sub(1, std::memory_order_release);
-            return {callback_failed ? ParameterGestureApplyStatus::CallbackFailureUnknown
-                                    : ParameterGestureApplyStatus::ConcurrentMutation,
-                    rollback_observed};
-        }
-        const auto rollback_generation = rollback_observed + 1;
+        auto rollback_observed = reserved;
+        const auto rollback_generation = reserved + 1;
         const bool rollback_reserved = state_generation_.compare_exchange_strong(
             rollback_observed, rollback_generation, std::memory_order_acq_rel,
             std::memory_order_acquire);
