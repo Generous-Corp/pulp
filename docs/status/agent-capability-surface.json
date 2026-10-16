@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 136,
+  "inventory_version": 137,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 506,
-    "reviewed_headers": 229,
-    "legacy_unreviewed_headers": 277,
+    "reviewed_headers": 230,
+    "legacy_unreviewed_headers": 276,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 60,
-      "legacy_unreviewed": 277,
+      "infrastructure": 61,
+      "legacy_unreviewed": 276,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -62,8 +62,8 @@
       },
       "midi": {
         "public_headers": 50,
-        "reviewed_headers": 24,
-        "legacy_unreviewed_headers": 26,
+        "reviewed_headers": 25,
+        "legacy_unreviewed_headers": 25,
         "unsupported_headers": 0
       },
       "music": {
@@ -1552,11 +1552,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/raw_midi_parser.hpp",
-      "fingerprint": "sha256:48adcd006d27381b0d80fc5d1f40b70c5ff007afe0c20bdec3642cc3cfe1e48b",
+      "fingerprint": "sha256:5c37210fa38d1d11ad75d54d7997c50598e99d5f4133152c9ca6c238f98992f1",
       "include": "pulp/midi/raw_midi_parser.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Bounded MIDI1 byte-stream parsing and admission diagnostics are transport infrastructure, not a generator-facing musical transform."
     },
     {
       "domain": "midi",
