@@ -3479,14 +3479,16 @@ public:
                                        ? req->buffer.GetConstMappedRange(0, req->size)
                                        : nullptr;
                 if (!data) {
-                    if (pool_) pool_->discard(req->buffer);
+                    if (pool_)
+                        pool_->discard(req->buffer);
                     complete(*req, ReadbackStatus::Failed, 0);
                 } else {
                     std::memcpy(req->dest, data, req->size);
                     ++stats_->mapped_readback_memcpy_calls;
                     stats_->mapped_readback_memcpy_bytes += req->size;
                     req->buffer.Unmap();
-                    if (pool_) pool_->release(req->buffer);
+                    if (pool_)
+                        pool_->release(req->buffer);
                     complete(*req, ReadbackStatus::Success, req->size);
                 }
             }

@@ -825,12 +825,12 @@ TEST_CASE("Successful readback completion may destroy its compute owner",
     const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
     std::vector<float> dest(kBins, -1.0f);
     bool completed = false;
-    REQUIRE(gpu->compute_magnitude_async(
-                pairs.data(), dest.data(), kBins, std::chrono::seconds(5),
-                [&](const GpuCompute::ReadbackResult& result) {
-                    completed = result.status == GpuCompute::ReadbackStatus::Success;
-                    gpu.reset();
-                }) != 0);
+    REQUIRE(gpu->compute_magnitude_async(pairs.data(), dest.data(), kBins, std::chrono::seconds(5),
+                                         [&](const GpuCompute::ReadbackResult& result) {
+                                             completed = result.status ==
+                                                         GpuCompute::ReadbackStatus::Success;
+                                             gpu.reset();
+                                         }) != 0);
 
     while (gpu && !completed)
         gpu->poll_readbacks();
@@ -858,8 +858,7 @@ TEST_CASE("Successful readback completion leaves replacement generation for a ne
                     reinitialized = gpu->initialize_standalone();
                     if (reinitialized)
                         replacement_id = gpu->compute_magnitude_async(
-                            pairs.data(), replacement_dest.data(), kBins,
-                            std::chrono::seconds(5),
+                            pairs.data(), replacement_dest.data(), kBins, std::chrono::seconds(5),
                             [&](const GpuCompute::ReadbackResult& next) {
                                 replacement_succeeded =
                                     next.status == GpuCompute::ReadbackStatus::Success;
