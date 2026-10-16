@@ -582,6 +582,35 @@ TEST_CASE("An expired convolve_batch_async leaves dest untouched and never hangs
     REQUIRE(gpu->readbacks_in_flight() == 0);
 }
 
+TEST_CASE("Detached expired maps retain admission capacity after completion",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 512;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> first(kBins, -1.0f);
+    std::vector<float> second(kBins, -1.0f);
+    GpuCompute::ReadbackResult result{};
+    gpu->set_max_readbacks_in_flight(1);
+    REQUIRE(gpu->compute_magnitude_async(
+                pairs.data(), first.data(), kBins, std::chrono::microseconds(0),
+                [&result](const GpuCompute::ReadbackResult& completion) {
+                    result = completion;
+                }) != 0);
+
+    // The completion is delivered as Expired while an unresolved map is kept
+    // detached. The callback-pending count is zero, but admission remains full
+    // until the late map callback or bounded cleanup releases the slot.
+    gpu->poll_readbacks();
+    REQUIRE(result.status == GpuCompute::ReadbackStatus::Expired);
+    REQUIRE(gpu->readbacks_in_flight() == 0);
+    REQUIRE(gpu->compute_magnitude_async(
+                pairs.data(), second.data(), kBins, std::chrono::seconds(2),
+                [](const GpuCompute::ReadbackResult&) {}) == 0);
+}
+
 TEST_CASE("Async admission control rejects past the in-flight cap",
           "[render][gpu][compute][async]") {
     auto gpu = make_gpu();

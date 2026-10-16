@@ -4478,7 +4478,11 @@ private:
     // True when another async request cannot be admitted. Checked BEFORE any
     // buffer is acquired, so a rejected submit costs nothing.
     bool readbacks_at_cap() const {
-        return async_readbacks_.size() + detached_readbacks_.size() >= max_readbacks_in_flight_;
+        return readbacks_occupied() >= max_readbacks_in_flight_;
+    }
+
+    std::size_t readbacks_occupied() const {
+        return async_readbacks_.size() + detached_readbacks_.size();
     }
 
     bool ready_for_work() {

@@ -551,10 +551,15 @@ public:
 
     /// Pump the device event queue once and fire the completions that are ready
     /// or past their deadline. Never blocks. Returns the number of requests
-    /// still in flight. Re-entrant calls (from inside a completion) are a no-op.
+    /// whose completion has not fired yet. Re-entrant calls (from inside a
+    /// completion) are a no-op. Detached late-map cleanup is not included.
     virtual std::size_t poll_readbacks() = 0;
 
-    /// Requests submitted whose completion has not fired yet.
+    /// Requests submitted whose completion has not fired yet. A request whose
+    /// deadline fired before its map resolved is removed from this count after
+    /// its Expired completion, but its detached map cleanup still consumes the
+    /// admission cap until the late map callback arrives or bounded cleanup
+    /// grace expires.
     virtual std::size_t readbacks_in_flight() const = 0;
 
     /// Cap on concurrently in-flight async readbacks (default 4). Admission
