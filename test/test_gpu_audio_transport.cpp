@@ -194,6 +194,10 @@ class RealtimeHookNode : public GpuAudioNode {
         return true;
     }
 
+    bool cpu_fallback_prepared() const noexcept override {
+        return policy_ == MissPolicy::CpuFallback;
+    }
+
     void process_block(const BufferView<const float>& input, BufferView<float>& output,
                        uint32_t n) override {
         ++process_block_calls;
@@ -437,6 +441,10 @@ class GainNode : public GpuAudioNode {
     }
     bool prepare() override {
         return true;
+    }
+
+    bool cpu_fallback_prepared() const noexcept override {
+        return supports_fallback_ && mp_ == MissPolicy::CpuFallback;
     }
     void process_block(const BufferView<const float>& in, BufferView<float>& out,
                        uint32_t n) override {
@@ -693,6 +701,17 @@ TEST_CASE("GpuAudioTransport rejects invalid descriptor / config", "[gpu_audio][
     // CpuFallback miss policy without a real fallback.
     {
         GainNode node(1, 64, 1.0f, MissPolicy::CpuFallback, 2, /*supports_fallback=*/false);
+        GpuAudioTransport t;
+        REQUIRE_FALSE(t.prepare(&node, {8}));
+    }
+    // A declaration without a prepared witness also fails closed.
+    {
+        struct UnpreparedFallbackNode final : GainNode {
+            using GainNode::GainNode;
+            bool cpu_fallback_prepared() const noexcept override {
+                return false;
+            }
+        } node(1, 64, 1.0f, MissPolicy::CpuFallback, 2);
         GpuAudioTransport t;
         REQUIRE_FALSE(t.prepare(&node, {8}));
     }

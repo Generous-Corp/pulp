@@ -568,6 +568,9 @@ TEST_CASE("WaveNet transport primes one callback shadow on hits and misses",
     class ShadowNode final : public GpuWaveNetRealtimeNode {
       public:
         using GpuWaveNetRealtimeNode::GpuWaveNetRealtimeNode;
+        bool cpu_fallback_prepared() const noexcept override {
+            return true;
+        }
         int primes = 0, fallbacks = 0;
         std::array<float, 2> previous{}, due{};
         void prime_fallback(const pulp::audio::BufferView<const float>& in,
@@ -618,6 +621,41 @@ TEST_CASE("WaveNet transport primes one callback shadow on hits and misses",
     CHECK(output[0] == 3);
     CHECK(node.primes == 4);
     CHECK(node.fallbacks == 2);
+}
+
+TEST_CASE("WaveNet fallback witness is checked after static configuration",
+          "[gpu_audio][wavenet][realtime]") {
+    class WitnessNode final : public GpuWaveNetRealtimeNode {
+      public:
+        using GpuWaveNetRealtimeNode::GpuWaveNetRealtimeNode;
+        mutable int witness_calls = 0;
+        bool witness_ready = false;
+        bool cpu_fallback_prepared() const noexcept override {
+            ++witness_calls;
+            return witness_ready;
+        }
+    };
+
+    Shape shape;
+    auto config = shape.config();
+    config.miss_policy = MissPolicy::CpuFallback;
+    config.supports_cpu_fallback = true;
+    Control control;
+    WitnessNode node(config);
+
+    auto channel = [&] {
+        std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+        providers.push_back(std::make_unique<Channel>(control));
+        return providers;
+    };
+    REQUIRE_FALSE(detail::WaveNetRealtimeTestAccess::prepare(node, channel()));
+    CHECK(node.witness_calls == 1);
+    CHECK_FALSE(detail::realtime_gpu_node_path(&node).active());
+
+    node.witness_ready = true;
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, channel()));
+    CHECK(node.witness_calls == 2);
+    CHECK(detail::realtime_gpu_node_path(&node).active());
 }
 
 TEST_CASE("WaveNet late retirement leaves a sequence hole without resetting valid history",
