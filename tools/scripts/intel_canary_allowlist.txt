@@ -95,3 +95,7 @@ tools/cmake/PulpPluginFormats.cmake :: CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|a
 tools/cmake/PulpPluginFormats.cmake :: CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$"
 tools/cmake/PulpPluginFormats.cmake :: "arm64-win"
 tools/cmake/PulpPluginFormats.cmake :: "x86_64-win"
+
+# Windows wgpu-native archive token is selected from the resolved Windows
+# TARGET. The adjacent x86_64-win branch selects the x86_64 archive.
+tools/cmake/PulpWindowsSkiaProvider.cmake :: set(_arch "aarch64")
