@@ -49,9 +49,14 @@ that an LFO was assigned through the plugin UI.
 
 Exit code **0** means scoped PASS; **3** means INCONCLUSIVE. Every failure after
 the evidence directory is created writes a terminal receipt, including cleanup
-errors. Cleanup verifies retained process/start identity. The Lua driver binds the actual floating editor HWND; the wrapper requires that
-window to be present, visible and owned. Foreground and pointer targets must
-belong to that editor or its children/popups before capture/input. Optional `-ContextX/-ContextY`
+errors. Cleanup verifies retained process/start identity. The Lua driver binds
+the actual floating editor HWND; the wrapper requires that window to be present,
+visible and owned. Before requesting activation, it revalidates process/start,
+loaded PE and HWND ownership. It then observes actual foreground ownership over
+at most 51 checks separated by 100 ms, revalidating ownership each time;
+activation API success alone is insufficient. The receipt retains the activation
+result and last foreground HWND/PID even on refusal. Foreground and pointer targets
+must belong to that editor or its children/popups before capture/input. Optional `-ContextX/-ContextY`
 captures before and after a guarded right click; inspect the image to establish
 that a menu painted. Screenshot existence alone does not prove menu contents.
 

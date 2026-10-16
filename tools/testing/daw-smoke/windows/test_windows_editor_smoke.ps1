@@ -104,6 +104,34 @@ try {
   Reject {Assert-EditorEvidence 1234 $true $false $true $true} 'hidden editor refused'
   Reject {Assert-EditorEvidence 1234 $true $true $true $false} 'main-window-only foreground refused'
   Reject {Assert-EditorEvidence 1234 $true $true $false $true} 'foreign editor refused'
+  $activation=@{calls=0;foreground=$false;validations=0}
+  $foreign={param($hwnd) Assert-EditorWindow $hwnd $true $true $false}
+  $valid={param($hwnd) $activation.validations++;Assert-EditorWindow $hwnd $true $true $true}
+  $foreground={param($hwnd) $activation.foreground}
+  $activate={param($hwnd) $activation.calls++;$activation.foreground=$true;return $true}
+  Reject {Invoke-OwnedEditorActivation 1234 $foreign $foreground $activate} 'foreign HWND refuses activation'
+  Check ($activation.calls -eq 0) 'foreign HWND never reaches activation API'
+  $refused={param($hwnd) $activation.calls++;return $false}
+  Reject {Invoke-OwnedEditorActivation 1234 $valid $foreground $refused} 'activation refusal remains fail-closed'
+  Check ($activation.calls -eq 1 -and -not $activation.foreground) 'refused activation does not manufacture foreground proof'
+  $falseSuccess={param($hwnd) $activation.calls++;return $true}
+  Reject {Invoke-OwnedEditorActivation 1234 $valid $foreground $falseSuccess} 'API success without observed editor foreground refused'
+  $activation=@{calls=0;foreground=$false;validations=0}
+  $result=Invoke-OwnedEditorActivation 1234 $valid $foreground $activate
+  Check ($result.requested -and $result.foreground_belongs -and $activation.calls -eq 1 -and $activation.validations -eq 2) 'owned activation validates before and after then observes foreground'
+  $result=Invoke-OwnedEditorActivation 1234 $valid $foreground $activate
+  Check (-not $result.requested -and $activation.calls -eq 1) 'already foreground editor needs no activation request'
+  $activation=@{calls=0;foreground=$false;validations=0}
+  $changed={param($hwnd) $activation.validations++;if($activation.validations -gt 1){throw 'Planted process/module identity change'};Assert-EditorWindow $hwnd $true $true $true}
+  Reject {Invoke-OwnedEditorActivation 1234 $changed $foreground $activate} 'identity change during activation refused'
+  $activation=@{calls=0;foreground=$false;validations=0;pauses=0}
+  $delayed={param($hwnd) $activation.calls++;return $true}
+  $pause={$activation.pauses++;if($activation.pauses -eq 2){$activation.foreground=$true}}
+  $result=Invoke-OwnedEditorActivation 1234 $valid $foreground $delayed -MaxObservations 3 -Pause $pause
+  Check ($result.foreground_belongs -and $result.observations -eq 3 -and $activation.validations -eq 4) 'delayed foreground requires observed ownership and repeated identity checks'
+  $activation=@{calls=0;foreground=$false;validations=0;pauses=0};$observation=[ordered]@{}
+  Reject {Invoke-OwnedEditorActivation 1234 $valid $foreground $refused -Observation $observation -MaxObservations 3 -Pause {$activation.pauses++}} 'bounded activation refusal remains fail-closed'
+  Check ($observation.requested -and -not $observation.api_result -and -not $observation.foreground_belongs -and $observation.observations -eq 3 -and $activation.pauses -eq 2) 'failure retains bounded activation observation receipt'
   $seed=Join-Path $root 'source profile';$private=Join-Path $root 'private profile';$export=Join-Path $root 'export'
   New-Item -ItemType Directory -Path $seed,$export | Out-Null
   '[REAPER]'|Set-Content -LiteralPath (Join-Path $seed 'reaper.ini')

@@ -140,6 +140,8 @@ using System.Runtime.InteropServices;
 public static class OwnedWindow {
  [StructLayout(LayoutKind.Sequential)] public struct Point {public int X,Y;public Point(int x,int y){X=x;Y=y;}}
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int command);
+ [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p);
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
@@ -158,8 +160,30 @@ public static class OwnedWindow {
 }
 '@
   $editor=[IntPtr]([long]$hostStatus.editor_hwnd)
-  function Guard-Editor {
+  function Guard-EditorOwner([long]$Hwnd) {
     Assert-OwnedIdentity $proc.process $proc.started
+    if($Hwnd -ne $editor.ToInt64() -or $proc.process.Path -ine $reaper){throw 'Bound editor/host identity changed'}
+    $current=@($proc.process.Modules | Where-Object {$_.FileName -ieq $receipt.loaded_plugin.path})
+    if($current.Count -ne 1){throw 'Bound plugin module disappeared'}
+    Assert-ModuleBinding $current[0].FileName (Get-FileHash -LiteralPath $current[0].FileName -Algorithm SHA256).Hash $manifest
+    Assert-EditorWindow $Hwnd ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id))
+  }
+  $receipt.editor_activation=[ordered]@{editor_hwnd=$editor.ToInt64()}
+  Invoke-OwnedEditorActivation $editor.ToInt64() ${function:Guard-EditorOwner} {
+    param([long]$Hwnd)
+    $foreground=[OwnedWindow]::GetForegroundWindow()
+    [uint32]$foregroundPid=0
+    [OwnedWindow]::GetWindowThreadProcessId($foreground,[ref]$foregroundPid)|Out-Null
+    $receipt.editor_activation.foreground_hwnd=$foreground.ToInt64()
+    $receipt.editor_activation.foreground_pid=$foregroundPid
+    [OwnedWindow]::Belongs([IntPtr]$Hwnd,$foreground)
+  } {
+    param([long]$Hwnd)
+    [OwnedWindow]::ShowWindow([IntPtr]$Hwnd,9) | Out-Null
+    [OwnedWindow]::SetForegroundWindow([IntPtr]$Hwnd)
+  } -Observation $receipt.editor_activation -MaxObservations 51 | Out-Null
+  function Guard-Editor {
+    Guard-EditorOwner $editor.ToInt64()
     Assert-EditorEvidence $editor.ToInt64() ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id)) ([OwnedWindow]::Belongs($editor,[OwnedWindow]::GetForegroundWindow()))
   }
   function Capture([string]$Name){

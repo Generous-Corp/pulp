@@ -75,11 +75,34 @@ function Copy-PrivateProfile([string]$Source, [string]$Destination, [string]$Evi
     if (Test-Path -LiteralPath $path -PathType Leaf) { Copy-Item -LiteralPath $path -Destination (Join-Path $private $name) }
   }
 }
-function Assert-EditorEvidence([long]$Hwnd, [bool]$Exists, [bool]$Visible, [bool]$Owned, [bool]$ForegroundBelongs) {
+function Assert-EditorWindow([long]$Hwnd, [bool]$Exists, [bool]$Visible, [bool]$Owned) {
   if ($Hwnd -eq 0 -or -not $Exists) { throw 'Floating editor HWND absent' }
   if (-not $Visible) { throw 'Floating editor is hidden' }
   if (-not $Owned) { throw 'Floating editor belongs to another process' }
+}
+function Assert-EditorEvidence([long]$Hwnd, [bool]$Exists, [bool]$Visible, [bool]$Owned, [bool]$ForegroundBelongs) {
+  Assert-EditorWindow $Hwnd $Exists $Visible $Owned
   if (-not $ForegroundBelongs) { throw 'Foreground is not the bound editor or its child/popup' }
+}
+function Invoke-OwnedEditorActivation([long]$Hwnd, [scriptblock]$ValidateOwner, [scriptblock]$ForegroundBelongs, [scriptblock]$Activate,
+  [System.Collections.IDictionary]$Observation = [ordered]@{}, [ValidateRange(1,51)][int]$MaxObservations = 1,
+  [scriptblock]$Pause = {Start-Sleep -Milliseconds 100}) {
+  # The real validator binds process start, loaded PE and HWND ownership before
+  # any focus request. Injected operations let fixtures prove refusal ordering.
+  & $ValidateOwner $Hwnd
+  $Observation.requested=-not [bool](& $ForegroundBelongs $Hwnd)
+  $Observation.api_result=$null
+  $Observation.foreground_belongs=$false
+  $Observation.observations=0
+  if($Observation.requested){$Observation.api_result=[bool](& $Activate $Hwnd)}
+  for($i=0;$i -lt $MaxObservations;$i++){
+    & $ValidateOwner $Hwnd
+    $Observation.observations++
+    $Observation.foreground_belongs=[bool](& $ForegroundBelongs $Hwnd)
+    if($Observation.foreground_belongs){return $Observation}
+    if($i+1 -lt $MaxObservations){& $Pause}
+  }
+  throw 'Foreground is not the bound editor or its child/popup after activation'
 }
 
 # ARM64EC images commonly retain AMD64 COFF machine 0x8664. Keep that raw
