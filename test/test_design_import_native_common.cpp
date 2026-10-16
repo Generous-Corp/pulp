@@ -1460,7 +1460,7 @@ TEST_CASE("native materializer preserves stable identity while applying child or
     CHECK(root->child_at(2)->bounds().x == Catch::Approx(100.0f));
 }
 
-TEST_CASE("native materializer rejects duplicate stable identity before reorder proof",
+TEST_CASE("native materializer diagnoses duplicate stable identity before reorder proof",
           "[design-import][native][identity][fail-closed]") {
     DesignIR ir;
     ir.root.type = "frame";
