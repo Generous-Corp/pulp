@@ -89,9 +89,12 @@ TEST_CASE("UmpBuffer growth prepares sorting before realtime admission",
             UmpPacket packet;
             packet.words[0] = static_cast<std::uint32_t>(i);
             UmpEvent event{packet, static_cast<int>(i % 3)};
-            if (overload == 0) REQUIRE(buffer.add(event));
-            else if (overload == 1) REQUIRE(buffer.add(std::move(event)));
-            else REQUIRE(buffer.add(packet, event.sample_offset));
+            if (overload == 0)
+                REQUIRE(buffer.add(event));
+            else if (overload == 1)
+                REQUIRE(buffer.add(std::move(event)));
+            else
+                REQUIRE(buffer.add(packet, event.sample_offset));
         }
         const auto prepared_capacity = buffer.capacity();
         REQUIRE(prepared_capacity > initial_capacity);

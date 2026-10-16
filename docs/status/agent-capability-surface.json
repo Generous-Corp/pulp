@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 138,
+  "inventory_version": 139,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1659,7 +1659,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/ump_buffer.hpp",
-      "fingerprint": "sha256:c1ea59345f5e6f8892b30024b52aa4f9251f0ed789c57d147408f1a05cd00377",
+      "fingerprint": "sha256:bfa4083ebc64f5ca30675facbb1b4ebf8a6a203b0aa24d15662dcced33697b3e",
       "include": "pulp/midi/ump_buffer.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -1705,7 +1705,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp",
-      "fingerprint": "sha256:fffeda45fe0d210f401d566951f9fcde269f29c50b4f3384cc6312bdecbbd4d5",
+      "fingerprint": "sha256:51b0e3f62886ff000661c5ab250c21f17c09894b863ad3d3d120f63b526f4a8f",
       "include": "pulp/midi/ump_sysex7_reassembler.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

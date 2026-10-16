@@ -143,9 +143,8 @@ TEST_CASE("UmpSysex7Reassembler: orphan continue is dropped silently (#292 P2)",
     UmpSysex7Reassembler r;
     EmitSink sink;
 
-    auto s = r.feed_packet(make_word0(0x2, 4, 0x2A, 0x3B),
-                           make_word1(0x4C, 0x5D, 0, 0),
-                           capture, &sink);
+    auto s =
+        r.feed_packet(make_word0(0x2, 4, 0x2A, 0x3B), make_word1(0x4C, 0x5D, 0, 0), capture, &sink);
     REQUIRE(s == Status::dropped);
     REQUIRE_FALSE(r.in_progress());
     REQUIRE(sink.sysex.empty());
@@ -156,9 +155,8 @@ TEST_CASE("UmpSysex7Reassembler: orphan end is dropped silently (#292 P2)",
     UmpSysex7Reassembler r;
     EmitSink sink;
 
-    auto s = r.feed_packet(make_word0(0x3, 4, 0x2A, 0x3B),
-                           make_word1(0x4C, 0x5D, 0, 0),
-                           capture, &sink);
+    auto s =
+        r.feed_packet(make_word0(0x3, 4, 0x2A, 0x3B), make_word1(0x4C, 0x5D, 0, 0), capture, &sink);
     REQUIRE(s == Status::dropped);
     REQUIRE_FALSE(r.in_progress());
     REQUIRE(sink.sysex.empty());
@@ -170,15 +168,13 @@ TEST_CASE("UmpSysex7Reassembler: interleaved single-packet preserves open accumu
     EmitSink sink;
 
     // Open an in-progress sysex.
-    REQUIRE(r.feed_packet(make_word0(0x1, 4, 0x2A, 0x3B),
-                          make_word1(0x4C, 0x5D, 0, 0),
-                          capture, &sink) == Status::start);
+    REQUIRE(r.feed_packet(make_word0(0x1, 4, 0x2A, 0x3B), make_word1(0x4C, 0x5D, 0, 0), capture,
+                          &sink) == Status::start);
     REQUIRE(r.in_progress());
     REQUIRE(r.partial_size() == 4);
 
     // Interleave a complete single-packet sysex on another UMP group.
-    REQUIRE(r.feed_packet(make_word0(0x0, 2, 0x55, 0x66) | (1u << 24),
-                          make_word1(0, 0, 0, 0),
+    REQUIRE(r.feed_packet(make_word0(0x0, 2, 0x55, 0x66) | (1u << 24), make_word1(0, 0, 0, 0),
                           capture, &sink) == Status::single_packet);
     REQUIRE(r.in_progress());
     REQUIRE(r.partial_size() == 4);  // unchanged
@@ -186,12 +182,10 @@ TEST_CASE("UmpSysex7Reassembler: interleaved single-packet preserves open accumu
     REQUIRE(sink.sysex[0] == std::vector<std::uint8_t>{0x55, 0x66});
 
     // Close the original accumulator.
-    REQUIRE(r.feed_packet(make_word0(0x3, 2, 0x6E, 0x7F),
-                          make_word1(0, 0, 0, 0),
-                          capture, &sink) == Status::ended);
+    REQUIRE(r.feed_packet(make_word0(0x3, 2, 0x6E, 0x7F), make_word1(0, 0, 0, 0), capture, &sink) ==
+            Status::ended);
     REQUIRE(sink.sysex.size() == 2);
-    REQUIRE(sink.sysex[1] == std::vector<std::uint8_t>{
-        0x2A, 0x3B, 0x4C, 0x5D, 0x6E, 0x7F});
+    REQUIRE(sink.sysex[1] == std::vector<std::uint8_t>{0x2A, 0x3B, 0x4C, 0x5D, 0x6E, 0x7F});
 }
 
 TEST_CASE("UmpSysex7Reassembler: nested start resets accumulator (no nest)",
@@ -203,18 +197,15 @@ TEST_CASE("UmpSysex7Reassembler: nested start resets accumulator (no nest)",
                           make_word1(0x03, 0x04, 0, 0),
                           capture, &sink) == Status::start);
     // Another start before end — drop the half-built sysex, begin again.
-    REQUIRE(r.feed_packet(make_word0(0x1, 3, 0x2A, 0x3B),
-                          make_word1(0x4C, 0, 0, 0),
-                          capture, &sink) == Status::start);
+    REQUIRE(r.feed_packet(make_word0(0x1, 3, 0x2A, 0x3B), make_word1(0x4C, 0, 0, 0), capture,
+                          &sink) == Status::start);
     REQUIRE(r.partial_size() == 3);
     REQUIRE(sink.sysex.empty());
 
-    REQUIRE(r.feed_packet(make_word0(0x3, 1, 0x5D, 0x00),
-                          make_word1(0, 0, 0, 0),
-                          capture, &sink) == Status::ended);
+    REQUIRE(r.feed_packet(make_word0(0x3, 1, 0x5D, 0x00), make_word1(0, 0, 0, 0), capture, &sink) ==
+            Status::ended);
     REQUIRE(sink.sysex.size() == 1);
-    REQUIRE(sink.sysex[0] == std::vector<std::uint8_t>{
-        0x2A, 0x3B, 0x4C, 0x5D});
+    REQUIRE(sink.sysex[0] == std::vector<std::uint8_t>{0x2A, 0x3B, 0x4C, 0x5D});
 }
 
 TEST_CASE("UmpSysex7Reassembler: reset() drops in-progress state",
@@ -231,9 +222,8 @@ TEST_CASE("UmpSysex7Reassembler: reset() drops in-progress state",
     REQUIRE(r.partial_size() == 0);
 
     // After reset, a continue packet must be treated as orphan.
-    REQUIRE(r.feed_packet(make_word0(0x2, 1, 0x7F, 0),
-                          make_word1(0, 0, 0, 0),
-                          capture, &sink) == Status::dropped);
+    REQUIRE(r.feed_packet(make_word0(0x2, 1, 0x7F, 0), make_word1(0, 0, 0, 0), capture, &sink) ==
+            Status::dropped);
     REQUIRE(sink.sysex.empty());
 }
 
@@ -248,15 +238,14 @@ TEST_CASE("UmpSysex7Reassembler: reserved status nibble drops cleanly",
                           capture, &sink) == Status::start);
 
     // status nibble 0x7 — reserved per the UMP spec.
-    REQUIRE(r.feed_packet(make_word0(0x7, 6, 0x19, 0x19),
-                          make_word1(0x19, 0x19, 0x19, 0x19),
+    REQUIRE(r.feed_packet(make_word0(0x7, 6, 0x19, 0x19), make_word1(0x19, 0x19, 0x19, 0x19),
                           capture, &sink) == Status::dropped);
     REQUIRE(r.last_drop_reason() == UmpSysex7Reassembler::DropReason::reserved_status);
     REQUIRE_FALSE(r.in_progress());
     REQUIRE(r.partial_size() == 0);
 
-    REQUIRE(r.feed_packet(make_word0(0x3, 1, 0x04, 0),
-                          make_word1(0, 0, 0, 0), capture, &sink) == Status::dropped);
+    REQUIRE(r.feed_packet(make_word0(0x3, 1, 0x04, 0), make_word1(0, 0, 0, 0), capture, &sink) ==
+            Status::dropped);
     REQUIRE(sink.sysex.empty());
 }
 
@@ -272,8 +261,7 @@ TEST_CASE("UmpSysex7Reassembler: #292 P1 — word1's top nibble must not be repa
     UmpSysex7Reassembler r;
     EmitSink sink;
 
-    REQUIRE(r.feed_packet(make_word0(0x1, 6, 0x2A, 0x3B),
-                          make_word1(0x4C, 0x5D, 0x6E, 0x7F),
+    REQUIRE(r.feed_packet(make_word0(0x1, 6, 0x2A, 0x3B), make_word1(0x4C, 0x5D, 0x6E, 0x7F),
                           capture, &sink) == Status::start);
 
     // word1 = 0x31_60_00_00 — top nibble looks like a sysex7 type,
@@ -289,13 +277,11 @@ TEST_CASE("UmpSysex7Reassembler: #292 P1 — word1's top nibble must not be repa
                           make_word1(0, 0, 0, 0),
                           capture, &sink) == Status::ended);
     REQUIRE(sink.sysex.size() == 1);
-    REQUIRE(sink.sysex[0] == std::vector<std::uint8_t>{
-        0x2A, 0x3B, 0x4C, 0x5D, 0x6E, 0x7F,
-        0x11, 0x22, 0x31, 0x60, 0x00, 0x00});
+    REQUIRE(sink.sysex[0] == std::vector<std::uint8_t>{0x2A, 0x3B, 0x4C, 0x5D, 0x6E, 0x7F, 0x11,
+                                                       0x22, 0x31, 0x60, 0x00, 0x00});
 }
 
-TEST_CASE("UmpSysex7Reassembler: size > 6 is rejected",
-          "[midi][ump][sysex7]") {
+TEST_CASE("UmpSysex7Reassembler: size > 6 is rejected", "[midi][ump][sysex7]") {
     UmpSysex7Reassembler r;
     std::vector<std::uint8_t> out;
     // size = 0xF (15) — spec only allows 0..6. Reject the packet.
@@ -321,11 +307,9 @@ TEST_CASE("UmpSysex7Reassembler: groups retain independent partial messages",
           "[midi][ump][sysex7]") {
     UmpSysex7Reassembler r;
     EmitSink sink;
-    auto word0 = [](std::uint8_t group, std::uint8_t status,
-                    std::uint8_t size, std::uint8_t b0) {
-        return (0x3u << 28) | (std::uint32_t(group) << 24)
-             | (std::uint32_t(status) << 20) | (std::uint32_t(size) << 16)
-             | (std::uint32_t(b0) << 8);
+    auto word0 = [](std::uint8_t group, std::uint8_t status, std::uint8_t size, std::uint8_t b0) {
+        return (0x3u << 28) | (std::uint32_t(group) << 24) | (std::uint32_t(status) << 20) |
+               (std::uint32_t(size) << 16) | (std::uint32_t(b0) << 8);
     };
     REQUIRE(r.feed_packet(word0(0, 1, 1, 0x01), 0, capture, &sink) == Status::start);
     REQUIRE(r.feed_packet(word0(1, 1, 1, 0x11), 0, capture, &sink) == Status::start);
@@ -338,8 +322,8 @@ TEST_CASE("UmpSysex7Reassembler: overflow discards whole message and recovers",
           "[midi][ump][sysex7][capacity]") {
     UmpSysex7Reassembler r(7);
     EmitSink sink;
-    REQUIRE(r.feed_packet(make_word0(1, 6, 0x01, 0x02),
-                          make_word1(0x03, 0x04, 0x05, 0x06), capture, &sink) == Status::start);
+    REQUIRE(r.feed_packet(make_word0(1, 6, 0x01, 0x02), make_word1(0x03, 0x04, 0x05, 0x06), capture,
+                          &sink) == Status::start);
     REQUIRE(r.feed_packet(make_word0(2, 2, 0x07, 0x08), 0, capture, &sink) == Status::dropped);
     REQUIRE(r.last_drop_reason() == UmpSysex7Reassembler::DropReason::overflow);
     REQUIRE_FALSE(r.in_progress());
@@ -349,8 +333,7 @@ TEST_CASE("UmpSysex7Reassembler: overflow discards whole message and recovers",
 
 TEST_CASE("UmpSysex7Reassembler: exact configured boundaries are atomic",
           "[midi][ump][sysex7][capacity]") {
-    auto packet = [](std::uint8_t status, std::uint8_t size,
-                     std::uint8_t seed) {
+    auto packet = [](std::uint8_t status, std::uint8_t size, std::uint8_t seed) {
         return std::pair<std::uint32_t, std::uint32_t>{
             make_word0(status, size, static_cast<std::uint8_t>(seed & 0x7F),
                        static_cast<std::uint8_t>((seed + 1) & 0x7F)),
@@ -395,10 +378,10 @@ TEST_CASE("UmpSysex7Reassembler: deterministic 139 and 715 byte payloads",
             for (std::uint8_t i = 0; i < size; ++i)
                 expected.push_back(static_cast<std::uint8_t>((b + i) & 0x7F));
             return std::pair{make_word0(status, size, b, static_cast<std::uint8_t>((b + 1) & 0x7F)),
-                              make_word1(static_cast<std::uint8_t>((b + 2) & 0x7F),
-                                         static_cast<std::uint8_t>((b + 3) & 0x7F),
-                                         static_cast<std::uint8_t>((b + 4) & 0x7F),
-                                         static_cast<std::uint8_t>((b + 5) & 0x7F))};
+                             make_word1(static_cast<std::uint8_t>((b + 2) & 0x7F),
+                                        static_cast<std::uint8_t>((b + 3) & 0x7F),
+                                        static_cast<std::uint8_t>((b + 4) & 0x7F),
+                                        static_cast<std::uint8_t>((b + 5) & 0x7F))};
         };
         auto first = make(1, 6);
         REQUIRE(r.feed_packet(first.first, first.second, capture, &sink) == Status::start);
@@ -425,7 +408,7 @@ TEST_CASE("UmpSysex7Reassembler: 64 KiB maximum and maximum plus one",
     EmitSink sink;
     auto feed = [&](std::uint8_t status, std::uint8_t size) {
         return r.feed_packet(make_word0(status, size, 0x01, 0x02),
-                              make_word1(0x03, 0x04, 0x05, 0x06), capture, &sink);
+                             make_word1(0x03, 0x04, 0x05, 0x06), capture, &sink);
     };
     std::size_t remaining = kMax;
     REQUIRE(feed(1, 6) == Status::start);
@@ -498,8 +481,8 @@ TEST_CASE("UmpSysex7Reassembler: reserved hot path is allocation-free",
         // open. This exercises the prepared scratch buffer without disturbing
         // the open accumulator.
         REQUIRE(r.feed_packet(make_word0(0x0, 3, 0x55, 0x66) | (1u << 24),
-                              make_word1(0x77, 0, 0, 0),
-                              capture_rt, &sink) == Status::single_packet);
+                              make_word1(0x77, 0, 0, 0), capture_rt,
+                              &sink) == Status::single_packet);
 
         REQUIRE(r.feed_packet(make_word0(0x2, 3, 0x0D, 0x0E),
                               make_word1(0x0F, 0, 0, 0),
@@ -527,8 +510,8 @@ TEST_CASE("UmpSysex7Reassembler: copies preserve prepared storage and partial gr
           "[midi][ump][sysex7][rt-safety]") {
     UmpSysex7Reassembler source;
     source.reserve(18);
-    REQUIRE(source.feed_packet(make_word0(1, 6, 1, 2) | (15u << 24),
-                               make_word1(3, 4, 5, 6), nullptr, nullptr) == Status::start);
+    REQUIRE(source.feed_packet(make_word0(1, 6, 1, 2) | (15u << 24), make_word1(3, 4, 5, 6),
+                               nullptr, nullptr) == Status::start);
     UmpSysex7Reassembler copied(source);
     UmpSysex7Reassembler assigned;
     assigned = source;
@@ -536,10 +519,11 @@ TEST_CASE("UmpSysex7Reassembler: copies preserve prepared storage and partial gr
         RtEmitSink sink;
         {
             pulp::test::RtAllocationProbe probe;
-            REQUIRE(instance->feed_packet(make_word0(0, 3, 7, 8),
-                                           make_word1(9), capture_rt, &sink) == Status::single_packet);
+            REQUIRE(instance->feed_packet(make_word0(0, 3, 7, 8), make_word1(9), capture_rt,
+                                          &sink) == Status::single_packet);
             REQUIRE(instance->feed_packet(make_word0(3, 6, 10, 11) | (15u << 24),
-                                           make_word1(12, 13, 14, 15), capture_rt, &sink) == Status::ended);
+                                          make_word1(12, 13, 14, 15), capture_rt,
+                                          &sink) == Status::ended);
             REQUIRE_FALSE(probe.saw_allocation());
         }
         REQUIRE(sink.count == 2);
@@ -565,7 +549,8 @@ TEST_CASE("UmpSysex7Reassembler: moves transfer prepared partial state",
     {
         pulp::test::RtAllocationProbe probe;
         REQUIRE(assigned.feed_packet(make_word0(3, 1, 43), 0, capture_rt, &sink) == Status::ended);
-        REQUIRE(assigned.feed_packet(make_word0(0, 1, 44) | (15u << 24), 0, capture_rt, &sink) == Status::single_packet);
+        REQUIRE(assigned.feed_packet(make_word0(0, 1, 44) | (15u << 24), 0, capture_rt, &sink) ==
+                Status::single_packet);
         REQUIRE_FALSE(probe.saw_allocation());
     }
     REQUIRE(sink.count == 2);
@@ -581,9 +566,12 @@ TEST_CASE("UmpSysex7Reassembler: empty completions preserve message boundaries",
     RtEmitSink sink;
     {
         pulp::test::RtAllocationProbe probe;
-        REQUIRE(reassembler.feed_packet(make_word0(0, 0), 0, capture_rt, &sink) == Status::single_packet);
-        REQUIRE(reassembler.feed_packet(make_word0(1, 0) | (15u << 24), 0, capture_rt, &sink) == Status::start);
-        REQUIRE(reassembler.feed_packet(make_word0(3, 0) | (15u << 24), 0, capture_rt, &sink) == Status::ended);
+        REQUIRE(reassembler.feed_packet(make_word0(0, 0), 0, capture_rt, &sink) ==
+                Status::single_packet);
+        REQUIRE(reassembler.feed_packet(make_word0(1, 0) | (15u << 24), 0, capture_rt, &sink) ==
+                Status::start);
+        REQUIRE(reassembler.feed_packet(make_word0(3, 0) | (15u << 24), 0, capture_rt, &sink) ==
+                Status::ended);
         REQUIRE_FALSE(probe.saw_allocation());
     }
     REQUIRE(sink.count == 2);

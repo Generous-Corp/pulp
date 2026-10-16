@@ -641,9 +641,7 @@ TEST_CASE("raw_midi_parser rejected F0 clears running status",
     RawMidiParserState state;
     state.reserve_sysex(0);
     Captured c;
-    auto on_short = [&c](uint8_t s, uint8_t d1, uint8_t d2) {
-        c.shorts.push_back({s, d1, d2});
-    };
+    auto on_short = [&c](uint8_t s, uint8_t d1, uint8_t d2) { c.shorts.push_back({s, d1, d2}); };
     const uint8_t bytes[] = {0x90, 0x40, 0xF0, 0x01, 0xF8, 0xF7, 0x7F};
     parse_raw_midi_bytes(bytes, sizeof(bytes), state, on_short, {});
     REQUIRE(c.shorts.size() == 2);

@@ -39,11 +39,12 @@ struct UmpEvent {
 /// the backing vector. Without that preparation, append operations may
 /// allocate and belong on a non-realtime path.
 class UmpBuffer {
-public:
-    UmpBuffer() { reserve(kInitialCapacity); }
+  public:
+    UmpBuffer() {
+        reserve(kInitialCapacity);
+    }
     UmpBuffer(const UmpBuffer& other)
-        : events_(other.events_),
-          limit_to_reserved_capacity_(other.limit_to_reserved_capacity_),
+        : events_(other.events_), limit_to_reserved_capacity_(other.limit_to_reserved_capacity_),
           dropped_events_(other.dropped_events_) {
         reserve(other.capacity());
     }
@@ -110,15 +111,16 @@ public:
     /// does not allocate. As with add(), unreserved growth is non-realtime.
     void sort() {
         const auto count = events_.size();
-        if (count < 2) return;
+        if (count < 2)
+            return;
         sort_indices_.resize(count);
-        for (std::size_t i = 0; i < count; ++i) sort_indices_[i] = i;
-        std::sort(sort_indices_.begin(), sort_indices_.end(),
-            [this](std::size_t a, std::size_t b) {
-                if (events_[a].sample_offset != events_[b].sample_offset)
-                    return events_[a].sample_offset < events_[b].sample_offset;
-                return a < b;
-            });
+        for (std::size_t i = 0; i < count; ++i)
+            sort_indices_[i] = i;
+        std::sort(sort_indices_.begin(), sort_indices_.end(), [this](std::size_t a, std::size_t b) {
+            if (events_[a].sample_offset != events_[b].sample_offset)
+                return events_[a].sample_offset < events_[b].sample_offset;
+            return a < b;
+        });
         sort_events_.resize(count);
         for (std::size_t i = 0; i < count; ++i)
             sort_events_[i] = events_[sort_indices_[i]];
@@ -132,7 +134,7 @@ public:
 
     const UmpEvent& operator[](std::size_t i) const { return events_[i]; }
 
-private:
+  private:
     void prepare_sort_after_growth() {
         if (!limit_to_reserved_capacity_) {
             sort_indices_.reserve(events_.capacity());

@@ -100,7 +100,7 @@ using Sysex7EmitFn = void(*)(const std::vector<std::uint8_t>& payload,
 ///
 /// Per-stream — see "Thread-safety" in the file header.
 class UmpSysex7Reassembler {
-public:
+  public:
     static constexpr std::size_t default_maximum_payload_bytes = 64u * 1024u;
 
     /// Classification of the most recently consumed packet.
@@ -138,8 +138,7 @@ public:
         reset,
     };
 
-    explicit UmpSysex7Reassembler(
-        std::size_t maximum_payload_bytes = default_maximum_payload_bytes)
+    explicit UmpSysex7Reassembler(std::size_t maximum_payload_bytes = default_maximum_payload_bytes)
         : maximum_payload_bytes_(maximum_payload_bytes) {}
 
     /// Feed a single 2-word UMP packet through the state machine.
@@ -268,7 +267,8 @@ public:
     /// been seen and no 0x3 end packet has closed it yet).
     bool in_progress() const noexcept {
         for (const auto& stream : streams_)
-            if (stream.in_progress) return true;
+            if (stream.in_progress)
+                return true;
         return false;
     }
 
@@ -296,7 +296,9 @@ public:
         return maximum_payload_bytes_;
     }
 
-    DropReason last_drop_reason() const noexcept { return last_drop_reason_; }
+    DropReason last_drop_reason() const noexcept {
+        return last_drop_reason_;
+    }
 
     /// Drop any in-progress sysex without emitting. Use on port-close
     /// or when a transport-level reset is observed (e.g. CoreMIDI
@@ -309,14 +311,17 @@ public:
         last_drop_reason_ = DropReason::reset;
     }
 
-private:
+  private:
     // Copying is non-RT configuration work. Preserve prepared capacity even
     // for empty vectors so the copied instance has the same hot-path budget.
     struct StreamState {
         StreamState() = default;
-        StreamState(const StreamState& other) { *this = other; }
+        StreamState(const StreamState& other) {
+            *this = other;
+        }
         StreamState& operator=(const StreamState& other) {
-            if (this == &other) return *this;
+            if (this == &other)
+                return *this;
             payload.reserve(other.payload.capacity());
             scratch.reserve(other.scratch.capacity());
             payload.assign(other.payload.begin(), other.payload.end());
@@ -328,7 +333,8 @@ private:
             : payload(std::move(other.payload)), scratch(std::move(other.scratch)),
               in_progress(std::exchange(other.in_progress, false)) {}
         StreamState& operator=(StreamState&& other) noexcept {
-            if (this == &other) return *this;
+            if (this == &other)
+                return *this;
             payload = std::move(other.payload);
             scratch = std::move(other.scratch);
             in_progress = std::exchange(other.in_progress, false);
@@ -339,8 +345,7 @@ private:
         bool in_progress = false;
     };
 
-    static bool payload_is_7bit(std::uint32_t w0, std::uint32_t w1,
-                                std::uint32_t size) noexcept {
+    static bool payload_is_7bit(std::uint32_t w0, std::uint32_t w1, std::uint32_t size) noexcept {
         const std::uint8_t bytes[6] = {
             static_cast<std::uint8_t>((w0 >> 8) & 0xFF),
             static_cast<std::uint8_t>(w0 & 0xFF),
@@ -350,7 +355,8 @@ private:
             static_cast<std::uint8_t>(w1 & 0xFF),
         };
         for (std::uint32_t i = 0; i < size; ++i)
-            if ((bytes[i] & 0x80) != 0) return false;
+            if ((bytes[i] & 0x80) != 0)
+                return false;
         return true;
     }
 
@@ -374,7 +380,8 @@ private:
             static_cast<std::uint8_t>((w1 >>  8) & 0xFF),
             static_cast<std::uint8_t>((w1 >>  0) & 0xFF),
         };
-        for (std::uint32_t i = 0; i < size; ++i) out.push_back(buf[i]);
+        for (std::uint32_t i = 0; i < size; ++i)
+            out.push_back(buf[i]);
     }
 
     std::array<StreamState, 16> streams_{};

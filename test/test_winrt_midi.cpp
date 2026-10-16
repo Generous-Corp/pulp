@@ -170,20 +170,20 @@ TEST_CASE("WinRT MIDI: per-group sysex7 reassembly keeps interleaved streams sep
 
     // Group 0: Start with 2 bytes (stream still open).
     std::vector<uint8_t> g0;
-    REQUIRE(feed_collect(r, w0(0, 0x1, 2, 0x20, 0x21), 0u, g0)
-            == UmpSysex7Reassembler::Status::start);
+    REQUIRE(feed_collect(r, w0(0, 0x1, 2, 0x20, 0x21), 0u, g0) ==
+            UmpSysex7Reassembler::Status::start);
 
     // Group 1: a full single-packet stream arrives in between.
     std::vector<uint8_t> g1;
-    REQUIRE(feed_collect(r, w0(1, 0x0, 3, 0x30, 0x31), (0x32u << 24), g1)
-            == UmpSysex7Reassembler::Status::single_packet);
+    REQUIRE(feed_collect(r, w0(1, 0x0, 3, 0x30, 0x31), (0x32u << 24), g1) ==
+            UmpSysex7Reassembler::Status::single_packet);
     REQUIRE(g1 == std::vector<uint8_t>{0x30, 0x31, 0x32});
 
     // Group 0: End with 2 bytes — completes the ORIGINAL stream intact,
     // unaffected by group 1's intervening packet.
     std::vector<uint8_t> g0done;
-    REQUIRE(feed_collect(r, w0(0, 0x3, 2, 0x22, 0x23), 0u, g0done)
-            == UmpSysex7Reassembler::Status::ended);
+    REQUIRE(feed_collect(r, w0(0, 0x3, 2, 0x22, 0x23), 0u, g0done) ==
+            UmpSysex7Reassembler::Status::ended);
     REQUIRE(g0done == std::vector<uint8_t>{0x20, 0x21, 0x22, 0x23});
 }
 

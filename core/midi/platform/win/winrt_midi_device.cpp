@@ -249,9 +249,8 @@ private:
             // synchronously inside feed_packet, so a single last_sysex_ts_
             // set immediately before the call stays correct.
             last_sysex_ts_ = ts;
-            sysex_reassembler_.feed_packet(
-                packet.words[0], packet.words[1],
-                &WinrtMidiInput::on_sysex_complete, this);
+            sysex_reassembler_.feed_packet(packet.words[0], packet.words[1],
+                                           &WinrtMidiInput::on_sysex_complete, this);
             return;
         }
 
