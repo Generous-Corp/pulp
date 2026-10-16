@@ -132,3 +132,14 @@ function Get-PeIdentity([string]$Path) {
     return [pscustomobject]$result
   } finally {$b.Dispose();$f.Dispose()}
 }
+
+# REAPER recognizes these literal default roots. Expanded absolute equivalents
+# make it append the defaults again, after the staged root, changing precedence.
+function Get-ReaperVstScanPath([string]$StagedRoot) {
+  return '%COMMONPROGRAMFILES%\VST3;%LOCALAPPDATA%\Programs\Common\VST3;'+$StagedRoot
+}
+function Write-ReaperIni([string]$Path,[string[]]$Lines) {
+  # Windows PowerShell 5.1 Set-Content -Encoding utf8 emits a BOM. Preserve the
+  # no-BOM INI form read by the seeded REAPER profile on the actual guest.
+  [IO.File]::WriteAllLines($Path,$Lines,(New-Object Text.UTF8Encoding($false)))
+}

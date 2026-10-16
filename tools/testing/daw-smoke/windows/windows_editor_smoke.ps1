@@ -79,12 +79,12 @@ try {
     if($line -eq '[REAPER]'){
       # Staged root last wins duplicate VST3 class IDs; loaded-PE binding below
       # remains authoritative even when system roots are scanned implicitly.
-      $out.Add($keys[0]+'='+$env:COMMONPROGRAMFILES+'\VST3;'+$env:LOCALAPPDATA+'\Programs\Common\VST3;'+$scan)
+      $out.Add($keys[0]+'='+(Get-ReaperVstScanPath $scan))
       $out.Add($keys[1]+'='+$scan);$out.Add('vstfullstate=33605');$out.Add('lastproject=');$out.Add('loadlastproj=0');$inserted=$true
     }
   }
   if(-not $inserted){throw 'Seed profile lacks REAPER section'}
-  $out | Set-Content -LiteralPath $ini -Encoding utf8
+  Write-ReaperIni $ini $out.ToArray()
   $status=Join-Path $run 'status.txt';$lua=Join-Path $PSScriptRoot 'windows_editor_smoke.lua'
   $env:PULP_DAW_SMOKE_FX="$(if($Format -eq 'vst3'){'VST3:'}else{'CLAP:'}) $PluginName"
   $env:PULP_DAW_SMOKE_STATUS=$status;$env:PULP_DAW_SMOKE_TOKEN=$token

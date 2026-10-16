@@ -12,6 +12,17 @@ try {
     [System.Management.Automation.Language.Parser]::ParseFile($f.FullName,[ref]$tokens,[ref]$errors)|Out-Null
     Check ($errors.Count -eq 0) ('PowerShell parser '+$f.Name)
   }
+  $profile=Join-Path $root 'scan-profile.ini'
+  $staged='C:\isolated staged plugins'
+  $scanPath=Get-ReaperVstScanPath $staged
+  Write-ReaperIni $profile @('[REAPER]',('vstpath_winarm64='+$scanPath))
+  $raw=[IO.File]::ReadAllBytes($profile)
+  Check ($raw[0] -eq 0x5b -and $raw[1] -eq 0x52 -and $raw[2] -eq 0x45) 'written Windows INI starts with section bytes and has no UTF8 BOM'
+  $written=[Text.Encoding]::UTF8.GetString($raw)
+  $expected='vstpath_winarm64=%COMMONPROGRAMFILES%\VST3;%LOCALAPPDATA%\Programs\Common\VST3;C:\isolated staged plugins'
+  Check ($written -match [regex]::Escape($expected)) 'written INI preserves literal default scan roots before staged root'
+  $scanRoots=$scanPath.Split(';')
+  Check ($scanRoots.Count -eq 3 -and $scanRoots[-1] -eq $staged) 'staged scan root remains last without duplicated defaults'
   foreach($fixture in @(@(0x8664,'x64','vstpath64'),@(0xaa64,'arm64','vstpath_winarm64'),@(0xa641,'arm64ec','vstpath_winarm64'),@(0xa64e,'arm64x','vstpath_winarm64'))){
     $path=Join-Path $root ($fixture[1]+'.exe')
     $bytes=New-Object byte[] 128

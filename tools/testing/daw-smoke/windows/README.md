@@ -28,7 +28,11 @@ The receipt contains a named SHA256/size manifest for staged files, the actual
 REAPER PE architecture, and the exact loaded plugin module path/hash/machine.
 The cache basename only establishes scan progress; it is never artifact proof.
 The isolated scan root is last in the VST3 scan list for duplicate-class
-resolution. A mismatching live module makes the run INCONCLUSIVE.
+resolution. Default roots retain REAPER's literal `%COMMONPROGRAMFILES%` and
+`%LOCALAPPDATA%` tokens: expanded equivalents can cause REAPER to append its
+literal defaults after the staged root. The private INI is written as UTF-8
+without a BOM, including on Windows PowerShell 5.1. A mismatching live module
+makes the run INCONCLUSIVE.
 
 The host executable determines the VST scan key: `vstpath64` for the x64 ABI and
 `vstpath_winarm64` for ARM64/ARM64EC/ARM64X. ARM64EC can retain an AMD64 COFF
