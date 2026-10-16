@@ -68,9 +68,12 @@ to know before reaching for it:
    to initialize, the node logs it and runs its `signal::*` CPU reference — the
    plugin still loads and produces correct audio, just unaccelerated. On a *miss*
    mid-stream (the worker didn't finish in time) the `CpuFallback` policy fills
-   the block on the CPU seamlessly — but only if that fallback is kept
-   continuously primed and latency-aligned (see `prime_fallback()` below); an
-   unprimed one substitutes a stale block with a torn history.
+   the block on the CPU seamlessly — but only after the host-thread
+   `cpu_fallback_prepared()` witness confirms that the exact fallback state is
+   built, and only if that fallback is kept continuously primed and
+   latency-aligned (see `prime_fallback()` below); an unprimed one substitutes a
+   stale block with a torn history. The `supports_cpu_fallback` descriptor bit
+   is a declaration; it does not admit the policy by itself.
    `capabilities().backend` tells you at runtime
    which backend you actually got ("Metal"/"D3D12"/"Vulkan"), and audio paths are
    only **validated on Apple Silicon / Metal** today (see the matrix below) —
@@ -129,10 +132,11 @@ at short IRs the CPU path is selected because it's faster there.
 ## Which GPUs / platforms
 
 GPU compute runs through the WebGPU layer (Dawn / wgpu-native), so it follows
-WebGPU's backends. Where a node declares a CPU fallback, a plugin still works
-with no compatible GPU — it just runs the `signal::*` reference path. Where it
-declares none (`supports_cpu_fallback = false`), a missed or unavailable GPU
-block comes out silent, never as wrong audio.
+WebGPU's backends. Where a node declares and prepares a CPU fallback, a plugin
+still works with no compatible GPU — it just runs the `signal::*` reference
+path. Where it declares none (`supports_cpu_fallback = false`), or where the
+host-thread `cpu_fallback_prepared()` witness is false, a missed or unavailable
+GPU block comes out silent, never as wrong audio.
 
 | Platform | Backend | GPUs |
 |---|---|---|
@@ -383,11 +387,18 @@ public:
         return d;
     }
 
+    // Host-thread witness: the allocation-free fallback is built and warmed
+    // before the transport may admit CpuFallback.
+    bool cpu_fallback_prepared() const noexcept override { return prepared_; }
+
     // Non-RT setup: create the device + upload static data here, never in process_block.
     bool prepare() override {
+        prepared_ = false;
         gpu_ = render::GpuCompute::create();
         if (!gpu_ || !gpu_->initialize_standalone()) { gpu_.reset(); return false; }
         // ... prepare Layer-1 plans (FFTs, convolution, matmul) on gpu_ ...
+        // ... build and warm the CPU fallback, then mark it prepared ...
+        prepared_ = true;
         return true;
     }
 
@@ -413,6 +424,7 @@ public:
     }
 private:
     uint32_t channels_, block_, sr_;
+    bool prepared_ = false;
     std::unique_ptr<render::GpuCompute> gpu_;
 };
 
