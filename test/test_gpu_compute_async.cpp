@@ -772,12 +772,11 @@ TEST_CASE("Accepted async readback completes failed when its owner is destroyed"
         if (!gpu)
             SKIP(kNoGpu);
 
-        id = gpu->compute_magnitude_async(
-            pairs.data(), dest.data(), kBins, std::chrono::seconds(2),
-            [&](const GpuCompute::ReadbackResult& completion) {
-                result = completion;
-                ++completions;
-            });
+        id = gpu->compute_magnitude_async(pairs.data(), dest.data(), kBins, std::chrono::seconds(2),
+                                          [&](const GpuCompute::ReadbackResult& completion) {
+                                              result = completion;
+                                              ++completions;
+                                          });
         REQUIRE(id != 0);
         REQUIRE(gpu->readbacks_in_flight() == 1);
     }
