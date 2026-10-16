@@ -19,4 +19,5 @@ pulp_test_data(pulp-test-sample-region-sequencer NO_DEFINE PATHS
     docs/status/sequencer-exposure/rows/sample-region-sequencer-interoperability.json
     examples/sample-region-allpass/README.md
     core/host/src/timeline_automation_delivery.cpp
-    core/host/src/signal_graph.cpp)
+    core/host/src/signal_graph.cpp
+    core/host/src/signal_graph_authoring.cpp)

@@ -362,6 +362,16 @@ Two things that bite when baking analog VCF nodes:
 
 ## Signal graph gotchas
 
+`core/host/src/signal_graph_authoring.cpp` owns control-thread node and
+connection authoring: add/remove mutators, connection validation, and their
+`GraphMutationLock` plus `invalidate_live_locked_()` ordering. Keep those
+operations there when changing topology. `signal_graph.cpp` retains the
+compile/process spine; `signal_graph_live_swap.cpp` owns staged publication,
+and `signal_graph_reference_walk.cpp` remains the independent execution oracle.
+The authoring extraction changes source ownership, not the graph's public
+contract or real-time lock rules. Recheck the host graph and executor parity
+suites after moving a method across these translation units.
+
 ### A hosted device's latency is discovered once, on the control thread
 
 `PluginSlot::latency_query()` exists because `latency_samples()` returns an
@@ -512,7 +522,7 @@ save/reopen render proof beside the legacy caller-owned route controls.
     the `begin_swap_edit` / `prepare_swap` / `abort_swap_edit` transaction with its
     crossfade publish and rollback, `snapshot_is_plugin_reinit_free_locked_`, and
     the load-admission gate — lives in `core/host/src/signal_graph_live_swap.cpp`,
-    so `signal_graph.cpp` keeps the topology/compile/process spine. The file
+    so `signal_graph.cpp` keeps the compile/process spine. The file
     arrangement mirrors `signal_graph_reference_walk.cpp`, but the *reason* does
     NOT: these are still ordinary `SignalGraph` members that name its private
     nested types, only their definitions moved. **The reference walk's

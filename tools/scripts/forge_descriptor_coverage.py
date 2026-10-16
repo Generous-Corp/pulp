@@ -90,7 +90,7 @@ CATALOG = (
      ("sidechain_compressor",)),
     ("forge_space_catalog.hpp", "forge_space_catalog.hpp",
      ("convolution_reverb", "nonlin_ambience", "speaker_cabinet")),
-    ("forge_synthesis_catalog.hpp", "forge_synthesis_catalog.hpp",
+    ("forge_synthesis_catalog.hpp", "core/host/src/forge_synthesis_catalog.cpp",
      ("additive_bank", "vocoder", "cyclic_stretch", "granular_live")),
     ("forge_tape_catalog.hpp", "core/host/src/forge_tape_catalog.cpp", ("tape_machine",)),
     ("forge_wavetable_catalog.hpp", "forge_wavetable_catalog.hpp",

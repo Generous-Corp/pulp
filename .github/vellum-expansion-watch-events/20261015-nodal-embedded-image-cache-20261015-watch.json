@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261015-nodal-embedded-image-cache-20261015-watch",
+  "created_at": "2026-10-15T07:17:51Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds a process-lifetime cache for immutable embedded PNG bytes used by the native Nodal editor. The source-rectangle draw now decodes and uploads a static image once per backend, preserving pixel output while removing repeated per-frame decode. Pulp continues to own this editable canvas target under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits this generic cache when that target adopts the Vellum package. No source-routing or authority boundary moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-image-file-cache",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

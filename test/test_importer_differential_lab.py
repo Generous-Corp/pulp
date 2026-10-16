@@ -105,6 +105,119 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(len(missing), 1)
         self.assertIn("title", {match[1].anchor for match in matches})
 
+    def test_backend_node_id_matches_element_to_element_before_text_heuristics(self) -> None:
+        strings = ["DIV", "#text", "Gain", "display", "block"]
+        snapshot = {
+            "strings": strings,
+            "computedStyleNames": ["display"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0],
+                    "nodeType": [1, 3],
+                    "nodeName": [0, 1],
+                    "nodeValue": [-1, 2],
+                    "backendNodeId": [35, 36],
+                    "attributes": [[], []],
+                },
+                "layout": {
+                    "nodeIndex": [0],
+                    "bounds": [[0, 0, 100, 40]],
+                    "styles": [[4]],
+                },
+            }],
+        }
+        browser = LAB.browser_nodes(snapshot)
+        ir = {
+            "root": {
+                "type": "frame",
+                "name": "div",
+                "stable_anchor_id": "root",
+                "attributes": {"backend_node_id": "35"},
+                "children": [{
+                    "type": "text",
+                    "name": "#text",
+                    "content": "Gain",
+                    "stable_anchor_id": "text",
+                    "attributes": {"backend_node_id": "36"},
+                    "children": [],
+                }],
+            },
+        }
+        layout = {"views": [
+            {"anchor_id": "root", "x": 0, "y": 0, "width": 100, "height": 40},
+            {"anchor_id": "text", "x": 0, "y": 0, "width": 30, "height": 20},
+        ]}
+        native = LAB.native_nodes(ir, layout)
+        matches, missing, extra = LAB.match_nodes(browser, native)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0][0].backend_node_id, 35)
+        self.assertEqual(matches[0][1].backend_node_id, 35)
+        self.assertEqual(len(missing), 0)
+        self.assertEqual(len(extra), 1)
+
+    def test_mismatched_backend_ids_fail_closed_despite_same_text_and_tag(self) -> None:
+        browser = LAB.BrowserNode(
+            1, "span", -1, "Gain", {}, (0, 0, 40, 20), {}, 35)
+        native = LAB.NativeNode(
+            "wrong", "frame", "span", "Gain", None, {}, (0, 0, 40, 20), 99)
+        matches, missing, extra = LAB.match_nodes([browser], [native])
+        self.assertEqual(matches, [])
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(len(extra), 1)
+
+    @staticmethod
+    def _panel_with_gain_span():
+        browser = [
+            LAB.BrowserNode(0, "div", -1, "", {"id": "panel"}, (0, 0, 100, 40), {}, 10),
+            LAB.BrowserNode(1, "span", 0, "Gain", {}, (10, 10, 40, 20), {}, 11),
+        ]
+        return browser
+
+    def test_an_element_lowered_to_bare_text_is_missing_not_matched(self) -> None:
+        # The native lost the span: only a text child carries its text (and
+        # its backend id). That text node is a representation node excluded
+        # from the precision denominator, so it must not count as a match.
+        browser = self._panel_with_gain_span()
+        native = [
+            LAB.NativeNode("panel", "frame", "div", "", None, {}, (0, 0, 100, 40), 10),
+            LAB.NativeNode("gain-text", "text", "#text", "Gain", "panel", {},
+                           (10, 10, 40, 20), 11),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        self.assertLessEqual(result["precision"], 1.0)
+        self.assertEqual([node.tag for node in result["missing"]], ["span"])
+        self.assertEqual(result["structurally_valid_matches"], 1)
+        self.assertAlmostEqual(result["recall"], 0.5)
+        self.assertLess(result["score"], LAB.PROMOTION_THRESHOLDS["structural"])
+
+    def test_control_a_faithful_lowering_scores_one(self) -> None:
+        browser = self._panel_with_gain_span()
+        native = [
+            LAB.NativeNode("panel", "frame", "div", "", None, {}, (0, 0, 100, 40), 10),
+            LAB.NativeNode("gain", "frame", "span", "Gain", "panel", {}, (10, 10, 40, 20), 11),
+            LAB.NativeNode("gain-text", "text", "#text", "Gain", "gain", {}, (10, 10, 40, 20)),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual(result["missing"], [])
+        self.assertEqual(result["structurally_valid_matches"], 2)
+        self.assertAlmostEqual(result["precision"], 1.0)
+        self.assertAlmostEqual(result["score"], 1.0)
+
+    def test_representation_nodes_are_not_structural_element_extras(self) -> None:
+        native = [
+            LAB.NativeNode("browser:root", "frame", "Browser-evaluated HTML", "", None, {}, None),
+            LAB.NativeNode("html", "frame", "html", "", None, {}, None),
+            LAB.NativeNode("body", "frame", "body", "", None, {}, None),
+            LAB.NativeNode("panel", "frame", "main", "", None, {}, None),
+            LAB.NativeNode("panel-text", "text", "#text", "Panel", "panel", {}, None),
+        ]
+        comparable, ignored = LAB.comparable_native_nodes(native)
+        self.assertEqual([node.anchor for node in comparable], ["panel"])
+        self.assertEqual(
+            [node.anchor for node in ignored],
+            ["browser:root", "html", "body", "panel-text"],
+        )
+
     @requires_pillow
     def test_visual_similarity_is_exact_for_equal_images(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -143,6 +256,24 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(metrics["score"], 0.0)
         self.assertEqual(
             metrics["rows"][0]["differences"][0]["candidate"], "<missing>")
+
+    def test_css_initial_typography_omissions_are_equivalent(self) -> None:
+        browser = LAB.BrowserNode(
+            1, "span", -1, "Gain", {}, (0, 0, 40, 20), {
+                "font-style": "normal",
+                "text-align": "start",
+                "letter-spacing": "normal",
+                "line-height": "normal",
+                "text-transform": "none",
+                "text-decoration-line": "none",
+                "white-space": "normal",
+            })
+        native = LAB.NativeNode(
+            "gain", "text", "span", "Gain", None, {}, (0, 0, 40, 20))
+        metrics = LAB.typography_metrics([(browser, native, 4.0)])
+        self.assertEqual(metrics["comparable_properties"], 7)
+        self.assertEqual(metrics["equal_properties"], 7)
+        self.assertEqual(metrics["score"], 1.0)
 
     def test_capture_extent_uses_reference_not_responsive_viewport(self) -> None:
         capture = {
@@ -288,6 +419,64 @@ class DifferentialLabTests(unittest.TestCase):
                     fixture_metadata={"viewport": {"width": 1, "height": 1}})
             self.assertEqual(report["integrity"]["source_sha256"], source_sha256)
             self.assertTrue(report["integrity"]["source_bound"])
+
+    @requires_pillow
+    def test_compare_one_scores_structure_through_the_shared_comparison(self) -> None:
+        """compare_one reports the score structural_comparison computes."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "panel.html"
+            source.write_text("<div></div>", encoding="utf-8")
+            evidence = root / "evidence"
+            evidence.mkdir()
+            source_sha256 = LAB.sha256_file(source)
+            provenance = {
+                "source": {"sha256": source_sha256},
+                "viewport": {"requested": {"width": 1, "height": 1},
+                             "resolved": {"width": 1, "height": 1}},
+                "browser": {"product": "Chrome", "version": "140.0"},
+            }
+            capture = {
+                "provenance": provenance,
+                "reference": {"logical_width": 1, "logical_height": 1,
+                               "device_scale_factor": 1},
+            }
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
+            Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            (evidence / "dom-snapshot.json").write_text(
+                json.dumps({"documents": []}), encoding="utf-8")
+
+            def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                if "--render" in argv:
+                    Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(
+                        Path(argv[argv.index("--render") + 1]))
+                    Path(argv[argv.index("--layout") + 1]).write_text(
+                        json.dumps({"views": []}), encoding="utf-8")
+                    Path(argv[argv.index("--render-receipt") + 1]).write_text(
+                        json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
+                                    "backend_requested": "skia", "backend_used": "skia",
+                                    "ok": True}), encoding="utf-8")
+                else:
+                    output = Path(argv[argv.index("--output") + 1])
+                    output.write_text(json.dumps({"root": {"type": "frame",
+                                                              "children": []}}),
+                                      encoding="utf-8")
+                return LAB.CommandResult(argv, 1, 0, "", "")
+
+            sentinel = {
+                "matches": [], "missing": [], "extra": [], "comparable_native": [],
+                "ignored_native": [], "parentage_errors": [],
+                "structurally_valid_matches": 0, "precision": 0.25, "recall": 0.25,
+                "score": 0.123456,
+            }
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    patch.object(LAB, "structural_comparison", return_value=sentinel):
+                report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1}})
+            self.assertEqual(report["comparison"]["structural"]["score"], 0.123456)
 
     def test_canonical_json_digest_ignores_run_clock_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

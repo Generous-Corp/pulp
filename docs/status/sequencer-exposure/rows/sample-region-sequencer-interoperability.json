@@ -22,7 +22,7 @@
       ]
     },
     {
-      "path": "core/host/src/signal_graph.cpp",
+      "path": "core/host/src/signal_graph_authoring.cpp",
       "needles": [
         "connect_audio_rate_modulation"
       ]

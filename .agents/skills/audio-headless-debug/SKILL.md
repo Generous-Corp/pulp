@@ -293,7 +293,7 @@ full list and the stimulus each policy needs.
 
 ## The spectral analyzers throw — and the throw is the feature
 
-`measure_aliasing` and `measure_thd` reject inputs they would otherwise report a
+`measure_aliasing`, `measure_thd` and `measure_modulation_sidebands` reject inputs they would otherwise report a
 confident number for. Catch the exception or size the arguments correctly; do not
 read the refusal as a tooling bug.
 

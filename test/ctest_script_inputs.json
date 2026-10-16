@@ -2083,6 +2083,7 @@
    ],
    "inputs": [
     "core/host/src/signal_graph.cpp",
+    "core/host/src/signal_graph_authoring.cpp",
     "core/host/src/timeline_automation_delivery.cpp",
     "docs/status/sequencer-exposure/rows/sample-region-sequencer-interoperability.json",
     "examples/sample-region-allpass/README.md"
@@ -2680,6 +2681,7 @@
   "pulp-test-ipc",
   "pulp-test-isolated-scanner",
   "pulp-test-latency-contract",
+  "pulp-test-lfo-sampling",
   "pulp-test-live-dsp-telemetry",
   "pulp-test-live-dsp-telemetry-graph",
   "pulp-test-live-kernel-crossfade-null",

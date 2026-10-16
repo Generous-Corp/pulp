@@ -175,6 +175,7 @@ try {
     $VcVarsBat = Resolve-VcVars
     Import-VcVarsEnvironment -BatchFile $VcVarsBat
     $SrcDirBash = Convert-ToBashPath -PathValue $SrcDir
+    $BuildDirBash = Convert-ToBashPath -PathValue $BuildDir
     if (-not $Quiet) { Write-Host "Creating clean validation worktree..." }
     $worktreeCmd = 'git -C "{0}" worktree add --detach "{1}" "{2}" >nul 2>nul' -f $Root, $SrcDir, $Ref
     & cmd.exe /d /c $worktreeCmd
@@ -208,9 +209,8 @@ try {
         cmake @configureArgs
     }
 
-    $Jobs = [Environment]::ProcessorCount
     Run-OrDump "build" $BuildLog {
-        cmake --build $BuildDir --config Release --parallel $Jobs
+        & $BashExe -lc "cd '$SrcDirBash' && tools/ci/governed-build.sh cmake --build '$BuildDirBash' --config Release"
     }
 
     Run-OrDump "install" $InstallLog {
@@ -219,13 +219,15 @@ try {
 
     $SmokeBuildLog = Join-Path $TmpRoot "smoke-build.log"
     New-Item -ItemType Directory -Force -Path $SmokeDir | Out-Null
+    $SmokeBuildDir = Join-Path $SmokeDir "build"
+    $SmokeBuildDirBash = Convert-ToBashPath -PathValue $SmokeBuildDir
 
     Run-OrDump "install smoke configure" $SmokeLog {
-        cmake -S (Join-Path $SrcDir "tools/validation/sdk-smoke") -B (Join-Path $SmokeDir "build") "-DCMAKE_PREFIX_PATH=$InstallDir"
+        cmake -S (Join-Path $SrcDir "tools/validation/sdk-smoke") -B $SmokeBuildDir "-DCMAKE_PREFIX_PATH=$InstallDir"
     }
 
     Run-OrDump "install smoke build" $SmokeBuildLog {
-        cmake --build (Join-Path $SmokeDir "build") --config Release
+        & $BashExe -lc "cd '$SrcDirBash' && tools/ci/governed-build.sh cmake --build '$SmokeBuildDirBash' --config Release"
     }
 
     if (-not $NoTests) {

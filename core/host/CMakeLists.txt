@@ -11,6 +11,7 @@ target_include_directories(pulp-host
 target_sources(pulp-host PRIVATE
     src/scanner.cpp
     src/signal_graph.cpp
+    src/signal_graph_authoring.cpp
     src/signal_graph_process.cpp
     src/signal_graph_diagnostics.cpp
     src/signal_graph_control.cpp
@@ -34,6 +35,7 @@ target_sources(pulp-host PRIVATE
     src/forge_catalog_export_eurorack_drums.cpp
     src/forge_catalog_export_dynamics.cpp
     src/forge_dynamics_catalog.cpp
+    src/forge_synthesis_catalog.cpp
     src/forge_catalog_export_modulation.cpp
     src/forge_modulation_catalog.cpp
     src/forge_effect_modulation_catalog.cpp
