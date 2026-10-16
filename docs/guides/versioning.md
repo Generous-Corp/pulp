@@ -611,14 +611,21 @@ on mtime, which would eventually reclaim a slow test's live shard and drop its
 coverage silently.
 
 The hosted **Linux** coverage leg has its own "Reclaim hosted Linux coverage
-disk" step. The ubuntu image arrives with roughly 14 GiB free, and a full Linux
-run exhausted it about 93 minutes in; a runner that fills its disk dies without
-a log. The step deletes preinstalled SDKs the job never uses (.NET, Android,
-GHC, CodeQL, Boost, Swift and similar) on GitHub-hosted runners only. While the
-suite runs, the coverage step prints a `disk-sample:` line every five minutes:
-free space plus the sizes of `build-coverage`, its `profraw` and `coverage`
-subdirectories, and `~/.cache/pulp`. Read those lines to see which writer grew
-before changing anything else.
+disk" step. The ubuntu image arrives with roughly 14 GiB free on its root disk,
+and a full Linux run exhausted it (about 93 minutes in, then about 2 hours in
+after deleting preinstalled SDKs alone). A runner that fills its disk dies
+without a log. On GitHub-hosted runners only, the step deletes preinstalled
+SDKs the job never uses (.NET, Android, GHC, CodeQL, Boost, Swift and similar),
+and, when the runner's separate `/mnt` scratch disk has more room than root,
+makes `build-coverage` a symlink to `/mnt/build-coverage`. The instrumented
+objects and every raw profile then live off the root disk the runner logs to.
+
+While the suite runs, the coverage step prints a `disk-sample:` line every five
+minutes: free space on root and on the build disk, plus the sizes of
+`build-coverage`, its `profraw` and `coverage` subdirectories, and
+`~/.cache/pulp`. Because a full disk loses the log, crossing 20, 10, 5 and
+2 GiB free is also raised as a `coverage disk below N GiB` annotation, which is
+stored apart from the log. Read those before changing anything else.
 
 
 ## Shipyard-binary pin bumps
