@@ -10,7 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from verify_wgpu_native_staged import parse_output, validate_loss_evidence
+from verify_wgpu_native_staged import (diagnostic_exit_disposition, parse_output,
+                                       validate_loss_evidence)
 
 
 def main() -> int:
@@ -20,6 +21,11 @@ def main() -> int:
                  "verifier"):
         parser.add_argument(f"--{name}")
     args = parser.parse_args()
+    for returncode, expected in ((0, "passed"), (77, "provider_unavailable"),
+                                 (16, "diagnostic_failure")):
+        if diagnostic_exit_disposition(returncode) != expected:
+            print(f"typed exit disposition control failed: {returncode}", file=sys.stderr)
+            return 1
     valid = parse_output(
         "device_loss_callback=registered device_loss_scenario=triggered "
         "device_loss_reason=destroyed device_loss_terminal_records=1 "
