@@ -31,7 +31,8 @@ enum class MissPolicy {
     PassthroughDry,
 
     /// Run the node's CPU fallback for the missed block. Requires
-    /// `supports_cpu_fallback` AND a fallback that is kept continuously fed and
+    /// `supports_cpu_fallback`, a true `cpu_fallback_prepared()` witness after
+    /// host preparation, and a fallback that is kept continuously fed and
     /// latency-aligned via `prime_fallback()` — otherwise the substitute is a
     /// stale block with a torn history.
     CpuFallback,
@@ -67,7 +68,8 @@ struct GpuAudioNodeDescriptor {
 ///   allocate scratch prepared in prepare(), and block on readback. It must
 ///   NOT be called from the audio callback.
 /// - process_cpu_fallback(): real-time-safe; used by the transport for the
-///   CpuFallback miss policy. Required if descriptor().supports_cpu_fallback.
+///   CpuFallback miss policy. Required when the descriptor opts into that
+///   policy and `cpu_fallback_prepared()` witnesses a prepared fallback.
 class GpuAudioNode {
 public:
     virtual ~GpuAudioNode() = default;
