@@ -214,9 +214,18 @@ public:
     }
 
     void attach_to_parent(NativeViewHandle parent) override {
-        if (!hwnd_) return;
+        (void)try_attach_to_parent(parent);
+    }
+
+    bool try_attach_to_parent(NativeViewHandle parent) override {
+        if (!hwnd_) return false;
         HWND parent_hwnd = static_cast<HWND>(parent);
-        if (!parent_hwnd) return;
+        if (!parent_hwnd) return false;
+        // A live attachment owns its timer and presentation surfaces. Repeating
+        // it is a no-op; changing its native shape requires an explicit detach.
+        // Report refusal directly: is_attached() still describes the old parent.
+        if (attached_.load(std::memory_order_acquire))
+            return GetParent(hwnd_) == parent_hwnd;
         // Switch WS_POPUP -> WS_CHILD before reparenting (SetParent does not add
         // the style itself); SWP_FRAMECHANGED makes the style edit take effect.
         LONG_PTR style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
@@ -235,7 +244,7 @@ public:
                               (style & ~static_cast<LONG_PTR>(WS_CHILD)) | WS_POPUP);
             SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-            return;  // attached_ stays false; try_attach_to_parent reports failure
+            return false;
         }
         {
             // Bracket our own sizing SetWindowPos: it synchronously re-enters the
@@ -254,7 +263,7 @@ public:
             // dirty bit. Fail closed instead of leaving a visible child that
             // can never present another frame.
             rollback_failed_attach();
-            return;
+            return false;
         }
 #ifdef PULP_HAS_SKIA
         // Dawn configures its presentation surface for the HWND's current
@@ -283,6 +292,7 @@ public:
         }
 #endif
         repaint();
+        return true;
     }
 
     bool is_attached() const noexcept {

@@ -1876,6 +1876,10 @@ Rules when touching an adapter's editor-attach path:
   valid parent when its frame timer cannot be installed; a successful VST3
   `CPluginView::attached()` or a recognized CLAP window API does not prove the
   native host attached. Keep failure cleanup before the bridge's teardown.
+- The Windows host treats an already attached parent as an idempotent success.
+  A different-parent request returns false and preserves the existing timer
+  and GPU surfaces. Call `detach()` before attaching to a different parent;
+  detach releases the old surfaces so the next attachment recreates them.
 - A custom `Processor::create_view()` that owns a `ScriptedUiSession` MUST
   override `Processor::active_scripted_ui()` so `ViewBridge` reports
   `uses_script_ui()`, adapters log `mode=scripted`, select the GPU host, and
