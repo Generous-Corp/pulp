@@ -45,6 +45,7 @@ class TimelineStepSequencerProcessor final : public format::Processor {
     std::shared_ptr<const playback::TrackProgram> track_program(timeline::ItemId id) const {
         return engine_.track_program(id);
     }
+    /// Test oracle; call only while audio processing is stopped.
     bool has_active_notes() const noexcept { return engine_.synth_has_active_notes(); }
     /// Control-thread pump: applies queued channel commands, rebuilds the typed
     /// persistent component, and publishes a lowered program to the stable graph.
