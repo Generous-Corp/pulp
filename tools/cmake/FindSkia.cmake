@@ -189,7 +189,8 @@ set(SKIA_LIBRARY "${_skia_lib_dir}/${_skia_lib_name}")
 set(DAWN_LIBRARY "${_skia_lib_dir}/${_dawn_lib_name}")
 
 # The Windows ARM64 skia-builder slice keeps its static archives under an
-# `arm64/` directory below the shared Release directory. x64 remains flat.
+# `arm64/` directory below the shared Release directory. Some x64 bundles
+# likewise use `x64/`; older bundles remain flat.
 # Select the slice from the target architecture before probing the archives so
 # an ARM64 configure cannot silently fall back to a missing flat path and then
 # build a CPU-only consumer. The target comes from pulp_windows_target_arch(),
@@ -228,6 +229,12 @@ elseif(_pulp_skia_target_arch STREQUAL "arm64-win")
         set(DAWN_LIBRARY "DAWN_LIBRARY-NOTFOUND")
         message(STATUS "Skia: Windows ARM64 archive slice is missing")
     endif()
+elseif(_pulp_skia_target_arch STREQUAL "x86_64-win"
+        AND EXISTS "${_skia_lib_dir}/x64/${_skia_lib_name}")
+    set(_skia_lib_dir "${_skia_lib_dir}/x64")
+    set(SKIA_LIBRARY "${_skia_lib_dir}/${_skia_lib_name}")
+    set(DAWN_LIBRARY "${_skia_lib_dir}/${_dawn_lib_name}")
+    message(STATUS "Skia: selecting Windows x64 archive slice")
 endif()
 
 if(NOT EXISTS "${SKIA_LIBRARY}")

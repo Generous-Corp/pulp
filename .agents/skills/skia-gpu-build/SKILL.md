@@ -208,7 +208,7 @@ shipping artifact.
   disagreed, every windows-arm64 release leg failed configure with "Skia: Windows
   ARM64 archive slice is missing" (v0.966.0). Change the layout in both places
   together; `test_fetch_skia_for_release_extra.py` reads FindSkia to hold them
-  in step. windows-x64 stays flat.
+  in step. Windows x64 bundles may be flat or use a nested `x64/` directory.
 
 - **Windows: `LNK2019 __imp_CompareObjectHandles` from `dawn_combined.lib(SharedFenceD3D12.cpp.obj)`.**
   Dawn's D3D12 shared fence calls `CompareObjectHandles`, which `kernel32.lib` does
@@ -220,17 +220,19 @@ shipping artifact.
   `GetProcAddress` lookup would mean patching Dawn. It surfaces only in targets that pull in the D3D12 device path (GPU compute,
   headless surface, renderer3d), which is why other Windows targets link fine.
 
-- **Windows ARM64 Skia archives are nested one level deeper than x64.** The
+- **Windows Skia archives can carry target-specific directories.** The
   `skia-builder` Windows ARM64 release stores `skia.lib` and
-  `dawn_combined.lib` under `build/win-gpu/lib/Release/arm64/`, while x64 keeps
-  them directly under `Release/`. `FindSkia.cmake` selects that directory from
+  `dawn_combined.lib` under `build/win-gpu/lib/Release/arm64/`. Windows x64
+  releases can place them under `Release/x64/` or directly under `Release/`.
+  `FindSkia.cmake` selects that directory from
   the target architecture and deliberately leaves `SKIA_FOUND=FALSE` when the
   ARM64 slice is absent; otherwise an ARM64 configure can silently become a
   CPU-only build. The target architecture comes from
   `pulp_windows_target_arch()` (generator platform, then
   `CMAKE_CXX_COMPILER_ARCHITECTURE_ID`), never `CMAKE_SYSTEM_PROCESSOR`. In a
-  Visual Studio `-A` configure that is the host, so an x64 build on an ARM64
-  host would take the ARM64 slice. ARM64EC and ARM64X are distinct COFF
+  Visual Studio `-A` configure that is the host; Ninja has no `-A`, so an
+  ARM-hosted x64 compiler must drive the x64 Skia auto-fetch/cache key and
+  x64 wgpu-native asset as well. ARM64EC and ARM64X are distinct COFF
   machine modes and must consume matching `arm64ec/` or `arm64x/` producer
   slices; pure `arm64/` and flat x64 libraries are not compatible substitutes.
   When a matching Skia `dawn_combined.lib` exists, the consumer must also skip
