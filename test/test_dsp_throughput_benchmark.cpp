@@ -144,6 +144,7 @@ struct KernelResult {
 };
 
 struct MultiInstanceResult {
+    std::string name;
     int block = 0;
     int instances = 0;
     double p50_ns = 0.0;
@@ -158,6 +159,8 @@ struct MultiInstanceResult {
 };
 
 std::vector<ProcessorResult> g_processor_results;
+std::map<std::pair<std::string, int>, double> g_processor_cpu_ns;
+double thread_cpu_seconds();
 std::vector<KernelResult> g_kernel_results;
 std::vector<MultiInstanceResult> g_multi_results;
 Options g_options;
@@ -191,14 +194,23 @@ void bench(const std::string& name, int block, Fn&& fn) {
     for (long b = 0; b < std::max(4L, blocks / 8); ++b) fn(block);
 
     std::vector<double> reps;
+    std::vector<double> cpu_reps;
     for (int rep = 0; rep < kMeanRepetitions; ++rep) {
+        const double cpu_start = thread_cpu_seconds();
         const auto t0 = Clock::now();
         for (long b = 0; b < blocks; ++b) fn(block);
         const auto t1 = Clock::now();
+        const double cpu_end = thread_cpu_seconds();
+        if (std::isfinite(cpu_start) && std::isfinite(cpu_end) && cpu_end >= cpu_start)
+            cpu_reps.push_back((cpu_end - cpu_start) * 1e9 / double(blocks * block));
         reps.push_back(std::chrono::duration<double, std::nano>(t1 - t0).count()
                        / double(blocks * block));
     }
     std::sort(reps.begin(), reps.end());
+    if (cpu_reps.size() == kMeanRepetitions) {
+        std::sort(cpu_reps.begin(), cpu_reps.end());
+        g_processor_cpu_ns[{name, block}] = cpu_reps[cpu_reps.size() / 2];
+    }
 
     std::vector<double> per_block(std::size_t(blocks), 0.0);
     for (long b = 0; b < blocks; ++b) {
@@ -728,7 +740,8 @@ void run_multi_instance_convolvers() {
             const double process_percent = std::isfinite(process_cpu)
                                                ? process_cpu / represented_seconds * 100.0
                                                : std::numeric_limits<double>::quiet_NaN();
-            MultiInstanceResult result{B,
+            MultiInstanceResult result{name,
+                                       B,
                                        count,
                                        percentile(0.50),
                                        percentile(0.95),
@@ -754,6 +767,89 @@ void run_multi_instance_convolvers() {
                     "%-46s p50 %9.0f p95 %9.0f p99 %9.0f max %9.0f ns  CPU N/A  misses %ld\n",
                     name.c_str(), result.p50_ns, result.p95_ns, result.p99_ns, result.max_ns,
                     result.deadline_misses);
+        }
+
+        // Ordinary stereo 2IR workload. Keep this separate from the existing
+        // 4IR rows so baseline and packed candidates retain identical names.
+        for (int count : counts) {
+            const std::string name = "multi_instance.zero_latency.2IR.96k B=" + std::to_string(B) +
+                                     " N=" + std::to_string(count);
+            if (!selected(name)) continue;
+            std::vector<ZeroLatencyConvolver> convolvers(static_cast<std::size_t>(count));
+            std::vector<std::vector<float>> ir0(static_cast<std::size_t>(count));
+            std::vector<std::vector<float>> ir1(static_cast<std::size_t>(count));
+            std::vector<std::vector<float>> out_l(static_cast<std::size_t>(count),
+                                                  std::vector<float>(static_cast<std::size_t>(B)));
+            std::vector<std::vector<float>> out_r = out_l;
+            for (int instance = 0; instance < count; ++instance) {
+                auto& cv = convolvers[static_cast<std::size_t>(instance)];
+                cv.prepare(kSampleRate, B, 2);
+                ir0[static_cast<std::size_t>(instance)] = decaying_ir(96000, 1900 + instance * 2, 5.0f);
+                ir1[static_cast<std::size_t>(instance)] = decaying_ir(96000, 1901 + instance * 2, 5.0f);
+                const float* ir[2] = {ir0[static_cast<std::size_t>(instance)].data(),
+                                      ir1[static_cast<std::size_t>(instance)].data()};
+                if (!cv.load_impulse_response(ir, 2, 96000, kSampleRate)) std::exit(1);
+            }
+            const long blocks = std::max(16L, long(kSampleRate * g_options.seconds) / B);
+            int warm_callbacks = 16;
+            for (const auto& cv : convolvers)
+                warm_callbacks = std::max(warm_callbacks,
+                                          4 * cv.level_block_length(cv.num_levels() - 1) / B + 1);
+            const std::size_t total_frames = static_cast<std::size_t>((blocks + warm_callbacks) * B);
+            std::vector<std::vector<float>> input_l(static_cast<std::size_t>(count), std::vector<float>(total_frames));
+            std::vector<std::vector<float>> input_r = input_l;
+            for (int instance = 0; instance < count; ++instance) {
+                std::mt19937 rng(2700 + instance);
+                for (std::size_t i = 0; i < total_frames; ++i) {
+                    input_l[static_cast<std::size_t>(instance)][i] = std::generate_canonical<float, 24>(rng) - 0.5f;
+                    input_r[static_cast<std::size_t>(instance)][i] = std::generate_canonical<float, 24>(rng) - 0.5f;
+                }
+            }
+            std::size_t position = 0;
+            const auto callback = [&] {
+                for (int instance = 0; instance < count; ++instance) {
+                    const float* in[2] = {input_l[static_cast<std::size_t>(instance)].data() + position,
+                                          input_r[static_cast<std::size_t>(instance)].data() + position};
+                    float* out[2] = {out_l[static_cast<std::size_t>(instance)].data(),
+                                     out_r[static_cast<std::size_t>(instance)].data()};
+                    convolvers[static_cast<std::size_t>(instance)].process(in, out, B);
+                    clobber(out[0]); clobber(out[1]);
+                }
+                position += static_cast<std::size_t>(B);
+            };
+            for (int warm = 0; warm < warm_callbacks; ++warm) callback();
+            for (const auto& channel : out_l)
+                if (!std::all_of(channel.begin(), channel.end(), [](float v) { return std::isfinite(v); })) std::exit(1);
+            for (const auto& channel : out_r)
+                if (!std::all_of(channel.begin(), channel.end(), [](float v) { return std::isfinite(v); })) std::exit(1);
+            std::vector<double> samples;
+            samples.reserve(static_cast<std::size_t>(blocks));
+            const double thread_start = thread_cpu_seconds();
+            const double process_start = process_cpu_seconds();
+            for (long b = 0; b < blocks; ++b) {
+                const auto t0 = Clock::now(); callback();
+                samples.push_back(std::chrono::duration<double, std::nano>(Clock::now() - t0).count());
+            }
+            for (const auto& channel : out_l)
+                if (!std::all_of(channel.begin(), channel.end(), [](float v) { return std::isfinite(v); }))
+                    std::exit(1);
+            for (const auto& channel : out_r)
+                if (!std::all_of(channel.begin(), channel.end(), [](float v) { return std::isfinite(v); }))
+                    std::exit(1);
+            const double thread_cpu = thread_cpu_seconds() - thread_start;
+            const double process_cpu = process_cpu_seconds() - process_start;
+            std::sort(samples.begin(), samples.end());
+            const auto percentile = [&](double q) { return samples[std::size_t(std::min<double>(samples.size() - 1, std::floor(q * samples.size())))]; };
+            const double represented_seconds = double(blocks * B) / kSampleRate;
+            MultiInstanceResult result{name, B, count, percentile(.50), percentile(.95), percentile(.99), samples.back(),
+                                       thread_cpu / represented_seconds * 100.0, process_cpu / represented_seconds * 100.0,
+                                       0, warm_callbacks, blocks};
+            const double deadline_ns = double(B) / kSampleRate * 1e9;
+            result.deadline_misses = long(std::count_if(samples.begin(), samples.end(), [&](double ns) { return ns > deadline_ns; }));
+            g_multi_results.push_back(result);
+            std::printf("%-46s p50 %9.0f p95 %9.0f p99 %9.0f max %9.0f ns  threadCPU %6.2f%% processCPU %6.2f%% misses %ld\n",
+                        name.c_str(), result.p50_ns, result.p95_ns, result.p99_ns, result.max_ns,
+                        result.cpu_percent, result.process_cpu_percent, result.deadline_misses);
         }
     }
 }
@@ -1025,17 +1121,21 @@ void write_json(const std::string& path, double timer_overhead_ns) {
     std::vector<Section> sections;
     for (int B : kBlockSizes) {
         Section mean{"Mean ns/frame, B=" + std::to_string(B), "ns/frame", {}};
+        Section cpu{"Thread CPU ns/frame, B=" + std::to_string(B), "ns/frame", {}};
         Section p50{"Block p50 ns/frame, B=" + std::to_string(B), "ns/frame", {}};
         Section p99{"Worst-block p99 ns/frame, B=" + std::to_string(B), "ns/frame", {}};
         Section worst{"Worst-block max ns/frame, B=" + std::to_string(B), "ns/frame", {}};
         for (const auto& r : g_processor_results) {
             if (r.block != B) continue;
             mean.values.emplace_back(r.name, r.mean_ns);
+            const auto cpu_value = g_processor_cpu_ns.find({r.name, r.block});
+            if (cpu_value != g_processor_cpu_ns.end())
+                cpu.values.emplace_back(r.name, cpu_value->second);
             p50.values.emplace_back(r.name, r.p50_ns);
             p99.values.emplace_back(r.name, r.p99_ns);
             worst.values.emplace_back(r.name, r.max_ns);
         }
-        for (auto* s : {&mean, &p50, &p99, &worst})
+        for (auto* s : {&mean, &cpu, &p50, &p99, &worst})
             if (!s->values.empty()) sections.push_back(std::move(*s));
     }
     std::map<int, Section> kernels;
@@ -1056,8 +1156,8 @@ void write_json(const std::string& path, double timer_overhead_ns) {
     Section multi_warm{"Multi-instance warmup callbacks", "callbacks", {}};
     Section multi_blocks{"Multi-instance measurement callbacks", "callbacks", {}};
     for (const auto& r : g_multi_results) {
-        const std::string key =
-            "B=" + std::to_string(r.block) + " N=" + std::to_string(r.instances);
+        const std::string key = r.name + " B=" + std::to_string(r.block) + " N=" +
+                                 std::to_string(r.instances);
         multi_p50.values.emplace_back(key, r.p50_ns);
         multi_p95.values.emplace_back(key, r.p95_ns);
         multi_p99.values.emplace_back(key, r.p99_ns);
