@@ -485,6 +485,11 @@ Two other capture-shaping facts worth knowing before you blame a query:
   used to be untagged, so closing and reopening an editor inside the window let
   the FIRST session's timer stop the SECOND one — a capture that looks
   mysteriously truncated mid-gesture. A stale timer is now a no-op.
+  A crash while arming the timer is a different failure: Windows argument
+  evaluation can expose a moved ownership token if its generation is read in
+  a sibling argument. No SQL result can diagnose a capture that never began;
+  require a repaired, hash-bound tracing-ON binary and positive-timeout flush
+  evidence before interpreting a missing file or comparing query counts.
 - **Zero rows everywhere can mean the binary was never built with tracing.**
   `PULP_TRACING` is OFF by default, and a build without it emits no spans at
   all while every command still succeeds — the emptiest possible capture from

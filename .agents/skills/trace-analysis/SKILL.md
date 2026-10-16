@@ -811,6 +811,14 @@ a session that merely has not flushed before changing instrumentation.
 
 ### The auto-flush timer is owned, joined, and generation-tagged
 
+An access violation at traced Windows plug-in insertion can occur before a
+capture exists. In the timeout arm call, read the ownership token's generation
+into a local **before** passing a callback that move-captures that token:
+sibling argument evaluation can otherwise move it before the dereference.
+Exercise this path with `PULP_TRACING=ON`, a positive timeout, an emitted marker,
+and a successfully auto-flushed trace; the default tracing-OFF tests cannot
+validate it. Bind the repaired loaded PE hash before comparing startup runs.
+
 `PULP_TRACE_SECONDS` used to arm a DETACHED `std::thread` that slept and
 then called back into process-global tracing state. Two consequences you
 may still see in older builds:
