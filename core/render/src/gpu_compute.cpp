@@ -4384,6 +4384,9 @@ private:
         while (!pending.empty()) {
             auto req = pending.front();
             pending.pop_front();
+            if (req->resolved.load(std::memory_order_acquire) &&
+                req->ok.load(std::memory_order_acquire))
+                req->buffer.Unmap();
             if (pool_) pool_->discard(req->buffer);
             if (deferred && req->on_complete) {
                 if (status == ReadbackStatus::Expired)
