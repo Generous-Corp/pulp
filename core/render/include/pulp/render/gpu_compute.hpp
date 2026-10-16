@@ -2,6 +2,7 @@
 
 #include <pulp/render/gpu_surface.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -62,7 +63,9 @@ public:
     /// Returns false on a null handle or pipeline-creation failure.
     virtual bool initialize_from_device(void* wgpu_device) = 0;
 
-    bool is_initialized() const { return initialized_; }
+    bool is_initialized() const {
+        return initialized_.load(std::memory_order_acquire);
+    }
 
     /// True once the WebGPU device has been lost. Device loss is normal — a
     /// browser tab can lose its device at any time — so it is reported as state,
@@ -71,14 +74,39 @@ public:
     /// expected to re-acquire a device and re-`prepare_*`.
     virtual bool device_lost() const = 0;
 
+    /// Monotonic device generation. A generation changes at every initialize
+    /// attempt, so an owner can tag an adopted-device loss notification and
+    /// reject a callback from an older device after reinitialization.
+    virtual std::uint64_t device_generation() const {
+        return 0;
+    }
+
     /// Report that an ADOPTED device (initialize_from_device /
     /// initialize_from_surface) has been lost. A device-lost callback can only be
     /// installed on the device *descriptor*, i.e. at creation, so a device this
     /// object did not create cannot observe its own loss — its owner must say so.
     /// In the browser that owner is the worker's JS, which awaits `device.lost`.
     /// Idempotent. A device created by initialize_standalone() observes loss on
-    /// its own and needs no call.
+    /// its own and needs no call. The owner must call this on the instance's
+    /// worker strand. Backend callbacks must call post_device_lost() to publish
+    /// a transition and never drain readbacks directly.
     virtual void notify_device_lost() = 0;
+
+    virtual void notify_device_lost(std::uint64_t generation) {
+        if (generation == device_generation())
+            notify_device_lost();
+    }
+
+    /// Publish a loss from a backend callback without touching readback queues
+    /// or invoking user completions. The owner strand applies the transition on
+    /// its next operation. A backend with asynchronous callbacks must override
+    /// this method with a publish-only implementation. The compatibility
+    /// default forwards synchronously to notify_device_lost() for existing
+    /// downstream implementations, so it is only safe on the owner strand;
+    /// new backends must override it before publishing from a callback thread.
+    virtual void post_device_lost(std::uint64_t generation) {
+        notify_device_lost(generation);
+    }
 
     // ── Compute operations ──────────────────────────────────────────────
 
@@ -523,10 +551,15 @@ public:
 
     /// Pump the device event queue once and fire the completions that are ready
     /// or past their deadline. Never blocks. Returns the number of requests
-    /// still in flight. Re-entrant calls (from inside a completion) are a no-op.
+    /// whose completion has not fired yet. Re-entrant calls (from inside a
+    /// completion) are a no-op. Detached late-map cleanup is not included.
     virtual std::size_t poll_readbacks() = 0;
 
-    /// Requests submitted whose completion has not fired yet.
+    /// Requests submitted whose completion has not fired yet. A request whose
+    /// deadline fired before its map resolved is removed from this count after
+    /// its Expired completion, but its detached map cleanup still consumes the
+    /// admission cap until the late map callback arrives or bounded cleanup
+    /// grace expires.
     virtual std::size_t readbacks_in_flight() const = 0;
 
     /// Cap on concurrently in-flight async readbacks (default 4). Admission
@@ -686,8 +719,8 @@ public:
     virtual void set_bench_counters(bench::PerfCounters* counters) = 0;
 #endif
 
-protected:
-    bool initialized_ = false;
+  protected:
+    std::atomic<bool> initialized_{false};
 };
 
 } // namespace pulp::render

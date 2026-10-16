@@ -6413,6 +6413,9 @@
   "import-validation-diff-against-reference-selftest": {
    "entry": "tools/import-validation/test_diff_against_reference.py",
    "inputs": [
+    "tools/import-validation/importer_differential/core.py",
+    "tools/import-validation/importer_differential/recognition.py",
+    "tools/import-validation/importer_differential/reports.py",
     "tools/import-validation/test_diff_against_reference.py"
    ],
    "kind": "python"
@@ -11350,6 +11353,14 @@
     "tools/scripts/test_setup_source_cache.sh"
    ],
    "kind": "shell"
+  },
+  "shipyard-merge-gate-evidence-selftest": {
+   "entry": "tools/scripts/test_shipyard_merge_gate_evidence.py",
+   "inputs": [
+    "tools/scripts/shipyard_merge_gate_evidence.py",
+    "tools/scripts/test_shipyard_merge_gate_evidence.py"
+   ],
+   "kind": "python"
   },
   "shipyard-target-defaults-selftest": {
    "entry": "tools/ci/test_shipyard_target_defaults.py",

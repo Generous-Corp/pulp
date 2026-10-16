@@ -15,6 +15,20 @@ REAPER in `tools/testing/daw-smoke/test_reaper_smoke.py`.
 Full rules: `docs/guides/daw-smoke.md`. CLAUDE.md has the one-paragraph policy.
 
 ## Modes (`--mode`, default `reload`)
+
+### Windows editor acceptance packet
+
+The Python harness is macOS-only: its portable scan keys and window automation
+use macOS paths and System Events. For an operator-dispatched Windows REAPER
+run, use `tools/testing/daw-smoke/windows/windows_editor_smoke.ps1`. It stages
+one exact VST3 or CLAP artifact, inserts a format-qualified FX, requires the
+portable REAPER scan cache to contain that plugin before accepting a verdict,
+and captures the interactive editor (plus an optional right-click context
+menu) to an evidence receipt. It returns **INCONCLUSIVE**, never PASS, when
+the cache/status handshake or interactive desktop is unavailable. The packet's
+README specifies separate `pulp audio render`/null and dev-only Perfetto
+companion gates; screenshots alone do not prove audio or performance.
+
 - **`reload`** — the original flow. Seed watched DSP variant A, insert+float the
   FX, copy variant B over the watched path, scrape `swapped DSP` / `reload
   rejected`.

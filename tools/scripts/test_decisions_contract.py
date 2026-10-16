@@ -324,6 +324,10 @@ def _run_without_tomllib(*args: str, env_extra: dict | None = None):
             encoding="utf-8")
         bootstrap = (
             "import sys, runpy\n"
+            # A startup hook (coverage's subprocess hook under
+            # COVERAGE_PROCESS_START) may already have imported the real
+            # tomllib; the cached module would win over the shim.
+            "sys.modules.pop('tomllib', None)\n"
             f"sys.path.insert(0, {td!r})\n"
             "try:\n"
             "    import tomllib\n"

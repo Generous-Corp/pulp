@@ -118,6 +118,10 @@ class GpuConvolver : public GpuAudioNode {
 
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
+
+    bool cpu_fallback_prepared() const noexcept override {
+        return prepared_;
+    }
     void process_block(const audio::BufferView<const float>& input,
                        audio::BufferView<float>& output, uint32_t n) override;
 

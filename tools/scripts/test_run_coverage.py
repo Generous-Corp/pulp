@@ -684,22 +684,21 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
     than the tail shows.
     """
 
-    def test_first_error_is_printed_even_when_buried_before_the_tail(self) -> None:
+    def _run_failing_build(self, build_body: str) -> subprocess.CompletedProcess:
+        """Run run_coverage.sh against a stub cmake whose --build runs build_body."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             stub_bin = tmp_path / "bin"
             stub_bin.mkdir()
             stub_cmake = stub_bin / "cmake"
             stub_cmake.write_text(
-                textwrap.dedent(
+                "#!/usr/bin/env bash\n"
+                'if [[ "$1" == "--build" ]]; then\n'
+                f"{build_body}\n"
+                "    exit 2\n"
+                "fi\n"
+                + textwrap.dedent(
                     """
-                    #!/usr/bin/env bash
-                    if [[ "$1" == "--build" ]]; then
-                        echo "custom command FAILED: stdout-only-marker"
-                        echo "core/x.cpp:1:1: error: buried-compile-error" >&2
-                        for i in $(seq 1 300); do echo "warning: noise $i" >&2; done
-                        exit 2
-                    fi
                     BUILD=""
                     while [[ $# -gt 0 ]]; do
                         case "$1" in
@@ -710,7 +709,7 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
                     mkdir -p "$BUILD"
                     printf 'PULP_ENABLE_COVERAGE:BOOL=ON\n' > "$BUILD/CMakeCache.txt"
                     """
-                ).lstrip(),
+                ),
                 encoding="utf-8",
             )
             stub_cmake.chmod(0o755)
@@ -731,7 +730,7 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
 
             env = os.environ.copy()
             env["PATH"] = f"{stub_bin}:{env['PATH']}"
-            result = subprocess.run(
+            return subprocess.run(
                 ["bash", str(repo / "scripts" / "run_coverage.sh")],
                 cwd=repo,
                 env=env,
@@ -740,11 +739,28 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+    def test_first_error_is_printed_even_when_buried_before_the_tail(self) -> None:
+        result = self._run_failing_build(
+            '    echo "custom command FAILED: stdout-only-marker"\n'
+            '    echo "core/x.cpp:1:1: error: buried-compile-error" >&2\n'
+            '    for i in $(seq 1 300); do echo "warning: noise $i" >&2; done'
+        )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("Coverage build failed", result.stderr)
         self.assertIn("buried-compile-error", result.stderr)
         self.assertIn("stdout-only-marker", result.stderr)
         self.assertIn("warning: noise 300", result.stderr)
+
+    def test_a_stderr_error_flood_does_not_hide_stdout_errors(self) -> None:
+        # More stderr matches than one log's cap; the stdout-only failure must
+        # still be printed.
+        result = self._run_failing_build(
+            '    for i in $(seq 1 150); do echo "x.cpp:$i:1: error: flood $i" >&2; done\n'
+            '    echo "FAILED: stdout-only-step"'
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("flood 1", result.stderr)
+        self.assertIn("stdout-only-step", result.stderr)
 
 
 class LcovCoberturaTests(unittest.TestCase):

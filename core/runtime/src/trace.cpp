@@ -383,9 +383,15 @@ void Tracing::attach() {
     // open editor. Flush on a timer instead so the capture is self-completing.
     if (const char* s = std::getenv("PULP_TRACE_SECONDS"); s && *s) {
         if (int secs = std::atoi(s); secs > 0) {
+            // Capture the generation before moving this local shared ownership
+            // into the expiry callback. Function-argument evaluation order is
+            // unspecified, and MSVC may evaluate the move capture first;
+            // dereferencing `ownership` in the sibling argument would then
+            // dereference an empty shared_ptr during plug-in startup.
+            const auto generation = ownership->generation_;
             std::lock_guard<std::mutex> lk(g_timeout_mu);
             g_timeout.arm(
-                std::chrono::seconds(secs), ownership->generation_,
+                std::chrono::seconds(secs), generation,
                 [ownership = std::move(ownership)](std::uint64_t armed_for) {
                     // Refuse to act on a session this timeout was not armed
                     // for. Close and reopen an editor inside the window and the
