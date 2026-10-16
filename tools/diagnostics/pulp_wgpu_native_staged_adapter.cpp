@@ -926,6 +926,11 @@ int main() {
             return kDiagnosticFailureExit;
         if (loss_probe->device_loss_reason() != WGPUDeviceLostReason_Destroyed)
             return kDiagnosticFailureExit;
+        // The probe is capability-only. Even after a successful callback, the
+        // pinned Metal runtime can block while releasing its idle device
+        // fence. Keep the validated result and abandon this process-scoped
+        // probe before entering the outstanding-submission session.
+        loss_probe.release();
 
         // The probe above is a capability gate for the session path: only a
         // runtime that delivered the exact callback userdata and Destroyed
