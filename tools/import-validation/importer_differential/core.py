@@ -61,6 +61,20 @@ TYPOGRAPHY_MAP = {
     "color": "color",
 }
 
+# Native DesignIR intentionally omits CSS properties whose authored value is
+# the CSS initial/inherited default. Treat those omissions as equivalent only
+# for the documented defaults; an authored non-default value must still be
+# present and equal in the native style.
+CSS_INITIAL_EQUIVALENTS = {
+    "font-style": {"normal"},
+    "text-align": {"start", "left"},
+    "letter-spacing": {"normal", "0px"},
+    "line-height": {"normal"},
+    "text-transform": {"none"},
+    "text-decoration-line": {"none"},
+    "white-space": {"normal"},
+}
+
 PROMOTION_THRESHOLDS = {
     "structural": 0.99,
     "geometry": 0.98,
@@ -131,6 +145,7 @@ class BrowserNode:
     attributes: dict[str, str]
     bounds: tuple[float, float, float, float] | None
     styles: dict[str, str]
+    backend_node_id: int | None = None
 
 
 @dataclass
@@ -142,6 +157,7 @@ class NativeNode:
     parent_anchor: str | None
     style: dict[str, Any]
     bounds: tuple[float, float, float, float] | None
+    backend_node_id: int | None = None
 
 
 def sha256_file(path: Path) -> str:
@@ -238,6 +254,7 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
     types = raw_nodes.get("nodeType", [])
     names = raw_nodes.get("nodeName", [])
     values = raw_nodes.get("nodeValue", [])
+    backend_node_ids = raw_nodes.get("backendNodeId", [])
     raw_attributes = raw_nodes.get("attributes", [])
     children: dict[int, list[int]] = {}
     for index, parent in enumerate(parents):
@@ -302,6 +319,12 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
             attributes=attrs,
             bounds=bounds,
             styles=styles,
+            backend_node_id=(
+                int(backend_node_ids[index])
+                if index < len(backend_node_ids)
+                and isinstance(backend_node_ids[index], int)
+                and backend_node_ids[index] > 0
+                else None),
         ))
     return result
 
@@ -341,6 +364,11 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
             parent_anchor=parent,
             style=node.get("style") if isinstance(node.get("style"), dict) else {},
             bounds=layout_by_anchor.get(anchor),
+            backend_node_id=(
+                int(node.get("attributes", {}).get("backend_node_id"))
+                if isinstance(node.get("attributes"), dict)
+                and str(node.get("attributes", {}).get("backend_node_id", "")).isdigit()
+                else None),
         ))
         for child in node.get("children", []):
             if isinstance(child, dict):
@@ -354,6 +382,9 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
 
 def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
     score = 0.0
+    if (browser.backend_node_id is not None
+            and browser.backend_node_id == native.backend_node_id):
+        score += 100.0
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
         score += 5.0
@@ -376,6 +407,9 @@ def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
 
 
 def has_identity_signal(browser: BrowserNode, native: NativeNode) -> bool:
+    if (browser.backend_node_id is not None
+            and browser.backend_node_id == native.backend_node_id):
+        return True
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
         return True
@@ -411,6 +445,29 @@ def match_nodes(
         node for index, node in enumerate(browser) if index not in used_browser]
     extra = [node for index, node in enumerate(native) if index not in used_native]
     return matches, missing, extra
+
+
+def comparable_native_nodes(native: list[NativeNode]) -> tuple[list[NativeNode], list[NativeNode]]:
+    """Split native nodes into browser-element comparables and representation wrappers.
+
+    Chromium's DOM snapshot reader intentionally exposes element nodes only;
+    native DesignIR also contains synthetic frame roots, html/body capture
+    wrappers, and explicit text children. Counting those implementation nodes
+    as unmatched browser elements makes an exact element join look like a
+    structural failure. Keep them in the report as ignored representation
+    nodes, but exclude them from precision/recall.
+    """
+    ignored_names = {"html", "body"}
+    comparable: list[NativeNode] = []
+    ignored: list[NativeNode] = []
+    for node in native:
+        if (node.node_type.lower() == "text"
+                or node.anchor == "browser:root"
+                or node.name.lower() in ignored_names):
+            ignored.append(node)
+        else:
+            comparable.append(node)
+    return comparable, ignored
 
 
 def relative_error(reference: float, candidate: float) -> float:
@@ -473,7 +530,10 @@ def typography_metrics(
             if not browser_value:
                 continue
             comparable += 1
-            if native_value and browser_value == native_value:
+            if (native_value and browser_value == native_value) or (
+                    not native_value
+                    and browser_value in CSS_INITIAL_EQUIVALENTS.get(
+                        browser_key, set())):
                 equal += 1
             else:
                 differences.append({
@@ -889,6 +949,9 @@ def compare_one(
     browser_flat = browser_nodes(browser_snapshot)
     native_flat = native_nodes(native_doc, native_layout_doc)
     matches, missing, extra = match_nodes(browser_flat, native_flat)
+    comparable_native, ignored_native = comparable_native_nodes(native_flat)
+    comparable_native_anchors = {node.anchor for node in comparable_native}
+    extra = [node for node in extra if node.anchor in comparable_native_anchors]
     matched_parent_by_browser = {
         browser.index: native.anchor for browser, native, _ in matches}
     parentage_errors = []
@@ -902,7 +965,7 @@ def compare_one(
                 "actual_native_parent": native.parent_anchor,
             })
     denominator = max(1, len(browser_flat))
-    precision_denominator = max(1, len(native_flat))
+    precision_denominator = max(1, len(comparable_native))
     structurally_valid_matches = max(0, len(matches) - len(parentage_errors))
     recall = structurally_valid_matches / denominator
     precision = structurally_valid_matches / precision_denominator
@@ -919,6 +982,12 @@ def compare_one(
         "incorrect_parentage": parentage_errors,
         "missing_count": len(missing),
         "extra_count": len(extra),
+        "ignored_representation_node_count": len(ignored_native),
+        "ignored_representation_nodes": [
+            {"anchor": node.anchor, "type": node.node_type, "name": node.name,
+             "text": node.text}
+            for node in ignored_native
+        ],
         "missing": [
             {"index": node.index, "tag": node.tag, "text": node.text}
             for node in missing

@@ -105,6 +105,71 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(len(missing), 1)
         self.assertIn("title", {match[1].anchor for match in matches})
 
+    def test_backend_node_id_matches_element_to_element_before_text_heuristics(self) -> None:
+        strings = ["DIV", "#text", "Gain", "display", "block"]
+        snapshot = {
+            "strings": strings,
+            "computedStyleNames": ["display"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0],
+                    "nodeType": [1, 3],
+                    "nodeName": [0, 1],
+                    "nodeValue": [-1, 2],
+                    "backendNodeId": [35, 36],
+                    "attributes": [[], []],
+                },
+                "layout": {
+                    "nodeIndex": [0],
+                    "bounds": [[0, 0, 100, 40]],
+                    "styles": [[4]],
+                },
+            }],
+        }
+        browser = LAB.browser_nodes(snapshot)
+        ir = {
+            "root": {
+                "type": "frame",
+                "name": "div",
+                "stable_anchor_id": "root",
+                "attributes": {"backend_node_id": "35"},
+                "children": [{
+                    "type": "text",
+                    "name": "#text",
+                    "content": "Gain",
+                    "stable_anchor_id": "text",
+                    "attributes": {"backend_node_id": "36"},
+                    "children": [],
+                }],
+            },
+        }
+        layout = {"views": [
+            {"anchor_id": "root", "x": 0, "y": 0, "width": 100, "height": 40},
+            {"anchor_id": "text", "x": 0, "y": 0, "width": 30, "height": 20},
+        ]}
+        native = LAB.native_nodes(ir, layout)
+        matches, missing, extra = LAB.match_nodes(browser, native)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0][0].backend_node_id, 35)
+        self.assertEqual(matches[0][1].backend_node_id, 35)
+        self.assertEqual(len(missing), 0)
+        self.assertEqual(len(extra), 1)
+
+    def test_representation_nodes_are_not_structural_element_extras(self) -> None:
+        native = [
+            LAB.NativeNode("browser:root", "frame", "Browser-evaluated HTML", "", None, {}, None),
+            LAB.NativeNode("html", "frame", "html", "", None, {}, None),
+            LAB.NativeNode("body", "frame", "body", "", None, {}, None),
+            LAB.NativeNode("panel", "frame", "main", "", None, {}, None),
+            LAB.NativeNode("panel-text", "text", "#text", "Panel", "panel", {}, None),
+        ]
+        comparable, ignored = LAB.comparable_native_nodes(native)
+        self.assertEqual([node.anchor for node in comparable], ["panel"])
+        self.assertEqual(
+            [node.anchor for node in ignored],
+            ["browser:root", "html", "body", "panel-text"],
+        )
+
     @requires_pillow
     def test_visual_similarity_is_exact_for_equal_images(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -143,6 +208,24 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(metrics["score"], 0.0)
         self.assertEqual(
             metrics["rows"][0]["differences"][0]["candidate"], "<missing>")
+
+    def test_css_initial_typography_omissions_are_equivalent(self) -> None:
+        browser = LAB.BrowserNode(
+            1, "span", -1, "Gain", {}, (0, 0, 40, 20), {
+                "font-style": "normal",
+                "text-align": "start",
+                "letter-spacing": "normal",
+                "line-height": "normal",
+                "text-transform": "none",
+                "text-decoration-line": "none",
+                "white-space": "normal",
+            })
+        native = LAB.NativeNode(
+            "gain", "text", "span", "Gain", None, {}, (0, 0, 40, 20))
+        metrics = LAB.typography_metrics([(browser, native, 4.0)])
+        self.assertEqual(metrics["comparable_properties"], 7)
+        self.assertEqual(metrics["equal_properties"], 7)
+        self.assertEqual(metrics["score"], 1.0)
 
     def test_capture_extent_uses_reference_not_responsive_viewport(self) -> None:
         capture = {
