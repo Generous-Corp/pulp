@@ -56,7 +56,15 @@ def main() -> int:
         if ("run_loss_capability_probe()" not in source or
                 "loss_probe_provider.release();" not in source or
                 "kill(child, SIGKILL);" not in source or
-                "poll(&descriptor, 1, 8'000)" not in source):
+                "poll(&descriptor, 1, 8'000)" not in source or
+                "setpgid(0, 0)" not in source or
+                "kill(-child, SIGKILL)" not in source or
+                'open("/dev/null", O_WRONLY)' not in source or
+                "FD_CLOEXEC" not in source or
+                "O_NONBLOCK" not in source or
+                "PR_SET_PDEATHSIG" not in source or
+                "getppid() == 1" not in source or
+                "wait_for_child(child, child_status)" not in source):
             print("typed unavailable probe watchdog control failed", file=sys.stderr)
             return 1
         if "const auto abandon_loss_session" not in source or source.count(
