@@ -58,6 +58,9 @@ struct Params { in_ch:u32, out_ch:u32, B:u32, woff:u32 };
 }
 )wgsl";
 
+constexpr int kProviderUnavailableExit = 77;
+constexpr int kDiagnosticFailureExit = 16;
+
 struct AdapterWait {
     WGPUAdapter adapter = nullptr;
     WGPURequestAdapterStatus status = WGPURequestAdapterStatus_Unknown;
@@ -73,6 +76,12 @@ struct DeviceWait {
 struct MapWait {
     WGPUMapAsyncStatus status = WGPUMapAsyncStatus_Unknown;
     bool done = false;
+};
+
+struct DeviceLossWait {
+    bool observed = false;
+    WGPUDeviceLostReason reason = WGPUDeviceLostReason_Unknown;
+    std::string message;
 };
 
 const char* string_view(WGPUStringView value) {
@@ -119,6 +128,14 @@ void device_callback(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStri
 
 void uncaptured_error(const WGPUDevice*, WGPUErrorType type, WGPUStringView message, void*, void*) {
     std::fprintf(stderr, "wgpu error %d: %s\n", static_cast<int>(type), string_view(message));
+}
+
+void device_lost_callback(const WGPUDevice*, WGPUDeviceLostReason reason, WGPUStringView message,
+                          void* userdata, void*) {
+    auto* loss = static_cast<DeviceLossWait*>(userdata);
+    loss->reason = reason;
+    loss->message = string_view(message);
+    loss->observed = true;
 }
 
 bool process_until(WGPUInstance instance, bool& done) {
@@ -178,6 +195,8 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         SharedIoTerminalStatus terminal_status = SharedIoTerminalStatus::RetiredFailed;
         bool terminal_published = false;
         bool planted_failure = false;
+        bool queue_failed = false;
+        bool planted_queue_error = false;
     };
 
   public:
@@ -325,6 +344,18 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             if (pending->queue_done && pending->queue_status == WGPUQueueWorkDoneStatus_Success &&
                 !pending->map_started)
                 begin_map(*pending);
+            else if (pending->queue_done &&
+                     pending->queue_status != WGPUQueueWorkDoneStatus_Success) {
+                pending->queue_failed = true;
+                queue_error_observed_ = true;
+            }
+            if (physical_drain_ && pending->queue_failed && !pending->terminal_ready) {
+                // Queue status alone is not a retirement proof. Publish only
+                // after the provider-specific drain barrier has crossed the
+                // device-loss boundary; ordinary queue errors stay quarantined.
+                pending->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+                pending->terminal_ready = true;
+            }
             if (pending->map_started && pending->map_done && !pending->terminal_ready)
                 finish_map(*pending);
             if (pending->terminal_ready && !pending->terminal_published)
@@ -336,6 +367,8 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
     }
 
     bool drain() noexcept override {
+        if (device_loss_.observed)
+            physical_drain_ = true;
         for (int attempt = 0; attempt < 10'000 && !pending_.empty(); ++attempt) {
             poll();
             if (!pending_.empty())
@@ -366,6 +399,37 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
                 .gpu_timestamps = false};
     }
 
+    bool device_lost() const noexcept override {
+        return device_loss_.observed;
+    }
+
+    // wgpu-native v24 exposes device destruction as the only portable,
+    // controlled loss trigger. This is a diagnostic hook; production provider
+    // selection and the public ABI never call it.
+    bool force_device_loss_for_diagnostic() noexcept {
+        if (device_ == nullptr || device_loss_.observed || loss_forced_)
+            return false;
+        loss_forced_ = true;
+        wgpuDeviceDestroy(device_);
+        return true;
+    }
+
+    bool device_loss_observed() const noexcept {
+        return device_loss_.observed;
+    }
+
+    WGPUDeviceLostReason device_loss_reason() const noexcept {
+        return device_loss_.reason;
+    }
+
+    bool ordinary_queue_error_is_quarantined() const noexcept {
+        return !physical_drain_;
+    }
+
+    bool queue_error_observed() const noexcept {
+        return queue_error_observed_;
+    }
+
     bool submit_program(Slot& slot, SlotToken token, std::shared_ptr<SharedIoTerminalInbox> inbox,
                         WGPUComputePipeline pipeline, WGPUBindGroupLayout layout) noexcept {
         try {
@@ -375,6 +439,7 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             pending->token = token;
             pending->inbox = std::move(inbox);
             pending->planted_failure = token.stream_sequence == 4;
+            pending->planted_queue_error = token.stream_sequence == 901;
             wgpuQueueWriteBuffer(queue_, slot.input_gpu, 0, slot.input.data(), slot.input.size());
             WGPUBuffer weights = slot.weights_gpu;
             WGPUBuffer input = slot.input_gpu;
@@ -425,7 +490,8 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             callback.mode = WGPUCallbackMode_AllowProcessEvents;
             callback.callback = [](WGPUQueueWorkDoneStatus status, void* userdata, void*) {
                 auto* pending = static_cast<Pending*>(userdata);
-                pending->queue_status = status;
+                pending->queue_status =
+                    pending->planted_queue_error ? WGPUQueueWorkDoneStatus_Error : status;
                 pending->queue_done = true;
             };
             callback.userdata1 = submitted;
@@ -473,6 +539,12 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         vendor_id_ = info.vendorID;
         device_id_ = info.deviceID;
         WGPUDeviceDescriptor device_descriptor{};
+        device_loss_.message.clear();
+        WGPUDeviceLostCallbackInfo device_loss_callback_info{};
+        device_loss_callback_info.mode = WGPUCallbackMode_AllowProcessEvents;
+        device_loss_callback_info.callback = device_lost_callback;
+        device_loss_callback_info.userdata1 = &device_loss_;
+        device_descriptor.deviceLostCallbackInfo = device_loss_callback_info;
         WGPUUncapturedErrorCallbackInfo error_callback{};
         error_callback.callback = uncaptured_error;
         device_descriptor.uncapturedErrorCallbackInfo = error_callback;
@@ -558,6 +630,12 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             pending.terminal_published = true;
     }
 
+    // Callback state must outlive every native handle: raw handles are
+    // declared after it and therefore destroyed first during teardown.
+    DeviceLossWait device_loss_;
+    bool loss_forced_ = false;
+    bool physical_drain_ = false;
+    bool queue_error_observed_ = false;
     WGPUInstance instance_ = nullptr;
     WGPUAdapter adapter_ = nullptr;
     WGPUDevice device_ = nullptr;
@@ -806,6 +884,67 @@ int main() {
     }
     if (!session.release() || successes != 5 || failures != 1 || max_error > 1.0e-5f)
         return 11;
+
+    // Exercise the pinned runtime's controlled loss path in a fresh, bounded
+    // session. The device is destroyed while one submission is outstanding;
+    // the queue callback must become a terminal failure and no output lease
+    // may be acquired from that record. A lost device cannot prove that the
+    // existing prepared state can resume, so re-prime remains typed unavailable.
+    bool loss_callback_registered = true;
+    bool loss_scenario_triggered = false;
+    bool loss_no_output_leases = false;
+    bool ordinary_queue_error_quarantined = false;
+    std::uint32_t loss_terminal_records = 0;
+    WGPUDeviceLostReason loss_reason = WGPUDeviceLostReason_Unknown;
+    {
+        auto loss_provider = WgpuNativeStagedProvider::create();
+        if (loss_provider == nullptr)
+            return kProviderUnavailableExit;
+        auto loss_program = loss_provider->make_program();
+        SharedIoProgramSession loss_session;
+        if (loss_program == nullptr ||
+            !loss_session.prepare({std::move(loss_provider), std::move(loss_program)},
+                                  {.slots = 2,
+                                   .input_bytes_per_slot = 64 * sizeof(float),
+                                   .output_bytes_per_slot = 64 * 3 * sizeof(float),
+                                   .storage_kind = SharedIoArenaProvider::StorageKind::Staged}))
+            return kDiagnosticFailureExit;
+        auto* loss_native = static_cast<WgpuNativeStagedProvider*>(loss_session.owned_provider());
+        auto loss_input = loss_session.acquire_input(901, 0);
+        if (!loss_input || !loss_session.submit({loss_input->token, 0}) ||
+            !loss_native->force_device_loss_for_diagnostic())
+            return kDiagnosticFailureExit;
+        loss_scenario_triggered = true;
+
+        std::optional<SharedIoProgramSession::Completion> loss_completion;
+        for (int attempt = 0; attempt < 10'000 && !loss_native->device_loss_observed(); ++attempt) {
+            (void)loss_session.service(0);
+            if (!loss_native->device_loss_observed())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        (void)loss_session.service(0);
+        const auto premature_completion = loss_session.pop_completion();
+        ordinary_queue_error_quarantined = !premature_completion &&
+                                           loss_native->queue_error_observed() &&
+                                           loss_native->ordinary_queue_error_is_quarantined();
+        if (premature_completion || !ordinary_queue_error_quarantined ||
+            !loss_native->device_loss_observed() || !loss_native->drain())
+            return kDiagnosticFailureExit;
+        for (int attempt = 0; attempt < 10'000 && !loss_completion; ++attempt) {
+            (void)loss_session.service(0);
+            loss_completion = loss_session.pop_completion();
+            if (!loss_completion)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!loss_completion || loss_completion->status != SharedIoTerminalStatus::RetiredFailed)
+            return kDiagnosticFailureExit;
+        ++loss_terminal_records;
+        loss_no_output_leases = !loss_session.acquire_output(*loss_completion);
+        loss_reason = loss_native->device_loss_reason();
+        if (!loss_no_output_leases || !loss_session.discard_completion(*loss_completion) ||
+            !loss_session.release())
+            return kDiagnosticFailureExit;
+    }
     std::printf("loaded_runtime_path=%s\n", loaded.dli_fname);
     std::printf("input_sha256=%s weights_sha256=%s shader_sha256=%s\n",
                 sha256_hex(submitted_inputs.data(), sizeof(submitted_inputs)).c_str(),
@@ -813,6 +952,16 @@ int main() {
                 sha256_hex(kShader, std::strlen(kShader)).c_str());
     std::printf("staged_blocks=%u planted_completion_failures=%u cpu_oracle_max_error=%.9g\n",
                 successes, failures, max_error);
-    std::puts("device_loss_proof=unavailable callback_fallback_proof=unavailable");
+    std::printf("device_loss_callback=%s device_loss_scenario=%s device_loss_reason=%s "
+                "device_loss_terminal_records=%u device_loss_no_output_leases=%s "
+                "device_loss_reprime=unavailable\n",
+                loss_callback_registered ? "registered" : "unavailable",
+                loss_scenario_triggered ? "triggered" : "unavailable",
+                loss_reason == WGPUDeviceLostReason_Destroyed ? "destroyed" : "unknown",
+                loss_terminal_records, loss_no_output_leases ? "true" : "false");
+    std::printf("queue_error_without_loss=%s\n",
+                ordinary_queue_error_quarantined ? "quarantined" : "unknown");
+    std::puts(
+        "device_loss_proof=callback_terminal_no_output_lease callback_fallback_proof=unavailable");
     return 0;
 }

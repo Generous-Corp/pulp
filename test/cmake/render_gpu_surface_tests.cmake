@@ -39,6 +39,18 @@
             TIMEOUT 60)
     endif()
 
+    # Typed verifier controls are pure Python and must run even when the
+    # opt-in native diagnostic is unavailable. Keep the planted positive and
+    # negative controls in the default test graph whenever Python is present.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME pulp-gpu-wgpu-native-staged-verifier-typed-controls
+            COMMAND "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/diagnostics/test_verify_wgpu_native_staged.py"
+                --typed-only)
+        set_tests_properties(pulp-gpu-wgpu-native-staged-verifier-typed-controls PROPERTIES
+            TIMEOUT 30)
+    endif()
+
     add_executable(pulp-test-gpu-surface test_gpu_surface.cpp)
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
