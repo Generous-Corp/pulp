@@ -64,8 +64,9 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
                                     count_call](choc::javascript::ArgumentList args) {
                                        count_call();
                                        js_trace::NativeWrapperScope wrapped;
+                                       const char* trace_function_name = span.c_str();
                                        PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn",
-                                                                   span.c_str());
+                                                                   trace_function_name);
                                        return inner(args);
                                    }));
         return;
@@ -78,7 +79,8 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
                             count_call](const choc::value::Value* args, size_t num_args) {
                 count_call();
                 js_trace::NativeWrapperScope wrapped;
-                PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span.c_str());
+                const char* trace_function_name = span.c_str();
+                PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", trace_function_name);
                 return inner(args, num_args);
             }));
         return;
