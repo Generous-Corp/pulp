@@ -101,9 +101,10 @@ public:
     /// or invoking user completions. The owner strand applies the transition on
     /// its next operation. Implementations with asynchronous callbacks should
     /// override this method rather than calling notify_device_lost() there.
-    virtual void post_device_lost(std::uint64_t generation) {
-        notify_device_lost(generation);
-    }
+    /// Publish-only loss reporting is mandatory for every backend. A default
+    /// implementation could accidentally drain queues or invoke completions on
+    /// a backend callback thread, violating the owner-strand contract above.
+    virtual void post_device_lost(std::uint64_t generation) = 0;
 
     // ── Compute operations ──────────────────────────────────────────────
 

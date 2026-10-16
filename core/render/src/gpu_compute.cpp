@@ -22,6 +22,7 @@
 #include "gpu_compute_pool.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -1045,7 +1046,10 @@ public:
         // a destroyed device as lost during teardown.
         callback_state_->alive.store(false, std::memory_order_release);
         destroying_ = true;
-        release_device_resources();
+        // Destruction is the terminal lifetime boundary. Do not invoke user
+        // completions while members and the owning object are being torn down;
+        // a completion may re-enter the object or release its last owner.
+        release_device_resources(false);
     }
 
     void release_device_resources(bool invoke_callbacks = true) {
@@ -1230,10 +1234,11 @@ public:
         dev_desc.SetDeviceLostCallback(
             kAsyncCallbackMode,
             [state = callback_state_, generation](const wgpu::Device&,
-                                                  wgpu::DeviceLostReason reason, wgpu::StringView) {
+                                                  wgpu::DeviceLostReason reason,
+                                                  wgpu::StringView message) {
                 if (!state->alive.load(std::memory_order_acquire))
                     return;
-                state->publish_loss(generation, static_cast<int>(reason));
+                state->publish_loss(generation, static_cast<int>(reason), message);
             });
 
         adapter_.RequestDevice(
@@ -1349,10 +1354,19 @@ public:
         std::atomic<int> pending_reason{-1};
         mutable std::mutex loss_mutex;
 
-        void publish_loss(std::uint64_t generation, int reason) {
+        static constexpr std::size_t kMessageCapacity = 256;
+
+        void publish_loss(std::uint64_t generation, int reason,
+                          wgpu::StringView message = {}) {
             std::lock_guard<std::mutex> lock(loss_mutex);
             if (generation > pending_generation.load(std::memory_order_relaxed)) {
                 pending_reason.store(reason, std::memory_order_relaxed);
+                const auto count = std::min<std::size_t>(message.length,
+                                                         kMessageCapacity - 1);
+                if (message.data && count != 0)
+                    std::memcpy(pending_message.data(), message.data, count);
+                pending_message[count] = '\0';
+                pending_message_length = count;
                 pending_generation.store(generation, std::memory_order_release);
             }
         }
@@ -1362,13 +1376,18 @@ public:
             pending_generation.store(0, std::memory_order_release);
         }
 
-        std::uint64_t take_loss(int& reason) {
+        std::uint64_t take_loss(int& reason, std::string& message) {
             std::lock_guard<std::mutex> lock(loss_mutex);
             const auto generation = pending_generation.exchange(0, std::memory_order_acq_rel);
-            if (generation != 0)
+            if (generation != 0) {
                 reason = pending_reason.load(std::memory_order_relaxed);
+                message.assign(pending_message.data(), pending_message_length);
+            }
             return generation;
         }
+
+        std::array<char, kMessageCapacity> pending_message{};
+        std::size_t pending_message_length = 0;
     };
 
     struct DeferredCompletion {
@@ -1401,12 +1420,13 @@ public:
 
     void apply_pending_device_loss() {
         int reason = -1;
-        const auto pending_generation = callback_state_->take_loss(reason);
+        std::string message;
+        const auto pending_generation = callback_state_->take_loss(reason, message);
         if (pending_generation == 0)
             return;
         if (pending_generation != device_generation())
             return;
-        handle_device_lost(reason, "reported by device owner");
+        handle_device_lost(reason, message.empty() ? "reported by device owner" : message);
     }
 
     // ── Compute operations ──────────────────────────────────────────────
@@ -3403,14 +3423,21 @@ public:
 
         polling_ = true;
 
-        // The deadline is judged against the poll's ENTRY time, before the event
-        // queue is pumped: a result is on time only if it was already delivered
-        // by the deadline, not if it happens to land in this pump. That keeps
-        // expiry a pure function of the clock — the caller's block deadline has
-        // passed either way, and the substitute has already gone out.
-        const auto now = std::chrono::steady_clock::now();
+        const auto generation_at_entry = device_generation();
         pump_events();
         apply_pending_device_loss();
+
+        // Loss completion may synchronously reinitialize the device and submit
+        // replacement work from a user callback. Leave that new generation for
+        // its own poll; this invocation owns only the queue it entered with.
+        if (device_generation() != generation_at_entry) {
+            polling_ = false;
+            return async_readbacks_.size();
+        }
+
+        // Judge readiness after pumping. A map callback that lands during the
+        // pump is late when the pump itself crosses the audio deadline.
+        const auto now = std::chrono::steady_clock::now();
 
         while (!async_readbacks_.empty()) {
             auto req = async_readbacks_.front();
