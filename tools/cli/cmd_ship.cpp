@@ -1776,9 +1776,13 @@ static int ship_auv3_xcodeproj(const std::vector<std::string>& args,
 
         // Configure is target-agnostic: CMake generates the project, and the
         // build hint selects the conventional AUv3 target that CMake creates.
-        const std::string build_hint =
-            "cmake --build " + shell_quote(output_dir) +
-            " --target " + shell_quote(target_name + "_AUv3");
+        // Keep the follow-up build under the same host lease, QoS, watchdog,
+        // and build-directory lock as every other Pulp build. The absolute
+        // path keeps the hint usable when the caller's cwd is outside root.
+        const auto governed_build = root / "tools" / "ci" / "governed-build.sh";
+        const std::string build_hint = shell_quote(governed_build.string()) + " cmake --build " +
+                                       shell_quote(output_dir) + " --target " +
+                                       shell_quote(target_name + "_AUv3");
 
         if (dry_run) {
             std::cout << "  cmake  = " << configure_cmd << "\n";

@@ -158,10 +158,9 @@ TEST_CASE("WinRT MIDI: sysex7 reassembly framed to F0..F7 for delivery",
 TEST_CASE("WinRT MIDI: per-group sysex7 reassembly keeps interleaved streams separate",
           "[midi][ump][sysex][winrt][pr3781]") {
     // SysEx7 reassembly is per-stream state, and UMP SysEx7
-    // streams can interleave across the 16 UMP groups. The backend keeps one
-    // reassembler per group so a Start on group 1 cannot reset/corrupt an
-    // in-flight stream on group 0 — which a single shared reassembler would.
-    std::array<UmpSysex7Reassembler, 16> r{};
+    // streams can interleave across the 16 UMP groups. The shared reassembler
+    // isolates their partial messages without per-backend state duplication.
+    UmpSysex7Reassembler r;
 
     auto w0 = [](uint8_t group, uint8_t status, uint8_t nbytes,
                  uint8_t b1, uint8_t b2) {
@@ -171,21 +170,21 @@ TEST_CASE("WinRT MIDI: per-group sysex7 reassembly keeps interleaved streams sep
 
     // Group 0: Start with 2 bytes (stream still open).
     std::vector<uint8_t> g0;
-    REQUIRE(feed_collect(r[0], w0(0, 0x1, 2, 0xA0, 0xA1), 0u, g0)
-            == UmpSysex7Reassembler::Status::start);
+    REQUIRE(feed_collect(r, w0(0, 0x1, 2, 0x20, 0x21), 0u, g0) ==
+            UmpSysex7Reassembler::Status::start);
 
     // Group 1: a full single-packet stream arrives in between.
     std::vector<uint8_t> g1;
-    REQUIRE(feed_collect(r[1], w0(1, 0x0, 3, 0xB0, 0xB1), (0xB2u << 24), g1)
-            == UmpSysex7Reassembler::Status::single_packet);
-    REQUIRE(g1 == std::vector<uint8_t>{0xB0, 0xB1, 0xB2});
+    REQUIRE(feed_collect(r, w0(1, 0x0, 3, 0x30, 0x31), (0x32u << 24), g1) ==
+            UmpSysex7Reassembler::Status::single_packet);
+    REQUIRE(g1 == std::vector<uint8_t>{0x30, 0x31, 0x32});
 
     // Group 0: End with 2 bytes — completes the ORIGINAL stream intact,
     // unaffected by group 1's intervening packet.
     std::vector<uint8_t> g0done;
-    REQUIRE(feed_collect(r[0], w0(0, 0x3, 2, 0xA2, 0xA3), 0u, g0done)
-            == UmpSysex7Reassembler::Status::ended);
-    REQUIRE(g0done == std::vector<uint8_t>{0xA0, 0xA1, 0xA2, 0xA3});
+    REQUIRE(feed_collect(r, w0(0, 0x3, 2, 0x22, 0x23), 0u, g0done) ==
+            UmpSysex7Reassembler::Status::ended);
+    REQUIRE(g0done == std::vector<uint8_t>{0x20, 0x21, 0x22, 0x23});
 }
 
 TEST_CASE("WinRT MIDI: MIDI 1.0 short message promotes to MIDI 2.0 UMP for send",

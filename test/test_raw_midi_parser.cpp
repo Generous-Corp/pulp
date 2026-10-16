@@ -595,3 +595,123 @@ TEST_CASE("raw_midi_parser caps runaway sysex at kRawMidiSysexLimit",
     REQUIRE(c.sysex.size() == 1);
     REQUIRE(c.sysex[0] == std::vector<uint8_t>{0xF0, 0x01, 0xF7});
 }
+
+TEST_CASE("raw_midi_parser enforces configured whole-message admission",
+          "[midi][raw_midi_parser][capacity]") {
+    RawMidiParserState state;
+    state.reserve_sysex(5); // includes F0 and F7
+    Captured c;
+    auto on_sysex = [&c](const std::vector<uint8_t>& sx) { c.sysex.push_back(sx); };
+
+    const uint8_t exact[] = {0xF0, 0x01, 0x02, 0x03, 0xF7};
+    parse_raw_midi_bytes(exact, sizeof(exact), state, {}, on_sysex);
+    REQUIRE(c.sysex == std::vector<std::vector<uint8_t>>{{0xF0, 0x01, 0x02, 0x03, 0xF7}});
+    REQUIRE(state.last_drop_reason == RawMidiParserState::DropReason::none);
+
+    const uint8_t over[] = {0xF0, 0x01, 0x02, 0x03, 0x04, 0xF7};
+    parse_raw_midi_bytes(over, sizeof(over), state, {}, on_sysex);
+    REQUIRE(c.sysex.size() == 1);
+    REQUIRE_FALSE(state.sysex_in_progress);
+    REQUIRE(state.sysex_buffer.empty());
+    REQUIRE(state.last_drop_reason == RawMidiParserState::DropReason::overflow);
+
+    const uint8_t recovered[] = {0xF0, 0x7D, 0xF7};
+    parse_raw_midi_bytes(recovered, sizeof(recovered), state, {}, on_sysex);
+    REQUIRE(c.sysex.size() == 2);
+    REQUIRE(c.sysex.back() == std::vector<uint8_t>{0xF0, 0x7D, 0xF7});
+}
+
+TEST_CASE("raw_midi_parser reset preserves capacity and drops partial",
+          "[midi][raw_midi_parser][capacity]") {
+    RawMidiParserState state;
+    state.reserve_sysex(16);
+    const auto capacity = state.sysex_buffer.capacity();
+    const uint8_t partial[] = {0xF0, 0x7D, 0x01};
+    parse_raw_midi_bytes(partial, sizeof(partial), state, {}, {});
+    REQUIRE(state.sysex_in_progress);
+    state.reset_sysex();
+    REQUIRE_FALSE(state.sysex_in_progress);
+    REQUIRE(state.sysex_buffer.empty());
+    REQUIRE(state.sysex_buffer.capacity() == capacity);
+    REQUIRE(state.last_drop_reason == RawMidiParserState::DropReason::reset);
+}
+
+TEST_CASE("raw_midi_parser rejected F0 clears running status",
+          "[midi][raw_midi_parser][capacity]") {
+    RawMidiParserState state;
+    state.reserve_sysex(0);
+    Captured c;
+    auto on_short = [&c](uint8_t s, uint8_t d1, uint8_t d2) { c.shorts.push_back({s, d1, d2}); };
+    const uint8_t bytes[] = {0x90, 0x40, 0xF0, 0x01, 0xF8, 0xF7, 0x7F};
+    parse_raw_midi_bytes(bytes, sizeof(bytes), state, on_short, {});
+    REQUIRE(c.shorts.size() == 2);
+    REQUIRE(c.shorts[0].status == 0xF8);
+    REQUIRE(c.shorts[1].status == 0xF7);
+    REQUIRE_FALSE(state.sysex_in_progress);
+    REQUIRE(state.last_drop_reason == RawMidiParserState::DropReason::overflow);
+}
+
+TEST_CASE("raw_midi_parser default limit admits F7 at exact boundary",
+          "[midi][raw_midi_parser][capacity]") {
+    RawMidiParserState state;
+    Captured c;
+    std::vector<uint8_t> bytes;
+    bytes.reserve(kRawMidiSysexLimit);
+    bytes.push_back(0xF0);
+    bytes.insert(bytes.end(), kRawMidiSysexLimit - 2, 0x01);
+    bytes.push_back(0xF7);
+    parse_raw_midi_bytes(bytes.data(), bytes.size(), state, {},
+                         [&c](const std::vector<uint8_t>& sx) { c.sysex.push_back(sx); });
+    REQUIRE(c.sysex.size() == 1);
+    REQUIRE(c.sysex.front().size() == kRawMidiSysexLimit);
+    REQUIRE(c.sysex.front().front() == 0xF0);
+    REQUIRE(c.sysex.front().back() == 0xF7);
+}
+
+TEST_CASE("raw_midi_parser rejects F7 beyond default whole-message limit",
+          "[midi][raw_midi_parser][capacity]") {
+    RawMidiParserState state;
+    state.reserve_sysex(kRawMidiSysexLimit);
+    std::vector<uint8_t> bytes(kRawMidiSysexLimit + 1, 1);
+    bytes.front() = 0xF0;
+    bytes.back() = 0xF7;
+    std::size_t emitted = 0;
+    const RawMidiSysexCallback on_sysex = [&](const auto&) { ++emitted; };
+    {
+        pulp::test::RtAllocationProbe probe;
+        parse_raw_midi_bytes(bytes.data(), bytes.size(), state, {}, on_sysex);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(emitted == 0);
+    REQUIRE(state.last_drop_reason == RawMidiParserState::DropReason::overflow);
+}
+
+TEST_CASE("raw_midi_parser bounded fragments and overflow recover without allocation",
+          "[midi][raw_midi_parser][capacity][rt-safety]") {
+    RawMidiParserState state;
+    state.reserve_sysex(5);
+    RtRawMidiSink sink;
+    const RawMidiShortCallback on_short = [&](auto s, auto d1, auto d2) {
+        sink.capture_short(s, d1, d2);
+    };
+    const RawMidiSysexCallback on_sysex = [&](const auto& bytes) { sink.capture_sysex(bytes); };
+    const uint8_t start[] = {0xF0, 1};
+    const uint8_t end[] = {2, 0xF8, 3, 0xF7};
+    const uint8_t excess[] = {0xF0, 1, 2, 3, 4, 0xF7};
+    const uint8_t recover[] = {0xF0, 0x7D, 0xF7};
+    {
+        pulp::test::RtAllocationProbe probe;
+        parse_raw_midi_bytes(start, sizeof(start), state, on_short, on_sysex);
+        parse_raw_midi_bytes(end, sizeof(end), state, on_short, on_sysex);
+        parse_raw_midi_bytes(excess, sizeof(excess), state, on_short, on_sysex);
+        REQUIRE(state.last_drop_reason == RawMidiParserState::DropReason::overflow);
+        parse_raw_midi_bytes(recover, sizeof(recover), state, on_short, on_sysex);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(sink.sysex_count == 2);
+    REQUIRE(sink.sysex[0].size == 5);
+    REQUIRE(sink.sysex[0].payload[4] == 0xF7);
+    REQUIRE(sink.sysex[1].size == 3);
+    REQUIRE(sink.short_count == 1);
+    REQUIRE(sink.shorts[0].status == 0xF8);
+}

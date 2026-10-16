@@ -50,7 +50,9 @@ enum class GovernedBuildOutput { Spinner, Quiet };
 // This leaves configure policy and command-specific failure handling to callers.
 int run_governed_cmake_build(const fs::path& project_root, const fs::path& build_dir,
                              const std::vector<std::string>& args, const std::string& command_kind,
-                             GovernedBuildOutput output = GovernedBuildOutput::Spinner);
+                             GovernedBuildOutput output = GovernedBuildOutput::Spinner,
+                             const std::string& spinner_label = "Building",
+                             const std::string& lease_error_prefix = {});
 
 // The build-governance tier that is currently active on this host — the model a
 // build's parallelism is bounded by. Reported by `pulp status` so a user can see

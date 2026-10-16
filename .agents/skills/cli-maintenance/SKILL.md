@@ -358,6 +358,12 @@ a host whose role QoS is background. Against a class-aware tartci
 `tools/ci/governed-build.sh`; `test/test_cli_tartci_lease.cpp` pins both
 classes against a fake class-aware tartci.
 
+The checkout and development SDK installers (`tools/cli/cli_sdk.cpp` and
+`tools/cli/local_sdk_install.cpp`) must call `run_governed_cmake_build` for
+their install targets. Pass their existing spinner label and lease-error
+prefix through the helper so user-facing diagnostics remain stable while
+lease, QoS, watchdog, lock, and bounded-parallelism policy stays centralized.
+
 ### Build-shaped commands consult the focused-build selector
 
 `pulp build`, `pulp dev`, `pulp loop`, `pulp test`, and `pulp-cpp build --watch`
@@ -3361,11 +3367,13 @@ pulp ship auv3-xcodeproj <target> --sdk iphoneos     # device
 pulp ship auv3-xcodeproj <target> --sdk macosx       # macOS lane
 pulp ship auv3-xcodeproj <target> --output build/xcode/MyPlugin
 pulp ship auv3-xcodeproj <target> --open             # open in Xcode after gen
-pulp ship auv3-xcodeproj <target> --dry-run          # print cmake invocation + build hint
+pulp ship auv3-xcodeproj <target> --dry-run          # print cmake invocation + governed build hint
 ```
 
-Default output dir is `build/xcode/<target>-<sdk>`. The generated build
-hint targets `<target>_AUv3`; configure does not use a separate
+Default output dir is `build/xcode/<target>-<sdk>`. The generated build hint
+invokes the repository's `tools/ci/governed-build.sh` with the
+`<target>_AUv3` target, preserving the host lease, QoS, watchdog, and
+build-directory lock for the follow-up build. Configure does not use a separate
 target-selector cache variable. iOS SDKs include
 `tools/cmake/ios.toolchain.cmake` with the correct `IOS_PLATFORM` (OS for
 device, SIMULATOR64 for simulator). macOS projects also contain the runnable

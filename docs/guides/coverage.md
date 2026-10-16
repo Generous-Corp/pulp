@@ -331,6 +331,12 @@ Fix: `rm -rf build-coverage/` and re-run. This guard exists because the
 silent version of this failure produced empty profdata that looked like
 a test/instrumentation bug. Issue #570 has the details.
 
+If the coverage build itself fails, the script prints every error line it
+finds in the full build log (stderr in `build-coverage/build.log`, stdout in
+`build-coverage/build.stdout.log`) before the last 200 stderr lines. Read the
+error lines first: under a parallel build the tail is usually warnings from
+sibling targets that kept compiling after the first failure.
+
 If you see `_deps/catch2-build/src/src/catch2/...: No such file or
 directory` spam on stderr, you're on an older checkout — the canonical
 exclude regex in `scripts/run_coverage.sh` filters these. Update to the

@@ -27,6 +27,93 @@ TEST_CASE("UmpBuffer sort + clear", "[midi][ump]") {
     REQUIRE(buf.empty());
 }
 
+TEST_CASE("UmpBuffer preserves packet arrival order at equal offsets",
+          "[midi][ump][ordering][rt-safety]") {
+    UmpBuffer buffer;
+    buffer.reserve(512);
+    buffer.set_realtime_capacity_limit(true);
+    for (int i = 0; i < 256; ++i) {
+        UmpPacket packet;
+        packet.words[0] = static_cast<std::uint32_t>(i);
+        packet.word_count = 1;
+        REQUIRE(buffer.add(packet, i % 3));
+    }
+    {
+        pulp::test::RtAllocationProbe probe;
+        buffer.sort();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    std::size_t position = 0;
+    for (int offset = 0; offset < 3; ++offset) {
+        for (int sequence = offset; sequence < 256; sequence += 3) {
+            REQUIRE(buffer[position].sample_offset == offset);
+            REQUIRE(buffer[position].packet.words[0] == sequence);
+            ++position;
+        }
+    }
+    // Repeated sorting and reuse retain the original equal-offset order.
+    buffer.sort();
+    REQUIRE(buffer[0].packet.words[0] == 0);
+    REQUIRE(buffer[1].packet.words[0] == 3);
+}
+
+TEST_CASE("UmpBuffer copies retain prepared realtime sorting storage",
+          "[midi][ump][ordering][rt-safety]") {
+    UmpBuffer source;
+    source.reserve(256);
+    source.set_realtime_capacity_limit(true);
+    source.add(UmpPacket::note_on_2(0, 0, 60, 0x8000), 10);
+    UmpBuffer copied(source);
+    UmpBuffer assigned;
+    assigned = source;
+    for (auto* buffer : {&copied, &assigned}) {
+        for (std::size_t i = buffer->size(); i < buffer->capacity(); ++i)
+            REQUIRE(buffer->add(UmpPacket::note_on_2(0, 0, 61, 0x8000), 0));
+        {
+            pulp::test::RtAllocationProbe probe;
+            buffer->sort();
+            REQUIRE_FALSE(buffer->add(UmpPacket{}));
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
+        REQUIRE(buffer->dropped_event_count() == 1);
+        REQUIRE((*buffer)[buffer->size() - 1].packet.note_number() == 60);
+    }
+}
+
+TEST_CASE("UmpBuffer growth prepares sorting before realtime admission",
+          "[midi][ump][ordering][rt-safety]") {
+    for (int overload = 0; overload < 3; ++overload) {
+        UmpBuffer buffer;
+        const auto initial_capacity = buffer.capacity();
+        for (std::size_t i = 0; i <= initial_capacity; ++i) {
+            UmpPacket packet;
+            packet.words[0] = static_cast<std::uint32_t>(i);
+            UmpEvent event{packet, static_cast<int>(i % 3)};
+            if (overload == 0)
+                REQUIRE(buffer.add(event));
+            else if (overload == 1)
+                REQUIRE(buffer.add(std::move(event)));
+            else
+                REQUIRE(buffer.add(packet, event.sample_offset));
+        }
+        const auto prepared_capacity = buffer.capacity();
+        REQUIRE(prepared_capacity > initial_capacity);
+        buffer.set_realtime_capacity_limit(true);
+        {
+            pulp::test::RtAllocationProbe probe;
+            buffer.sort();
+            buffer.clear();
+            for (std::size_t i = 0; i < prepared_capacity; ++i)
+                REQUIRE(buffer.add(UmpPacket{}, static_cast<int>(i % 3)));
+            buffer.sort();
+            buffer.sort();
+            REQUIRE_FALSE(buffer.add(UmpPacket{}));
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
+        REQUIRE(buffer.capacity() == prepared_capacity);
+    }
+}
+
 TEST_CASE("UmpBuffer accepts moved events and exposes const iteration",
           "[midi][ump]") {
     UmpBuffer buf;

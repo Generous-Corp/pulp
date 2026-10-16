@@ -997,6 +997,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
 - Determine whether a browser/native residual comes from html/body/viewport background registration outside the imported root. → `tools/import-validation/viewport_background_diagnostic.py`
   - ⚠ **Cannot see:** Does not score fidelity or identify the CSS declaration that caused a background mismatch; pair it with the authenticated capture receipt and residual profile.
+- Decompose an equal-sized browser/native PNG residual into heuristic background, edge, interior, mask/placement, and outside-root buckets during importer evidence calibration. → `tools/import-validation/visual_residual_diagnostic.py`
+  - ⚠ **Cannot see:** Heuristic and non-causal. It does not prove Chromium/Skia pixel parity or identify a renderer cause; use authenticated same-path receipts and the canonical whole-frame comparator as authoritative evidence.
 
 **design-import** — get a design into Pulp
 - Run the browser capture integration harness against an imported panel. → `tools/import-design/browser_capture/run_integration.mjs`

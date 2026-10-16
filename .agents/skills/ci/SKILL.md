@@ -899,6 +899,17 @@ nightly `schedule`, and on `workflow_dispatch`. Consequences worth holding:
 - When reading history, filter runs by `event` — mixing `pull_request` runs into
   a health count inflates the pass rate with runs that skipped the build.
 
+## A red Linux coverage leg: read which step actually failed
+
+`Coverage report (Linux, Clang)` goes red when its C++ build fails, because
+"Verify Cobertura XML exists" then finds no XML. The Python tools pass is
+`continue-on-error`, so a list of failing `tools/scripts/test_*.py` there is
+real but is not what turned the job red. When the C++ build fails,
+`scripts/run_coverage.sh` prints the error lines from the full build log
+(`build.log` for stderr, `build.stdout.log` for stdout) before the last 200
+lines; under a parallel build, the tail alone is warnings from sibling
+targets that kept compiling.
+
 ## Compiler coverage is asymmetric — GCC sees only `core/**`
 
 Before you read a green PR as "this compiles everywhere": every Linux lane in PR
