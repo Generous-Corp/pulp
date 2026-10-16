@@ -853,15 +853,17 @@ void write_json(const std::string& path, double timer_overhead_ns) {
     std::vector<Section> sections;
     for (int B : kBlockSizes) {
         Section mean{"Mean ns/frame, B=" + std::to_string(B), "ns/frame", {}};
+        Section p50{"Block p50 ns/frame, B=" + std::to_string(B), "ns/frame", {}};
         Section p99{"Worst-block p99 ns/frame, B=" + std::to_string(B), "ns/frame", {}};
         Section worst{"Worst-block max ns/frame, B=" + std::to_string(B), "ns/frame", {}};
         for (const auto& r : g_processor_results) {
             if (r.block != B) continue;
             mean.values.emplace_back(r.name, r.mean_ns);
+            p50.values.emplace_back(r.name, r.p50_ns);
             p99.values.emplace_back(r.name, r.p99_ns);
             worst.values.emplace_back(r.name, r.max_ns);
         }
-        for (auto* s : {&mean, &p99, &worst})
+        for (auto* s : {&mean, &p50, &p99, &worst})
             if (!s->values.empty()) sections.push_back(std::move(*s));
     }
     std::map<int, Section> kernels;
