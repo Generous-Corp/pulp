@@ -536,6 +536,13 @@ knowing before you touch that file:
   precision/recall. Keep the visual threshold intact: text antialiasing can
   dominate the pixel diff even when structure and geometry are exact.
 
+  The authored-fixture validator also records the native Skia PNG itself, its
+  hash and size, and the browser/native comparator result. This closes the
+  earlier measurement mistake of hashing generated JavaScript as if it were a
+  render receipt. A real PNG and repeated identical hashes prove capture
+  authenticity and determinism; they still do not prove Chromium/Skia pixel
+  parity, font/rasterizer provenance, lifecycle safety, or importer capability.
+
 - `pulp-design-ir-observe` replays input headlessly: ordered `--click x,y`,
   `--drag x1,y1:x2,y2` and `--key <name>` (`tab`/`shift+tab` traverse focus
   as the window hosts do; other keys go to the focused view) run after layout
