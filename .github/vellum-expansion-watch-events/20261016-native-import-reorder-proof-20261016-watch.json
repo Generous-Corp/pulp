@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261016-native-import-reorder-proof-20261016-watch",
+  "created_at": "2026-10-16T02:37:32Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "design-import-refactor: add native materializer coverage for CSS order and stable anchor identity; test-only evidence uses existing Pulp DesignIR and Skia/Dawn materializer, introduces no importer, Chromium, rendering, packaging, or Vellum authority change",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-native-common",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
