@@ -995,6 +995,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 - Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`
   - ⚠ **Cannot see:** Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
+- Determine whether a browser/native residual comes from html/body/viewport background registration outside the imported root. → `tools/import-validation/viewport_background_diagnostic.py`
+  - ⚠ **Cannot see:** Does not score fidelity or identify the CSS declaration that caused a background mismatch; pair it with the authenticated capture receipt and residual profile.
 
 **design-import** — get a design into Pulp
 - Run the browser capture integration harness against an imported panel. → `tools/import-design/browser_capture/run_integration.mjs`

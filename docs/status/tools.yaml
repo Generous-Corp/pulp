@@ -810,6 +810,17 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: viewport-background-diagnostic
+  path: tools/import-validation/viewport_background_diagnostic.py
+  category: visual-compare
+  use_when: Determine whether a browser/native residual comes from html/body/viewport background registration outside the imported root.
+  invocation: python3 tools/import-validation/viewport_background_diagnostic.py <reference.png> <candidate.png> --root-bounds X Y WIDTH HEIGHT [--json report.json]
+  inputs: Reference and candidate RGBA/PNG renders plus the imported root bounds in image pixels.
+  outputs: Corner colors and modal/mean/differing-pixel summaries inside and outside the root; diagnostic only.
+  caveat: Does not score fidelity or identify the CSS declaration that caused a background mismatch; pair it with the authenticated capture receipt and residual profile.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: fidelity-diff
   path: tools/import-design/fidelity_diff.py
   category: visual-compare
