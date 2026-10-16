@@ -95,11 +95,14 @@ class UpdateTests(unittest.TestCase):
 
     def test_shipyard_bump_lists_assets(self) -> None:
         generate.fetch_shipyard_assets = lambda repo, tag: {"shipyard-linux-x64": "c" * 64}
-        table = update.update(self.root, "shipyard", "v0.300.0", None, "2026-10-14")
-        self.assertIn("| shipyard pin | all | v0.269.1 | v0.300.0 |", table)
-        self.assertIn("| shipyard install.sh | all | c6ad3645c90c | eeeeeeeeeeee |", table)
-        self.assertIn("| shipyard asset shipyard-linux-x64 | shipyard-linux-x64 | 327dd4b5f72a | cccccccccccc |", table)
-        self.assertTrue(any("shipyard-macos-arm64.dmg | 73c426a8a6f9 | absent" in row for row in table))
+        pin = generate.load()[0]["shipyard"]
+        table = update.update(self.root, "shipyard", "v9.0.0", None, "2026-10-14")
+        self.assertIn(f"| shipyard pin | all | {pin['version']} | v9.0.0 |", table)
+        self.assertIn(f"| shipyard install.sh | all | {pin['installer_sha256'][:12]} | eeeeeeeeeeee |", table)
+        linux = pin["assets"]["shipyard-linux-x64"][:12]
+        self.assertIn(f"| shipyard asset shipyard-linux-x64 | shipyard-linux-x64 | {linux} | cccccccccccc |", table)
+        dmg = pin["assets"]["shipyard-macos-arm64.dmg"][:12]
+        self.assertTrue(any(f"shipyard-macos-arm64.dmg | {dmg} | absent" in row for row in table))
 
     def test_refusals(self) -> None:
         before = self.snapshot()
