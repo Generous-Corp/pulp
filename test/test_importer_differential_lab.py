@@ -283,6 +283,45 @@ class DifferentialLabTests(unittest.TestCase):
         }
         self.assertEqual(LAB.capture_logical_size(capture), (1440, 1200))
 
+    def test_geometry_metrics_preserves_signed_residuals_and_root(self) -> None:
+        browser = [
+            LAB.BrowserNode(0, "main", -1, "", {}, (10, 20, 100, 40), {}),
+            LAB.BrowserNode(1, "span", 0, "Gain", {}, (20, 30, 40, 10), {}),
+        ]
+        native = [
+            LAB.NativeNode("root", "frame", "main", "", None, {}, (11, 18, 102, 39)),
+            LAB.NativeNode("gain", "text", "span", "Gain", "root", {}, (19, 31, 40, 11)),
+        ]
+        metrics = LAB.geometry_metrics([
+            (browser[0], native[0], 1.0), (browser[1], native[1], 1.0)])
+        self.assertEqual(metrics["rows"][0]["signed_delta"],
+                         {"x": 1, "y": -2, "width": 2, "height": -1})
+        self.assertEqual(metrics["root_residual"]["native_anchor"], "root")
+        self.assertEqual(metrics["signed_delta_summary"]["x"]["median"], 0.0)
+
+    def test_viewport_dpr_audit_rejects_wrong_pixel_extent(self) -> None:
+        capture, native_capture, _source_sha256 = self._bound_captures()
+        for item in (capture, native_capture):
+            item["reference"] = {
+                "logical_width": 1280, "logical_height": 800,
+                "device_scale_factor": 2,
+            }
+        audit = LAB.viewport_dpr_audit(
+            capture, native_capture, (1280, 800), (2559, 1600))
+        self.assertFalse(audit["ok"])
+        self.assertFalse(audit["checks"]["render_size_matches_dpr"])
+
+    def test_viewport_dpr_audit_accepts_matching_root_contract(self) -> None:
+        capture, native_capture, _source_sha256 = self._bound_captures()
+        for item in (capture, native_capture):
+            item["reference"] = {
+                "logical_width": 1280, "logical_height": 800,
+                "device_scale_factor": 2,
+            }
+        audit = LAB.viewport_dpr_audit(
+            capture, native_capture, (1280, 800), (2560, 1600))
+        self.assertTrue(audit["ok"])
+
     @staticmethod
     def _bound_captures() -> tuple[dict, dict, str]:
         source_sha256 = "a" * 64

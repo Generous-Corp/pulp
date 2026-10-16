@@ -525,6 +525,8 @@ def geometry_metrics(
         if not browser.bounds or not native.bounds:
             continue
         labels = ("x", "y", "width", "height")
+        signed_delta = [candidate - reference
+                        for reference, candidate in zip(browser.bounds, native.bounds)]
         component_errors = [
             relative_error(reference, candidate)
             for reference, candidate in zip(browser.bounds, native.bounds)
@@ -536,14 +538,82 @@ def geometry_metrics(
             "native_anchor": native.anchor,
             "browser": dict(zip(labels, browser.bounds)),
             "candidate": dict(zip(labels, native.bounds)),
+            # Keep the direction visible. An absolute score can hide a
+            # systematic offset by collapsing +N and -N into the same value.
+            "signed_delta": dict(zip(labels, [round(v, 6) for v in signed_delta])),
+            "max_abs_delta": round(max(abs(v) for v in signed_delta), 6),
             "mean_relative_error": round(mean_error, 6),
         })
     mean_error = statistics.fmean(errors) if errors else 1.0
+    signed_columns = {
+        label: [row["signed_delta"][label] for row in rows]
+        for label in ("x", "y", "width", "height")
+    }
+    signed_summary = {
+        label: {
+            "mean": round(statistics.fmean(values), 6) if values else None,
+            "median": round(statistics.median(values), 6) if values else None,
+            "min": min(values) if values else None,
+            "max": max(values) if values else None,
+        }
+        for label, values in signed_columns.items()
+    }
+    root_indices = {browser.index for browser, _native, _score in matches
+                    if browser.parent < 0}
+    root_rows = [row for row in rows if row["browser_node"] in root_indices]
     return {
         "score": round(max(0.0, 1.0 - mean_error), 6),
         "matched_bounds": len(rows),
         "mean_relative_error": round(mean_error, 6),
+        "signed_delta_summary": signed_summary,
+        "root_residual": root_rows[0] if root_rows else None,
         "rows": rows,
+    }
+
+
+def viewport_dpr_audit(
+    capture: dict[str, Any], native_capture: dict[str, Any],
+    expected_logical_size: tuple[int, int], actual_render_size: tuple[int, int],
+) -> dict[str, Any]:
+    """Record the coordinate contract used by a comparison.
+
+    The audit is diagnostic, but it is deliberately strict about missing or
+    contradictory provenance. A signed geometry residual is not actionable if
+    the two captures used different roots, viewport extents, or device scale.
+    """
+    reference = capture.get("reference", {})
+    native_reference = native_capture.get("reference", {})
+    try:
+        dpr = float(reference["device_scale_factor"])
+        native_dpr = float(native_reference.get("device_scale_factor", dpr))
+        logical = (int(reference["logical_width"]), int(reference["logical_height"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LabError("capture is missing a valid logical extent or device scale") from exc
+    if dpr <= 0 or native_dpr <= 0:
+        raise LabError("capture device scale factor must be positive")
+    resolved = capture.get("provenance", {}).get("viewport", {}).get("resolved", {})
+    native_resolved = native_capture.get("provenance", {}).get("viewport", {}).get("resolved", {})
+    resolved_size = (resolved.get("width"), resolved.get("height"))
+    native_resolved_size = (native_resolved.get("width"), native_resolved.get("height"))
+    expected_pixels = (round(logical[0] * dpr), round(logical[1] * dpr))
+    checks = {
+        "logical_size_matches_request": logical == expected_logical_size,
+        "native_logical_size_matches_browser": native_reference.get("logical_width") == logical[0]
+        and native_reference.get("logical_height") == logical[1],
+        "dpr_matches_native": dpr == native_dpr,
+        "resolved_viewport_matches_native": resolved_size == native_resolved_size,
+        "render_size_matches_dpr": actual_render_size == expected_pixels,
+    }
+    return {
+        "schema": "pulp-importer-viewport-dpr-audit-v1",
+        "logical_size": list(logical),
+        "resolved_viewport": [resolved_size[0], resolved_size[1]],
+        "device_scale_factor": dpr,
+        "native_device_scale_factor": native_dpr,
+        "expected_pixel_size": list(expected_pixels),
+        "actual_render_size": list(actual_render_size),
+        "checks": checks,
+        "ok": all(checks.values()),
     }
 
 
@@ -977,6 +1047,17 @@ def compare_one(
             or render_receipt.get("ok") is not True):
         raise LabError("native render receipt did not prove a successful Skia render")
 
+    try:
+        from PIL import Image
+        with Image.open(native_render) as image:
+            actual_render_size = image.size
+    except (ImportError, OSError) as exc:
+        raise LabError("native render could not be opened for viewport/DPR audit") from exc
+    viewport_dpr = viewport_dpr_audit(
+        capture, native_capture, (viewport_width, viewport_height), actual_render_size)
+    if not viewport_dpr["ok"]:
+        raise LabError("viewport/DPR audit failed: " + json.dumps(viewport_dpr["checks"], sort_keys=True))
+
     for name in (
         ".pulp-browser-capture-v1", "browser.png", "capture.json",
         "dom-snapshot.json", "semantic-report.json", "tokens.json",
@@ -1171,6 +1252,7 @@ def compare_one(
             "geometry": geometry,
             "typography": typography,
             "visual": visual,
+            "viewport_dpr_audit": viewport_dpr,
         },
         "classifications": classifications,
         "promotion": recommendation,
