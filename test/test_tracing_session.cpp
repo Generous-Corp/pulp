@@ -127,8 +127,7 @@ TEST_CASE("attach timer arms without moving ownership before reading generation"
     if (!pulp::runtime::kTracingEnabled)
         return;
 
-    const auto out = std::filesystem::temp_directory_path() /
-                     "pulp-trace-attach-timer.pftrace";
+    const auto out = std::filesystem::temp_directory_path() / "pulp-trace-attach-timer.pftrace";
     std::error_code ec;
     std::filesystem::remove(out, ec);
     ScopedEnvironment path_environment("PULP_TRACE_PATH", out.string());
@@ -137,7 +136,9 @@ TEST_CASE("attach timer arms without moving ownership before reading generation"
     REQUIRE_FALSE(Tracing::active());
     Tracing::attach();
     REQUIRE(Tracing::active());
-    { PULP_TRACE_SCOPE_NAMED("render", "attach_timer_armed"); }
+    {
+        PULP_TRACE_SCOPE_NAMED("render", "attach_timer_armed");
+    }
 
     // The timer must flush and end the session while the attachment remains
     // held. This exercises the same positive-seconds path used by a traced
