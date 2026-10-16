@@ -1,5 +1,5 @@
 {
-  "schema": "pulp-fresh-plugin-validation-v1",
+  "schema": "pulp-fresh-plugin-validation-v2",
   "fixture": "17-fresh-plugin-panel.html",
   "source_sha256": "b39adabbe9f66819c4b43d67bad8b9bd4db56bebd9baf3fa11f4e94213743b11",
   "source_bytes": 3093,
@@ -17,11 +17,24 @@
   },
   "native": {
     "backend": "skia",
-    "artifact_sha256": "5fec00ff037425db487bcd1595c54ec60c7ec1dadae92b1c94205c975cbfec26",
-    "artifact_bytes": 649
+    "artifact_sha256": "a04946cc1947f475016eb81189feb3b8210c6ab9444032598d7b4f021f3ac575",
+    "artifact_bytes": 648,
+    "render_sha256": "71eba62834d5a8a55e7bec7fd8e71d059162f03dc6fea305f5fa0d04504f4c21",
+    "render_bytes": 35881,
+    "comparator": {
+      "reference": "browser.screenshot_sha256",
+      "similarity_percent": 98,
+      "diff_pixels": 6961,
+      "total_pixels": 614400,
+      "mean_error": 1.04048
+    }
   },
   "planted_negative": {
     "mutated_id": "toggle-mutated",
     "browser_capture_rejected": true
+  },
+  "scope": {
+    "behavior": "panel-toggle",
+    "keyed_identity_reorder": "deferred"
   }
 }
