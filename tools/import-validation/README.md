@@ -42,6 +42,10 @@ an authenticated same-path receipt that binds the Chromium and native images to
 the same source, viewport, DPR, and settle policy. They do not establish
 Chromium/Skia pixel parity and do not change the importer or its thresholds.
 
+For the canonical whole-frame residual profile, use
+`diff_against_reference.py`; this companion exists only when a caller has a
+trusted root rectangle and needs spatial/background buckets.
+
 ## Semantic probes
 
 `semantic_probes.sh` complements the pixel-diff pipeline (planning spec,

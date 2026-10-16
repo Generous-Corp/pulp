@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Decompose a Chromium/native image residual into diagnostic regions.
+"""Decompose a Chromium/native image residual into root-aware diagnostic regions.
 
 This tool is deliberately advisory.  It does not change the importer score or
 make a parity decision.  It classifies differing pixels as an edge-band
 residual, shared-foreground interior color differences, mask/placement
 disagreement, or outside-root registration differences.  The labels are
 heuristics, not causal proof that a renderer setting is responsible.
+
+``diff_against_reference.py`` remains the canonical whole-frame residual
+profile (including alpha and translation probes).  This optional companion
+adds spatial root/background buckets for an already-authenticated pair.
 """
 
 from __future__ import annotations
