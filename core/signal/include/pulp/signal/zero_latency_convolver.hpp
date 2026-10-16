@@ -475,15 +475,17 @@ private:
     /// Job list for one period, in order:
     ///   jobs [0, channels)           forward transform of each audio channel's
     ///                                closed frame into its FDL slot
-    ///   jobs [channels, channels+C)  per cell: spectral MAC over the FDL's
-    ///                                lower half, Hermitian mirror, inverse
-    ///                                transform, and the overlap-save extract
+    ///   remaining jobs: per cell, or per destination for a four-channel
+    ///                   true-stereo IR: spectral MAC, Hermitian mirror,
+    ///                   inverse transform, and overlap-save extract
     void run_group_work(Group& g, long budget) {
         if (!g.armed || budget <= 0) return;
         const int np = g.num_partitions;
         const int K = g.fft_size;
         const int L = g.block_len;
         const int half = K / 2;  // Nyquist bin
+        const bool fused_stereo = channels_ == 2 && cell_count_ == 4;
+        const int output_jobs = fused_stereo ? 2 : cell_count_;
         long spent = 0;
 
         while (spent < budget) {
@@ -503,12 +505,16 @@ private:
                 continue;
             }
 
-            const int cell = g.job - channels_;
-            if (cell >= cell_count_) {
+            const int output_job = g.job - channels_;
+            if (output_job >= output_jobs) {
                 g.armed = false;
                 g.has_result = true;
                 break;
             }
+            // Keep fused output in the always-active diagonal cell. The
+            // off-diagonal emit buffers remain zero, so render_chunk and its
+            // routing behavior need no special case.
+            const int cell = fused_stereo ? (output_job == 0 ? 0 : 3) : output_job;
             if (!cell_active(cell)) {
                 std::fill(g.ready[static_cast<std::size_t>(cell)].begin(),
                           g.ready[static_cast<std::size_t>(cell)].end(), SampleType{0});
@@ -519,8 +525,6 @@ private:
             }
 
             auto& acc = g.accum[static_cast<std::size_t>(cell)];
-            const Cell& k = cells_[static_cast<std::size_t>(cell)];
-
             if (g.job_step == 0) {
                 // ── spectral multiply-accumulate over the FDL ──
                 // Partition p covers IR delays [2L + pL, 3L + pL) and consumes
@@ -528,24 +532,49 @@ private:
                 // SAME output range and share one inverse transform. Input and
                 // IR spectra are both Hermitian, so only bins [0, K/2] are
                 // independent; the mirror step below reconstructs the rest.
-                const long unit = detail::SlicedFftPlanT<SampleType>::kMacCost * np;
+                const long unit = detail::SlicedFftPlanT<SampleType>::kMacCost * np *
+                                  (fused_stereo ? 2 : 1);
                 const int remaining = half + 1 - g.job_cursor;
                 const int take = static_cast<int>(
                     std::min<long>((budget - spent) / unit, remaining));
                 if (take <= 0) break;
-                for (int p = 0; p < np; ++p) {
-                    const int slot = (g.slot - p + np) % np;
-                    const std::complex<SampleType>* x =
-                        g.spectra[static_cast<std::size_t>(k.src * np + slot)].data();
-                    const std::complex<SampleType>* h =
-                        g.ir_spectra[static_cast<std::size_t>(cell * np + p)].data();
-                    std::complex<SampleType>* a = acc.data();
-                    if (p == 0)
-                        for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                            a[i] = x[i] * h[i];
-                    else
-                        for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                            a[i] += x[i] * h[i];
+                if (!fused_stereo) {
+                    for (int p = 0; p < np; ++p) {
+                        const int slot = (g.slot - p + np) % np;
+                        const Cell& source = cells_[static_cast<std::size_t>(cell)];
+                        const std::complex<SampleType>* x =
+                            g.spectra[static_cast<std::size_t>(source.src * np + slot)].data();
+                        const std::complex<SampleType>* h =
+                            g.ir_spectra[static_cast<std::size_t>(cell * np + p)].data();
+                        std::complex<SampleType>* a = acc.data();
+                        if (p == 0)
+                            for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                                a[i] = x[i] * h[i];
+                        else
+                            for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                                a[i] += x[i] * h[i];
+                    }
+                } else {
+                    bool first = true;
+                    for (int source_cell = 0; source_cell < cell_count_; ++source_cell) {
+                        const Cell& source = cells_[static_cast<std::size_t>(source_cell)];
+                        if (source.dst != output_job || !cell_active(source_cell)) continue;
+                        for (int p = 0; p < np; ++p) {
+                            const int slot = (g.slot - p + np) % np;
+                            const std::complex<SampleType>* x =
+                                g.spectra[static_cast<std::size_t>(source.src * np + slot)].data();
+                            const std::complex<SampleType>* h =
+                                g.ir_spectra[static_cast<std::size_t>(source_cell * np + p)].data();
+                            std::complex<SampleType>* a = acc.data();
+                            if (first)
+                                for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                                    a[i] = x[i] * h[i];
+                            else
+                                for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                                    a[i] += x[i] * h[i];
+                            first = false;
+                        }
+                    }
                 }
                 g.job_cursor += take;
                 spent += static_cast<long>(take) * unit;
@@ -855,14 +884,16 @@ private:
             }
         }
 
-        // Metered cost of one period: one forward per audio channel, then per
-        // cell a spectral MAC over the independent bins, the Hermitian mirror,
-        // an inverse, and the extract.
+        // Metered cost of one period: one forward per audio channel and one
+        // spectral MAC per cell. A four-cell stereo IR needs only one inverse
+        // and extract per destination after the cell spectra are summed.
         g.total_cost = static_cast<long>(channels_) * g.plan.forward_cost();
         g.total_cost +=
             static_cast<long>(cell_count_) *
-            (static_cast<long>(K / 2 + 1) * detail::SlicedFftPlanT<SampleType>::kMacCost * np +
-             static_cast<long>(K / 2 - 1) + g.plan.inverse_cost() + L);
+            (static_cast<long>(K / 2 + 1) * detail::SlicedFftPlanT<SampleType>::kMacCost * np);
+        const int output_jobs = channels_ == 2 && cell_count_ == 4 ? 2 : cell_count_;
+        g.total_cost += static_cast<long>(output_jobs) *
+                        (static_cast<long>(K / 2 - 1) + g.plan.inverse_cost() + L);
         return g;
     }
 

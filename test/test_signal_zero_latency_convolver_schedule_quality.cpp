@@ -371,6 +371,73 @@ TEST_CASE("True-stereo matrix routes [LL, LR, RL, RR]",
     }
 }
 
+TEST_CASE("True-stereo simultaneous inputs match the direct sum",
+          "[signal][convolution][acceptance][stereo]") {
+    constexpr int ir_len = 3072;
+    constexpr int frames = 6144;
+    std::vector<std::vector<float>> ir(4, std::vector<float>(ir_len));
+    for (int c = 0; c < 4; ++c) {
+        const auto source = decaying_noise_ir(ir_len, 4.0, 0x3100u + c);
+        for (int i = 0; i < ir_len; ++i)
+            ir[c][i] = static_cast<float>(source[static_cast<std::size_t>(i)]);
+    }
+    const float* ir_ptrs[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    std::vector<std::vector<float>> input(2, std::vector<float>(frames));
+    Rng rng(0x40FFEE);
+    for (int i = 0; i < frames; ++i) {
+        input[0][i] = static_cast<float>(rng.bipolar());
+        input[1][i] = static_cast<float>(rng.bipolar());
+    }
+    std::vector<double> left_input(input[0].begin(), input[0].end());
+    std::vector<double> right_input(input[1].begin(), input[1].end());
+
+    for (int block : {16, 64, 128, 512}) {
+        ZeroLatencyConvolver conv;
+        conv.prepare(kFs, block, 2);
+        conv.set_normalize_mode(IrNormalizeMode::none);
+        conv.set_true_stereo(true);
+        REQUIRE(conv.load_impulse_response(ir_ptrs, 4, ir_len, kFs));
+        REQUIRE(conv.latency_samples() == 0);
+
+        auto want_left = direct_convolve(left_input, prepared_taps(conv, 0));
+        const auto left_cross = direct_convolve(right_input, prepared_taps(conv, 2));
+        auto want_right = direct_convolve(left_input, prepared_taps(conv, 1));
+        const auto right_cross = direct_convolve(right_input, prepared_taps(conv, 3));
+        for (int i = 0; i < frames; ++i) {
+            want_left[i] += left_cross[i];
+            want_right[i] += right_cross[i];
+        }
+
+        const auto got = render(conv, input, block);
+        const std::vector<double> got_left(got[0].begin(), got[0].end());
+        const std::vector<double> got_right(got[1].begin(), got[1].end());
+        INFO("block " << block);
+        REQUIRE(rms_error_db(got_left, want_left) < -95.0);
+        REQUIRE(rms_error_db(got_right, want_right) < -95.0);
+        if (block == 128) {
+            conv.reset();
+            REQUIRE(render(conv, input, block) == got);
+
+            conv.reset();
+            std::vector<std::vector<float>> ragged(2, std::vector<float>(frames));
+            const int sizes[] = {1, 7, 64, 128, 33, 100, 5};
+            int part = 0;
+            for (int pos = 0; pos < frames;) {
+                const int n = std::min(sizes[part++ % 7], frames - pos);
+                const float* in[2] = {input[0].data() + pos, input[1].data() + pos};
+                float* out[2] = {ragged[0].data() + pos, ragged[1].data() + pos};
+                conv.process(in, out, n);
+                pos += n;
+            }
+            for (int c = 0; c < 2; ++c) {
+                const std::vector<double> fixed(got[c].begin(), got[c].end());
+                const std::vector<double> split(ragged[c].begin(), ragged[c].end());
+                REQUIRE(rms_error_db(split, fixed) < -120.0);
+            }
+        }
+    }
+}
+
 TEST_CASE("IR channel-count policy", "[signal][convolution][stereo]") {
     // 1 channel is applied to both ears, 2 channels are dual-mono, and anything
     // else is a load error that keeps the previous IR rather than half-loading.
@@ -430,8 +497,12 @@ TEST_CASE("process and reset are allocation-free", "[signal][convolution][accept
     std::vector<float> taps = to_float(ir);
     std::vector<float> taps2 = taps;
     for (auto& v : taps2) v *= 0.7f;
-    const float* channels[2] = {taps.data(), taps2.data()};
-    REQUIRE(conv.load_impulse_response(channels, 2, static_cast<int>(taps.size()), kFs));
+    std::vector<float> taps3 = taps;
+    std::vector<float> taps4 = taps;
+    for (auto& v : taps3) v *= 0.4f;
+    for (auto& v : taps4) v *= 0.9f;
+    const float* channels[4] = {taps.data(), taps2.data(), taps3.data(), taps4.data()};
+    REQUIRE(conv.load_impulse_response(channels, 4, static_cast<int>(taps.size()), kFs));
 
     std::vector<float> in_l(kBlock), in_r(kBlock), out_l(kBlock), out_r(kBlock);
     const float* in[2] = {in_l.data(), in_r.data()};

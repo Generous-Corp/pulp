@@ -3,7 +3,7 @@
 // Measures per-frame cost of the processors that dominate realistic plugin
 // workloads (convolution, FDN reverb, oversampling, FIR, character delays,
 // pitch/time, synth voice loops, dynamics, meters, biquads) at 48 kHz for
-// block sizes 32, 128 and 512, plus the block-kernel shapes (sum, dot,
+// block sizes 16, 32, 64, 128 and 512, plus the block-kernel shapes (sum, dot,
 // max |x|, sum of squares, gain ramp, FIR per output) those processors reduce
 // to. Every processor row reports the mean cost and the worst-block cost
 // (p99 and max of individually timed blocks), because a realtime deadline is
@@ -72,7 +72,7 @@ using namespace pulp::signal;
 namespace {
 
 constexpr double kSampleRate = 48000.0;
-constexpr int kBlockSizes[] = {32, 128, 512};
+constexpr int kBlockSizes[] = {16, 32, 64, 128, 512};
 constexpr int kMeanRepetitions = 5;
 volatile float g_sink = 0.0f;
 
@@ -443,6 +443,25 @@ void run_processors(int B) {
         const float* ir_channels[2] = {ir.data(), ir.data()};
         z.load_impulse_response(ir_channels, 2, 96000, kSampleRate);
         bench("conv.zero_latency IR 2s stereo", B, [&](int n) {
+            fill_stereo();
+            const float* in[2] = {left.data(), right.data()};
+            float* o[2] = {out.data(), out2.data()};
+            z.process(in, o, n);
+            clobber(out.data());
+            clobber(out2.data());
+        });
+    }
+    if (selected("conv.zero_latency IR 2s true stereo 4IR")) {
+        ZeroLatencyConvolver z;
+        z.prepare(kSampleRate, B, 2);
+        z.set_true_stereo(true);
+        const auto ll = decaying_ir(96000, 9, 5.0f);
+        const auto lr = decaying_ir(96000, 10, 5.0f);
+        const auto rl = decaying_ir(96000, 11, 5.0f);
+        const auto rr = decaying_ir(96000, 12, 5.0f);
+        const float* ir_channels[4] = {ll.data(), lr.data(), rl.data(), rr.data()};
+        z.load_impulse_response(ir_channels, 4, 96000, kSampleRate);
+        bench("conv.zero_latency IR 2s true stereo 4IR", B, [&](int n) {
             fill_stereo();
             const float* in[2] = {left.data(), right.data()};
             float* o[2] = {out.data(), out2.data()};
