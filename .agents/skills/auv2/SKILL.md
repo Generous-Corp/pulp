@@ -1240,3 +1240,7 @@ editor, or nothing to prewarm, costs one virtual call. The editor itself does
 not change: an open that races the worker waits for the in-flight result
 instead of compiling again. Details: `view-bridge`, "What the host shows while
 it waits".
+
+## SysEx core storage and representation
+
+SysEx7 test payloads must contain only seven-bit bytes. High-bit bytes belong in explicit malformed-packet tests; helper tests do not prove host runtime support.

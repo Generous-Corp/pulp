@@ -427,3 +427,11 @@ getters inline; put anything with branches/loops in the .cpp.
   plan, not here.
 - Hosting MPE plugins (MPE output, dispatching MPE into a loaded
   plugin) — covered by the SignalGraph hosting work, not this skill.
+
+## SysEx core storage and representation
+
+UmpBuffer sorting retains arrival order at equal sample offsets using reserved scratch; reserve before limiting RT growth. UmpSysex7Reassembler reserve(N) resets partial streams and sets the per-group admission bound. Copies preserve prepared capacity; copy/move are non-RT operations, and moved-from instances require reserve before RT reuse. Its callbacks return UMP payload without MIDI1 F0/F7 framing.
+
+RawMidiParserState.reserve_sysex(N) now sets a whole-message admission bound including F0/F7 and resets partial SysEx. Configure off RT; aggregate copies require their own reserve before RT reuse. The default remains64KiB, with F7 included and whole-message overflow rejection.
+
+SysEx7 completion callbacks include zero-byte payloads: a completed message boundary must remain observable even when the UMP payload is empty. MIDI1 conversion must frame that callback explicitly.
