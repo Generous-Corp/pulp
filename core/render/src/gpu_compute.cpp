@@ -3459,6 +3459,8 @@ public:
                     req->ok.load(std::memory_order_acquire))
                     req->buffer.Unmap();
                 if (pool_) pool_->discard(req->buffer);
+                if (!req->resolved.load(std::memory_order_acquire))
+                    detached_readbacks_.push_back(req);
                 complete(*req, ReadbackStatus::Expired, 0);
                 continue;
             }
