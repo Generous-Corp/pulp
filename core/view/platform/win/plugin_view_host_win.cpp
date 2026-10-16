@@ -218,9 +218,11 @@ public:
     }
 
     bool try_attach_to_parent(NativeViewHandle parent) override {
-        if (!hwnd_) return false;
+        if (!hwnd_)
+            return false;
         HWND parent_hwnd = static_cast<HWND>(parent);
-        if (!parent_hwnd) return false;
+        if (!parent_hwnd)
+            return false;
         // A live attachment owns its timer and presentation surfaces. Repeating
         // it is a no-op; changing its native shape requires an explicit detach.
         // Report refusal directly: is_attached() still describes the old parent.
@@ -463,7 +465,8 @@ public:
         // let the next timer tick consume it. Before attachment the caller has
         // no timer-backed host loop, so preserve the synchronous capture/embed
         // behavior.
-        if (attached_.load(std::memory_order_acquire)) return;
+        if (attached_.load(std::memory_order_acquire))
+            return;
         paint_or_invalidate();
     }
 

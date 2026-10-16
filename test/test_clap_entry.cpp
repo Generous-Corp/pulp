@@ -1281,11 +1281,16 @@ public:
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
     ViewSize view_size() const override { return vs_; }
-    void on_view_opened(pulp::view::View&) override { ++opened; }
-    void on_view_closed(pulp::view::View&) override { ++closed; }
+    void on_view_opened(pulp::view::View&) override {
+        ++opened;
+    }
+    void on_view_closed(pulp::view::View&) override {
+        ++closed;
+    }
     int opened = 0;
     int closed = 0;
-private:
+
+  private:
     ViewSize vs_;
 };
 
@@ -1419,10 +1424,17 @@ public:
         ++attach_calls;
         attached = accept_attach && parent != nullptr;
     }
-    bool is_attached() const noexcept override { return attached; }
-    void detach() override { attached = false; }
+    bool is_attached() const noexcept override {
+        return attached;
+    }
+    void detach() override {
+        attached = false;
+    }
     void repaint() override {}
-    bool present_first_frame() override { ++first_frames; return attached; }
+    bool present_first_frame() override {
+        ++first_frames;
+        return attached;
+    }
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
     }
@@ -1456,8 +1468,7 @@ TEST_CASE("CLAP native attachment refusal leaves the editor unopened and retryab
     auto& processor = static_cast<ClapResizeProcessor&>(*data.processor);
     auto options = pulp::format::ViewBridge::Options::hosted_editor();
     options.content_first_open = true;
-    data.bridge = std::make_unique<pulp::format::ViewBridge>(
-        processor, data.store, options);
+    data.bridge = std::make_unique<pulp::format::ViewBridge>(processor, data.store, options);
     REQUIRE(data.bridge->open());
     auto editor_host = std::make_unique<FakePluginViewHost>();
     auto& native_host = *editor_host;

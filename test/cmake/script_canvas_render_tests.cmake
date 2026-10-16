@@ -157,7 +157,8 @@ if(PULP_HAS_SKIA AND NOT APPLE AND NOT ANDROID)
             target_include_directories(pulp-test-plugin-view-host-factory PRIVATE ${X11_INCLUDE_DIR})
             target_compile_definitions(pulp-test-plugin-view-host-factory PRIVATE PULP_TEST_HAS_X11=1)
         endif()
-        catch_discover_tests(pulp-test-plugin-view-host-factory)
+        catch_discover_tests(pulp-test-plugin-view-host-factory
+            PROPERTIES RESOURCE_LOCK pulp_gpu)
     endif()
 endif()
 

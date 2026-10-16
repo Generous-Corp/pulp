@@ -404,7 +404,9 @@ TEST_CASE("Windows attached editor fails closed when frame timer install fails",
     REQUIRE(parent != nullptr);
     struct ParentWindowCleanup {
         HWND hwnd;
-        ~ParentWindowCleanup() { DestroyWindow(hwnd); }
+        ~ParentWindowCleanup() {
+            DestroyWindow(hwnd);
+        }
     } cleanup_parent{parent};
     ShowWindow(parent, SW_SHOWNOACTIVATE);
     REQUIRE(IsWindowVisible(parent));
@@ -478,10 +480,13 @@ TEST_CASE("Windows attached editor requires detach before changing parent",
     } reset_seam;
     REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr));
     struct ParentWindow {
-        HWND hwnd = CreateWindowExW(
-            0, L"STATIC", L"Pulp repeated attachment", WS_OVERLAPPEDWINDOW,
-            0, 0, 128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-        ~ParentWindow() { if (hwnd) DestroyWindow(hwnd); }
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp repeated attachment", WS_OVERLAPPEDWINDOW, 0, 0,
+                            128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
     } first_parent, second_parent;
     REQUIRE(first_parent.hwnd != nullptr);
     REQUIRE(second_parent.hwnd != nullptr);
@@ -518,7 +523,8 @@ TEST_CASE("Windows attached editor requires detach before changing parent",
     root.set_continuous_repaint(true);
     REQUIRE(ValidateRect(child, nullptr));
     MSG frame_timer{};
-    while (PeekMessageW(&frame_timer, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {}
+    while (PeekMessageW(&frame_timer, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+    }
     const auto frames_before_repeat = root.frame_clock()->frame();
 
     const auto check_preserved_attachment = [&] {
@@ -535,7 +541,7 @@ TEST_CASE("Windows attached editor requires detach before changing parent",
     for (int force_timer_failure = 0; force_timer_failure != 2; ++force_timer_failure) {
         INFO("new timer installation forced to fail: " << force_timer_failure);
         REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE",
-                                       force_timer_failure ? L"1" : nullptr));
+                                        force_timer_failure ? L"1" : nullptr));
         REQUIRE(host->try_attach_to_parent(first_parent.hwnd));
         check_preserved_attachment();
         host->attach_to_parent(first_parent.hwnd);
@@ -596,9 +602,9 @@ TEST_CASE("Windows attached editor requires detach before changing parent",
 TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
           "[view][plugin-view-host][repaint][windows][gpu]") {
     constexpr UINT_PTR kTestFrameTimerId = 1;
-    HWND parent = CreateWindowExW(
-        0, L"STATIC", L"Pulp repaint regression", WS_OVERLAPPEDWINDOW,
-        0, 0, 128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    HWND parent =
+        CreateWindowExW(0, L"STATIC", L"Pulp repaint regression", WS_OVERLAPPEDWINDOW, 0, 0, 128,
+                        128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     REQUIRE(parent != nullptr);
 
     View root;

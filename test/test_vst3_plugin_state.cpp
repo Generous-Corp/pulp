@@ -5972,11 +5972,16 @@ public:
                  pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
     ViewSize view_size() const override { return vs_; }
-    void on_view_opened(pulp::view::View&) override { ++opened; }
-    void on_view_closed(pulp::view::View&) override { ++closed; }
+    void on_view_opened(pulp::view::View&) override {
+        ++opened;
+    }
+    void on_view_closed(pulp::view::View&) override {
+        ++closed;
+    }
     int opened = 0;
     int closed = 0;
-private:
+
+  private:
     ViewSize vs_;
 };
 
@@ -5994,8 +5999,7 @@ TEST_CASE("VST3 rejects a native attach without a parent and closes its bridge",
     Vst3ResizeProcessor processor(ViewSize{400, 300});
     pulp::state::StateStore store;
     pulp::format::vst3::PulpPlugView view(processor, store);
-    REQUIRE(view.attached(nullptr, Steinberg::kPlatformTypeNSView) ==
-            Steinberg::kResultFalse);
+    REQUIRE(view.attached(nullptr, Steinberg::kPlatformTypeNSView) == Steinberg::kResultFalse);
     CHECK(processor.opened == 0);
     CHECK(processor.closed == 0);
     CHECK(pulp::format::vst3::PulpPlugViewTestAccess::root(view) == nullptr);
@@ -6013,29 +6017,43 @@ TEST_CASE("VST3 native attachment refusal tears down the editor and permits retr
         int first_frames = 0;
     } calls;
     class AttachmentHost final : public pulp::view::PluginViewHost {
-    public:
+      public:
         explicit AttachmentHost(HostCalls& calls) : calls_(calls) {}
-        ~AttachmentHost() override { ++calls_.destroyed; }
-        pulp::view::NativeViewHandle native_handle() override { return nullptr; }
+        ~AttachmentHost() override {
+            ++calls_.destroyed;
+        }
+        pulp::view::NativeViewHandle native_handle() override {
+            return nullptr;
+        }
         void attach_to_parent(pulp::view::NativeViewHandle parent) override {
             ++calls_.attached;
             attached_ = calls_.accept_attach && parent != nullptr;
         }
-        bool is_attached() const noexcept override { return attached_; }
-        void detach() override { ++calls_.detached; attached_ = false; }
+        bool is_attached() const noexcept override {
+            return attached_;
+        }
+        void detach() override {
+            ++calls_.detached;
+            attached_ = false;
+        }
         void repaint() override {}
         bool present_first_frame() override {
             ++calls_.first_frames;
             return attached_;
         }
         void set_size(uint32_t, uint32_t) override {}
-        Size get_size() const override { return {400, 300}; }
-    private:
+        Size get_size() const override {
+            return {400, 300};
+        }
+
+      private:
         HostCalls& calls_;
         bool attached_ = false;
     };
     struct FactoryReset {
-        ~FactoryReset() { pulp::view::PluginViewHost::clear_factory(); }
+        ~FactoryReset() {
+            pulp::view::PluginViewHost::clear_factory();
+        }
     } reset_factory;
     pulp::view::PluginViewHost::set_factory(
         [&calls](pulp::view::View&, const pulp::view::PluginViewHost::Options&) {
