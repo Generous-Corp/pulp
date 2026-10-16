@@ -1,10 +1,10 @@
 {
   "schema": "pulp-three-project-scorecard-receipt/v1",
-  "captured_at": [
-    "2026-10-16T14:49:27.543900Z",
-    "2026-10-16T14:49:27.622476Z",
-    "2026-10-16T14:49:27.754217Z"
-  ],
+  "captured_at": {
+    "started_at": "2026-10-16T15:23:23.498711Z",
+    "completed_at": "2026-10-16T15:23:23.849107Z",
+    "scope": "three sequential scorecard commands"
+  },
   "command": "shipyard metrics scorecard --mode isolated --fail-on-stale --project <project> --since 3d --json",
   "metrics_database": "/Users/danielraffel/Library/Application Support/shipyard-dev/metrics/metrics.db",
   "shipyard_executable": "/Users/danielraffel/Code/Shipyard-baseline-refresh/target/debug/shipyard",
@@ -215,26 +215,20 @@
         "status": "fresh",
         "project": "pulp",
         "threshold_secs": 86400,
-        "checked_at": "2026-10-16T15:13:14.956703Z",
+        "checked_at": "2026-10-16T15:23:23.561076Z",
         "newest_sample_at": "2026-10-16T14:21:54Z",
         "sources": [
           {
             "source": "github",
             "samples": 222,
             "newest_sample_at": "2026-10-16T14:21:54Z",
-            "age_secs": 3080,
+            "age_secs": 3689,
             "stale": false,
             "judged": true
           }
         ],
         "stale_sources": [],
-        "message": "fresh: newest sample 2026-10-16T14:21:54+00:00 (51m ago; threshold 1d) for project pulp"
-      },
-      "observed_sample_window": {
-        "oldest_sample_at": "2026-10-16T13:44:53+00:00",
-        "newest_sample_at": "2026-10-16T14:21:54+00:00",
-        "span_seconds": 2221,
-        "span_human": "0:37:01"
+        "message": "fresh: newest sample 2026-10-16T14:21:54+00:00 (1h 1m ago; threshold 1d) for project pulp"
       }
     },
     "tartci": {
@@ -438,26 +432,20 @@
         "status": "fresh",
         "project": "danielraffel/tartci",
         "threshold_secs": 86400,
-        "checked_at": "2026-10-16T15:13:15.072527Z",
+        "checked_at": "2026-10-16T15:23:23.655804Z",
         "newest_sample_at": "2026-10-16T14:36:09Z",
         "sources": [
           {
             "source": "github",
             "samples": 460,
             "newest_sample_at": "2026-10-16T14:36:09Z",
-            "age_secs": 2226,
+            "age_secs": 2834,
             "stale": false,
             "judged": true
           }
         ],
         "stale_sources": [],
-        "message": "fresh: newest sample 2026-10-16T14:36:09+00:00 (37m ago; threshold 1d) for project danielraffel/tartci"
-      },
-      "observed_sample_window": {
-        "oldest_sample_at": "2026-10-16T03:15:37+00:00",
-        "newest_sample_at": "2026-10-16T14:36:09+00:00",
-        "span_seconds": 40832,
-        "span_human": "11:20:32"
+        "message": "fresh: newest sample 2026-10-16T14:36:09+00:00 (47m ago; threshold 1d) for project danielraffel/tartci"
       }
     },
     "shipyard": {
@@ -661,26 +649,20 @@
         "status": "fresh",
         "project": "danielraffel/Shipyard",
         "threshold_secs": 86400,
-        "checked_at": "2026-10-16T15:13:15.262547Z",
+        "checked_at": "2026-10-16T15:23:23.809455Z",
         "newest_sample_at": "2026-10-16T14:03:36Z",
         "sources": [
           {
             "source": "github",
             "samples": 800,
             "newest_sample_at": "2026-10-16T14:03:36Z",
-            "age_secs": 4179,
+            "age_secs": 4787,
             "stale": false,
             "judged": true
           }
         ],
         "stale_sources": [],
-        "message": "fresh: newest sample 2026-10-16T14:03:36+00:00 (1h 9m ago; threshold 1d) for project danielraffel/Shipyard"
-      },
-      "observed_sample_window": {
-        "oldest_sample_at": "2026-10-15T03:16:26+00:00",
-        "newest_sample_at": "2026-10-16T14:03:36+00:00",
-        "span_seconds": 125230,
-        "span_human": "1 day, 10:47:10"
+        "message": "fresh: newest sample 2026-10-16T14:03:36+00:00 (1h 19m ago; threshold 1d) for project danielraffel/Shipyard"
       }
     }
   },
@@ -692,18 +674,36 @@
     "reason": "The metrics database was an existing daemon-maintained snapshot; this refresh performed read-only scorecard commands and did not mutate or re-import it. Database mtime is recorded separately."
   },
   "scorecard_execution": {
-    "command": "shipyard metrics scorecard --mode isolated --fail-on-stale --project <project> --since 3d --json",
+    "command": "shipyard metrics scorecard --mode isolated --fail-on-stale --project <full-project-slug> --since 3d --json",
     "projects": [
       "pulp",
       "danielraffel/tartci",
       "danielraffel/Shipyard"
     ],
+    "capture": {
+      "pulp": {
+        "started_at": "2026-10-16T15:23:23.498711Z",
+        "completed_at": "2026-10-16T15:23:23.564780Z",
+        "exit_code": 0
+      },
+      "danielraffel/tartci": {
+        "started_at": "2026-10-16T15:23:23.565153Z",
+        "completed_at": "2026-10-16T15:23:23.676500Z",
+        "exit_code": 0
+      },
+      "danielraffel/Shipyard": {
+        "started_at": "2026-10-16T15:23:23.676840Z",
+        "completed_at": "2026-10-16T15:23:23.849107Z",
+        "exit_code": 0
+      }
+    },
     "exit_codes": {
       "pulp": 0,
-      "tartci": 0,
-      "shipyard": 0
+      "danielraffel/tartci": 0,
+      "danielraffel/Shipyard": 0
     },
-    "raw_outputs": "Each scorecard object below is the parsed stdout from its individual command; this file assembles those objects with provenance metadata."
+    "exit_codes_basis": "operator_asserted from subprocess returncode; individual stdout captures are /tmp-only and are not committed",
+    "raw_outputs": "Each scorecard object below is the parsed stdout from its individual command; this committed file assembles those objects with provenance metadata."
   },
   "shipyard_binary_provenance": {
     "path": "/Users/danielraffel/Code/Shipyard-baseline-refresh/target/debug/shipyard",
@@ -711,5 +711,30 @@
     "head": "100d3bbabbe784fdbfd381350d401b2aad9fd916",
     "version": "0.343.0",
     "profile": "dev (unoptimized + debuginfo)"
+  },
+  "observed_sample_windows": {
+    "source": "/Users/danielraffel/Library/Application Support/shipyard-dev/metrics/metrics.db",
+    "query": "SELECT project, MIN(ts) AS oldest_sample_at, MAX(ts) AS newest_sample_at, COUNT(*) AS run_rows FROM runs WHERE project IN (?,?,?) GROUP BY project ORDER BY project",
+    "rows": [
+      {
+        "project": "Shipyard",
+        "oldest_sample_at": "2026-10-15T03:16:26+00:00",
+        "newest_sample_at": "2026-10-16T14:03:36+00:00",
+        "run_rows": 800
+      },
+      {
+        "project": "pulp",
+        "oldest_sample_at": "2026-10-16T13:44:53+00:00",
+        "newest_sample_at": "2026-10-16T14:21:54+00:00",
+        "run_rows": 222
+      },
+      {
+        "project": "tartci",
+        "oldest_sample_at": "2026-10-16T03:15:37+00:00",
+        "newest_sample_at": "2026-10-16T14:36:09+00:00",
+        "run_rows": 460
+      }
+    ],
+    "note": "Derived from the existing SQLite snapshot, outside parsed scorecard command output; spans are observed data coverage, while since_days=3 is the nominal query window."
   }
 }

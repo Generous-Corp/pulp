@@ -19,7 +19,7 @@ merge, release, or safe-merge claim.
 - Raw JSON: [`2026-10-16-three-project-scorecard.json`](2026-10-16-three-project-scorecard.json)
 - Shipyard binary: `/Users/danielraffel/Code/Shipyard-baseline-refresh/target/debug/shipyard`, version `0.343.0`, dev profile (`unoptimized + debuginfo`), exact checkout head `100d3bbabbe784fdbfd381350d401b2aad9fd916`
 
-The exact command was run once per project. Each command wrote stdout to an individual temporary capture, parsed that JSON, and exited `0`; the committed JSON is an assembled envelope containing those parsed per-command objects plus provenance metadata.
+The exact command was run once per project in one sequential capture interval (`2026-10-16T15:23:23.498711Z` through `2026-10-16T15:23:23.849107Z`). Each command wrote stdout to an individual temporary capture, parsed that JSON, and exited `0`; the committed JSON is an assembled envelope containing those parsed per-command objects plus provenance metadata. Exit codes are explicitly operator-asserted from subprocess return codes; the temporary stdout captures are not committed.
 
 ```text
 shipyard metrics scorecard --mode isolated --fail-on-stale --project <project> --since 3d --json
@@ -44,7 +44,7 @@ durations are minutes unless marked milliseconds.
 | Failure rate | 2.0408% | 5.0473% | 2.9070% |
 | Cancelled share | 7.2072% | 19.1304% | 31.3750% |
 | Starvation share | 3.1532% | 6.7391% | 22.6250% |
-| Queue p50 / p90 (milliseconds) | 2s / 2s | 3s / 3s | 3s / 4s |
+| Queue p50 / p90 (milliseconds) | 2000 / 2000 | 3000 / 3000 | 3000 / 4000 |
 | Wasted compute | 49.4167 | 694.2500 | 1,110.0833 |
 | Coordination | 23.5667 | 17.7333 | 1,427.0167 |
 | Rework compute | 1.3500 | 277.1167 | 72.3833 |
@@ -52,15 +52,24 @@ durations are minutes unless marked milliseconds.
 | Distinct pull requests | 3 | 7 | 0 |
 | Comparison verdict | `insufficient_sample` | `insufficient_sample` | `insufficient_sample` |
 
-Freshness at each command's `checked_at`:
+Freshness at each command's own `checked_at` (the three commands were sequential, so these timestamps intentionally differ):
 
 | Project | `checked_at` | Newest sample | Age | Status |
 | --- | --- | --- | ---: | --- |
-| Pulp | `2026-10-16T14:49:27.543900Z` | `2026-10-16T14:21:54Z` | 1,653s | `fresh` |
-| TartCI | `2026-10-16T14:49:27.622476Z` | `2026-10-16T14:36:09Z` | 798s | `fresh` |
-| Shipyard | `2026-10-16T14:49:27.754217Z` | `2026-10-16T14:03:36Z` | 2,751s | `fresh` |
+| Pulp | `2026-10-16T15:23:23.561076Z` | `2026-10-16T14:21:54Z` | 3,689s | `fresh` |
+| TartCI | `2026-10-16T15:23:23.655804Z` | `2026-10-16T14:36:09Z` | 2,834s | `fresh` |
+| Shipyard | `2026-10-16T15:23:23.809455Z` | `2026-10-16T14:03:36Z` | 4,787s | `fresh` |
 
-Observed sample spans (oldest to newest sample, from the database snapshot) are Pulp `2026-10-16T13:44:53Z` to `2026-10-16T14:21:54Z` (`2,221s`, 37m01s), TartCI `2026-10-16T03:15:37Z` to `2026-10-16T14:36:09Z` (`40,832s`, 11h20m32s), and Shipyard `2026-10-15T03:16:26Z` to `2026-10-16T14:03:36Z` (`125,230s`, 1d10h47m10s). These are observed data spans; `since 3d` is only the nominal query window.
+Queue values are numeric milliseconds; the source timestamps have whole-second resolution, so the scorecard's queue comparison floor remains 1 second.
+
+Observed sample spans are derived outside the parsed scorecards by this exact SQLite query against the recorded database source:
+
+```sql
+SELECT project, MIN(ts) AS oldest_sample_at, MAX(ts) AS newest_sample_at, COUNT(*) AS run_rows
+FROM runs WHERE project IN (?,?,?) GROUP BY project ORDER BY project;
+```
+
+The resulting oldest-to-newest spans from the database snapshot are Pulp `2026-10-16T13:44:53Z` to `2026-10-16T14:21:54Z` (`2,221s`, 37m01s), TartCI `2026-10-16T03:15:37Z` to `2026-10-16T14:36:09Z` (`40,832s`, 11h20m32s), and Shipyard `2026-10-15T03:16:26Z` to `2026-10-16T14:03:36Z` (`125,230s`, 1d10h47m10s). These are observed data spans; `since 3d` is only the nominal query window.
 
 ## Data-quality and decision boundary
 
