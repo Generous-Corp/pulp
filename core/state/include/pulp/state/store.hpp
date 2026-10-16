@@ -52,12 +52,27 @@ struct ParameterGestureApplyResult {
     std::uint64_t generation = 0;
 };
 
-/// Exact identity captured when asynchronous work is ordered against a
+/// Opaque exact identity captured when asynchronous work is ordered against a
 /// parameter. The identity includes the value bits and a monotonic per-slot
 /// revision, so equal values written at different times remain distinct.
-struct ParameterFeedbackBaseline {
-    ParamID id = 0;
-    std::uint64_t packed_identity = 0;
+class ParameterFeedbackBaseline {
+  public:
+    ParameterFeedbackBaseline() = default;
+
+    ParamID id() const noexcept {
+        return id_;
+    }
+    std::uint64_t packed_identity() const noexcept {
+        return packed_identity_;
+    }
+
+  private:
+    friend class StateStore;
+    ParameterFeedbackBaseline(ParamID id, std::uint64_t packed_identity)
+        : id_(id), packed_identity_(packed_identity) {}
+
+    ParamID id_ = 0;
+    std::uint64_t packed_identity_ = 0;
 };
 
 enum class ConditionalParameterApplyStatus {
@@ -67,8 +82,7 @@ enum class ConditionalParameterApplyStatus {
 };
 
 struct ConditionalParameterApplyResult {
-    ConditionalParameterApplyStatus status =
-        ConditionalParameterApplyStatus::InvalidParameter;
+    ConditionalParameterApplyStatus status = ConditionalParameterApplyStatus::InvalidParameter;
     std::uint64_t current_identity = 0;
 };
 
@@ -148,8 +162,7 @@ public:
 
     /// Capture an exact per-parameter identity at the caller's ordering point.
     /// This is a single lock-free load and performs no allocation.
-    std::optional<ParameterFeedbackBaseline>
-    capture_feedback_baseline(ParamID id) const noexcept;
+    std::optional<ParameterFeedbackBaseline> capture_feedback_baseline(ParamID id) const noexcept;
 
     /// Publish asynchronous feedback only if the captured identity is still
     /// current. The packed identity CAS is the linearization point. A
@@ -157,8 +170,8 @@ public:
     /// @c current_identity is diagnostic only; callers recapture a fresh
     /// baseline before retrying and must not treat it as an authority token.
     /// Revision exhaustion is reported as Conflict and never wraps.
-    ConditionalParameterApplyResult set_value_rt_if_baseline(
-        const ParameterFeedbackBaseline& baseline, float value);
+    ConditionalParameterApplyResult
+    set_value_rt_if_baseline(const ParameterFeedbackBaseline& baseline, float value);
 
     /// Set the absolute modulation offset for a parameter.
     void set_mod_offset(ParamID id, float offset);

@@ -567,7 +567,7 @@ inline bool is_automatable_param(const ParamInfo& info) {
 /// for free) and ARM (each load/store is individually atomic; reordering
 /// between independent parameters is harmless).
 class ParamValue {
-public:
+  public:
     /// Packed base identity: low 32 bits are float bits, high 32 bits are a
     /// monotonic per-parameter revision. The revision is not StateStore's
     /// global generation and never wraps.
@@ -601,7 +601,9 @@ public:
 
     /// Write a new base value through the same bounded revision CAS as every
     /// other base-value writer. A saturated revision is a terminal no-op.
-    void set(float v) noexcept { (void)set_revisioned(v, 0, 8); }
+    void set(float v) noexcept {
+        (void)set_revisioned(v, 0, 8);
+    }
 
     VersionedValue versioned_value() const {
         return value_.load(std::memory_order_relaxed);
@@ -626,6 +628,11 @@ public:
         return unpack_generation(value);
     }
 
+    bool revision_available() const noexcept {
+        return revision_from_versioned(versioned_value()) !=
+               std::numeric_limits<std::uint32_t>::max();
+    }
+
     /// Compatibility name retained for existing callers. The argument is
     /// recorded in the diagnostic mirror; ordering is provided solely by the
     /// packed per-parameter revision CAS.
@@ -642,8 +649,7 @@ public:
         if (current_revision == std::numeric_limits<std::uint32_t>::max())
             return false;
         const auto replacement = pack(desired, current_revision + 1);
-        if (!value_.compare_exchange_strong(expected, replacement,
-                                            std::memory_order_acq_rel,
+        if (!value_.compare_exchange_strong(expected, replacement, std::memory_order_acq_rel,
                                             std::memory_order_acquire))
             return false;
         expected = replacement;
@@ -734,7 +740,7 @@ public:
         set(range.denormalize(n));
     }
 
-private:
+  private:
     friend class ParamValueTest;
 
     bool set_revisioned(float value, std::uint64_t generation,
@@ -745,8 +751,7 @@ private:
             if (revision == std::numeric_limits<std::uint32_t>::max())
                 return false;
             const auto replacement = pack(value, revision + 1);
-            if (value_.compare_exchange_weak(current, replacement,
-                                             std::memory_order_acq_rel,
+            if (value_.compare_exchange_weak(current, replacement, std::memory_order_acq_rel,
                                              std::memory_order_acquire)) {
                 committed_generation_.store(generation, std::memory_order_relaxed);
                 return true;

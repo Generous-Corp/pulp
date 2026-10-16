@@ -529,29 +529,30 @@ void StateStore::set_normalized_rt(ParamID id, float normalized) {
 std::optional<ParameterFeedbackBaseline>
 StateStore::capture_feedback_baseline(ParamID id) const noexcept {
     const auto it = id_to_index_.find(id);
-    if (it == id_to_index_.end()) return std::nullopt;
+    if (it == id_to_index_.end())
+        return std::nullopt;
     return ParameterFeedbackBaseline{id, values_[it->second].versioned_value()};
 }
 
-ConditionalParameterApplyResult StateStore::set_value_rt_if_baseline(
-    const ParameterFeedbackBaseline& baseline, float value) {
-    const auto it = id_to_index_.find(baseline.id);
+ConditionalParameterApplyResult
+StateStore::set_value_rt_if_baseline(const ParameterFeedbackBaseline& baseline, float value) {
+    const auto it = id_to_index_.find(baseline.id());
     if (it == id_to_index_.end())
         return {ConditionalParameterApplyStatus::InvalidParameter, 0};
 
     const auto index = it->second;
     const auto clamped = constrain_stored_value(params_[index], value);
-    auto expected = baseline.packed_identity;
+    auto expected = baseline.packed_identity();
     active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
     const auto generation = advance_state_generation();
-    const bool applied = values_[index].compare_exchange_versioned(
-        expected, generation, clamped, generation);
+    const bool applied =
+        values_[index].compare_exchange_versioned(expected, generation, clamped, generation);
     active_state_writers_.fetch_sub(1, std::memory_order_release);
     if (!applied)
-        return {ConditionalParameterApplyStatus::Conflict,
-                values_[index].versioned_value()};
+        return {ConditionalParameterApplyStatus::Conflict, values_[index].versioned_value()};
 
-    if (registry_) registry_->notify_rt(baseline.id, clamped);
+    if (registry_)
+        registry_->notify_rt(baseline.id(), clamped);
     return {ConditionalParameterApplyStatus::Applied, expected};
 }
 
@@ -693,8 +694,8 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
         acquire_gesture(id);
         gesture_acquired = true;
         if (state_generation() == reserved) {
-            value_written = values_[index].compare_exchange_versioned(
-                expected_value, reserved, desired, reserved);
+            value_written = values_[index].compare_exchange_versioned(expected_value, reserved,
+                                                                      desired, reserved);
             if (value_written && registry_) registry_->notify(id, desired);
         }
         release_gesture(id);
@@ -1193,6 +1194,17 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
     if (count > (payload_size - header_size) / param_size ||
         payload_size != header_size + static_cast<std::size_t>(count) * param_size)
         return false;
+
+    // Refuse the whole restore before writing when any addressed slot has
+    // exhausted its bounded packed revision. This keeps restore fail-closed
+    // rather than partially applying a payload and falsely advancing its edge.
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto offset = header_size + static_cast<std::size_t>(i) * param_size;
+        const ParamID id = choc::memory::readLittleEndian<uint32_t>(data.data() + offset);
+        const auto it = id_to_index_.find(id);
+        if (it != id_to_index_.end() && !values_[it->second].revision_available())
+            return false;
+    }
 
     // Claim the restore generation before exposing any restored value so an
     // optimistic control writer cannot commit against the pre-restore state.

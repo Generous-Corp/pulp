@@ -43,7 +43,7 @@ using Catch::Matchers::WithinAbs;
 
 namespace pulp::state {
 class ParamValueTest {
-public:
+  public:
     static void seed_revision(ParamValue& value, std::uint32_t revision) {
         value.value_.store(ParamValue::make_versioned_value(0.0f, revision),
                            std::memory_order_relaxed);
@@ -1324,8 +1324,7 @@ TEST_CASE("versioned parameter writes use a monotonic packed revision",
     CHECK(long_lived.committed_generation() == wrap + 1);
 }
 
-TEST_CASE("packed feedback revision exhaustion never wraps",
-          "[state][store][feedback][negative]") {
+TEST_CASE("packed feedback revision exhaustion never wraps", "[state][store][feedback][negative]") {
     ParamValue exhausted(0.0f);
     ParamValueTest::seed_revision(exhausted, std::numeric_limits<std::uint32_t>::max());
     const auto identity = exhausted.versioned_value();
@@ -1341,13 +1340,10 @@ TEST_CASE("conditional RT feedback rejects a stale recall without notification",
     StateStore store;
     store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
     int audio_notifications = 0;
-    auto token = store.add_audio_listener([&](ParamID, float) {
-        ++audio_notifications;
-    });
+    auto token = store.add_audio_listener([&](ParamID, float) { ++audio_notifications; });
     float main_value = -1.0f;
-    auto main_token = store.add_listener([&](ParamID, float value) {
-        main_value = value;
-    }, ListenerThread::Main);
+    auto main_token =
+        store.add_listener([&](ParamID, float value) { main_value = value; }, ListenerThread::Main);
 
     const auto baseline = store.capture_feedback_baseline(1);
     REQUIRE(baseline);
@@ -1430,11 +1426,9 @@ TEST_CASE("conditional RT feedback rejects unknown parameter and mismatched toke
     store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
     const auto baseline = store.capture_feedback_baseline(1);
     REQUIRE(baseline);
-    const auto unknown = store.set_value_rt_if_baseline(
-        ParameterFeedbackBaseline{999, baseline->packed_identity}, 0.2f);
+    const auto unknown = store.set_value_rt_if_baseline(ParameterFeedbackBaseline{}, 0.2f);
     CHECK(unknown.status == ConditionalParameterApplyStatus::InvalidParameter);
-    const auto wrong_id = store.set_value_rt_if_baseline(
-        ParameterFeedbackBaseline{2, baseline->packed_identity}, 0.2f);
+    const auto wrong_id = store.set_value_rt_if_baseline(ParameterFeedbackBaseline{}, 0.2f);
     CHECK(wrong_id.status == ConditionalParameterApplyStatus::InvalidParameter);
 }
 
