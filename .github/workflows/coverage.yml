@@ -684,15 +684,22 @@ jobs:
             # each low-space threshold is also raised as an annotation, which
             # is recorded separately from the log.
             ( warned=""
+              tick=0
               while kill -0 "${cov}" 2>/dev/null; do
                 root_gib=$(df -Pk / | awk 'NR==2 {printf "%.1f", $4/1048576}')
                 build_gib=$(df -Pk build-coverage/ 2>/dev/null | awk 'NR==2 {printf "%.1f", $4/1048576}')
                 sizes=""
-                for d in build-coverage/ build-coverage/profraw build-coverage/coverage \
-                         "${HOME}/.cache/pulp"; do
-                  [ -e "${d}" ] && sizes="${sizes} $(basename "${d}")=$(du -sk "${d}" 2>/dev/null | awk '{printf "%.1fG", $1/1048576}')"
-                done
-                line="root_free=${root_gib}G build_disk_free=${build_gib:-?}G${sizes}"
+                # du walks the whole build tree, so it runs every fifth sample;
+                # free space and memory are read every minute.
+                if [ $((tick % 5)) -eq 0 ]; then
+                  for d in build-coverage/ build-coverage/profraw build-coverage/coverage \
+                           "${HOME}/.cache/pulp"; do
+                    [ -e "${d}" ] && sizes="${sizes} $(basename "${d}")=$(du -sk "${d}" 2>/dev/null | awk '{printf "%.1fG", $1/1048576}')"
+                  done
+                fi
+                tick=$((tick + 1))
+                mem_gib=$(awk '/^MemAvailable:/ {printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null)
+                line="root_free=${root_gib}G build_disk_free=${build_gib:-?}G mem_available=${mem_gib:-?}G${sizes}"
                 echo "disk-sample: $(date -u +%H:%M:%SZ) ${line}"
                 low=$(awk -v a="${root_gib}" -v b="${build_gib:-${root_gib}}" 'BEGIN {print (a < b ? a : b)}')
                 for t in 20 10 5 2; do
@@ -701,7 +708,15 @@ jobs:
                     echo "::warning title=coverage disk below ${t} GiB::$(date -u +%H:%M:%SZ) ${line}"
                   fi
                 done
-                sleep 300
+                if [ -n "${mem_gib}" ]; then
+                  for t in 2 1 0.5; do
+                    if awk -v m="${mem_gib}" -v t="${t}" 'BEGIN {exit !(m < t)}' && [[ " ${warned} " != *" mem${t} "* ]]; then
+                      warned="${warned} mem${t}"
+                      echo "::warning title=coverage memory below ${t} GiB::$(date -u +%H:%M:%SZ) ${line}"
+                    fi
+                  done
+                fi
+                sleep 60
               done ) & sampler=$!
           fi
           ( sleep "${budget}"

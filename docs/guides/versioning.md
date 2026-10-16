@@ -620,12 +620,16 @@ and, when the runner's separate `/mnt` scratch disk has more room than root,
 makes `build-coverage` a symlink to `/mnt/build-coverage`. The instrumented
 objects and every raw profile then live off the root disk the runner logs to.
 
-While the suite runs, the coverage step prints a `disk-sample:` line every five
-minutes: free space on root and on the build disk, plus the sizes of
-`build-coverage`, its `profraw` and `coverage` subdirectories, and
-`~/.cache/pulp`. Because a full disk loses the log, crossing 20, 10, 5 and
-2 GiB free is also raised as a `coverage disk below N GiB` annotation, which is
-stored apart from the log. Read those before changing anything else.
+While the suite runs, the coverage step prints a `disk-sample:` line every
+minute: free space on root and on the build disk and available memory, plus,
+every fifth sample, the sizes of `build-coverage`, its `profraw` and `coverage`
+subdirectories, and `~/.cache/pulp`. A runner lost to disk or memory exhaustion
+loses its whole log, so crossing 20, 10, 5 and 2 GiB free disk, or 2, 1 and
+0.5 GiB available memory, is also raised as an annotation, which is stored
+apart from the log. `run_coverage.sh` raises a `coverage phase` notice at each
+phase (configure, build, tests, merge, report, export) for the same reason:
+the last one shows how far a lost run got. Read those before changing anything
+else.
 
 
 ## Shipyard-binary pin bumps

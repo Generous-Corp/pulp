@@ -29,7 +29,10 @@ questions are answered in order:
 The control plane in `codecov.yml`, `.github/workflows/coverage.yml`,
 `.github/workflows/android.yml`, and the helper scripts under
 `tools/scripts/` defines what currently counts. The target tiers in
-`ci/coverage-targets.yaml` come after that. A low percentage on a
+`ci/coverage-targets.yaml` come after that. Every first-party source file
+must fall in exactly one tier; `test_coverage_tier_check.py` fails on any that
+fall in none, so a new `core/<subsystem>` directory needs its tier entry in the
+same change. A low percentage on a
 correctly represented surface is a test-gap problem; a missing or `null`
 surface is a Codecov-truth problem.
 
@@ -337,6 +340,11 @@ in `build-coverage/build.stdout.log`) before the last 200 stderr lines. Read
 the error lines first: under a parallel build the tail is usually warnings from
 sibling targets that kept compiling after the first failure. A full log is
 still on disk when 100 lines are not enough.
+
+On GitHub Actions, `run_coverage.sh` also raises a `coverage phase` notice at
+each major phase, with available memory. A hosted runner lost to memory or
+disk exhaustion loses its whole log, and the last notice then shows how far
+the run got.
 
 If you see `_deps/catch2-build/src/src/catch2/...: No such file or
 directory` spam on stderr, you're on an older checkout — the canonical
