@@ -129,6 +129,13 @@ public:
     OSStatus HandleNoteOff(UInt8 inChannel, UInt8 inNoteNumber,
                            UInt8 inVelocity, UInt32 inStartFrame) override;
 
+    /// System-exclusive payload (F0 … F7). MusicDeviceBase delivers this
+    /// callback through the ``kMusicDeviceSysExSelect`` selector. AU v2 does
+    /// not carry a per-event sample offset here, so the payload is queued at
+    /// the start of the next Render block, matching the effect and MIDI
+    /// processor adapters.
+    OSStatus HandleSysEx(const UInt8* inData, UInt32 inLength) override;
+
     OSStatus Render(AudioUnitRenderActionFlags& ioActionFlags,
                     const AudioTimeStamp& inTimeStamp,
                     UInt32 inNumberFrames) override;
@@ -214,6 +221,23 @@ private:
     // Lock-free MIDI note input (single producer = host MIDI/render thread via
     // HandleNoteOn/Off; single consumer = Render). No audio-thread mutex.
     runtime::SpscQueue<midi::MidiEvent, 1024> midi_in_queue_;
+
+    // MusicDeviceSysEx has no frame offset at the AU v2 callback boundary.
+    // Keep the bounded copy shape identical to the other AU v2 adapters so a
+    // host SysEx callback never allocates or blocks.
+    static constexpr std::size_t kMaxSysexPayloadBytes = 1024;
+    struct SysexChunk {
+        std::array<uint8_t, kMaxSysexPayloadBytes> bytes{};
+        uint16_t length = 0;
+    };
+    runtime::SpscQueue<SysexChunk, 32> sysex_in_queue_;
+
+    // Per-block buffers are members so their vectors and SysEx payload pool
+    // can be reserved during Initialize(), never grown from Render().
+    static constexpr std::size_t kMaxEventsPerBlock = kMaxMidiEventsPerBlock;
+    static constexpr std::size_t kMaxSysexPerBlock = 64;
+    midi::MidiBuffer midi_in_;
+    midi::MidiBuffer midi_out_;
 
     // Previous-block transport snapshot used to derive change flags on
     // `ProcessContext`. Default-constructed so the first Render() call

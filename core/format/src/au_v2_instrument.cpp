@@ -263,6 +263,14 @@ OSStatus PulpAUInstrument::Initialize()
         output_bus_ptrs_[e].reserve(ch == 0 ? 2 : ch);
     }
 
+    // MIDI and SysEx payload storage belongs to the adapter, not the audio
+    // callback. Reserve the full bounded block shape before Render() starts and
+    // make overflow lossy rather than permitting an RT allocation.
+    midi_in_.reserve(kMaxEventsPerBlock, kMaxSysexPerBlock, kMaxSysexPayloadBytes);
+    midi_out_.reserve(kMaxEventsPerBlock, kMaxSysexPerBlock, kMaxSysexPayloadBytes);
+    midi_in_.set_realtime_capacity_limit(true);
+    midi_out_.set_realtime_capacity_limit(true);
+
     runtime::log_info("AU v2 instrument: initialized at {} Hz, {} output bus(es)",
                       GetOutput(0)->GetStreamFormat().mSampleRate,
                       Outputs().GetNumberOfElements());
@@ -304,6 +312,23 @@ OSStatus PulpAUInstrument::HandleNoteOff(UInt8 inChannel, UInt8 inNoteNumber,
     return noErr;
 }
 
+OSStatus PulpAUInstrument::HandleSysEx(const UInt8* inData, UInt32 inLength) {
+    if (!inData || inLength == 0)
+        return noErr;
+    SysexChunk chunk;
+    // The callback is bounded by the preallocated RT mailbox. Refuse an
+    // oversized message instead of silently truncating a program/performance
+    // dump into a different SysEx message. Nodal program/performance dumps
+    // have 139-byte program and about 715-byte performance shapes.
+    if (inLength > chunk.bytes.size())
+        return kAudio_ParamError;
+    chunk.length = static_cast<uint16_t>(inLength);
+    std::memcpy(chunk.bytes.data(), inData, chunk.length);
+    if (!sysex_in_queue_.try_push(chunk))
+        return kAudio_ParamError;
+    return noErr;
+}
+
 OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
                                   const AudioTimeStamp& inTimeStamp,
                                   UInt32 inNumberFrames)
@@ -324,10 +349,16 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
 
     audio::BufferView<const float> input_view;
 
-    midi::MidiBuffer midi_in, midi_out;
+    midi_in_.clear();
+    midi_in_.clear_sysex();
+    midi_out_.clear();
+    midi_out_.clear_sysex();
     while (auto ev = midi_in_queue_.try_pop())  // lock-free drain
-        midi_in.add(*ev);
-    midi_in.sort();
+        midi_in_.add(*ev);
+    while (auto sx = sysex_in_queue_.try_pop()) // lock-free drain
+        midi_in_.add_sysex_copy(sx->bytes.data(), sx->length,
+                                /*sample_offset=*/0);
+    midi_in_.sort();
 
     ProcessContext ctx = make_render_process_context(
         GetOutput(0)->GetStreamFormat().mSampleRate,
@@ -420,7 +451,7 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
 
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        processor_->process(process_buffers, midi_in, midi_out, ctx);
+        processor_->process(process_buffers, midi_in_, midi_out_, ctx);
     }
 
     return noErr;

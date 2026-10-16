@@ -23,6 +23,7 @@
 // steady-state block, where the render path must be allocation/lock-free.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/format/au_v2_instrument.hpp>
 #include <pulp/format/processor.hpp>
@@ -72,12 +73,22 @@ public:
 
     void prepare(const format::PrepareContext&) override {}
 
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>&,
-                 midi::MidiBuffer&,
-                 midi::MidiBuffer&,
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
+                 midi::MidiBuffer& midi_in, midi::MidiBuffer&,
                  const format::ProcessContext&) override {
-        const float level = state().get_value(1);
+        // Exercise the two bounded payload sizes observed on the Nodal AU
+        // path: 139-byte program and 715-byte performance messages. These
+        // packets are shape-only fixtures, not decoded Nodal dumps; the test
+        // proves adapter delivery and size handling while malformed input
+        // remains silent.
+        bool valid_program_dump = false;
+        for (const auto& sysex : midi_in.sysex()) {
+            valid_program_dump = (sysex.data.size() == 139 || sysex.data.size() == 715) &&
+                                 sysex.data.front() == 0xF0 && sysex.data.back() == 0xF7;
+            if (valid_program_dump)
+                break;
+        }
+        const float level = valid_program_dump ? state().get_value(1) : 0.0f;
         for (std::size_t c = 0; c < output.num_channels(); ++c) {
             float* dst = output.channel_ptr(c);
             for (std::size_t n = 0; n < output.num_samples(); ++n) {
@@ -181,6 +192,88 @@ TEST_CASE("AU v2 instrument Render path is allocation/lock-free",
     }
     REQUIRE(render_status == noErr);
     REQUIRE(allocation_count == 0);
+
+    instrument.DoCleanup();
+}
+
+TEST_CASE("AU v2 instrument delivers MusicDeviceSysEx to the audio processor",
+          "[au][au-v2][instrument][sysex]") {
+    ScopedFactoryRegistration registration(create_rt_instrument);
+
+    constexpr double kSampleRate = 48000.0;
+    constexpr UInt32 kChannels = 2;
+    constexpr UInt32 kFrames = 256;
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(make_float_format(kSampleRate, kChannels)) ==
+            noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    timestamp.mSampleTime = 0;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+
+    std::vector<UInt8> valid_dump(139, 0x01);
+    valid_dump.front() = 0xF0;
+    valid_dump.back() = 0xF7;
+    REQUIRE(instrument.SysEx(valid_dump.data(), static_cast<UInt32>(valid_dump.size())) == noErr);
+    OSStatus render_status = noErr;
+    std::size_t allocation_count = 0;
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        render_status = instrument.Render(flags, timestamp, kFrames);
+        allocation_count = probe.allocation_count();
+    }
+    REQUIRE(render_status == noErr);
+    REQUIRE(allocation_count == 0);
+    const auto& audible = instrument.GetOutput(0)->GetBufferList();
+    REQUIRE(audible.mNumberBuffers == kChannels);
+    REQUIRE(static_cast<const float*>(audible.mBuffers[0].mData)[0] == Catch::Approx(0.5f));
+
+    // A callback returning success is not enough: malformed input must not be
+    // mistaken for a source-valid program dump or produce a voice.
+    const std::array<UInt8, 3> malformed{{0xF0, 0x01, 0xF7}};
+    REQUIRE(instrument.SysEx(malformed.data(), malformed.size()) == noErr);
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    const auto& silent = instrument.GetOutput(0)->GetBufferList();
+    REQUIRE(static_cast<const float*>(silent.mBuffers[0].mData)[0] == Catch::Approx(0.0f));
+
+    // The performance-shaped dump is larger than the program dump and must
+    // survive the same callback path without truncation.
+    std::vector<UInt8> performance_dump(715, 0x02);
+    performance_dump.front() = 0xF0;
+    performance_dump.back() = 0xF7;
+    REQUIRE(instrument.SysEx(performance_dump.data(),
+                             static_cast<UInt32>(performance_dump.size())) == noErr);
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    const auto& performance = instrument.GetOutput(0)->GetBufferList();
+    REQUIRE(static_cast<const float*>(performance.mBuffers[0].mData)[0] == Catch::Approx(0.5f));
+
+    std::vector<UInt8> oversized(1025, 0x03);
+    oversized.front() = 0xF0;
+    oversized.back() = 0xF7;
+    REQUIRE(instrument.SysEx(oversized.data(), static_cast<UInt32>(oversized.size())) ==
+            kAudio_ParamError);
+
+    // A full lock-free mailbox must fail closed as well; success cannot mean
+    // that a patch was silently dropped.
+    for (int i = 0; i < 32; ++i) {
+        REQUIRE(instrument.SysEx(valid_dump.data(), static_cast<UInt32>(valid_dump.size())) ==
+                noErr);
+    }
+    REQUIRE(instrument.SysEx(valid_dump.data(), static_cast<UInt32>(valid_dump.size())) ==
+            kAudio_ParamError);
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
 
     instrument.DoCleanup();
 }
