@@ -1,0 +1,740 @@
+{
+  "schema": "pulp-three-project-scorecard-receipt/v1",
+  "captured_at": {
+    "started_at": "2026-10-16T15:23:23.498711Z",
+    "completed_at": "2026-10-16T15:23:23.849107Z",
+    "scope": "three sequential scorecard commands"
+  },
+  "command": "shipyard metrics scorecard --mode isolated --fail-on-stale --project <project> --since 3d --json",
+  "metrics_database": "/Users/danielraffel/Library/Application Support/shipyard-dev/metrics/metrics.db",
+  "shipyard_executable": "/Users/danielraffel/Code/Shipyard-baseline-refresh/target/debug/shipyard",
+  "protected_heads": {
+    "pulp": "3c2334da9151e68e3040cd54de78c8da59d776e5",
+    "danielraffel/tartci": "0ed9da98c044eea117ddc390f247c586f6e5b637",
+    "danielraffel/Shipyard": "100d3bbabbe784fdbfd381350d401b2aad9fd916"
+  },
+  "scorecards": {
+    "pulp": {
+      "project": "pulp",
+      "since_days": 3,
+      "job_samples": 222,
+      "successful_jobs": 144,
+      "failed_jobs": 3,
+      "other_jobs": 75,
+      "failure_rate": 0.02040816326530612,
+      "worker_minutes": 480.1166666666667,
+      "duration_samples": 191,
+      "worker_minutes_coverage": {
+        "status": "partial",
+        "reason": "191 of 222 completed job samples include measured duration"
+      },
+      "duration_p50_ms": 38000,
+      "duration_p90_ms": 333000,
+      "queue_samples": 222,
+      "queue_p50_ms": 2000,
+      "queue_p90_ms": 2000,
+      "wasted_compute_minutes": 49.416666666666664,
+      "wasted_compute_samples": 19,
+      "coordination_minutes": 23.566666666666666,
+      "coordination_samples": 222,
+      "rework_compute_minutes": 1.35,
+      "rework_compute_samples": 3,
+      "coordination_rework_minutes": 24.916666666666668,
+      "safely_merged_changes": {
+        "status": "unavailable",
+        "reason": "no durable merge receipt joins a PR head to a safely merged change"
+      },
+      "wasted_compute_per_safely_merged_change": {
+        "status": "unavailable",
+        "reason": "no durable merge receipt joins a PR head to a safely merged change"
+      },
+      "distinct_pull_requests": 3,
+      "pull_requests_per_day": 1.0,
+      "pull_request_throughput": {
+        "status": "partial",
+        "reason": "200 of 222 completed job samples include pull-request identity"
+      },
+      "cache_samples": 0,
+      "cache_hits": 0,
+      "cache_hit_rate": null,
+      "submit_to_receipt": {
+        "status": "unavailable",
+        "reason": "job metrics do not store durable submission and receipt timestamps"
+      },
+      "model_token_use": {
+        "status": "unavailable",
+        "reason": "job metrics do not store model call or token counters"
+      },
+      "basis": "proxy",
+      "proxies": [
+        {
+          "name": "failure_share",
+          "value": 0.02040816326530612,
+          "sample": 147,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 success/failure jobs per window; change must exceed 2 pooled standard errors and 5 points"
+        },
+        {
+          "name": "cancelled_share",
+          "value": 0.07207207207207207,
+          "sample": 222,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 completed jobs per window; change must exceed 2 pooled standard errors and 5 points"
+        },
+        {
+          "name": "starvation_share",
+          "value": 0.03153153153153153,
+          "sample": 222,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 jobs with known runner assignment per window; change must exceed 2 pooled standard errors and 5 points"
+        },
+        {
+          "name": "attempts_per_pr",
+          "value": 66.66666666666667,
+          "sample": 3,
+          "min_sample": 5,
+          "sufficient": false,
+          "better": "lower",
+          "floor": "n>=5 distinct pull requests per window; change must exceed 15% and 0.25 attempts"
+        },
+        {
+          "name": "queue_wait_per_job_ahead_ms",
+          "value": 1000.0,
+          "sample": 153,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 jobs with provider queue timestamps per window; median must move 25% and 1s (timestamps are whole seconds)"
+        },
+        {
+          "name": "cache_hit_rate",
+          "value": null,
+          "sample": 0,
+          "min_sample": 10,
+          "sufficient": false,
+          "better": "higher",
+          "floor": "n>=10 jobs reporting cache reuse per window; change must exceed 2 pooled standard errors and 5 points"
+        }
+      ],
+      "comparison": {
+        "basis": "proxy",
+        "verdict": "insufficient_sample",
+        "proxy_verdict": "insufficient_sample",
+        "wall_time_verdict": "insufficient_sample",
+        "proxies": [
+          {
+            "name": "failure_share",
+            "before": null,
+            "after": 0.02040816326530612,
+            "before_sample": 0,
+            "after_sample": 147,
+            "unit": "jobs (success+failure)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 success/failure jobs per window; change must exceed 2 pooled standard errors and 5 points"
+          },
+          {
+            "name": "cancelled_share",
+            "before": null,
+            "after": 0.07207207207207207,
+            "before_sample": 0,
+            "after_sample": 222,
+            "unit": "jobs (completed)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 completed jobs per window; change must exceed 2 pooled standard errors and 5 points"
+          },
+          {
+            "name": "starvation_share",
+            "before": null,
+            "after": 0.03153153153153153,
+            "before_sample": 0,
+            "after_sample": 222,
+            "unit": "jobs (runner assignment known)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 jobs with known runner assignment per window; change must exceed 2 pooled standard errors and 5 points"
+          },
+          {
+            "name": "attempts_per_pr",
+            "before": null,
+            "after": 66.66666666666667,
+            "before_sample": 0,
+            "after_sample": 3,
+            "unit": "pull requests",
+            "min_sample": 5,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=5 distinct pull requests per window; change must exceed 15% and 0.25 attempts"
+          },
+          {
+            "name": "queue_wait_per_job_ahead_ms",
+            "before": null,
+            "after": 1000.0,
+            "before_sample": 0,
+            "after_sample": 153,
+            "unit": "jobs (queue-timed)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 jobs with provider queue timestamps per window; median must move 25% and 1s (timestamps are whole seconds)"
+          },
+          {
+            "name": "cache_hit_rate",
+            "before": null,
+            "after": null,
+            "before_sample": 0,
+            "after_sample": 0,
+            "unit": "jobs (cache-reporting)",
+            "min_sample": 10,
+            "better": "higher",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 jobs reporting cache reuse per window; change must exceed 2 pooled standard errors and 5 points"
+          }
+        ],
+        "context": {
+          "label": "context (load-dependent)",
+          "before_sample": 0,
+          "after_sample": 144,
+          "before_p50_ms": null,
+          "after_p50_ms": 51000,
+          "before_p90_ms": null,
+          "after_p90_ms": 448000
+        }
+      },
+      "freshness": {
+        "status": "fresh",
+        "project": "pulp",
+        "threshold_secs": 86400,
+        "checked_at": "2026-10-16T15:23:23.561076Z",
+        "newest_sample_at": "2026-10-16T14:21:54Z",
+        "sources": [
+          {
+            "source": "github",
+            "samples": 222,
+            "newest_sample_at": "2026-10-16T14:21:54Z",
+            "age_secs": 3689,
+            "stale": false,
+            "judged": true
+          }
+        ],
+        "stale_sources": [],
+        "message": "fresh: newest sample 2026-10-16T14:21:54+00:00 (1h 1m ago; threshold 1d) for project pulp"
+      }
+    },
+    "tartci": {
+      "project": "danielraffel/tartci",
+      "since_days": 3,
+      "job_samples": 460,
+      "successful_jobs": 301,
+      "failed_jobs": 16,
+      "other_jobs": 143,
+      "failure_rate": 0.050473186119873815,
+      "worker_minutes": 2668.1833333333334,
+      "duration_samples": 423,
+      "worker_minutes_coverage": {
+        "status": "partial",
+        "reason": "423 of 460 completed job samples include measured duration"
+      },
+      "duration_p50_ms": 22000,
+      "duration_p90_ms": 1210000,
+      "queue_samples": 460,
+      "queue_p50_ms": 3000,
+      "queue_p90_ms": 3000,
+      "wasted_compute_minutes": 694.25,
+      "wasted_compute_samples": 91,
+      "coordination_minutes": 17.733333333333334,
+      "coordination_samples": 460,
+      "rework_compute_minutes": 277.1166666666667,
+      "rework_compute_samples": 16,
+      "coordination_rework_minutes": 294.85,
+      "safely_merged_changes": {
+        "status": "unavailable",
+        "reason": "no durable merge receipt joins a PR head to a safely merged change"
+      },
+      "wasted_compute_per_safely_merged_change": {
+        "status": "unavailable",
+        "reason": "no durable merge receipt joins a PR head to a safely merged change"
+      },
+      "distinct_pull_requests": 7,
+      "pull_requests_per_day": 2.3333333333333335,
+      "pull_request_throughput": {
+        "status": "partial",
+        "reason": "58 of 460 completed job samples include pull-request identity"
+      },
+      "cache_samples": 0,
+      "cache_hits": 0,
+      "cache_hit_rate": null,
+      "submit_to_receipt": {
+        "status": "unavailable",
+        "reason": "job metrics do not store durable submission and receipt timestamps"
+      },
+      "model_token_use": {
+        "status": "unavailable",
+        "reason": "job metrics do not store model call or token counters"
+      },
+      "basis": "proxy",
+      "proxies": [
+        {
+          "name": "failure_share",
+          "value": 0.050473186119873815,
+          "sample": 317,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 success/failure jobs per window; change must exceed 2 pooled standard errors and 5 points"
+        },
+        {
+          "name": "cancelled_share",
+          "value": 0.19130434782608696,
+          "sample": 460,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 completed jobs per window; change must exceed 2 pooled standard errors and 5 points"
+        },
+        {
+          "name": "starvation_share",
+          "value": 0.06739130434782609,
+          "sample": 460,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 jobs with known runner assignment per window; change must exceed 2 pooled standard errors and 5 points"
+        },
+        {
+          "name": "attempts_per_pr",
+          "value": 8.285714285714286,
+          "sample": 7,
+          "min_sample": 5,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=5 distinct pull requests per window; change must exceed 15% and 0.25 attempts"
+        },
+        {
+          "name": "queue_wait_per_job_ahead_ms",
+          "value": 3000.0,
+          "sample": 374,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 jobs with provider queue timestamps per window; median must move 25% and 1s (timestamps are whole seconds)"
+        },
+        {
+          "name": "cache_hit_rate",
+          "value": null,
+          "sample": 0,
+          "min_sample": 10,
+          "sufficient": false,
+          "better": "higher",
+          "floor": "n>=10 jobs reporting cache reuse per window; change must exceed 2 pooled standard errors and 5 points"
+        }
+      ],
+      "comparison": {
+        "basis": "proxy",
+        "verdict": "insufficient_sample",
+        "proxy_verdict": "insufficient_sample",
+        "wall_time_verdict": "insufficient_sample",
+        "proxies": [
+          {
+            "name": "failure_share",
+            "before": null,
+            "after": 0.050473186119873815,
+            "before_sample": 0,
+            "after_sample": 317,
+            "unit": "jobs (success+failure)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 success/failure jobs per window; change must exceed 2 pooled standard errors and 5 points"
+          },
+          {
+            "name": "cancelled_share",
+            "before": null,
+            "after": 0.19130434782608696,
+            "before_sample": 0,
+            "after_sample": 460,
+            "unit": "jobs (completed)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 completed jobs per window; change must exceed 2 pooled standard errors and 5 points"
+          },
+          {
+            "name": "starvation_share",
+            "before": null,
+            "after": 0.06739130434782609,
+            "before_sample": 0,
+            "after_sample": 460,
+            "unit": "jobs (runner assignment known)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 jobs with known runner assignment per window; change must exceed 2 pooled standard errors and 5 points"
+          },
+          {
+            "name": "attempts_per_pr",
+            "before": null,
+            "after": 8.285714285714286,
+            "before_sample": 0,
+            "after_sample": 7,
+            "unit": "pull requests",
+            "min_sample": 5,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=5 distinct pull requests per window; change must exceed 15% and 0.25 attempts"
+          },
+          {
+            "name": "queue_wait_per_job_ahead_ms",
+            "before": null,
+            "after": 3000.0,
+            "before_sample": 0,
+            "after_sample": 374,
+            "unit": "jobs (queue-timed)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 jobs with provider queue timestamps per window; median must move 25% and 1s (timestamps are whole seconds)"
+          },
+          {
+            "name": "cache_hit_rate",
+            "before": null,
+            "after": null,
+            "before_sample": 0,
+            "after_sample": 0,
+            "unit": "jobs (cache-reporting)",
+            "min_sample": 10,
+            "better": "higher",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 jobs reporting cache reuse per window; change must exceed 2 pooled standard errors and 5 points"
+          }
+        ],
+        "context": {
+          "label": "context (load-dependent)",
+          "before_sample": 0,
+          "after_sample": 301,
+          "before_p50_ms": null,
+          "after_p50_ms": 21000,
+          "before_p90_ms": null,
+          "after_p90_ms": 1220000
+        }
+      },
+      "freshness": {
+        "status": "fresh",
+        "project": "danielraffel/tartci",
+        "threshold_secs": 86400,
+        "checked_at": "2026-10-16T15:23:23.655804Z",
+        "newest_sample_at": "2026-10-16T14:36:09Z",
+        "sources": [
+          {
+            "source": "github",
+            "samples": 460,
+            "newest_sample_at": "2026-10-16T14:36:09Z",
+            "age_secs": 2834,
+            "stale": false,
+            "judged": true
+          }
+        ],
+        "stale_sources": [],
+        "message": "fresh: newest sample 2026-10-16T14:36:09+00:00 (47m ago; threshold 1d) for project danielraffel/tartci"
+      }
+    },
+    "shipyard": {
+      "project": "danielraffel/Shipyard",
+      "since_days": 3,
+      "job_samples": 800,
+      "successful_jobs": 501,
+      "failed_jobs": 15,
+      "other_jobs": 284,
+      "failure_rate": 0.029069767441860465,
+      "worker_minutes": 2551.3333333333335,
+      "duration_samples": 760,
+      "worker_minutes_coverage": {
+        "status": "partial",
+        "reason": "760 of 800 completed job samples include measured duration"
+      },
+      "duration_p50_ms": 53000,
+      "duration_p90_ms": 481000,
+      "queue_samples": 790,
+      "queue_p50_ms": 3000,
+      "queue_p90_ms": 4000,
+      "wasted_compute_minutes": 1110.0833333333333,
+      "wasted_compute_samples": 236,
+      "coordination_minutes": 1427.0166666666667,
+      "coordination_samples": 790,
+      "rework_compute_minutes": 72.38333333333334,
+      "rework_compute_samples": 15,
+      "coordination_rework_minutes": 1499.4,
+      "safely_merged_changes": {
+        "status": "unavailable",
+        "reason": "no durable merge receipt joins a PR head to a safely merged change"
+      },
+      "wasted_compute_per_safely_merged_change": {
+        "status": "unavailable",
+        "reason": "no durable merge receipt joins a PR head to a safely merged change"
+      },
+      "distinct_pull_requests": 0,
+      "pull_requests_per_day": 0.0,
+      "pull_request_throughput": {
+        "status": "unavailable",
+        "reason": "no completed job samples include pull-request identity"
+      },
+      "cache_samples": 0,
+      "cache_hits": 0,
+      "cache_hit_rate": null,
+      "submit_to_receipt": {
+        "status": "unavailable",
+        "reason": "job metrics do not store durable submission and receipt timestamps"
+      },
+      "model_token_use": {
+        "status": "unavailable",
+        "reason": "job metrics do not store model call or token counters"
+      },
+      "basis": "proxy",
+      "proxies": [
+        {
+          "name": "failure_share",
+          "value": 0.029069767441860465,
+          "sample": 516,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 success/failure jobs per window; change must exceed 2 pooled standard errors and 5 points"
+        },
+        {
+          "name": "cancelled_share",
+          "value": 0.31375,
+          "sample": 800,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 completed jobs per window; change must exceed 2 pooled standard errors and 5 points"
+        },
+        {
+          "name": "starvation_share",
+          "value": 0.22625,
+          "sample": 800,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 jobs with known runner assignment per window; change must exceed 2 pooled standard errors and 5 points"
+        },
+        {
+          "name": "attempts_per_pr",
+          "value": null,
+          "sample": 0,
+          "min_sample": 5,
+          "sufficient": false,
+          "better": "lower",
+          "floor": "n>=5 distinct pull requests per window; change must exceed 15% and 0.25 attempts"
+        },
+        {
+          "name": "queue_wait_per_job_ahead_ms",
+          "value": 1500.0,
+          "sample": 576,
+          "min_sample": 10,
+          "sufficient": true,
+          "better": "lower",
+          "floor": "n>=10 jobs with provider queue timestamps per window; median must move 25% and 1s (timestamps are whole seconds)"
+        },
+        {
+          "name": "cache_hit_rate",
+          "value": null,
+          "sample": 0,
+          "min_sample": 10,
+          "sufficient": false,
+          "better": "higher",
+          "floor": "n>=10 jobs reporting cache reuse per window; change must exceed 2 pooled standard errors and 5 points"
+        }
+      ],
+      "comparison": {
+        "basis": "proxy",
+        "verdict": "insufficient_sample",
+        "proxy_verdict": "insufficient_sample",
+        "wall_time_verdict": "insufficient_sample",
+        "proxies": [
+          {
+            "name": "failure_share",
+            "before": null,
+            "after": 0.029069767441860465,
+            "before_sample": 0,
+            "after_sample": 516,
+            "unit": "jobs (success+failure)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 success/failure jobs per window; change must exceed 2 pooled standard errors and 5 points"
+          },
+          {
+            "name": "cancelled_share",
+            "before": null,
+            "after": 0.31375,
+            "before_sample": 0,
+            "after_sample": 800,
+            "unit": "jobs (completed)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 completed jobs per window; change must exceed 2 pooled standard errors and 5 points"
+          },
+          {
+            "name": "starvation_share",
+            "before": null,
+            "after": 0.22625,
+            "before_sample": 0,
+            "after_sample": 800,
+            "unit": "jobs (runner assignment known)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 jobs with known runner assignment per window; change must exceed 2 pooled standard errors and 5 points"
+          },
+          {
+            "name": "attempts_per_pr",
+            "before": null,
+            "after": null,
+            "before_sample": 0,
+            "after_sample": 0,
+            "unit": "pull requests",
+            "min_sample": 5,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=5 distinct pull requests per window; change must exceed 15% and 0.25 attempts"
+          },
+          {
+            "name": "queue_wait_per_job_ahead_ms",
+            "before": null,
+            "after": 1500.0,
+            "before_sample": 0,
+            "after_sample": 576,
+            "unit": "jobs (queue-timed)",
+            "min_sample": 10,
+            "better": "lower",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 jobs with provider queue timestamps per window; median must move 25% and 1s (timestamps are whole seconds)"
+          },
+          {
+            "name": "cache_hit_rate",
+            "before": null,
+            "after": null,
+            "before_sample": 0,
+            "after_sample": 0,
+            "unit": "jobs (cache-reporting)",
+            "min_sample": 10,
+            "better": "higher",
+            "direction": "insufficient_sample",
+            "floor": "n>=10 jobs reporting cache reuse per window; change must exceed 2 pooled standard errors and 5 points"
+          }
+        ],
+        "context": {
+          "label": "context (load-dependent)",
+          "before_sample": 0,
+          "after_sample": 501,
+          "before_p50_ms": null,
+          "after_p50_ms": 55000,
+          "before_p90_ms": null,
+          "after_p90_ms": 469000
+        }
+      },
+      "freshness": {
+        "status": "fresh",
+        "project": "danielraffel/Shipyard",
+        "threshold_secs": 86400,
+        "checked_at": "2026-10-16T15:23:23.809455Z",
+        "newest_sample_at": "2026-10-16T14:03:36Z",
+        "sources": [
+          {
+            "source": "github",
+            "samples": 800,
+            "newest_sample_at": "2026-10-16T14:03:36Z",
+            "age_secs": 4787,
+            "stale": false,
+            "judged": true
+          }
+        ],
+        "stale_sources": [],
+        "message": "fresh: newest sample 2026-10-16T14:03:36+00:00 (1h 19m ago; threshold 1d) for project danielraffel/Shipyard"
+      }
+    }
+  },
+  "ingest_provenance": {
+    "status": "not_captured",
+    "command": null,
+    "started_at": null,
+    "completed_at": null,
+    "reason": "The metrics database was an existing daemon-maintained snapshot; this refresh performed read-only scorecard commands and did not mutate or re-import it. Database mtime is recorded separately."
+  },
+  "scorecard_execution": {
+    "command": "shipyard metrics scorecard --mode isolated --fail-on-stale --project <full-project-slug> --since 3d --json",
+    "projects": [
+      "pulp",
+      "danielraffel/tartci",
+      "danielraffel/Shipyard"
+    ],
+    "capture": {
+      "pulp": {
+        "started_at": "2026-10-16T15:23:23.498711Z",
+        "completed_at": "2026-10-16T15:23:23.564780Z",
+        "exit_code": 0
+      },
+      "danielraffel/tartci": {
+        "started_at": "2026-10-16T15:23:23.565153Z",
+        "completed_at": "2026-10-16T15:23:23.676500Z",
+        "exit_code": 0
+      },
+      "danielraffel/Shipyard": {
+        "started_at": "2026-10-16T15:23:23.676840Z",
+        "completed_at": "2026-10-16T15:23:23.849107Z",
+        "exit_code": 0
+      }
+    },
+    "exit_codes": {
+      "pulp": 0,
+      "danielraffel/tartci": 0,
+      "danielraffel/Shipyard": 0
+    },
+    "exit_codes_basis": "operator_asserted from subprocess returncode; individual stdout captures are /tmp-only and are not committed",
+    "raw_outputs": "Each scorecard object below is the parsed stdout from its individual command; this committed file assembles those objects with provenance metadata."
+  },
+  "shipyard_binary_provenance": {
+    "path": "/Users/danielraffel/Code/Shipyard-baseline-refresh/target/debug/shipyard",
+    "checkout": "/Users/danielraffel/Code/Shipyard-baseline-refresh",
+    "head": "100d3bbabbe784fdbfd381350d401b2aad9fd916",
+    "version": "0.343.0",
+    "profile": "dev (unoptimized + debuginfo)"
+  },
+  "observed_sample_windows": {
+    "source": "/Users/danielraffel/Library/Application Support/shipyard-dev/metrics/metrics.db",
+    "query": "SELECT project, MIN(ts) AS oldest_sample_at, MAX(ts) AS newest_sample_at, COUNT(*) AS run_rows FROM runs WHERE project IN (?,?,?) GROUP BY project ORDER BY project",
+    "rows": [
+      {
+        "project": "Shipyard",
+        "oldest_sample_at": "2026-10-15T03:16:26+00:00",
+        "newest_sample_at": "2026-10-16T14:03:36+00:00",
+        "run_rows": 800
+      },
+      {
+        "project": "pulp",
+        "oldest_sample_at": "2026-10-16T13:44:53+00:00",
+        "newest_sample_at": "2026-10-16T14:21:54+00:00",
+        "run_rows": 222
+      },
+      {
+        "project": "tartci",
+        "oldest_sample_at": "2026-10-16T03:15:37+00:00",
+        "newest_sample_at": "2026-10-16T14:36:09+00:00",
+        "run_rows": 460
+      }
+    ],
+    "note": "Derived from the existing SQLite snapshot, outside parsed scorecard command output; spans are observed data coverage, while since_days=3 is the nominal query window."
+  }
+}
