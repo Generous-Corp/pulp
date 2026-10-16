@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09860"></a>
+## [0.986.0] - 2026-10-16
+
+- release/version bump ([#10452](https://github.com/Generous-Corp/pulp/pull/10452))
+- shipyard merge gate evidence 20261016 ([#10450](https://github.com/Generous-Corp/pulp/pull/10450))
+- feature/gpu audio sync 20261015 ([#10433](https://github.com/Generous-Corp/pulp/pull/10433))
+- test/a2t alternate pin two revision window ([#10444](https://github.com/Generous-Corp/pulp/pull/10444))
+- fix/coverage g1 gnu driver only ([#10449](https://github.com/Generous-Corp/pulp/pull/10449))
+- release/version bump ([#10443](https://github.com/Generous-Corp/pulp/pull/10443))
+- fix/test pch carrier pie ([#10441](https://github.com/Generous-Corp/pulp/pull/10441))
+- codex/gate1 phase1 20261016 ([#10429](https://github.com/Generous-Corp/pulp/pull/10429))
+- test/p2 provider receipt bindings ([#10442](https://github.com/Generous-Corp/pulp/pull/10442))
+- docs/three project scorecard refresh 20261016 ([#10440](https://github.com/Generous-Corp/pulp/pull/10440))
+- fix/a2t test alternate history pin ([#10439](https://github.com/Generous-Corp/pulp/pull/10439))
+
 <a id="v09850"></a>
 ## [0.985.0] - 2026-10-16
 
@@ -10919,6 +10934,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.986.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.0
 [0.985.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.985.0
 [0.984.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.984.1
 [0.984.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.984.0
