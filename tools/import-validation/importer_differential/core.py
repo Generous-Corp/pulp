@@ -876,6 +876,40 @@ def verify_capture_binding(
         raise LabError("browser and native lowering viewport provenance differs")
     if native.get("browser") != browser.get("browser"):
         raise LabError("browser and native lowering browser provenance differs")
+    browser_reference = capture.get("reference", {})
+    native_reference = native_capture.get("reference", {})
+    if (browser_reference.get("device_scale_factor") is not None
+            and native_reference.get("device_scale_factor") is not None
+            and browser_reference["device_scale_factor"] != native_reference["device_scale_factor"]):
+        raise LabError("browser and native lowering device scale factor differs")
+    browser_interactions = browser.get("interactions")
+    native_interactions = native.get("interactions")
+    if (browser_interactions is not None or native_interactions is not None) and (
+            browser_interactions != native_interactions):
+        raise LabError("browser and native lowering interaction provenance differs")
+
+
+def verify_capture_image_binding(capture: dict[str, Any], image_path: Path) -> None:
+    """Fail closed when the capture envelope does not name the PNG we compare."""
+    reference = capture.get("reference", {})
+    asset_id = reference.get("asset_id")
+    assets = capture.get("assets", [])
+    asset = next((item for item in assets if item.get("id") == asset_id), None)
+    if not isinstance(asset, dict):
+        raise LabError("capture reference asset is missing")
+    expected_sha = asset.get("sha256")
+    if not isinstance(expected_sha, str) or expected_sha != sha256_file(image_path):
+        raise LabError("capture reference PNG digest does not match capture envelope")
+    if not isinstance(asset.get("width_px"), int) or not isinstance(asset.get("height_px"), int):
+        raise LabError("capture reference PNG dimensions are missing from capture envelope")
+    try:
+        from PIL import Image
+        with Image.open(image_path) as image:
+            expected_size = (asset.get("width_px"), asset.get("height_px"))
+            if image.size != expected_size:
+                raise LabError("capture reference PNG dimensions do not match capture envelope")
+    except ImportError as exc:
+        raise LabError("Pillow is required to verify capture PNG dimensions") from exc
 
 
 def compare_one(
@@ -954,6 +988,8 @@ def compare_one(
     native_capture = json.loads((native_evidence / "capture.json").read_text(encoding="utf-8"))
     source_sha256 = sha256_file(source)
     verify_capture_binding(capture, native_capture, source_sha256)
+    verify_capture_image_binding(capture, evidence / "browser.png")
+    verify_capture_image_binding(native_capture, native_evidence / "browser.png")
     viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
     render_args = [
@@ -980,7 +1016,7 @@ def compare_one(
     for name in (
         ".pulp-browser-capture-v1", "browser.png", "capture.json",
         "dom-snapshot.json", "semantic-report.json", "tokens.json",
-        "interaction-report.json",
+        "interaction-report.json", "platform-fonts.json",
     ):
         source_evidence = evidence / name
         if source_evidence.exists():
@@ -1062,6 +1098,8 @@ def compare_one(
     integrity = {
         "schema": "pulp-importer-differential-integrity-v1",
         "source_sha256": source_sha256,
+        "importer_sha256": sha256_file(importer) if importer.is_file() else None,
+        "observer_sha256": sha256_file(observer) if observer.is_file() else None,
         "browser_ir_sha256": sha256_file(browser_ir),
         "native_ir_sha256": sha256_file(native_ir),
         "browser_capture_sha256": sha256_file(evidence / "capture.json"),
@@ -1074,6 +1112,14 @@ def compare_one(
         "native_render_sha256": sha256_file(native_render),
         "native_layout_sha256": sha256_file(native_layout),
         "native_render_receipt_sha256": sha256_file(native_receipt),
+        "platform_fonts_sha256": (
+            sha256_file(evidence / "platform-fonts.json")
+            if (evidence / "platform-fonts.json").is_file() else None),
+        "interaction_plan_sha256": (
+            capture.get("provenance", {}).get("interactions", {}).get("plan_sha256")),
+        "device_scale_factor": capture.get("provenance", {}).get("viewport", {}).get(
+            "device_scale_factor", capture.get("reference", {}).get("device_scale_factor")),
+        "browser_build_hash": capture.get("provenance", {}).get("browser", {}).get("build_hash"),
         "source_bound": True,
         "viewport_bound": True,
         "browser_bound": True,

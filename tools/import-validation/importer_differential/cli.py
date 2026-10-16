@@ -209,6 +209,71 @@ def cache_bucket(
     }
 
 
+DETERMINISM_FIELDS = (
+    "source_sha256",
+    "importer_sha256",
+    "observer_sha256",
+    "browser_capture_sha256",
+    "native_capture_sha256",
+    "browser_screenshot_sha256",
+    "native_render_sha256",
+    "native_layout_sha256",
+    "native_render_receipt_sha256",
+    "platform_fonts_sha256",
+    "interaction_plan_sha256",
+)
+
+
+def determinism_receipt(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Require three identical authenticated run digests before promotion.
+
+    A repeated process invocation is not evidence of deterministic rendering
+    unless the source, browser capture, native capture, PNG, layout, and Skia
+    receipt digests all agree. Fewer than three runs remains explicitly
+    unverified so existing exploratory one- and two-run calls stay diagnostic.
+    """
+    if len(reports) < 3:
+        return {
+            "schema": "pulp-importer-differential-determinism-v1",
+            "status": "unverified",
+            "required_runs": 3,
+            "runs": len(reports),
+            "reason": "three runs are required before determinism can be claimed",
+        }
+    run_digests: list[dict[str, str]] = []
+    missing: dict[int, list[str]] = {}
+    for index, report in enumerate(reports, 1):
+        integrity = report.get("integrity")
+        if not isinstance(integrity, dict):
+            missing[index] = list(DETERMINISM_FIELDS)
+            continue
+        digest = {field: integrity.get(field) for field in DETERMINISM_FIELDS}
+        absent = [field for field, value in digest.items() if not isinstance(value, str) or not value]
+        if absent:
+            missing[index] = absent
+        else:
+            run_digests.append(digest)
+    if missing:
+        return {
+            "schema": "pulp-importer-differential-determinism-v1",
+            "status": "unverified",
+            "required_runs": 3,
+            "runs": len(reports),
+            "missing_fields": {str(index): fields for index, fields in missing.items()},
+            "reason": "one or more runs lack authenticated integrity digests",
+        }
+    agreed = all(digest == run_digests[0] for digest in run_digests[1:])
+    return {
+        "schema": "pulp-importer-differential-determinism-v1",
+        "status": "pass" if agreed else "fail",
+        "required_runs": 3,
+        "runs": len(reports),
+        "fields": list(DETERMINISM_FIELDS),
+        "run_digests": run_digests,
+        "reason": "all authenticated run digests agree" if agreed else "authenticated run digests disagree",
+    }
+
+
 def command_benchmark(args: argparse.Namespace) -> int:
     output = args.output.resolve()
     reports = []
@@ -259,6 +324,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
              "fidelity": report.get("comparison")}
             for index, report in enumerate(reports)
         ],
+        "determinism": determinism_receipt(reports),
         # Keep these v1 keys for readers of existing receipts, but populate a
         # bucket only when every run was explicitly declared in that state.
         # Run position is recorded separately and is never called cold/warm.
@@ -295,7 +361,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
     }
     write_json(output / "benchmark.json", benchmark)
     print(json.dumps(benchmark, indent=2))
-    return 1 if benchmark["timing_budget"]["status"] == "fail" else 0
+    return 1 if benchmark["timing_budget"]["status"] == "fail" or benchmark["determinism"]["status"] == "fail" else 0
 
 
 def read_timing_budgets(path: Path | None) -> dict[str, int] | None:

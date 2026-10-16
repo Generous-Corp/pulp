@@ -245,6 +245,58 @@ class DifferentialLabTests(unittest.TestCase):
             with self.assertRaises(LAB.LabError):
                 LAB.visual_metrics(reference, candidate, root / "mismatch")
 
+    @requires_pillow
+    def test_visual_lens_keeps_renderer_floor_advisory_and_kills_gate_controls(self) -> None:
+        """The strict visual gate tolerates tiny edge AA variance only.
+
+        This is a deterministic calibration control, not a Chromium/Skia
+        claim. A real floor campaign must replace the synthetic pair with
+        authenticated same-source captures and retain its receipt.
+        """
+        from PIL import Image, ImageDraw
+
+        def panel(*, shift=0, fill=(220, 220, 220), border=2, rounded=False):
+            image = Image.new("RGBA", (64, 48), (24, 28, 36, 255))
+            draw = ImageDraw.Draw(image)
+            box = (14 + shift, 10, 49 + shift, 37)
+            draw.rectangle(box, fill=fill, outline=(120, 130, 145, 255), width=border)
+            if rounded:
+                draw.rounded_rectangle(box, radius=12, fill=fill, outline=(120, 130, 145, 255), width=border)
+            return image
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            reference_image = panel()
+            reference = root / "reference.png"
+            reference_image.save(reference)
+
+            healthy_image = reference_image.copy()
+            healthy_pixels = healthy_image.load()
+            for x in range(14, 50):
+                for y in (10, 37):
+                    red, green, blue, alpha = healthy_pixels[x, y]
+                    healthy_pixels[x, y] = (min(255, red + 12), min(255, green + 12), min(255, blue + 12), alpha)
+            healthy = root / "healthy.png"
+            healthy_image.save(healthy)
+            healthy_metrics = LAB.visual_metrics(reference, healthy, root / "healthy-artifacts")
+            self.assertGreaterEqual(healthy_metrics["score"], LAB.PROMOTION_THRESHOLDS["visual"])
+            self.assertGreater(healthy_metrics["differing_pixel_count"], 0)
+
+            controls = {
+                "one-pixel-shift": panel(shift=1),
+                "color-change": panel(fill=(90, 220, 160)),
+                "missing-border": panel(border=0),
+                "wrong-weight": panel(border=4),
+                "corner-radius": panel(rounded=True),
+            }
+            for name, image in controls.items():
+                with self.subTest(control=name):
+                    candidate = root / f"{name}.png"
+                    image.save(candidate)
+                    metrics = LAB.visual_metrics(reference, candidate, root / f"{name}-artifacts")
+                    self.assertLess(metrics["score"], LAB.PROMOTION_THRESHOLDS["visual"])
+                    self.assertGreater(metrics["differing_pixel_count"], 0)
+
     def test_missing_typography_counts_as_missing_coverage(self) -> None:
         browser = LAB.BrowserNode(
             1, "span", -1, "Gain", {}, (0, 0, 40, 20),
@@ -317,6 +369,34 @@ class DifferentialLabTests(unittest.TestCase):
                 with self.assertRaisesRegex(LAB.LabError, message):
                     LAB.verify_capture_binding(capture, native_capture, source_sha256)
 
+    def test_capture_binding_checks_dpr_and_interaction_provenance(self) -> None:
+        capture, native_capture, source_sha256 = self._bound_captures()
+        capture["reference"] = {"device_scale_factor": 2}
+        native_capture["reference"] = {"device_scale_factor": 1}
+        with self.assertRaisesRegex(LAB.LabError, "device scale factor"):
+            LAB.verify_capture_binding(capture, native_capture, source_sha256)
+        native_capture["reference"]["device_scale_factor"] = 2
+        capture["provenance"]["interactions"] = {"plan_sha256": "a" * 64}
+        native_capture["provenance"]["interactions"] = {"plan_sha256": "b" * 64}
+        with self.assertRaisesRegex(LAB.LabError, "interaction provenance"):
+            LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+    @requires_pillow
+    def test_capture_image_binding_rejects_stale_png(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            image_path = root / "browser.png"
+            Image.new("RGBA", (2, 1), (0, 0, 0, 255)).save(image_path)
+            capture = {
+                "reference": {"asset_id": "reference:browser"},
+                "assets": [{"id": "reference:browser", "sha256": LAB.sha256_file(image_path),
+                            "width_px": 2, "height_px": 1}],
+            }
+            LAB.verify_capture_image_binding(capture, image_path)
+            Image.new("RGBA", (2, 1), (255, 0, 0, 255)).save(image_path)
+            with self.assertRaisesRegex(LAB.LabError, "digest"):
+                LAB.verify_capture_image_binding(capture, image_path)
+
     def test_capture_binding_refuses_a_capture_without_provenance(self) -> None:
         _, native_capture, source_sha256 = self._bound_captures()
         with self.assertRaisesRegex(LAB.LabError, "browser capture source hash"):
@@ -386,11 +466,15 @@ class DifferentialLabTests(unittest.TestCase):
             }
             capture = {
                 "provenance": provenance,
-                "reference": {"logical_width": 1, "logical_height": 1,
+                "reference": {"asset_id": "reference:browser",
+                               "logical_width": 1, "logical_height": 1,
                                "device_scale_factor": 1},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            capture["assets"] = [{"id": "reference:browser", "sha256": LAB.sha256_file(evidence / "browser.png"),
+                                  "width_px": 1, "height_px": 1}]
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             (evidence / "dom-snapshot.json").write_text(
                 json.dumps({"documents": []}), encoding="utf-8")
 
@@ -438,11 +522,15 @@ class DifferentialLabTests(unittest.TestCase):
             }
             capture = {
                 "provenance": provenance,
-                "reference": {"logical_width": 1, "logical_height": 1,
+                "reference": {"asset_id": "reference:browser",
+                               "logical_width": 1, "logical_height": 1,
                                "device_scale_factor": 1},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            capture["assets"] = [{"id": "reference:browser", "sha256": LAB.sha256_file(evidence / "browser.png"),
+                                  "width_px": 1, "height_px": 1}]
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             (evidence / "dom-snapshot.json").write_text(
                 json.dumps({"documents": []}), encoding="utf-8")
 
@@ -648,6 +736,25 @@ class DifferentialLabTests(unittest.TestCase):
                 "native_total_p95_ms": 20,
                 "p50_ms_saved": 75.0,
             },
+        )
+
+    def test_determinism_receipt_requires_three_runs(self) -> None:
+        reports = [{"integrity": {field: "a" for field in LAB_CLI.DETERMINISM_FIELDS}}]
+        receipt = LAB_CLI.determinism_receipt(reports)
+        self.assertEqual(receipt["status"], "unverified")
+        self.assertEqual(receipt["required_runs"], 3)
+
+    def test_determinism_receipt_passes_only_when_all_authenticated_digests_agree(self) -> None:
+        def report(seed: str) -> dict:
+            return {"integrity": {field: seed for field in LAB_CLI.DETERMINISM_FIELDS}}
+
+        self.assertEqual(
+            LAB_CLI.determinism_receipt([report("a"), report("a"), report("a")])["status"],
+            "pass",
+        )
+        self.assertEqual(
+            LAB_CLI.determinism_receipt([report("a"), report("a"), report("b")])["status"],
+            "fail",
         )
 
     def test_benchmark_receipt_does_not_infer_cache_state_from_run_order(self) -> None:

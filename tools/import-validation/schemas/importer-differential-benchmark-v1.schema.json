@@ -13,7 +13,17 @@
     "cold": {"$ref": "#/$defs/cacheBucket"},
     "warm": {"$ref": "#/$defs/cacheBucket"},
     "first_invocation": {"type": "object"},
-    "repeat_runs": {"type": "object"}
+    "repeat_runs": {"type": "object"},
+    "determinism": {
+      "type": "object",
+      "required": ["schema", "status", "required_runs", "runs"],
+      "properties": {
+        "schema": {"const": "pulp-importer-differential-determinism-v1"},
+        "status": {"enum": ["pass", "fail", "unverified"]},
+        "required_runs": {"const": 3},
+        "runs": {"type": "integer", "minimum": 0}
+      }
+    }
   },
   "$defs": {
     "cacheBucket": {

@@ -241,6 +241,16 @@ def mean_pixel_distance(a: Image.Image, b: Image.Image) -> float:
     return 1.0 - (avg / 441.7)
 
 
+def similarity_score(a: Image.Image, b: Image.Image) -> float:
+    """Return the canonical weighted similarity score for two same-sized images.
+
+    This is the score used by the CLI. Keeping the calculation in a small
+    callable lets calibration tests and future receipt tooling measure planted
+    controls without reimplementing (or accidentally changing) the gate.
+    """
+    return (histogram_similarity(a, b) * 0.4) + (mean_pixel_distance(a, b) * 0.6)
+
+
 def is_blank(img: Image.Image, dark_threshold: int = 30) -> bool:
     """True if the image is essentially blank (>95% pixels near-black)."""
     pixels = list(img.getdata())
@@ -314,7 +324,7 @@ def main() -> int:
     blank_cand = is_blank(cand)
     dom_ref = dominant_colors(ref)
     dom_cand = dominant_colors(cand)
-    score = (hist_sim * 0.4) + (pix_sim * 0.6)
+    score = similarity_score(ref, cand)
     passed = score >= args.threshold and not blank_cand
     residual = None
     if args.residual_json:
