@@ -499,8 +499,10 @@ TEST_CASE("process and reset are allocation-free", "[signal][convolution][accept
     for (auto& v : taps2) v *= 0.7f;
     std::vector<float> taps3 = taps;
     std::vector<float> taps4 = taps;
-    for (auto& v : taps3) v *= 0.4f;
-    for (auto& v : taps4) v *= 0.9f;
+    for (auto& v : taps3)
+        v *= 0.4f;
+    for (auto& v : taps4)
+        v *= 0.9f;
     const float* channels[4] = {taps.data(), taps2.data(), taps3.data(), taps4.data()};
     REQUIRE(conv.load_impulse_response(channels, 4, static_cast<int>(taps.size()), kFs));
 
@@ -596,7 +598,7 @@ TEST_CASE("Packed stereo keeps partition work distributed",
     const auto kernel = decaying_noise_ir(65536, 6.0, 0xC05A);
     const std::vector<float> ir(kernel.begin(), kernel.end());
     const float* taps[4] = {ir.data(), ir.data(), ir.data(), ir.data()};
-    for (int block : {16, 128, 512}) {
+    for (int block : {1, 2, 3, 7, 16, 128, 512}) {
         for (bool enabled : {false, true}) {
             ZeroLatencyConvolver conv;
             conv.prepare(kFs, block, 2);
@@ -606,7 +608,8 @@ TEST_CASE("Packed stereo keeps partition work distributed",
             const float* in[2] = {input.data(), input.data()};
             float* out[2] = {left.data(), right.data()};
             const int largest = conv.level_block_length(conv.num_levels() - 1);
-            for (int b = 0; b < 4 * largest / block; ++b) conv.process(in, out, block);
+            for (int b = 0; b < 4 * largest / block; ++b)
+                conv.process(in, out, block);
             const int blocks = 2 * largest / block;
             long long total = 0, peak = 0;
             for (int b = 0; b < blocks; ++b) {
@@ -839,12 +842,12 @@ TEST_CASE("Tail trim ends on an exact zero through the shipped fade",
     for (std::size_t i = static_cast<std::size_t>(keep); i < y.size(); ++i)
         REQUIRE(std::abs(y[i]) < 1e-12);
 }
-TEST_CASE("Disabling true stereo mutes an active cross tail",
-          "[signal][convolution][stereo]") {
+TEST_CASE("Disabling true stereo mutes an active cross tail", "[signal][convolution][stereo]") {
     constexpr int ir_len = 12000;
     constexpr int frames = 20000;
     std::vector<std::vector<double>> ir(4, std::vector<double>(ir_len));
-    for (int i = 3000; i < 9000; ++i) ir[1][i] = 0.25;
+    for (int i = 3000; i < 9000; ++i)
+        ir[1][i] = 0.25;
     const double* p[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
     ZeroLatencyConvolver64 conv;
     conv.prepare(kFs, kBlock, 2);
@@ -856,19 +859,20 @@ TEST_CASE("Disabling true stereo mutes an active cross tail",
     first[0][0] = 1.0;
     const auto before = render(conv, first, kBlock);
     double before_peak = 0.0;
-    for (double v : before[1]) before_peak = std::max(before_peak, std::abs(v));
+    for (double v : before[1])
+        before_peak = std::max(before_peak, std::abs(v));
     REQUIRE(before_peak > 0.01);
 
     conv.set_true_stereo(false);
     std::vector<std::vector<double>> rest(2, std::vector<double>(frames - 4000));
     const auto after = render(conv, rest, kBlock);
     double after_peak = 0.0;
-    for (double v : after[1]) after_peak = std::max(after_peak, std::abs(v));
+    for (double v : after[1])
+        after_peak = std::max(after_peak, std::abs(v));
     REQUIRE(after_peak < 1e-12);
 }
 
-TEST_CASE("Packed stereo preserves DC and Nyquist components",
-          "[signal][convolution][stereo]") {
+TEST_CASE("Packed stereo preserves DC and Nyquist components", "[signal][convolution][stereo]") {
     constexpr int ir_len = 1537;
     constexpr int frames = 4096;
     std::vector<std::vector<float>> ir(4, std::vector<float>(ir_len));
@@ -940,11 +944,11 @@ TEST_CASE("True-stereo tail state survives render gating during partial work",
         for (int c = 0; c < 2; ++c) {
             for (int i = 0; i < n; ++i) {
                 if (enabled) {
-                    enabled_error = std::max(enabled_error,
-                        std::abs(double(out[c][i]) - double(ref[c][i])));
+                    enabled_error =
+                        std::max(enabled_error, std::abs(double(out[c][i]) - double(ref[c][i])));
                     if (pos >= 2002)
-                        reference_tail_peak = std::max(reference_tail_peak,
-                                                       std::abs(double(ref[c][i])));
+                        reference_tail_peak =
+                            std::max(reference_tail_peak, std::abs(double(ref[c][i])));
                 } else {
                     muted_peak = std::max(muted_peak, std::abs(double(out[c][i])));
                 }
@@ -954,4 +958,46 @@ TEST_CASE("True-stereo tail state survives render gating during partial work",
     REQUIRE(reference_tail_peak > 0.001);
     REQUIRE(enabled_error < 1e-7);
     REQUIRE(muted_peak < 1e-7);
+}
+
+TEST_CASE("Packed stereo preserves quiet diagonal channels", "[signal][convolution][stereo]") {
+    constexpr int frames = 8192;
+    constexpr int ir_len = 2048;
+    std::vector<std::vector<float>> ir(4, std::vector<float>(ir_len));
+    for (int cell : {0, 3}) {
+        ir[cell][0] = 0.5f;
+        ir[cell][511] = 0.1f;
+        ir[cell][1023] = -0.2f;
+        ir[cell][1900] = 0.05f;
+    }
+    const float* taps[4] = {ir[0].data(), ir[1].data(), ir[2].data(), ir[3].data()};
+    for (int loud : {0, 1}) {
+        for (float quiet_gain : {0.0f, 1e-5f}) {
+            ZeroLatencyConvolver conv;
+            conv.prepare(kFs, 64, 2);
+            conv.set_normalize_mode(IrNormalizeMode::none);
+            conv.set_true_stereo(false);
+            REQUIRE(conv.load_impulse_response(taps, 4, ir_len, kFs));
+            Rng rng(0x51A1CE);
+            std::vector<std::vector<float>> input(2, std::vector<float>(frames));
+            const int quiet = 1 - loud;
+            for (int i = 0; i < frames; ++i) {
+                input[loud][i] = static_cast<float>(0.75 * rng.bipolar());
+                input[quiet][i] = quiet_gain * static_cast<float>(rng.bipolar());
+            }
+            // Non-finite input is sanitized before either channel enters the FFT.
+            input[loud][111] = std::numeric_limits<float>::quiet_NaN();
+            input[loud][222] = std::numeric_limits<float>::infinity();
+            const auto got = render(conv, input, 7);
+            const std::vector<double> x(input[quiet].begin(), input[quiet].end());
+            const auto want = direct_convolve(x, prepared_taps(conv, quiet * 3));
+            const std::vector<double> actual(got[quiet].begin(), got[quiet].end());
+            for (const auto& channel : got)
+                REQUIRE(std::all_of(channel.begin(), channel.end(),
+                                    [](float sample) { return std::isfinite(sample); }));
+            INFO("loud channel " << loud << ", quiet gain " << quiet_gain << ", peak residual "
+                                 << amplitude_db(max_abs_error(actual, want)) << " dBFS");
+            REQUIRE(amplitude_db(max_abs_error(actual, want)) < -120.0);
+        }
+    }
 }

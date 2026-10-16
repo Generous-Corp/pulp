@@ -262,6 +262,16 @@ public:
             gather_mask = mask;
         }
 
+        /// Forward transform of the already gathered natural-order data in
+        /// `data`, using the in-place permutation and butterfly phases.
+        void begin_forward_in_place() {
+            phase = Phase::permute;
+            cursor = 0;
+            stage = 1;
+            inverse = false;
+            gather_src = nullptr;
+        }
+
         /// Inverse transform of whatever already sits in `data`, computed as
         /// `conj(fft(conj(x)))/N`.
         void begin_inverse_in_place() {

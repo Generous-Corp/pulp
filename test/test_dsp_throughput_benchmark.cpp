@@ -470,7 +470,8 @@ void run_processors(int B) {
     for (bool true_stereo : {false, true}) {
         const std::string name = true_stereo ? "conv.zero_latency IR 2s true stereo 4IR"
                                              : "conv.zero_latency IR 2s diagonal 4IR";
-        if (!selected(name)) continue;
+        if (!selected(name))
+            continue;
         ZeroLatencyConvolver z;
         z.prepare(kSampleRate, B, 2);
         z.set_true_stereo(true_stereo);
@@ -606,11 +607,14 @@ void run_processors(int B) {
 // ── Kernel shapes (scalar reference loops) ──────────────────────────────────
 
 #if defined(_WIN32)
-double cpu_clock_seconds(int) { return std::numeric_limits<double>::quiet_NaN(); }
+double cpu_clock_seconds(int) {
+    return std::numeric_limits<double>::quiet_NaN();
+}
 #else
 double cpu_clock_seconds(clockid_t id) {
     struct timespec ts{};
-    if (clock_gettime(id, &ts) != 0) return std::numeric_limits<double>::quiet_NaN();
+    if (clock_gettime(id, &ts) != 0)
+        return std::numeric_limits<double>::quiet_NaN();
     return double(ts.tv_sec) + double(ts.tv_nsec) * 1e-9;
 }
 #endif
@@ -635,9 +639,10 @@ void run_multi_instance_convolvers() {
     const std::vector<int> counts{1, 4, 8, 16, 32};
     for (int B : kBlockSizes) {
         for (int count : counts) {
-            const std::string name = "multi_instance.zero_latency.4IR.96k B=" +
-                                     std::to_string(B) + " N=" + std::to_string(count);
-            if (!selected(name)) continue;
+            const std::string name = "multi_instance.zero_latency.4IR.96k B=" + std::to_string(B) +
+                                     " N=" + std::to_string(count);
+            if (!selected(name))
+                continue;
 
             std::vector<ZeroLatencyConvolver> convolvers(static_cast<std::size_t>(count));
             std::vector<std::vector<float>> ll(static_cast<std::size_t>(count));
@@ -645,7 +650,7 @@ void run_multi_instance_convolvers() {
             std::vector<std::vector<float>> rl(static_cast<std::size_t>(count));
             std::vector<std::vector<float>> rr(static_cast<std::size_t>(count));
             std::vector<std::vector<float>> out_l(static_cast<std::size_t>(count),
-                                                   std::vector<float>(static_cast<std::size_t>(B)));
+                                                  std::vector<float>(static_cast<std::size_t>(B)));
             std::vector<std::vector<float>> out_r = out_l;
             for (int instance = 0; instance < count; ++instance) {
                 convolvers[static_cast<std::size_t>(instance)].prepare(kSampleRate, B, 2);
@@ -666,11 +671,11 @@ void run_multi_instance_convolvers() {
             int warm_callbacks = 16;
             for (const auto& cv : convolvers)
                 warm_callbacks = std::max(warm_callbacks,
-                    4 * cv.level_block_length(cv.num_levels() - 1) / B + 1);
+                                          4 * cv.level_block_length(cv.num_levels() - 1) / B + 1);
             const std::size_t total_frames =
                 static_cast<std::size_t>((blocks + warm_callbacks) * B);
             std::vector<std::vector<float>> input_l(static_cast<std::size_t>(count),
-                                                     std::vector<float>(total_frames));
+                                                    std::vector<float>(total_frames));
             std::vector<std::vector<float>> input_r = input_l;
             for (int instance = 0; instance < count; ++instance) {
                 std::mt19937 rng(1700);
@@ -696,7 +701,8 @@ void run_multi_instance_convolvers() {
                 }
                 position += static_cast<std::size_t>(B);
             };
-            for (int warm = 0; warm < warm_callbacks; ++warm) callback();
+            for (int warm = 0; warm < warm_callbacks; ++warm)
+                callback();
             std::vector<double> samples;
             samples.reserve(static_cast<std::size_t>(blocks));
             const double process_start = process_cpu_seconds();
@@ -704,40 +710,50 @@ void run_multi_instance_convolvers() {
             for (long b = 0; b < blocks; ++b) {
                 const auto t0 = Clock::now();
                 callback();
-                samples.push_back(std::chrono::duration<double, std::nano>(Clock::now() - t0).count());
+                samples.push_back(
+                    std::chrono::duration<double, std::nano>(Clock::now() - t0).count());
             }
             const double thread_cpu = thread_cpu_seconds() - thread_start;
             const double process_cpu = process_cpu_seconds() - process_start;
             std::sort(samples.begin(), samples.end());
             const auto percentile = [&](double q) {
-                const auto index = std::size_t(std::min<double>(samples.size() - 1,
-                    std::floor(q * double(samples.size()))));
+                const auto index = std::size_t(
+                    std::min<double>(samples.size() - 1, std::floor(q * double(samples.size()))));
                 return samples[index];
             };
             const double represented_seconds = double(blocks * B) / kSampleRate;
             const double thread_percent = std::isfinite(thread_cpu)
-                ? thread_cpu / represented_seconds * 100.0
-                : std::numeric_limits<double>::quiet_NaN();
+                                              ? thread_cpu / represented_seconds * 100.0
+                                              : std::numeric_limits<double>::quiet_NaN();
             const double process_percent = std::isfinite(process_cpu)
-                ? process_cpu / represented_seconds * 100.0
-                : std::numeric_limits<double>::quiet_NaN();
-            MultiInstanceResult result{B, count, percentile(0.50), percentile(0.95),
-                                       percentile(0.99), samples.back(),
-                                       thread_percent, process_percent,
-                                       0, warm_callbacks, blocks};
+                                               ? process_cpu / represented_seconds * 100.0
+                                               : std::numeric_limits<double>::quiet_NaN();
+            MultiInstanceResult result{B,
+                                       count,
+                                       percentile(0.50),
+                                       percentile(0.95),
+                                       percentile(0.99),
+                                       samples.back(),
+                                       thread_percent,
+                                       process_percent,
+                                       0,
+                                       warm_callbacks,
+                                       blocks};
             const double deadline_ns = double(B) / kSampleRate * 1e9;
-            result.deadline_misses = long(std::count_if(samples.begin(), samples.end(),
-                [&](double ns) { return ns > deadline_ns; }));
+            result.deadline_misses = long(std::count_if(
+                samples.begin(), samples.end(), [&](double ns) { return ns > deadline_ns; }));
             g_multi_results.push_back(result);
             if (std::isfinite(result.cpu_percent))
-                std::printf("%-46s p50 %9.0f p95 %9.0f p99 %9.0f max %9.0f ns  threadCPU %6.2f%% processCPU %6.2f%% misses %ld\n",
-                        name.c_str(), result.p50_ns, result.p95_ns, result.p99_ns,
-                        result.max_ns, result.cpu_percent, result.process_cpu_percent,
-                        result.deadline_misses);
-            else
-                std::printf("%-46s p50 %9.0f p95 %9.0f p99 %9.0f max %9.0f ns  CPU N/A  misses %ld\n",
+                std::printf("%-46s p50 %9.0f p95 %9.0f p99 %9.0f max %9.0f ns  threadCPU %6.2f%% "
+                            "processCPU %6.2f%% misses %ld\n",
                             name.c_str(), result.p50_ns, result.p95_ns, result.p99_ns,
-                            result.max_ns, result.deadline_misses);
+                            result.max_ns, result.cpu_percent, result.process_cpu_percent,
+                            result.deadline_misses);
+            else
+                std::printf(
+                    "%-46s p50 %9.0f p95 %9.0f p99 %9.0f max %9.0f ns  CPU N/A  misses %ld\n",
+                    name.c_str(), result.p50_ns, result.p95_ns, result.p99_ns, result.max_ns,
+                    result.deadline_misses);
         }
     }
 }
@@ -1040,7 +1056,8 @@ void write_json(const std::string& path, double timer_overhead_ns) {
     Section multi_warm{"Multi-instance warmup callbacks", "callbacks", {}};
     Section multi_blocks{"Multi-instance measurement callbacks", "callbacks", {}};
     for (const auto& r : g_multi_results) {
-        const std::string key = "B=" + std::to_string(r.block) + " N=" + std::to_string(r.instances);
+        const std::string key =
+            "B=" + std::to_string(r.block) + " N=" + std::to_string(r.instances);
         multi_p50.values.emplace_back(key, r.p50_ns);
         multi_p95.values.emplace_back(key, r.p95_ns);
         multi_p99.values.emplace_back(key, r.p99_ns);
