@@ -841,8 +841,7 @@ inline bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* win
     }
 #elif defined(__linux__)
     if (strcmp(window->api, CLAP_WINDOW_API_X11) == 0) {
-        attached = p->editor_host->try_attach_to_parent(
-            reinterpret_cast<void*>(window->x11));
+        attached = p->editor_host->try_attach_to_parent(reinterpret_cast<void*>(window->x11));
     }
 #endif
     if (attached && p->bridge) {
