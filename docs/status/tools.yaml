@@ -821,6 +821,17 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: visual-residual-diagnostic
+  path: tools/import-validation/visual_residual_diagnostic.py
+  category: visual-compare
+  use_when: Decompose an equal-sized browser/native PNG residual into heuristic background, edge, interior, mask/placement, and outside-root buckets during importer evidence calibration.
+  invocation: python3 tools/import-validation/visual_residual_diagnostic.py <reference.png> <candidate.png> [--root-bounds X Y WIDTH HEIGHT] [--json report.json]
+  inputs: Equal-sized reference and candidate RGBA/PNG renders, optionally with imported-root bounds in image pixels.
+  outputs: Diagnostic-only residual buckets and alpha-aware counts; it does not change a fidelity score or promotion decision.
+  caveat: Heuristic and non-causal. It does not prove Chromium/Skia pixel parity or identify a renderer cause; use authenticated same-path receipts and the canonical whole-frame comparator as authoritative evidence.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: fidelity-diff
   path: tools/import-design/fidelity_diff.py
   category: visual-compare
