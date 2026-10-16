@@ -810,11 +810,13 @@ int main() {
         std::puts("wgpu_native_session=failed");
         return 2;
     }
+    std::fputs("wgpu staged diagnostic stage=initial_session_ready\n", stderr);
 
     // Exercise the fixed scheduler with two admitted blocks before waiting for
     // either terminal result. This remains a private staged diagnostic; it is
     // not realtime or product/provider evidence.
     std::array<std::optional<SharedIoProgramSession::InputLease>, 2> inflight;
+    std::fputs("wgpu staged diagnostic stage=initial_inflight_begin\n", stderr);
     for (std::size_t i = 0; i < inflight.size(); ++i) {
         inflight[i] = session->acquire_input(100 + i, 0);
         if (!inflight[i] || !session->submit({inflight[i]->token, 0}))
@@ -837,11 +839,13 @@ int main() {
         if (!output || !session->release_output({output->token}))
             return 15;
     }
+    std::fputs("wgpu staged diagnostic stage=initial_inflight_done\n", stderr);
     constexpr std::array<float, 3> weights{{-0.6180188f, 1.0314025f, -1.0111561f}};
     std::uint32_t successes = 0;
     std::uint32_t failures = 0;
     float max_error = 0.0f;
     std::array<float, 6 * 64> submitted_inputs{};
+    std::fputs("wgpu staged diagnostic stage=initial_sequential_begin\n", stderr);
     for (std::uint64_t sequence = 0; sequence < 6; ++sequence) {
         auto lease = session->acquire_input(sequence, 0);
         if (!lease || lease->bytes.size() != 64 * sizeof(float))
@@ -893,6 +897,7 @@ int main() {
     // CPU-oracle evidence. The pinned Metal runtime may block while tearing
     // down the completed provider, so abandon it before native destruction.
     session.release();
+    std::fputs("wgpu staged diagnostic stage=initial_session_abandoned\n", stderr);
 
     // Exercise the pinned runtime's controlled loss path in a fresh, bounded
     // session. The device is destroyed while one submission is outstanding;
@@ -905,6 +910,7 @@ int main() {
     std::uint32_t loss_terminal_records = 0;
     WGPUDeviceLostReason loss_reason = WGPUDeviceLostReason_Unknown;
     {
+        std::fputs("wgpu staged diagnostic stage=loss_probe_begin\n", stderr);
         // Probe the controlled loss trigger before preparing an outstanding
         // submission. Some pinned wgpu-native images accept the callback
         // descriptor but never deliver a loss notification for destroy();
@@ -935,6 +941,7 @@ int main() {
         loss_probe.release();
         if (!loss_probe_registered || loss_probe_reason != WGPUDeviceLostReason_Destroyed)
             return kDiagnosticFailureExit;
+        std::fputs("wgpu staged diagnostic stage=loss_probe_abandoned\n", stderr);
 
         // The probe above is a capability gate for the session path: only a
         // runtime that delivered the exact callback userdata and Destroyed
@@ -992,6 +999,7 @@ int main() {
         // provider can still block on a pinned Metal fence. Keep this
         // process-scoped diagnostic bounded after recording the evidence.
         loss_session.release();
+        std::fputs("wgpu staged diagnostic stage=loss_session_abandoned\n", stderr);
     }
     std::printf("loaded_runtime_path=%s\n", loaded.dli_fname);
     std::printf("input_sha256=%s weights_sha256=%s shader_sha256=%s\n",
