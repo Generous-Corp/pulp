@@ -133,8 +133,9 @@ class RemoteCommandTests(unittest.TestCase):
 
         self.assertIn("cd '/tmp/repo with spaces'", command)
         self.assertIn("git ls-remote --exit-code --heads origin 'feature/a b'", command)
-        self.assertIn("./validate-build.sh --quiet --no-tests", command)
-        self.assertIn("./validate-build.sh --quiet", with_tests)
+        # A remote validates the checked-out HEAD it just pulled, by ref.
+        self.assertIn("./validate-build.sh --quiet --ref HEAD --no-tests", command)
+        self.assertIn("./validate-build.sh --quiet --ref HEAD", with_tests)
         self.assertNotIn("--no-tests", with_tests)
 
     def test_windows_remote_command_escapes_values_and_can_run_tests(self) -> None:
@@ -201,7 +202,7 @@ class MainTests(unittest.TestCase):
         )
         self.assertEqual(observed[1][1][:4], ["ssh", "-o", "BatchMode=yes", "linux-host"])
         self.assertIn("cd /srv/pulp", observed[1][1][4])
-        self.assertIn("./validate-build.sh --quiet --no-tests", observed[1][1][4])
+        self.assertIn("./validate-build.sh --quiet --ref HEAD --no-tests", observed[1][1][4])
         self.assertEqual(
             observed[2][1][:8],
             [
