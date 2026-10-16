@@ -9,6 +9,36 @@ This page covers what Pulp pins today, how to use the pinned tools when you
 build Pulp from source, what it means for plugin developers who use the SDK,
 and what is planned but not built yet.
 
+## Pulp's adoption policy
+
+Pulp treats `tools/toolchain/manifest.toml` as the canonical description of
+its build-tool versions. Use the locked mise profile for reproducible local
+builds, Windows VM probes, release investigations, and any change that edits
+the toolchain manifest or generated lock files:
+
+```bash
+MISE_ENV=toolchain mise install --locked
+MISE_ENV=toolchain mise exec -- pulp build
+```
+
+This is a consistency requirement for toolchain and release evidence: record
+the mise version, platform, manifest revision, and lock checksum with the
+receipt. A build is not evidence of the pinned toolchain merely because mise
+is installed; run the command through `mise exec` (or activate the same
+environment) and run `tools/toolchain/check_env.py`.
+
+Ordinary source builds and public CI remain compatible with hosts that do not
+have mise yet. The CI images and bootstrap path are being migrated in a
+separate, reviewed step; they must not silently download tools or change a
+working host's PATH. Until that migration lands, a non-mise build must be
+reported as host-toolchain evidence, with the versions from
+`tools/toolchain/check_env.py`, rather than as a pinned-toolchain build.
+
+For Windows VM work, keep the image disposable and use the same locked profile
+for ARM64 and x64 guests. Do not put credentials, VM-specific paths, or
+mutable cache locations in `.mise.toml`; keep those in the VM recipe or host
+configuration.
+
 ## Why Pulp uses mise
 
 A build machine usually gets its tools from whatever it happens to have:
@@ -63,15 +93,13 @@ That evidence lives in the manifest's `[evidence]` table.
 
 ## Building Pulp from source
 
-The pinned tools are **opt in**. They live in an environment-scoped mise
-config, `.mise.toolchain.toml`, which mise loads only when `MISE_ENV=toolchain`
-is set. If you already activate mise in your shell, entering a Pulp checkout
-changes nothing until you opt in.
-
-Nothing in Pulp's build requires mise today: `setup.sh`, `pulp build`, and the
-CI, Shipyard and release lanes do not run it. You can keep using your own
-CMake, Python and Node.js. Using the pinned set is how you get the same tool
-versions the toolchain manifest describes.
+The pinned tools live in an environment-scoped mise config,
+`.mise.toolchain.toml`, which mise loads only when `MISE_ENV=toolchain` is set.
+Entering a Pulp checkout never changes an existing shell until you opt in.
+For reproducibility-sensitive work, opting in is the project policy; the
+remaining host-toolchain path is a migration boundary, not a second set of
+Pulp pins. `setup.sh`, `pulp build`, and public CI still accept hosts without
+mise until their provisioning is migrated and verified.
 
 ### 1. Install mise 2026.10.8
 
