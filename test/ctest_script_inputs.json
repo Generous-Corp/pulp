@@ -11351,6 +11351,14 @@
    ],
    "kind": "shell"
   },
+  "shipyard-merge-gate-evidence-selftest": {
+   "entry": "tools/scripts/test_shipyard_merge_gate_evidence.py",
+   "inputs": [
+    "tools/scripts/shipyard_merge_gate_evidence.py",
+    "tools/scripts/test_shipyard_merge_gate_evidence.py"
+   ],
+   "kind": "python"
+  },
   "shipyard-target-defaults-selftest": {
    "entry": "tools/ci/test_shipyard_target_defaults.py",
    "inputs": [
