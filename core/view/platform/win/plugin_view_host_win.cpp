@@ -249,7 +249,13 @@ public:
         }
         ShowWindow(hwnd_, SW_SHOW);
         attached_.store(true, std::memory_order_release);
-        start_frame_timer();
+        if (!start_frame_timer()) {
+            // An attached repaint is only live while the timer can consume its
+            // dirty bit. Fail closed instead of leaving a visible child that
+            // can never present another frame.
+            rollback_failed_attach();
+            return;
+        }
 #ifdef PULP_HAS_SKIA
         // Dawn configures its presentation surface for the HWND's current
         // native-window shape. Creating it while this HWND is still the hidden
@@ -675,11 +681,37 @@ private:
     // a retained persistent-scene target. Default OFF.
     bool partial_repaint_enabled_ = false;
 
-    void start_frame_timer() {
-        if (!hwnd_ || SetTimer(hwnd_, kFrameTimerId, kFrameTimerPeriodMs, nullptr) == 0)
+    bool start_frame_timer() {
+        // Private failure seam for the Windows regression: it drives the real
+        // attach path without changing the public host ABI or mirroring a
+        // separate policy in the test.
+        wchar_t forced_failure[2]{};
+        const bool force_failure =
+            GetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", forced_failure,
+                                    2) != 0;
+        if (!hwnd_ || force_failure ||
+            SetTimer(hwnd_, kFrameTimerId, kFrameTimerPeriodMs, nullptr) == 0) {
             runtime::log_warn("WinPluginViewHost: SetTimer frame pump failed");
+            return false;
+        }
         frame_pump_.suspend();
         needs_repaint_ = true;
+        return true;
+    }
+
+    void rollback_failed_attach() {
+        KillTimer(hwnd_, kFrameTimerId);
+        frame_pump_.suspend();
+        needs_repaint_ = false;
+        continuous_frames_ = false;
+        ShowWindow(hwnd_, SW_HIDE);
+        SetParent(hwnd_, nullptr);
+        LONG_PTR style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
+        style = (style & ~static_cast<LONG_PTR>(WS_CHILD)) | WS_POPUP;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, style);
+        SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        attached_.store(false, std::memory_order_release);
     }
 
     void stop_frame_timer() {

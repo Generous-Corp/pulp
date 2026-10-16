@@ -389,6 +389,51 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     }
 }
 
+TEST_CASE("Windows attached editor fails closed when frame timer install fails",
+          "[view][plugin-view-host][repaint][windows]") {
+    struct TimerFailureSeamReset {
+        ~TimerFailureSeamReset() {
+            SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr);
+        }
+    } reset_seam;
+    HWND parent =
+        CreateWindowExW(0, L"STATIC", L"Pulp timer failure regression", WS_OVERLAPPEDWINDOW, 0, 0,
+                        128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    REQUIRE(parent != nullptr);
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = false;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    const HWND child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+
+    SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", L"1");
+    REQUIRE_FALSE(host->try_attach_to_parent(parent));
+    CHECK_FALSE(host->is_attached());
+    CHECK(GetParent(child) == nullptr);
+    CHECK((GetWindowLongPtrW(child, GWL_STYLE) & WS_POPUP) != 0);
+    CHECK_FALSE(IsWindowVisible(child));
+
+    // Clearing the seam proves the failed attach did not poison the host: a
+    // later attach installs a real timer and resumes normal frame delivery.
+    SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr);
+    REQUIRE(host->try_attach_to_parent(parent));
+    int idle_calls = 0;
+    host->set_idle_callback([&] { ++idle_calls; });
+    SendMessageW(child, WM_TIMER, 1, 0);
+    CHECK(idle_calls == 1);
+    host->detach();
+    SendMessageW(child, WM_TIMER, 1, 0); // stale queued timer must be inert
+    CHECK(idle_calls == 1);
+    host->set_idle_callback({});
+    DestroyWindow(parent);
+}
+
 // The real HWND/Dawn host must not recurse when scripted idle work requests a
 // repaint during a frame. An attached repaint is consumed by WM_TIMER; the
 // nested request survives for the next timer tick. This uses the production
