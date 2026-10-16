@@ -1645,3 +1645,7 @@ reviewed host tuple and minimal-target registry with an empty capability-key
 list; it describes lineage validation vocabulary and does not advertise a DSP
 capability. Refresh its byte fingerprint and the surface inventory when the
 contract changes.
+
+## SysEx core storage and representation
+
+SysEx7 reassembly is reviewed MIDI infrastructure, not a new musical capability. Refresh both reviewed-header fingerprints and generated surface history after bounded-storage or copy-semantics changes.

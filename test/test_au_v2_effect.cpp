@@ -421,10 +421,9 @@ TEST_CASE("AU v3 UMP sysex7: multi-packet reassembly emits once, no growth; "
 
     SECTION("reset() after an incomplete stream does not poison the next message") {
         // Start a stream and never close it (host hands us a truncated group).
-        REQUIRE(reassembler.feed_packet(
-                    make_sysex7_word0(0x1, 6, 0xAA, 0xBB),
-                    make_sysex7_word1(0xCC, 0xDD, 0xEE, 0xFF), emit, &sink) ==
-                midi::UmpSysex7Reassembler::Status::start);
+        REQUIRE(reassembler.feed_packet(make_sysex7_word0(0x1, 6, 0x2A, 0x3B),
+                                        make_sysex7_word1(0x4C, 0x5D, 0x6E, 0x7F), emit,
+                                        &sink) == midi::UmpSysex7Reassembler::Status::start);
         REQUIRE(reassembler.in_progress());
         REQUIRE(reassembler.partial_size() == 6);
         REQUIRE(sink.sysex_size() == 0);  // nothing emitted yet
@@ -442,7 +441,7 @@ TEST_CASE("AU v3 UMP sysex7: multi-packet reassembly emits once, no growth; "
                 midi::UmpSysex7Reassembler::Status::single_packet);
         REQUIRE(sink.sysex_size() == 1);
         const std::vector<uint8_t> expected{0x11, 0x22, 0x33};
-        REQUIRE(sink.sysex()[0].data == expected);  // not poisoned by 0xAA..0xFF
+        REQUIRE(sink.sysex()[0].data == expected); // not poisoned by 0x2A..0x7F
         REQUIRE(sink.sysex_copy_payload_capacity() == payload_cap);
     }
 

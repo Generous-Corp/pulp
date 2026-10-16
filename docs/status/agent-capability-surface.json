@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 134,
+  "inventory_version": 139,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 506,
-    "reviewed_headers": 228,
-    "legacy_unreviewed_headers": 278,
+    "reviewed_headers": 230,
+    "legacy_unreviewed_headers": 276,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 59,
-      "legacy_unreviewed": 278,
+      "infrastructure": 61,
+      "legacy_unreviewed": 276,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -62,8 +62,8 @@
       },
       "midi": {
         "public_headers": 50,
-        "reviewed_headers": 23,
-        "legacy_unreviewed_headers": 27,
+        "reviewed_headers": 25,
+        "legacy_unreviewed_headers": 25,
         "unsupported_headers": 0
       },
       "music": {
@@ -1552,11 +1552,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/raw_midi_parser.hpp",
-      "fingerprint": "sha256:48adcd006d27381b0d80fc5d1f40b70c5ff007afe0c20bdec3642cc3cfe1e48b",
+      "fingerprint": "sha256:5c37210fa38d1d11ad75d54d7997c50598e99d5f4133152c9ca6c238f98992f1",
       "include": "pulp/midi/raw_midi_parser.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Bounded MIDI1 byte-stream parsing and admission diagnostics are transport infrastructure, not a generator-facing musical transform."
     },
     {
       "domain": "midi",
@@ -1659,7 +1659,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/ump_buffer.hpp",
-      "fingerprint": "sha256:bc5816405c9ef8a2fdf9336d86212319dd70a83a9633c7d515b6c3010c5019e6",
+      "fingerprint": "sha256:bfa4083ebc64f5ca30675facbb1b4ebf8a6a203b0aa24d15662dcced33697b3e",
       "include": "pulp/midi/ump_buffer.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -1705,11 +1705,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp",
-      "fingerprint": "sha256:f881ddce6a156c2f5916c986c0ac9411890f2cc529987f26e17f93a7139b0dc1",
+      "fingerprint": "sha256:51b0e3f62886ff000661c5ab250c21f17c09894b863ad3d3d120f63b526f4a8f",
       "include": "pulp/midi/ump_sysex7_reassembler.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Bounded per-group SysEx7 reassembly and transport diagnostics are MIDI ingress infrastructure, not a generator-facing musical transform."
     },
     {
       "domain": "midi",
