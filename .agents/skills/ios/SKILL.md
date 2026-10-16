@@ -58,11 +58,10 @@ cmake -S . -B build-ios-sim -G Xcode \
   -DPULP_BUILD_TESTS=OFF \
   -DPULP_BUILD_EXAMPLES=OFF
 
-# Build a target
-xcodebuild -project build-ios-sim/Pulp.xcodeproj \
-  -target pulp-format -configuration Debug \
-  -sdk iphonesimulator -arch arm64 \
-  IPHONEOS_DEPLOYMENT_TARGET=16.4 build
+# Build a target under the shared-host build governor.
+tools/ci/governed-build.sh cmake --build build-ios-sim \
+  --target pulp-format --config Debug -- \
+  -sdk iphonesimulator -arch arm64 IPHONEOS_DEPLOYMENT_TARGET=16.4
 ```
 
 ### iOS Device (arm64)
@@ -606,7 +605,7 @@ cmake -S . -B build-ios-sim -G Xcode \
   -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator \
   -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 \
   -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_TESTS=OFF
-cmake --build build-ios-sim --target PulpSineSynth_HostApp --config Release -- -sdk iphonesimulator
+tools/ci/governed-build.sh cmake --build build-ios-sim --target PulpSineSynth_HostApp --config Release -- -sdk iphonesimulator
 xcrun simctl boot "iPad Pro 13-inch (M5)"
 xcrun simctl install booted build-ios-sim/AUv3/Release-iphonesimulator/PulpSineSynth.app
 xcrun simctl launch --console booted com.pulp.examples.sinesynth.host
@@ -622,7 +621,7 @@ cmake -S . -B build-ios-device -G Xcode \
   -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY="Apple Development" \
   -DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM="${PULP_TEAM_ID}" \
   -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_STYLE="Automatic"
-cmake --build build-ios-device --target PulpSineSynth_HostApp --config Release -- -sdk iphoneos
+tools/ci/governed-build.sh cmake --build build-ios-device --target PulpSineSynth_HostApp --config Release -- -sdk iphoneos
 xcrun devicectl device install app --device <DEVICE_UDID> \
   build-ios-device/AUv3/Release-iphoneos/PulpSineSynth.app
 ```
@@ -669,9 +668,11 @@ on iOS:
    include in `#if defined(__has_include) && __has_include(<pulp/host/...>)`
    so transitive consumers on iOS get a clean "feature absent" macro
    rather than a "file not found" error. Affected headers today:
-   `core/view/include/pulp/view/widgets/graph_editor_view.hpp`,
-   `core/view/include/pulp/view/plugin_manager_panel.hpp`,
-   `core/view/include/pulp/view/hosted_editor_attachment.hpp`. Each
+   `core/view/audio/include/pulp/view/widgets/graph_editor_view.hpp`
+   (its `pulp-view-graph-editor` target is not created on iOS, where `pulp-host`
+   is absent; the header still installs and stays include-guarded),
+   `core/view/audio/include/pulp/view/plugin_manager_panel.hpp`,
+   `core/view/audio/include/pulp/view/hosted_editor_attachment.hpp`. Each
    defines a `PULP_VIEW_HAS_*` companion macro downstream code can
    key off.
 

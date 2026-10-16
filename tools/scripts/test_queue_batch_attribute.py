@@ -2122,5 +2122,23 @@ class GuardEnvironmentTests(unittest.TestCase):
         self.assertIn("PULP_GH_CLI", proc.stderr, detail)
 
 
+class EjectedNotSelectedTests(unittest.TestCase):
+    def test_report_excludes_fast_and_selected_pairs(self) -> None:
+        observations = [qba.GroupObservation(
+            run_id="run-1", members=frozenset({10053}),
+            failed=frozenset({"slow-owned", "pr-fast-owned"}),
+        )]
+        rows = qba.ejected_not_selected(
+            observations, {10053: ["selected-owned"]}, {"pr-fast-owned"}
+        )
+        self.assertEqual(rows, [{"pr": 10053, "test": "slow-owned", "run_id": "run-1"}])
+
+    def test_unknown_membership_is_an_evidence_gap_not_a_claim(self) -> None:
+        observations = [qba.GroupObservation(
+            run_id="run-2", members=None, failed=frozenset({"slow-owned"})
+        )]
+        self.assertEqual(qba.ejected_not_selected(observations, {}, set()), [])
+
+
 if __name__ == "__main__":
     unittest.main()

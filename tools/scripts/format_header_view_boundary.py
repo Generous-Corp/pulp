@@ -40,6 +40,7 @@ import sys
 
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]')
 VIEW_PREFIXES = ("pulp/view/", "pulp/canvas/", "pulp/render/")
+FORBIDDEN_PREFIXES = ("vellum/",)
 
 # Headers whose include closure legitimately reaches the view layer. These are
 # the pulp-format-view surface. Keep sorted.
@@ -95,7 +96,7 @@ def include_dirs(repo: str) -> list[str]:
 
 
 def build_walker(dirs: list[str]):
-    cache: dict[str, tuple[frozenset, frozenset]] = {}
+    cache: dict[str, tuple[frozenset, frozenset, frozenset]] = {}
 
     def resolve(name: str) -> str | None:
         for d in dirs:
@@ -108,32 +109,40 @@ def build_walker(dirs: list[str]):
         if path in cache:
             return cache[path]
         if path in stack:
-            return frozenset(), frozenset()
+            return frozenset(), frozenset(), frozenset()
         views: set[str] = set()
         unresolved: set[str] = set()
+        forbidden: set[str] = set()
         try:
             with open(path, encoding="utf-8", errors="replace") as handle:
                 lines = handle.read().splitlines()
         except OSError:
-            return frozenset(), frozenset()
+            return frozenset(), frozenset(), frozenset()
         for line in lines:
             match = INCLUDE_RE.match(line)
             if not match:
                 continue
             name = match.group(1)
+            if name.startswith(FORBIDDEN_PREFIXES):
+                forbidden.add(name)
+                continue
             if not name.startswith("pulp/"):
                 continue
             if name.startswith(VIEW_PREFIXES):
                 views.add(name)
                 continue
+            if name.startswith(FORBIDDEN_PREFIXES):
+                forbidden.add(name)
+                continue
             target = resolve(name)
             if target is None:
                 unresolved.add(name)
                 continue
-            sub_views, sub_unresolved = walk(target, stack | {path})
+            sub_views, sub_unresolved, sub_forbidden = walk(target, stack | {path})
             views |= sub_views
             unresolved |= sub_unresolved
-        result = (frozenset(views), frozenset(unresolved))
+            forbidden |= sub_forbidden
+        result = (frozenset(views), frozenset(unresolved), frozenset(forbidden))
         cache[path] = result
         return result
 
@@ -168,13 +177,16 @@ def main() -> int:
 
     reaching: dict[str, list[str]] = {}
     unresolved_any: dict[str, list[str]] = {}
+    forbidden_any: dict[str, list[str]] = {}
     for path in headers:
         rel = os.path.relpath(path, fmt_include)
-        views, unresolved = walk(path)
+        views, unresolved, forbidden = walk(path)
         if views:
             reaching[rel] = sorted(views)
         if unresolved:
             unresolved_any[rel] = sorted(unresolved)
+        if forbidden:
+            forbidden_any[rel] = sorted(forbidden)
 
     # An unresolved pulp/* include means the walker could not see part of the
     # graph, so a "view-free" verdict below would be an artefact of not looking.
@@ -195,6 +207,10 @@ def main() -> int:
         return 2
 
     failures = []
+
+    for rel, names in sorted(forbidden_any.items()):
+        failures.append(
+            f"{rel} reaches forbidden Vellum headers: {', '.join(names)}")
 
     unexpected = sorted(set(reaching) - VIEW_HEADERS)
     for rel in unexpected:

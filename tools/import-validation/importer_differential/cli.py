@@ -5,10 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import platform
 import re
 import statistics
 import sys
 from pathlib import Path
+from typing import Any
 
 # The development wrapper is invoked by path, so the repository root is not
 # otherwise guaranteed to be importable.
@@ -158,6 +161,54 @@ def sanitized_error(error: Exception, paths: list[Path]) -> str:
     return text
 
 
+def timing_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize a set of importer runs without assigning cache state.
+
+    A benchmark invocation has one caller-declared cache state for every run.
+    The position of a run in the sequence is not evidence that it was cold or
+    warm, so this helper deliberately only reports the timing distribution.
+    """
+    if not reports:
+        raise ValueError("timing summary requires at least one report")
+    browser = [report["timings"]["browser_import_ms"] for report in reports]
+    native = [report["timings"]["native_total_ms"] for report in reports]
+    return {
+        "browser_import_p50_ms": round(statistics.median(browser), 1),
+        "browser_import_p95_ms": percentile(browser, 0.95),
+        "native_total_p50_ms": round(statistics.median(native), 1),
+        "native_total_p95_ms": percentile(native, 0.95),
+        "p50_ms_saved": round(
+            statistics.median(browser) - statistics.median(native), 1),
+    }
+
+
+def cache_bucket(
+    reports: list[dict[str, Any]], declared_state: str, bucket_state: str
+) -> dict[str, Any]:
+    """Return a cache bucket only when the caller declared that state.
+
+    ``command_benchmark`` runs the same transaction shape for every sample.
+    A first run is not inherently cold and a later run is not inherently warm;
+    callers that need both states must run separate, explicitly labelled
+    campaigns.  Keeping an unverified bucket in the receipt preserves the v1
+    shape while preventing positional samples from becoming cache claims.
+    """
+    if declared_state == bucket_state:
+        return {
+            "status": "measured",
+            "cache_state": bucket_state,
+            **timing_summary(reports),
+        }
+    return {
+        "status": "unverified",
+        "cache_state": declared_state,
+        "reason": (
+            f"runs were declared {declared_state}; {bucket_state} was not "
+            "measured and cannot be inferred from run order"
+        ),
+    }
+
+
 def command_benchmark(args: argparse.Namespace) -> int:
     output = args.output.resolve()
     reports = []
@@ -170,7 +221,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
                 args.file.resolve(), output / "runs" / str(index + 1),
                 args.timeout_seconds, args.from_source,
                 args.browser.resolve() if args.browser else None,
-                cache_state="cold" if index == 0 else "warm",
+                cache_state=args.cache_state,
                 timing_budgets_ms=budgets))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
@@ -178,29 +229,57 @@ def command_benchmark(args: argparse.Namespace) -> int:
                   args.file.resolve(), args.output.resolve()])
         print(f"importer_differential_lab: {error}", file=sys.stderr)
         return 2
-    warm = reports[1:] or reports
-    browser = [report["timings"]["browser_import_ms"] for report in warm]
-    native = [report["timings"]["native_total_ms"] for report in warm]
+    repeat_reports = reports[1:]
+    timing_reports = repeat_reports or reports
     benchmark = {
         "schema": "pulp-importer-differential-benchmark-v1",
         "version": 1,
         "runs": len(reports),
-        "cold": reports[0]["timings"],
-        "warm": {
-            "browser_import_p50_ms": round(statistics.median(browser), 1),
-            "browser_import_p95_ms": percentile(browser, 0.95),
-            "native_total_p50_ms": round(statistics.median(native), 1),
-            "native_total_p95_ms": percentile(native, 0.95),
-            "p50_ms_saved": round(
-                statistics.median(browser) - statistics.median(native), 1),
+        "provenance": {
+            "fixture": reports[0].get("fixture"),
+            "source": reports[0].get("source"),
+            "oracle": reports[0].get("oracle"),
+            "importer_sha256": sha256_file(args.importer.resolve()),
+            "observer_sha256": sha256_file(args.observer.resolve()),
+            "host": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "machine": platform.machine(),
+                "processor": platform.processor() or "unknown",
+                "cpu_count": os.cpu_count(),
+            },
+            "cache_model": "caller-declared; browser and native run sequentially per trial",
         },
+        "run_receipts": [
+            {"run": index + 1,
+             "cache_state": report["observability"]["cache_state"]["identity"],
+             "report": f"runs/{index + 1}/comparison/report.json",
+             "render_receipt": f"runs/{index + 1}/candidate/render-receipt.json",
+             "promotion": report.get("promotion"),
+             "fidelity": report.get("comparison")}
+            for index, report in enumerate(reports)
+        ],
+        # Keep these v1 keys for readers of existing receipts, but populate a
+        # bucket only when every run was explicitly declared in that state.
+        # Run position is recorded separately and is never called cold/warm.
+        "cold": cache_bucket(reports, args.cache_state, "cold"),
+        "warm": cache_bucket(reports, args.cache_state, "warm"),
+        "first_invocation": reports[0]["timings"],
+        "repeat_runs": (
+            timing_summary(repeat_reports)
+            if repeat_reports
+            else {
+                "status": "unavailable",
+                "reason": "benchmark has no repeat run",
+            }
+        ),
         "observability": {
             "ttfp": {"value_ms": None, "status": "unverified"},
             "ttni": {"p50_ms": None, "p95_ms": None, "status": "unverified"},
             "ttni_proxy": {"p50_ms": round(statistics.median(
-                [report["observability"]["ttni_proxy"]["value_ms"] for report in warm]), 1),
+                [report["observability"]["ttni_proxy"]["value_ms"] for report in timing_reports]), 1),
                      "p95_ms": percentile(
-                         [report["observability"]["ttni_proxy"]["value_ms"] for report in warm], 0.95),
+                         [report["observability"]["ttni_proxy"]["value_ms"] for report in timing_reports], 0.95),
                      "status": "measured"},
             "ifnf": {"value_ms": None, "status": "readback-only"},
             "cache_states": [report["observability"]["cache_state"]["identity"] for report in reports],

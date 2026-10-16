@@ -20,7 +20,13 @@
 #     --installer-identity <Developer ID Installer hash> \
 #     --out DIR \
 #     [--architectures arm64|x86_64|arm64,x86_64]
-#     [--plugin au|vst3|clap PATH]...     (repeatable)
+#     [--plugin au|vst3|clap|aax PATH]... (repeatable; an aax bundle must
+#                                          already be PACE-wrapped and
+#                                          Developer-ID signed -- the recipe
+#                                          verifies it and never re-signs it)
+#     [--allow-unverified-aax-wrap]       (package an aax even when PACE's
+#                                          wraptool is not installed to verify
+#                                          the wrap; refused by default)
 #     [--product-title BUNDLE "Display Title"]...  (repeatable; renames the
 #                                                   expandable group for that
 #                                                   plugin, e.g. PulpDesignSynth
@@ -57,6 +63,7 @@ CLI="${PULP_CPP:-$ROOT/build/tools/cli/pulp-cpp}"
 NOTARIZE_HEARTBEAT_SECS="${PULP_NOTARIZE_HEARTBEAT_SECS:-30}"
 
 NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
+ALLOW_UNVERIFIED_AAX_WRAP=0
 HOST_ARCHITECTURES=""
 # Parallel arrays of components.
 declare -a P_KIND=() P_PATH=()      # plugins: kind + bundle path
@@ -76,6 +83,7 @@ while [[ $# -gt 0 ]]; do
     --out) OUT="$2"; shift 2;;
     --architectures) HOST_ARCHITECTURES="$2"; shift 2;;
     --no-notarize) NOTARIZE=0; shift;;
+    --allow-unverified-aax-wrap) ALLOW_UNVERIFIED_AAX_WRAP=1; shift;;
     --plugin) P_KIND+=("$2"); P_PATH+=("$3"); shift 3;;
     --product-title) PT_NAME+=("$2"); PT_TITLE+=("$3"); shift 3;;
     --uninstaller-in) UNINSTALL_IN="$2"; shift 2;;
@@ -123,6 +131,28 @@ for _distribution_input in \
   _d15_runtime="$(find -L "$_distribution_input" -name libvellum-gpu.dylib -print -quit)"
   if [[ -n "$_d15_runtime" ]]; then
     echo "[installer] ERROR: development-only Vellum D15 GPU-audio runtime found in $_distribution_input; refusing to package, sign, or notarize" >&2
+    exit 1
+  fi
+done
+
+# Control-shipping manifests and scan reports are build evidence, not Mach-O
+# subcomponents, and Apple reserves Contents/MacOS for code: JSON there makes
+# codesign report an unsigned subcomponent. The build writes them to
+# Contents/Resources, where the signature seals them; a bundle that still has
+# them beside its binary was built by an older SDK (or copied from one).
+# Nested bundles (an AUv3 host app's extension and framework) are searched too;
+# anywhere outside a Resources directory is a code directory to codesign.
+for _distribution_input in \
+    ${P_PATH[@]+"${P_PATH[@]}"} \
+    ${A_PATH[@]+"${A_PATH[@]}"}; do
+  [[ -d "$_distribution_input" ]] || continue
+  _legacy_evidence="$(find "$_distribution_input" -type f \
+    \( -name "*.inspector-capabilities.json" \
+       -o -name "*.control-shipping.json" \
+       -o -name "*.control-shipping-report.json" \) \
+    -not -path "*/Resources/*" -print -quit)"
+  if [[ -n "$_legacy_evidence" ]]; then
+    echo "[installer] ERROR: $_distribution_input carries control evidence outside Resources (${_legacy_evidence#"$_distribution_input/"}); rebuild it with this SDK, which writes it to Contents/Resources (a code directory must hold only code to be signed)" >&2
     exit 1
   fi
 done
@@ -197,23 +227,6 @@ sign_embedded_frameworks() {  # $1=bundle
 
 deep_sign() {  # $1=bundle  $2=entitlements(optional)
   local b="$1" ent="${2:-}"
-  # Control-shipping manifests and scan reports are build evidence, not Mach-O
-  # subcomponents. CMake emits them beside the target so direct-build scanners
-  # can prove the exact binary, but Apple reserves Contents/MacOS for code and
-  # rejects an otherwise valid Developer-ID signature when JSON lives there.
-  # Preserve the receipts in the sealed bundle resources before signing.
-  if [[ -d "$b/Contents/MacOS" ]]; then
-    local _evidence_dir="$b/Contents/Resources/pulp-control-shipping-evidence"
-    local _evidence_moved=0
-    while IFS= read -r -d '' _evidence; do
-      [[ "$_evidence_moved" -eq 1 ]] || mkdir -p "$_evidence_dir"
-      mv "$_evidence" "$_evidence_dir/$(basename "$_evidence")"
-      _evidence_moved=1
-    done < <(find "$b/Contents/MacOS" -maxdepth 1 -type f \
-      \( -name "*.inspector-capabilities.json" \
-         -o -name "*.control-shipping.json" \
-         -o -name "*.control-shipping-report.json" \) -print0)
-  fi
   # An ABSOLUTE rpath in anything the bundle carries is a build-machine leak,
   # and it fails in two different ways that both look like a broken feature
   # rather than a packaging mistake. Where the path is missing, dyld reports
@@ -321,9 +334,45 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
   [[ -f "$VALIDATOR" ]] && python3 "$VALIDATOR" "$b" --strict
 }
 
+# An AAX bundle is signed by PACE's wraptool, which wraps the main executable
+# and seals the bundle under the Developer ID identity in one step; Pro Tools
+# refuses an AAX that is merely codesigned. Re-running codesign --force here
+# would strip that wrap and ship a plugin Pro Tools will not load, so an aax
+# plugin arrives already signed and is only VERIFIED: Apple's seal, PACE's wrap
+# by wraptool, and the same relocatability check every other bundle passes.
+# Any failure refuses the package; nothing re-signs. Without wraptool the wrap
+# cannot be checked, and a merely codesigned AAX would ship as if it were
+# shippable, so that refuses too unless --allow-unverified-aax-wrap says the
+# caller accepts an unverified wrap.
+verify_presigned_aax() {
+  local b="$1"
+  echo "  verifying pre-signed AAX (not re-signed): $(basename "$b")"
+  codesign --verify --deep --strict "$b" || {
+    echo "error: $b is not signed; wrap and sign it with wraptool before packaging" >&2
+    exit 2
+  }
+  local wraptool="${PULP_AAX_WRAPTOOL:-/Applications/PACEAntiPiracy/Eden/Fusion/Versions/6/bin/wraptool}"
+  if [[ -x "$wraptool" ]]; then
+    "$wraptool" verify -i "$b" || {
+      echo "error: $b fails wraptool verify; Pro Tools will not load it" >&2
+      exit 2
+    }
+  elif [[ "$ALLOW_UNVERIFIED_AAX_WRAP" == 1 ]]; then
+    echo "  warning: wraptool not installed; PACE wrap NOT verified for $(basename "$b") (--allow-unverified-aax-wrap)" >&2
+  else
+    echo "error: cannot verify the PACE wrap of $b: wraptool not found at $wraptool." >&2
+    echo "  Install PACE's tooling or point PULP_AAX_WRAPTOOL at wraptool; pass" >&2
+    echo "  --allow-unverified-aax-wrap only to package it without that check." >&2
+    exit 2
+  fi
+  [[ -f "$VALIDATOR" ]] && python3 "$VALIDATOR" "$b" --strict
+}
+
 plugin_dir() { case "$1" in
     au) echo /Library/Audio/Plug-Ins/Components;; vst3) echo /Library/Audio/Plug-Ins/VST3;;
-    clap) echo /Library/Audio/Plug-Ins/CLAP;; *) echo "bad plugin kind: $1" >&2; exit 2;; esac; }
+    clap) echo /Library/Audio/Plug-Ins/CLAP;;
+    aax) echo "/Library/Application Support/Avid/Audio/Plug-Ins";;
+    *) echo "bad plugin kind: $1" >&2; exit 2;; esac; }
 
 xml_escape() {  # escape XML metacharacters so titles/descriptions with & < > " ' stay valid
   local s="$1"
@@ -430,7 +479,7 @@ MANIFEST_TEXT="${MANIFEST_TEXT}${MANIFEST_RECEIPTS}"
 
 for ((i=0; i<${#PS_KIND[@]}; i++)); do
   case "${PS_KIND[$i]}" in
-    au|vst3|clap) ;;
+    au|vst3|clap|aax) ;;
     *) echo "invalid plugin script format: ${PS_KIND[$i]}" >&2; exit 2;;
   esac
   [[ -n "${PS_TITLE[$i]}" ]] || {
@@ -448,7 +497,11 @@ done
 echo "== plugins =="
 for ((i=0; i<${#P_KIND[@]}; i++)); do
   k="${P_KIND[$i]}"; p="${P_PATH[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
-  deep_sign "$p"
+  case "$k" in
+    au|vst3|clap) deep_sign "$p";;
+    aax) verify_presigned_aax "$p";;
+    *) echo "bad plugin kind: $k" >&2; exit 2;;
+  esac
   pname="$(basename "$p")"; pname="${pname%.*}"        # e.g. VaDrum
   plugin_idx=-1
   for ((j=0; j<${#PLUGIN_NAMES[@]}; j++)); do
@@ -471,7 +524,8 @@ for ((i=0; i<${#P_KIND[@]}; i++)); do
   pkgbuild --component "$p" --identifier "com.pulp.$NAME.$cid.pkg" --version "$VERSION" \
     "${SCRIPT_ARGS[@]+${SCRIPT_ARGS[@]}}" \
     --install-location "$(plugin_dir "$k")" "$STAGE/comp/$f" >/dev/null
-  case "$k" in au) d="Logic, GarageBand";; vst3) d="Most DAWs";; clap) d="REAPER, Bitwig";; esac
+  case "$k" in au) d="Logic, GarageBand";; vst3) d="Most DAWs";; clap) d="REAPER, Bitwig";;
+               aax) d="Pro Tools";; esac
   add_ref "$cid" "$(echo "$k" | tr a-z A-Z)" "$d" "$f"
   PLUGIN_ENTRIES="${PLUGIN_ENTRIES}${plugin_idx}	${pname}	${cid}
 "

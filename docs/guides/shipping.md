@@ -45,7 +45,7 @@ alone (Info.plist carries only a product version):
 | Bundle | Location |
 |--------|----------|
 | macOS `.vst3`, `.component`, `.clap`, `.aaxplugin`, `.appex`, `.app` | `Contents/Resources/pulp-build-info.json` |
-| iOS flat bundles | `Resources/pulp-build-info.json` |
+| iOS and other shallow bundles (`.appex`, `.app`) | `pulp-build-info.json` at the bundle root |
 | LV2 | `<name>.lv2/pulp-build-info.json` |
 | other single-file modules (Windows/Linux) | `<binary>.pulp-build-info.json` beside the binary |
 
@@ -56,6 +56,16 @@ should. It is a plain resource (no code, no absolute paths), so bundle
 relocatability, codesign, and notarization are unaffected. The AUv3
 framework embedded in the extension does not get its own copy; the extension
 and host app do.
+
+A shallow (iOS-family) bundle must not contain a top-level `Resources/`
+directory (this applies to `pulp.plugin-runtime.json` too, which sits at the
+root there as well): `codesign` then treats it as a malformed macOS bundle and refuses
+to sign it ("bundle format unrecognized", or every other root file reported as
+unsigned code), so the extension cannot be installed. That is why the record
+sits at the root there. The iOS compile gate ad-hoc signs the AUv3 extension it
+builds (`tools/scripts/check_apple_bundle_signing.sh`, inside out and without
+`--deep`, as Xcode signs it), because its build runs with
+`CODE_SIGNING_ALLOWED=NO`, which hides this class of layout mistake.
 
 Schema `pulp.build-info.v1`:
 
@@ -367,12 +377,19 @@ tools/scripts/build_combined_installer.sh \
   --plugin au   "build/AU/MyPlugin.component" \
   --plugin vst3 "build/VST3/MyPlugin.vst3" \
   --plugin clap "build/CLAP/MyPlugin.clap" \
+  --plugin aax  "signed/MyPlugin.aaxplugin" \
   --app "Standalone app" "build/MyPlugin.app"
 ```
 
 `--plugin` and `--app` are **repeatable**, and `--plugin` accumulates per
 format — so a product with three AU plugins, two VST3s and three CLAPs passes
 eight `--plugin` flags and gets one installer with a nested Customize tree.
+An `aax` bundle is the one input the recipe does not sign: hand it the bundle
+`wraptool sign` already wrapped and sealed, and the recipe verifies that
+signature and the PACE wrap (`wraptool verify`) before packaging it as a "Pro
+Tools" choice. On a machine without wraptool the AAX is refused unless you pass
+`--allow-unverified-aax-wrap`. See the `ship` skill for why re-signing an AAX
+breaks it.
 Notarization is **on by default** (`--no-notarize` opts out), and the signing
 preflight runs automatically, so no separate `pulp ship doctor` is needed.
 

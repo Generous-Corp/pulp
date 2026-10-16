@@ -46,7 +46,7 @@ jobs:
     name: pulp create template integrity
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run template-tree integrity smoke
         run: python3 tools/scripts/verify_create_templates.py

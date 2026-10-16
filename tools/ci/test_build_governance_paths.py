@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -20,10 +21,55 @@ def read_source(relative: str) -> str:
 
 
 class BuildGovernancePathTests(unittest.TestCase):
+    def test_downstream_validation_recipes_route_every_build_through_governor(self) -> None:
+        manifests = (
+            "tools/validation/downstream/consumer-validation.json",
+            "test/fixtures/refactor-baselines/downstream-consumers.json",
+        )
+        checked = 0
+        for relative in manifests:
+            manifest = json.loads(read_source(relative))
+            if "canonical_sdk_recipe" in manifest:
+                commands = [" ".join(manifest["canonical_sdk_recipe"]["build"])]
+                commands.extend(
+                    check["command"]
+                    for consumer in manifest["consumers"]
+                    for check in consumer["required_checks"]
+                )
+            else:
+                commands = [manifest["sdk_recipe"]["build_command"]]
+                commands.extend(
+                    command["command"]
+                    for consumer in manifest["consumers"]
+                    for command in consumer["required_commands"]
+                )
+            for command in commands:
+                if "cmake --build" not in command:
+                    continue
+                checked += 1
+                self.assertIn(
+                    "governed-build.sh cmake --build",
+                    command,
+                    f"{relative} has an ungoverned downstream build: {command}",
+                )
+                self.assertNotRegex(
+                    command,
+                    r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))",
+                )
+        self.assertEqual(11, checked)
+
     def test_validate_build_routes_every_build_through_governor(self) -> None:
         source = read_source("validate-build.sh")
         build_lines = [line for line in source.splitlines() if "cmake --build" in line]
         self.assertGreaterEqual(len(build_lines), 2)
+        for line in build_lines:
+            self.assertIn("governed-build.sh", line)
+            self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
+
+    def test_windows_validate_build_routes_every_build_through_governor(self) -> None:
+        source = read_source("validate-build.ps1")
+        build_lines = [line for line in source.splitlines() if "cmake --build" in line]
+        self.assertEqual(len(build_lines), 2)
         for line in build_lines:
             self.assertIn("governed-build.sh", line)
             self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
@@ -60,6 +106,55 @@ class BuildGovernancePathTests(unittest.TestCase):
             build_lines[0], r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))"
         )
 
+    def test_android_fixture_build_uses_governor(self) -> None:
+        source = read_source(".github/workflows/android.yml")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn(
+            "tools/ci/governed-build.sh cmake --build build-android-fixtures",
+            build_lines[0],
+        )
+        self.assertNotRegex(
+            build_lines[0], r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+        )
+
+    def test_cross_platform_builds_use_governor(self) -> None:
+        source = read_source(".github/workflows/cross-platform-check.yml")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "governed-build.sh cmake --build" in line
+        ]
+        self.assertEqual(len(build_lines), 3)
+        for line in build_lines:
+            self.assertNotRegex(
+                line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+            )
+        self.assertNotRegex(
+            source,
+            r"(?m)^\s*(?:run:\s*)?cmake --build\s+\"\$PULP_BUILD_DIR\"",
+        )
+
+    def test_windows_cli_build_uses_governor(self) -> None:
+        source = read_source(".github/workflows/windows-cli-compile.yml")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn(
+            "bash tools/ci/governed-build.sh cmake --build build-win-cli --target pulp-cli pulp-mcp -- -k 0",
+            build_lines[0],
+        )
+        self.assertNotRegex(
+            build_lines[0], r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+        )
+
     def test_macos_retarget_build_uses_governor_inside_untrusted_runner(self) -> None:
         source = read_source(".github/workflows/build-macos.yml")
         self.assertIn(
@@ -93,6 +188,13 @@ class BuildGovernancePathTests(unittest.TestCase):
         for line in build_lines:
             self.assertIn("tools/ci/governed-build.sh", line)
             self.assertNotRegex(line, r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))")
+
+    def test_tsan_selects_signal_graph_reprepare_race_hammers(self) -> None:
+        source = read_source(".github/workflows/sanitizers.yml")
+        self.assertIn(
+            "SignalGraph re-prepare while the (executor|parallel) path renders is race-free",
+            source,
+        )
 
     def test_generated_wasm_fixture_build_uses_governor(self) -> None:
         source = read_source("test/cmake/gpu_audio_web_tests.cmake")
@@ -304,6 +406,7 @@ class BuildGovernancePathTests(unittest.TestCase):
 
     def test_local_release_builds_route_through_governor(self) -> None:
         source = read_source("tools/scripts/release-cli-local.sh")
+
         build_lines = [
             line
             for line in source.splitlines()
@@ -315,6 +418,48 @@ class BuildGovernancePathTests(unittest.TestCase):
             self.assertNotRegex(
                 line, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
             )
+
+    def test_sdk_consumer_sweep_build_uses_governor_and_job_cap(self) -> None:
+        source = read_source("tools/scripts/sdk_consumer_sweep.py")
+        self.assertIn('REPO / "tools" / "ci" / "governed-build.sh"', source)
+        self.assertIn('"PULP_BUILD_JOBS": str(jobs)', source)
+        self.assertNotIn('"-j", str(jobs)', source)
+
+    def test_confirm_failure_build_routes_through_governor(self) -> None:
+        source = read_source("tools/scripts/confirm_failure.sh")
+        build_lines = [
+            line
+            for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(build_lines), 1)
+        self.assertIn('PULP_BUILD_JOBS="$JOBS"', source)
+        self.assertIn('bash "$GOVERNED_BUILD"', source)
+        self.assertIn('cmake --build "$BUILD_DIR" --target "$TARGET"', source)
+        self.assertNotRegex(
+            source, r"cmake --build[^\n]*(?:-j\S*|--parallel(?:=|\s))"
+        )
+
+    def test_hot_reload_rebuild_scripts_route_through_governor(self) -> None:
+        for relative, target in (
+            ("examples/hot-reload-demo/rebuild_logic.sh", "hot-reload-demo-logic"),
+            ("examples/hot-reload-synth/rebuild_logic.sh", "hot-reload-synth-logic"),
+        ):
+            with self.subTest(relative=relative):
+                source = read_source(relative)
+                build_lines = [
+                    line for line in source.splitlines()
+                    if "cmake --build" in line and not line.lstrip().startswith("#")
+                ]
+                self.assertEqual(len(build_lines), 1)
+                # No lease wait: an edit-then-rebuild hot swap must not stall
+                # for the interactive wait (90 s) on a busy host.
+                self.assertIn(
+                    'PULP_GOVERNED_BUILD_WAIT_SECS=0 bash "$GOVERNED_BUILD" cmake --build '
+                    f'"$BUILD_DIR" --target {target}',
+                    build_lines[0],
+                )
+                self.assertNotRegex(source, r"(?m)^\s*cmake --build")
 
 
 if __name__ == "__main__":

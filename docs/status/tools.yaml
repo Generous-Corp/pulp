@@ -35,6 +35,16 @@ tools:
   availability: always
   skill: view-bridge
   caveat: Reads back the host's own window with CGWindowListCreateImage, which must run in the logged-in GUI session (hence --gui-session over ssh) and has read back only the host backdrop on a macOS 27 host while the editor was demonstrably drawing; a run whose every image is host-empty proves the instrument blind, not the editor. It sees what is composited, not why — pair it with a trace from the plug-in process (~/.config/pulp/trace-autostart in a traced build).
+- name: host-lane-probe
+  path: tools/editor-open/host_lane_probe.sh
+  category: editor-open
+  use_when: You need host-side evidence that built plug-in bundles (CLAP, VST3, AU v2) load, open/resize/close/reopen their editors, keep audio byte-identical with the editor open, and coexist with another plug-in in one process — the data the Vellum parity host lane compares.
+  invocation: bash tools/editor-open/host_lane_probe.sh -- --plugin build/CLAP/SpectralLab.clap --plugin build/CLAP/SuperConvolver.clap --out /tmp/host-obs
+  inputs: Built bundle paths. AU v2 components are registered with the probe process only (AudioComponentRegister), so nothing is installed.
+  outputs: host-observation.json (per plug-in load facts, four audio renders with hashes, editor lifecycle events, read-back frame statistics, dyld census of plug-in and GPU-runtime images), raw .f32 renders and editor PNGs.
+  availability: always
+  skill: view-bridge
+  caveat: Records observations, never a verdict — the paired comparison and its negative controls live in Vellum tools/parity/host_lane.py. Read-back uses CGWindowListCreateImage on the probe's own off-screen window; a frame with read=false is a blind instrument, not an empty editor. Animated editors do not reproduce pixel for pixel across runs.
 - name: audio-quality-lab
   path: tools/audio/quality-lab
   category: audio
@@ -169,6 +179,17 @@ tools:
   invocation: node tools/import-design/browser_capture/run_integration.mjs --help
   inputs: A browser-capture integration scenario and its panel/runtime fixtures.
   outputs: Integration capture results and diagnostics for the browser import lane.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: fresh-plugin-fixture-validation
+  path: tools/import-design/fresh_plugin_fixture_validation.mjs
+  category: design-import
+  use_when: Validate a fresh authored HTML fixture's Chromium receipt, native import receipt, and planted negative interaction.
+  invocation: node tools/import-design/fresh_plugin_fixture_validation.mjs --importer <pulp-import-design> --fixture <fixture.html> --interactions <interactions.json> --expected-receipt <receipt.json> --receipt <out.json>
+  inputs: A fresh authored HTML fixture, its bounded browser interaction plan, a managed Chromium executable, and the importer executable.
+  outputs: A fail-closed receipt containing source and native hashes, interaction evidence, and the expected rejected-selector negative control.
+  caveat: Acceptance evidence for a named fixture only; it does not prove general HTML importer coverage or semantic native-widget reconstruction.
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
@@ -690,8 +711,8 @@ tools:
   invocation: python3 tools/scripts/gate_suite_executed.py --run-id <run-id> [--require-executed] [--format
     json]
   inputs: An Actions run id, read live through `ghapp`.
-  outputs: executed / built-but-untested / not-executed per `macos` job, with its step count;
-    `--require-executed` exits nonzero unless the suite genuinely ran.
+  outputs: executed / tier-only / built-but-untested / not-executed per `macos` job, with its step
+    count; `--require-executed` exits nonzero unless the full suite genuinely ran (tier-only fails it).
   caveat: Answers only whether the suite RAN, never whether the tree is healthy — an `executed` verdict on
     a failing job is still `executed`. It classifies by step names, so renaming the workflow's Test step
     without updating it would make a real run look void.

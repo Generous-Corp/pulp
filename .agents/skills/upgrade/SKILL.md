@@ -296,13 +296,87 @@ the note so a curious user can verify why it applied.
 Grammar: Boolean combinations (`&&`, `||`, parentheses) over comparisons
 of `cli_version_from` / `cli_version_to` against a literal semver. Six
 operators: `<`, `<=`, `>`, `>=`, `==`, `!=`. See
-`docs/migrations/README.md` for full details.
+`docs/migrations/README.md` for full details. The evaluator accepts the
+whole grammar, but a note in `docs/migrations/` may only carry the canonical
+`cli_version_from < X && cli_version_to >= X` for its own version `X`: the
+index generator refuses anything else, because an extra `||` arm can show a
+note for an unrelated upgrade while still passing a probe of the boundary
+hops.
 
 ## Common breaking-change patterns
 
 These are the patterns that have shown up in Pulp migration notes. When
 you spot one, suggest the exact grep / replacement to the user instead
 of leaving them to figure it out from a prose paragraph.
+
+### Link-target splits (a module's code moves to a new imported target)
+
+**Pattern.** Code that used to live inside one installed archive moves to a
+new `Pulp::*` target, e.g. the design importers leaving `Pulp::view-core` for
+`Pulp::design-import`. Umbrella targets (`Pulp::view`) usually keep linking the
+new target, so only consumers that link the narrower target directly break,
+and they break at LINK time with undefined `pulp::...` symbols, not at compile
+time.
+
+**What to do.** Find the consumer's direct links to the narrowed target and add
+the new one (or switch to the umbrella):
+
+```bash
+grep -rn "Pulp::view-core" --include=CMakeLists.txt --include=*.cmake .
+```
+
+**Authoring such a note.** Versions are assigned after merge
+(`post_merge_assignment`), so the release number a split lands in is unknown
+while its PR is open. Write the note in a follow-up once the split has merged
+and the number is predictable from the pending bump, and verify it with
+`pulp upgrade --notes --json --from <prev> --to <next>`.
+
+### A transitive link edge removed (a target stops bringing another one)
+
+**Pattern.** A target keeps its name and its code, but stops linking a
+dependency it used to pass through. For example, 0.946.0 `Pulp::gpu-audio`
+links `Pulp::gpu-device` instead of `Pulp::render`. A consumer that leaned on
+the old edge still compiles, because the headers sit on a shared include
+directory, and then fails at LINK time with undefined symbols from the
+dependency it never named.
+
+**What to do.** Find code that uses the dependency's types while linking only
+the narrowed target, and link the dependency explicitly:
+
+```bash
+grep -rln "pulp/render/\(skia_surface\|headless_surface\|render_loop\|renderer3d\)" --include=*.cpp --include=*.hpp .
+```
+
+### Umbrella headers narrowed (an include stops arriving transitively)
+
+**Pattern.** An umbrella header drops an `#include` that most of its users
+never needed. For example, 0.943.0 `<pulp/view/widgets.hpp>` stopped
+including `<pulp/view/visualizers.hpp>`. Unlike a link split, this breaks at
+COMPILE time with an undeclared identifier, and the fix is an `#include`, not
+a CMake edit.
+
+**What to do.** Grep for the types the note names and add the header it lists:
+
+```bash
+grep -rln "SpectrogramView\|MultiMeter\|CorrelationMeter" --include=*.cpp --include=*.hpp .
+```
+
+### An always-present service becomes opt-in (an accessor turns into an installer)
+
+**Pattern.** A member accessor that always returned an object is removed, and
+the object is built only when a process-wide installer ran first. For example,
+0.960.0 replaces `ScriptedUiSession::script_inspector()` with
+`pulp::view::script_inspector(session)`, which is null unless
+`pulp::view::install_script_inspector_bridge()` ran before the session was
+constructed. The call site breaks at COMPILE time; a host that only swaps the
+spelling then gets null at run time.
+
+**What to do.** Find the old accessor, switch to the free function, and add the
+installer where the host builds its UI:
+
+```bash
+grep -rn "script_inspector()" --include=*.cpp --include=*.hpp --include=*.mm .
+```
 
 ### CMake macro renames
 

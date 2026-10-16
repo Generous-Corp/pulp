@@ -12,7 +12,8 @@
 #include <pulp/canvas/text_shaper.hpp> // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/animation.hpp>
-#include <pulp/view/audio_bridge.hpp>
+#include <pulp/view/inspector_facts.hpp>
+#include <pulp/view/data_display.hpp>
 #include <pulp/view/caret.hpp>
 #include <pulp/view/custom_shader_host.hpp>
 #include <pulp/view/frame_clock.hpp>
@@ -22,7 +23,6 @@
 #include <pulp/view/sprite_strip.hpp>
 #include <pulp/view/value_source.hpp>
 #include <pulp/view/view.hpp>
-#include <pulp/view/visualizers.hpp> // SpectrogramView/MultiMeter/CorrelationMeter — include directly in new code
 #include <pulp/view/widget_painter.hpp>
 #include <string>
 #include <string_view>
@@ -120,6 +120,23 @@ class Label : public View, public SelectableText {
         const float ink_before =
             has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
         text_ = std::move(text);
+        // A captured browser line box describes ONE string. Once the copy
+        // diverges from it the Label paints natively, and it must keep doing
+        // so even when a later value equals the captured string again: a live
+        // readout that flipped between the captured basis and native placement
+        // would visibly jump every time its value passed through the design's
+        // original copy.
+        // The boxes themselves stay: the responsive reflow still reads their
+        // line count and wrap intent, and the line-break accounting still
+        // reports a reflow rather than an uncached shape. Only the basis is
+        // retired, so no later value can resurrect it.
+        bool captured_basis_dropped = false;
+        if (!cached_line_boxes_.empty() && !cached_line_basis_retired_ &&
+            apply_text_transform(text_) != cached_line_basis_text_) {
+            cached_line_basis_retired_ = true;
+            shaped_cache_valid_ = false;
+            captured_basis_dropped = true;
+        }
         // The text IS the accessible name for a label — the two-arg ctor set it
         // and set_text() did not, so every Label built by the JS bridge
         // (<span>, <p>, <label>) or by set_text() carried an empty name. It is
@@ -140,10 +157,10 @@ class Label : public View, public SelectableText {
         // PreText-style shaper cache is keyed by (text, family, size), so the
         // new text simply hits a different cache entry — no algorithm change,
         // just cache-correct re-measurement.
-        const bool text_geometry_is_fixed =
-            has_explicit_width && single_line_simple &&
-            ((has_explicit_height && !baseline_aligned) ||
-             (probe_height && intrinsic_height() == height_before));
+        const bool text_geometry_is_fixed = !captured_basis_dropped && has_explicit_width &&
+                                            single_line_simple &&
+                                            ((has_explicit_height && !baseline_aligned) ||
+                                             (probe_height && intrinsic_height() == height_before));
         if (!text_geometry_is_fixed) invalidate_layout();
         // selectable_text() already exposes the new source bytes, so geometry
         // from the previous paint can no longer describe it honestly. Keep
@@ -751,7 +768,8 @@ private:
                                  int visible_lines, bool append_ellipsis,
                                  bool single_line_ellipsis,
                                  bool captured_positions);
-    LabelAlign resolve_effective_align_();            ///< text-align cascade (auto/match-parent resolved)
+    LabelAlign
+    resolve_effective_align_() const; ///< text-align cascade (auto/match-parent resolved)
     bool has_own_font_size_ = false;
     bool has_own_font_weight_ = false;
     bool has_own_letter_spacing_ = false;
@@ -837,8 +855,16 @@ private:
 
     /// Build a ShapedLayout from the captured boxes, so the rest of paint —
     /// line-clamp, vertical-align, alignment — is the same code either way.
-    canvas::ShapedLayout layout_from_cached_lines(const std::string& text,
-                                                  float line_height) const;
+    /// A single captured line whose copy changed (`cached_line_basis_retired_`)
+    /// keeps the box's vertical placement and its left edge, adjusted for the
+    /// new width under the label's alignment, with the width measured for the
+    /// live text: the font and the box are unchanged, so where the line sits
+    /// is still Chromium's answer and only how wide it is has to be asked
+    /// again.
+    canvas::ShapedLayout layout_from_cached_lines(const std::string& text, float line_height,
+                                                  const std::string& family,
+                                                  float effective_font_size,
+                                                  float effective_letter_spacing) const;
     canvas::ShapedLayout layout_attributed_from_cached_lines(
         const canvas::AttributedString& text, float line_height) const;
 
@@ -896,6 +922,9 @@ private:
     float cached_line_basis_width_ = 0.0f;
     std::string cached_line_basis_face_;
     std::string cached_line_basis_text_;
+    // Set once the label's copy diverged from the captured basis; the boxes
+    // are kept for reflow but never honored verbatim again.
+    bool cached_line_basis_retired_ = false;
     std::string cached_line_basis_font_variant_;
     float cached_line_basis_font_size_ = 0.0f;
     float cached_line_basis_letter_spacing_ = 0.0f;
@@ -954,15 +983,6 @@ public:
 
 // ── Knob ─────────────────────────────────────────────────────────────────────
 // Rotary control for audio parameters (gain, frequency, etc.)
-
-/// Rendering style for audio widgets.
-/// `standard` = interactive widget (arcs, thumbs, fills).
-/// `minimal` = design-preview mode (simple shapes matching design tools).
-/// `silver` = skeuomorphic chrome body, radial-gradient highlight, indicator
-///           notch. Vector all the way — works on CPU raster + GPU Graphite.
-///           Used by the figma-import lane as a native-vector alternative to
-///           sprite-strip PNGs (no PNG bleed, crisp at any scale).
-enum class WidgetRenderStyle { standard, minimal, silver };
 
 // AccessibilityValueInterface: `AccessRole::slider` advertises the UIA
 // RangeValue/Value patterns and the AT-SPI Value interface. A slider with no
@@ -2331,118 +2351,6 @@ private:
     std::vector<canvas::Color> fill_gradient_;  // ≥2 stops ⇒ gradient fill
 };
 
-// ── Meter ────────────────────────────────────────────────────────────────────
-// Audio level meter with peak hold
-
-class Meter : public View, public AccessibilityValueInterface {
-public:
-    enum class Orientation { vertical, horizontal };
-
-    Meter() { set_access_role(AccessRole::meter); }
-
-    // ── AccessibilityValueInterface (read-only gauge, normalized 0..1) ───
-    // `meter` maps to a UIA ProgressBar / AT-SPI LEVEL_BAR, both of which
-    // advertise a range. Without a source they report 0 in a 0..0 range.
-    double get_current_value() const override { return display_peak(); }
-    void set_current_value(double) override {}  // a meter is not writable
-    double get_minimum_value() const override { return 0.0; }
-    double get_maximum_value() const override { return 1.0; }
-
-    void set_render_style(WidgetRenderStyle s) { render_style_ = s; }
-    WidgetRenderStyle render_style() const { return render_style_; }
-
-    // Set levels directly (normalized 0-1)
-    void set_level(float rms, float peak);
-
-    // Update from MeterBallistics (call once per frame with dt)
-    void update(float raw_peak, float raw_rms, float dt);
-
-    void set_orientation(Orientation o) { orientation_ = o; }
-    Orientation orientation() const { return orientation_; }
-
-    // Ballistics accessors for testing
-    float display_rms() const { return ballistics_.display_rms; }
-    float display_peak() const { return ballistics_.display_peak; }
-    float held_peak() const { return ballistics_.held_peak; }
-
-    // ── Live host→view source ────────────────────────────────────────────────
-    // Bind a lock-free MeterSource whose `channel` this meter reads once per
-    // frame, driving the ballistic `update()` path from `on_meter_frame`. The
-    // subscription lifecycle (attach, re-point on a clock change, self-healing
-    // teardown) and the lifetime contract live on View::set_meter_source; these
-    // are the meter-shaped spelling of that seam.
-    void set_source(std::shared_ptr<MeterSource> source, int channel = 0) {
-        set_meter_source(std::move(source), channel);
-    }
-    bool has_source() const { return has_meter_source(); }
-    int source_channel() const { return meter_source_channel(); }
-
-    void paint(canvas::Canvas& canvas) override;
-
-    // ── Skin overrides ────────────────────────────────────────────────────
-    // Per-widget gradient + background, generalising the knob sprite-strip
-    // path to the meter. The importer samples the captured Figma PNG's
-    // gradient (green→orange→red) and hands the stops here; the meter redraws
-    // that gradient procedurally, CLIPPED to the current level, so the fill
-    // still animates with set_level()/update() instead of freezing the
-    // captured image. Stops are ordered low→high (bottom→top for vertical).
-    // Unset → today's theme-token threshold behavior (back-compat).
-    void set_skin_gradient(std::vector<canvas::Color> stops) {
-        gradient_stops_ = std::move(stops);
-        request_repaint();
-    }
-    void set_skin_background_color(canvas::Color c) {
-        background_color_ = c;
-        has_skin_background_ = true;
-        request_repaint();
-    }
-    void clear_skin() {
-        gradient_stops_.clear();
-        has_skin_background_ = false;
-        bar_fill_ratio_ = 1.0f;
-        request_repaint();
-    }
-    // Fraction of the widget's cross-axis width occupied by the colored bar
-    // (0..1). The captured meter draws a narrow colored fill recessed inside a
-    // wider dark housing slot; this ratio reproduces that inset so the rendered
-    // bar isn't edge-to-edge paint. Derived from the captured asset
-    // (colored-bar width / housing width); defaults to 1.0 (full width) when the
-    // importer didn't supply it.
-    void set_bar_fill_ratio(float r) {
-        bar_fill_ratio_ = std::clamp(r, 0.05f, 1.0f);
-        request_repaint();
-    }
-    float bar_fill_ratio() const { return bar_fill_ratio_; }
-    bool has_skin_gradient() const { return gradient_stops_.size() >= 2; }
-    bool has_skin_background_color() const { return has_skin_background_; }
-    const std::vector<canvas::Color>& skin_gradient() const { return gradient_stops_; }
-    canvas::Color skin_background_color() const { return background_color_; }
-
-    // Sample the skin gradient at normalized position t (0=low/bottom,
-    // 1=high/top). Linear interpolation across the supplied stops.
-    //
-    // Nothing when no stops were set: a meter with no gradient has no colour
-    // to give, and the caller must draw nothing rather than receive one. This
-    // used to answer a built-in green, which is a colour from nowhere on any
-    // design that never chose it — and returning a transparent Color instead
-    // would be no safer, since a caller that ignores alpha paints it black.
-    std::optional<canvas::Color> gradient_color_at(float t) const;
-
-private:
-    // Drive the ballistic path from the frame the View base snapshotted for us.
-    void on_meter_frame(const MeterFrame& frame, float dt) override;
-
-    Orientation orientation_ = Orientation::vertical;
-    MeterBallistics ballistics_;
-    float current_rms_ = 0;
-    float current_peak_ = 0;
-    WidgetRenderStyle render_style_ = WidgetRenderStyle::standard;
-    std::vector<canvas::Color> gradient_stops_;
-    canvas::Color background_color_{};
-    bool has_skin_background_ = false;
-    float bar_fill_ratio_ = 1.0f;
-};
-
 // ── XYPad ────────────────────────────────────────────────────────────────────
 // 2D parameter control surface (e.g., filter frequency × resonance)
 
@@ -2522,133 +2430,6 @@ private:
     float mod_x_ = 0.0f, mod_y_ = 0.0f;
     std::string x_label_, y_label_;
     bool dragging_ = false;
-};
-
-// ── WaveformView ─────────────────────────────────────────────────────────────
-// Displays audio waveform data
-//
-// Two backing sources are supported:
-//
-//   set_data(...)       — raw normalized samples, redrawn directly. The
-//                         existing behavior, used by oscilloscope-style
-//                         displays of live audio.
-//   set_thumbnail(...)  — points the widget at a pre-decoded
-//                         `pulp::audio::WaveformOverview`. Paint reads peak
-//                         pairs from the cached level instead of decoding
-//                         per redraw, wiring WaveformOverview into the existing
-//                         WaveformView without inventing a new widget.
-//
-// This remains a display-only waveform widget. Sampler/editor behaviors
-// such as trim handles, fade curves, loop regions, slice markers, playheads,
-// hit testing, and snapping should live in dedicated editor/viewport modules
-// that compose this renderer instead of expanding WaveformView itself.
-
-}  // namespace pulp::view
-namespace pulp::audio { class WaveformOverview; }
-namespace pulp::view {
-
-class WaveformView : public View {
-public:
-    // Triggering mode for periodic signal display.
-    // free_run:     no triggering — caller is responsible for continuity
-    // rising_zero:  align to the first rising-edge zero crossing
-    // falling_zero: align to the first falling-edge zero crossing
-    enum class TriggerMode { free_run, rising_zero, falling_zero };
-    enum class PreviewShape { none, saw, sine, square, triangle };
-
-    WaveformView() = default;
-
-    // Set waveform data (normalized -1 to 1). If a non-free_run trigger
-    // mode is active, the buffer is rotated so the first matching
-    // crossing becomes index 0, producing a stable display for periodic
-    // signals. If no crossing is found, the buffer is stored as-is.
-    //
-    // Calling set_data clears any active thumbnail source.
-    void set_data(const float* samples, size_t count);
-    void set_data(std::vector<float> samples);
-
-    // Wire the widget to read peak (min, max) pairs from a pre-decoded
-    // `WaveformOverview`. The shared_ptr overload is the
-    // editor/cache-safe path: the widget retains the CPU thumbnail summary
-    // while it may paint from it. Setting a thumbnail clears any raw sample
-    // buffer.
-    //
-    // `channel == UINT32_MAX` folds all channels into one display row.
-    void set_thumbnail(std::shared_ptr<const pulp::audio::WaveformOverview> thumb,
-                       uint32_t channel = static_cast<uint32_t>(-1));
-    [[deprecated("set_thumbnail(const WaveformOverview*) is borrowed; prefer shared_ptr overload or set_thumbnail_borrowed()")]]
-    void set_thumbnail(const pulp::audio::WaveformOverview* thumb,
-                       uint32_t channel = static_cast<uint32_t>(-1));
-    // Explicit borrowed escape hatch for stack-owned tests or owners that
-    // manage lifetime externally. Prefer set_thumbnail(shared_ptr) for editor
-    // code and cache-backed thumbnails.
-    void set_thumbnail_borrowed(const pulp::audio::WaveformOverview* thumb,
-                                uint32_t channel = static_cast<uint32_t>(-1));
-    void clear_thumbnail();
-
-    bool has_thumbnail() const noexcept { return thumbnail_ != nullptr; }
-    const pulp::audio::WaveformOverview* thumbnail() const noexcept { return thumbnail_; }
-
-    size_t sample_count() const { return samples_.size(); }
-
-    // Static oscillator-preview lane for imported synth-style designs.
-    // Live sample data and thumbnails still take precedence when present.
-    void set_preview_shape(std::string_view shape);
-    PreviewShape preview_shape() const { return preview_shape_; }
-
-    void set_trigger_mode(TriggerMode mode) { trigger_mode_ = mode; }
-    TriggerMode trigger_mode() const { return trigger_mode_; }
-
-    // Locate the first crossing of `mode` in the buffer without mutating
-    // it. Returns the crossing index, or 0 if none is found or
-    // mode is free_run.
-    static size_t find_trigger_index(const float* samples, size_t count,
-                                     TriggerMode mode);
-
-    void paint(canvas::Canvas& canvas) override;
-
-private:
-    void apply_trigger();
-
-    std::vector<float> samples_;
-    TriggerMode trigger_mode_ = TriggerMode::free_run;
-    PreviewShape preview_shape_ = PreviewShape::none;
-
-    std::shared_ptr<const pulp::audio::WaveformOverview> thumbnail_owner_;
-    const pulp::audio::WaveformOverview* thumbnail_ = nullptr;
-    std::vector<float> thumbnail_min_max_;
-    std::vector<float> thumbnail_envelope_;
-    uint32_t thumbnail_channel_ = static_cast<uint32_t>(-1);
-};
-
-// ── SpectrumView ─────────────────────────────────────────────────────────────
-// Displays frequency spectrum (magnitude data from FFT)
-
-class SpectrumView : public View {
-public:
-    enum class Style { bars, line, filled };
-
-    SpectrumView() = default;
-
-    // Set spectrum magnitudes (dB, typically -100 to 0)
-    void set_spectrum(const float* magnitudes_db, size_t bin_count);
-    void set_spectrum(std::vector<float> magnitudes_db);
-
-    size_t bin_count() const { return bins_.size(); }
-
-    void set_style(Style s) { style_ = s; }
-    Style style() const { return style_; }
-
-    // dB range for display
-    void set_range(float min_db, float max_db) { min_db_ = min_db; max_db_ = max_db; }
-
-    void paint(canvas::Canvas& canvas) override;
-
-private:
-    std::vector<float> bins_;
-    Style style_ = Style::filled;
-    float min_db_ = -80.0f;
-    float max_db_ = 0.0f;
 };
 
 // ── Panel ────────────────────────────────────────────────────────────────────
@@ -2925,3 +2706,9 @@ private:
 };
 
 } // namespace pulp::view
+
+// clang-format off
+#if defined(PULP_VIEW_HAS_AUDIO_WIDGETS)
+#include <pulp/view/audio_widgets.hpp>
+#endif  // PULP_VIEW_HAS_AUDIO_WIDGETS
+// clang-format on

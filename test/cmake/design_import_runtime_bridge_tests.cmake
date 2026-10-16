@@ -10,7 +10,7 @@
 # silhouette fill, host-param-surface (the RT allocation probe replaces global
 # operator new), faithful-port-toolkit (links pulp-annotated-capture),
 # offscreen-capture-rt-contract (the RT intercept shim), design-swift-codegen
-# (pulp::view-core + pulp::platform), design-import-designmd (compiles
+# (pulp::view-audio + pulp::platform), design-import-designmd (compiles
 # import_detect.cpp and runs from the source root), and
 # design-import-react-runtime, which the import-validation roundtrip scripts
 # and source-contracts.json build and run by its executable name.
@@ -113,7 +113,7 @@ add_executable(pulp-test-design-swift-codegen test_design_swift_codegen.cpp)
 pulp_test_data(pulp-test-design-swift-codegen NO_DEFINE
     PATHS apple/Sources/PulpSwift)
 target_link_libraries(pulp-test-design-swift-codegen
-    PRIVATE pulp::view-core pulp::platform Catch2::Catch2WithMain)
+    PRIVATE pulp::view-audio pulp::design-import pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-swift-codegen PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     PULP_TEST_SWIFTC="${PULP_SWIFTC}")

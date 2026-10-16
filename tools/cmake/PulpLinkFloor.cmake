@@ -122,7 +122,8 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 #   pulp-format — the adapter the plugin is packaged as. Its own closure brings
 #     the parameter store and the buffer types: state and events directly,
 #     signal and sample_bank_manifest through pulp-audio, plus graph and
-#     native-components.
+#     native-components. Not content: the adapters' PresetManager installs no
+#     content-pack reader, so no format target links pulp-content.
 #
 # None of this is a permission. It is the bill the format packaging currently
 # presents, written down so the gate polices the artifact that exists instead

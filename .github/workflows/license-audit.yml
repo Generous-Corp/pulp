@@ -18,7 +18,7 @@ jobs:
     name: Audit dependency and boundaries
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Verify dependency inventory
         run: python3 tools/deps/audit.py --strict

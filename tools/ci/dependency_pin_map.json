@@ -33,6 +33,7 @@
   "Jost": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "Khronos Box Textured fixture": "test fixture read as data, so a change moves all",
   "LV2": "header-only: no target or archive to reach, so a change moves all",
+  "mise": "developer-supplied build tool outside the build's pins, so a change moves all",
   "miniz": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "Moonbase": "example-only dependency outside the test build, so a change moves all",
   "msdfgen": "planned, not yet built, so a change moves all",

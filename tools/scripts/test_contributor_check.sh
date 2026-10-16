@@ -177,6 +177,27 @@ printf 'x\n' > "$r/notes.md"
 git -C "$r" add -A >/dev/null && git -C "$r" commit -qm gates
 check "does not suppress a real failure that mentions tomllib" 1 "config-doc: tomllib parser" "$r"
 
+# 12. A coverage run that exits 4 (skipped: starved host, or refused on a tartci
+#     gate host) was not measured. It must read NOT CHECKED, never "below
+#     threshold" and never a pass.
+r="$(make_repo)"
+mkdir -p "$r/core/signal/src" "$r/test" "$r/fakebin"
+printf 'int f() { return 1; }\n' > "$r/core/signal/src/thing.cpp"
+printf 'TEST_CASE("f") {}\n' > "$r/test/test_thing.cpp"
+cat > "$r/tools/scripts/local_diff_cover.sh" <<'COVER'
+#!/bin/sh
+echo "[gate-host] REFUSED local diff-coverage configure/build: fixture" >&2
+exit 4
+COVER
+chmod +x "$r/tools/scripts/local_diff_cover.sh"
+printf '#!/bin/sh\nexit 0\n' > "$r/fakebin/diff-cover"
+chmod +x "$r/fakebin/diff-cover"
+git -C "$r" add -A >/dev/null && git -C "$r" commit -qm "src, test, refused coverage"
+saved_path="$PATH"
+PATH="$r/fakebin:$PATH" CONTRIB_FULL_COVERAGE=1 \
+    check "reports a refused coverage run as NOT CHECKED" 0 "diff coverage NOT CHECKED" "$r"
+PATH="$saved_path"
+
 # 11. An identical branch has nothing to say.
 r="$(make_repo)"
 check "exits cleanly with no changes" 0 "nothing to check" "$r"

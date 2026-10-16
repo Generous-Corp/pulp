@@ -18,7 +18,6 @@
 #include <pulp/audio/load_measurer.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
-#include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/host/anticipation_lane.hpp>
 #include <pulp/host/custom_node_diagnostics.hpp>
 #include <pulp/host/custom_node_type.hpp>
@@ -45,6 +44,11 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+namespace pulp::format {
+class Processor;
+class ProcessorNodeInstance;
+} // namespace pulp::format
 
 namespace pulp::host {
 
@@ -494,7 +498,9 @@ public:
     // signal_graph_executor_routing.{hpp,cpp}; these are control-thread only.
 
     // True once prepare() has published a live compiled snapshot.
-    bool is_prepared() const noexcept { return live_slot_.live() != nullptr; }
+    bool is_prepared() const noexcept {
+        return live_slot_.has_value();
+    }
     // Max block size the live snapshot was prepared for (0 if not prepared).
     int prepared_max_block_size() const noexcept;
     // The live compiled snapshot's per-node gain atomic (Gain nodes only), or
@@ -781,6 +787,12 @@ public:
     std::size_t custom_node_type_count() const;
 
 private:
+  // The standalone executor-routing builder must resolve every pointer and
+  // capture the matching snapshot keepalive as one publication-serialized
+  // operation.  It is a friend rather than a new public locking API so the
+  // existing source/ABI surface stays unchanged.
+  friend bool build_signal_graph_executor_routing(const SignalGraph&, SignalGraphExecutorRouting&);
+
   friend std::optional<std::vector<HostParamInfo>>
   detail::processor_node_parameters(const SignalGraph&, NodeId);
 
@@ -1004,13 +1016,9 @@ private:
     // final destruction releases only after both ownership domains are gone.
     struct ProcessorNodeLifetime {
         explicit ProcessorNodeLifetime(
-            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept
-            : instance(std::move(value)) {}
+            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept;
 
-        ~ProcessorNodeLifetime() {
-            if (instance)
-                (void)instance->release();
-        }
+        ~ProcessorNodeLifetime();
 
         std::shared_ptr<format::ProcessorNodeInstance> instance;
     };

@@ -79,7 +79,8 @@ def find_wgpu_lib(build_dir: Path, platform: str) -> Path | None:
     """Locate the wgpu-native dylib/so/dll the build linked against.
 
     Scans the build dir and the standard Pulp FetchContent cache roots for
-    ``libwgpu_native.*``. On macOS the cache can hold BOTH arch slices at once
+    ``libwgpu_native.*``; when the job sets an isolated source/base dir, only
+    the build dir and that root are scanned. On macOS the cache can hold BOTH arch slices at once
     (e.g. an arm64 prefetch plus an x86_64 cross-build), so darwin candidates
     are arch-filtered via ``lipo -archs`` to the target arch — otherwise the
     packager can bundle the wrong-arch dylib into the tarball, which only
@@ -100,6 +101,20 @@ def find_wgpu_lib(build_dir: Path, platform: str) -> Path | None:
     # otherwise the packager silently misses the runtime library and
     # ships a tarball that crashes on clean machines.
     roots: list[Path] = [build_dir]
+    # An explicit source/base dir (release-cli.yml's job-local isolated root)
+    # is where setup.sh and PulpFetchContent.cmake put the runtime. When one is
+    # set, the shared caches are not searched at all: they may hold a runtime
+    # an earlier job wrote, and a signed release must not bundle it.
+    isolated = [
+        Path(value)
+        for value in (
+            os.environ.get("PULP_SHARED_FETCHCONTENT_SOURCE_DIR"),
+            os.environ.get("PULP_FETCHCONTENT_BASE_DIR"),
+        )
+        if value
+    ]
+    if isolated:
+        return _pick_wgpu_lib([build_dir, *isolated], suffix, platform)
     home = Path.home()
     # macOS Pulp cache (Title-Case matches setup.sh)
     roots.append(home / "Library" / "Caches" / "Pulp")
@@ -119,7 +134,11 @@ def find_wgpu_lib(build_dir: Path, platform: str) -> Path | None:
     # compatibility with tarballs built on runners that still hardcode
     # the runner's home directory).
     roots.append(Path("/Users/runner/Library/Caches/Pulp"))
+    return _pick_wgpu_lib(roots, suffix, platform)
 
+
+def _pick_wgpu_lib(roots: list[Path], suffix: str, platform: str) -> Path | None:
+    """Return the first wgpu-native runtime under ``roots``, arch-filtered on macOS."""
     # De-dupe while preserving order.
     seen: set[Path] = set()
     unique_roots = []

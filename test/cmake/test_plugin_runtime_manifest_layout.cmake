@@ -21,10 +21,18 @@ if(NOT _utils_content MATCHES "elseif\\(APPLE AND PULP_IOS\\)")
         "through the flat resource-layout branch")
 endif()
 
-if(NOT _utils_content MATCHES "TARGET_BUNDLE_DIR:\\$\\{format_target\\}>/Resources/pulp\\.plugin-runtime\\.json")
+if(NOT _utils_content MATCHES "TARGET_BUNDLE_DIR:\\$\\{format_target\\}>/pulp\\.plugin-runtime\\.json")
     message(FATAL_ERROR
         "_pulp_attach_plugin_runtime_manifest must copy iOS manifests "
-        "to Resources/pulp.plugin-runtime.json")
+        "to the flat bundle root (<bundle>/pulp.plugin-runtime.json)")
+endif()
+
+# A shallow iOS bundle must not get a top-level Resources/ directory: codesign
+# then rejects the bundle and the extension cannot be signed or installed.
+if(_utils_content MATCHES "TARGET_BUNDLE_DIR:\\$\\{format_target\\}>/Resources")
+    message(FATAL_ERROR
+        "_pulp_attach_plugin_runtime_manifest must not create a Resources/ "
+        "directory at the root of an iOS bundle")
 endif()
 
 if(NOT _utils_content MATCHES "TARGET_BUNDLE_DIR:\\$\\{format_target\\}>/Contents/Resources/pulp\\.plugin-runtime\\.json")

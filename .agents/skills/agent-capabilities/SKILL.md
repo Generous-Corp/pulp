@@ -5,6 +5,17 @@ description: Maintain Pulp's installed design-time agent capability manifest and
 
 # Agent Capabilities
 
+## Public-header fingerprint refresh
+
+When a SignalGraph or other covered public header changes bytes while its
+consumer capability remains the same, refresh the reviewed SHA-256 in the
+catalog and surface ledger, increment `SURFACE_INVENTORY_VERSION`, and update
+any sequencer-exposure rows that name the old version. Run
+`python3 tools/scripts/agent_capability_manifest.py --check` and the sequencer
+exposure checker before pushing. This keeps focused-header refactors visible
+to installed-SDK consumers without turning an include-only change into a new
+capability contract.
+
 Maintain three related artifacts:
 
 - `agent-capabilities.json` is the installed consumer contract: curated keys,
@@ -86,6 +97,20 @@ all curated capability contracts stay identical. Bind related pending exposure
 evidence to the specific API or header fingerprint, not a literal global
 `SURFACE_INVENTORY_VERSION`; an unrelated inventory update must not invalidate
 that evidence. None of these source checks establishes installed execution.
+
+### A legacy header that changes bytes cannot be re-fingerprinted
+
+`tools/agent-capabilities/legacy-unreviewed-baseline.json` is FROZEN: it may
+only shrink, through explicit reviewed classifications, so editing a
+`legacy_unreviewed` header's fingerprint there (or adding a new header to it)
+fails with `legacy baseline digest changed` / `must retain exactly N frozen
+entries`. The recorded path when such a header changes (2026-10-15,
+`pulp/signal/lfo.hpp` gaining `set_band_limited` / `next_mean`): give the
+header a reviewed row in `agent_capability_registry.py` (`capability_support`
+with the key it serves and a durable rationale), register its owner in
+`REVIEWED_MINIMAL_TARGETS`, do the same for any new sibling header, then run
+`agent_capability_rederive.py` and `--check`. The baseline file itself is not
+edited; the header simply stops being legacy.
 
 ## Classify the change
 
@@ -1256,6 +1281,15 @@ the bypass trailer by reflex:
   honest record is a line in this skill saying so, not a `Skill-Update: skip`.
   A note costs the same as the trailer and leaves the next person something to
   read.
+
+- **A new archive over headers that were already installed** — splitting a
+  target (for example `pulp-gpu-device` and the INTERFACE `pulp-gpu-device-api`
+  carved out of `pulp-render`, over the same `core/render/include`) adds no
+  capability surface, so there is nothing to classify. The new archive stem
+  still goes into `release_product_matrix.json` in the same change:
+  `test_installed_sdk_archives_match_release_matrix` compares
+  `PULP_SDK_TARGETS` minus INTERFACE targets against that list, so an INTERFACE
+  target needs no stem and a STATIC one does.
 
 ## A platform header installed for per-binary recompilation is not capability surface
 

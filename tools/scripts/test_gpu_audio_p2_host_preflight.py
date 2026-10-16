@@ -1,5 +1,7 @@
 import json
 import subprocess
+import stat
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +11,24 @@ import gpu_audio_p2_host_preflight as preflight
 
 
 class HostPreflightTests(unittest.TestCase):
+    def test_gpu_doctor_capture_uses_file_backed_streams(self):
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / "doctor-helper"
+            helper.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "import subprocess\n"
+                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(1)'], close_fds=False)\n"
+                "sys.stdout.write('gpu-json\\n')\n"
+                "sys.stderr.write('gpu-log\\n')\n",
+                encoding="utf-8",
+            )
+            helper.chmod(helper.stat().st_mode | stat.S_IXUSR)
+            result = preflight._run([str(helper), "doctor", "gpu"], timeout=0.2)
+        self.assertEqual(result["returncode"], 0)
+        self.assertEqual(result["stdout"], "gpu-json\n")
+        self.assertEqual(result["stderr"], "gpu-log\n")
+
     @staticmethod
     def collect_fixture(runner, source):
         identity = {
@@ -138,6 +158,22 @@ class HostPreflightTests(unittest.TestCase):
         identity = preflight._gpu_health_identity(
             ["/definitely/missing/pulp", "doctor", "gpu", "--json"], "a" * 40)
         self.assertEqual(identity["status"], "invalid")
+
+    def test_gpu_health_identity_rejects_symlink_before_resolution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "build" / "pulp-real"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"pulp-fixture")
+            target.chmod(target.stat().st_mode | stat.S_IXUSR)
+            manifest = root / "build/core/runtime/generated/Release/pulp/runtime/build_info.hpp"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('kGitSha = "' + "a" * 40 + '"\n', encoding="utf-8")
+            link = root / "build" / "pulp"
+            link.symlink_to(target.name)
+            with patch.object(preflight, "REPO_ROOT", root):
+                identity = preflight._gpu_health_identity([str(link), "doctor", "gpu"], "a" * 40)
+        self.assertEqual(identity, {"status": "invalid", "reason": "executable_symlink"})
 
     def test_positive_receipt_contains_hashed_real_observations(self):
         receipt = preflight.collect(runner=self.runner, source_revision="a" * 40)

@@ -26,11 +26,40 @@ on a real PR. Do them in order.
 
 1. **Run `tools/scripts/gates.sh origin/main` before every push.** It runs the
    offline gates CI runs, including both halves of the required `Vellum freeze`
-   check, over the merge-base range:
+   check, over the merge-base range. **On a host that carries the required gate
+   VMs it refuses its heavy half.** `tools/scripts/gate_host_policy.sh` reads
+   `tartci host-profile`, not the hostname: when `TARTCI_SERVES_GATE=1` and
+   `TARTCI_ROLE` is anything but `light` (today m3 `dedicated-builder`, m5 and
+   m5s `dev-overflow`), `gates.sh` never configures and skips every
+   source-selftest lane. The generated-manifest lane still runs build-free
+   (`PULP_GATES_NO_CONFIGURE=1`), so its families prediction can still fail.
+   The skipped lanes are listed as NOT CHECKED, so the verdict reads "not a full
+   pass" rather than "safe to push". The cheap gates still run.
+   The pre-push hook and `local_diff_cover.sh` (exit 4) refuse the
+   diff-coverage build the same way, and the hook ends "gates clean except
+   diff coverage: NOT CHECKED". Run the full set on m1 (`light`) or a
+   disposable VM.
+   The policy fails closed:
+   - tartci is found on PATH or in `~/.local/bin`;
+   - a tartci whose `host-profile` fails, or that prints no
+     `TARTCI_SERVES_GATE`, counts as a gate host;
+   - an unknown role is refused;
+   - only a machine with no tartci at all is treated as a non-fleet host.
+
+   Every fleet host reports `TARTCI_SERVES_GATE=1`, so that field alone would
+   refuse m1 too. `PULP_TARTCI_BIN` is a test hook that names a fake profile.
+   Do not point it at a fake light profile to dodge the refusal. The gate run
+   covers:
    - **watch events** — a range touching a watched capability-family path
      without a committed `.github/vellum-expansion-watch-events/` event FAILS
      (exit 10) and prints the exact JSON; or run
      `python3 tools/scripts/vellum_watch_preflight.py --write-event --rationale "..."`.
+   - **foundation include lint** — `foundation_include_lint.py` fails when a
+     file under `core/platform`, `core/runtime` or `core/simd` includes an
+     upper-layer `pulp/<area>/` header or a quoted relative path that resolves
+     outside those roots (it resolves through the foundation include dirs, the
+     way the compiler does). Put the code in the owning subsystem instead of
+     allowlisting it; a stale allowlist entry also fails.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
@@ -88,6 +117,15 @@ on a real PR. Do them in order.
 
 ## Build emitters always use the governor
 
+The PR-head affected-test step reads a marker written immediately before the
+governed build. Keep that marker inside the build directory and before the
+build command: the warm Ninja log contains outputs from earlier branches, so
+only artifacts newer than this run's marker count as rebuilt tests. The marker
+proves the build produced an output, not that the diff caused it. So the rebuilt
+set is also dropped when it exceeds `REBUILT_EXECUTABLE_CAP` (8) executables,
+or when `build.ninja` or `CMakeCache.txt` was regenerated after the marker.
+Otherwise a cold or stale directory selects the whole suite.
+
 Any command that Pulp prints for a user to copy, any generated test driver,
 and every sanitizer workflow build step must invoke
 `tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
@@ -115,6 +153,24 @@ same rule. Keep their target lists and build directories unchanged, but route
 both `cmake --build` invocations through `tools/ci/governed-build.sh`; the
 governor owns the worker share on every runner.
 
+The Android fixture workflow follows the same rule for its cross-compiled
+headless runners. Keep the NDK toolchain, API floor, build directory, and
+`pulp-fixture-runner`/`pulp-android-fixture-runner` target list unchanged, but
+route the build through `tools/ci/governed-build.sh` without an explicit
+`--parallel` cap. The governor owns the worker share and build-directory lock;
+the emulator and fixture execution steps remain separate.
+
+The TSan workflow keeps its SignalGraph selection exact and bounded: include
+the compile-first lifecycle cases, mutation-lock and prepare-swap publication
+cases, and the routed and parallel re-prepare/process race hammers. Do not
+replace this with the full graph parity matrix; ordinary lanes own parity
+coverage while TSan owns these thread-race cases.
+
+The cross-platform software-GPU workflow also routes its Linux and Windows
+build steps through the governor. Keep each runner's existing build directory,
+Release configuration, log tee, and platform-specific test flow unchanged;
+the wrapper supplies bounded parallelism and the shared build-directory lock.
+
 ## Focused builds are a dev-loop default, never a landing signal
 
 ### Build commands emitted by diagnostics and remediations
@@ -124,6 +180,9 @@ doctor/remediation output, is a build emitter and must invoke
 `tools/ci/governed-build.sh cmake --build ...`. Keep the target and build
 directory explicit, but do not include `-j`, `--parallel`, or a host-core
 probe: the governor owns parallelism, leases, and build-directory locking.
+The local sanitizer and coverage helper scripts follow the same rule: pass a
+requested cap through `PULP_BUILD_JOBS` and leave worker flags out of the
+`cmake --build` argv.
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
 and run only what the working diff affects (`pulp affected`, the build-target
@@ -204,17 +263,37 @@ against a batch name that was not the culprit.
 Three facts make that possible, and all three are worth knowing before you
 diagnose a stalled queue:
 
-**A pull-request head does not run the test suite at all.** The `Test
-(non-Windows)` step is gated `github.event_name != 'pull_request'`. Tests run
-in the merge queue, on push, and on Shipyard's `workflow_dispatch` — never on
-the PR head. So "the PR was green" never meant its tests passed.
+**An ordinary pull-request head does not run the full test suite.** The
+`Test (non-Windows)` step runs the fast tier for ordinary heads, while an
+armed head selected by `pr_suite == full` runs the full suite as a required
+queue-admission signal. Tests also run in the merge queue, on push, and on
+Shipyard's `workflow_dispatch`.
 
 **`main`'s macOS health is the merge group's `macos` job, not a push run.**
 The queue lands with the MERGE method, so the commit on `main` IS the
 merge-group head: `ghapp api 'repos/Generous-Corp/pulp/actions/workflows/build.yml/runs?head_sha=<main-sha>&event=merge_group'`
 finds the run that tested main's exact commit. Read its `macos` **job**, never
-the run's conclusion: the run also folds in advisory hosted Linux, which fails
-routinely, so a run marked `failure` is often a green tip.
+the run's conclusion. In a merge group the Linux matrix leg is job-level
+`continue-on-error`, so a red Linux leg no longer turns the run's conclusion to
+`failure`; its own check run still shows red. A merge-group run marked
+`failure` therefore means a non-advisory job failed, but the run conclusion
+still does not tell `macos` from the other jobs, and pull-request and push runs
+keep folding the Linux leg into their conclusion. Over 2026-10-02 to 10-09, 343
+of 726 merge-group runs read `failure` with only the Linux leg red; the rule
+turns those to `success` and leaves all 48 runs with a red or cancelled `macos`
+non-green (`tools/ci/test_build_matrix_contract.py` pins both directions).
+
+**A cheap required check `cancelled` with no runner is starvation, not the PR.**
+`drift-fast`, `Vellum trusted freeze` and `Enforce version & skill sync` run on
+hosted `ubuntu-latest` unless their routing variable is set. On 2026-10-05 each
+was cancelled about 15 minutes after creation with `runner_name` empty and zero
+steps, and the queue ejected #9652, #9647 and #9662 for it. A required job that
+did get a runner can also be cancelled at its `timeout-minutes`: on 2026-10-07
+`drift-fast` spent 19.5 of its 20 minutes in a silent `apt-get update`, which
+ejected #9846. The shared apt installer now bounds every attempt (apt's 30 s
+connection timeout plus a wall-clock `timeout`) so a stalled mirror is retried
+instead of spending the job. Read the job's `runner_name`, step count and the
+step that was running before calling such a cancel a failure.
 
 A push-to-main run has no macOS leg at all (`resolve-provider` omits it; a
 static test in `tools/scripts/test_fork_pr_runner_routing.py` pins that no
@@ -238,6 +317,22 @@ Both event-dependent ctest decisions live in `tools/ci/ctest_gate_args.py`,
 tested by `ctest-gate-args-selftest`, which also asserts `build.yml` still
 calls it.
 
+## A red run names its own cause in the `ci-cause` annotation
+
+Before you read a 10 MB job log, look for the run's `ci-cause` notice. The
+advisory `ci-cause (advisory)` job in `build.yml` prints one `ci.cause/v1`
+record per failed job. Each record gives the failing test, compile error,
+runner failure or gate verdict, with a class and a confidence.
+
+- **Low or `unknown` means unread, not innocent.** A `low` confidence, or a
+  class of `unknown`, means the extractor could not name the cause. Read the
+  log in that case.
+- **Absent means it did not run.** If the notice is missing, the job may not
+  have run at all; check its own log. It is advisory and never gates.
+- **Upgrading the pin.** The extractor is the Shipyard release pinned, with
+  its checksums, in `tools/ci/ci_cause_notices.sh`. Bump the version and the
+  hashes together.
+
 ## A green `macos` check can mean nothing ran
 
 The required `macos` context is reported by more than one job: the macOS matrix
@@ -252,14 +347,62 @@ Ask the run instead of the colour:
 
 ```bash
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
-# executed | built-but-untested | not-executed, with the step count
+# executed | tier-only | built-but-untested | not-executed, with the step count
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
-# exits nonzero unless the suite genuinely ran
+# exits nonzero unless the full suite genuinely ran
 ```
+
+`tier-only` is the normal pull-request head: the fast deterministic tier or the
+affected-tests tier ran, and `Test (...)` was skipped. That is not the suite
+(build.yml: the fast tier "is NOT test evidence for the merge", and the
+affected tier can select nothing), so `--require-executed` refuses it.
 
 Each bootstrap job also writes a banner into its own job summary saying no
 build and no test step ran. A step count near three on a `macos` job is the
 tell.
+
+## Diff-scoped gates on merge_group use the entry's own base
+
+`Enforce version & skill sync` diffs against `merge_group.base_sha` on a queued
+run, resolved by `tools/scripts/ci_diff_base.py`. It used to take
+merge-base(origin/main, HEAD), which spans every entry ahead in the queue: a
+`fix:` touching no versioned surface in one entry ejected the innocent entry
+behind it, and the offender passed on whatever sat ahead of it. If an enforce
+failure on a merge group names a commit that is not in the ejected PR, read the
+`diff base:` line in the job log before touching the PR. Any new diff-scoped
+gate added to a merge_group workflow should reuse the same resolver.
+
+## A HOLD on a queued head fails the merge group
+
+On 2026-10-12/13 six pulp pull requests merged minutes after a `verdict: HOLD`
+naming their merge head: each was armed before the HOLD, and review before arm
+judges only the arm. Two layers stop that now. Shipyard's `verdict-hold-hook`
+dequeues or disarms the exact head when the HOLD posts through `ghapp` (on
+hosts that enable `hold-disarms`). Behind it, the merge-group classify job runs
+`tools/ci/merge_group_hold_check.py`, which fails `macos` closed, before any VM,
+when a queued pull request's latest trusted verdict on the head it lands is
+HOLD. Its error annotation names the pull request, the HOLD's URL and the fix:
+a new head plus the fleet App's APPROVE, or the App's APPROVE on that head if
+the HOLD no longer applies, then re-queue. Only the fleet App's APPROVE (a
+verdict posted through `ghapp`, whose author is a `Bot`) clears a HOLD here; a
+human account's APPROVE, comment or review, never does, and neither does a
+user account named `shipyard-local`. It fails closed: an "(unreadable)" error annotation
+means it could not read the group (a commit on the chain, a missing token) or a
+pull request's comments or reviews in full (a failed read, a GraphQL `errors`
+answer, a list short of its `totalCount`), and that fails the group too. A
+stalled queue is the deliberate lesser harm: re-run the group's classify job or
+re-queue. A failed fetch of the base branch fails the same way; only a base
+that does not carry the check yet passes, with a notice. A HOLD from the pull
+request's own author counts; a HOLD from an OWNER, MEMBER or COLLABORATOR
+counts too.
+
+**An App APPROVE needs a signer.** Every agent posts verdicts as the same App,
+so `.shipyard/config.toml` names who may sign one (`[auto_merge]
+reviewer_signers = ["pulp-review", "infra-review2"]`): Shipyard's guards count
+an App `verdict: APPROVE` only with a `reviewer: <name>` line naming one of
+them, and never one `ghapp` stamped with an `unattributed` session. A reviewer
+agent puts `reviewer: <its name>` on the line above the verdict. Adding a
+reviewer means adding it to that list.
 
 ## A failed batch's branch name is not the culprit
 
@@ -466,6 +609,11 @@ queued PR, reordering or dequeuing any other PR, or making room ahead of the fix
 
 ## Wait on a blocking waiter, not a poll loop
 
+For an unattended pull request, use `shipyard wait pr <PR> --state merged`
+with an explicit timeout. This uses Shipyard's single authoritative PR watch
+ledger and can run from any fleet host. Never wrap `gh pr view` or `gh pr
+checks` in a polling loop.
+
 A wait on CI or a PR belongs in one blocking call: `shipyard wait run|job|pr|release`,
 `shipyard ship --pr <n>` (merges on green), or a background command that exits
 when the condition holds. A loop that reads the same state every few seconds
@@ -611,7 +759,8 @@ summary/watch commands.
 > **If a PR's required `macos` check has been queued >30 min** or the
 > repo's PRs are all in `mergeable_state=blocked` with no movement,
 > jump to **"Self-hosted runner ops"** near the end of this file.
-> One-shot recovery is `shipyard rescue <PR>` (Shipyard v0.53.0+).
+> One-shot recovery of a queued run is `shipyard rescue <PR>` (Shipyard
+> v0.53.0+) (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 > Continuous prevention is `shipyard runner watch --kill-hung-workers`
 > (v0.54.0+). Keep Shipyard itself current with `shipyard update`
 > (v0.55.0+; Pulp currently pins v0.56.2+). All three replace the
@@ -685,6 +834,18 @@ job summary. It never compares a number to a threshold, and it must stay off
 policy is that DSP perf is tracked, not gated. Its first dispatch after landing
 must be `ghapp workflow run dsp-throughput-bench.yml --ref main` (a new
 workflow is dispatchable only once it exists on the default branch).
+
+## `toolchain` warnings on a build leg are drift reports, not the failure
+
+Every `build.yml` leg runs `tools/toolchain/check_env.py --format github`
+before configuring and annotates the run with `::warning title=toolchain ...`
+lines: one per tool whose version differs from `tools/toolchain/manifest.toml`.
+While the manifest is in warn mode the step never fails a leg, so a red leg
+with toolchain warnings failed somewhere else; read the failing step, not the
+annotations. Use the warnings when a failure reproduces on one host or runner
+and not another: they name the version each one actually ran (for example the
+hosted Linux leg's apt CMake 3.x against the 4.3.3 pin, which is how a
+CMake-4-only script fails only there).
 
 ## Android minimum-API allocation check
 
@@ -1063,6 +1224,17 @@ consequences worth knowing before you debug:
   and still exits 0, which is a pass it never earned. Reproduce with
   `python3.12 tools/ci/source_selftests.py run` after temporarily renaming
   `build/`, which is the lane's condition.
+- The lane is three jobs. `Version & skill sync checks` runs the shared part.
+  `Exclusive source selftests 1/2` and `2/2` run the `PROCESSORS` > 1 entries,
+  each alone on its own runner. The required `Enforce version & skill sync`
+  job only collects the result of the other two. When it is red, open the
+  needed job that failed: the aggregator's log names it but holds no test
+  output. `EXCLUSIVE_SHARD_PLAN` in `tools/ci/source_selftests.py` names the
+  shard for each `PROCESSORS` > 1 entry, balanced on measured wall time, not
+  on manifest timeouts (the timeouts are all 300 s and put the two GPU DPR
+  tests together, a 200 s shard). A new such entry still runs, on the lightest
+  shard, but the contract fails until the plan places it. Changing the shard
+  count means changing the plan and the workflow matrix together.
 - Editing a moved registration's arguments without refreshing the manifest
   fails `source-selftest-lane-contract` on the gate; run
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
@@ -1516,6 +1688,14 @@ CLI flag or command is enough to stale `docs/status/pulp-tooling-disposition.jso
 the regenerate command (`python3 tools/scripts/pulp_tooling_disposition.py
 --write`, and so on) for whichever is stale.
 
+**"Could not be verified" is not "stale".** `pulp_tooling_disposition.py`
+reads `cli-commands.yaml` and needs PyYAML. Without it, the generator exits 3,
+naming the interpreter, and the gate prints "could not be verified" (exit 13)
+instead of a regenerate command. Regenerating would change nothing. Put a
+python3 that has PyYAML first on `PATH`, or set `PYTHON=`, and push again.
+Before this change the same failure printed "is stale", and three agents in
+one day went to regenerate a file that was current.
+
 **Reading that step's log:** the line `vellum-ownership-projection: error:
 ownership projection is stale` used to be printed by a *passing* negative
 control in `test_generate_vellum_ownership_projection.py`, so it appeared in
@@ -1681,6 +1861,10 @@ tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
 integration file back into the unit aggregate or remove that install step: the
 former exhausts the aggregate deadline before later tests run, while the latter
 turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
+Before regenerating `test/ctest_script_inputs.json` or
+`.shipyard/changed-surface-families.toml`, run that same locked install and
+reconfigure from the gate profile so both materialized-runtime tests remain
+registered.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
@@ -1936,6 +2120,10 @@ passed. The `ctest-logs-<key>` upload is now `continue-on-error` (a missing
 log artifact on a green run means the upload failed); the SDK upload retries
 once after 90 s with `overwrite: true` and only then fails the job, because a
 green job must imply the artifact exists.
+Before making any other upload non-gating, map its readers first. The macOS
+`plugins-<key>` bundles have none, and the `ios-gate-ok-<digest>` marker only
+saves a rebuild, so both are `continue-on-error`. Receipts and A2T evidence
+are read by merge decisions and must keep failing the job.
 
 **Configure should not clone.** `setup.sh` primes every dependency
 `PulpDependencies.cmake` fetches unconditionally into the shared FetchContent
@@ -2260,6 +2448,14 @@ full run on a CMake change or control run id are the contract any enforcement
 inherits. Do not enforce while `would_skip_failed` is ever nonzero or binary
 identity (`binary_identity_shadow.py report`) is below ~100%: an unreproducible
 binary only means zero hits, but a missed runtime input means a false skip.
+
+The shadow step sits on the required merge-group job's critical path (about
+3.2 min median). Only binary identity's hashes (`our-identity.json`) and the
+receipts' keys (`test-keys.json`) feed the reuse record; the affected-test and
+flake-exoneration instruments only annotate. Before moving or dropping any of
+them, read the `merge-group shadows timing:` line the runner prints after its
+summary (each instrument's wall seconds, also flushed as `<label> took <s>s`
+when it finishes), not the step total.
 
 ## Compiled tests declare runtime data with `pulp_test_data()`
 
@@ -2990,6 +3186,12 @@ stall the tool exists to catch.
 
 ## Diagnosing a slow / stuck PR — investigate before assuming runner saturation
 
+If the required `macos` job is queued and never starts while hosts report
+"fleet ready", read the lane logs and the admission verdict on the hosts before
+anything else: see the `tart-ci` skill, "Diagnosing a queued macOS job that
+never starts". An empty runner list from the API is normal for just-in-time
+runners and is not evidence of an outage.
+
 When a PR sits without merging, don't ASSUME "the macOS CI pool is saturated"
 from a long-queued run — investigate. Saturation IS possible (a genuine burst, or
 a wedged/dead runner — see the `pulp-runner-ops` skill), so it's worth checking;
@@ -3308,6 +3510,24 @@ measured baseline as a must-stay-quiet case and will fail a tuning that
 re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
+
+**An evidence gap that never closes is a mute button.** A degraded sweep
+(any failed read or truncated listing) suppresses alarms. On this repo the
+*completed* run listing truncates on every sweep, so for weeks every sweep was
+degraded. The watchdog listed the dead native Intel lane as a 322-minute `warn`
+each night and never opened a tracker. Now, when completed-listing truncation is
+the only gap, a job alarms after `2 x alarm_minutes` with no comparable job
+in progress, because that truncation can only hide a finished start, not a live
+one. When you add a new reason to degrade a sweep, check how often it fires.
+A gap that is present on every sweep disables the watchdog. Read
+`degraded=` across a day of sweeps before trusting a quiet tracker.
+
+**`cancelled` with an empty `runner_name` means no runner picked the job up.**
+Job-level `needs.<job>.result` reads `cancelled` both for a job that ran and
+timed out and for one that waited for a runner until GitHub gave up. A
+watchdog that files every `cancelled` as infra hides a lane with no runner at
+all. `tools/scripts/unserved_job_check.py` asks the jobs API which case it was.
+`nightly-intel.yml` uses it, and fails the run when no runner picked the job up.
 
 ### …but the same sweep DOES name the label, once a job is already stalled on it
 
@@ -4206,6 +4426,12 @@ auto-release deliberately does not hold. Read it as:
   runs no tests. A failure in `Build CLI targets (MSVC)` is a real MSVC error; a
   failure in an earlier step (bootstrap, toolchain) is runner trouble: the verdict
   job is skipped, so the pre-tag check ignores it too.
+- The MSVC build step invokes `bash tools/ci/governed-build.sh cmake --build
+  build-win-cli --target pulp-cli pulp-mcp -- -k 0`. Keep the wrapper even though
+  the hosted Windows runner is single-tenant: it supplies the same bounded
+  parallelism and build-directory lock contract as the other emitters, and the
+  wrapper's MSYS path handles the runner without attempting POSIX-only lock
+  probes.
 - **Promoting it to required** needs a `merge_group` trigger plus the ruleset
   entry. The scope job always reports and an irrelevant change skips the compile
   job (a skipped job satisfies a required check), so nothing else changes.
@@ -4216,6 +4442,29 @@ so the starvation mechanism is real — but it is ~0.6 min of Mac time per run, 
 the `linux`/`windows` alias jobs are `needs: build`, not pollers, so they never hold
 a slot for a build's duration. Relocating them pushes four more jobs into the
 contended hosted pool to reclaim half a minute.
+## A cache that never restores still costs the whole budget
+
+The repository's Actions cache has a 10 GB cap and evicts the least recently
+used entries. On 2026-10-13 it sat at 9.997 GB, and 6.5 GB of that was two
+entries that never restored:
+- android.yml's `android/app/.cxx`: 0 of 10 sampled jobs restored it. Its key
+  could not track the sources, so every main push saved another 3 GB.
+- cross-platform-check's `Linux-gradle` entry, which bundled `.cxx` into 3.5 GB.
+  It was evicted before every nightly run (0 of 7).
+
+They pushed out the Windows build ccache that PRs restore. So:
+- Cache downloads (Gradle caches, archives keyed on their pin, ccache), never
+  build trees.
+- Split `actions/cache/restore` and `actions/cache/save`, and save only on a
+  push to main. PR and merge-queue refs can read main's entries but nothing else
+  can read theirs.
+- Guard both on `runner.environment == 'github-hosted'`. Self-hosted runners
+  keep these paths on local disk.
+
+Check the budget with `gh api repos/Generous-Corp/pulp/actions/cache/usage` and
+`actions/caches?per_page=100`. An entry whose `ref` is a PR or
+`gh-readonly-queue` ref is quota nothing else can read.
+
 ## A cache that looks configured can be saving nothing
 
 `actions/cache` reports success whether or not the path it was handed contains
@@ -4806,6 +5055,27 @@ bisectable.
   build with `-DPULP_BUILD_EXAMPLES=OFF` (matching `build.yml`). If you add a
   new release/packaging workflow, configure with examples OFF (or a populated
   `SKIA_DIR`), or the design-tool Skia gate will block it.
+- **One packaging step, three callers.** `release-cli.yml` (Package CLI
+  (Unix)), `release-dry-run.yml` and `release-path-pr-gate.yml` all run
+  `tools/ci/release_package_cli.sh`, and all three isolate dependencies with
+  the same "Isolate the build from shared caches" body.
+  `tools/scripts/test_release_package_step.py` fails if any caller keeps a
+  private `package_cli.py` invocation or a drifted isolation body. Change how a
+  release packages in the script, never in one workflow. Before this, the PR
+  gate never packaged, so #10220's FetchContent move passed it and stalled
+  four releases, and the dry-run's copy drifted and went red unnoticed. The PR
+  gate also runs in `merge_group` when the batch touches its `paths:` list,
+  read by `tools/ci/release_path_changed.py` from the workflow itself.
+- **A release job's dependencies live in its isolated root, not the home
+  cache.** `release-cli.yml` sets `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` /
+  `PULP_FETCHCONTENT_BASE_DIR` to a fresh `$RUNNER_TEMP/pulp-isolated-*` root.
+  Any script that later goes looking for a fetched artifact must read those
+  variables. When they are set, it must also refuse to fall back to
+  `~/Library/Caches/Pulp` or `~/.cache/pulp`, which an earlier, possibly PR,
+  job wrote. `package_cli.py`'s wgpu lookup missed this. Linux failed to
+  package at all, because the runtime is not copied into the build dir there.
+  darwin-arm64 went green while bundling the shared-cache dylib. A green leg
+  is not proof that the isolated copy shipped: read the `bundled:` line.
 - **Release/SDK builds must pass `-DPULP_ENABLE_AUDIO_PROBES=OFF`.** The
   standalone audio probe is a dev/example inspection surface and defaults ON
   for local development, but shipped CLI, standalone, and SDK artifacts must
@@ -4881,12 +5151,28 @@ bisectable.
   needs a machine other than the builder; on the gate VMs it waited 16 / 29 min
   p50 (max 115) for 0.4-1.5 min of work. Do not index `smoke-cli`'s `runs-on`
   back into `map`.
-- **Release ccache is asserted, not assumed.** `build-cli` carries the gate's
-  `CCACHE_*` correctness env and an always-run `Ccache stats` step reading a
-  per-job `CCACHE_STATSLOG`. The darwin VMs share the host cache with the gate,
-  so `ccache --show-stats` there is the host's lifetime total and says nothing
-  about one release; read `--show-log-stats` instead. Never `ccache -z` on a
-  shared host cache: it resets the counters of every concurrent gate job.
+- **A signed or published build reads no shared cache.** The self-hosted VMs
+  mount the host ccache and configure-check cache writable (tartci
+  `runner.sh`, `ccache:` and `configure-checks:`), and PR gate VMs run PR code
+  with the same mounts. The FetchContent seed is mounted read-only, but host
+  jobs write it. A release that read any of these could link an object or
+  source a PR planted. The configure-check cache is the sharpest of them:
+  `PulpConfigureCheckCache.cmake` `include()`s its files (SDL3 always calls it
+  on Apple), so a planted file runs CMake inside the release configure. Every
+  job that signs, notarizes, attests or deploys and also compiles sets
+  job-level `CCACHE_DISABLE: "1"` and runs "Isolate the build from shared
+  caches" before its first build step. That step uses a fresh `RUNNER_TEMP`
+  root for `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` / `PULP_FETCHCONTENT_BASE_DIR`
+  / `PULP_CONFIGURE_CHECK_CACHE_DIR`, and no other step may re-point the last.
+  These jobs also restore no `actions/cache`, no Namespace cache action or
+  volume, and no setup-action cache (`with: cache:`, setup-emsdk
+  `actions-cache-folder`, setup-go without `cache: false`).
+  Do not "speed up" a release by re-adding ccache; the cold compile is the
+  accepted price. `test_release_cache_isolation.py` detects such jobs by their
+  signing/deploy capability, so a new release job is held to it too. Third-party
+  clones in these lanes name a commit or release tag, never a branch, and land
+  in `RUNNER_TEMP`, never `$HOME`. Never `ccache -z` on a shared host cache: it
+  resets the counters of every concurrent gate job.
 - **CHANGELOG.md rides the version-bump commit, one release behind.**
   `version_at_land.py` runs `shipyard changelog regenerate` as a derived
   regenerator, so there is no post-tag workflow. Do not run
@@ -5027,6 +5313,17 @@ bisectable.
   is not re-dispatched, because the frozen sources fail identically every time.
   Fix it on main and let the next tag publish; re-dispatching that tag by hand
   only burns another release matrix.
+- **Each incident entry carries a diagnosis: run, job › step, first error line,
+  cause class, fix, verify** (`tools/scripts/release_failure_diagnosis.py`). For
+  `ERROR: sha256 mismatch` it names the `tools/deps/manifest.json` line and both
+  digests; check the upstream asset's live `digest` and (Windows) its
+  `msvc-toolchain.json` before repinning. A mismatch the upstream asset confirms
+  opens the circuit at once. Re-dispatch release-cli with `--ref <tag>`, never
+  `--ref main`: the "Dispatch must run on the tag it publishes" step refuses a
+  non-tag commit, and that guard failure once masked a real digest mismatch as
+  the "failing leg" for five tags. Replay a past incident with
+  `release_reconcile.py --tag vX.Y.Z` (dry run; prints the body). A tag joining
+  the open incident posts a comment, since edits notify nobody.
 - **NEVER delete a GitHub release or draft — deletion of a once-published
   release permanently burns its tag name.** GitHub reserves an immutable
   release's `tag_name` forever; every later publish attempt 422s with
@@ -5053,6 +5350,16 @@ bisectable.
   exactly to the failing CTest cases and leave comments explaining the
   alternate coverage path; do not use sanitizer excludes to hide new targeted
   coverage tests.
+- **Gate-inventory checks never run in a sanitizer lane.** `script-test-inputs-drift`
+  and its siblings compare manifests generated from the gate configure against
+  the configured build's inventory. A sanitizer configure registers a different
+  set of tests (GPU off, other options), so there they report "stale entries"
+  that are not drift. Seen on 2026-10-14: the GPU-gated `pulp.vellum-closure-*`
+  tests read as stale under ASan and UBSan. They carry the `gate-inventory`
+  label, which every broad sanitizer ctest run excludes.
+  `sanitizer-gate-inventory-contract` fails if a new `--build-dir
+  ${CMAKE_BINARY_DIR} --check` test lacks the label, or if a sanitizer run
+  stops excluding it.
 - **ASan, TSan, and UBSan use `PULP_SANITIZER=<kind>`; ASan's
   example-bundle build does too.** Do not replace the named options with raw
   `CMAKE_*_FLAGS`: the option owns the compiler/linker flags and explicitly
@@ -5110,11 +5417,15 @@ touched nothing:
   its own PR, and update `determinism.web_toolchain` in `tools/deps/manifest.json`
   in the same change.
 - **The Skia wasm slice is fetched from `tools/deps/manifest.json`, not a
-  hardcoded URL.** The lane reads the URL + sha256 out of the manifest, verifies
-  the checksum, and keys the `actions/cache` entry on `hashFiles('tools/deps/manifest.json')`
-  — so the CI lane and the dependency audit can never disagree about which binary
-  is in use, and a pin bump self-invalidates the cache. Do not paste a release URL
-  into the workflow. The lane then runs `tools/scripts/verify_wasm_skia_slice.py`
+  hardcoded URL.** The lane reads the URL + sha256 out of the manifest, so the CI
+  lane and the dependency audit can never disagree about which binary is in use.
+  The cache holds the release archive, named and keyed by that sha256. It is
+  checked against the digest on every run, cache hit or not, and unpacks into
+  `$RUNNER_TEMP` (`SKIA_WASM_ROOT`). Caching the unpacked tree skipped the digest
+  check on every hit. A host that kept `$HOME` between jobs also reused an
+  `~/skia-wasm` from an older pin. Only `wclap-cloudflare.yml` saves, on a push
+  to main; `web-plugins.yml` restores. Do not paste a release URL into the
+  workflow. The lane then runs `tools/scripts/verify_wasm_skia_slice.py`
   to assert the slice really is Ganesh/WebGL2 (no Dawn, no Graphite) — the
   invariant `FindSkia.cmake`'s Emscripten arm is built on. See the
   `skia-gpu-build` skill.
@@ -6136,6 +6447,21 @@ local check matches (3 s, `PULP_QUEUE_REBASE_TIMEOUT`), fails silently without
 `refresh_push_check.py` so the two never both print. `PULP_ALLOW_QUEUE_REBASE=1`
 silences it. Tests: `prepush-queue-rebase-hint` ctest.
 
+**A PR that is IN the merge queue is refused, not hinted.** The same script's
+`--refuse-queued` mode runs first in `.githooks/pre-push`, before every gate and
+the diff-coverage build. When GraphQL shows `mergeQueueEntry` on the branch's
+open PR it exits 1 with "a queued PR does not need a rebase, the queue merges it
+on top of current main; to change it anyway, dequeue deliberately first",
+whatever the push contains. It exists because agents rebased queued PRs, the
+pre-push build ran for minutes while GitHub re-queued the new head, the push was
+rejected, and the agent dequeued to retry; one PR looped ten times.
+There is **no override**, and `PULP_SKIP_PREPUSH=1` does not bypass it, because
+an override recreates the dequeue loop. The only ways forward are a new PR, or a
+dequeue through the guarded path with a stated reason
+(`GHAPP_QUEUE_REMOVAL_REASON=defect-fix`) followed by the push.
+A lookup that cannot answer fails open with a one-line `queued-PR check skipped`
+notice. Armed but not yet queued stays advisory.
+
 ### The arm is not armed until you read it back — `update-branch` disarms it silently
 
 An armed auto-merge is a backstop only if it is still armed. Two silent failures
@@ -6377,6 +6703,10 @@ the failure surfaces on the first unrelated PR that tries to land on it (looks
 like the PR's fault; it is not). Fix by reconciling the gate config to the
 branch's real state **in the landing PR**: raise the hotspot ceiling to the file's
 current LOC, and add the missing codecov flag+component (`paths: core/<new>/**`).
+A new `core/<module>/` needs TWO entries even on a short-lived branch: the
+`codecov.yml` component, and the component's name in a producer's set in
+`ci/coverage-surfaces.yaml` (or an explicit `not_applicable` disposition) —
+`test_coverage_surface_contract.py` rejects a component no producer claims.
 Run `tools/scripts/gates.sh <integration-branch>` locally first — the fast gates
 are sub-second and catch all of this before a multi-minute ship cycle. Reconciling
 config you didn't author trips skill-sync/version-bump (config maps to the `ci`
@@ -6433,13 +6763,13 @@ The PR enters the queue once its required contexts are green. Note GitHub uses
 the **latest** run for a required context, so a newly-queued re-run makes an
 already-green context pending again and delays entry — that resolves itself.
 
-#### `shipyard update` is an updater, not a converger — it will not go backwards
+#### `shipyard update` tracks `latest` unless you pin it with `--to`
 
-`shipyard update --to vX.Y.Z` silently does **nothing** when `X.Y.Z` is older
-than the installed version: it reports `update_available: false` and exits 0.
-Verified against v0.70.0 — asked for `--to v0.60.0` with 0.70.0 installed it
-reports no update available, exactly as it does for an already-current
-machine. The two outcomes are indistinguishable from the exit code.
+Downgrade behaviour changed between releases. On v0.70.0, `shipyard update --to
+v0.60.0` silently did nothing (`update_available: false`, exit 0). On v0.307.0,
+`shipyard update --to v0.301.0` really did install v0.301.0; that downgrade was
+the stopgap that restored the fleet on 2026-10-12. Read `shipyard --version`
+after every `--to` rather than trusting the exit code.
 
 Two consequences:
 
@@ -6451,8 +6781,9 @@ Two consequences:
   `tools/install-shipyard.sh`. Always `--to` the pin.
 - **Coming back to the pin needs `tools/install-shipyard.sh`**, which installs
   the pinned version unconditionally (via the upstream, checksum-verifying
-  `install.sh`). Routing a downgrade through `shipyard update` is a silent
-  no-op, so an ahead-of-pin machine would never converge.
+  `install.sh`). Older Shipyard releases ignore a downgrade through
+  `shipyard update --to`, so on an unknown version use the installer rather
+  than relying on `update` to converge.
 
 Never trust either path's exit code alone — re-read `shipyard --version`.
 
@@ -6469,9 +6800,18 @@ and `tartci doctor fleet`. Per-host opt-out: `auto_apply = false` under
 pin converger existed and was removed: its pin lagged
 the fleet by ~78 releases, so installing it would have downgraded every host.
 
-Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
-Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
-signed/notarized `.dmg`, so the version and asset metadata must move together.
+Pin bumps go through `python3 tools/toolchain/deps.py update shipyard --to
+vX.Y.Z` (or `generate.py --shipyard vX.Y.Z`), not a hand edit and not
+`shipyard pin bump`. The authority is `[shipyard]` in
+`tools/toolchain/manifest.toml`: the tag, the repository and the sha256 of
+every release asset, taken from the release's `checksums.sha256`.
+`tools/shipyard.toml` and `tools/toolchain/shipyard.sha256` are generated from
+it, so `shipyard pin bump`, which edits `tools/shipyard.toml` alone, fails the
+`toolchain-test_generate-selftest` drift test until it calls the generator.
+The upstream installer verifies no digest; `install-shipyard.sh` refuses a
+downloaded asset whose sha256 differs from the pin, and an `install.sh` that
+differs from its pinned `installer_sha256`, before anything runs. If the
+installed binary still turns out different, it restores the previous one.
 
 - **Pinned at v0.68.0+: a killed `shipyard pr`/`ship` worker no longer wedges
   the PR.** Before v0.68.0, a worker that died (crash, `kill`, launching a
@@ -6915,8 +7255,8 @@ shipyard cleanup --ship-state --apply     # prune closed-PR + aged state
 shipyard run --targets windows --smoke    # fast Windows-only check
 shipyard run --resume-from test           # skip configure+build, run tests only
 shipyard cloud run build <branch>         # dispatch the GHA build workflow
-shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs
-shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs (not just cancelled), and — with --to omitted — RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This is the lever to recover a saturated/timed-out macOS leg (re-run it on a real local runner). Pass --to <provider> to force.
+shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs (a workflow_dispatch on the branch tip, not the merge ref)
+shipyard rescue <PR> --rerun-failed       # v0.67.0+: also re-dispatches FAILED/timed-out runs (not just cancelled) as branch-tip workflow_dispatch replacements, not reruns; for a required pull_request run prefer `ghapp run rerun <run> --failed`. With --to omitted it RE-RESOLVES the provider local-first (overflow-aware) instead of forcing github-hosted. This moves a saturated/timed-out macOS leg to a real local runner. Pass --to <provider> to force.
 shipyard rescue <PR> --rerun-failed --to local   # force a re-run onto the local runner
 shipyard ship --pr N --base main --adopt-head     # recover "ship state SHA drift" after a force-push (Shipyard #346): adopt the current branch head + re-validate, instead of re-shipping from scratch
 shipyard runner watch --kill-hung-workers # host-side prevention daemon for self-hosted runners
@@ -7126,22 +7466,28 @@ log is NOT in the GHA store (`run view --job <id> --log` returns 0 lines), so
 read a GitHub-hosted sanitizer leg's log instead — a recurring culprit is
 `extract_keyboard_shortcuts does not catastrophically backtrack on large
 embedded data` (a ReDoS-guard timing test that overruns under ASan / runner
-load). Recovery, once confirmed flaky — **reach for the one-liner first**: arm
-`ghapp pr merge <pr> --auto` (no strategy flag), then
-**`shipyard rescue <pr> --rerun-failed`**.
-`rescue` cancels stuck runs and, with `--rerun-failed`, re-dispatches completed
-failed/cancelled runs — "e.g. a flaky required leg" (its own help) — re-resolving
-the provider so the rerun lands local-first on the JIT pool; the armed
-auto-merge then fires when it goes green. Do NOT hand-crank the cancel+rerun
-unless `rescue` is unavailable. `shipyard ship` now also *detects* this exact
-wedge (validated green + a red required check that maps to a validated-green
-target) and prints the `shipyard rescue … --rerun-failed` line for you in its
-hand-back, so on a fresh block you usually just copy it. Manual fallback only if
-`rescue` is missing/older: `ghapp run cancel <run>` (advisory legs are
-expendable), wait ~20–60s for `status: completed`, then `ghapp run rerun <run>
---failed`; the per-run rerun lock is why the cancel must come first. (Or `ghapp
-workflow run build.yml --ref <branch>` for a fresh run whose newer `macos`
-context supersedes the stale failure — do one or the other, not both.)
+load). Recovery, once confirmed flaky, is to **re-run the `pull_request` run
+itself**: `ghapp run cancel <run>` while an advisory leg still holds it
+`in_progress` (advisory legs are expendable), wait ~20–60s for `status:
+completed`, then `ghapp run rerun <run> --failed`. The per-run rerun lock is why
+the cancel must come first. A re-run keeps the run's `pull_request` event and
+its `refs/pull/N/merge` checkout, so its `macos` is the proof strict protection
+asks for.
+
+Do not substitute a dispatch, by hand or through `rescue`.
+`ghapp workflow run build.yml --ref <branch>` starts a `workflow_dispatch` run,
+which checks out the branch tip rather than `refs/pull/N/merge`, so its `macos`
+is the wrong proof under strict protection. **`shipyard rescue <pr>
+--rerun-failed` does the same thing**: despite the name, it does not re-run the
+failed run. It dispatches a `workflow_dispatch` replacement of the workflow on
+the branch tip (`src/app/rescue_cmd.rs`, both for a terminal failed or cancelled
+run and for a queued-stuck one, which it then cancels). The `shipyard rescue …
+--rerun-failed` line `shipyard ship` prints in its hand-back has the same
+effect; use the cancel-then-rerun above instead until rescue re-runs
+`pull_request` runs. Over 2026-09-22..10-12, 26 dispatches on 13 pulp heads
+that already had a `pull_request` build went 0 green (13 failed, 13
+cancelled); the `pull_request` run before each had been cancelled (15), had
+failed (8) or had passed (3), so none was a missing trigger.
 
 **Prevention: retry transient flakes on the required leg.** `build.yml`'s
 non-Windows and Windows `ctest` steps run `--repeat until-pass:2` (mirroring
@@ -7511,9 +7857,9 @@ and the explicit `pr.workflow=github` bypass.
 After install, every Pulp checkout that has `~/.local/bin` on PATH gets
 the same pinned Shipyard version automatically. The pin lives in
 `tools/shipyard.toml` and is bumped via PR after each Shipyard release
-that passes Pulp's CI matrix. Use `shipyard pin bump --to vX.Y.Z`
-instead of hand-editing `tools/shipyard.toml`; the helper owns the pin
-edit and worktree-safety checks.
+that passes Pulp's CI matrix. Use `python3 tools/toolchain/deps.py update
+shipyard --to vX.Y.Z`: the version and every asset digest live in
+`tools/toolchain/manifest.toml`, and `tools/shipyard.toml` is generated.
 
 `shipyard pin bump` verifies by running the installer, which installs the
 new release into `~/.local/bin` on the host you run it on. Pass
@@ -7833,13 +8179,20 @@ Shipyard's own `skills/ci/SKILL.md`; the commands surface from
 
 ### Recover: `shipyard rescue <PR>`
 
+**What rescue starts is a `workflow_dispatch` on the branch tip**, for queued and
+(with `--rerun-failed`) completed runs alike; it re-runs nothing. That moves an
+advisory or stuck queued run, but a required `pull_request` check it replaces is
+then proved on the branch tip rather than `refs/pull/N/merge`. For a required
+check, re-run the `pull_request` run instead (`ghapp run cancel <run>` if it is
+still running, then `ghapp run rerun <run> --failed`).
+
 When a PR's matrix is stuck behind a queue jam on the self-hosted local
 runner (the typical 5+ hour backlog scenario), cancel that PR's queued
 runs and redispatch them to GitHub-hosted runners:
 
 ```bash
 shipyard rescue 1920                  # cancel + redispatch queued runs to github-hosted
-shipyard rescue 1920 --rerun-failed   # also re-arm completed/cancelled runs (watchdog-cancelled case)
+shipyard rescue 1920 --rerun-failed   # also dispatch branch-tip replacements of completed/cancelled runs
 shipyard rescue 1920 --dry-run        # preview without acting
 shipyard rescue --all-stuck           # repo-wide
 shipyard rescue 1920 --to <provider>  # default: github-hosted
@@ -8042,9 +8395,10 @@ form is only needed when a host has no Shipyard at all. Future
 upgrades on a host that already has Shipyard installed go through
 `shipyard update`.
 
-The repo-side pin lives in `tools/shipyard.toml`; bump it with
-`shipyard pin bump --to vX.Y.Z` (this triggers the ci skill-sync gate,
-which is why this section exists). The pin and a developer's local
+The repo-side pin lives in `[shipyard]` of `tools/toolchain/manifest.toml`
+(generated into `tools/shipyard.toml`); bump it with
+`python3 tools/toolchain/deps.py update shipyard --to vX.Y.Z` (this triggers
+the ci skill-sync gate, which is why this section exists). The pin and a developer's local
 install can drift — `pulp doctor` surfaces that, and `shipyard
 --version` is the local source of truth.
 
@@ -9649,7 +10003,7 @@ plus ccache and FetchContent paths. It runs only on Namespace /
 nscloud labels (`contains(matrix.runs_on_json, 'namespace') ||
 contains(matrix.runs_on_json, 'nscloud')`); self-hosted Macs keep
 their caches on local disk and github-hosted runners use
-`actions/cache@v4` via the existing `Restore ccache (GitHub-hosted)`
+`actions/cache@v6` via the existing `Restore ccache (GitHub-hosted)`
 step (#420). The brew cache only restores the bottle download cache —
 it does NOT restore the brew config that would tell the runner
 "updates are recent," so `brew update --quiet` is still required
@@ -9896,8 +10250,12 @@ PY
    ```bash
    shipyard ship-state list
    shipyard ship
-   shipyard rescue PR --rerun-failed
    ```
+
+   For a failed or cancelled required run, re-run the `pull_request` run
+   (`ghapp run cancel <run>` if it is still running, then `ghapp run rerun
+   <run> --failed`) rather than `shipyard rescue PR --rerun-failed`
+   (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 
    Plain `shipyard ship` automatically resumes its durable state. Use
    `--resume-from <stage>` only when intentionally selecting a known stage; the
@@ -9981,11 +10339,18 @@ Pulp-specific gotchas.
 
 ### Recover — `shipyard rescue <PR>` (v0.53.0+)
 
+**What rescue starts is a `workflow_dispatch` on the branch tip**, for queued and
+(with `--rerun-failed`) completed runs alike; it re-runs nothing. That moves an
+advisory or stuck queued run, but a required `pull_request` check it replaces is
+then proved on the branch tip rather than `refs/pull/N/merge`. For a required
+check, re-run the `pull_request` run instead (`ghapp run cancel <run>` if it is
+still running, then `ghapp run rerun <run> --failed`).
+
 ```bash
 shipyard rescue <PR>                # cancel queued runs + redispatch
                                     # to github-hosted (default)
-shipyard rescue <PR> --rerun-failed # also re-arm completed/cancelled
-                                    # runs (watchdog-cancellation case)
+shipyard rescue <PR> --rerun-failed # also dispatch branch-tip replacements
+                                    # of completed/cancelled runs
 shipyard rescue <PR> --dry-run      # preview without acting
 shipyard rescue --all-stuck         # repo-wide sweep
 shipyard rescue <PR> --to github-hosted   # explicit provider
@@ -10057,7 +10422,8 @@ drift; humans run `shipyard update` to apply.
 - **PRs that touch CI/runner workflows need a manual handoff.** If the
   PR's macOS lane was cancelled by the wedge, even after `rescue` the
   PR may need a fresh push to retrigger the version-skill-sync check
-  too.
+  too. For the required `macos` run itself, re-run it rather than
+  rescue it (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 - **launchd agent exit 75 + "lease denied … rc=2" → check the plist PATH
   for `/usr/sbin` FIRST.** Before suspecting tart, network, or auth. A
   runner agent crash-looping under `KeepAlive` with last-exit **75**
@@ -10138,8 +10504,9 @@ unresponsive, not just the Worker), the machine-side recovery is:
    permanent daemon.
 
 Agents should NOT do step 1–4 themselves; ask the human via
-`PushNotification`. Agents CAN and SHOULD run `shipyard rescue` for
-the PR-side recovery without waiting.
+`PushNotification`. Agents CAN and SHOULD run the PR-side recovery
+without waiting: `shipyard rescue` for queued runs, and for a required
+`pull_request` run that failed or was cancelled, a re-run (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 
 ## Cobertura artifact verification (A2 first cut, 2026-05)
 
@@ -11616,9 +11983,23 @@ including blocks the branch never touched.
 
 The cost is the opposite of a false failure: the gate is advisory and not a
 required check, so nothing blocks — but an author who does the obvious thing
-commits output the formatter would not reproduce. **Diff a class body before
-committing the fixer's result**; if it de-indents, do not commit it. Tracked as
-issue #8753, which carries the full reproduction.
+commits output the formatter would not reproduce. Tracked as issue #8753, which
+carries the full reproduction.
+
+The mechanism: clang-format indents the first declaration under an access
+specifier relative to where the specifier actually sits. When a range starts
+just below a column-0 `private:` that is outside `--lines`, that declaration and
+every member after it in the block (out-of-range lines included) land at
+0 + 2. `hunk_ranges` therefore walks up from each hunk over blank and comment
+lines and, on reaching a `public:`/`protected:`/`private:`, starts the range at
+the specifier, so the block comes out as the whole-file run leaves it. The cost
+is that the specifier line is judged too: changing the first member under a
+column-0 specifier also asks to move that specifier to 2 spaces, which is the
+whole-file answer. Restoring its original indent was rejected: it needs
+clang-format's replacement offsets, or a marker comment that perturbs
+trailing-comment alignment. **Still diff a class body before committing the
+fixer's result**; the specifier rule covers the known trigger, not every way a
+partial range can disagree with a whole-file run.
 
 ## A workflow that matches a bypass trailer with its own grep will honour a quoted one
 
@@ -11887,3 +12268,39 @@ that prints non-ASCII marks, reconfigure its own stdout at its entry point
 (`sys.stdout.reconfigure(encoding="utf-8", errors="replace")`); a Windows pipe
 defaults to the ANSI code page. `PYTHONIOENCODING=cp1252` reproduces that pipe
 on macOS.
+
+## Tracked Python parses on 3.11: the floor-syntax check
+
+The gate tooling needs Python 3.11 (`tomllib`, `enterContext`), and 3.11 is
+what CMake finds on a stock Homebrew Mac, so ctest's Python suites often run
+under it locally while CI runs 3.12. PEP 701 (3.12) lets an f-string field reuse
+the enclosing quote (`f"{row["a"]}"`) or hold a backslash, comment or line
+break. On 3.11 one such file makes `gate-python-imports` and
+`script-test-inputs-drift` fail for everyone ("f-string: unmatched '['"),
+while CI stays green. `tools/scripts/python_floor_syntax_check.py` (in
+`gates.sh` and `version-skill-check.yml`) scans every tracked `*.py`, not
+only `tools/`, because `test/` runs under the same floor.
+`ast.parse(feature_version=(3, 11))` does not catch these on 3.12, so on 3.12+
+the check walks the f-string tokens; on an older Python it compiles the file.
+Two cases leave no token of their own:
+- a backslash line continuation inside a field. The check reads the source
+  line the previous field token ends on;
+- the literal text of an f-string nested in another's field. That text is part
+  of the outer field, so a backslash in it is rejected.
+
+Fix a hit with the other quote character, or bind the expression to a local
+first.
+
+## Hosted macOS advisory cadence
+
+Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
+native matrix are scheduled nightly and dispatched on an approved PR head. The
+`pulp pr` wrapper invokes `tools/scripts/dispatch_advisory_lanes.sh` after its
+delegated Shipyard arm/ship path succeeds. Direct `shipyard pr` does not yet
+invoke that Pulp hook; until the Shipyard arm hook lands, nightly main runs are
+the interim signal. These workflows intentionally have no `pull_request`
+trigger, so a PR push does not consume hosted macOS capacity for advisory work.
+ASan and UBSan remain on non-draft `core/**` pull requests (opened, synchronize,
+and ready-for-review events); TSan runs nightly or by dispatch. Coverage alone
+has a `max-parallel: 2` matrix cap; sanitizer jobs are independent named legs.
+These changes preserve the required Vellum lanes on their existing runners.

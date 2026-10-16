@@ -135,7 +135,12 @@ retain those fields in the PR/landing evidence.
    and simulator slices, WASM, or XCFramework coverage.
 3. Inspect one native archive and `external/skia-build/VERSION.md`. Confirm the exact
    Skia and built-Dawn SHAs, deployment floors, and optional archives such as Skottie,
-   `jsonreader`, and `skresources`.
+   `jsonreader`, and `skresources`. For Windows ARM64EC and ARM64X consumers, also
+   verify that the producer archive contains the matching
+   `build/win-gpu/lib/Release/arm64ec/` or `arm64x/` slice; pure `arm64/` and flat
+   x64 libraries are not compatible substitutes. Record the exact producer run and
+   archive digest, and keep the consumer provider decision fail-closed when the
+   requested slice is missing.
 4. Inspect the matched v8-builder release manifests. All assets must agree on
    `pair.pair_kind=chromium-milestone`, `pair.milestone`, `pair.skia`, `pair.v8`,
    `pair.built_dawn`, and `pair.validated_skia_release`.
@@ -217,6 +222,12 @@ retain those fields in the PR/landing evidence.
 
 ## Common traps
 
+- The Vellum closure gate identifies Skia inputs by `determinism.skia_commit` and
+  by the asset digest sealed in the cache generation's
+  `.skia-generation-manifest.json`, which must be one of
+  `determinism.release_assets[*].sha256`. Each closure file must match its digest
+  in that receipt. Bump `skia_commit` and the asset digests together, or every
+  Skia row in the closure goes unresolved.
 - `release-path-pr-gate.yml`'s darwin runner resolver runs
   `resolve_release_runners.py --apply-class-label pulp-release-pr-gate` after a
   sparse checkout. With `PULP_RELEASE_CLASS_TOKENS` unset the selector is
@@ -235,8 +246,15 @@ retain those fields in the PR/landing evidence.
   VERSION.md lines turns the pins into `null`; the
   `cmake-bundle-build-info-contract` ctest compares them with the manifest's
   Skia version and Dawn notes (`DEPS file at <sha>`, `Dawn SHA1 <sha>`), so keep
-  those phrasings too. A wgpu-native bump now edits that one variable plus
-  `PulpWgpuUniversal.cmake`'s slice digests and `shared-source-contract.txt`.
+  those phrasings too. A wgpu-native bump edits that one variable,
+  `WGPU_NATIVE_VERSION` in `setup.sh`, `shared-source-contract.txt`, and the
+  `wgpu-native` row of `tools/deps/manifest.json`: its version and every
+  `artifacts` entry's `sha256` (the zip) and `tree_sha256` (the extracted tree).
+  Download each asset into a new empty directory and run
+  `python3 -I tools/deps/wgpu_native_digests.py <dir>/*.zip`. Configure and
+  `setup.sh` refuse any archive whose digest differs, and configure re-checks
+  the shared cache against `tree_sha256`, so a missed digest fails loudly
+  rather than fetching unpinned bytes.
 - `PulpDependencies.cmake` sets `CMAKE_DISABLE_PRECOMPILE_HEADERS ON` around
   SDL3's `FetchContent_MakeAvailable` only. SDL3 precompiles `src/SDL_internal.h`
   into every object, and ccache refuses to cache a TU compiled against a PCH
@@ -354,3 +372,16 @@ release assets in the manifest. Select the slice from the CMake target
 architecture (`CMAKE_GENERATOR_PLATFORM` when cross-compiling) and mirror each
 release digest in `external/skia-build/VERSION.md` before running the fetcher and
 host validation gates.
+
+Even a published fork release can be clobbered. A Windows backfill lane
+re-uploads its slice with `gh release upload --clobber` under the existing
+`chrome/mNNN` tag, so the pinned digest stops matching and the release CLI
+fails at `fetch_skia_for_release.py <platform>` with `sha256 mismatch`. Because
+the release job needs the whole build matrix, every platform's release stops
+publishing. Do not bump the digest blindly. Recover the superseded bytes from
+the fork's Actions artifact for the run that produced the old pin, unzip both,
+and compare the libraries member by member, ignoring COFF `TimeDateStamp`. A
+rebuild of the same source that differs only in timestamps can be repinned as
+is, and its provenance belongs in `VERSION.md`. Any other content difference is
+a toolchain change and needs a full Windows build and smoke before the pin
+moves.

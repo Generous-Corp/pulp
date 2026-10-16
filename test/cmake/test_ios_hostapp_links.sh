@@ -7,7 +7,7 @@
 #
 #   - core/view/CMakeLists.txt did not PUBLIC-link pulp::audio despite
 #     visualizers.cpp transitively including <pulp/audio/waveform_overview.hpp>
-#   - core/view/include/pulp/view/widgets/graph_editor_view.hpp included
+#   - core/view/audio/include/pulp/view/widgets/graph_editor_view.hpp included
 #     <pulp/host/signal_graph.hpp> unconditionally even though pulp::host
 #     is intentionally not added on iOS (#2994 long-double-to-chars libc++
 #     availability error).

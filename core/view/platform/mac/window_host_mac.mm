@@ -1900,7 +1900,7 @@ public:
         if (!display_link_.is_open()) start_display_link();
         // Make the Metal view the first responder so the window receives key
         // events on its FIRST show. Only run_event_loop() (the PRIMARY window)
-        // did this; a SECONDARY window (e.g. the MusicalTypingKeyboard popout)
+        // did this; a SECONDARY keyboard window opened through WindowHost
         // showed via show() and never became first responder, so typed keys were
         // dropped until some later interaction (a click/toggle) focused it — the
         // "first ⌘K open doesn't register QWERTY until a piano/typing toggle" bug.

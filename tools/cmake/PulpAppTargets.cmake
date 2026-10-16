@@ -64,7 +64,7 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             set(_control_runtime_eval_factory_source
                 "${CMAKE_CURRENT_BINARY_DIR}/${target}_standalone_runtime_eval_factory.cpp")
             file(GENERATE OUTPUT "${_control_runtime_eval_factory_source}" CONTENT
-                "#include <pulp/format/processor.hpp>\n#include <pulp/format/view_bridge.hpp>\n#include <pulp/inspect/control_standalone_host.hpp>\n#include <pulp/inspect/runtime_eval_component.hpp>\n#include <memory>\nnamespace { std::shared_ptr<pulp::inspect::RuntimeEvaluator> pulp_make_control_runtime_evaluator(pulp::format::Processor&, pulp::format::ViewBridge& bridge) { return std::shared_ptr<pulp::inspect::RuntimeEvaluator>(pulp::inspect::make_script_runtime_evaluator([&bridge](const auto& visitor) { bridge.visit_scripted_ui(visitor); })); } [[maybe_unused]] const bool pulp_control_runtime_eval_factory_installed = pulp::inspect::detail::install_standalone_runtime_evaluator_factory(&pulp_make_control_runtime_evaluator); }\n")
+                "#include <pulp/format/processor.hpp>\n#include <pulp/format/view_bridge.hpp>\n#include <pulp/inspect/control_standalone_host.hpp>\n#include <pulp/inspect/runtime_eval_component.hpp>\n#include <pulp/view/script_inspector_bridge.hpp>\n#include <memory>\nnamespace { std::shared_ptr<pulp::inspect::RuntimeEvaluator> pulp_make_control_runtime_evaluator(pulp::format::Processor&, pulp::format::ViewBridge& bridge) { return std::shared_ptr<pulp::inspect::RuntimeEvaluator>(pulp::inspect::make_script_runtime_evaluator([&bridge](const auto& visitor) { bridge.visit_scripted_ui(visitor); })); } [[maybe_unused]] const bool pulp_control_runtime_eval_factory_installed = (pulp::view::install_script_inspector_bridge(), pulp::inspect::detail::install_standalone_runtime_evaluator_factory(&pulp_make_control_runtime_evaluator)); }\n")
             target_sources(${target}_Standalone PRIVATE
                 "${_control_runtime_eval_factory_source}")
             target_link_libraries(${target}_Standalone PRIVATE
@@ -218,6 +218,7 @@ endfunction()
 #       VERSION "1.0.0"
 #   )
 function(pulp_add_app target)
+    _pulp_resolve_consumer_targets()
     cmake_parse_arguments(APP
         ""
         "APP_NAME;BUNDLE_ID;VERSION"

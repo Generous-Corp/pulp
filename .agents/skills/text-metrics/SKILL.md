@@ -124,6 +124,39 @@ Two consequences when touching this code:
 A fixture with zero padding cannot see any of this. Give the label real padding
 and assert the draw origin on both branches of the cache predicate.
 
+## A retyped single captured line keeps its box; only its width is re-measured
+
+`cached_line_layout_usable()` honors a captured browser line box while the
+label's transformed text equals the string it was captured for. When the copy
+changes (`Label::set_text` sets `cached_line_basis_retired_`), what happens
+next depends on what the change could have done to the LINE COUNT:
+
+- **One captured line, no wrap, no newline, no attributed runs** -- the box is
+  still where Chromium put that text, so `layout_from_cached_lines()` keeps the
+  box's `top`/`height` (the captured vertical placement) and re-measures the
+  live text with the shaper for its width. The left edge is the captured one
+  moved by the width change under the label's alignment (`x_offset = left +
+  (box.width - new_width) * {0, .5, 1}`), so a centred caption stays centred.
+- **Anything else** (several boxes, a soft wrap, a `\n`, attributed text)
+  reflows natively, because the captured boxes no longer describe the lines.
+
+The earlier rule -- refuse a retired basis for good and paint natively --
+re-centred the caption from native face metrics, which sit visibly higher
+than Chromium's line box, so a modulated readout ("32 BANDS" playing "64
+BANDS") jumped up the moment the LFO started and dropped back when it stopped.
+The native path and the captured path place a single line differently
+(`(content_h - text_h)/2 + half_leading + ascent` vs `box.top + half_leading +
+ascent`); keeping the box is what keeps the caption still.
+
+The boxes are deliberately never cleared on a text change: the responsive
+reflow still reads their line count and wrap intent, and the
+`line_break_path_counts().reflowed` accounting that
+`test_design_import_codegen_layout_text.cpp` pins must keep reporting a reflow
+for the multi-line case. `set_cached_line_boxes()` clears the retired flag
+when a fresh capture arrives. Regressions: `Label keeps a retyped single
+captured line where Chromium put it` and `Label re-centres a retyped captured
+line on the captured box` in `test/test_widgets_label.cpp`.
+
 ## Gotchas
 
 - **`white-space` is inherited, and wrapping is `soft_wraps()`, not

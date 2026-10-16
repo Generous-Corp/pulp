@@ -23,6 +23,12 @@ identity runs first and leaves its per-binary hashes in
 `<work-dir>/our-identity.json` so neither receipts nor the reuse record hash
 the test binaries twice.
 
+Each instrument's wall seconds are printed, flushed, the moment it finishes
+(`merge-group shadows: <label> took <s>s`), and again together on a
+`merge-group shadows timing:` line after the summary. The step is on the
+required job's critical path, so the split is what tells a report-only
+instrument worth moving off it from one that is cheap.
+
     merge_group_shadows.py run --build-dir B --source-root S --repository O/R \\
         --merge-sha SHA --token T --junit J --selected-json I \\
         --ctest-outcome success|failure|skipped [--hours 24] [--work-dir W] [--run-id N]
@@ -34,6 +40,7 @@ import importlib
 import os
 import subprocess
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -118,12 +125,18 @@ def main(argv: list[str]) -> int:
     r.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
     a = ap.parse_args(argv[1:])
     results = []
+    timings = []
     for label, module_name, args in plan(a):
         if args is None:
             results.append(f"{label}=skipped")
             continue
+        started = time.monotonic()
         results.append(f"{label}={run_one(label, module_name, args)}")
+        seconds = time.monotonic() - started
+        timings.append(f"{label}={seconds:.1f}s")
+        print(f"merge-group shadows: {label} took {seconds:.1f}s", flush=True)
     print("merge-group shadows: " + " ".join(results))
+    print("merge-group shadows timing: " + (" ".join(timings) or "none ran"), flush=True)
     return 0
 
 

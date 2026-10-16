@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.generouscorp.pulp.evidence-archive</string>
+  <key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>/ABSOLUTE/PATH/TO/pulp/tools/ci/evidence_archive.py</string><string>--root</string><string>/Volumes/Atelier/pulp-replay-evidence</string><string>--repo</string><string>Generous-Corp/pulp</string><string>--host-root</string><string>/var/log/shipyard</string><string>--sessions-root</string><string>/Users/danielraffel/.codex/sessions</string></array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>15</integer></dict>
+  <key>StandardOutPath</key><string>/Volumes/Atelier/pulp-replay-evidence/collector.stdout.log</string><key>StandardErrorPath</key><string>/Volumes/Atelier/pulp-replay-evidence/collector.stderr.log</string>
+</dict></plist>

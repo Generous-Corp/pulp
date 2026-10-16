@@ -21,6 +21,12 @@ on:
     paths:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
+      - 'tools/scripts/test_release_cache_isolation.py'
+      - 'tools/scripts/test_release_package_step.py'
+      - 'tools/ci/release_package_cli.sh'
+      - 'tools/ci/release_path_changed.py'
+      - 'tools/scripts/action_pin_lint.py'
+      - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
       - 'tools/scripts/schedule_backstop_check.py'
       - 'tools/scripts/test_schedule_backstop_check.py'
@@ -44,8 +50,13 @@ on:
       - 'tools/scripts/test_windows_cli_compile_workflow.py'
       - 'tools/scripts/release_reconcile.py'
       - 'tools/scripts/test_release_reconcile.py'
+      - 'tools/scripts/release_failure_diagnosis.py'
+      - 'tools/scripts/test_release_failure_diagnosis.py'
+      - 'tools/scripts/fixtures/release_failure/**'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
+      - 'tools/scripts/package_cli.py'
+      - 'tools/scripts/test_package_cli.py'
       - 'tools/scripts/release_build_matrix.py'
       - 'tools/scripts/test_release_build_matrix.py'
       - 'tools/scripts/release_platform_subset_check.py'
@@ -61,6 +72,9 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/queue_age_watchdog.py'
       - 'tools/scripts/test_queue_age_watchdog.py'
+      - 'tools/scripts/unserved_job_check.py'
+      - 'tools/scripts/test_unserved_job_check.py'
+      - 'tools/scripts/fixtures/nightly_intel_unserved_jobs.json'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
       - 'tools/scripts/stale_run_reaper.py'
@@ -100,6 +114,8 @@ on:
       - 'tools/deps/test_validate_hosts.py'
       - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/dispatch_advisory_lanes.sh'
+      - 'tools/scripts/test_dispatch_advisory_lanes.py'
       - 'tools/scripts/test_fork_pr_runner_routing.py'
       - 'tools/scripts/ctest_scheduling_policy.py'
       - 'tools/scripts/test_ctest_scheduling_contract.py'
@@ -138,6 +154,12 @@ on:
     paths:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
+      - 'tools/scripts/test_release_cache_isolation.py'
+      - 'tools/scripts/test_release_package_step.py'
+      - 'tools/ci/release_package_cli.sh'
+      - 'tools/ci/release_path_changed.py'
+      - 'tools/scripts/action_pin_lint.py'
+      - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
       - 'tools/scripts/schedule_backstop_check.py'
       - 'tools/scripts/test_schedule_backstop_check.py'
@@ -161,8 +183,13 @@ on:
       - 'tools/scripts/test_windows_cli_compile_workflow.py'
       - 'tools/scripts/release_reconcile.py'
       - 'tools/scripts/test_release_reconcile.py'
+      - 'tools/scripts/release_failure_diagnosis.py'
+      - 'tools/scripts/test_release_failure_diagnosis.py'
+      - 'tools/scripts/fixtures/release_failure/**'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
+      - 'tools/scripts/package_cli.py'
+      - 'tools/scripts/test_package_cli.py'
       - 'tools/scripts/release_build_matrix.py'
       - 'tools/scripts/test_release_build_matrix.py'
       - 'tools/scripts/release_platform_subset_check.py'
@@ -178,6 +205,9 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/queue_age_watchdog.py'
       - 'tools/scripts/test_queue_age_watchdog.py'
+      - 'tools/scripts/unserved_job_check.py'
+      - 'tools/scripts/test_unserved_job_check.py'
+      - 'tools/scripts/fixtures/nightly_intel_unserved_jobs.json'
       - 'tools/scripts/merge_stall_watchdog.py'
       - 'tools/scripts/test_merge_stall_watchdog.py'
       - 'tools/scripts/stale_run_reaper.py'
@@ -217,6 +247,8 @@ on:
       - 'tools/deps/test_validate_hosts.py'
       - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/dispatch_advisory_lanes.sh'
+      - 'tools/scripts/test_dispatch_advisory_lanes.py'
       - 'tools/scripts/test_fork_pr_runner_routing.py'
       - 'tools/scripts/ctest_scheduling_policy.py'
       - 'tools/scripts/test_ctest_scheduling_contract.py'
@@ -260,14 +292,15 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: yamllint + actionlint + structural parse
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -342,6 +375,7 @@ jobs:
           python3 tools/ci/test_install_linux_build_deps.py
           python3 tools/scripts/test_example_validation_paths.py
           python3 tools/scripts/test_ci_throughput_workflows.py
+          python3 tools/scripts/test_dispatch_advisory_lanes.py
           python3 tools/scripts/test_verify_control_shipping_native_evidence.py
           python3 tools/scripts/test_control_shipping_native_workflow.py
           python3 tools/scripts/test_codecov_upload_contract.py
@@ -363,11 +397,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_workflow_lint.py
+          python3 tools/scripts/test_action_pin_lint.py
+          python3 tools/scripts/action_pin_lint.py
           python3 tools/scripts/test_shell_portability_check.py
           python3 tools/scripts/shell_portability_check.py tools/ci scripts tools/scripts
           python3 tools/scripts/test_ios_gate_skip_contract.py
           python3 tools/scripts/test_api_contracts_workflow.py
           python3 tools/scripts/test_queue_age_watchdog.py
+          python3 tools/scripts/test_unserved_job_check.py
           python3 tools/scripts/test_merge_stall_watchdog.py
           python3 tools/scripts/test_stale_run_reaper.py
           python3 tools/scripts/test_gpu_provenance_ci_wiring.py
@@ -398,6 +435,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_release_workflow_test_step.py
+          # release-cli, the dry-run and the release-path PR gate package
+          # through one script and isolate with one step body.
+          python3 tools/scripts/test_release_package_step.py
+          # Signing/publishing jobs compile with ccache disabled and re-fetch
+          # every dependency into a fresh job root, never a shared host cache.
+          python3 tools/scripts/test_release_cache_isolation.py
           # MSVC CLI compile lane: its change scope, the pre-tag check that
           # reads it, and its configure parity with release-cli.yml's
           # Windows legs. The reconciler's circuit/drought rules ride along.
@@ -405,12 +448,18 @@ jobs:
           python3 tools/scripts/test_windows_cli_release_precheck.py
           python3 tools/scripts/test_windows_cli_compile_workflow.py
           python3 tools/scripts/test_release_reconcile.py
+          # The incident's root-cause diagnosis, replayed over the recorded
+          # v0.955.1 pinned-asset digest-mismatch outage (v0.951.0 negative).
+          python3 tools/scripts/test_release_failure_diagnosis.py
           # auto-release.yml's bypass-trailer guard, run as the step body
           # extracted from the workflow: a quoted trailer must not
           # withhold a release tag, a declared one must.
           python3 tools/scripts/test_release_trailer_guard.py
           python3 tools/scripts/test_release_checksum_manifest.py
           python3 tools/scripts/test_release_artifact_contents.py
+          # The release packager, including where it looks for the wgpu-native
+          # runtime when the job's dependencies live in an isolated root.
+          python3 tools/scripts/test_package_cli.py
           # The active_platforms shipping knob: matrix-leg derivation and the
           # subset-staleness allowance that keeps a platform pause temporary.
           python3 tools/scripts/test_release_build_matrix.py
@@ -496,7 +545,7 @@ jobs:
         # `uses:` refs, missing required keys, and deprecated action
         # versions — which are the failure modes Layer 1 exists to catch.
         # Re-enable shellcheck after those existing findings are retired.
-        uses: raven-actions/actionlint@v2
+        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
         with:
           matcher: true
           shellcheck: false

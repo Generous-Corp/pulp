@@ -22,6 +22,7 @@ export function buildMaterializedRuntimeEntry({
   textBindings,
   layoutBindings,
   paintBindings,
+  pseudoBindings = [],
   runtimeDocumentAsset,
   sidecar,
   productPrelude,
@@ -36,6 +37,7 @@ export function buildMaterializedRuntimeEntry({
   visualWidth,
   visualHeight,
   canvasBindings,
+  canvasAuthority,
   behaviorCanvasAnchors,
   capturedPaintAuthorityAnchors,
 }) {
@@ -68,6 +70,11 @@ g.__pulpNativeBridgeFunctions__ = Object.freeze({
 });
 g.React = React;
 const behaviorRootId = '__pulp_materialized_behavior__';
+// Pseudo planes are a separate visual layer. The behavior root is intentionally
+// transparent in reference-authority imports so the captured DesignIR remains
+// visible; placing pseudo planes below that root would inherit opacity=0 and
+// silently drop authored ::before/::after paint.
+const pseudoRootId = '__pulp_materialized_pseudo_root__';
 const surfaceRootId = '__pulp_materialized_surface__';
 const stateAtlasRootId = '__pulp_materialized_state_atlas__';
 class NativeRoot {
@@ -180,10 +187,12 @@ function materializedDomRegistryValues() {
 const capturedTextBindings = ${JSON.stringify(textBindings)};
 const capturedLayoutBindings = ${JSON.stringify(layoutBindings)};
 const capturedPaintBindings = ${JSON.stringify(paintBindings)};
+const capturedPseudoBindings = ${JSON.stringify(pseudoBindings ?? [])};
 const capturedHomeMetadata = {
   layout_bindings: capturedLayoutBindings,
   text_bindings: capturedTextBindings,
   paint_bindings: capturedPaintBindings,
+  pseudo_bindings: capturedPseudoBindings,
 };
 let activeCapturedState = '';
 // React may commit a conditionally-mounted state over more than one pass.
@@ -327,7 +336,72 @@ g.__pulpReconcileMaterializedPaint__ = function (id, changes) {
 // that is not the per-commit hook -- bootstrap, and a captured-state change --
 // deliberately passes nothing: a state flip replaces the whole binding table,
 // so nothing about the previous commit's dirty set describes it.
+const materializedPseudoPlanes = new Map();
+let materializedPseudoRootReady = false;
+function ensureMaterializedPseudoRoot() {
+  if (materializedPseudoRootReady) return;
+  createCol(pseudoRootId, '');
+  setPosition(pseudoRootId, 'absolute');
+  setLeft(pseudoRootId, ${JSON.stringify(authoredLeft)});
+  setTop(pseudoRootId, ${JSON.stringify(authoredTop)});
+  setFlex(pseudoRootId, 'width', ${JSON.stringify(authoredWidth)});
+  setFlex(pseudoRootId, 'height', ${JSON.stringify(authoredHeight)});
+  ${authoredTransform ? `
+  setTransformOrigin(pseudoRootId, 0, 0);
+  setTransform(pseudoRootId,
+    ${JSON.stringify(authoredTransform.a)}, ${JSON.stringify(authoredTransform.b)},
+    ${JSON.stringify(authoredTransform.c)}, ${JSON.stringify(authoredTransform.d)},
+    ${JSON.stringify(authoredTransform.e)}, ${JSON.stringify(authoredTransform.f)});` : ''}
+  setVisible(pseudoRootId, true);
+  setOpacity(pseudoRootId, 1);
+  setPointerEvents(pseudoRootId, 'box-none');
+  setZIndex(pseudoRootId, ${MATERIALIZED_BEHAVIOR_Z - 1000});
+  materializedPseudoRootReady = true;
+}
+function applyMaterializedPseudoBindings(metadata) {
+  const bindings = Array.isArray(metadata && metadata.pseudo_bindings)
+    ? metadata.pseudo_bindings : [];
+  if (bindings.length > 0) ensureMaterializedPseudoRoot();
+  const live = new Set();
+  for (const binding of bindings) {
+    const id = "__pulp_materialized_pseudo_" + binding.index;
+    live.add(id);
+    if (!materializedPseudoPlanes.has(id)) {
+      createCol(id, pseudoRootId);
+      materializedPseudoPlanes.set(id, { gradient: false });
+    }
+    setPosition(id, 'absolute');
+    setLeft(id, Number(binding.box.left) - Number(${JSON.stringify(authoredLeft)}));
+    setTop(id, Number(binding.box.top) - Number(${JSON.stringify(authoredTop)}));
+    setFlex(id, 'width', binding.box.width);
+    setFlex(id, 'height', binding.box.height);
+    // CSS background layers paint from color into image; clear stale layers
+    // before applying the current state so state switches are deterministic.
+    setBackground(id, binding.background_color || '');
+    const plane = materializedPseudoPlanes.get(id);
+    if (typeof setBackgroundGradient === 'function') {
+      if (binding.background_gradient)
+        setBackgroundGradient(id, binding.background_gradient);
+      else if (plane && plane.gradient)
+        setBackgroundGradient(id, '');
+    }
+    if (plane) plane.gradient = Boolean(binding.background_gradient);
+    setOpacity(id, binding.opacity);
+    setPointerEvents(id, 'none');
+    setZIndex(id, ${MATERIALIZED_BEHAVIOR_Z - 1000} +
+      Math.max(-999, Math.min(999, binding.z_index)));
+    setVisible(id, true);
+  }
+  for (const id of materializedPseudoPlanes.keys()) {
+    if (live.has(id)) continue;
+    setVisible(id, false);
+    setBackground(id, '');
+    if (typeof setBackgroundGradient === 'function') setBackgroundGradient(id, '');
+  }
+}
+
 function applyMaterializedImportMetadata(metadata, scopeIds) {
+  applyMaterializedPseudoBindings(metadata);
   const scopeSet = materializedScopeSet(scopeIds);
   const values = materializedDomRegistryValues();
   const pathIndex = materializedPathIndex(values);
@@ -1101,6 +1175,7 @@ setOpacity(behaviorRootId, ${visualAuthority === 'native' ? '1' : '0'});
 // in native mode those children also paint the complete UI.
 setPointerEvents(behaviorRootId, 'box-none');
 setZIndex(behaviorRootId, ${MATERIALIZED_BEHAVIOR_Z});
+applyMaterializedPseudoBindings(capturedHomeMetadata);
 // Commit exactly the element supplied by the captured document's own
 // ReactDOM.createRoot(...).render(...) call. A declaration-only export may
 // omit that call, so retain one bounded compatibility fallback to App, but
@@ -1115,6 +1190,7 @@ activeNativeRoot = new NativeRoot();
 activeNativeRoot.render(capturedRootElement);
 if (typeof g.__pulpRuntimeSettle__ === 'function') g.__pulpRuntimeSettle__(8);
 const capturedStates = ${JSON.stringify(stateAtlas)};
+const canvasAuthorityEnabled = ${JSON.stringify(Boolean(canvasAuthority))};
 for (const state of capturedStates) {
   if (state.match) {
     recordMaterializedSelectorAttributes(state.match.selector);
@@ -1183,11 +1259,26 @@ function driveRequestedCapturedState() {
 }
 if (requestedCapturedState) requestAnimationFrame(driveRequestedCapturedState);
 function resolveCapturedStateFromAtlas() {
-  // Every state's lookup in one registry pass; the answer is the last state
-  // in atlas order whose selector matches, as before.
-  const matches = g.__pulpFindMaterializedElements__(capturedStates.map(
-    state => state.match ? { selector: state.match.selector,
-      ancestor: state.match.ancestor } : null));
+  const usesCanvasAuthority = canvasAuthorityEnabled && capturedStates.some(
+    state => state.canvas_index !== null && state.canvas_index !== undefined);
+  const registeredCanvases = usesCanvasAuthority
+    ? materializedDomRegistryValues().filter(node =>
+      String(node && node.tagName || '').toLowerCase() === 'canvas')
+    : [];
+  // Every semantic selector lookup is answered in one registry pass. Canvas
+  // authority states carry the binding index validated by the transformer so
+  // multiple captured canvases cannot accidentally resolve to the first one.
+  const semanticMatches = g.__pulpFindMaterializedElements__(capturedStates.map(
+    state => canvasAuthorityEnabled &&
+      state.canvas_index !== null && state.canvas_index !== undefined
+      ? null
+      : state.match ? { selector: state.match.selector,
+        ancestor: state.match.ancestor } : null));
+  const matches = capturedStates.map((state, index) =>
+    canvasAuthorityEnabled && state.canvas_index !== null &&
+      state.canvas_index !== undefined
+      ? registeredCanvases[state.canvas_index] || null
+      : semanticMatches[index]);
   for (let index = capturedStates.length - 1; index >= 0; --index) {
     if (matches[index]) return capturedStates[index].id;
   }

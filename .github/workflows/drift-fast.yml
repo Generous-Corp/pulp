@@ -55,7 +55,7 @@ jobs:
       # the group's own commit: both are the tip combined with the head, which
       # is the tree the drift exists in. Depth 2 keeps HEAD^1 (the base) for
       # the diff-scoped script-inputs check.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
           fetch-depth: 2
@@ -86,7 +86,7 @@ jobs:
       # uses the same key and path so its configure reuses those sources. It
       # never saves.
       - name: Restore FetchContent sources
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps

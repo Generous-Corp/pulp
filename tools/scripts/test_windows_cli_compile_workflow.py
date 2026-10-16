@@ -123,19 +123,20 @@ class CompileLane(unittest.TestCase):
             self.release["jobs"]["build-cli"], "Configure (CLI, no WebView on Linux)"
         )["run"]
         # The GPU/Scene3D-on case list names the platforms that get them; the
-        # Windows legs take the defaults. If Windows joins that list, this lane
-        # must follow.
+        # Windows legs are included now that pinned Windows Skia/Dawn assets
+        # are available.
         case_list = re.search(r"\n\s*([a-z0-9|*-]+)\)\n\s*REQUIRE_GPU=", release_configure)
         self.assertIsNotNone(case_list, "release GPU case list not found")
-        self.assertNotIn("windows", case_list.group(1))
+        self.assertIn("windows-x64", case_list.group(1))
+        self.assertIn("windows-arm64", case_list.group(1))
         self.assertIn('REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"', release_configure)
         self.assertIn('SCENE3D="-DPULP_ENABLE_SCENE3D=OFF"', release_configure)
         self.assertIn('INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"', release_configure)
         self.assertIn("'-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON'",
                       release_configure)
         ours = define_flags(self.configure)
-        self.assertEqual(ours.get("PULP_REQUIRE_GPU_FOR_SDK"), "OFF")
-        self.assertEqual(ours.get("PULP_ENABLE_SCENE3D"), "OFF")
+        self.assertEqual(ours.get("PULP_REQUIRE_GPU_FOR_SDK"), "ON")
+        self.assertEqual(ours.get("PULP_ENABLE_SCENE3D"), "ON")
         self.assertEqual(ours.get("PULP_ENABLE_INSPECTOR"), "ON")
         self.assertEqual(ours.get("PULP_BUILD_WEBVIEW"), "ON")
         self.assertEqual(ours.get("CMAKE_CXX_COMPILER"), "cl")

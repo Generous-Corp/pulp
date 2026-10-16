@@ -16,12 +16,13 @@
     {
       "path": "core/host/src/timeline_automation_delivery.cpp",
       "needles": [
+        "#include <pulp/format/processor_node_adapter.hpp>",
         "processor_node_parameters",
         "validate_timeline_automation_routes"
       ]
     },
     {
-      "path": "core/host/src/signal_graph.cpp",
+      "path": "core/host/src/signal_graph_authoring.cpp",
       "needles": [
         "connect_audio_rate_modulation"
       ]

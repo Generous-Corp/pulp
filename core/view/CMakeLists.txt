@@ -9,13 +9,32 @@
 # project before core/format so that target can make the same composition
 # decision during a clean configure.
 
-add_library(pulp-view-core)
+# DesignIR value types (header-only); configured in cmake/PulpDesignUnits.cmake.
+add_library(pulp-design-ir INTERFACE)
+add_library(pulp::design-ir ALIAS pulp-design-ir)
+
+add_library(pulp-view-core
+    src/data_display.cpp)
 add_library(pulp::view-core ALIAS pulp-view-core)
 # Consumers (and view-core's own headers) gate any optional JS use on this.
 target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_ENABLE_JS}>)
 
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
+
+# GraphEditorView is pulp-view-graph-editor (see audio/), the one view target
+# that depends on pulp::host; the view umbrellas do not link it.
+add_subdirectory(audio)
+
+# The audio-dependent widgets (meters, waveform, spectrum, ...) are a separate
+# target that links signal/audio but never pulp::host; the view umbrellas link it.
+add_library(pulp-view-audio)
+add_library(pulp::view-audio ALIAS pulp-view-audio)
+
+# Pulp-kept plugin-host and editor layer (inspector, editor bridge, StateStore
+# host-parameter adapter). Extracted view targets never link it.
+add_library(pulp-view-tooling)
+add_library(pulp::view-tooling ALIAS pulp-view-tooling)
 
 add_library(pulp-view src/placeholder.cpp)
 add_library(pulp::view ALIAS pulp-view)
@@ -47,6 +66,15 @@ else()
             "PULP_ENABLE_JS=OFF path in core/view/CMakeLists.txt.")
     endif()
 endif()
+# The pulp::view umbrella carries the Pulp-kept layer. It may depend on the
+# scripted runtime; the extracted view targets (view-core, view-script,
+# design-import, and view-native, which D3 maps to view-platform) never link
+# it. Native plugins reach it through pulp::format-view.
+target_link_libraries(pulp-view PUBLIC pulp::view-tooling)
+# The umbrellas carry the audio widgets on both paths, so a JS-free consumer of
+# pulp::view keeps Meter/WaveformView/SpectrumView without naming view-audio.
+target_link_libraries(pulp-view PUBLIC pulp::view-audio)
+target_link_libraries(pulp-view-native PUBLIC pulp::view-audio)
 
 # ── pulp-view-reload-exports (live-swap M2b) ─────────────────────────────────
 # A tiny static lib whose single keep-alive TU references the editor ABI surface
@@ -56,7 +84,7 @@ endif()
 # a whole-archive force-load of view-core would. Self-contained: links view-core.
 add_library(pulp-view-reload-exports STATIC src/reload_exports.cpp)
 add_library(pulp::view-reload-exports ALIAS pulp-view-reload-exports)
-target_link_libraries(pulp-view-reload-exports PUBLIC pulp-view-core)
+target_link_libraries(pulp-view-reload-exports PUBLIC pulp::view-audio)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
@@ -64,10 +92,19 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # belong to the core/view targets declared above.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PulpViewJsPreludes.cmake")
 
-foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view pulp-view-native)
+foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view-tooling pulp-view pulp-view-native)
     target_include_directories(${_pulp_view_target}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+endforeach()
+unset(_pulp_view_target)
+
+foreach(_pulp_view_target pulp-view pulp-view-native pulp-view-audio)
+    target_include_directories(${_pulp_view_target}
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/include>
             $<INSTALL_INTERFACE:include>
     )
 endforeach()
@@ -152,6 +189,8 @@ if(PULP_BUILD_WEBVIEW)
             $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
             $<INSTALL_INTERFACE:include>)
     target_link_libraries(pulp-view-webview PUBLIC pulp::view-core)
+    # editor_bridge_webview.cpp adapts the Pulp-kept EditorBridge.
+    target_link_libraries(pulp-view-webview PUBLIC pulp::view-tooling)
     target_link_libraries(pulp-view PUBLIC pulp::view-webview)
     # PUBLIC so tests and downstream callers see the same value the
     # detector TU was compiled with.
@@ -202,7 +241,7 @@ elseif(UNIX AND NOT APPLE AND NOT ANDROID)
 endif()
 
 # CHOC headers (JS engine, utilities)
-foreach(_pulp_view_target pulp-view-core pulp-view-script)
+foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view-tooling)
     target_include_directories(${_pulp_view_target} PUBLIC
         $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
         $<INSTALL_INTERFACE:include>
@@ -211,13 +250,38 @@ endforeach()
 unset(_pulp_view_target)
 
 target_link_libraries(pulp-view-core PUBLIC
-    pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio
+    pulp::canvas pulp::events pulp::state pulp::platform
 )
+
+# Audio-dependent view widgets are isolated in their own target. The pulp::view
+# and pulp::view-native umbrellas link it (above), preserving the public consumer
+# surface while keeping pulp-view-core's direct PUBLIC closure audio-free.
+target_link_libraries(pulp-view-audio PUBLIC pulp::view-core)
+target_link_libraries(pulp-view-audio PUBLIC pulp::audio pulp::signal pulp::midi)
+target_compile_definitions(pulp-view-audio PRIVATE PULP_VIEW_HAS_AUDIO_WIDGETS=1 INTERFACE PULP_VIEW_HAS_AUDIO_WIDGETS=1)
+# Convenience only for direct in-tree consumers.  Product entry points call
+# register_audio_widgets() explicitly; the shim is intentionally not exported
+# as an installed source file.
+target_sources(pulp-view-audio INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/audio/src/register_audio_widgets_shim.cpp>)
+if(PULP_ENABLE_DESIGN_IMPORT)
+    target_compile_definitions(pulp-view-audio PRIVATE PULP_VIEW_AUDIO_HAS_DESIGN_IMPORT=1)
+endif()
+target_link_libraries(pulp-view-tooling PUBLIC pulp::view-core)
+if(PULP_ENABLE_JS)
+    # Link-only: the runtime-inspector bridge implementation reaches
+    # ScriptedUiSession, but the tooling headers expose no view-script type, so
+    # consumers (every format through pulp-format-view) do not inherit
+    # view-script's usage requirements from here.
+    target_link_libraries(pulp-view-tooling PRIVATE pulp::view-script)
+endif()
 # Host-backed view facilities are implemented by pulp-host. Keeping that
 # integration out of both view targets is load-bearing: every plugin format
 # links pulp::view, so a view-to-host edge would make even a plugin that only
 # draws native controls acquire plugin hosting and playback transitively.
-target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
+# The scripting bridge instantiates audio widgets (Meter, WaveformView,
+# SpectrumView, etc.), so its static link closure must carry the audio view
+# target after those implementations leave pulp-view-core.
 # design_import.cpp uses pulp::runtime::base64_decode +
 # gzip_decompress to unpack Claude Design's base64-gzip envelope.
 # PUBLIC because the public header model_manager_view.hpp includes
@@ -226,17 +290,13 @@ target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
 # include path + link.
 target_link_libraries(pulp-view-core PUBLIC pulp::runtime)
 target_link_libraries(pulp-view-script PRIVATE pulp::runtime)
+# view-script still consumes view-core headers in native-only/design-import-off builds.
+target_link_libraries(pulp-view-script PUBLIC pulp::view-core pulp::state)
 
-# yaml-cpp (MIT) — DESIGN.md frontmatter parsing. Public Pulp headers expose no
-# YAML types, but pulp-view-core is static: its parser object retains YAML
-# symbols that the final consumer link must resolve. Keep yaml-cpp private in
-# the API while preserving that static link closure in installed SDKs.
-if(PULP_ENABLE_DESIGN_IMPORT)
-    target_link_libraries(pulp-view-core PRIVATE
-        $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>
-        $<INSTALL_INTERFACE:Pulp::yaml-cpp>
-    )
-endif()
+# Design units (DesignIR value types below view-core; the importer and its
+# Pulp-owned audio-control recognition pack above it). Directory scope: the
+# targets it declares belong to this directory, like the ones above.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PulpDesignUnits.cmake")
 
 if(PULP_HAS_JSC_ACTUAL)  # auto/quickjs must never leak JSC into link interfaces
     target_link_libraries(pulp-view-script PRIVATE "-framework JavaScriptCore")
@@ -270,16 +330,14 @@ if(APPLE)
     if(PULP_IOS)
         target_sources(pulp-view-core PRIVATE
             platform/ios/window_host_ios.mm
-            platform/ios/plugin_view_host_ios.mm
             platform/ios/accessibility_ios.mm
-            # Bridge stubs compile on iOS too. They provide set_factory /
+            # Bridge stubs compile on iOS too. They provide
             # set_screenshot_provider / has_* registration APIs
             # unconditionally; create/render impls stay gated by
-            # their own #if checks so the iOS-native window +
-            # plugin-view impls aren't shadowed. screenshot has no
-            # iOS-native impl yet, so the stub's provider-backed
-            # path is the one iOS actually uses.
-            src/plugin_view_host_stub.cpp
+            # their own #if checks so the iOS-native window impl
+            # isn't shadowed. screenshot has no iOS-native impl yet,
+            # so the stub's provider-backed path is the one iOS
+            # actually uses.
             src/screenshot_stub.cpp
             src/window_host_stub.cpp
         )
@@ -299,6 +357,23 @@ if(APPLE)
                 "-framework Metal"
             )
         endif()
+        # The UIView plug-in editor host is Pulp-kept embedding glue; it builds
+        # in pulp-view-tooling beside the factory registration it defines
+        # PluginViewHost::create() against.
+        target_sources(pulp-view-tooling PRIVATE
+            platform/ios/plugin_view_host_ios.mm
+            src/plugin_view_host_stub.cpp
+        )
+        target_link_libraries(pulp-view-tooling PRIVATE
+            "-framework UIKit"
+            "-framework CoreGraphics"
+            "-framework QuartzCore"
+        )
+        if(PULP_HAS_SKIA)
+            target_link_libraries(pulp-view-tooling PRIVATE pulp::render
+                "-framework Metal"
+            )
+        endif()
     else()
         target_sources(pulp-view-core PRIVATE
             platform/mac/app_menu_mac.mm
@@ -310,8 +385,6 @@ if(APPLE)
             platform/mac/window_host_mac_open_documents.mm
             platform/mac/window_host_mac_text_input.mm
             platform/mac/window_manager_mac.mm
-            platform/mac/plugin_view_host_mac.mm
-            platform/mac/plugin_view_host_mac_text_input.mm
             platform/mac/screenshot_mac.mm
             platform/mac/drag_drop_mac.mm
             platform/mac/accessibility_mac_host_lifetime.mm
@@ -320,12 +393,10 @@ if(APPLE)
             platform/mac/appearance_mac.mm
             platform/mac/motion_preferences_mac.mm
             # Host-backend registration APIs. The stub files compile
-            # set_factory/set_screenshot_provider etc.
-            # unconditionally; only the create/render impls are
-            # gated by `#if !defined(__APPLE__)`. Including them
-            # here surfaces the registration API on mac without
-            # conflicting with the native impls.
-            src/plugin_view_host_stub.cpp
+            # set_screenshot_provider etc. unconditionally; only the
+            # create/render impls are gated by `#if !defined(__APPLE__)`.
+            # Including them here surfaces the registration API on mac
+            # without conflicting with the native impls.
             src/screenshot_stub.cpp
             src/window_host_stub.cpp
         )
@@ -346,10 +417,34 @@ if(APPLE)
                 "-framework QuartzCore"
             )
         endif()
+        # The NSView plug-in editor hosts (CPU and GPU), their text input and
+        # their drag-destination categories are Pulp-kept embedding glue. They
+        # build in pulp-view-tooling with the PluginViewHost factory
+        # registration; the shared window-host internals they use stay in
+        # view-core. Shipped binaries still compile the whole ObjC cluster
+        # per binary through _pulp_apply_view_mac_objc_suffix().
+        target_sources(pulp-view-tooling PRIVATE
+            platform/mac/plugin_view_host_mac.mm
+            platform/mac/plugin_view_host_mac_text_input.mm
+            platform/mac/plugin_view_host_mac_drag.mm
+            src/plugin_view_host_stub.cpp
+        )
+        target_link_libraries(pulp-view-tooling PRIVATE
+            "-framework Cocoa"
+            "-framework CoreVideo"
+        )
+        if(PULP_HAS_SKIA)
+            target_link_libraries(pulp-view-tooling PRIVATE pulp::render
+                "-framework Metal"
+                "-framework QuartzCore"
+            )
+        endif()
     endif()
 elseif(WIN32)
+    # PluginViewHost factory registration and create(); the native HWND host
+    # below registers itself through it. Both are Pulp-kept embedding glue.
+    target_sources(pulp-view-tooling PRIVATE src/plugin_view_host_stub.cpp)
     target_sources(pulp-view-core PRIVATE
-        src/plugin_view_host_stub.cpp
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
         platform/win/accessibility_win.cpp
@@ -363,18 +458,18 @@ elseif(WIN32)
         platform/win/drag_drop_win.cpp
     )
     # Win/Linux parity. When Skia is available, add the built-in Skia raster
-    # screenshot backend and the native HWND PluginViewHost.
-    # plugin_view_host_stub.cpp stays (it owns the always-compiled
-    # set_factory/has_factory registration API + the factory-dispatching
-    # create()); the native impl registers ITSELF as the factory via
-    # register_platform_plugin_view_host(). screenshot_skia.cpp self-guards
-    # on PULP_HAS_SKIA and supersedes the stub's render_* fallback (which is
-    # now compiled only when !PULP_HAS_SKIA).
+    # screenshot backend to view-core and the native HWND PluginViewHost to
+    # pulp-view-tooling. plugin_view_host_stub.cpp stays (it owns the
+    # always-compiled set_factory/has_factory registration API + the
+    # factory-dispatching create()); the native impl registers ITSELF as the
+    # factory via register_platform_plugin_view_host(). screenshot_skia.cpp
+    # self-guards on PULP_HAS_SKIA and supersedes the stub's render_* fallback
+    # (which is now compiled only when !PULP_HAS_SKIA).
     if(PULP_HAS_SKIA)
-        target_sources(pulp-view-core PRIVATE
-            src/screenshot_skia.cpp
-            platform/win/plugin_view_host_win.cpp
-        )
+        target_sources(pulp-view-core PRIVATE src/screenshot_skia.cpp)
+        target_sources(pulp-view-tooling PRIVATE platform/win/plugin_view_host_win.cpp)
+        # OLE drag-drop on the plugin-host child HWND (WinPluginViewHost).
+        target_link_libraries(pulp-view-tooling PRIVATE ole32 shell32)
         # The native HWND host supplies register_platform_plugin_view_host();
         # tell the stub not to compile its no-op default (one definition).
         set_source_files_properties(src/plugin_view_host_stub.cpp PROPERTIES
@@ -383,36 +478,38 @@ elseif(WIN32)
     # UIAutomationCore for UiaClientsAreListening plus
     # UiaReturnRawElementProvider + UiaRaiseStructureChangedEvent.
     target_link_libraries(pulp-view-core PRIVATE uiautomationcore)
-    # OLE drag-drop on the plugin-host child HWND (WinPluginViewHost):
-    # ole32 = OleInitialize/RegisterDragDrop/ReleaseStgMedium; shell32 =
-    # DragQueryFileW for CF_HDROP file lists.
+    # OLE drag-drop for the standalone outbound file drag (drag_drop_win.cpp):
+    # ole32 = OleInitialize/DoDragDrop/ReleaseStgMedium; shell32 = the CF_HDROP
+    # helpers. The plug-in host child HWND links them on pulp-view-tooling.
     target_link_libraries(pulp-view-core PRIVATE ole32 shell32)
 elseif(ANDROID)
+    # Android has no native plug-in editor host; the factory registration is
+    # the whole PluginViewHost surface there.
+    target_sources(pulp-view-tooling PRIVATE src/plugin_view_host_stub.cpp)
     target_sources(pulp-view-core PRIVATE
-        src/plugin_view_host_stub.cpp
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
         $<$<BOOL:${PULP_HAS_SKIA}>:src/screenshot_skia.cpp>
     )
     # Android accessibility wired via Kotlin TalkBack integration
 elseif(UNIX)
+    target_sources(pulp-view-tooling PRIVATE src/plugin_view_host_stub.cpp)
     target_sources(pulp-view-core PRIVATE
-        src/plugin_view_host_stub.cpp
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
         platform/linux/accessibility_linux.cpp
     )
     # Win/Linux parity. Same split as the WIN32 branch: when Skia is available
-    # add the built-in Skia raster screenshot backend and the native X11
-    # PluginViewHost (which registers itself via
-    # register_platform_plugin_view_host()). The X11 host links Xlib; missing
-    # X11 dev headers degrade to the headless-render-only path.
+    # add the built-in Skia raster screenshot backend to view-core and the
+    # native X11 PluginViewHost (which registers itself via
+    # register_platform_plugin_view_host()) to pulp-view-tooling. The X11 host
+    # links Xlib; missing X11 dev headers degrade to the headless-render-only
+    # path.
     if(PULP_HAS_SKIA)
         target_sources(pulp-view-core PRIVATE src/screenshot_skia.cpp)
         find_package(X11)
         if(X11_FOUND)
             target_sources(pulp-view-core PRIVATE
-                platform/linux/plugin_view_host_linux.cpp
                 # Standalone outbound file-drag backend (free begin_file_drag via
                 # XDND source). Gated with PULP_HAS_X11 so the drag_drop.cpp no-op
                 # drops out only when this real backend is compiled.
@@ -420,6 +517,10 @@ elseif(UNIX)
             target_link_libraries(pulp-view-core PRIVATE ${X11_LIBRARIES})
             target_include_directories(pulp-view-core PRIVATE ${X11_INCLUDE_DIR})
             target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_X11=1)
+            target_sources(pulp-view-tooling PRIVATE
+                platform/linux/plugin_view_host_linux.cpp)
+            target_link_libraries(pulp-view-tooling PRIVATE ${X11_LIBRARIES})
+            target_include_directories(pulp-view-tooling PRIVATE ${X11_INCLUDE_DIR})
             # The native X11 host supplies register_platform_plugin_view_host();
             # tell the stub not to compile its no-op default (one definition).
             set_source_files_properties(src/plugin_view_host_stub.cpp PROPERTIES
@@ -455,11 +556,13 @@ endif()
 # of PULP_BENCHMARK. Downstream targets that only use view APIs do NOT need to
 # link pulp::render when PULP_BENCHMARK is enabled.
 if(TARGET pulp-render)
-    # plugin_frame_renderer.hpp exposes render::GpuSurface when Skia is on,
-    # so consumers need the render include and link contract in that build.
-    # The no-Skia build keeps render as an implementation detail.
+    # View-core consumers have received the render include and link contract
+    # in Skia builds, and the plug-in editor layer in pulp-view-tooling relies
+    # on it: plugin_frame_renderer.hpp exposes render::GpuSurface when Skia is
+    # on. The no-Skia build keeps render as an implementation detail.
     if(PULP_HAS_SKIA)
         target_link_libraries(pulp-view-core PUBLIC pulp::render)
+        target_link_libraries(pulp-view-tooling PUBLIC pulp::render)
     else()
         target_link_libraries(pulp-view-core PRIVATE pulp::render)
     endif()

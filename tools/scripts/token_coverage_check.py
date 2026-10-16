@@ -33,7 +33,8 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCAN_DIR = REPO_ROOT / "core" / "view" / "src"
+# The view layer's paint code: the generic widgets and the audio widgets.
+SCAN_DIRS = (REPO_ROOT / "core" / "view" / "src", REPO_ROOT / "core" / "view" / "audio" / "src")
 BASELINE = Path(__file__).resolve().parent / "token_coverage_baseline.json"
 
 # Files whose purpose is color authoring, not widget paint — excluded wholesale.
@@ -66,7 +67,7 @@ def count_hardcodes(path: Path) -> int:
 
 def scan() -> dict[str, int]:
     counts: dict[str, int] = {}
-    for path in sorted(SCAN_DIR.rglob("*.cpp")):
+    for path in sorted(p for d in SCAN_DIRS for p in d.rglob("*.cpp")):
         if path.name in EXCLUDE_BASENAMES:
             continue
         c = count_hardcodes(path)

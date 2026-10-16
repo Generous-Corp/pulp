@@ -118,8 +118,13 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", required=True)
     ap.add_argument("--repo-root", default=str(HERE.parents[1]))
+    # The configured build to verify against, as merge_tree_script_state.py
+    # passes it; the same thing PULP_GATES_BUILD_DIR declares.
+    ap.add_argument("--build-dir", default=None)
     a = ap.parse_args(argv[1:])
     root = Path(a.repo_root).resolve()
+    if a.build_dir:
+        os.environ[sst.GATES_BUILD_DIR_ENV] = str(Path(a.build_dir).expanduser())
 
     try:
         reasons = sti.touch_reasons(root, a.base)

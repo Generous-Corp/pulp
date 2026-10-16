@@ -21,6 +21,41 @@ if(COMMAND pulp_add_plugin)
     return()
 endif()
 
+# An argument cmake_parse_arguments() did not recognise is a misspelled or
+# unsupported keyword (or a stray value before the first keyword). Ignoring it
+# builds something other than what the caller asked for -- a NO_EDITOR passed to
+# an SDK that predates it still links the full view stack -- so it is an error.
+# `tolerated` names keywords that are reported elsewhere and must not fail here.
+function(_pulp_reject_unknown_arguments context unparsed)
+    set(_unknown ${unparsed})
+    if(ARGN)
+        list(REMOVE_ITEM _unknown ${ARGN})
+    endif()
+    if(_unknown)
+        list(JOIN _unknown ", " _unknown_text)
+        message(FATAL_ERROR
+            "${context}: unknown argument(s): ${_unknown_text}. Check the spelling, or "
+            "update the Pulp SDK if the keyword is newer than this one.")
+    endif()
+endfunction()
+
+# A FORMATS value nothing handles builds nothing for it, silently; a misspelled
+# or lower-case format name ("clap", "VST") is an error for the same reason.
+function(_pulp_reject_unknown_formats context formats)
+    set(_unknown "")
+    foreach(_fmt IN LISTS formats)
+        if(NOT _fmt IN_LIST ARGN)
+            list(APPEND _unknown "${_fmt}")
+        endif()
+    endforeach()
+    if(_unknown)
+        list(JOIN _unknown ", " _unknown_text)
+        list(JOIN ARGN ", " _known_text)
+        message(FATAL_ERROR
+            "${context}: unknown format(s): ${_unknown_text}. Known formats: ${_known_text}.")
+    endif()
+endfunction()
+
 # ── pulp_add_plugin ─────────────────────────────────────────────────────────
 # Creates plugin targets for each requested format from a single declaration.
 #
@@ -52,8 +87,9 @@ endif()
 #   ${target}_Standalone — Standalone executable
 #
 function(pulp_add_plugin target)
+    _pulp_resolve_consumer_targets()
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;NATIVE_UI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
+        "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
@@ -64,6 +100,9 @@ function(pulp_add_plugin target)
             "Set PluginDescriptor::produces_midi = true in the processor; "
             "MIDI output is format/runtime metadata, not a CMake packaging flag.")
     endif()
+    _pulp_reject_unknown_arguments("pulp_add_plugin(${target})" "${PLUGIN_UNPARSED_ARGUMENTS}" PRODUCES_MIDI)
+    _pulp_reject_unknown_formats("pulp_add_plugin(${target})" "${PLUGIN_FORMATS}"
+        VST3 CLAP AU LV2 AAX AUv3 Standalone)
 
     # Defaults
     if(NOT PLUGIN_PLUGIN_NAME)
@@ -91,6 +130,42 @@ function(pulp_add_plugin target)
         set(_plugin_accepts_midi "1")
     else()
         set(_plugin_accepts_midi "0")
+    endif()
+
+    # NO_EDITOR: an editor-less plug-in. Its VST3, CLAP, AU v2 and LV2 modules
+    # link pulp::format-core (and the view-free CLAP adapter) instead of the
+    # format + view umbrella, so the image carries no view, canvas, render,
+    # Skia, Dawn or wgpu code and stages no GPU runtime. The processor must not
+    # override create_view(); if it does, the link fails on the view symbols.
+    # Standalone, AUv3 and AAX still link the view stack: a standalone app and
+    # an app-extension host need a window, and the AAX GUI glue is not split.
+    if(PLUGIN_NO_EDITOR)
+        if(PLUGIN_NATIVE_UI OR PLUGIN_UI_SCRIPT)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): NO_EDITOR cannot be combined with NATIVE_UI or UI_SCRIPT")
+        endif()
+        if(NOT _PULP_FORMAT_CORE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target} NO_EDITOR): this Pulp SDK does not export Pulp::format-core")
+        endif()
+        if("CLAP" IN_LIST PLUGIN_FORMATS AND PULP_HAS_CLAP AND NOT _PULP_FORMAT_CLAP_CORE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target} NO_EDITOR): this Pulp SDK does not export Pulp::format-clap-core")
+        endif()
+        set(PULP_${target}_NO_EDITOR TRUE CACHE INTERNAL "")
+        set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
+    else()
+        set(PULP_${target}_NO_EDITOR FALSE CACHE INTERNAL "")
+        set(_pulp_core_format_target "${_PULP_FORMAT_TARGET}")
+    endif()
+    # AAX_HEADLESS: a processor-only AAX artifact (no custom EffectGUI). Its
+    # core links the editor-less format library the same way NO_EDITOR does.
+    if(PLUGIN_AAX_HEADLESS)
+        if(NOT _PULP_FORMAT_CORE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target} AAX_HEADLESS): this Pulp SDK does not export Pulp::format-core")
+        endif()
+        set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
     endif()
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
@@ -221,12 +296,12 @@ function(pulp_add_plugin target)
     # For compiled processors, create OBJECT library.
     if(PLUGIN_SOURCES)
         add_library(${target}_Core OBJECT ${PLUGIN_SOURCES})
-        target_link_libraries(${target}_Core PUBLIC ${_PULP_FORMAT_TARGET})
+        target_link_libraries(${target}_Core PUBLIC ${_pulp_core_format_target})
         target_include_directories(${target}_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "${PULP_${target}_CORE_OBJECTS}")
     else()
         add_library(${target}_Core INTERFACE)
-        target_link_libraries(${target}_Core INTERFACE ${_PULP_FORMAT_TARGET})
+        target_link_libraries(${target}_Core INTERFACE ${_pulp_core_format_target})
         target_include_directories(${target}_Core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "")
     endif()
@@ -239,6 +314,9 @@ function(pulp_add_plugin target)
             PULP_BUNDLE_ID="${PLUGIN_BUNDLE_ID}"
             PULP_PLUGIN_VERSION="${PLUGIN_VERSION}"
         )
+        if(PLUGIN_AAX_HEADLESS)
+            target_compile_definitions(${target}_Core PRIVATE PULP_AAX_HEADLESS=1)
+        endif()
     endif()
 
     # ── Design dimensions (auto-sizing for imported-design plugins) ────
@@ -323,7 +401,8 @@ function(pulp_add_plugin target)
             _pulp_add_aax(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
                           "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}"
                           "${PLUGIN_CATEGORY}" "${PLUGIN_MANUFACTURER_CODE}"
-                          "${PLUGIN_AAX_PRODUCT_CODE}" "${PLUGIN_AAX_NATIVE_CODE}")
+                          "${PLUGIN_AAX_PRODUCT_CODE}" "${PLUGIN_AAX_NATIVE_CODE}"
+                          ${PLUGIN_AAX_HEADLESS})
         endif()
     endif()
 
@@ -455,12 +534,18 @@ endfunction()
 #       SOURCES      plugin_a.cpp plugin_b.cpp   # union of the bundled plugins
 #   )
 function(pulp_add_plugin_bundle target)
+    _pulp_resolve_consumer_targets()
     cmake_parse_arguments(BUNDLE
         ""
         "BUNDLE_NAME;BUNDLE_ID;VERSION;MANUFACTURER"
         "FORMATS;SOURCES"
         ${ARGN}
     )
+    _pulp_reject_unknown_arguments("pulp_add_plugin_bundle(${target})" "${BUNDLE_UNPARSED_ARGUMENTS}")
+    # AU, AUv3 and AAX are recognised so the dedicated "not yet supported"
+    # error below explains them.
+    _pulp_reject_unknown_formats("pulp_add_plugin_bundle(${target})" "${BUNDLE_FORMATS}"
+        VST3 CLAP AU AUv3 AAX)
     if(NOT BUNDLE_BUNDLE_NAME)
         set(BUNDLE_BUNDLE_NAME "${target}")
     endif()

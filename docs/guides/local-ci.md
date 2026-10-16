@@ -1,6 +1,15 @@
 # CI Validation
 
-Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before merging.
+Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) validation lanes before merging.
+
+On a pull-request head, the affected-test step runs tests selected from the
+diff and from binaries rebuilt by that head's governed build. A marker written
+just before the build bounds the warm Ninja log; older branch outputs do not
+add tests. Docs-only diffs add no rebuilt-binary tests. The rebuilt set counts
+only when it is narrow: at most eight test executables, and no regeneration of
+`build.ninja` or `CMakeCache.txt` during the build. A cold, reconfigured or
+stale warm directory rebuilds far more than the diff reaches, and the step then
+adds no rebuilt-binary tests and logs why.
 
 The macOS retarget lane keeps the untrusted-runner boundary for contributor
 code and invokes `tools/ci/governed-build.sh` inside that namespace for its
@@ -33,7 +42,7 @@ which makes the dependency-backed case visible to CTest. The required macOS
 lane performs the same locked install before running its affected-test sweep.
 Because the automatic Linux selector may use a clean Proxmox VM without a
 system Node installation, `build.yml` first provisions the exact Node
-`22.15.0` toolchain with `actions/setup-node@v4` and a lockfile-keyed npm cache;
+`22.15.0` toolchain with `actions/setup-node@v7` and a lockfile-keyed npm cache;
 that version supplies the `zstdDecompressSync` API used by the `.fig` lane.
 Source-only or offline
 configurations without that `node_modules/esbuild` installation still register
@@ -311,6 +320,25 @@ makes the reinstall a single verified command:
   as unknown, never as healthy.
   It reports drift older than an hour, any non-healthy state, and a
   `checked_at` older than 30 minutes, since the reaper runs every 15 minutes.
+- `tools/ci/proxmox_host_watch.py` is that reader. It runs every 15 minutes
+  from one non-gate fleet Mac
+  (`tools/ci/com.danielraffel.pulp.proxmox-host-watch.plist.template`). It
+  reaches the host over ssh by its fleet name and only reads. Each problem gets
+  one issue in the private infrastructure-issues repository. The issue is
+  updated in place and closed when the problem clears. It covers four signals:
+  - a `pulp-*` unit that has been `failed` for over 15 minutes (a slot at its
+    restart limit), shown with its last error line. For `no free clone id in
+    A..B`, it also names the orphan clone that holds the slot's VMID.
+  - `health.json` that is absent, unreadable or stale. This counts as unknown,
+    never as healthy.
+  - a non-healthy state, or drift older than an hour, with the
+    `reinstall_command`.
+  - a VM the reaper has skipped on 4 or more passes over at least 45 minutes
+    while no online runner registration names it. A live job's lease skip stays
+    quiet because its runner is online.
+
+  An observation that could not be read never closes an issue. Every issue
+  carries what, evidence, likely cause, fix, safe-to-auto-apply and verify.
 
 Create separate root-owned role environments; never share one:
 
@@ -789,7 +817,7 @@ and fails before the hour-long Debug build if neither exists.
 shipyard run --targets mac                # validate current branch on the opt-in local lane
 shipyard pr                               # create/track the PR and arm auto-merge; required checks decide
 shipyard cloud run build <branch>         # dispatch to Namespace
-shipyard rescue <PR>                      # recover a wedged PR
+shipyard rescue <PR>                      # recover a wedged PR's queued runs (dispatches a branch-tip replacement; re-run a required pull_request run instead)
 shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges
 shipyard update --check --json            # report installed vs latest
 ```
@@ -1991,6 +2019,26 @@ python3 -m pip install --user -r tools/motion/visual/requirements.txt
 The analyzer falls back to a translation-only estimator without it, so it stays
 optional and is not part of the checked set.
 
+## Every build leg reports its toolchain against the manifest
+
+Before configuring, each `build.yml` leg runs `tools/toolchain/check_env.py
+--format github`. It prints one `::warning::` annotation per tool whose version
+differs from `tools/toolchain/manifest.toml` (`python3`, `cmake`, `ninja`,
+`node`, `rustc`, `clang-format`, `mise`, and the npm lockfile installs), with
+the found version, its path and the fix. The step is report only: the manifest
+is in warn mode, so the script exits 0, and the step is `continue-on-error`. It
+reads versions and installs nothing. Because the gate VM, the hosted Linux and
+Windows runners and each host get their tools from different places, these
+annotations are where drift between them shows up first; for example, the
+hosted Linux leg's apt CMake is reported against the 4.3.3 pin, labelled as
+the manifest's declared Linux exception. See [mise](mise.md#checking-your-environment).
+
+The step costs well under a second (0.45 s on the macOS gate VM, 0.10 s on
+hosted Linux), each version probe is capped at 5 s, and the step at 2 minutes,
+so a hung tool cannot stall a leg. It stays report only under `bash -e`
+whatever is missing: no Python on the runner, or a check that cannot read its
+expected versions (exit 3), becomes a warning annotation, never a failed step.
+
 ## Build-time Node dependencies are installed before the build, never inside it
 
 The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an
@@ -2510,9 +2558,11 @@ tell an executed `macos` suite from a reused receipt), the other workflows'
 jobs through one `commits/<sha>/check-runs` read kept to those runs' check
 suites (so a push run on the landed commit is never read as the gate), and the
 commit's statuses for a context published as a status. Never by a run's
-conclusion, which also folds in advisory legs: while hosted Linux was failing
+conclusion, which used to fold in advisory legs: while hosted Linux was failing
 every merge group, reading the run called every green tip red and turned the
-Linux failure into a fake batch streak. And never by `macos` alone: on
+Linux failure into a fake batch streak. In a merge group the Linux matrix leg is
+now job-level `continue-on-error`, so it no longer turns the run's conclusion
+red, but a run conclusion still cannot say which required context failed. And never by `macos` alone: on
 2026-09-29 the required `drift-fast` context was red on main for about fourteen
 hours while `macos` stayed green, the macos-only detector read `healthy`
 throughout, and every batch that failed `drift-fast` read as a pass, so the
@@ -2858,6 +2908,29 @@ two disagree (and the detector judges all six on main's tip). `[governance]` is 
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
 
+## Every failed run names its cause: the advisory `ci-cause` job
+
+When any job in a `build.yml` run fails, the `ci-cause (advisory)` job runs
+`tools/ci/ci_cause_notices.sh`. It reads each failed job's finished log through
+the Actions API and runs `shipyard cause extract` over it. The result is one
+`ci.cause/v1` record per failed job, printed as a `::notice title=ci-cause::`
+annotation on the run: the failing test, compile error, runner failure or gate
+verdict, its class and a confidence.
+
+- **Why a separate job.** A job's own log cannot be downloaded until the job
+  has finished, so a step inside the failing job has nothing to read.
+- **Pinned and verified.** The extractor is the Shipyard release pinned in the
+  script (`v0.326.0`). Its SHA-256 must match the release checksum, or nothing
+  runs. Moving to a newer release means editing both the version and the
+  hashes in the script.
+- **Never a gate.** The job is `continue-on-error`. A missing asset, an
+  unreadable log or an extractor failure is reported and exits 0.
+- **Selftest.** `ci-cause-notices-selftest` covers the script.
+
+The records are the input to the root-cause dataset. Shipyard's scorecard
+`--export-cases` carries the same records, and `shipyard cause archive` keeps
+them append-only.
+
 ## A green `macos` check does not always mean the suite ran
 
 The required `macos` context is reported by more than one job. It can come from
@@ -2877,7 +2950,7 @@ is legible from the check itself rather than only from its step count. And
 `tools/scripts/gate_suite_executed.py` answers the question directly:
 
 ```bash
-# executed / built-but-untested / not-executed, per `macos` job
+# executed / tier-only / built-but-untested / not-executed, per `macos` job
 python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
 
 # exit nonzero unless the suite genuinely ran, for use in a script
@@ -2885,7 +2958,10 @@ python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-execute
 ```
 
 It classifies by the steps that actually ran, not by the conclusion, so it
-separates a real pass from a claimed one. It answers only whether the suite
+separates a real pass from a claimed one. Only a `Test (<platform>)` step is
+the suite. A pull-request head that ran only the fast deterministic tier or the
+affected-tests tier reads `tier-only`: the merge queue still runs the suite,
+and `--require-executed` does not accept it. It answers only whether the suite
 ran: an `executed` verdict on a failing job is still `executed`.
 
 ## Attributing a failed batch to the PR that caused it
@@ -3097,10 +3173,12 @@ refresh push cancels and restarts the running `macos` gate, so it costs more
 than the receipt could save. Merge `main` only when the pull request is DIRTY
 or a required check fails because of a stale base.
 
-That full run is evidence, not the pull request's gate: the step is
-`continue-on-error` on pull requests, so a failure there leaves the `macos`
-check meaning build + fast tier, and the `Surface ctest failures` step still
-reports it. That reporter always exits 0 (errexit off, every possibly-empty
+That full run is evidence and, for an armed head, a queue-admission gate: its
+step is not `continue-on-error` when `pr_suite` is `full`, so a failure turns
+the required `macos` check red before the head can enter the queue. Ordinary
+pull-request runs still skip the full step, leaving `macos` as build + fast
+tier. The `Surface ctest failures` step still reports a failed armed run. That
+reporter always exits 0 (errexit off, every possibly-empty
 grep guarded): it runs whenever the Test step's outcome is failure, so a
 non-zero exit from it alone would turn the required check red for a failure
 the workflow deliberately does not gate on. `tools/ci/test_build_matrix_contract.py`
@@ -3365,6 +3443,38 @@ the native build fails closed, because the native leg and the receipt reuse
 both wait on classify; a failing in-job classifier fails closed.
 `tools/ci/test_macos_merge_group_bootstrap.py` runs the script against stub
 results.
+
+On a merge group, the classify job first runs the protected base branch's copy
+of `tools/ci/merge_group_hold_check.py` (fetched from
+`merge_group.base_ref`; the token never reaches a queue entry's code). It reads the group's pull requests from
+the first-parent chain of queue merge commits (each lands its second parent),
+and fails when one's latest trusted verdict on that head is
+`verdict: HOLD head:<sha>` or a CHANGES_REQUESTED review. An APPROVE counts
+only from the fleet App itself, a `Bot` (GraphQL names it `shipyard-local`, a
+login anyone can register as a user, so a user of that name never counts;
+every agent posts verdicts as the App through `ghapp`),
+never from a human account, so a human APPROVE posted after the App's HOLD
+cannot clear it: an agent holding the owner's personal `gh` login posted such
+approvals. A HOLD counts from the fleet App, an OWNER, MEMBER or COLLABORATOR,
+or the pull request's own author. The chain is read one commit at a time and comments and reviews are
+paginated, so a large group or a long pull request is read in full. The failure names the pull request, the HOLD's URL and the
+fix, and a failed classify fails `macos` closed through the bootstrap above,
+before any VM. It is the backstop for a HOLD on a head that was already armed
+or queued, which Shipyard's `verdict-hold-hook` otherwise dequeues or disarms
+when the HOLD posts. It fails closed: anything it cannot read (a commit on
+the chain, a pull request's comments or reviews, a missing token, a failed
+fetch of the base branch) fails the group with an error naming the pull request
+or group, the error and the fix (re-run the classify job, or re-queue). A
+stalled queue is the deliberate lesser harm. Only a base branch that does not
+carry the check yet passes, with a notice.
+
+Who may sign the fleet App's approvals is set in `.shipyard/config.toml`:
+`[auto_merge] reviewer_signers = ["pulp-review", "infra-review2"]`. Every
+agent posts verdicts as the same App, so Shipyard's guards count an App
+`verdict: APPROVE` only with a `reviewer: <name>` line naming one of these, and
+never one `ghapp` stamped with an `unattributed` session. Shipyard's
+server-side `review-verdict` reads the list only from this file and refuses
+every App approval when it is missing, so a new reviewer is added here first.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
@@ -4116,7 +4226,7 @@ The next PR's `resolve-provider` keeps the macOS leg on the local selector.
 gh run view <run-id> --log --repo Generous-Corp/pulp | grep "macOS route"
 ```
 
-**Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in. With Plan B in place, manual rescue should be needed much less frequently.
+**Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`). With Plan B in place, manual rescue should be needed much less frequently.
 
 ### `pulp overflow` — operator surface
 
@@ -4309,7 +4419,9 @@ commands are discoverable from `shipyard --help` and replace the legacy
 ```bash
 # Recover one PR whose required macOS check is wedged or stale
 shipyard rescue <PR>                      # cancel queued runs + redispatch to github-hosted
-shipyard rescue <PR> --rerun-failed       # also re-arm cancelled/failed runs
+shipyard rescue <PR> --rerun-failed       # also dispatch branch-tip replacements of cancelled/failed runs
+                                          # (not reruns: for a required pull_request run, use
+                                          # `ghapp run rerun <run> --failed` instead)
 shipyard rescue <PR> --dry-run            # preview without acting
 shipyard rescue --all-stuck               # repo-wide stuck-run sweep
 shipyard rescue <PR> --to github-hosted   # explicit destination provider
@@ -4412,8 +4524,38 @@ holding the workflow concurrency group, not to Tart capacity. This alert is the
 off-fleet backstop when a current-head run is stranded.
 
 Any failed API read or truncated run listing makes the sweep degraded. A
-degraded sweep suppresses alarms and cannot create, update, reopen, or close the
-tracking issue; absence is not evidence of recovery until a complete sweep.
+degraded sweep suppresses alarms and never closes the tracking issue; absence is
+not evidence of recovery until a complete sweep. There is one exception. On this
+repo the **completed** listing truncates on every sweep, and a truncated
+completed listing can hide only a comparable job that started after the stalled
+one queued and has already finished. It can't hide an in-progress job, because
+in-progress jobs come from their own listing. So when the completed listing's
+truncation is the sweep's only gap, a queued job alarms once it has waited past
+`2 x alarm_minutes` (`TRUNCATED_COMPLETED_ALARM_FACTOR`) with no comparable job
+in progress. That alarm can open, update or reopen the tracker. It can't close
+it.
+
+Before this exception existed, every sweep was degraded, so the watchdog could
+never alarm. A native Intel lane whose only runner had been deleted showed up as
+a `warn` row 322 minutes deep, night after night, and no tracker opened.
+
+**A deaf watchdog is itself an alarm.** A sweep with a gap other than the
+completed-listing exception can't alarm, so it is *blind*. The sweep records that
+by running a `Record blind sweep` step, and the next sweep reads that step back
+from the jobs API, so no state is stored anywhere. When 4 sweeps in a row are
+blind (about two hours), the watchdog opens its own tracker,
+`Queue watchdog blind: <reason>`. The tracker names the gap, such as failing
+reads or truncated listings, along with the likely cause and the fix. The first
+sweep that isn't blind closes it. An unreadable history can delay this alarm but
+can't invent one.
+
+**Org runner census authentication.** Label reconciliation reads
+`orgs/<org>/actions/runners`, which needs Administration: Read on the org. The
+workflow uses `RELEASE_BOT_TOKEN` and falls back to `GITHUB_TOKEN`. When the
+fallback is in effect, the org scope refuses the read, and every
+`runner_census_blind` row says so. The fix is a GitHub App installation token
+that has org self-hosted-runner read, minted in the job with
+`actions/create-github-app-token`. Adding that secret is an owner decision.
 
 The issue is edited in place each sweep and closes automatically on recovery —
 the same open/update/auto-close contract as the release watchdogs (see
@@ -4802,7 +4944,8 @@ around real CI, coverage, sanitizer, or review failures.
 Use `shipyard rescue` when a PR is otherwise ready but blocked by queued,
 cancelled, or failed runner contexts caused by a self-hosted-runner wedge. It is
 the PR-side recovery path and avoids the old failure mode where cancelling
-queued runs left required checks stuck as `failure`.
+queued runs left required checks stuck as `failure`. For a required check, mind
+what it starts (until Shipyard's rescue re-runs `pull_request` runs, it dispatches a branch-tip `workflow_dispatch` replacement, which is the wrong proof for a required check under strict protection; for a required `pull_request` run, `ghapp run cancel <run>` if it is still running, then `ghapp run rerun <run> --failed`).
 
 Use `shipyard runner watch --kill-hung-workers` on the runner host itself. It
 auto-cancels stale queued runs and kills hung `Runner.Worker` processes through
@@ -7418,6 +7561,12 @@ tests did. The GPU-audio SDK upload is a contract downstream consumers rely
 on, so a failed first attempt is retried once after a 90-second pause with
 `overwrite: true` (the reset can land after the artifact record exists), and
 the job still fails if that retry fails.
+The `plugins-<key>` bundles on macOS and the `ios-gate-ok-<digest>` marker
+are also `continue-on-error`. Nothing reads the bundles; they are a download
+for people. A lost iOS marker only makes a later run build the iOS gate again.
+An "Upload progress stalled" on the plugin bundles once ejected a merge batch
+after every test passed. The protected-validation receipt and the A2T
+verification stay failing, because merge decisions read them.
 
 ### The GPU provenance hydration step is bounded
 
@@ -7427,3 +7576,5 @@ all of those fetches a shared 300 s budget and treats a fetch that runs past it 
 an unfetchable ref (a WARN, then its fail-closed ancestry checks decide). The step
 also carries `timeout-minutes: 10`. Before this, a stalled fetch held the required
 `macos` gate for 43 minutes with no output and no build.
+
+<!-- same-base keyed reuse canary probe -->

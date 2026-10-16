@@ -24,6 +24,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable, Sequence
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from release_failure_diagnosis import (  # noqa: E402
+    Diagnosis,
+    diagnose,
+    failing_step_error,
+    release_asset_coordinates,
+)
+
 SEMVER_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # Pulls the tag out of a job name like "Resolve macOS runner — v0.659.0".
 SEMVER_IN_TEXT = re.compile(r"v\d+\.\d+\.\d+")
@@ -38,7 +46,12 @@ LIVE_RUN_STATES = {"queued", "in_progress", "requested", "waiting", "pending"}
 # nothing ever escalating.
 WORKING_RUN_STATES = {"in_progress"}
 
+# The long-lived incident used before stall episodes. An open one is still
+# updated and closed like an episode, so the switch loses nothing in flight.
 INCIDENT_TITLE = "Release reconciler: tags stuck after repeated re-dispatch"
+# One issue per stall episode: opened when a tag first becomes unresolved,
+# updated while anything stays unresolved, closed on recovery, never reopened.
+EPISODE_TITLE_PREFIX = "Release stalled: "
 INCIDENT_LABEL = "release-guard"
 
 
@@ -196,6 +209,13 @@ class TagState:
     # "<job> › <first failed step>" for each failed job of the newest completed
     # run, so an incident names the leg without anyone opening the run.
     failed_legs: tuple[str, ...] = ()
+    # The root-cause failure of the tag's release, explained: first error line,
+    # cause class, exact fix. Taken from the newest run that failed for a reason
+    # OTHER than a mis-targeted re-dispatch, so a broken repair attempt cannot
+    # mask the failure it was meant to repair.
+    diagnoses: tuple[Diagnosis, ...] = ()
+    # Failed jobs of the tag's newest `Sign and Release` run, if it failed.
+    sign_failures: tuple[Diagnosis, ...] = ()
 
     @property
     def circuit_open(self) -> bool:
@@ -433,22 +453,96 @@ def failed_legs(jobs: Iterable[dict]) -> tuple[str, ...]:
     return tuple(legs)
 
 
-def newest_failed_legs(
+# A re-dispatch from the wrong ref fails this guard before building anything.
+# Its failure says nothing about the release; reporting it as the failing leg
+# hid a pinned-asset digest mismatch behind five identical guard failures.
+DISPATCH_GUARD_STEP = "Dispatch must run on the tag it publishes"
+
+
+def _first_failed_step(job: dict) -> str:
+    return next(
+        (st.get("name", "") for st in job.get("steps", [])
+         if st.get("conclusion") == "failure"),
+        "",
+    )
+
+
+def root_cause_run(
     runs: Iterable[dict], job_cache: dict[int, list[dict]]
-) -> tuple[str, ...]:
-    """Failed legs of the newest completed run's latest attempt."""
+) -> tuple[dict | None, list[dict]]:
+    """The newest completed run's failed jobs (latest attempt), preferring one
+    that did not fail only on the dispatch-ref guard."""
     completed = sorted(
         (r for r in runs if r.get("status") == "completed"),
         key=lambda r: r.get("created_at", ""),
         reverse=True,
     )
+    fallback: tuple[dict | None, list[dict]] = (None, [])
     for run in completed:
         jobs = job_cache.get(run["id"], [])
         if not jobs:
             continue
         latest = max(int(j.get("run_attempt", 1)) for j in jobs)
-        return failed_legs(j for j in jobs if int(j.get("run_attempt", 1)) == latest)
-    return ()
+        current = [j for j in jobs if int(j.get("run_attempt", 1)) == latest]
+        failed = [j for j in current if j.get("conclusion") == "failure"]
+        if failed and all(_first_failed_step(j) == DISPATCH_GUARD_STEP for j in failed):
+            if fallback[0] is None:
+                fallback = (run, current)
+            continue
+        return run, current
+    return fallback
+
+
+def newest_failed_legs(
+    runs: Iterable[dict], job_cache: dict[int, list[dict]]
+) -> tuple[str, ...]:
+    """Failed legs of the root-cause run (see `root_cause_run`)."""
+    _, jobs = root_cause_run(runs, job_cache)
+    return failed_legs(jobs)
+
+
+def diagnose_run(
+    workflow: str,
+    tag: str,
+    run: dict | None,
+    jobs: Iterable[dict],
+    log_fetcher: Callable[[int | None], str],
+    *,
+    manifest_text: str = "",
+    upstream_digest: Callable[[str], str | None] = lambda _url: None,
+    limit: int = 3,
+) -> tuple[Diagnosis, ...]:
+    """Explain each failed job of `run` (at most `limit`)."""
+    if run is None:
+        return ()
+    out: list[Diagnosis] = []
+    for job in jobs:
+        if job.get("conclusion") != "failure":
+            continue
+        if len(out) >= limit:
+            break
+        log = log_fetcher(job.get("id"))
+        url_match = re.search(
+            r"url:\s*(https://github\.com/\S+/releases/download/\S+)", log
+        )
+        live = upstream_digest(url_match.group(1)) if url_match else None
+        out.append(
+            diagnose(
+                workflow=workflow, tag=tag,
+                run_url=job.get("html_url") or run.get("html_url", ""),
+                job=job.get("name", "unknown job"), step=_first_failed_step(job),
+                log_text=log, manifest_text=manifest_text, upstream_digest=live,
+            )
+        )
+    return tuple(out)
+
+
+def render_diagnoses(state: "TagState") -> str:
+    """The actionable detail appended under a tag's incident entry."""
+    lines: list[str] = []
+    for diag in (*state.diagnoses, *state.sign_failures):
+        lines.extend(diag.render())
+    return ("\n" + "\n".join(lines)) if lines else ""
 
 
 # ── github i/o ───────────────────────────────────────────────────────────────
@@ -527,15 +621,10 @@ def collect(
         if job_id is None:
             return ""
         if job_id not in log_cache:
-            try:
-                completed = subprocess.run(
-                    ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
-                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, text=True, timeout=60, check=False,
-                )
-                log_cache[job_id] = completed.stdout if completed.returncode == 0 else ""
-            except (subprocess.SubprocessError, OSError):
-                log_cache[job_id] = ""
+            text, error = fetch_job_log(repo, job_id)
+            if error:
+                print(f"  job {job_id}: log not fetched — {error}")
+            log_cache[job_id] = text
         return log_cache[job_id]
     for r in flat_runs:
         if not needs_job_details(r):
@@ -565,6 +654,37 @@ def collect(
                 break
         dispatch_tag[r["id"]] = found
 
+    # Sign and Release runs once per tag push, independently of Release CLI. A
+    # failure there never stops release-cli from publishing, so it is invisible
+    # to every published/unpublished check and has to be looked for directly.
+    sign_runs = gh_json(
+        [
+            "api", "--paginate", "--slurp",
+            f"repos/{repo}/actions/workflows/sign-and-release.yml/runs"
+            f"?per_page=100&event=push&created=%3E%3D{created}",
+        ]
+    )
+    flat_sign_runs = [r for page in sign_runs for r in page["workflow_runs"]]
+
+    manifest_text = read_pin_file()
+    digest_cache: dict[str, str | None] = {}
+
+    def upstream_digest(url: str) -> str | None:
+        """The digest the upstream release asset carries right now."""
+        if url not in digest_cache:
+            digest_cache[url] = None
+            coords = release_asset_coordinates(url)
+            if coords:
+                owner_repo, rel_tag, asset = coords
+                try:
+                    rel = gh_json(["api", f"repos/{owner_repo}/releases/tags/{rel_tag}"])
+                    for a in (rel or {}).get("assets", []):
+                        if a.get("name") == asset and a.get("digest"):
+                            digest_cache[url] = a["digest"].removeprefix("sha256:")
+                except (subprocess.CalledProcessError, ValueError):
+                    pass
+        return digest_cache[url]
+
     states: list[TagState] = []
     for tag, created_at in tags:
         tag_runs = [
@@ -572,6 +692,22 @@ def collect(
             if runs_this_tag(r, tag, dispatch_tag.get(r["id"]))
         ]
         rel = by_tag.get(tag)
+        root_run, root_jobs = root_cause_run(tag_runs, job_cache)
+        diagnoses = diagnose_run(
+            "Release CLI", tag, root_run, root_jobs, log_fetcher,
+            manifest_text=manifest_text, upstream_digest=upstream_digest,
+        )
+        sign_failures = sign_and_release_failures(
+            repo, tag, flat_sign_runs, log_fetcher,
+            manifest_text=manifest_text, upstream_digest=upstream_digest,
+        )
+        # An upstream-confirmed pinned-asset digest mismatch is a fact about the
+        # tag's tree: re-dispatching it would rebuild the whole matrix to fail
+        # the same fetch. Open the circuit instead.
+        immutable = tuple(
+            f"{d.job}: {d.cause} (tag-immutable; the upstream asset changed bytes)"
+            for d in diagnoses if d.tag_immutable
+        )
         states.append(
             TagState(
                 tag=tag,
@@ -584,6 +720,8 @@ def collect(
                 run_states=tuple(r["status"] for r in tag_runs),
                 validation_failures=latest_validation_failures(
                     tag_runs, job_cache, log_fetcher=log_fetcher
+                ) + immutable + repeated_package_failures(
+                    tag_runs, job_cache, log_fetcher
                 ),
                 # A tag push produces one `push` run; every run beyond that is a
                 # re-dispatch, ours or a human's.
@@ -591,9 +729,55 @@ def collect(
                     1 for r in tag_runs if r["event"] == "workflow_dispatch"
                 ),
                 failed_legs=newest_failed_legs(tag_runs, job_cache),
+                diagnoses=diagnoses,
+                sign_failures=sign_failures,
             )
         )
     return states
+
+
+def read_pin_file(path: str = "tools/deps/manifest.json") -> str:
+    """The pin file on the checked-out tree (main), for fix line numbers."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
+def sign_and_release_failures(
+    repo: str,
+    tag: str,
+    runs: Iterable[dict],
+    log_fetcher: Callable[[int | None], str],
+    **kwargs,
+) -> tuple[Diagnosis, ...]:
+    """Explain the tag's newest Sign and Release run, if it failed."""
+    newest = max(
+        (r for r in runs if r.get("head_branch") == tag),
+        key=lambda r: r.get("created_at", ""),
+        default=None,
+    )
+    if not newest or newest.get("status") != "completed" or newest.get("conclusion") != "failure":
+        return ()
+    try:
+        result = gh_json(
+            ["api", f"repos/{repo}/actions/runs/{newest['id']}/jobs?per_page=100"]
+        )
+        jobs = (result or {}).get("jobs", [])
+    except subprocess.CalledProcessError:
+        jobs = []
+    found = diagnose_run("Sign and Release", tag, newest, jobs, log_fetcher, **kwargs)
+    if found:
+        return found
+    # The run failed but no job did (e.g. the workflow file was rejected):
+    # still report it rather than read the failure as healthy.
+    return (
+        diagnose(
+            workflow="Sign and Release", tag=tag, run_url=newest.get("html_url", ""),
+            job="(no failed job)", step="(none)", log_text="",
+        ),
+    )
 
 
 def needs_job_details(run: dict) -> bool:
@@ -721,16 +905,21 @@ def runs_this_tag(run: dict, tag: str, dispatch_tag: str | None = None) -> bool:
 
 
 def redispatch(repo: str, tag: str, dry_run: bool) -> None:
-    """Rebuild and republish `tag` from the CURRENT workflow on main.
+    """Rebuild and republish `tag` from the tag itself.
 
-    `--ref main` runs main's (fixed) workflow file; `version=<tag>` makes it
-    check out and build the TAG's source. `make_latest=true` only *permits* the
-    latest pointer — release-cli's finalizer still refuses to move
-    /releases/latest backward, so this is safe for an out-of-order backfill.
+    `--ref <tag>` is required: release-cli's "Dispatch must run on the tag it
+    publishes" guard refuses any dispatch whose run commit is not the tag
+    commit, because the build provenance would otherwise name a different
+    commit than the one consumers pin. A dispatch from `main` therefore fails
+    in seconds without building anything — and, worse, its failure used to be
+    reported as the tag's failing leg, hiding the real cause. If the tag's own
+    workflow is broken, the fix is a new tag, not a dispatch from `main`.
+    `make_latest=true` only *permits* the latest pointer — release-cli's
+    finalizer still refuses to move /releases/latest backward.
     """
     cmd = [
         "gh", "workflow", "run", "release-cli.yml",
-        "--repo", repo, "--ref", "main",
+        "--repo", repo, "--ref", tag,
         "-f", f"version={tag}",
         "-f", "make_latest=true",
     ]
@@ -741,34 +930,139 @@ def redispatch(repo: str, tag: str, dry_run: bool) -> None:
     print(f"    re-dispatched release-cli for {tag}")
 
 
-def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> None:
-    """Maintain exactly ONE incident issue across its whole lifecycle.
+# Job logs carry ANSI colour codes. Newer gh refuses to print a response that
+# contains terminal escape sequences unless told to, and exits 1 — which the
+# runner's gh started doing while this host's older gh did not. Every log then
+# read as "", so no failure could be classified and every tag-immutable
+# circuit stayed shut. Ask for the bytes; fall back for a gh too old to know
+# the flag.
+_ALLOW_ESCAPES = "--allow-escape-sequences"
 
-    Deliberately not one-issue-per-tag-per-run: that pattern produced 413 issues in
-    two weeks. Three things make "one issue" actually hold, all of which the old
-    release-health.yml got wrong:
 
-      - The title is CONSTANT — no counts, no tag names. release-health embedded an
-        escalating count, so its issues were not even title-identical to each other.
-      - The label EXISTS. release-health labeled with `release-health`, which is
-        not a label in this repo; the labeled create failed, an unlabelled create
-        fell through, and its own dedupe (filtered by that label) could never find
-        what it had filed.
-      - The lookup searches `--state all` and REOPENS. Searching only open issues
-        means every recurrence after a recovery mints a fresh issue, which is just
-        the firehose with extra steps.
+def fetch_job_log(
+    repo: str, job_id: int, *, run: "Callable[..., subprocess.CompletedProcess]" = None
+) -> tuple[str, str]:
+    """Return (log text, "") or ("", why it could not be fetched).
+
+    A failure is returned, never swallowed: an unfetched log means "no
+    evidence", and the caller must be able to say so rather than report
+    "no error line in the job log" for a log it never saw.
     """
+    run = run or subprocess.run
+    base = ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"]
+    error = ""
+    for cmd in ([*base, _ALLOW_ESCAPES], base):
+        try:
+            completed = run(
+                cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                timeout=60, check=False,
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            return "", f"{exc!r}"[:300]
+        if completed.returncode == 0:
+            return completed.stdout, ""
+        error = (completed.stderr or "").strip()[:300] or f"gh exited {completed.returncode}"
+        if _ALLOW_ESCAPES not in error and "unknown flag" not in error:
+            break
+    return "", error
+
+
+# A `Package CLI` step that fails the same way on two separate runs of one tag
+# will keep failing until something changes: the build inputs are frozen in the
+# tag, and a dispatched run's packager is main's copy (release-cli.yml overlays
+# it), which a sweep cannot tell has been fixed. Re-dispatching unchanged only
+# repeats the result — v0.963.0 to v0.965.0 each failed `Package CLI (Unix)` with
+# "wgpu native library not found" and were re-dispatched hourly, seven ~2-hour
+# matrices, before the packager fix reached main. So an identical repeat opens
+# the circuit: the incident names the error, a human (or a redrive) dispatches
+# once after the fix lands, and a passing run clears it. One failure stays on
+# the retry path, since a runner can die mid-package.
+PACKAGE_STEP_PREFIX = "Package CLI"
+
+
+def repeated_package_failures(
+    runs: Iterable[dict],
+    job_cache: dict[int, list[dict]],
+    log_fetcher: Callable[[int | None], str],
+) -> tuple[str, ...]:
+    """Signatures of package failures that repeated across runs of one tag."""
+    seen: dict[tuple[str, str, str], set[int]] = {}
+    for run in runs:
+        if run.get("status") != "completed":
+            continue
+        jobs = job_cache.get(run["id"], [])
+        if not jobs:
+            continue
+        latest = max(int(j.get("run_attempt", 1)) for j in jobs)
+        for job in jobs:
+            if int(job.get("run_attempt", 1)) != latest or job.get("conclusion") != "failure":
+                continue
+            step = _first_failed_step(job)
+            if not step.startswith(PACKAGE_STEP_PREFIX):
+                continue
+            # Only an error inside the failing step is evidence. Without one
+            # (no log, or a step that was lost or cancelled) two failures cannot be shown
+            # to be the same, so the tag stays on the retry path.
+            first = failing_step_error(log_fetcher(job.get("id")))
+            if not first:
+                continue
+            seen.setdefault((job.get("name", "unknown job"), step, first), set()).add(run["id"])
+    return tuple(
+        f"{job}: {step} failed identically on {len(ids)} runs of this tag — {first} "
+        "(re-running unchanged cannot help; land the fix on main, then dispatch once)"
+        for (job, step, first), ids in sorted(seen.items())
+        if len(ids) >= 2
+    )
+
+
+def episode_title(report: list[tuple[str, str]], now: datetime) -> str:
+    """Name a stall episode after its oldest unresolved tag and its start date."""
+    tags = [tag for tag, _ in report]
+    oldest = min(tags, key=lambda t: version_of(t) or (0,))
+    return f"{EPISODE_TITLE_PREFIX}{oldest} unpublished ({now:%Y-%m-%d})"
+
+
+def is_incident(issue: dict) -> bool:
+    title = issue.get("title", "")
+    return title == INCIDENT_TITLE or title.startswith(EPISODE_TITLE_PREFIX)
+
+
+def sync_incident(
+    repo: str, report: list[tuple[str, str]], dry_run: bool, *, now: datetime | None = None
+) -> None:
+    """Keep exactly one OPEN incident per stall episode.
+
+    A stall that began yesterday must read as news. The previous design kept one
+    issue for the reconciler's whole lifetime and reopened it: #6880 had been
+    reopened and closed many times since July, so its reopen for v0.963.0 at
+    2026-10-13 22:31Z read as routine and a stuck release went unnoticed for
+    hours. Now:
+
+      - A new episode (nothing open) creates a NEW issue whose title names the
+        oldest unresolved tag and the date. A closed issue is never reopened.
+      - While an episode is open it is edited in place, with one comment per
+        tag that joins it, so the issue count stays one per episode, not one
+        per sweep or per tag (release-health once filed 413 in two weeks).
+      - The label exists and is part of the lookup, and only OPEN issues match,
+        so the lookup cannot mint a duplicate during an episode.
+    """
+    now = now or datetime.now(timezone.utc)
     found = gh_json(
         [
-            "issue", "list", "--repo", repo, "--state", "all", "--limit", "50",
-            "--label", INCIDENT_LABEL, "--search", f"in:title {INCIDENT_TITLE}",
+            "issue", "list", "--repo", repo, "--state", "open", "--limit", "50",
+            "--label", INCIDENT_LABEL, "--search", "in:title Release",
             "--json", "number,title,state",
         ]
     )
-    match = next((i for i in found if i["title"] == INCIDENT_TITLE), None)
+    match = next(
+        (i for i in found or []
+         if is_incident(i) and i.get("state", "").lower() == "open"),
+        None,
+    )
 
     if not report:
-        if match and match["state"].lower() == "open" and not dry_run:
+        if match and not dry_run:
             subprocess.run(
                 ["gh", "issue", "close", str(match["number"]), "--repo", repo,
                  "--comment", "Every recent tag is published and complete. Closing."],
@@ -777,13 +1071,25 @@ def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> No
             print(f"  closed incident #{match['number']} — all clear")
         return
 
-    body = (
-        "Tags the release reconciler could not get published on its own: each "
-        "one exhausted its retry budget, failed in a way a rebuild cannot fix, "
-        "or is still unpublished long after it was cut. Every entry names the "
-        "release legs that failed.\n\n"
-        + "\n".join(f"- `{tag}` — {why}" for tag, why in report)
-        + "\n\nOpen the failing `release-cli.yml` run and land the fix on `main`. "
+    body = incident_body(report)
+    if dry_run:
+        title = match["title"] if match else episode_title(report, now)
+        print(f"  DRY RUN: would report {len(report)} unresolved tag(s) as {title!r}")
+        print("  DRY RUN: incident body follows\n" + body)
+        return
+    _write_incident(repo, match, report, body, episode_title(report, now))
+
+
+# GitHub rejects an issue body over 65,536 characters, and a rejected edit fails
+# every sweep. Stay well under it.
+INCIDENT_BODY_LIMIT = 60_000
+# The newest tags keep their full diagnosis; older ones get one line each.
+INCIDENT_FULL_ENTRIES = 5
+_ENTRY_DETAIL_LIMIT = 8_000
+_SUMMARY_LIMIT = 240
+
+_INCIDENT_FOOTER = (
+    "\n\nOpen the failing `release-cli.yml` run and land the fix on `main`. "
         "A product-validation circuit stays open until a later run passes the "
         "failed gate: manually dispatch the repaired workflow for the same tag "
         "when a pipeline overlay can fix it, or ship a new patch tag when product "
@@ -792,33 +1098,123 @@ def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> No
         "in place by "
         "`.github/workflows/release-reconcile.yml`; it closes itself once every "
         "recent tag is published and complete."
-    )
-    if dry_run:
-        print(f"  DRY RUN: would report {len(report)} unresolved tag(s)")
-        return
+)
+_INCIDENT_HEADER = (
+    "Tags the release reconciler could not get published on its own: each "
+    "one exhausted its retry budget, failed in a way a rebuild cannot fix, "
+    "or is still unpublished long after it was cut. Every entry names the "
+    "release legs that failed.\n\n"
+)
+
+
+def incident_body(
+    report: list[tuple[str, str]],
+    *,
+    full_entries: int = INCIDENT_FULL_ENTRIES,
+    limit: int = INCIDENT_BODY_LIMIT,
+) -> str:
+    """Render the incident, bounded so GitHub always accepts the edit.
+
+    `report` is newest-first. The newest `full_entries` tags keep their full
+    diagnosis (each still capped); older tags collapse to one line. If even
+    that overflows, the oldest one-liners are folded into a single line that
+    still names every tag, so `newly_reported` never mistakes them for new.
+    """
+    entries: list[str] = []
+    for index, (tag, why) in enumerate(report):
+        if index < full_entries:
+            text = why if len(why) <= _ENTRY_DETAIL_LIMIT else (
+                why[:_ENTRY_DETAIL_LIMIT].rsplit("\n", 1)[0]
+                + "\n  - _(diagnosis truncated; open the linked run)_"
+            )
+        else:
+            first = why.split("\n", 1)[0]
+            text = first if len(first) <= _SUMMARY_LIMIT else first[:_SUMMARY_LIMIT] + "…"
+            text += " _(older tag: summarised)_"
+        entries.append(f"- `{tag}` — {text}")
+
+    def assemble(kept: list[str], folded: list[str]) -> str:
+        lines = list(kept)
+        if folded:
+            lines.append("- older tags folded to save space: "
+                         + ", ".join(f"`{t}`" for t in folded))
+        return _INCIDENT_HEADER + "\n".join(lines) + _INCIDENT_FOOTER
+
+    kept, folded = entries, []
+    body = assemble(kept, folded)
+    while len(body) > limit and len(kept) > min(full_entries, len(kept)) and len(kept) > 1:
+        kept = kept[:-1]
+        folded = [report[len(kept)][0]] + folded
+        body = assemble(kept, folded)
+    return body
+
+
+def _write_incident(
+    repo: str, match: dict | None, report: list[tuple[str, str]], body: str, title: str
+) -> None:
     if match:
+        # Editing a long-open issue notifies nobody, which is how five broken
+        # releases sat in an already-open incident unnoticed. Comment whenever
+        # a tag joins the incident, so each new failure is an event.
+        previous = gh_json(
+            ["issue", "view", str(match["number"]), "--repo", repo, "--json", "body"]
+        )
+        new_tags = newly_reported((previous or {}).get("body", ""), report)
         subprocess.run(
             ["gh", "issue", "edit", str(match["number"]), "--repo", repo,
              "--body", body],
             check=True,
         )
-        if match["state"].lower() != "open":
+        if new_tags:
             subprocess.run(
-                ["gh", "issue", "reopen", str(match["number"]), "--repo", repo],
+                ["gh", "issue", "comment", str(match["number"]), "--repo", repo,
+                 "--body", "Newly unresolved: "
+                 + ", ".join(f"`{t}`" for t in new_tags)
+                 + ". Each entry in the issue body names the failing run, job and "
+                 "step, the first error line, the cause class, the fix, and how "
+                 "to verify it."],
                 check=True,
             )
-            print(f"  reopened incident #{match['number']}")
         print(f"  updated incident #{match['number']} ({len(report)} unresolved)")
     else:
         subprocess.run(
-            ["gh", "issue", "create", "--repo", repo, "--title", INCIDENT_TITLE,
+            ["gh", "issue", "create", "--repo", repo, "--title", title,
              "--body", body, "--label", INCIDENT_LABEL],
             check=True,
         )
-        print(f"  opened incident ({len(report)} unresolved)")
+        print(f"  opened incident {title!r} ({len(report)} unresolved)")
 
 
-def main() -> int:
+_TAG_IN_ENTRY = re.compile(r"`(v\d+\.\d+\.\d+)`")
+
+
+def newly_reported(previous_body: str, report: list[tuple[str, str]]) -> list[str]:
+    """Tags in `report` that the incident body did not already list.
+
+    Only column-0 entry lines count (indented diagnosis lines mention tags in
+    commands); an entry's own tag comes first, and the folded line lists many.
+    """
+    seen: set[str] = set()
+    for line in previous_body.splitlines():
+        if line.startswith("- older tags folded"):
+            seen.update(_TAG_IN_ENTRY.findall(line))
+        elif line.startswith("- `"):
+            found = _TAG_IN_ENTRY.search(line)
+            if found:
+                seen.add(found.group(1))
+    return [tag for tag, _ in report if tag not in seen]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--tag", action="append", default=[],
+        help="Evaluate only these tags (repeatable). Implies a dry run that "
+             "prints the incident body; for reproducing a past incident.",
+    )
+    args = parser.parse_args(argv if argv is not None else [])
     repo = os.environ["REPO"]
     dry_run = os.environ.get("DRY_RUN", "false") == "true"
     grace = int(os.environ.get("GRACE_MINUTES", "45"))
@@ -830,7 +1226,13 @@ def main() -> int:
     # Look slightly further back for RUNS than for tags: a tag at the edge of the
     # window may have been built by a run that started before it.
     since = now - timedelta(hours=max_age + 24)
-    states = collect(repo, sdk_tags(max_age, now), since)
+    if args.tag:
+        dry_run = True
+        tags = [(t, tag_created_at(t)) for t in args.tag]
+        since = min(created for _, created in tags) - timedelta(hours=24)
+    else:
+        tags = sdk_tags(max_age, now)
+    states = collect(repo, tags, since)
     if not states:
         print("No SDK tags in the reconciliation window.")
         return 0
@@ -887,9 +1289,9 @@ def main() -> int:
                 report.append((state.tag, f"{dry_spell}; re-dispatching"))
             if budget <= 0:
                 print("    (deferred — re-dispatch budget for this sweep is spent)")
-                continue
-            budget -= 1
-            redispatch(repo, state.tag, dry_run)
+            else:
+                budget -= 1
+                redispatch(repo, state.tag, dry_run)
         elif decision.action in (CIRCUIT_OPEN, ESCALATE, INCOMPLETE, STUCK_QUEUE):
             reason = decision.reason
             if decision.action != INCOMPLETE and state.failed_legs:
@@ -912,11 +1314,30 @@ def main() -> int:
         elif dry_spell:
             report.append((state.tag, dry_spell))
 
+        if state.sign_failures and not superseded(state.tag, newest_published):
+            if not any(tag == state.tag for tag, _ in report):
+                report.append((state.tag, "`Sign and Release` failed for this tag"))
+
+    # Every entry carries its root-cause explanation, so the incident says what
+    # to change and how to verify it without anyone opening a log.
+    by_tag = {s.tag: s for s in states}
+    report = [(tag, why + render_diagnoses(by_tag[tag])) if tag in by_tag else (tag, why)
+              for tag, why in report]
     sync_incident(repo, report, dry_run)
     # Reporting a problem is not itself a failure — exiting non-zero here would
     # just mint another red X for the watchdogs to shout about.
     return 0
 
 
+def tag_created_at(tag: str) -> datetime:
+    out = subprocess.run(
+        ["git", "for-each-ref", "--format=%(creatordate:iso-strict)", f"refs/tags/{tag}"],
+        capture_output=True, text=True, encoding="utf-8", check=True,
+    ).stdout.strip()
+    if not out:
+        raise SystemExit(f"release_reconcile: unknown tag {tag} (fetch tags first)")
+    return parse_ts(out)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

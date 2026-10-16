@@ -193,10 +193,23 @@ pub struct LockedPackage {
     pub version: String,
     /// Resolved upstream URL.
     pub resolved: String,
-    /// Optional integrity hash (left empty by the C++ writer today).
+    /// `sha256-<hex>` of the deterministic archive of `commit`
+    /// (see [`crate::pkg::pin`]). Empty only in locks written before
+    /// packages were pinned.
+    #[serde(default)]
     pub integrity: String,
-    /// Git commit / tag that version maps to.
+    /// Full 40-hex commit the version maps to. Older locks may hold the
+    /// registry tag here instead.
+    #[serde(default)]
     pub commit: String,
+    /// SPDX license id recorded when the package was added.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub license: String,
+    /// How a non-allowed license was accepted at add time:
+    /// `accept-license:<SPDX>` or `commercial`. Absent when no override
+    /// was needed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub license_acceptance: String,
 }
 
 /// Walk up from `start` and return the Pulp project root — either a
@@ -557,6 +570,7 @@ mod tests {
                 resolved: "https://example.com/alac.git".to_owned(),
                 integrity: String::new(),
                 commit: "master".to_owned(),
+                ..LockedPackage::default()
             },
         );
         save_lock(&p, &lock).unwrap();

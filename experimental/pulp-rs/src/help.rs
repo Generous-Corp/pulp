@@ -232,6 +232,10 @@ pub const SCRIPT_COMMANDS: &[Entry] = &[
         summary: "Local-first CI across configured hosts",
     },
     Entry {
+        name: "deps",
+        summary: "Toolchain pins: check, resolve, update (tools/toolchain/manifest.toml)",
+    },
+    Entry {
         name: "harness",
         summary: "Catalog-driven coverage harness (compat.json verifier)",
     },

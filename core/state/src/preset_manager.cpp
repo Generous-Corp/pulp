@@ -1,5 +1,4 @@
 #include <pulp/state/preset_manager.hpp>
-#include <pulp/state/content_registry.hpp>
 #include <pulp/runtime/system.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cmath>
@@ -84,7 +83,7 @@ PresetManager::PresetManager(StateStore& store, const std::string& manufacturer,
     // all — so this class cannot resolve it. It stays empty (factory_presets()
     // then finds nothing) until a caller supplies it through
     // set_factory_presets_dir(); the AU adapters derive it from the loaded
-    // binary in pulp::format::au::FactoryPresetTable.
+    // binary in the format adapter's factory-preset table implementation.
     factory_dir_.clear();
 }
 
@@ -332,7 +331,8 @@ std::vector<PresetInfo> PresetManager::user_presets() const {
 }
 
 std::vector<PresetInfo> PresetManager::content_presets() const {
-    if (content_plugin_id_.empty()) return {};
+    if (content_plugin_id_.empty() || !content_source_)
+        return {};
     if (!content_kinds_.empty() && !contains_string(content_kinds_, "presets")) return {};
 
     ContentCapabilityManifest manifest;
@@ -341,10 +341,12 @@ std::vector<PresetInfo> PresetManager::content_presets() const {
     manifest.content_kinds = content_kinds_.empty() ? std::vector<std::string>{"presets"}
                                                     : content_kinds_;
 
-    ContentRegistry registry(content_data_root_.empty()
-                                 ? ContentRegistry::platform_data_root()
-                                 : content_data_root_);
-    return registry.presets_for_plugin(manifest);
+    return content_source_(manifest, content_data_root_);
+}
+
+void PresetManager::set_content_preset_source(ContentPresetSource source) {
+    content_source_ = std::move(source);
+    cache_valid_ = false;
 }
 
 void PresetManager::set_content_plugin_id(std::string plugin_id) {

@@ -109,6 +109,49 @@ TEST_CASE("cmake build parallel args preserve lower explicit user cap") {
     REQUIRE(plan.args == std::vector<std::string>{"--parallel", "2"});
 }
 
+TEST_CASE("one-shot governed builds preserve targets, configuration, paths and failures") {
+#ifdef _WIN32
+    SKIP("POSIX executable stub is required for this command receipt");
+#else
+    const auto scratch = pulp::test::make_unique_temp_dir("pulp-governed-one-shot-");
+    const auto stub_dir = scratch / "stub";
+    const auto args_receipt = scratch / "args.txt";
+    const auto jobs_receipt = scratch / "jobs.txt";
+    fs::create_directories(stub_dir);
+    {
+        std::ofstream stub(stub_dir / "cmake");
+        stub << "#!/bin/sh\n"
+                "printf '%s\\n' \"$@\" > \"$PULP_TEST_CMAKE_ARGS\"\n"
+                "printf '%s\\n' \"$PULP_BUILD_JOBS\" > \"$PULP_TEST_CMAKE_JOBS\"\n"
+                "exit \"$PULP_TEST_CMAKE_EXIT\"\n";
+    }
+    fs::permissions(stub_dir / "cmake", fs::perms::owner_all, fs::perm_options::replace);
+    ScopedEnvVar path("PATH", stub_dir.string() + ":" + env_or_empty("PATH"));
+    ScopedEnvVar leases_off("PULP_TARTCI_LEASES", std::string{"0"});
+    ScopedEnvVar lock_off("PULP_BUILD_DIR_LOCK", std::string{"0"});
+    ScopedEnvVar jobs("PULP_BUILD_JOBS", std::string{"2"});
+    ScopedEnvVar capture_args("PULP_TEST_CMAKE_ARGS", args_receipt.string());
+    ScopedEnvVar capture_jobs("PULP_TEST_CMAKE_JOBS", jobs_receipt.string());
+    const auto build_dir = scratch / "build with spaces";
+    const std::vector<std::string> args{"--target", "ExampleTest", "--config", "Release"};
+    {
+        ScopedEnvVar exit_code("PULP_TEST_CMAKE_EXIT", std::string{"0"});
+        REQUIRE(run_governed_cmake_build(scratch, build_dir, args, "pulp create",
+                                         GovernedBuildOutput::Quiet) == 0);
+    }
+    REQUIRE(read_file(args_receipt) ==
+            "--build\n" + build_dir.string() +
+                "\n--target\nExampleTest\n--config\nRelease\n--parallel\n2\n");
+    REQUIRE(read_file(jobs_receipt) == "2\n");
+    {
+        ScopedEnvVar exit_code("PULP_TEST_CMAKE_EXIT", std::string{"19"});
+        REQUIRE(run_governed_cmake_build(scratch, build_dir, args, "pulp project bump",
+                                         GovernedBuildOutput::Quiet) == 19);
+    }
+    fs::remove_all(scratch);
+#endif
+}
+
 TEST_CASE("cmake build parallel parser handles compact forms") {
     auto dash_j = cap_cmake_build_parallel_args({"-j12"}, 8);
     REQUIRE(dash_j.jobs == 8);

@@ -295,7 +295,7 @@ class ProtectedLinuxFallbackTests(unittest.TestCase):
         checkout = next(
             step
             for step in self.linux["steps"]
-            if step.get("uses") == "actions/checkout@v5"
+            if step.get("uses") == "actions/checkout@v7"
         )
         checkout_ref = " ".join(checkout["with"]["ref"].split())
         self.assertIn(
@@ -529,7 +529,10 @@ class TartMacosWorkflowPrerequisiteTests(unittest.TestCase):
 
     def test_gpu_audio_macos_installs_and_uses_discovered_chrome(self) -> None:
         macos = job(self.web_plugins, "gpu-audio-macos")
-        self.assertIn("uses: browser-actions/setup-chrome@v1", macos)
+        self.assertRegex(
+            macos,
+            r"uses: browser-actions/setup-chrome@[0-9a-f]{40} # v2\.2\.0",
+        )
         self.assertIn("id: chrome-macos", macos)
         self.assertEqual(
             macos.count(

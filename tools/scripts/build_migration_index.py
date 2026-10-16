@@ -233,6 +233,144 @@ def semver_key(version: str) -> tuple[int, int, int]:
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 
+# ── applies_if: the same mini-language the CLI evaluates ────────────────────
+#
+# expr := and ("||" and)* ; and := cmp ("&&" cmp)* ;
+# cmp  := ident op version | "(" expr ")"
+# ident := cli_version_from | cli_version_to ; op := < <= > >= == !=
+# The runtime treats anything else as "never applies", so a note whose
+# expression does not parse would silently never be shown.
+
+_TOKEN_RE = re.compile(r"\s*(\(|\)|&&|\|\||<=|>=|==|!=|<|>|[vV]?\d+\.\d+\.\d+|[A-Za-z_]\w*)")
+
+
+class AppliesIfError(ValueError):
+    pass
+
+
+def _tokens(expr: str) -> list[str]:
+    out, pos = [], 0
+    while pos < len(expr):
+        if expr[pos:].strip() == "":
+            break
+        m = _TOKEN_RE.match(expr, pos)
+        if not m:
+            raise AppliesIfError(f"unexpected text at {expr[pos:]!r}")
+        out.append(m.group(1))
+        pos = m.end()
+    return out
+
+
+def evaluate_applies_if(expr: str, version_from: str, version_to: str) -> bool:
+    """Evaluate `expr` for one upgrade hop; raises AppliesIfError when it
+    does not parse (the runtime would then never apply the note)."""
+    toks = _tokens(expr)
+    pos = 0
+    values = {"cli_version_from": semver_key(version_from), "cli_version_to": semver_key(version_to)}
+    ops = {"<": lambda a, b: a < b, "<=": lambda a, b: a <= b, ">": lambda a, b: a > b,
+           ">=": lambda a, b: a >= b, "==": lambda a, b: a == b, "!=": lambda a, b: a != b}
+
+    def peek():
+        return toks[pos] if pos < len(toks) else None
+
+    def take():
+        nonlocal pos
+        if pos >= len(toks):
+            raise AppliesIfError("unexpected end of expression")
+        pos += 1
+        return toks[pos - 1]
+
+    def parse_or():
+        value = parse_and()
+        while peek() == "||":
+            take()
+            rhs = parse_and()
+            value = value or rhs
+        return value
+
+    def parse_and():
+        value = parse_cmp()
+        while peek() == "&&":
+            take()
+            rhs = parse_cmp()
+            value = value and rhs
+        return value
+
+    def parse_cmp():
+        tok = take()
+        if tok == "(":
+            value = parse_or()
+            if take() != ")":
+                raise AppliesIfError("missing ')'")
+            return value
+        if tok not in values:
+            raise AppliesIfError(f"unknown identifier {tok!r}")
+        op = take()
+        if op not in ops:
+            raise AppliesIfError(f"unknown operator {op!r}")
+        ver = take()
+        if not SEMVER_RE.match(ver):
+            raise AppliesIfError(f"not a version: {ver!r}")
+        return ops[op](values[tok], semver_key(ver))
+
+    value = parse_or()
+    if pos != len(toks):
+        raise AppliesIfError(f"trailing tokens {toks[pos:]!r}")
+    return value
+
+
+def _predecessor(version: str) -> str:
+    major, minor, patch = semver_key(version)
+    if patch:
+        return f"{major}.{minor}.{patch - 1}"
+    if minor:
+        return f"{major}.{minor - 1}.999999"
+    return f"{max(major - 1, 0)}.999999.999999"
+
+
+FILENAME_VERSION_RE = re.compile(r"^v?(\d+\.\d+\.\d+)$")
+
+# The only `applies_if` a note may carry: the half-open interval of hops that
+# cross its own version. Probing an expression at a few hops cannot prove it
+# selects nothing else (an `||` arm can add any unrelated range), so the shape
+# is fixed instead.
+CANONICAL_APPLIES_IF_RE = re.compile(
+    r"^\s*cli_version_from\s*<\s*(\d+\.\d+\.\d+)\s*&&\s*"
+    r"cli_version_to\s*>=\s*(\d+\.\d+\.\d+)\s*$")
+
+
+def check_entry_consistency(entry: "Entry") -> None:
+    """A note must describe the release it is filed under. Two ways it can
+    silently not: a `vX.Y.Z.md` file whose `version` names another release,
+    and an `applies_if` that does not select exactly the hops crossing that
+    version (the note would show for the wrong upgrade or never). The latter
+    is enforced by shape: only the canonical single interval is accepted, and
+    it is still evaluated at the boundary hops as a second check."""
+    path = entry.source_path
+    own = semver_key(entry.version)
+    name = FILENAME_VERSION_RE.match(path.stem)
+    if name and semver_key(name.group(1)) != own:
+        _fatal(path, f"file name says {name.group(1)} but `version` is {entry.version!r}; "
+                     "rename the file or fix the version")
+    if not entry.applies_if:
+        return
+    canonical = f"cli_version_from < {entry.version} && cli_version_to >= {entry.version}"
+    shape = CANONICAL_APPLIES_IF_RE.match(entry.applies_if)
+    if not shape or {shape.group(1), shape.group(2)} != {entry.version}:
+        _fatal(path, f"`applies_if` must be exactly {canonical!r} (the hops crossing "
+                     f"{entry.version}, and nothing else); got {entry.applies_if!r}")
+    try:
+        crosses = evaluate_applies_if(entry.applies_if, "0.0.0", entry.version)
+        before = evaluate_applies_if(entry.applies_if, "0.0.0", _predecessor(entry.version))
+    except AppliesIfError as error:
+        _fatal(path, f"`applies_if` does not parse ({error}); the CLI would never show this note")
+    if not crosses:
+        _fatal(path, f"`applies_if` does not select an upgrade that crosses {entry.version}")
+    if before:
+        _fatal(path, f"`applies_if` selects an upgrade that ends before {entry.version} "
+                     f"(to {_predecessor(entry.version)}); it should apply only to hops crossing {entry.version}")
+
+
 # ── C++ codegen ─────────────────────────────────────────────────────────────
 
 
@@ -342,7 +480,9 @@ def main(argv: list[str]) -> int:
     for md in sorted(docs_dir.glob("*.md")):
         if md.name.lower() == "readme.md":
             continue
-        entries.append(load_entry(md))
+        entry = load_entry(md)
+        check_entry_consistency(entry)
+        entries.append(entry)
 
     entries.sort(key=lambda e: semver_key(e.version))
 

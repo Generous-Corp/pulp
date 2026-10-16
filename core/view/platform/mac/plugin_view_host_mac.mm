@@ -1409,9 +1409,9 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     if (self.onWindowChange) self.onWindowChange();
     if (self.window) {
         // Accept dragged files/text so the editor's drop targets work when hosted
-        // in a DAW (the NSDraggingDestination behavior lives in drag_drop_mac.mm).
-        // Without this, drag-drop worked only in the standalone PulpView.
-        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
+        // in a DAW (the NSDraggingDestination behavior lives in
+        // plugin_view_host_mac_drag.mm).
+        pulp::view::mac_host::register_hosted_drag_types(self);
         // The hover tracking area installed in -updateTrackingAreas carries
         // NSTrackingMouseMoved, but a tracking area only fans -mouseMoved: out to
         // its owner when the window itself accepts mouse-moved events, and NSWindow
@@ -1597,12 +1597,15 @@ public:
     }
     void start_render_link() {
         if (!render_link_.open(&render_link_callback, this)) return;
-        render_link_.resume();
         // A frame driver is now running, so drag motion may be HELD until the
         // next presented frame. The opt-in belongs to "a driver is running",
         // not to this function — see the flush in render_link_callback, which
         // is the only thing that releases it.
         [view_ setCoalescePointerInput:YES];
+        // Arm coalescing before the display link can deliver its first tick.
+        // Resuming first creates a race where that callback sees coalescing
+        // disabled and dispatches the initial drag burst one event at a time.
+        render_link_.resume();
         if (const float nominal = render_link_.nominal_dt(); nominal > 0.0f) {
             frame_pump_.set_nominal_dt(nominal);
         }
@@ -2274,8 +2277,9 @@ private:
     if (self.onWindowChange) self.onWindowChange();
     if (self.window) {
         // Accept dragged files/text when hosted in a DAW (drop dispatch lives in
-        // drag_drop_mac.mm) — same as the CPU host above and the standalone PulpView.
-        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
+        // plugin_view_host_mac_drag.mm) — same as the CPU host above and the
+        // standalone PulpView.
+        pulp::view::mac_host::register_hosted_drag_types(self);
         // Opt the host-owned window into mouse-moved delivery so the hover tracking
         // area's -mouseMoved: -> simulate_hover path fires in a hosted editor. See
         // the identical note in PulpPluginView above: a tracking area only receives

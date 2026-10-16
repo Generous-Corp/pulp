@@ -139,6 +139,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     struct AdapterIdentity {
         std::string name;
         std::string backend;
+        // Native runtime identity is observed independently from AdapterInfo.
         std::string native_runtime_name;
         std::string native_runtime_revision;
         std::uint32_t vendor_id = 0;
@@ -170,6 +171,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     void poll() noexcept override;
     bool device_lost() const noexcept override;
     bool drain() noexcept override;
+    bool can_resume_after_drain() const noexcept override;
     bool gpu_elapsed_ns(SlotToken token, std::uint64_t& elapsed) const noexcept override;
 
     std::uint32_t alignment() const noexcept;

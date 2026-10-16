@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261014-mise-phase2-deps-update-watch",
+  "created_at": "2026-10-14T15:27:15Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Adds the pulp deps script command (C++ and Rust command tables, docs/status/cli-commands.yaml, docs/reference/cli.md, the tooling disposition map as pulp-owned) that delegates to tools/toolchain/deps.py for Pulp's own build-toolchain pins. It reads and reports host tool versions, fetches pinned dependency sources through the existing setup.sh --deps-only, and edits the toolchain manifest on request. No design-import, Chromium, rendering, or packaging authority moves; no design output or package format changes.",
+  "tests": [
+    "python3 tools/scripts/test_install_shipyard_queue_repair.py",
+    "python3 tools/toolchain/test_check_env.py",
+    "python3 tools/toolchain/test_generate.py",
+    "python3 tools/toolchain/test_update.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -291,5 +291,74 @@ class SurfaceCtestFailuresStepTests(unittest.TestCase):
         self.assertIn("No ctest result log", summary)
 
 
+class MergeGroupAdvisoryLegTests(unittest.TestCase):
+    """Only advisory legs may tolerate failure, and only in a merge group.
+
+    The build matrix's job-level `continue-on-error` keeps a red advisory Linux
+    leg from turning a merge-group run's conclusion to `failure` while every
+    required check is green. The required `macos` child must never be covered:
+    that is the negative control, and the case that would let a real required
+    failure read as a passing run. PR and push conclusions stay unchanged.
+    """
+
+    EVENTS = ("merge_group", "pull_request", "push", "workflow_dispatch")
+    KEYS = ("macos", "linux", "windows")
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        lines = BUILD_YML.read_text(encoding="utf-8").splitlines()
+        start = lines.index("  build:")
+        end = next(
+            i
+            for i in range(start + 1, len(lines))
+            if re.match(r"^  [A-Za-z0-9_-]+:\s*$", lines[i])
+        )
+        found = [
+            line.split(":", 1)[1].strip()
+            for line in lines[start:end]
+            if line.startswith("    continue-on-error:")
+        ]
+        cls.found = found
+
+    def _evaluate(self, event: str, key: str) -> bool:
+        (raw,) = self.found
+        match = re.fullmatch(r"\$\{\{(.*)\}\}", raw)
+        self.assertIsNotNone(match, f"continue-on-error is not an expression: {raw}")
+        expression = match.group(1)
+        allowed = re.fullmatch(
+            r"[\s()!=&|'a-z_.]*", expression
+        )
+        self.assertIsNotNone(allowed, f"unexpected tokens in {expression!r}")
+        python = (
+            expression.replace("&&", " and ")
+            .replace("||", " or ")
+            .replace("github.event_name", repr(event))
+            .replace("matrix.key", repr(key))
+        )
+        return bool(eval(python, {"__builtins__": {}}, {}))  # noqa: S307
+
+    def test_exactly_one_job_level_continue_on_error(self) -> None:
+        self.assertEqual(len(self.found), 1, self.found)
+
+    def test_required_macos_leg_is_never_covered(self) -> None:
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                self.assertFalse(self._evaluate(event, "macos"))
+
+    def test_advisory_legs_are_covered_only_in_merge_groups(self) -> None:
+        for event in self.EVENTS:
+            for key in ("linux", "windows"):
+                with self.subTest(event=event, key=key):
+                    self.assertEqual(
+                        self._evaluate(event, key), event == "merge_group"
+                    )
+
+    def test_required_leg_key_matches_the_matrix_builder(self) -> None:
+        # The expression keys on the literal the matrix builder assigns to the
+        # required leg; renaming one without the other would cover macOS.
+        text = BUILD_YML.read_text(encoding="utf-8")
+        self.assertIn('"key": "macos",', text)
+
+
 if __name__ == "__main__":
     unittest.main()

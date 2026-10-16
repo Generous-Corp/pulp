@@ -63,7 +63,7 @@ Partial repaint is opportunistic: it costs nothing and changes nothing unless a
 widget opts in by calling `request_repaint(rect)` with the sub-rect it repaints,
 **including any halo it draws** (a meter's peak-hold overscan, a glow). Rect-less
 `repaint()` keeps the full-frame behavior. See the built-in meters
-(`core/view/src/widgets/visualizers.cpp`) for the overscan pattern.
+(`core/view/audio/src/widgets/visualizers.cpp`) for the overscan pattern.
 
 ## Interaction with subtree caching
 

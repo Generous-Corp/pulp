@@ -774,10 +774,13 @@ TEST_CASE("S4 exposure row and example retain the existing authority boundaries"
     const auto automation =
         read_text(source_root / "core/host/src/timeline_automation_delivery.cpp");
     const auto graph = read_text(source_root / "core/host/src/signal_graph.cpp");
+    const auto graph_authoring =
+        read_text(source_root / "core/host/src/signal_graph_authoring.cpp");
     REQUIRE_FALSE(row.empty());
     REQUIRE_FALSE(example.empty());
     REQUIRE_FALSE(automation.empty());
     REQUIRE_FALSE(graph.empty());
+    REQUIRE_FALSE(graph_authoring.empty());
 
     CHECK(row.find("S4 timeline automation reaches an authored ProcessorNode") !=
           std::string::npos);
@@ -790,9 +793,11 @@ TEST_CASE("S4 exposure row and example retain the existing authority boundaries"
     CHECK(example.find("parameter 2901") != std::string::npos);
     CHECK(example.find("same Processor rather than") != std::string::npos);
     CHECK(automation.find("validate_timeline_automation_routes") != std::string::npos);
-    CHECK(graph.find("connect_audio_rate_modulation") != std::string::npos);
+    CHECK(graph_authoring.find("connect_audio_rate_modulation") != std::string::npos);
     CHECK(graph.find("serialize_project") == std::string::npos);
     CHECK(graph.find("StateStore") == std::string::npos);
+    CHECK(graph_authoring.find("serialize_project") == std::string::npos);
+    CHECK(graph_authoring.find("StateStore") == std::string::npos);
     CHECK(automation.find("serialize_project") == std::string::npos);
     CHECK(automation.find("StateStore") == std::string::npos);
 }

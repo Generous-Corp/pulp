@@ -2,10 +2,11 @@
 #include <pulp/view/design_export.hpp>
 #include <pulp/view/design_tokens_w3c.hpp>
 #include <pulp/view/design_fidelity_ledger.hpp>
-#include <pulp/view/recognition_resolver.hpp>
+#include <pulp/view/recognition_audio_pack.hpp> // also RecognitionResolver
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/editor_bridge.hpp>
 #include <pulp/view/inspector.hpp>
 #include <choc/text/choc_JSON.h>
 #include <pulp/view/script_engine.hpp>
@@ -23,6 +24,7 @@
 #include "import_design_cli_help.hpp"
 #include "render_artifact_path.hpp"
 #include "sprite_skins.hpp"
+#include "zip_entry_policy.hpp"
 #include <miniz.h>
 // getpid() is POSIX-only via <unistd.h>; MSVC ships an equivalent
 // `_getpid` declaration in <process.h>. Wrap both to keep the
@@ -566,8 +568,10 @@ std::string current_utc_timestamp() {
 
 // Per-stage timing breakdown printed on a successful import — struct and
 // formatters live in import_timing.hpp; main() only stamps the boundaries.
-using pulp::import_design::StageTimings;
 using pulp::import_design::format_import_timing_line;
+using pulp::import_design::StageTimings;
+using pulp::import_design::unsafe_zip_entry_reason;
+using pulp::import_design::ZipMemberSet;
 
 ImportDiagnostic make_cli_diagnostic(ImportDiagnosticSeverity severity,
                                      ImportDiagnosticKind kind,
@@ -1335,6 +1339,7 @@ extract_pulp_zip_if_present(const std::string& input_file,
     }
     std::uint64_t total_uncompressed = 0;
     std::string scene_candidate;
+    ZipMemberSet members;
     for (mz_uint i = 0; i < n; ++i) {
         // mz_zip_reader_get_filename truncates silently when name_buf is
         // too small. A malicious archive can stuff a 2-KB entry name like
@@ -1385,37 +1390,16 @@ extract_pulp_zip_if_present(const std::string& input_file,
             return out;
         }
 
-        // Path-safety: refuse anything that could escape temp_dir.
-        // (a) `..` anywhere — catches `a/../../etc/x` and trailing `..`.
-        // (b) entry that resolves absolute under std::filesystem rules —
-        //     catches POSIX `/foo`, Windows `C:\foo`, UNC `\\srv\sh\x`,
-        //     and any platform-specific oddity we'd otherwise miss.
-        // (c) Windows drive-relative `C:foo` — `is_absolute()` does NOT
-        //     consider this absolute on Linux (where this CLI parses
-        //     archives Windows authors may have produced), so guard
-        //     explicitly: any entry whose second character is `:` after
-        //     a single alphabetic drive letter.
-        bool unsafe = false;
-        const char* unsafe_reason = "";
-        if (entry_name.find("..") != std::string::npos) {
-            unsafe = true; unsafe_reason = "contains '..'";
-        } else if (fs::path(entry_name).is_absolute()) {
-            unsafe = true; unsafe_reason = "absolute path";
-        } else if (entry_name.size() >= 2 &&
-                   ((entry_name[0] >= 'A' && entry_name[0] <= 'Z') ||
-                    (entry_name[0] >= 'a' && entry_name[0] <= 'z')) &&
-                   entry_name[1] == ':') {
-            unsafe = true; unsafe_reason = "drive-relative Windows path";
-        } else if (!entry_name.empty() &&
-                   (entry_name[0] == '/' || entry_name[0] == '\\')) {
-            // Belt + braces — `is_absolute()` on macOS / Linux already
-            // catches `/`, but this also covers `\foo` on a Unix host
-            // where fs::path treats `\` as a regular character.
-            unsafe = true; unsafe_reason = "leading slash";
-        }
-        if (unsafe) {
-            std::cerr << "Error: refusing unsafe zip entry (" << unsafe_reason
+        if (auto unsafe_reason = unsafe_zip_entry_reason(entry_name)) {
+            std::cerr << "Error: refusing unsafe zip entry (" << *unsafe_reason
                       << "): " << entry_name << "\n";
+            mz_zip_reader_end(&zip);
+            return out;
+        }
+        if (auto earlier = members.claim(entry_name)) {
+            std::cerr << "Error: refusing ZIP " << input_file << ": duplicate zip member '"
+                      << entry_name << "' lands on the same file as '" << *earlier
+                      << "', so which one is imported is ambiguous\n";
             mz_zip_reader_end(&zip);
             return out;
         }
@@ -3011,7 +2995,7 @@ int main(int argc, char* argv[]) {
     // overridden). Unmatched-but-present component instances are surfaced as an
     // import diagnostic — never guessed into a wrong kind.
     if (*source == DesignSource::figma_plugin || *source == DesignSource::figma) {
-        auto resolver = pulp::view::RecognitionResolver::with_builtin_library();
+        auto resolver = pulp::view::recognition_resolver_with_builtin_library();
         if (!recognition_manifest_path.empty()) {
             const std::string manifest_json = read_file(recognition_manifest_path);
             if (manifest_json.empty()) {

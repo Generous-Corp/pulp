@@ -934,6 +934,30 @@ it does not disable overflow. See
 [local-ci.md](../guides/local-ci.md#pulp-overflow-operator-surface) for the
 exact repository variables and rollback notes.
 
+### deps
+
+**Status**: experimental (Pulp source checkouts)
+
+The toolchain pins that build Pulp itself, in `tools/toolchain/manifest.toml`.
+Delegates to `tools/toolchain/deps.py`.
+
+```bash
+pulp deps check                       # every host tool that differs, with the fix
+pulp deps check --format github       # ::warning:: annotations for Actions
+pulp deps resolve                     # fetch what a build needs, once, then report
+pulp deps update cmake --to 4.3.4     # move one pin and print what changed
+pulp deps update shipyard --to v0.270.0
+```
+
+`check` exits 0 when everything matches or the manifest is in warn mode, 1 for a
+difference in enforce mode, and 3 when it cannot read the expected versions.
+`resolve` runs `setup.sh --deps-only`, then `npm ci` for each lockfile directory
+whose `node_modules` differs, then `check`; it never installs a host tool and
+names the command that does. `update` regenerates the mise lock with the pinned
+mise (found from the manifest, or `--mise <path>`), never commits, pushes or
+installs, and restores every file if a step fails. See
+[mise](../guides/mise.md#checking-your-environment).
+
 ### ci-local
 
 **Status**: legacy (prefer [Shipyard](https://github.com/danielraffel/Shipyard))
@@ -3114,6 +3138,8 @@ pulp add dr-libs --no-cmake                        # metadata only, skip CMake w
 
 Performs license checking, platform compatibility analysis, overlap detection, CMake generation (`cmake/pulp-packages.cmake`), and updates `packages.lock.json`, `DEPENDENCIES.md`, and `NOTICE.md`. Restricted licenses require `--accept-license <SPDX>` after review. `--license-override commercial` is a project-owned assertion that separate commercial terms cover a package the registry policy would otherwise block.
 
+Before writing anything, `pulp add` pins the package: the registry tag is resolved to a full commit and the lock records that `commit`, an `integrity` (`sha256-` digest of `git ls-tree -r -z --full-tree <commit>`, independent of git configuration, attributes and clone depth), the `license`, and any `license_acceptance`. A package that cannot be pinned is not added. The generated CMake fetches by that commit and stops the configure unless the checkout's `HEAD` is that commit, its working tree is clean, and its tree digest matches. See [the package guide](../guides/packages/README.md#lock-file) for the exact method.
+
 ### remove
 
 **Status**: usable
@@ -3161,9 +3187,11 @@ the default text output.
 Check for and apply package updates.
 
 ```bash
-pulp update            # dry-run: show available updates
-pulp update --apply    # apply updates and regenerate CMake
+pulp update            # dry-run: show available updates and unpinned lock entries
+pulp update --apply    # re-pin (new commit + integrity) and regenerate CMake
 ```
+
+A lock entry written before packages were pinned (registry tag in `commit`, empty `integrity`) counts as needing an update. A package that cannot be re-pinned keeps its entry and the command exits 1.
 
 ### suggest
 

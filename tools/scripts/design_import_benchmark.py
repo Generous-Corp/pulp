@@ -34,6 +34,14 @@ DEFAULT_LIVE_RUNTIME_OBJECTS = [
 ]
 
 BAKED_LANES = ("baked-native", "baked-cpp")
+COUNTER_FIELDS = (
+    "bridge_calls",
+    "layout_passes",
+    "paint_calls",
+    "paint_commands_total",
+    "invalidation_requests",
+    "unmarked_paint_mutations",
+)
 
 
 def now_utc() -> str:
@@ -269,7 +277,26 @@ def run_lane(
     ]
     subprocess.run(cmd, check=True, timeout=timeout_s, env=no_launch_env())
     with out_path.open(encoding="utf-8") as fh:
-        return json.load(fh)
+        report = json.load(fh)
+    validate_lane_counters(report)
+    return report
+
+
+def validate_lane_counters(report: dict[str, Any]) -> None:
+    """Fail closed if a v1 lane omits the additive deterministic counters."""
+    for phase_name in ("idle", "interactive"):
+        phase = report.get(phase_name)
+        if not isinstance(phase, dict):
+            raise ValueError(f"benchmark lane missing phase {phase_name}")
+        counters = phase.get("counters")
+        if not isinstance(counters, dict):
+            raise ValueError(f"benchmark lane missing {phase_name}.counters")
+        if counters.get("counter_schema") != "pulp-design-import-benchmark-counters-v1":
+            raise ValueError(f"benchmark lane has invalid {phase_name}.counters.counter_schema")
+        for field in COUNTER_FIELDS:
+            value = counters.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"benchmark lane has invalid {phase_name}.counters.{field}")
 
 
 def delta_ratio(after: float | int | None, before: float | int | None) -> float | None:
@@ -406,6 +433,24 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"{format_bytes(data.get('rss_p99_bytes', 0))} | "
                 f"{format_bytes(data.get('rss_peak_bytes', 0))} | "
                 f"{data.get('js_evaluations_total', 0)} |"
+            )
+
+    lines.extend([
+        "",
+        "## Deterministic Work Counters",
+        "",
+        "| Phase | Lane | Bridge calls | Layout passes | Paint calls | Paint commands | Invalidation requests | Unmarked paint mutations |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
+    ])
+    for phase in ("idle", "interactive"):
+        for name in lane_order:
+            counters = lanes[name].get(phase, {}).get("counters", {})
+            lines.append(
+                f"| {phase} | {name} | {counters.get('bridge_calls', 0)} | "
+                f"{counters.get('layout_passes', 0)} | {counters.get('paint_calls', 0)} | "
+                f"{counters.get('paint_commands_total', 0)} | "
+                f"{counters.get('invalidation_requests', 0)} | "
+                f"{counters.get('unmarked_paint_mutations', 0)} |"
             )
 
     lines.extend([

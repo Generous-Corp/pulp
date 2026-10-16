@@ -1,4 +1,5 @@
 #include <pulp/gpu_audio/gpu_convolver.hpp>
+#include <pulp/render/gpu_compute.hpp>
 #include <pulp/runtime/trace.hpp>
 
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
@@ -24,6 +25,16 @@
 #include <utility>
 
 namespace pulp::gpu_audio {
+
+bool GpuConvolver::gpu_available() const {
+    return gpu_ != nullptr || has_realtime_shared_io();
+}
+
+std::string GpuConvolver::backend() const {
+    return gpu_                       ? gpu_->capabilities().backend
+           : has_realtime_shared_io() ? std::string("Metal")
+                                      : std::string();
+}
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #ifndef PULP_GPU_AUDIO_EXPECTED_DAWN_SHA

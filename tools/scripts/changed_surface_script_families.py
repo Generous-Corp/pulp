@@ -674,7 +674,12 @@ def main(argv: list[str]) -> int:
         print(f"changed-surface script families: SKIP: {args.build_dir} has no CMake file-API "
               "codemodel reply (touch .cmake/api/v1/query/codemodel-v2 and reconfigure)")
         return SKIP_EXIT
-    off_profile = outside_gate_profile(args.build_dir)
+    try:
+        tests = inventory.load_ctest_json(args.build_dir)
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"changed-surface script families: cannot read CTest inventory: {error}", file=sys.stderr)
+        return 2
+    off_profile = outside_gate_profile(args.build_dir, tests)
     if off_profile:
         # The environment-bound family lists every declared test the configure
         # registers, so a build the gate does not make writes a file the gate
@@ -682,8 +687,11 @@ def main(argv: list[str]) -> int:
         # gate-profile build may write or judge it.
         reasons = "; ".join(off_profile)
         if args.write:
-            print(f"changed-surface script families: refusing to write {FAMILIES_FILE} from a build "
-                  f"that is not the gate's: {reasons}. Regenerate from a gate-profile configure.",
+            print(f"changed-surface script families: refusing to write file={FAMILIES_FILE}; "
+                  f"cause_class=INCOMPLETE_CONFIGURE; evidence={reasons}; "
+                  "fix=`pulp build --clean`; safe_to_auto_apply=no; "
+                  "verify=`python3 tools/scripts/changed_surface_script_families.py "
+                  "--build-dir <gate-build> --check` after regeneration.",
                   file=sys.stderr)
             return 2
         print(f"changed-surface script families: SKIP: {args.build_dir} is not a gate-profile "
@@ -691,7 +699,6 @@ def main(argv: list[str]) -> int:
         return SKIP_EXIT
     try:
         current = families_path.read_text(encoding="utf-8") if families_path.is_file() else ""
-        tests = inventory.load_ctest_json(args.build_dir)
         model = inventory.load_codemodel_targets(args.build_dir)
         updated = render(generate(root, tests, model))
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, GenerationError) as error:
@@ -708,12 +715,29 @@ def main(argv: list[str]) -> int:
     fix = ("regenerate with\n  python3 tools/scripts/changed_surface_script_families.py "
            "--build-dir <dir> --write")
     base = script_test_inputs.resolve_base(root, args.base)
+    removed = globally_removed_registered_tests(root, base, current, updated)
+    if removed:
+        print("changed-surface script families: file=" + str(FAMILIES_FILE) +
+              "; cause_class=REMOVED_BASE_ENTRY; test=" + ",".join(removed) +
+              "; evidence=tests remain registered on main and current CTest output but are absent "
+              "from the committed inventory; fix=`pulp build --clean`; safe_to_auto_apply=no; "
+              "verify=`python3 tools/scripts/changed_surface_script_families.py --build-dir "
+              "<gate-build> --check`", file=sys.stderr)
+        print("This is always blocking on pull-request heads; regenerate from a complete "
+              "gate-profile configure.", file=sys.stderr)
+        if not script_test_inputs.advisory_here():
+            return 1
     touched = sorted(script_test_inputs.changed_files(root, base)) if base else None
     if touched is not None and not any(blocks_on(path) for path in touched):
-        print(f"changed-surface script families: note: {FAMILIES_FILE} drifted, but this change touches "
-              f"none of its inputs; the next change to a mapped surface must {fix}")
+        print(f"changed-surface script families: file={FAMILIES_FILE}; cause_class=ADVISORY_DRIFT; "
+              f"evidence=generated family mapping differs but this change touches none of its inputs; "
+              f"fix={fix}; safe_to_auto_apply=no; verify=`python3 tools/scripts/changed_surface_script_families.py "
+              "--build-dir <gate-build> --check`")
         return 0
-    print(f"changed-surface script families drifted in {FAMILIES_FILE}; {fix}", file=sys.stderr)
+    print(f"changed-surface script families: file={FAMILIES_FILE}; cause_class=INVENTORY_DRIFT; "
+          f"evidence=generated family mapping differs; fix={fix}; safe_to_auto_apply=no; "
+          "verify=`python3 tools/scripts/changed_surface_script_families.py --build-dir <gate-build> --check`",
+          file=sys.stderr)
     for line in describe_drift(current, updated)[:12]:
         print(f"  {line}", file=sys.stderr)
     if script_test_inputs.advisory_here():
@@ -723,12 +747,12 @@ def main(argv: list[str]) -> int:
     return 1
 
 
-def outside_gate_profile(build_dir: Path) -> list[str]:
+def outside_gate_profile(build_dir: Path, tests: dict | None = None) -> list[str]:
     """Why this build registers a different test set from the required gate's
     configure: script_test_inputs' gate-profile switches (the one rule both
     generated manifests share) and another platform. Empty for a gate-profile
     build."""
-    reasons = script_test_inputs.outside_gate_profile_build(build_dir)
+    reasons = script_test_inputs.outside_gate_profile_build(build_dir, tests)
     platform = script_test_inputs.outside_gate_platform(build_dir)
     if platform:
         reasons.append(platform)
@@ -759,6 +783,34 @@ def describe_drift(current: str, regenerated: str) -> list[str]:
             added, dropped = sorted(new[path] - old[path]), sorted(old[path] - new[path])
             lines.append(f"{path}: readers +{added[:3]} -{dropped[:3]}")
     return lines
+
+
+def family_tests(text: str) -> set[str]:
+    """Return the tests represented by a generated families file."""
+    import tomllib
+    try:
+        body = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return set()
+    return {test for family in body.get("families", [])
+            for test in family.get("tests", [])}
+
+
+def globally_removed_registered_tests(root: Path, base: str | None,
+                                      committed: str, regenerated: str) -> list[str]:
+    """Find tests still represented on main and current CTest output but
+    absent from the committed generated inventory, independent of diff paths."""
+    if not base:
+        return []
+    try:
+        proc = subprocess.run(["git", "-C", str(root), "show", f"{base}:{FAMILIES_FILE.as_posix()}"],
+                              capture_output=True, text=True, encoding="utf-8", check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    baseline = family_tests(proc.stdout)
+    current = family_tests(regenerated)
+    present = family_tests(committed)
+    return sorted((baseline & current) - present)
 
 
 def blocks_on(path: str) -> bool:

@@ -3,7 +3,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/hot_reload.hpp>
 #include <pulp/view/script_engine.hpp>
-#include <pulp/view/script_inspector_bridge.hpp>
+#include <pulp/view/script_inspector_port.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -166,6 +166,12 @@ public:
     /// already knows. See WidgetBridge::set_host_kind.
     void set_host_kind(std::string kind);
     const std::string& host_kind() const { return host_kind_; }
+    /// The clock script timers and performance.now() read (see
+    /// WidgetBridge::set_time_source). Kept by the session and applied to
+    /// every realm a load or reload builds, so a harness driving frames from
+    /// a fixed schedule keeps that clock across hot reloads. Empty restores
+    /// the steady clock.
+    void set_time_source(WidgetBridge::TimeSource source);
     /// Install the host-owned rebind run after a successful deferred
     /// Runtime.evaluate realm reset. The callback runs from poll(), after the
     /// replacement bridge is live and before that bridge pumps a frame. Hosts
@@ -212,20 +218,25 @@ public:
         return bridge_ ? bridge_->granted_capabilities() : granted_capabilities_;
     }
 
-    /// The runtime-inspector bridge for this session's JS engine. Always
-    /// present (even before load()); it tracks the live engine across hot
-    /// reloads and is pumped once per poll(). A host passes it to the separately
-    /// linked make_script_runtime_evaluator() adapter, retains that adapter, and
-    /// lends the adapter to DomainHandler::set_runtime_evaluator() so the
-    /// Runtime.* methods reach the live UI.
+    /// The runtime-inspector port for this session's JS engine, or nullptr. A
+    /// session carries one when a port factory was installed
+    /// (set_script_inspector_port_factory) before it was constructed; it then
+    /// tracks the live engine across hot reloads and is pumped once per poll().
+    /// Pulp's port is ScriptInspectorBridge: pulp::view::script_inspector()
+    /// returns it, and a host passes that to the separately linked
+    /// make_script_runtime_evaluator() adapter, retains the adapter, and lends
+    /// it to DomainHandler::set_runtime_evaluator() so the Runtime.* methods
+    /// reach the live UI.
     ///
-    /// TEARDOWN CONTRACT: the bridge is owned by (and lives as long as) this
+    /// TEARDOWN CONTRACT: the port is owned by (and lives as long as) this
     /// session, but its off-thread methods are called from a control router
     /// reader thread. A host that wires it MUST, before destroying this session,
     /// stop that reader thread, clear DomainHandler's evaluator pointer, and
     /// destroy the retained evaluator before this session, so no background
-    /// call dereferences the bridge post-destruction.
-    ScriptInspectorBridge* script_inspector() { return &inspector_bridge_; }
+    /// call dereferences the port post-destruction.
+    ScriptInspectorPort* script_inspector_port() {
+        return inspector_port_.get();
+    }
     /// Process-unique identity for borrowed-source lifetime/ABA checks.
     std::uint64_t identity() const noexcept { return identity_; }
 
@@ -315,11 +326,13 @@ private:
         std::make_shared<RuntimeRealmTeardownOwner>();
     // Marshals off-thread inspector evaluate/interrupt requests onto the engine
     // thread. Re-attached to the live engine after every rebuild_from_code().
-    ScriptInspectorBridge inspector_bridge_;
+    // Null when no port factory was installed at construction.
+    std::unique_ptr<ScriptInspectorPort> inspector_port_;
     std::unique_ptr<HotReloader> reloader_;
     bool root_released_ = false;
     std::function<void()> repaint_callback_;
     std::string host_kind_ = "unknown";
+    WidgetBridge::TimeSource time_source_;
     std::function<void()> post_evaluation_reset_callback_;
     bool post_evaluation_reset_callback_pending_ = false;
     LogCallback log_callback_;
@@ -344,9 +357,9 @@ private:
     std::optional<std::filesystem::file_time_type> last_theme_write_time_;
 
     bool rebuild_from_code(
-        const std::string& code, const std::filesystem::path& source_path,
-        bool preserve_state, std::string* error,
-        std::optional<ScriptInspectorBridge::EvaluationDeadline> deadline = std::nullopt);
+        const std::string& code, const std::filesystem::path& source_path, bool preserve_state,
+        std::string* error,
+        std::optional<ScriptInspectorPort::EvaluationDeadline> deadline = std::nullopt);
     bool apply_theme_override(std::string* error);
     // Read + parse the sibling theme override onto `base` WITHOUT mutating any
     // live state — the FALLIBLE half of a theme apply, split out so a reload can
@@ -356,8 +369,15 @@ private:
                                 std::optional<std::filesystem::file_time_type>& out_write_time,
                                 std::string* error) const;
     bool poll_theme_reload(std::string* error);
-    std::string reset_after_runtime_evaluation(
-        ScriptInspectorBridge::EvaluationDeadline deadline);
+    void attach_inspector_port(ScriptEngine* engine) {
+        if (inspector_port_)
+            inspector_port_->attach(engine);
+    }
+    void detach_inspector_port() {
+        if (inspector_port_)
+            inspector_port_->detach();
+    }
+    std::string reset_after_runtime_evaluation(ScriptInspectorPort::EvaluationDeadline deadline);
     LogCallback engine_log_callback();
     void install_native_message_handlers(ScriptEngine& engine,
                                          bool validation_realm) const;

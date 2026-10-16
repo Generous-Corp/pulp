@@ -649,6 +649,15 @@ there. CLAP is the only one of the four whose spec names a restart.
 `CLAP_PRESET_DISCOVERY_LOCATION_FILE` is honoured; bundle- and plugin-
 internal preset sources are ignored and return false.
 
+The adapter installs no content-preset source on that `PresetManager` and sets
+no content plugin id, so it lists no installed content-pack presets. pulp-state
+carries no content-pack reader (`pulp-state-symbol-closure` enforces it), and
+pulp-format links no pulp-content: `pulp-format-*-symbol-closure` and the plugin
+link floors (`tools/cmake/PulpLinkFloor.cmake`) fail if an adapter calls into
+`ContentRegistry` again. Code that wants content-pack presets links
+pulp-content and installs `state::content_registry_preset_source()` together
+with a plugin id on a `PresetManager` it configures.
+
 ### Remote controls and dynamic extension routing
 
 `clap_entry.hpp::get_extension(plugin, id)` handles static extensions first,

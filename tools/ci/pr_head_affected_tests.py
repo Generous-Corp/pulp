@@ -22,7 +22,13 @@ with the Shipyard changed-surface families), plus these rules:
     or any ctest registration under `test/` reaches `wide-non-native-selftest`;
   * `pr-fast` members already ran and are left out;
   * the extra time is capped: tests run in batches, no batch starts once the
-    budget is spent, and every test that did not run is listed as skipped.
+    budget is spent, and every test that did not run is listed as skipped;
+  * merge-only checks (selected because the diff changes their declared
+    inputs, adds or edits their registration, or by a path family) run first,
+    then the tests built from the sources the diff edits. If the budget still pushes one
+    out, the step fails, because nothing else runs it before the merge group.
+    An ordinary affected test the budget pushes out is deferred to the merge
+    queue, which runs the full suite, and the step stays neutral.
 
 A failing script-driven test is re-run from a checkout of the base; when every
 test it fails also fails there, main was already red and the failure is
@@ -31,9 +37,10 @@ Compiled tests are never exempted (their binary is this pull request's).
 
 Output: one `::notice title=pr-head-affected-tests::` JSON line
 (`pulp-pr-head-affected-tests/v1`) with the counts and minutes, then any
-failures. Exit 1 when a selected test failed because of this pull request, 0
-otherwise (including when nothing was selected), 2 when an input could not be
-read.
+failures. Exit 1 when a selected test failed because of this pull request or a
+selected merge-only check was skipped for budget, 0 otherwise (including when
+nothing was selected or only ordinary affected tests were deferred), 2 when an
+input could not be read.
 """
 
 from __future__ import annotations
@@ -54,6 +61,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
 
 import affected_targets  # noqa: E402
+import build_time_report  # noqa: E402
 import changed_surface_inventory as inventory  # noqa: E402
 import cmake_registration_impact as registration_impact  # noqa: E402
 
@@ -86,6 +94,16 @@ PATH_FAMILIES = (
                 r"|tools/scripts/gpu_audio_provider_identity\.py|tools/deps/manifest\.json"
                 r"|test/cmake/verify_gpu_audio_provider\w*\.cmake)$"),
      re.compile(r"^pulp-gpu-(audio-provider-identity|host-mapped-pointer-|dawn-shared-io-provider-)")),
+    # The iOS control-shipping probe is a cmake-driven fixture, so its source
+    # files are invisible to the Python input inventory. Keep edits to the
+    # fixture and its registration connected to the test on PR heads.
+    ("ios-auv3-control-shipping",
+     re.compile(r"^(test/cmake/(cmake_smoke_tests\.cmake|test_ios_auv3_control_shipping\.cmake)|"
+                r"test/fixtures/ios-auv3-control-shipping/.*)$"),
+     re.compile(r"^cmake-ios-auv3-control-shipping$")),
+    ("no-editor-link-floor",
+     re.compile(r"^test/fixtures/no_editor_link_floor/"),
+     re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
 )
 
 
@@ -221,6 +239,87 @@ def own_tests(build: Path, root: Path, paths: list[str]) -> list[str]:
                    if any(os.path.normpath(c) in artifacts for c in e.command)})
 
 
+# A diff reaches only a handful of test executables through a CMake or
+# dependency edge. A larger rebuilt set means the directory, not the diff,
+# drove the build: a cold or reconfigured directory, or a warm one last used
+# for another branch or an older main. Those rebuild every executable that
+# differs, and the step must not widen to the suite on their account.
+REBUILT_EXECUTABLE_CAP = 8
+
+
+def rebuilt_binary_tests(build: Path, why: list[str] | None = None) -> list[str]:
+    """Tests whose executable was rebuilt by the current Ninja invocation.
+
+    Source projection misses tests whose binary is rebuilt through a CMake or
+    dependency edge, which is exactly how a rebuilt migration-index test was
+    omitted from a PR head. Ninja's latest log invocation is the build's own
+    ground truth for outputs actually produced. Map those executable outputs
+    back through the CTest command inventory.
+
+    The rebuilt set is bound to this diff only when it is narrow: none when
+    the build system was regenerated during this build, and none when more
+    than REBUILT_EXECUTABLE_CAP executables were rebuilt. ``why`` receives the
+    reason when the set is dropped.
+    """
+    why = why if why is not None else []
+    log = build / ".ninja_log"
+    build_start = build / ".pulp-build-start"
+    if not log.is_file() or not build_start.is_file() or not inventory.codemodel_reply_available(build):
+        return []
+    try:
+        runs = build_time_report.parse_ninja_log(log.read_text(encoding="utf-8", errors="replace"))
+        model = inventory.load_codemodel_targets(build)
+        entries = inventory.load_projection_ctest_entries(build) or []
+    except (OSError, ValueError, inventory.InventoryError):
+        return []
+    if not runs:
+        return []
+
+    def key(path: str) -> str:
+        value = Path(path)
+        if not value.is_absolute():
+            value = build / value
+        return os.path.normpath(str(value))
+
+    try:
+        build_start_mtime = build_start.stat().st_mtime
+    except OSError:
+        return []
+    # Ninja logs are cumulative on warm self-hosted runners. The marker is
+    # written immediately before this PR head's build, so only artifacts whose
+    # mtime belongs to this invocation may be treated as rebuilt. Without this
+    # proof, a previous branch's output could select unrelated tests.
+    built = {key(entry.output) for entry in runs[-1]
+             if Path(key(entry.output)).is_file() and
+             Path(key(entry.output)).stat().st_mtime >= build_start_mtime}
+    executable_artifacts = {
+        key(artifact)
+        for target in model.targets.values()
+        if target.type == "EXECUTABLE"
+        for artifact in target.artifacts
+    }
+    rebuilt = built & executable_artifacts
+    if not rebuilt:
+        return []
+    regenerated = [name for name in ("build.ninja", "CMakeCache.txt")
+                   if (build / name).is_file()
+                   and (build / name).stat().st_mtime >= build_start_mtime]
+    if regenerated:
+        why.append(f"{len(rebuilt)} rebuilt executable(s) ignored: {regenerated[0]} was "
+                   "regenerated during this build, so every output is new")
+        return []
+    if len(rebuilt) > REBUILT_EXECUTABLE_CAP:
+        why.append(f"{len(rebuilt)} rebuilt executable(s) ignored: more than "
+                   f"{REBUILT_EXECUTABLE_CAP}, so the directory's history drove the "
+                   "build, not this diff")
+        return []
+    selected = []
+    for entry in entries:
+        if any(key(command) in rebuilt for command in entry.command):
+            selected.append(entry.name)
+    return sorted(set(selected))
+
+
 def registration_tests(build: Path, paths: list[str], root: Path = REPO_ROOT,
                        changes: dict[str, tuple[set[int], list[str]]] | None = None
                        ) -> list[str]:
@@ -328,6 +427,14 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
         plan["reason"] = "the diff is empty"
         return plan
     chosen: list[str] = []
+    own: list[str] = []
+    docs_only = all(is_non_test_path(p) for p in paths)
+    rebuilt_why: list[str] = []
+    rebuilt = [] if docs_only else rebuilt_binary_tests(build, rebuilt_why)
+    plan["rebuilt_binaries"] = len(rebuilt)
+    if rebuilt_why:
+        plan["rebuilt_binaries_ignored"] = rebuilt_why[0]
+    chosen.extend(rebuilt)
     # Declared script inputs are exact, so they apply even where the build
     # projection does not (a docs/status file a census test parses).
     inputs = script_input_tests(paths, root)
@@ -336,6 +443,14 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     scripts = script_reference_tests(paths, root)
     plan["script_references"] = len(scripts)
     chosen.extend(scripts)
+    # Unknown or undeclared script inputs are unsafe to skip. Run every
+    # script-driven test when a tools/ script changed without a known edge.
+    script_paths = [p for p in paths if p.startswith(("tools/ci/", "tools/scripts/"))]
+    if script_paths and not inputs and not scripts:
+        # The broad fallback is intentionally deferred: running every script
+        # test cannot fit the PR-head budget reliably. The merge queue still
+        # runs the full script tier, so this is a neutral, visible deferral.
+        plan["selection_unknown"] = True
     registered = registration_tests(build, paths, root, changes)
     plan["registrations"] = len(registered)
     chosen.extend(registered)
@@ -359,9 +474,22 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     plan["families"] = {k: len(v) for k, v in families.items()}
     for tests in families.values():
         chosen.extend(tests)
+    # Merge-only checks reach a pull-request head only through their declared
+    # inputs, a path family, or a registration the diff adds or edits (a new
+    # test has no declared inputs until the manifest is regenerated). Nothing
+    # else runs them before the merge group, so they go first, where the
+    # budget is sure to reach them. The tests built from the sources the diff
+    # edits come next, ahead of the wider projection.
+    merge_only = set(inputs) | set(registered)
+    for tests in families.values():
+        merge_only.update(tests)
     seen: set[str] = set()
-    plan["tests"] = [t for t in chosen if t in names and PR_FAST_LABEL not in names[t]
-                     and not (t in seen or seen.add(t))]
+    tests = [t for t in chosen if t in names and PR_FAST_LABEL not in names[t]
+             and not (t in seen or seen.add(t))]
+    plan["merge_only"] = [t for t in tests if t in merge_only]
+    own_first = [t for t in tests if t in set(own) and t not in merge_only]
+    plan["tests"] = plan["merge_only"] + own_first + [
+        t for t in tests if t not in merge_only and t not in set(own)]
     return plan
 
 
@@ -382,11 +510,34 @@ def junit_outcomes(path: Path) -> dict[str, str]:
     return outcomes
 
 
+def junit_failure_evidence(path: Path) -> dict[str, str]:
+    """Return the first useful failure line for each failed testcase."""
+    evidence: dict[str, str] = {}
+    if not path.is_file():
+        return evidence
+    for case in ET.parse(path).getroot().iter("testcase"):
+        failure = case.find("failure")
+        if failure is None:
+            failure = case.find("error")
+        if failure is None:
+            continue
+        text = (failure.text or "").strip()
+        evidence[case.get("name", "")] = next((line.strip() for line in text.splitlines() if line.strip()),
+                                               "ctest reported a failure without detail")
+    return evidence
+
+
+def annotation_escape(value: str) -> str:
+    """Keep GitHub workflow-command fields one-line and lossless."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                  label_exclude: str, junit_dir: Path, chunk: int) -> dict:
     """Run ``tests`` in batches until the budget is spent."""
     start = time.monotonic()
-    results = {"passed": [], "failed": [], "skipped": [], "excluded_or_absent": []}
+    results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+               "excluded_or_absent": [], "failure_evidence": {}}
     for index in range(0, len(tests), chunk):
         batch = tests[index:index + chunk]
         if time.monotonic() - start >= budget:
@@ -402,6 +553,7 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
             command += ["-LE", label_exclude]
         subprocess.run(command, check=False)
         outcomes = junit_outcomes(junit)
+        results["failure_evidence"].update(junit_failure_evidence(junit))
         for test in batch:
             state = outcomes.get(test)
             if state == "fail":
@@ -409,7 +561,10 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
             elif state == "run":
                 results["passed"].append(test)
             elif state == "notrun":
-                results["skipped"].append(test)
+                # CTest's SKIP_RETURN_CODE is a self-reported notrun, not a
+                # budget omission.  It is useful evidence but must not make
+                # the PR-head step red.
+                results["notrun"].append(test)
             else:
                 results["excluded_or_absent"].append(test)
     results["seconds"] = round(time.monotonic() - start, 1)
@@ -543,12 +698,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     plan = select(build, paths, names, changes=changes)
     print(f"pr-head-affected-tests: {len(plan['tests'])} extra test(s); mode={plan['mode']} "
-          f"({plan['reason']}); families={plan['families']}", flush=True)
+          f"({plan['reason']}); rebuilt-binary-tests={plan.get('rebuilt_binaries', 0)}; "
+          f"families={plan['families']}", flush=True)
+    if plan.get("rebuilt_binaries_ignored"):
+        print(f"pr-head-affected-tests: {plan['rebuilt_binaries_ignored']}", flush=True)
     if args.dry_run:
         print(json.dumps(plan, indent=2))
         return 0
+    if plan.get("selection_unknown"):
+        # Keep running selections established by declared inputs, registrations,
+        # and the build projection. Only the unknown portion is deferred to the
+        # merge queue; an unknown script must not discard known coverage.
+        print("::warning title=pr-head-affected-tests::selection unknown, deferred to merge queue")
 
-    results = {"passed": [], "failed": [], "skipped": [], "excluded_or_absent": [],
+    results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+               "excluded_or_absent": [],
                "seconds": 0.0}
     if plan["tests"]:
         junit_dir = args.junit_dir or Path(tempfile.mkdtemp(prefix="pr-head-affected-"))
@@ -573,25 +737,53 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"pr-head-affected-tests: {test}: {why}")
         results["failed"] = [t for t in results["failed"] if t not in pre_existing]
+    # A merge-only check the budget pushed out has not run anywhere yet, so it
+    # fails the step. An ordinary affected test is deferred to the merge queue.
+    merge_only = set(plan.get("merge_only", []))
+    blocking = [t for t in results["skipped"] if t in merge_only]
+    deferred = [t for t in results["skipped"] if t not in merge_only]
     summary = {
         "schema": SCHEMA, "mode": plan["mode"], "reason": plan["reason"],
         "changed_files": plan["changed"], "families": plan["families"],
         "selected": len(plan["tests"]), "passed": len(results["passed"]),
         "failed": len(results["failed"]), "pre_existing_on_base": len(pre_existing),
         "skipped_for_budget": len(results["skipped"]),
+        "merge_only_skipped_for_budget": len(blocking),
+        "deferred_to_merge_queue": len(deferred),
+        "notrun": len(results["notrun"]),
         "excluded_or_absent": len(results["excluded_or_absent"]),
         "minutes": round(results["seconds"] / 60, 2), "budget_minutes": args.budget_secs / 60,
     }
     print(f"::notice title=pr-head-affected-tests::{json.dumps(summary, sort_keys=True)}")
-    if results["skipped"]:
-        shown = ", ".join(results["skipped"][:40])
-        more = len(results["skipped"]) - 40
-        print(f"pr-head-affected-tests: SKIPPED (budget spent, not run here; the merge group "
-              f"runs them): {shown}{f' and {more} more' if more > 0 else ''}")
+    if blocking:
+        shown = ", ".join(blocking[:40])
+        more = len(blocking) - 40
+        print(f"pr-head-affected-tests: SKIPPED, NOT RUN (budget spent before these merge-only "
+              f"checks ran; this diff changes their inputs and nothing else runs them before "
+              f"the merge group, so this step fails): {shown}"
+              f"{f' and {more} more' if more > 0 else ''}")
+        print(f"::error title=pr-head-affected-tests::{len(blocking)} merge-only check(s) the "
+              f"diff selected were skipped for budget: {', '.join(blocking[:10])}")
+    if deferred:
+        shown = ", ".join(deferred[:40])
+        more = len(deferred) - 40
+        print(f"pr-head-affected-tests: DEFERRED TO MERGE QUEUE (budget spent; ordinary affected "
+              f"tests): {shown}{f' and {more} more' if more > 0 else ''}")
+        print(f"::warning title=pr-head-affected-tests::{len(deferred)} affected test(s) deferred "
+              f"to merge queue (budget spent): {', '.join(deferred[:10])}")
+    if results["notrun"]:
+        shown = ", ".join(results["notrun"][:40])
+        more = len(results["notrun"]) - 40
+        print(f"pr-head-affected-tests: NOTRUN (self-skipped by ctest; not a budget omission): "
+              f"{shown}{f' and {more} more' if more > 0 else ''}")
     for test in results["failed"]:
-        print(f"::error title=pr-head-affected-tests::{test} failed on this pull request head; "
-              "it is a test this diff reaches, and it would fail the merge group too")
-    return 1 if results["failed"] else 0
+        evidence = results.get("failure_evidence", {}).get(test, "ctest reported a failure without detail")
+        reproduce = f"ctest --test-dir {build} -R '^{re.escape(test)}$' --output-on-failure -C Release"
+        message = (f"test={test}; evidence={annotation_escape(evidence)}; cause_class=CTEST_FAILURE; "
+                   f"reproduce=`{reproduce}`; safe_to_auto_apply=no; "
+                   f"verify=`{reproduce}` passes")
+        print(f"::error title=pr-head-affected-tests::{message}")
+    return 1 if results["failed"] or blocking else 0
 
 
 if __name__ == "__main__":

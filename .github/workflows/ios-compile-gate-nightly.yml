@@ -52,7 +52,7 @@ jobs:
     outputs:
       result: ${{ steps.gate.outputs.result }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -81,7 +81,7 @@ jobs:
 
       - name: Upload the gate log
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ios-compile-gate-nightly-log
           path: ios-gate.log

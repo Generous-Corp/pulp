@@ -36,12 +36,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - name: Cache visual harness Docker layers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pulp/visual-harness/buildx
           key: visual-harness-linux-buildx-${{ hashFiles('ci/visual-harness.Dockerfile', 'tools/harness/visual/docker-build.sh', 'external/fonts/*.ttf', 'tools/deps/manifest.json') }}
@@ -99,7 +99,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_VISUAL_HARNESS_MACOS_RUNS_ON_JSON || '"macos-15"') }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -107,7 +107,7 @@ jobs:
       # fails without it. A self-hosted runner happened to have python3.12 on
       # PATH; a hosted image guarantees no particular minor version there, so
       # pin it explicitly rather than inheriting whatever the image ships.
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -163,7 +163,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_VISUAL_HARNESS_MACOS_RUNS_ON_JSON || '"macos-15"') }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -176,7 +176,7 @@ jobs:
       - name: Restore FetchContent sources (GitHub-hosted)
         if: runner.environment == 'github-hosted'
         id: fetchcontent-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/Library/Caches/Pulp/fetchcontent-src
@@ -188,7 +188,7 @@ jobs:
       - name: Restore ccache (GitHub-hosted)
         if: runner.environment == 'github-hosted'
         id: ccache-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/Library/Caches/ccache
@@ -203,7 +203,7 @@ jobs:
 
       - name: Save FetchContent sources (main GitHub-hosted)
         if: runner.environment == 'github-hosted' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             ~/Library/Caches/Pulp/fetchcontent-src
@@ -230,7 +230,7 @@ jobs:
 
       - name: Save ccache (main GitHub-hosted)
         if: runner.environment == 'github-hosted' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.ccache-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             ~/Library/Caches/ccache

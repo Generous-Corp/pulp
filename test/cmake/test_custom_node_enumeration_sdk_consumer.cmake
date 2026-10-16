@@ -42,9 +42,16 @@ target_link_libraries(consumer PRIVATE Pulp::host)
 
 file(WRITE "${_source}/main.cpp" [=[
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_executor_contract.hpp>
 
 #include <utility>
 #include <vector>
+
+// This external project sees only the staged SDK prefix. Keep the lightweight
+// executor contract in the same installed-host proof as SignalGraph itself.
+static_assert(static_cast<bool>(pulp::host::ExecutorTopologyValidation{}));
+static_assert(pulp::host::ConnectionClass{}.kind ==
+              pulp::graph::GraphRuntimeConnectionKind::Audio);
 
 std::vector<pulp::host::CustomNodeTypeMetadata> detached_snapshot() {
     pulp::host::SignalGraph graph;

@@ -13,7 +13,6 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/sample_region_authoring.hpp>
 #include <pulp/host/signal_graph.hpp>
-#include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>

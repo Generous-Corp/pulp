@@ -44,11 +44,19 @@ function(_pulp_bundle_pkginfo_file out_var declaration)
     set(${out_var} "${_path}" PARENT_SCOPE)
 endfunction()
 
+# An editor-less plug-in (pulp_add_plugin NO_EDITOR) links only the audio side
+# of the format layer. It stages no GPU runtime because it links none; the
+# staging assertion is satisfied explicitly so a missing call on an ordinary
+# plug-in still fails.
+function(_pulp_mark_editorless_runtime target)
+    set_target_properties(${target} PROPERTIES PULP_RUNTIME_DEPENDENCIES_STAGED TRUE)
+endfunction()
+
 function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     if(NOT _PULP_VST3_SDK_DIR OR NOT _PULP_VST3_SDK_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 requested but the VST3 SDK is unavailable")
     endif()
-    if(NOT PULP_${target}_VIEW_TARGET)
+    if(NOT PULP_${target}_VIEW_TARGET AND NOT PULP_${target}_NO_EDITOR)
         message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 GUI targets require a Pulp view target")
     endif()
 
@@ -77,23 +85,36 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         set(vst3_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
     endif()
 
+    if(PULP_${target}_NO_EDITOR)
+        set(_vst3_view_src ${_PULP_FORMAT_SOURCE_DIR}/vst3_no_editor.cpp)
+    else()
+        set(_vst3_view_src ${_PULP_FORMAT_SOURCE_DIR}/vst3_plug_view.cpp)
+    endif()
     add_library(${target}_VST3 MODULE
         ${PULP_${target}_CORE_OBJECTS}
         ${vst3_entry}
         ${vst3_platform_src}
-        ${_PULP_FORMAT_SOURCE_DIR}/vst3_plug_view.cpp
+        ${_vst3_view_src}
         ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp
         ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp
     )
-    target_link_libraries(${target}_VST3 PRIVATE
-        ${target}_Core
-        ${_PULP_FORMAT_TARGET}
-        ${PULP_${target}_VIEW_TARGET}
-        ${_PULP_VST3_SDK_TARGET}
-    )
-    target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
-    _pulp_apply_view_mac_objc_suffix(${target}_VST3)
-    _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
+    if(PULP_${target}_NO_EDITOR)
+        target_link_libraries(${target}_VST3 PRIVATE
+            ${target}_Core
+            ${_PULP_FORMAT_CORE_TARGET}
+            ${_PULP_VST3_SDK_TARGET}
+        )
+    else()
+        target_link_libraries(${target}_VST3 PRIVATE
+            ${target}_Core
+            ${_PULP_FORMAT_TARGET}
+            ${PULP_${target}_VIEW_TARGET}
+            ${_PULP_VST3_SDK_TARGET}
+        )
+        target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
+        _pulp_apply_view_mac_objc_suffix(${target}_VST3)
+        _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
+    endif()
     _pulp_apply_macho_exports(${target}_VST3 "${target}_VST3"
         "_bundleEntry"
         "_bundleExit"
@@ -120,13 +141,8 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # copy_if_different so direct target builds and multi-config generators
     # remain deterministic.
     if(WIN32)
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
-            set(_pulp_vst3_windows_arch "arm64-win")
-        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$")
-            set(_pulp_vst3_windows_arch "x86_64-win")
-        else()
-            set(_pulp_vst3_windows_arch "x86-win")
-        endif()
+        include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpWindowsTargetArch.cmake")
+        pulp_windows_target_arch(_pulp_vst3_windows_arch)
         set(_pulp_vst3_windows_bundle
             "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
         set(_pulp_vst3_windows_contents
@@ -200,7 +216,11 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # pulp_stage_runtime_dependencies() is defined in both the source and
     # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
     # a missing definition silently skip staging entirely.
-    pulp_stage_runtime_dependencies(${target}_VST3)
+    if(PULP_${target}_NO_EDITOR)
+        _pulp_mark_editorless_runtime(${target}_VST3)
+    else()
+        pulp_stage_runtime_dependencies(${target}_VST3)
+    endif()
     pulp_assert_runtime_dependencies_staged(${target}_VST3)
     _pulp_attach_control_shipping(${target} ${target}_VST3 VST3)
 endfunction()
@@ -210,7 +230,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     if(NOT _PULP_CLAP_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP requested but the CLAP SDK is unavailable")
     endif()
-    if(NOT PULP_${target}_VIEW_TARGET)
+    if(NOT PULP_${target}_VIEW_TARGET AND NOT PULP_${target}_NO_EDITOR)
         message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP GUI targets require Pulp::view")
     endif()
 
@@ -230,15 +250,25 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${clap_entry}
     )
-    target_link_libraries(${target}_CLAP PRIVATE
-        ${target}_Core
-        ${_PULP_FORMAT_TARGET}
-        ${PULP_${target}_VIEW_TARGET}
-        ${_PULP_CLAP_TARGET}
-    )
-    target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
-    _pulp_apply_view_mac_objc_suffix(${target}_CLAP)
-    _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
+    if(PULP_${target}_NO_EDITOR)
+        # The view-free adapter: PULP_CLAP_GUI stays undefined here and in it.
+        target_link_libraries(${target}_CLAP PRIVATE
+            ${target}_Core
+            ${_PULP_FORMAT_CLAP_CORE_TARGET}
+            ${_PULP_FORMAT_CORE_TARGET}
+            ${_PULP_CLAP_TARGET}
+        )
+    else()
+        target_link_libraries(${target}_CLAP PRIVATE
+            ${target}_Core
+            ${_PULP_FORMAT_TARGET}
+            ${PULP_${target}_VIEW_TARGET}
+            ${_PULP_CLAP_TARGET}
+        )
+        target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
+        _pulp_apply_view_mac_objc_suffix(${target}_CLAP)
+        _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
+    endif()
     _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
         "_clap_entry")
     target_include_directories(${target}_CLAP PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -304,7 +334,11 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     # pulp_stage_runtime_dependencies() is defined in both the source and
     # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
     # a missing definition silently skip staging entirely.
-    pulp_stage_runtime_dependencies(${target}_CLAP)
+    if(PULP_${target}_NO_EDITOR)
+        _pulp_mark_editorless_runtime(${target}_CLAP)
+    else()
+        pulp_stage_runtime_dependencies(${target}_CLAP)
+    endif()
     pulp_assert_runtime_dependencies_staged(${target}_CLAP)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_CLAP)
     _pulp_attach_control_shipping(${target} ${target}_CLAP CLAP)
@@ -326,12 +360,20 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${lv2_entry}
     )
-    target_link_libraries(${target}_LV2 PRIVATE
-        ${target}_Core
-        ${_PULP_FORMAT_TARGET}
-        ${PULP_${target}_VIEW_TARGET}
-        ${_PULP_LV2_TARGET}
-    )
+    if(PULP_${target}_NO_EDITOR)
+        target_link_libraries(${target}_LV2 PRIVATE
+            ${target}_Core
+            ${_PULP_FORMAT_CORE_TARGET}
+            ${_PULP_LV2_TARGET}
+        )
+    else()
+        target_link_libraries(${target}_LV2 PRIVATE
+            ${target}_Core
+            ${_PULP_FORMAT_TARGET}
+            ${PULP_${target}_VIEW_TARGET}
+            ${_PULP_LV2_TARGET}
+        )
+    endif()
     target_include_directories(${target}_LV2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # LV2 bundles: <name>.lv2/ directory containing the .so and .ttl files
@@ -340,6 +382,18 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/LV2/${name}.lv2"
         PREFIX ""
     )
+
+    # Runtime sidecars: editorless LV2 modules link only the audio adapter and
+    # therefore need no renderer runtime; editor-enabled modules must stage the
+    # same runtime dependencies as the other hosted formats. Keep this call
+    # before the manifest/control shipping hooks so every LV2 bundle follows
+    # the same configure-time assertion and post-build staging path.
+    if(PULP_${target}_NO_EDITOR)
+        _pulp_mark_editorless_runtime(${target}_LV2)
+    else()
+        pulp_stage_runtime_dependencies(${target}_LV2)
+    endif()
+    pulp_assert_runtime_dependencies_staged(${target}_LV2)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_LV2)
     _pulp_attach_control_shipping(${target} ${target}_LV2 LV2)
 
@@ -374,7 +428,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
 endfunction()
 
 # ── Internal: AAX target ────────────────────────────────────────────────
-function(_pulp_add_aax target name bundle_id version manufacturer category manufacturer_code product_code native_code)
+function(_pulp_add_aax target name bundle_id version manufacturer category manufacturer_code product_code native_code headless)
     if(NOT APPLE AND NOT WIN32)
         return()
     endif()
@@ -401,15 +455,25 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
         ${aax_entry}
         ${_PULP_FORMAT_SOURCE_DIR}/aax_runtime.cpp
         ${_PULP_FORMAT_SOURCE_DIR}/aax_midi_node.cpp
-        ${_PULP_FORMAT_SOURCE_DIR}/aax_effect_gui.cpp
         $<TARGET_OBJECTS:pulp-aax-export>
     )
-    target_link_libraries(${target}_AAX PRIVATE
-        ${target}_Core
-        ${_PULP_FORMAT_TARGET}
-        ${PULP_${target}_VIEW_TARGET}
-        pulp-aax-library
-    )
+    if(APPLE AND NOT headless)
+        target_sources(${target}_AAX PRIVATE
+            ${_PULP_FORMAT_SOURCE_DIR}/aax_native_view_mac.mm)
+    endif()
+    if(NOT headless)
+        target_sources(${target}_AAX PRIVATE ${_PULP_FORMAT_SOURCE_DIR}/aax_effect_gui.cpp)
+    endif()
+    if(headless)
+        target_link_libraries(${target}_AAX PRIVATE pulp::format-core)
+    else()
+        target_link_libraries(${target}_AAX PRIVATE ${_PULP_FORMAT_TARGET})
+    endif()
+    target_link_libraries(${target}_AAX PRIVATE pulp-aax-library)
+    target_link_libraries(${target}_AAX PRIVATE ${target}_Core)
+    if(NOT headless)
+        target_link_libraries(${target}_AAX PRIVATE ${PULP_${target}_VIEW_TARGET})
+    endif()
     target_include_directories(${target}_AAX PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${target}_AAX PRIVATE
         PULP_AAX=1
@@ -417,6 +481,9 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
         PULP_AAX_PRODUCT_CODE="${product_code}"
         PULP_AAX_NATIVE_CODE="${native_code}"
     )
+    if(headless)
+        target_compile_definitions(${target}_AAX PRIVATE PULP_AAX_HEADLESS=1)
+    endif()
     set_target_properties(${target}_AAX PROPERTIES
         OUTPUT_NAME "${name}"
         PREFIX ""
@@ -458,8 +525,10 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
     # pulp_stage_runtime_dependencies() is defined in both the source and
     # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
     # a missing definition silently skip staging entirely.
-    pulp_stage_runtime_dependencies(${target}_AAX)
-    pulp_assert_runtime_dependencies_staged(${target}_AAX)
+    if(NOT headless)
+        pulp_stage_runtime_dependencies(${target}_AAX)
+        pulp_assert_runtime_dependencies_staged(${target}_AAX)
+    endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AAX)
     _pulp_attach_control_shipping(${target} ${target}_AAX AAX)
 endfunction()
@@ -469,7 +538,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     if(NOT _PULP_AUSDK_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): AU requested but AudioUnitSDK is unavailable")
     endif()
-    if(NOT PULP_${target}_VIEW_TARGET)
+    if(NOT PULP_${target}_VIEW_TARGET AND NOT PULP_${target}_NO_EDITOR)
         message(FATAL_ERROR "pulp_add_plugin(${target}): AU GUI targets require Pulp::view")
     endif()
 
@@ -479,21 +548,38 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         set(au_entry "${CMAKE_CURRENT_SOURCE_DIR}/au_v2_entry.cpp")
     endif()
 
-    add_library(${target}_AU MODULE
-        ${PULP_${target}_CORE_OBJECTS}
-        ${au_entry}
-        ${_PULP_FORMAT_SOURCE_DIR}/au_v2_cocoa_view.mm
-    )
-    target_link_libraries(${target}_AU PRIVATE
-        ${target}_Core
-        ${_PULP_FORMAT_TARGET}
-        ${PULP_${target}_VIEW_TARGET}
-        ${_PULP_AUSDK_TARGET}
-        "-framework AudioToolbox"
-        "-framework CoreFoundation"
-        "-framework CoreAudio"
-        "-framework Cocoa"
-    )
+    if(PULP_${target}_NO_EDITOR)
+        # No Cocoa view factory: without PULP_AU_GUI the AU reports no
+        # kAudioUnitProperty_CocoaUI, so hosts show their generic editor.
+        add_library(${target}_AU MODULE
+            ${PULP_${target}_CORE_OBJECTS}
+            ${au_entry}
+        )
+        target_link_libraries(${target}_AU PRIVATE
+            ${target}_Core
+            ${_PULP_FORMAT_CORE_TARGET}
+            ${_PULP_AUSDK_TARGET}
+            "-framework AudioToolbox"
+            "-framework CoreFoundation"
+            "-framework CoreAudio"
+        )
+    else()
+        add_library(${target}_AU MODULE
+            ${PULP_${target}_CORE_OBJECTS}
+            ${au_entry}
+            ${_PULP_FORMAT_SOURCE_DIR}/au_v2_cocoa_view.mm
+        )
+        target_link_libraries(${target}_AU PRIVATE
+            ${target}_Core
+            ${_PULP_FORMAT_TARGET}
+            ${PULP_${target}_VIEW_TARGET}
+            ${_PULP_AUSDK_TARGET}
+            "-framework AudioToolbox"
+            "-framework CoreFoundation"
+            "-framework CoreAudio"
+            "-framework Cocoa"
+        )
+    endif()
     # Per-plugin-unique Cocoa view factory class name. ObjC class names are
     # process-global, so two Pulp AU components in one host would otherwise
     # collide on a fixed `PulpAUCocoaViewFactory`. Derive a unique name from
@@ -503,14 +589,19 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     set(_pulp_au_cocoa_class_suffix "${manufacturer_code}_${plugin_code}")
     string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _pulp_au_cocoa_class_suffix
         "${_pulp_au_cocoa_class_suffix}")
-    target_compile_definitions(${target}_AU PRIVATE
-        PULP_AU_GUI=1
-        PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix})
-    _pulp_apply_view_mac_objc_suffix(${target}_AU)
-    _pulp_apply_macho_exports(${target}_AU "${target}_AU"
-        "_${target}AUFactory"
-        "_OBJC_CLASS_$_PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix}"
-        "_OBJC_METACLASS_$_PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix}")
+    if(PULP_${target}_NO_EDITOR)
+        _pulp_apply_macho_exports(${target}_AU "${target}_AU"
+            "_${target}AUFactory")
+    else()
+        target_compile_definitions(${target}_AU PRIVATE
+            PULP_AU_GUI=1
+            PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix})
+        _pulp_apply_view_mac_objc_suffix(${target}_AU)
+        _pulp_apply_macho_exports(${target}_AU "${target}_AU"
+            "_${target}AUFactory"
+            "_OBJC_CLASS_$_PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix}"
+            "_OBJC_METACLASS_$_PulpAUCocoaViewFactory_${_pulp_au_cocoa_class_suffix}")
+    endif()
     # AudioUnitSDK 1.4 headers use std::expected (C++23). CMAKE_CXX_STANDARD=20
     # at the repo root is authoritative under CMake 3.24's policy — target
     # compile_features are ignored when a lower CXX_STANDARD is already set.
@@ -518,7 +609,9 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     # this target also inherit).
     set_target_properties(${target}_AU PROPERTIES CXX_STANDARD 23)
     target_compile_features(${target}_AU PUBLIC cxx_std_23)
-    _pulp_apply_ui_script_definition(${target}_AU "${PULP_${target}_UI_SCRIPT}")
+    if(NOT PULP_${target}_NO_EDITOR)
+        _pulp_apply_ui_script_definition(${target}_AU "${PULP_${target}_UI_SCRIPT}")
+    endif()
     target_include_directories(${target}_AU PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # AudioUnitSDK 1.4 headers (`AUUtility.h`) use `std::expected` /
@@ -583,7 +676,11 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     # pulp_stage_runtime_dependencies() is defined in both the source and
     # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
     # a missing definition silently skip staging entirely.
-    pulp_stage_runtime_dependencies(${target}_AU)
+    if(PULP_${target}_NO_EDITOR)
+        _pulp_mark_editorless_runtime(${target}_AU)
+    else()
+        pulp_stage_runtime_dependencies(${target}_AU)
+    endif()
     pulp_assert_runtime_dependencies_staged(${target}_AU)
     # AU bundles are loaded by a separate registrar/host process. Add the
     # bundle-local runtime path without replacing CMake's other build rpaths:

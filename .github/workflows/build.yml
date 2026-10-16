@@ -142,7 +142,7 @@ jobs:
       linux_event_authorized_selector_json: ${{ steps.resolve.outputs.linux_event_authorized_selector_json }}
       macos_runs_on_json: ${{ steps.resolve.outputs.macos_runs_on_json }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Shared resolver lives in the repo at tools/scripts/resolve_runs_on.py.
           # We only need the script; no LFS or submodules required.
@@ -878,13 +878,49 @@ jobs:
       a2t_receipt_attestation_required: ${{ steps.classify.outputs.issue }}
       a2t_evidence_head: ${{ steps.classify.outputs.head }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Classification needs two immutable trees, not Pulp's entire
           # history. Full history made a traveling runner fetch into a 70 GiB
           # .git directory before this cheap preamble could report.
           fetch-depth: 1
           lfs: false
+      # Backstop for a HOLD that did not take its head out of the queue: fail
+      # the group, before any VM, when a queued pull request's latest trusted
+      # verdict on the head it lands is HOLD. A failed classify makes the
+      # macos-merge-group bootstrap fail `macos` closed. The token reaches only
+      # the protected base branch's copy of the check, never code from a queue
+      # entry. It fails closed: a base it cannot fetch, or input the check
+      # cannot read, fails the group (a re-run retries). Only a base that does
+      # not carry the check yet passes, with a notice.
+      - name: Refuse a merge group whose pull request is held
+        if: ${{ github.event_name == 'merge_group' }}
+        env:
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          title="merge-group HOLD check"
+          fix="re-run this merge group's classify job, or re-queue its pull requests"
+          if [[ "$MERGE_GROUP_BASE_REF" != refs/heads/* ]]; then
+            echo "::error title=$title::base ref '$MERGE_GROUP_BASE_REF' is not a branch, so the protected copy of the check cannot be read. Fix: $fix"
+            exit 1
+          fi
+          if ! git fetch --no-tags --depth=1 origin "$MERGE_GROUP_BASE_REF"; then
+            echo "::error title=$title::could not fetch $MERGE_GROUP_BASE_REF to read the protected copy of the check. Fix: $fix"
+            exit 1
+          fi
+          if ! git cat-file -e "FETCH_HEAD:tools/ci/merge_group_hold_check.py" 2>/dev/null; then
+            echo "::notice title=$title::$MERGE_GROUP_BASE_REF has no HOLD check yet; not checked"
+            exit 0
+          fi
+          hold_check=$(mktemp)
+          trap 'rm -f "$hold_check"' EXIT
+          git show "FETCH_HEAD:tools/ci/merge_group_hold_check.py" >"$hold_check"
+          GH_TOKEN="${{ github.token }}" python3 "$hold_check" \
+            --repo "$GITHUB_REPOSITORY" \
+            --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for
@@ -1088,7 +1124,7 @@ jobs:
       build_required: ${{ steps.reuse.outputs.build_required }}
       macos_reused: ${{ steps.reuse.outputs.macos_reused }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
           lfs: false
@@ -1247,7 +1283,7 @@ jobs:
     # macOS (it refuses any other RUNNER_OS), git and python3.
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
           lfs: false
@@ -1286,6 +1322,15 @@ jobs:
       matrix: ${{ fromJSON(needs.protected-receipt-reuse.outputs.matrix_json || needs.resolve-provider.outputs.matrix_json || '{"include":[]}') }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
+    # In a merge group only the macOS child is a required context; the Linux
+    # child is advisory and the queue never waits on it. Without this, a red
+    # advisory leg turns the whole run's conclusion to `failure` while every
+    # required check is green, and anything that reads run conclusions (the
+    # Actions list, `gh run list`, queue audits) reports a healthy batch as
+    # failed. The leg's own check run still shows its result. The macOS child
+    # is never covered, so a real required failure still fails the run, and PR
+    # and push runs keep their existing conclusions.
+    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.key != 'macos' }}
     # The macOS child owns the required `macos` context directly on PR heads,
     # Shipyard workflow dispatches, and merge groups. A reporter cannot depend
     # on one matrix child, so
@@ -1388,7 +1433,7 @@ jobs:
             exit 0
           fi
           echo "gate-git-seed: alternates=$mirror/objects mirror_main=$head"
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
           # GPU provenance self-tests use HEAD^ and exact historical receipts.
@@ -1473,7 +1518,7 @@ jobs:
       # and github-hosted runners (have actions/cache).
       - name: Namespace cache (brew + ccache + Pulp FetchContent)
         if: runner.os == 'macOS' && (contains(matrix.runs_on_json, 'namespace') || contains(matrix.runs_on_json, 'nscloud'))
-        uses: namespacelabs/nscloud-cache-action@v1
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: brew
           path: |
@@ -1550,7 +1595,7 @@ jobs:
       - name: Restore FetchContent sources (GitHub-hosted)
         if: runner.os != 'macOS' || runner.environment == 'github-hosted'
         id: fetchcontent-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           # Cache where FetchContent actually writes. The three paths this
           # replaced never populated — on Linux the cased `Pulp` did not match
@@ -1571,7 +1616,7 @@ jobs:
       - name: Restore ccache (GitHub-hosted)
         if: runner.os != 'macOS' || runner.environment == 'github-hosted'
         id: ccache-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/Library/Caches/ccache
@@ -1700,7 +1745,7 @@ jobs:
       #     merge_group and workflow_dispatch, which is not what we mean.
       - name: Save FetchContent sources (main push, GitHub-hosted Linux/Windows)
         if: runner.environment == 'github-hosted' && runner.os != 'macOS' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           # Cache where FetchContent actually writes. The three paths this
           # replaced never populated — on Linux the cased `Pulp` did not match
@@ -1803,7 +1848,7 @@ jobs:
       # that verifies the committed dependency lock.
       - name: Set up Node.js for materialized runtime tests (Linux)
         if: runner.os == 'Linux'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22.15.0'
           cache: npm
@@ -1823,6 +1868,29 @@ jobs:
       - name: Install materialized runtime Node test dependencies (macOS)
         if: runner.os == 'macOS'
         run: npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund
+
+      # Names every tool this leg runs at a version other than
+      # tools/toolchain/manifest.toml pins, as ::warning:: annotations, so
+      # drift between gate VMs, hosts and hosted runners is visible on every
+      # run. Report only: the manifest is in warn mode, the script exits 0 on
+      # a mismatch, and continue-on-error keeps even an unreadable manifest
+      # (exit 3) from failing the leg. It reads versions and installs
+      # nothing. It runs on whatever python3 the runner has (3.9 compatible)
+      # because it is what checks that interpreter.
+      # Measured: 0.45 s on the macOS gate VM, 0.10 s on hosted Linux. Each
+      # version probe is capped at 5 s, and the step at 2 minutes.
+      - name: Toolchain report against the manifest (warn only)
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          py="$(command -v python3 || command -v python || true)"
+          if [ -z "$py" ]; then
+            echo "::warning title=toolchain::no python3 or python on PATH; toolchain report skipped"
+            exit 0
+          fi
+          "$py" tools/toolchain/check_env.py --format github \
+            || echo "::warning title=toolchain::check_env.py exited $?; the report above is incomplete"
 
       - name: Configure
         # On PR and Shipyard workflow_dispatch validation, skip the examples tree
@@ -2069,6 +2137,11 @@ jobs:
           if [ "${RUNNER_OS}" = "Windows" ]; then
             cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4
           else
+            # Bound rebuilt-test selection to this PR head's build. Warm
+            # self-hosted Ninja logs retain previous branches' outputs.
+            if [ -n "${PULP_BUILD_DIR:-}" ]; then
+              date +%s.%N > "$PULP_BUILD_DIR/.pulp-build-start"
+            fi
             tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
           fi
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
@@ -2078,9 +2151,12 @@ jobs:
       # (PR heads and merge groups alike: artifacts are repository-wide, not
       # branch-scoped like the Actions cache) can find it. The Build step skips
       # the gate on a trusted receipt from this step; see ios_gate_digest.py.
+      # A lost marker only makes a later run build the iOS gate again, so an
+      # artifact-service stall here must not red a gate whose build passed.
       - name: Record iOS gate digest
         if: steps.build.outputs.ios_gate_digest != ''
-        uses: actions/upload-artifact@v5
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
         with:
           name: ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}
           path: ${{ runner.temp }}/ios-gate-shadow/marker.json
@@ -2116,7 +2192,7 @@ jobs:
       # overwritten in place regardless.
       - name: Save ccache (main push, GitHub-hosted Linux/Windows)
         if: runner.environment == 'github-hosted' && runner.os != 'macOS' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.ccache-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             ~/Library/Caches/ccache
@@ -2128,10 +2204,10 @@ jobs:
         # A pull-request head runs the fast tier below, and that is what its
         # required check means. A head that is ready to land (armed for
         # auto-merge, still the head, and merged onto the current tip of main)
-        # ALSO runs the full suite, as evidence only, so its exact-tree
-        # protected-validation receipt lets a merge group of that one pull
-        # request skip its own build and test. Every other push keeps only the
-        # fast tier. The rule and its fail-closed probe live in
+        # also runs the full suite as the required, queue-admission check. Its
+        # exact-tree protected-validation receipt lets a merge group of that
+        # one pull request skip its own build and test. Every other push keeps
+        # only the fast tier. The rule and its fail-closed probe live in
         # tools/ci/ctest_gate_args.py; an unreadable pull request means fast.
         id: pr_suite
         if: github.event_name == 'pull_request' && runner.os != 'Windows'
@@ -2188,7 +2264,11 @@ jobs:
         # (the merge ref's first parent is the base), and a failure fails the
         # required check here. It never widens to the full suite: a diff of
         # docs, skills or workflows, or one the projection cannot focus,
-        # selects nothing extra. The extra time is capped at ten minutes;
+        # selects nothing extra. Tests whose executable this build rebuilt
+        # are added only when at most eight executables were rebuilt and the
+        # build system was not regenerated; a wider rebuild comes from the
+        # build directory's history, not the diff, and adds nothing. The
+        # extra time is capped at ten minutes;
         # tests left over are listed as skipped, and the merge group still
         # runs everything. Rules and selection: tools/ci/pr_head_affected_tests.py.
         id: pr_affected_tests
@@ -2225,16 +2305,16 @@ jobs:
         #
         # The exception is a pull-request head that is ready to land (see
         # `Decide pull-request test suite`). There the suite runs once as
-        # EVIDENCE for the protected-validation receipt, never as the pull
-        # request's gate: `continue-on-error` keeps a failure here from turning
-        # the required check red, and the receipt issuer reads this step's
-        # outcome, which stays `failure`, so a failing run issues nothing and
-        # the merge group validates in full exactly as before.
+        # EVIDENCE for the protected-validation receipt. An armed head's full
+        # run is also a required admission signal: a failure must turn this
+        # check red so the queue cannot admit a head already known to fail.
+        # Ordinary pull-request runs keep the fast tier as their gate because
+        # the full step is skipped for them.
         if: >-
           runner.os != 'Windows'
           && (github.event_name != 'pull_request'
               || steps.pr_suite.outputs.suite == 'full')
-        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: ${{ github.event_name == 'pull_request' && steps.pr_suite.outputs.suite != 'full' }}
         shell: bash
         # Keep one hung ctest entry from burning the full workflow timeout.
         # Long-running tests that need more time set their own CTest TIMEOUT.
@@ -2386,10 +2466,9 @@ jobs:
           # it takes no stop-on-failure flag. A failed listing leaves an invalid
           # file, and the receipt issuer then refuses rather than guessing.
           ctest --show-only=json-v1 --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" > "$evidence_dir/selected.json" || true
-          # Tell `shipyard landing` which tier this check's green means. On a
-          # pull-request head the gate is still the fast tier, so the full run
-          # there reports itself as receipt evidence, not as the check's tier.
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+          # Ordinary pull requests use the fast tier; armed pull requests set
+          # pr_suite=full and therefore make this run the required check.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "${{ steps.pr_suite.outputs.suite }}" != full ]; then
             echo "::notice::full suite ran as receipt evidence (non-gating): ctest exit $ctest_exit"
           else
             echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"full"}'
@@ -2441,7 +2520,7 @@ jobs:
           always() && github.event_name == 'merge_group' && runner.os == 'macOS'
           && steps.build.outcome == 'success'
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: test-receipts-macos
           path: ${{ runner.temp }}/merge-group-shadows/test-receipts.json
@@ -2462,11 +2541,10 @@ jobs:
       # --exclude-regex list, and configure-time absence remove tests from the
       # report entirely — a broader class this step measures but does not close.
       # An empty report provides no execution evidence; selection may be empty.
-      # On a pull request the Test step is continue-on-error, so a failed full
-      # suite shows as a green step whose only trace is a skipped receipt.
-      # Name it: the failing tests in a warning annotation and a job-summary
-      # line, so "why no receipt" is readable on the PR. Non-gating.
-      - name: Announce a failed PR-head full suite (non-gating)
+      # This step adds diagnostic details for a failed full-suite check. On an
+      # armed head the full-suite step is required and already makes this job
+      # red; on an ordinary head the full suite is not run.
+      - name: Announce a failed PR-head full suite (diagnostic)
         if: >-
           always() && github.event_name == 'pull_request' && runner.os != 'Windows'
           && steps.ctest.outcome == 'failure'
@@ -2486,8 +2564,8 @@ jobs:
           print(f"{len(failed)} failing: {head}" if failed else "no failing testcase in the report (ctest exit was nonzero)")
           PY
           )"
-          echo "::warning title=PR-head full suite failed (non-gating)::${names} — no receipt will be issued; the merge group validates in full"
-          printf '### PR-head full suite: FAILED (non-gating)\n\n%s\n\nNo protected receipt is issued from this run; the merge group will validate in full.\n\n' \
+          echo "::warning title=PR-head full suite failed::${names}"
+          printf '### PR-head full suite: FAILED\n\n%s\n\n' \
             "$names" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
       - name: Observe ctest non-runs (non-Windows)
@@ -2629,7 +2707,7 @@ jobs:
               || github.event_name == 'merge_group'
               || github.event_name == 'workflow_dispatch')
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
           path: |
@@ -2648,7 +2726,7 @@ jobs:
 
       - name: Upload exact GPU-audio SDK (macOS ARM64, retry)
         if: steps.gpu_audio_sdk_upload.outcome == 'failure'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
           path: |
@@ -2694,7 +2772,7 @@ jobs:
         if: >-
           steps.a2t_structural_verification.outcome == 'success'
           && needs.classify.outputs.a2t_receipt_attestation_required == 'true'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}
           path: ${{ runner.temp }}/a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}/attestation.json
@@ -2710,12 +2788,14 @@ jobs:
         # the job summary so the failing
         # test(s) + assertions show in the GitHub UI without host access.
         #
-        # This step only reports; it must never decide the job's result. On a
-        # pull-request head the full suite runs as non-gating receipt evidence
-        # (the Test step is continue-on-error), so a non-zero exit here would
-        # turn the required check red for a failure the workflow deliberately
-        # does not gate on. On other events the Test step already failed
-        # visibly as its own step. The default shell is `bash -e -o pipefail`,
+        # This step only reports; it must never decide the job's result. On an
+        # armed pull-request head the full suite is the required admission
+        # check: the Test step is not continue-on-error, so a failing suite has
+        # already failed the job as its own step, as it does on every other
+        # event. On a fast-tier pull-request head the Test step does not run,
+        # and this step runs only after an earlier step (such as the fast
+        # tier) has already failed. Either way it only adds the failing test
+        # names, so it exits 0. The default shell is `bash -e -o pipefail`,
         # under which a grep that matches nothing (a failure that is a timeout
         # or a non-Catch2 test) ends the step with exit 1, so errexit is off
         # and every command that may legitimately return non-zero is guarded.
@@ -2756,7 +2836,7 @@ jobs:
         # every test passed must never turn a green gate red.
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ctest-logs-${{ matrix.key }}
           path: |
@@ -2822,7 +2902,7 @@ jobs:
         id: reuse_record_upload
         if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           # One artifact per run attempt: a re-run keeps the failed attempt's
           # record, which is the flake evidence a replay most needs.
@@ -2924,7 +3004,7 @@ jobs:
 
       - name: Publish exact protected-validation receipt
         if: steps.protected_receipt.outcome == 'success'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: protected-validation-${{ matrix.key }}-${{ github.event.pull_request.head.sha }}-${{ github.event.pull_request.base.sha }}
           path: ${{ steps.protected_receipt.outputs.path }}/receipt.json
@@ -2934,9 +3014,13 @@ jobs:
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's
       # PULP_BUILD_EXAMPLES=OFF gating) so there are no bundles to upload.
+      # A convenience download for people: no workflow, script or repository
+      # reads plugins-macos, and the bundles were already built and tested. An
+      # upload stall here after a green suite once ejected a merge batch.
       - name: Upload plugin bundles (macOS)
         if: success() && runner.os == 'macOS' && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v5
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
         with:
           name: plugins-${{ matrix.key }}
           path: |
@@ -2947,7 +3031,7 @@ jobs:
 
       - name: Upload plugin bundles (Windows)
         if: success() && runner.os == 'Windows' && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: plugins-${{ matrix.key }}
           path: |
@@ -2957,7 +3041,7 @@ jobs:
 
       - name: Upload plugin bundles (Linux)
         if: success() && runner.os == 'Linux' && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: plugins-${{ matrix.key }}
           path: |
@@ -2994,7 +3078,7 @@ jobs:
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: true
 
@@ -3073,7 +3157,7 @@ jobs:
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: true
 
@@ -3138,7 +3222,7 @@ jobs:
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: true
 
@@ -3227,7 +3311,7 @@ jobs:
         if: ${{ !cancelled() }}
         id: reuse_record_checkout
         continue-on-error: true
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
           sparse-checkout: |
@@ -3260,7 +3344,7 @@ jobs:
         id: reuse_record_upload
         if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
           path: ${{ runner.temp }}/reuse-record/
@@ -3293,7 +3377,7 @@ jobs:
       # The whole tree at depth 1, like the classify job: when classify was
       # never given a runner, the verdict classifies the group here.
       - name: Check out the bootstrap verdict and classifier
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
           lfs: false
@@ -3322,7 +3406,7 @@ jobs:
         if: ${{ !cancelled() }}
         id: reuse_record_checkout
         continue-on-error: true
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
           sparse-checkout: |
@@ -3355,7 +3439,7 @@ jobs:
         id: reuse_record_upload
         if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
           path: ${{ runner.temp }}/reuse-record/
@@ -3465,3 +3549,31 @@ jobs:
           # Windows is currently advisory (see Linux comment above).
           echo "Windows leg ${conclusion:-not found} or MSVC=$msvc_ok — failing windows alias (advisory only; not required)"
           exit 1
+
+  # Names the cause of each failed job in this run as a `ci.cause/v1` record,
+  # printed as a `::notice title=ci-cause::` annotation. A job's own log can be
+  # downloaded only once it has finished, so this job reads the failed jobs'
+  # finished logs and runs the pinned, checksum-verified
+  # `shipyard cause extract` over each (tools/ci/ci_cause_notices.sh). It is
+  # advisory: it never gates the run, and none of its failures fail it.
+  ci-cause:
+    name: ci-cause (advisory)
+    needs: [build, macos, macos-merge-group, linux, windows]
+    if: >-
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && contains(needs.*.result, 'failure')
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/ci_cause_notices.sh
+          sparse-checkout-cone-mode: false
+      - name: Name the cause of each failed job
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/ci_cause_notices.sh

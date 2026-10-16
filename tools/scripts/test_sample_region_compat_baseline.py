@@ -1,18 +1,62 @@
 #!/usr/bin/env python3
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import sample_region_compat_baseline as baseline
+import generate_sample_region_compat_inputs as input_generator
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
+from pr_head_affected_tests import script_input_tests
+sys.path.pop(0)
 
 
 class BaselineTests(unittest.TestCase):
+    def test_selector_inputs_cover_compiler_include_closure(self):
+        required = {
+            "test/fixtures/sample-region-compat",
+            "test/sample_region_compat/compat_runner.cpp",
+            "core/host/include/pulp/host/custom_node_type.hpp",
+            "core/host/include/pulp/host/signal_graph.hpp",
+        }
+        inputs = set(baseline.COMPAT_INPUTS)
+        self.assertTrue(required <= inputs)
+
+    def test_real_manifest_selects_every_declared_compat_input(self):
+        for path in (
+            "test/sample_region_compat/old_installed_sdk_consumer.cpp",
+            "test/sample_region_compat/old_graph_serializer_v2.hpp",
+            "test/sample_region_compat/CMakeLists.txt",
+            "core/host/src/signal_graph.cpp",
+            "core/host/src/graph_serializer.cpp",
+            "core/host/src/sample_region_plan.cpp",
+        ):
+            with self.subTest(path=path):
+                self.assertIn("sample-region-compat-baseline",
+                              script_input_tests([path]))
+
+    def test_generator_reads_linked_source_closure_from_cmake_dependinfo(self):
+        repo = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as raw:
+            build = Path(raw)
+            link = build / "CMakeFiles/sample-region-compat-runner.dir"
+            link.mkdir(parents=True)
+            (link / "link.txt").write_text("/build/pulp/core/host/libpulp-host.a\n", encoding="utf-8")
+            info = build / "CMakeFiles/pulp-host.dir"
+            info.mkdir(parents=True)
+            (info / "DependInfo.cmake").write_text(
+                f'"{repo}/core/host/src/graph_serializer.cpp" "obj"\n'
+                f'"{repo}/core/host/src/sample_region_plan.cpp" "obj"\n', encoding="utf-8")
+            paths = input_generator.dependency_paths(repo, build)
+            self.assertIn("core/host/src/graph_serializer.cpp", paths)
+            self.assertIn("core/host/src/sample_region_plan.cpp", paths)
+
     def test_frozen_receipt_includes_sdk_build_type_configure_input(self):
         repo = Path(__file__).resolve().parents[2]
         receipt = json.loads((repo / "test" / "fixtures" / "sample-region-compat" /
-                              baseline.SDK_RECEIPT).read_text())
+                              baseline.SDK_RECEIPT).read_text(encoding="utf-8"))
         self.assertIn("sdk_build_type.txt", receipt["files"])
 
     def test_builds_force_receipt_compatible_generator(self):
@@ -26,7 +70,7 @@ class BaselineTests(unittest.TestCase):
             sdk = Path(raw) / "sdk"
             pulp_dir = sdk / "lib" / "cmake" / "Pulp"
             pulp_dir.mkdir(parents=True)
-            (pulp_dir / "PulpConfig.cmake").write_text("# frozen\n")
+            (pulp_dir / "PulpConfig.cmake").write_text("# frozen\n", encoding="utf-8")
             with mock.patch.object(baseline, "verify_installed_sdk", return_value={}), \
                  mock.patch.object(baseline, "verify_sdk_build_inputs"), \
                  mock.patch.object(baseline, "run", return_value=success) as run:
@@ -44,7 +88,7 @@ class BaselineTests(unittest.TestCase):
             fixtures = Path(raw)
             (fixtures / "expected").mkdir()
             (fixtures / "expected" / "old-installed-sdk-consumer.txt").write_text(
-                "old-installed-sdk-consumer=pass\n")
+                "old-installed-sdk-consumer=pass\n", encoding="utf-8")
             with mock.patch.object(baseline, "sha256",
                                    return_value=baseline.SDK_RECEIPT_SHA256), \
                  mock.patch.object(baseline, "run", side_effect=results):
@@ -78,7 +122,7 @@ class BaselineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             (root / "expected").mkdir()
-            (root / "expected" / "processor-virtuals.txt").write_text("0:a\n1:b\n")
+            (root / "expected" / "processor-virtuals.txt").write_text("0:a\n1:b\n", encoding="utf-8")
             with mock.patch.object(baseline, "processor_virtual_facts",
                                    return_value="0:a\n1:b\n2:c\n"):
                 status, _ = baseline.verify_processor_virtuals(root, root)
@@ -94,23 +138,23 @@ class BaselineTests(unittest.TestCase):
             sdk = root / "sdk"
             consumed = sdk / "include" / "pulp" / "surface.hpp"
             consumed.parent.mkdir(parents=True)
-            consumed.write_text("frozen\n")
+            consumed.write_text("frozen\n", encoding="utf-8")
             provenance = {
                 "schema": "pulp.sdk-provenance.v1",
                 "sdk_version": "0.837.0",
                 "source_git_sha": "abc",
             }
             provenance_path = sdk / "sdk-provenance.json"
-            provenance_path.write_text(json.dumps(provenance))
+            provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
             receipt = {
                 "sdk_provenance_sha256": baseline.sha256(provenance_path),
                 "provenance": provenance,
                 "files": {"include/pulp/surface.hpp": baseline.sha256(consumed)},
             }
             receipt_path = root / "receipt.json"
-            receipt_path.write_text(json.dumps(receipt))
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
             baseline.verify_installed_sdk(sdk, receipt_path)
-            consumed.write_text("mutated\n")
+            consumed.write_text("mutated\n", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "file hash mismatch"):
                 baseline.verify_installed_sdk(sdk, receipt_path)
 
@@ -120,10 +164,10 @@ class BaselineTests(unittest.TestCase):
             sdk = root / "sdk"
             cmake_input = sdk / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake"
             cmake_input.parent.mkdir(parents=True)
-            cmake_input.write_text("# frozen\n")
+            cmake_input.write_text("# frozen\n", encoding="utf-8")
             provenance = {"schema": "pulp.sdk-provenance.v1"}
             provenance_path = sdk / "sdk-provenance.json"
-            provenance_path.write_text(json.dumps(provenance))
+            provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
             receipt = {
                 "sdk_provenance_sha256": baseline.sha256(provenance_path),
                 "provenance": provenance,
@@ -132,9 +176,9 @@ class BaselineTests(unittest.TestCase):
                 },
             }
             receipt_path = root / "receipt.json"
-            receipt_path.write_text(json.dumps(receipt))
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
             baseline.verify_installed_sdk(sdk, receipt_path)
-            (cmake_input.parent / "Unexpected.cmake").write_text("# unreceipted\n")
+            (cmake_input.parent / "Unexpected.cmake").write_text("# unreceipted\n", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "unreceipted files"):
                 baseline.verify_installed_sdk(sdk, receipt_path)
 

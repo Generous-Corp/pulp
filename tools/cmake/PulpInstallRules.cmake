@@ -44,15 +44,20 @@ endif()
 list(APPEND PULP_SDK_TARGETS
     pulp-timeline-agent-view pulp-timeline-editor
     pulp-playback pulp-events
-    pulp-sample-bank-manifest pulp-state
+    pulp-sample-bank-manifest pulp-content pulp-state
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-view-core pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
     list(APPEND PULP_SDK_TARGETS pulp-audio-analysis)
+endif()
+# The view-free CLAP adapter behind pulp_add_plugin(NO_EDITOR); present only
+# when the CLAP SDK is.
+if(TARGET pulp-format-clap-core)
+    list(APPEND PULP_SDK_TARGETS pulp-format-clap-core)
 endif()
 
 # pulp-view-script (the JS scripting + web-compat layer) is EXCLUDE_FROM_ALL
@@ -63,6 +68,13 @@ endif()
 # so it is only required in the export set then.
 if(PULP_ENABLE_JS)
     list(APPEND PULP_SDK_TARGETS pulp-view-script)
+endif()
+
+# The importer and its built-in recognition pack exist only when the
+# design-import subsystem is compiled; view-script and the view umbrellas link
+# them PUBLIC in that configuration, so the export set needs them then.
+if(PULP_ENABLE_DESIGN_IMPORT)
+    list(APPEND PULP_SDK_TARGETS pulp-design-import pulp-design-import-audio-pack)
 endif()
 if(PULP_BUILD_WEBVIEW)
     list(APPEND PULP_SDK_TARGETS pulp-view-webview)
@@ -89,17 +101,31 @@ endif()
 if(TARGET pulp-host)
     list(APPEND PULP_SDK_TARGETS pulp-host)
 endif()
+if(TARGET pulp-view-graph-editor)
+    list(APPEND PULP_SDK_TARGETS pulp-view-graph-editor)
+endif()
+if(TARGET pulp-view-audio)
+    list(APPEND PULP_SDK_TARGETS pulp-view-audio)
+endif()
 
+# The GPU device layer is exported with the renderer that links it, and on its
+# own for pulp-gpu-audio, which links the device without the 2D renderer.
+if(TARGET pulp-gpu-device-api)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-device-api)
+endif()
+if(TARGET pulp-gpu-device)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-device)
+endif()
 if(TARGET pulp-render)
     list(APPEND PULP_SDK_TARGETS pulp-render)
 endif()
 
 # pulp-gpu-audio is the GPU-agnostic real-time audio transport plus the optional
 # GPU convolver/spectral nodes. The transport target is always built, but its
-# GPU nodes (and the PUBLIC link to pulp::render / pulp::signal) only compile
+# GPU nodes (and the PUBLIC link to pulp::gpu-device / pulp::signal) only compile
 # when GPU is enabled. Export it when configured so find_package(Pulp) consumers
 # — GPU plugins that drive a GpuAudioTransport — get pulp::gpu-audio. Its PUBLIC
-# deps (pulp::audio, pulp::runtime, and in the GPU path pulp::render + pulp::signal)
+# deps (pulp::audio, pulp::runtime, and in the GPU path pulp::gpu-device + pulp::signal)
 # are all already in the export set, so the export set stays self-consistent.
 if(TARGET pulp-gpu-audio)
     list(APPEND PULP_SDK_TARGETS pulp-gpu-audio)
@@ -236,7 +262,7 @@ if(TARGET yogacore)
 endif()
 if(PULP_ENABLE_DESIGN_IMPORT AND TARGET yaml-cpp)
     # yaml-cpp remains an implementation detail of the public DESIGN.md parser,
-    # but pulp-view-core is static, so installed consumers need its archive in
+    # but pulp-design-import is static, so installed consumers need its archive in
     # their final link closure. Export it under Pulp's namespace rather than
     # installing a second, independently discoverable yaml-cpp package.
     set_target_properties(yaml-cpp PROPERTIES EXPORT_NAME yaml-cpp)
@@ -323,7 +349,7 @@ if(TARGET pulp-authoring-capsule)
     list(APPEND _pulp_sdk_header_subsystems authoring_capsule)
 endif()
 list(APPEND _pulp_sdk_header_subsystems
-    simd timeline_agent_view timeline_editor playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
+    simd timeline_agent_view timeline_editor playback interchange dawproject smf events content state audio midi signal graph format sequence osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)
@@ -339,6 +365,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+# GraphEditorView is an audio-UI header kept outside view-core, while retaining
+# its public pulp/view/widgets include path for installed consumers.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include/pulp/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+    FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"
@@ -696,6 +728,32 @@ file(WRITE "${CMAKE_BINARY_DIR}/sdk_build_type.txt"
      "${CMAKE_BUILD_TYPE}\n")
 install(FILES "${CMAKE_BINARY_DIR}/sdk_build_type.txt" DESTINATION ".")
 
+# Preserve the exact source identity in ordinary cmake --install prefixes.
+# This is local provenance only; release eligibility still requires the
+# separately verified release marker.
+find_package(Git REQUIRED)
+execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE PULP_SOURCE_INSTALL_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _pulp_source_install_sha_result ERROR_QUIET)
+execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" status --porcelain --untracked-files=no
+    OUTPUT_VARIABLE _pulp_source_install_status OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _pulp_source_install_status_result ERROR_QUIET)
+string(LENGTH "${PULP_SOURCE_INSTALL_SHA}" _pulp_source_install_sha_length)
+if(NOT _pulp_source_install_sha_result EQUAL 0 OR
+   NOT _pulp_source_install_sha_length EQUAL 40 OR
+   NOT PULP_SOURCE_INSTALL_SHA MATCHES "^[0-9a-f]+$" OR
+   NOT _pulp_source_install_status_result EQUAL 0)
+    message(FATAL_ERROR "Pulp source install provenance: unable to resolve checkout identity")
+endif()
+if(_pulp_source_install_status STREQUAL "")
+    set(PULP_SOURCE_INSTALL_DIRTY false)
+else()
+    set(PULP_SOURCE_INSTALL_DIRTY true)
+endif()
+configure_file("${PULP_ROOT_DIR}/tools/cmake/PulpStampSourceInstall.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake" @ONLY)
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake")
+
 # CMake config files for find_package(Pulp)
 install(EXPORT PulpTargets
     FILE PulpTargets.cmake
@@ -742,6 +800,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
@@ -777,6 +837,8 @@ install(FILES
     # them is exactly the gap WAH-3 closes.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpVerifyRuntimeStaging.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
+    # Included by FindSkia.cmake relative to its own directory.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
     # Every plist template a format helper can reach must ship. PulpPluginFormats
@@ -911,6 +973,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_native_view_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_adapter.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_audio_unit.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_entry.mm"
@@ -918,6 +981,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_no_editor.cpp"
     DESTINATION src/pulp/format
 )
 
@@ -971,6 +1035,8 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_script_keys.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_text_input.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac_internal.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_drag.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac_host_lifetime.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac_host_lifetime.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"

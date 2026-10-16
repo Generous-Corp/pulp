@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 129,
+  "inventory_version": 133,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,15 +42,15 @@
     }
   ],
   "counts": {
-    "public_headers": 505,
-    "reviewed_headers": 226,
-    "legacy_unreviewed_headers": 279,
+    "public_headers": 506,
+    "reviewed_headers": 228,
+    "legacy_unreviewed_headers": 278,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
-      "capability_support": 44,
+      "capability_support": 46,
       "infrastructure": 59,
-      "legacy_unreviewed": 279,
+      "legacy_unreviewed": 278,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -85,9 +85,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 272,
-        "reviewed_headers": 126,
-        "legacy_unreviewed_headers": 146,
+        "public_headers": 273,
+        "reviewed_headers": 128,
+        "legacy_unreviewed_headers": 145,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -1196,7 +1196,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph.hpp",
-      "fingerprint": "sha256:4f5173fdaf3fc38ba74e88ec35117c7d683aad6b1706a766f27fd9b549b15cc6",
+      "fingerprint": "sha256:5d27680ef37b465e122b3edb957b8d7ff01d691042004a93d1f91df4d90d49f3",
       "include": "pulp/host/signal_graph.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1227,7 +1227,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:451e1ec94d3e41c117f3c23e6cec6ba344566a86f40d051a297fd9312175d58c",
+      "fingerprint": "sha256:fdb399333f135b540d35a70647967363f203bdd1ab49507d7e3ceff8e1acc63e",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3467,11 +3467,24 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/lfo.hpp",
-      "fingerprint": "sha256:f24356e804172862d6bf497975993f9521d3da8092a36ed7eaf0b460600e270a",
+      "fingerprint": "sha256:cf8ba3b89400e1807b5cc4576bafd5f58046780ad68d073bdbda6131762d8adf",
       "include": "pulp/signal/lfo.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.unison-voice-primitives"
+      ],
+      "rationale": "The house LFO gains opt-in band limiting and a block-mean read built on lfo_sampling.hpp; its wave vocabulary moved there. A modulation-source contract for generators is a separate slice."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/lfo_sampling.hpp",
+      "fingerprint": "sha256:214e987fd3a805efa820889090dfd2bbb662fc58052f49ca959d7606306c3837",
+      "include": "pulp/signal/lfo_sampling.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.unison-voice-primitives"
+      ],
+      "rationale": "Pure sampling of an LFO waveform without aliasing: the interval mean a block-rate consumer takes and the polyBLEP / polyBLAMP waveform an audio-rate consumer takes. DSP support used by LfoT and by plugins; not a generator-facing capability contract in this slice."
     },
     {
       "domain": "signal",

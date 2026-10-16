@@ -16,8 +16,8 @@ on:
     branches: [main, develop]
     types: [opened, synchronize, reopened, edited]
   # Run the required `Enforce version & skill sync` gate on queued merge groups
-  # so a merge queue on `main` can land PRs. On merge_group the diff base
-  # resolves to origin/main (see the "Resolve diff base" step).
+  # so a merge queue on `main` can land PRs. On merge_group the diff base is
+  # the entry's own merge_group.base_sha (see the "Resolve diff base" step).
   merge_group:
   workflow_dispatch:
     inputs:
@@ -53,6 +53,7 @@ jobs:
     # branch JSON — including the hosted fallbacks, hence the quoted form — so
     # setting a local selector can never turn this required gate into a silent
     # black hole.
+    # workflow_ref is main only on a dispatch from main; PR and queue runs always land on ubuntu-latest.
     runs-on: >-
       ${{ fromJSON(
         github.workflow_ref == format('{0}/.github/workflows/version-skill-check.yml@refs/heads/main', github.repository) &&
@@ -65,41 +66,44 @@ jobs:
         (vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') ||
         '"ubuntu-latest"'
       ) }}
-    name: Enforce version & skill sync
+    # The required context is the `enforce` job below, which needs this one.
+    name: Version & skill sync checks
 
     env:
       PULP_ENFORCE_PREPUSH: "1"
 
     steps:
       - name: Checkout PR head with full history
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # version_bump_check and skill_sync_check both diff against
           # origin/main — we need the real base to be reachable.
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Resolve diff base
         id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
-          # Every gate below compares HEAD against the merge-base, not the
-          # base tip. The checked-out merge ref can lag the live base branch,
-          # and a gate that reads a file at the tip (node ABI order, the skill
-          # map, hotspot sizes) would blame the PR for whatever main changed
-          # since. Three-dot diffs and commit ranges are unchanged by this.
-          # workflow_dispatch and merge_group compare against origin/main.
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="origin/${{ github.base_ref }}"
-          else
-            base="origin/main"
-          fi
-          ref=$(git merge-base "$base" HEAD)
-          echo "diff base: $ref (merge-base of $base and HEAD)"
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          # Every gate below compares HEAD against this one commit. On
+          # merge_group it is the queue entry's own base (merge_group.base_sha):
+          # a group commit sits on top of every entry ahead of it, so a
+          # merge-base with origin/main would put their commits in this entry's
+          # range and fail it for them. On pull_request it is the merge-base
+          # with the base branch, so a gate reading a file at the base tip does
+          # not blame the PR for whatever the base changed since. The rules and
+          # their tests live in tools/scripts/ci_diff_base.py.
+          python3 tools/scripts/ci_diff_base.py \
+              --event "$EVENT_NAME" \
+              --base-ref "$BASE_REF" \
+              --merge-group-base-sha "$MERGE_GROUP_BASE_SHA"
 
       - name: Skill-sync check
         run: |
@@ -329,6 +333,7 @@ jobs:
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
+          python3 tools/scripts/test_ci_diff_base.py
           python3 tools/scripts/test_node_abi_gate.py
           python3 tools/scripts/test_hotspot_size_guard.py
           python3 tools/scripts/test_header_fanout_guard.py
@@ -350,6 +355,8 @@ jobs:
           python3 tools/scripts/safe_path_guard_lint.py
           python3 tools/scripts/test_text_encoding_lint.py
           python3 tools/scripts/text_encoding_lint.py --base "${{ steps.base.outputs.ref }}"
+          python3 tools/scripts/test_python_floor_syntax_check.py
+          python3 tools/scripts/python_floor_syntax_check.py
           python3 tools/scripts/single_backend_guard.py --selftest
           python3 tools/scripts/processing_model_terms_lint.py --selftest
           python3 tools/scripts/conflict_marker_check.py --selftest
@@ -362,14 +369,17 @@ jobs:
         # checkout, so they need none of the macOS build the required gate
         # spends most of its time producing. The gate excludes their
         # `source-selftest` label on pull_request / workflow_dispatch /
-        # merge_group, and this required context runs every one of them on
-        # the same events, so each still blocks a merge. The
-        # source-selftest-lane-contract ctest (on the gate) fails if the label,
-        # the manifest and this step drift apart. --min-count catches a
-        # manifest that shrank without anyone deciding to shrink it.
+        # merge_group, and this workflow runs every one of them on the same
+        # events: the shared part here, and the whole-machine entries in the
+        # `exclusive-selftests` shards. The required `Enforce version & skill
+        # sync` context needs both jobs, so each entry still blocks a merge.
+        # The source-selftest-lane-contract ctest (on the gate) fails if the
+        # label, the manifest, the split and these steps drift apart.
+        # --min-count catches a manifest that shrank without anyone deciding
+        # to shrink it.
         timeout-minutes: 45
         run: |
-          python3 tools/ci/source_selftests.py run --min-count 130
+          python3 tools/ci/source_selftests.py run --min-count 130 --part shared
 
       - name: Wide non-native tier (tooling checks for a skipped macOS gate)
         # With PULP_CLASSIFY_WIDE_NON_NATIVE=1, build.yml's classify job lets a
@@ -383,3 +393,81 @@ jobs:
           tools/ci/net-retry.sh python3 -m pip install --quiet 'PyYAML==6.0.2'
           python3 tools/ci/source_selftests.py run \
             --manifest tools/ci/wide_non_native_checks.json --min-count 7
+
+  exclusive-selftests:
+    # The manifest entries with PROCESSORS > 1 fan out their own subprocesses
+    # and were calibrated to have the machine to themselves, so the shared
+    # part runs them one at a time after everything else; that serial tail
+    # was most of the check's wall time. Each shard here runs its entries
+    # alone on a runner of its own, so the calibration still holds. The split
+    # is lane_parts() in tools/ci/source_selftests.py; `check` fails if this
+    # matrix and EXCLUSIVE_SHARDS disagree. Same runner selection, checkout
+    # and interpreter as the checks job, so the entries see the environment
+    # they always ran in. EXCLUSIVE_SHARD_PLAN says which entry runs in which
+    # shard, balanced on measured wall time.
+    runs-on: >-
+      ${{ fromJSON(
+        github.workflow_ref == format('{0}/.github/workflows/version-skill-check.yml@refs/heads/main', github.repository) &&
+        github.event_name == 'workflow_dispatch' &&
+        (vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') ||
+        github.workflow_ref == format('{0}/.github/workflows/version-skill-check.yml@refs/heads/main', github.repository) &&
+        (github.event_name == 'merge_group' ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository)) &&
+        (vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') ||
+        '"ubuntu-latest"'
+      ) }}
+    name: Exclusive source selftests ${{ matrix.shard }}/2
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    env:
+      PULP_ENFORCE_PREPUSH: "1"
+
+    steps:
+      - name: Checkout PR head with full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Exclusive source selftests
+        timeout-minutes: 45
+        run: |
+          python3 tools/ci/source_selftests.py run --min-count 130 --part exclusive --shard ${{ matrix.shard }}/2
+
+  enforce:
+    # The required context. It runs after both jobs whatever they concluded,
+    # and passes only when both succeeded: a failed, cancelled or skipped part
+    # fails it, so splitting the work cannot turn a part that did not run
+    # into a green check. It checks out and runs no repository code.
+    name: Enforce version & skill sync
+    needs: [version-skill-check, exclusive-selftests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every part of the check to have succeeded
+        env:
+          CHECKS_RESULT: ${{ needs.version-skill-check.result }}
+          EXCLUSIVE_RESULT: ${{ needs.exclusive-selftests.result }}
+        run: |
+          status=0
+          for part in "Version & skill sync checks=$CHECKS_RESULT" \
+                      "Exclusive source selftests=$EXCLUSIVE_RESULT"; do
+            name="${part%%=*}"
+            result="${part#*=}"
+            if [ "$result" = "success" ]; then
+              echo "$name: success"
+            else
+              echo "::error::$name concluded '${result:-missing}', not success"
+              status=1
+            fi
+          done
+          exit "$status"

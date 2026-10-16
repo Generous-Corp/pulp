@@ -142,7 +142,16 @@ lint alone does not establish Intel configuration or native execution.
   limitation in the guide.
 - **`macos-15-intel` is real but flaky** (linker-image errors, CPU-peg). It is
   the fallback for Tier-2 job A, which has an infra-vs-product watchdog
-  classifier. The physical Tier-4 runner uses only
+  classifier.
+- **`cancelled` does not mean a flaky runner.** A job that waits for a runner
+  until GitHub gives up also concludes `cancelled`, with an empty `runner_name`
+  and no steps. The infra-vs-product classifier calls that infra and keeps the
+  product verdict green. So the watchdog also asks the jobs API
+  (`tools/scripts/unserved_job_check.py`) whether a runner ever picked job A up.
+  If none did, it fails the run and keeps its own tracker, "Nightly Intel: no
+  runner picked up the native Intel job". Without this check, a deleted runner
+  registration left the lane dead for sixteen nights while the watchdog stayed
+  green. The physical Tier-4 runner uses only
   `pulp-intel-native,pulp-host-macmini`; never give it the required Studio pool
   labels and never route Intel work to Namespace.
 - **A universal wgpu dylib must be re-signed after `lipo`** (G3 lesson): a raw
@@ -172,6 +181,11 @@ portable; never blanket-exempt the containing Rack or packaging file.
 The control-shipping artifact scanner is one such contract: its non-Apple
 validation accepts both x86 and ARM spellings emitted by native inspection
 tools, so its paired ARM predicates are narrowly allowlisted.
+
+The lint does not report a stale allowlist entry (one whose substring no
+longer occurs in its file), so delete the entry when the code it excused goes
+away; `PulpWgpuUniversal.cmake`'s `_slice STREQUAL "aarch64"` entry went stale
+that way when its slice digests moved into the dependency manifest.
 
 When you change the lint, the allowlist, or an Intel workflow:
 
@@ -252,3 +266,10 @@ Adding another Intel leg that runs a broad `ctest` means adding this step too.
 lane is missing it, so the omission surfaces locally rather than as a red Intel
 lane whose message points at neither Intel nor portability. It runs in `workflow-lint.yml`, not as a ctest: it parses the workflow
 YAML, and the required macOS CTest hosts carry no PyYAML.
+
+### Hosted advisory cadence
+
+The Intel portability workflow is advisory and is scheduled nightly on `main`
+or dispatched by Shipyard at arm time for an approved PR head. It intentionally
+has no `pull_request` trigger, so ordinary PR pushes do not consume the hosted
+Intel capacity.

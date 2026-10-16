@@ -272,6 +272,34 @@ function(_pulp_declare_commit_bound target)
         "{\"target\": \"${target}\"}\n")
 endfunction()
 
+# Where an artifact's control sidecars (inspector capabilities, shipping
+# manifest, scan report) are written, as a generator expression. A macOS
+# bundle keeps them with its resources: Apple reserves Contents/MacOS (and a
+# framework's Versions/<v>) for code, and a data file there makes the bundle
+# fail an ordinary, non --deep code signature such as `pulp ship sign` makes.
+# Every other artifact, an iOS shallow bundle included, keeps them beside its
+# binary. `out_legacy` names the directory earlier releases wrote to when it
+# differs, so stale copies can be removed; it is empty otherwise.
+# Readers locate them with pulp::inspect::control_sidecar_directories().
+function(_pulp_control_sidecar_dir artifact_target out_dir out_legacy)
+    set(_dir "$<TARGET_FILE_DIR:${artifact_target}>")
+    set(_legacy "")
+    if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        get_target_property(_framework ${artifact_target} FRAMEWORK)
+        get_target_property(_bundle ${artifact_target} BUNDLE)
+        get_target_property(_app ${artifact_target} MACOSX_BUNDLE)
+        if(_framework)
+            set(_legacy "${_dir}")
+            set(_dir "$<TARGET_FILE_DIR:${artifact_target}>/Resources")
+        elseif(_bundle OR _app)
+            set(_legacy "${_dir}")
+            set(_dir "$<TARGET_BUNDLE_CONTENT_DIR:${artifact_target}>/Resources")
+        endif()
+    endif()
+    set(${out_dir} "${_dir}" PARENT_SCOPE)
+    set(${out_legacy} "${_legacy}" PARENT_SCOPE)
+endfunction()
+
 function(_pulp_attach_control_shipping target artifact_target artifact_format)
     if(NOT TARGET ${artifact_target})
         message(FATAL_ERROR "control shipping target does not exist: ${artifact_target}")
@@ -340,6 +368,9 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     if(NOT _architectures OR _architectures STREQUAL "_architectures-NOTFOUND")
         if(APPLE AND CMAKE_OSX_ARCHITECTURES)
             set(_architectures "${CMAKE_OSX_ARCHITECTURES}")
+        elseif(WIN32)
+            include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpWindowsTargetArch.cmake")
+            pulp_windows_target_arch(_architectures)
         else()
             set(_architectures "${CMAKE_SYSTEM_PROCESSOR}")
         endif()
@@ -375,7 +406,7 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     set(_stamp_dir "${CMAKE_CURRENT_BINARY_DIR}/pulp-control-shipping-stamps")
     file(MAKE_DIRECTORY "${_stamp_dir}")
     set(_scan_stamp
-        "${_stamp_dir}/${artifact_target}.${_format_identifier}.$<CONFIG>.stamp")
+        "${_stamp_dir}/${artifact_target}.${_format_identifier}.$<CONFIG>.sidecars-v2.stamp")
     set(_shipping_manifest
         "${_shipping_dir}/${_shipping_manifest_stem}.control-shipping.json")
     file(GENERATE OUTPUT "${_shipping_manifest}" CONTENT "${_shipping_manifest_content}")
@@ -390,23 +421,37 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     set(_marker_source
         "${CMAKE_CURRENT_BINARY_DIR}/${target}_${artifact_target}_${_format_identifier}_control_shipping_marker.cpp")
     set(_marker_content
-        "#if defined(_MSC_VER)\n#define PULP_SHIPPING_USED\n#else\n#define PULP_SHIPPING_USED __attribute__((used, visibility(\"default\")))\n#endif\nextern \"C\" PULP_SHIPPING_USED const volatile char pulp_control_shipping_${_format_identifier}_v1[] = \"PULP_CONTROL_PROFILE_${_profile_identifier}_V1\\0PULP_CONTROL_MANIFEST_SHA256_${_control_manifest_digest}_V1\\0PULP_CONTROL_SHIPPING_SHA256_${_shipping_manifest_digest}_V1\\0PULP_CONTROL_ARTIFACT_FORMAT_${_format_identifier}_V1\\0PULP_CONTROL_ARTIFACT_PLATFORM_${_platform_identifier}_V1${_architecture_markers}${_standalone_marker}\";\n")
+        "#if defined(_MSC_VER)\n#define PULP_SHIPPING_USED __declspec(dllexport)\n#else\n#define PULP_SHIPPING_USED __attribute__((used, visibility(\"default\")))\n#endif\nextern \"C\" PULP_SHIPPING_USED const volatile char pulp_control_shipping_${_format_identifier}_v1[] = \"PULP_CONTROL_PROFILE_${_profile_identifier}_V1\\0PULP_CONTROL_MANIFEST_SHA256_${_control_manifest_digest}_V1\\0PULP_CONTROL_SHIPPING_SHA256_${_shipping_manifest_digest}_V1\\0PULP_CONTROL_ARTIFACT_FORMAT_${_format_identifier}_V1\\0PULP_CONTROL_ARTIFACT_PLATFORM_${_platform_identifier}_V1${_architecture_markers}${_standalone_marker}\";\n")
     file(GENERATE OUTPUT "${_marker_source}" CONTENT "${_marker_content}")
     target_sources(${artifact_target} PRIVATE "${_marker_source}")
 
+    _pulp_control_sidecar_dir(${artifact_target} _sidecar_dir _legacy_sidecar_dir)
+    set(_legacy_sidecar_removal "")
+    if(_legacy_sidecar_dir)
+        # A bundle built before the sidecars moved out of the code directory
+        # keeps the old copies across incremental builds, and they alone make
+        # it unsignable; remove them.
+        set(_legacy_sidecar_removal
+            COMMAND "${CMAKE_COMMAND}" -E rm -f
+                "${_legacy_sidecar_dir}/${target}.inspector-capabilities.json"
+                "${_legacy_sidecar_dir}/${_shipping_manifest_stem}.control-shipping.json"
+                "${_legacy_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json")
+    endif()
     add_custom_command(TARGET ${artifact_target} POST_BUILD
+        ${_legacy_sidecar_removal}
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_sidecar_dir}"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${_control_manifest}"
-            "$<TARGET_FILE_DIR:${artifact_target}>/${target}.inspector-capabilities.json"
+            "${_sidecar_dir}/${target}.inspector-capabilities.json"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${_shipping_manifest}"
-            "$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping.json"
+            "${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping.json"
         COMMAND "${CMAKE_COMMAND}"
             -DARTIFACT=$<TARGET_FILE:${artifact_target}>
             -DMANIFEST=${_control_manifest}
             -DSHIPPING_MANIFEST=${_shipping_manifest}
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DREPORT=$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping-report.json
+            -DREPORT=${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json
             -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
         VERBATIM)
@@ -423,14 +468,26 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     # instead of scanning the same bytes a second time.
     set(_scanner "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake")
     set(_scan_target "${artifact_target}_ControlShippingScan_${_format_identifier}")
+    # The stamp's name carries the sidecar layout, so a build tree from before
+    # the layout changed has no such stamp and re-runs this step even when no
+    # relink follows (Make and Xcode do not relink for a changed POST_BUILD
+    # command); it moves the sidecars the same way the POST_BUILD step does.
     add_custom_command(
         OUTPUT "${_scan_stamp}"
+        ${_legacy_sidecar_removal}
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_sidecar_dir}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_control_manifest}"
+            "${_sidecar_dir}/${target}.inspector-capabilities.json"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_shipping_manifest}"
+            "${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping.json"
         COMMAND "${CMAKE_COMMAND}"
             -DARTIFACT=$<TARGET_FILE:${artifact_target}>
             -DMANIFEST=${_control_manifest}
             -DSHIPPING_MANIFEST=${_shipping_manifest}
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DREPORT=$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping-report.json
+            -DREPORT=${_sidecar_dir}/${_shipping_manifest_stem}.control-shipping-report.json
             -DSKIP_IF_FRESH_STAMP=${_scan_stamp}
             -P "${_scanner}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"

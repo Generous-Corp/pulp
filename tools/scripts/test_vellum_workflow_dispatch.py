@@ -84,9 +84,15 @@ FAKE_GIT = textwrap.dedent(
       rev-parse)
         case "${2:-}" in
           refs/vellum/pr-head) echo "${FAKE_FETCHED_HEAD:-HEAD_OPEN}" ;;
+          --verify)
+            case "${3:-}" in
+              refs/vellum/live-main*|HEAD|HEAD'^{commit}') echo "${FAKE_BASE:-MERGE_COMMIT}" ;;
+              *'^{commit}') echo "${3%'^{commit}'}" ;;
+              *) echo "${FAKE_BASE:-MERGE_COMMIT}" ;;
+            esac ;;
           *) echo "${FAKE_BASE:-MERGE_COMMIT}" ;;
         esac ;;
-      rev-list) echo "CANDIDATE ${FAKE_BASE:-MERGE_COMMIT} ${FAKE_FETCHED_HEAD:-HEAD_OPEN}" ;;
+      rev-list) echo "CANDIDATE ${FAKE_BASE:-MERGE_COMMIT} ${FAKE_CANDIDATE_HEAD_PARENT:-${FAKE_FETCHED_HEAD:-HEAD_OPEN}}" ;;
       *) exit 0 ;;
     esac
     """
@@ -97,6 +103,10 @@ FAKE_PYTHON = textwrap.dedent(
     #!/bin/sh
     case "${1:-}" in
       *vellum_trusted_merge.py)
+        if [ "${FAKE_MERGE_FAILURE:-}" = conflict ]; then
+          echo 'vellum-trusted-merge: base and head do not merge cleanly' >&2
+          exit 1
+        fi
         previous=''
         for arg in "$@"; do
           if [ "$previous" = "--output" ]; then
@@ -201,7 +211,8 @@ def _run(
         for key in ("DISPATCH_PR", "PR_BASE", "PR_SOURCE_HEAD", "MERGE_BASE",
                     "MERGE_HEAD", "EVENT_BASE", "EVENT_HEAD", "EVENT_NUMBER",
                     "EVENT_STATE", "FAKE_LIVE_MUTATION", "FAKE_VALIDATOR_FAILURE",
-                    "FAKE_FETCHED_HEAD", "FAKE_BASE"):
+                    "FAKE_FETCHED_HEAD", "FAKE_BASE", "FAKE_MERGE_FAILURE",
+                    "FAKE_CANDIDATE_HEAD_PARENT"):
             full[key] = ""
         full.update(env)
         # A workflow step receives these values from preceding step outputs. The
@@ -322,17 +333,40 @@ class FreezeCheckResolve(unittest.TestCase):
     def script(self) -> str:
         return _step_script("vellum-freeze-check.yml", "freeze-check", "comparison")
 
-    def test_pull_request_path_uses_proposed_merge_base(self):
+    def test_pull_request_path_merges_exact_head_into_live_main(self):
+        # FAKE_BASE stands for live protected main; the event's own merge ref
+        # (EVENT_MERGE) and the payload PR base must not become the comparison.
         rc, out, _ = _run(self.script(), {
             "GITHUB_EVENT_NAME": "pull_request",
-            "PR_BASE": "B", "PR_SOURCE_HEAD": "SH",
+            "PR_BASE": "B", "PR_SOURCE_HEAD": "HEAD_OPEN",
+            "FAKE_CANDIDATE_HEAD_PARENT": "HEAD_OPEN",
         })
         self.assertEqual(rc, 0)
         self.assertEqual(out, {
             "base": "MERGE_COMMIT",
-            "head": "EVENT_MERGE",
-            "source_head": "SH",
+            "head": "CANDIDATE",
+            "source_head": "HEAD_OPEN",
         })
+
+    def test_pull_request_path_fails_when_head_conflicts_with_live_main(self):
+        rc, out, err = _run(self.script(), {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "PR_SOURCE_HEAD": "HEAD_OPEN",
+            "FAKE_MERGE_FAILURE": "conflict",
+        })
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, {})
+        self.assertIn("does not merge cleanly with current protected main", err)
+
+    def test_pull_request_path_rejects_a_candidate_with_foreign_parents(self):
+        rc, out, err = _run(self.script(), {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "PR_SOURCE_HEAD": "HEAD_OPEN",
+            "FAKE_CANDIDATE_HEAD_PARENT": "SOMETHING_ELSE",
+        })
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, {})
+        self.assertIn("candidate parents are not current protected main", err)
 
     def test_merge_group_path_unchanged(self):
         rc, out, _ = _run(self.script(), {
@@ -356,6 +390,143 @@ def _workflow(name: str) -> dict:
     except ImportError:  # pragma: no cover - environment-dependent
         raise unittest.SkipTest("PyYAML not installed")
     return yaml.safe_load((WORKFLOWS / name).read_text())
+
+
+class FreezeCheckRealGitLiveMain(unittest.TestCase):
+    """Run the pull_request comparison step against real git objects.
+
+    The fixture reproduces the race the step exists to absorb: GitHub built
+    the PR's merge ref on an older main, and main then gained another PR's
+    watch event before the job started. The step must validate the PR merged
+    into the CURRENT main, and the measured diff must contain only the PR's
+    own change, never the event main gained after the branch forked.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.env = {
+            k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")
+        }
+        self.env.update({
+            "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "f@x.invalid",
+            "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "f@x.invalid",
+            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+            "PULP_NET_RETRY_ATTEMPTS": "1", "PULP_NET_RETRY_DELAY_SECS": "0",
+        })
+        self.origin = self.root / "origin"
+        self.work = self.root / "author"
+        self._git(self.root, "init", "-q", "-b", "main", str(self.work))
+        (self.work / "shared.txt").write_text("line\n", encoding="utf-8")
+        events = self.work / ".github" / "vellum-expansion-watch-events"
+        events.mkdir(parents=True)
+        (events / "older.json").write_text("{}\n", encoding="utf-8")
+        self._commit("fork point")
+        self.fork_point = self._rev("HEAD")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _git(self, cwd: Path, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, env=self.env, check=True,
+            capture_output=True, text=True, encoding="utf-8",
+        ).stdout.strip()
+
+    def _rev(self, ref: str, cwd: Path | None = None) -> str:
+        return self._git(cwd or self.work, "rev-parse", ref)
+
+    def _commit(self, message: str) -> None:
+        self._git(self.work, "add", "--all")
+        self._git(self.work, "commit", "-q", "-m", message)
+
+    def _race(self, *, pr_edit: str, main_edit: str) -> tuple[str, str, str]:
+        """Return (pr_head, stale_merge_ref, live_main)."""
+        self._git(self.work, "checkout", "-q", "-b", "pr", self.fork_point)
+        (self.work / "pr.txt").write_text("pr\n", encoding="utf-8")
+        (self.work / "shared.txt").write_text(pr_edit, encoding="utf-8")
+        self._commit("pr change")
+        pr_head = self._rev("HEAD")
+        tree = self._git(
+            self.work, "merge-tree", "--write-tree", self.fork_point, pr_head
+        ).splitlines()[0]
+        stale_merge = self._git(
+            self.work, "commit-tree", tree, "-p", self.fork_point, "-p", pr_head,
+            "-m", "github merge ref built on the older main",
+        )
+        self._git(self.work, "checkout", "-q", "main")
+        newer = self.work / ".github" / "vellum-expansion-watch-events" / "newer.json"
+        newer.write_text("{}\n", encoding="utf-8")
+        (self.work / "shared.txt").write_text(main_edit, encoding="utf-8")
+        self._commit("another PR lands on main")
+        live_main = self._rev("HEAD")
+        self._git(self.work, "update-ref", "refs/pull/1/merge", stale_merge)
+        self._git(self.root, "clone", "-q", "--mirror", str(self.work), str(self.origin))
+        return pr_head, stale_merge, live_main
+
+    def _run_step(self, merge_ref: str, pr_head: str) -> tuple[int, dict[str, str], str, Path]:
+        runner = self.root / "runner"
+        self._git(self.root, "clone", "-q", "--no-checkout", str(self.origin), str(runner))
+        self._git(runner, "fetch", "-q", "origin", "refs/pull/1/merge")
+        self._git(runner, "checkout", "-q", "--detach", merge_ref)
+        for helper in ("tools/ci/net-retry.sh", "tools/scripts/vellum_trusted_merge.py"):
+            target = runner / helper
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO_ROOT / helper, target)
+        script = runner.parent / "step.sh"
+        script.write_text(
+            _step_script("vellum-freeze-check.yml", "freeze-check", "comparison"),
+            encoding="utf-8",
+        )
+        output = runner.parent / "github_output"
+        output.write_text("", encoding="utf-8")
+        env = dict(self.env)
+        env.update({
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_SHA": merge_ref,
+            "GITHUB_OUTPUT": str(output),
+            "RUNNER_TEMP": str(runner.parent),
+            "PR_SOURCE_HEAD": pr_head,
+            "MERGE_BASE": "", "MERGE_HEAD": "",
+        })
+        proc = subprocess.run(
+            ["bash", str(script)], cwd=runner, env=env,
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        parsed = dict(
+            line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
+            if "=" in line
+        )
+        return proc.returncode, parsed, proc.stderr, runner
+
+    def test_merge_ref_built_on_an_older_main_validates_against_live_main(self):
+        pr_head, stale_merge, live_main = self._race(
+            pr_edit="line\n", main_edit="line\n"
+        )
+        rc, out, err, runner = self._run_step(stale_merge, pr_head)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(out["base"], live_main)
+        self.assertEqual(out["source_head"], pr_head)
+        candidate = out["head"]
+        self.assertNotEqual(candidate, stale_merge)
+        self.assertEqual(
+            self._git(runner, "rev-list", "--parents", "-n", "1", candidate).split(),
+            [candidate, live_main, pr_head],
+        )
+        self.assertEqual(self._rev("HEAD", runner), candidate)
+        changed = self._git(
+            runner, "diff", "--name-only", out["base"], out["head"]
+        ).splitlines()
+        self.assertEqual(changed, ["pr.txt"])
+
+    def test_head_that_conflicts_with_live_main_fails_closed(self):
+        pr_head, stale_merge, _ = self._race(
+            pr_edit="pr version\n", main_edit="main version\n"
+        )
+        rc, out, err, _ = self._run_step(stale_merge, pr_head)
+        self.assertEqual(rc, 1)
+        self.assertNotIn("base", out)
+        self.assertIn("does not merge cleanly with current protected main", err)
 
 
 class FreezeCheckDispatchRecovery(unittest.TestCase):

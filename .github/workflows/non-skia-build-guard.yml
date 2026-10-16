@@ -38,13 +38,13 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Tooling
         run: brew install ninja ccache
 
       - name: ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/Library/Caches/ccache
           key: non-skia-guard-${{ runner.os }}-${{ github.sha }}

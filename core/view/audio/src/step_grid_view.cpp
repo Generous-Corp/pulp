@@ -1,0 +1,249 @@
+#include <pulp/view/step_grid_view.hpp>
+
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/view/frame_clock.hpp>
+
+#include <algorithm>
+
+namespace pulp::view {
+
+StepGridViewBase::StepGridViewBase(std::uint8_t lanes, std::uint8_t steps, std::uint8_t patterns)
+    : lanes_(lanes), steps_(steps), patterns_(patterns),
+      visible_cache_(static_cast<std::size_t>(lanes) * steps) {
+    set_focusable(true);
+}
+
+StepGridViewBase::~StepGridViewBase() {
+    unsubscribe_probe();
+}
+
+void StepGridViewBase::detach_probe() {
+    unsubscribe_probe();
+}
+
+void StepGridViewBase::set_displayed_pattern(std::uint8_t pattern) {
+    if (pattern >= patterns_ || pattern == displayed_pattern_)
+        return;
+    displayed_pattern_ = pattern;
+    rebuild_visible();
+    request_repaint();
+}
+
+StepGridViewBase::PumpResult StepGridViewBase::pump() {
+    PumpResult r;
+    if (!channel_bound())
+        return r;
+
+    // Reset per-pump dirty accounting; the shim's apply_next_echo/rebuild_visible
+    // repopulate it as they replay this tick's echoes.
+    pump_dirty_cells_.clear();
+    pump_full_ = false;
+
+    // Drain the ordered echo stream, resyncing whenever the bar rises. A resync
+    // rebuilds the whole shown pattern; incremental echoes rebuild only their
+    // dirtied cells. Runs twice: once up front, once after the drain in case the
+    // echo FIFO overflowed mid-drain (which raises the resync bar).
+    auto do_resync = [&] {
+        ResyncPoint rp = resync_from_snapshot();
+        local_epoch_ = rp.epoch;
+        last_engine_sequence_ = rp.engine_sequence;
+        needs_initial_resync_ = false;
+        r.resynced = true;
+        r.full_rebuild = true;
+        r.rebuilt_cells += rp.rebuilt_cells;
+    };
+    auto drain = [&] {
+        for (;;) {
+            EchoResult er = apply_next_echo(last_engine_sequence_);
+            if (er.status == EchoStatus::Drained)
+                break;
+            if (er.status == EchoStatus::Applied) {
+                last_engine_sequence_ = er.engine_sequence;
+                ++r.echoes_applied;
+                r.rebuilt_cells += er.rebuilt_cells;
+                if (er.full_rebuild)
+                    pump_full_ = true;
+            }
+            // SkippedStale: keep draining without advancing the sequence bar.
+        }
+    };
+
+    if (needs_initial_resync_ || channel_resync_required_epoch() > local_epoch_)
+        do_resync();
+    drain();
+    if (channel_resync_required_epoch() > local_epoch_) {
+        do_resync();
+        drain();
+    }
+
+    // Read the playhead LAST — after any ActivePatternChanged echo — so the
+    // overlay reflects the current active pattern. Capture the outgoing overlay
+    // position first so a bounded repaint can invalidate the column the playhead
+    // is LEAVING as well as the one it is entering.
+    const bool was_visible = playhead_visible_;
+    const std::uint8_t prev_step = playhead_step_;
+    const PlayheadProjection ph = read_playhead();
+    const bool now_visible = ph.playing && ph.active_pattern == displayed_pattern_;
+    const bool playhead_changed =
+        now_visible != playhead_visible_ || (now_visible && ph.active_step != playhead_step_);
+    playhead_visible_ = now_visible;
+    playhead_step_ = ph.active_step;
+    playhead_pattern_ = ph.active_pattern;
+
+    // Repaint iff something *visible* changed. Prefer bounded invalidation: only
+    // the recomputed cells and the two playhead columns. A full rebuild (resync /
+    // pattern-length change) escalates to a whole-view repaint.
+    const bool full = r.full_rebuild || pump_full_;
+    r.requested_repaint = full || !pump_dirty_cells_.empty() || playhead_changed;
+    if (r.requested_repaint) {
+        if (full) {
+            request_repaint();
+        } else {
+            for (const Cell& c : pump_dirty_cells_)
+                request_repaint(cell_rect(c.lane, c.step));
+            if (playhead_changed) {
+                if (was_visible && prev_step < steps_)
+                    request_repaint(playhead_column_rect(prev_step));
+                if (playhead_visible_ && playhead_step_ < steps_)
+                    request_repaint(playhead_column_rect(playhead_step_));
+            }
+        }
+    }
+    return r;
+}
+
+// ── Geometry ────────────────────────────────────────────────────────────────
+Rect StepGridViewBase::cell_rect(std::uint8_t lane, std::uint8_t step) const {
+    const Rect b = local_bounds();
+    const float cw = b.width / static_cast<float>(steps_);
+    const float ch = b.height / static_cast<float>(lanes_);
+    constexpr float gap = 1.0f;
+    return Rect{static_cast<float>(step) * cw + gap, static_cast<float>(lane) * ch + gap,
+                std::max(0.0f, cw - 2 * gap), std::max(0.0f, ch - 2 * gap)};
+}
+
+Rect StepGridViewBase::playhead_column_rect(std::uint8_t step) const {
+    // Matches paint()'s overlay: a vertical strip spanning lane 0's top to the
+    // last lane's bottom at this step's column.
+    const Rect top = cell_rect(0, step);
+    const Rect bot = cell_rect(static_cast<std::uint8_t>(lanes_ - 1), step);
+    return Rect{top.x, top.y, top.width, (bot.y + bot.height) - top.y};
+}
+
+std::optional<StepGridViewBase::Cell> StepGridViewBase::cell_at(Point pos) const {
+    const Rect b = local_bounds();
+    if (b.width <= 0 || b.height <= 0)
+        return std::nullopt;
+    if (pos.x < 0 || pos.y < 0 || pos.x >= b.width || pos.y >= b.height)
+        return std::nullopt;
+    const int step = static_cast<int>(pos.x / (b.width / static_cast<float>(steps_)));
+    const int lane = static_cast<int>(pos.y / (b.height / static_cast<float>(lanes_)));
+    if (lane < 0 || lane >= lanes_ || step < 0 || step >= steps_)
+        return std::nullopt;
+    return Cell{static_cast<std::uint8_t>(lane), static_cast<std::uint8_t>(step)};
+}
+
+// ── Painting ────────────────────────────────────────────────────────────────
+void StepGridViewBase::paint(canvas::Canvas& canvas) {
+    using canvas::Color;
+    const Rect b = local_bounds();
+    canvas.set_fill_color(resolve_color("bg.surface", Color::rgba8(24, 24, 32)));
+    canvas.fill_rect(b.x, b.y, b.width, b.height);
+
+    for (std::uint8_t lane = 0; lane < lanes_; ++lane) {
+        for (std::uint8_t step = 0; step < steps_; ++step) {
+            const CellVisual& v = visible_cache_[index(lane, step)];
+            const Rect c = cell_rect(lane, step);
+            Color fill;
+            if (v.muted) {
+                fill = resolve_color("bg.primary", Color::rgba8(18, 18, 24));
+            } else if (v.enabled) {
+                // Accent brightened by velocity (token supplies hue; velocity drives alpha).
+                fill = resolve_color("accent.primary", Color::rgba8(99, 181, 255));
+                fill.a = 0.35f + 0.65f * v.intensity;
+            } else {
+                fill = resolve_color("bg.elevated", Color::rgba8(44, 44, 56));
+            }
+            canvas.set_fill_color(fill);
+            canvas.fill_rounded_rect(c.x, c.y, c.width, c.height, 2.0f);
+        }
+    }
+
+    // Playhead overlay column (drawn on top; never baked into cell visuals).
+    // Re-check the pattern here: set_displayed_pattern() can change the shown
+    // pattern after the last pump, and a synchronous repaint would otherwise draw
+    // the previous pattern's playhead over the new one.
+    if (playhead_visible_ && playhead_pattern_ == displayed_pattern_ && playhead_step_ < steps_) {
+        const Rect col = playhead_column_rect(playhead_step_);
+        Color ph = resolve_color("overlay.bg", Color::rgba8(255, 255, 255));
+        ph.a = 0.14f;
+        canvas.set_fill_color(ph);
+        canvas.fill_rect(col.x, col.y, col.width, col.height);
+    }
+}
+
+// ── Interaction (submit-only; render copy advances from echoes) ──────────────
+void StepGridViewBase::on_mouse_down(Point pos) {
+    auto cell = cell_at(pos);
+    if (!cell)
+        return;
+    current_txn_ = next_txn_++;
+    dragging_ = true;
+    // Toggle relative to current authoritative state (as reflected in the visual
+    // cache); the drag then paints that value across swept cells.
+    drag_sets_enabled_ = !cell_visual(cell->lane, cell->step).enabled;
+    last_drag_cell_ = cell;
+    submit_set_cell(cell->lane, cell->step, drag_sets_enabled_, state::GesturePhase::Begin);
+}
+
+void StepGridViewBase::on_mouse_drag(Point pos) {
+    if (!dragging_)
+        return;
+    auto cell = cell_at(pos);
+    if (!cell)
+        return;
+    if (last_drag_cell_ && last_drag_cell_->lane == cell->lane &&
+        last_drag_cell_->step == cell->step)
+        return; // same cell, no repeat command
+    last_drag_cell_ = cell;
+    submit_set_cell(cell->lane, cell->step, drag_sets_enabled_, state::GesturePhase::Update);
+}
+
+void StepGridViewBase::on_mouse_up(Point /*pos*/) {
+    if (!dragging_)
+        return;
+    dragging_ = false;
+    // Close the gesture with an IDEMPOTENT End marker on the last cell the drag
+    // actually touched, re-applying the SAME value the drag set. Gating on
+    // last_drag_cell_ avoids a stray default-cell edit on release-outside-grid.
+    if (channel_bound() && last_drag_cell_)
+        submit_set_cell(last_drag_cell_->lane, last_drag_cell_->step, drag_sets_enabled_,
+                        state::GesturePhase::End);
+    last_drag_cell_.reset();
+    current_txn_ = 0;
+}
+
+// ── FrameClock activity probe ────────────────────────────────────────────────
+void StepGridViewBase::on_frame_clock_changed() {
+    subscribe_probe();
+}
+
+void StepGridViewBase::subscribe_probe() {
+    FrameClock* clock = frame_clock();
+    if (clock == subscribed_clock_)
+        return;
+    unsubscribe_probe();
+    if (clock) {
+        probe_id_ = clock->subscribe_activity([this](float) { pump(); });
+        subscribed_clock_ = clock;
+    }
+}
+
+void StepGridViewBase::unsubscribe_probe() {
+    if (subscribed_clock_ && probe_id_ >= 0)
+        subscribed_clock_->unsubscribe_activity(probe_id_);
+    probe_id_ = -1;
+    subscribed_clock_ = nullptr;
+}
+
+} // namespace pulp::view

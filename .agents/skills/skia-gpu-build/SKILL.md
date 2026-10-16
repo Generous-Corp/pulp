@@ -85,6 +85,12 @@ exact Skia/Dawn pair used by desktop. The script checks out the immutable Skia
 revision and stages the `skunicode` headers; mutable milestone tips and stale
 module headers are not valid provenance.
 
+Android source builds take one governed host lease per ABI for both Skia Ninja
+and nested Dawn CMake. The Dawn-directory check must run after Ninja inside the
+governed command because that graph can create `cmake_dawn`; set
+`PULP_SKIA_ANDROID_DRY_RUN=1` to inspect per-ABI command receipts without an
+Android toolchain.
+
 A valid cached generation keeps headers and libraries together and carries both
 the verified archive stamp and extracted-file digest receipt. An arbitrary
 sibling checkout is not provenance: never use its mutable
@@ -194,6 +200,16 @@ shipping artifact.
 
 ## Gotchas (each cost real time)
 
+- **Windows ARM64 keeps its `arm64/` slice; never flatten it.** FindSkia.cmake
+  selects `build/win-gpu/lib/Release/arm64/` for an arm64-win target and refuses
+  the flat path, so an ARM64 configure cannot link x64 archives.
+  `fetch_skia_for_release.py` therefore preserves that subdir for
+  `windows-arm64`, as it does for iOS (`_PRESERVE_ARCH_SUBDIR`). When the two
+  disagreed, every windows-arm64 release leg failed configure with "Skia: Windows
+  ARM64 archive slice is missing" (v0.966.0). Change the layout in both places
+  together; `test_fetch_skia_for_release_extra.py` reads FindSkia to hold them
+  in step. windows-x64 stays flat.
+
 - **Windows: `LNK2019 __imp_CompareObjectHandles` from `dawn_combined.lib(SharedFenceD3D12.cpp.obj)`.**
   Dawn's D3D12 shared fence calls `CompareObjectHandles`, which `kernel32.lib` does
   not import. Microsoft's docs name `Kernelbase.lib`, but the Windows SDK on the
@@ -203,6 +219,25 @@ shipping artifact.
   Dawn through its own path needs the same. Dawn calls it directly, so a runtime
   `GetProcAddress` lookup would mean patching Dawn. It surfaces only in targets that pull in the D3D12 device path (GPU compute,
   headless surface, renderer3d), which is why other Windows targets link fine.
+
+- **Windows ARM64 Skia archives are nested one level deeper than x64.** The
+  `skia-builder` Windows ARM64 release stores `skia.lib` and
+  `dawn_combined.lib` under `build/win-gpu/lib/Release/arm64/`, while x64 keeps
+  them directly under `Release/`. `FindSkia.cmake` selects that directory from
+  the target architecture and deliberately leaves `SKIA_FOUND=FALSE` when the
+  ARM64 slice is absent; otherwise an ARM64 configure can silently become a
+  CPU-only build. The target architecture comes from
+  `pulp_windows_target_arch()` (generator platform, then
+  `CMAKE_CXX_COMPILER_ARCHITECTURE_ID`), never `CMAKE_SYSTEM_PROCESSOR`. In a
+  Visual Studio `-A` configure that is the host, so an x64 build on an ARM64
+  host would take the ARM64 slice. ARM64EC and ARM64X are distinct COFF
+  machine modes and must consume matching `arm64ec/` or `arm64x/` producer
+  slices; pure `arm64/` and flat x64 libraries are not compatible substitutes.
+  When a matching Skia `dawn_combined.lib` exists, the consumer must also skip
+  the incompatible wgpu-native FetchContent path because wgpu-native currently
+  has no ARM64EC/ARM64X asset. Select the matching Skia Dawn provider and fail
+  closed when that slice is absent. The regression is
+  `tools/scripts/test_findskia_windows_arm64_slice.py`.
 
 - **A failed `fetch_skia_for_release.py` is not always a bad pin.** The pinned
   archive is a few hundred megabytes from a release CDN, fetched fresh on lanes
@@ -428,7 +463,31 @@ validate the digest-bound receipt with `gpu-probe-current-acceptance`. Those
 surfaces reject unavailable evidence. There is no compile-time
 `PULP_GPU_PROBE_REQUIRE_WORK` policy branch in the portable unit suite.
 
-A GPU plugin/app links `libwgpu_native.dylib`. The upstream WebGPU FetchContent
+**Skia-on builds no longer link wgpu-native.** `core/render` links the `webgpu`
+target only when the renderer has no Skia Dawn archive; with Skia's static Dawn,
+every WebGPU call binds inside the image to that Dawn, and staging/build-info read
+the same decision (`pulp_wgpu_runtime_linked`), so a Skia-on bundle neither ships
+nor loads `libwgpu_native.dylib`. That also removes a per-process hazard: dyld
+shares one `@rpath/libwgpu_native.dylib` by install name, so two Pulp plug-ins in
+one host used to run on whichever copy loaded first. The link-floor ctest
+`native-ui-link-floor-artifacts` asserts Dawn present and wgpu-native absent, with
+a positive control that really loads it. Gotcha: a reused build dir that once
+staged the dylib still has it in each bundle until that target relinks;
+`pulp_stage_runtime_dependencies` removes it POST_BUILD, so rebuild the bundle
+rather than trusting an old one. Gotcha: whether Skia supplies Dawn is ONE
+recorded decision, the cache variable `PULP_SKIA_PROVIDES_DAWN` that FindSkia
+sets through `tools/cmake/PulpSkiaDawnProvider.cmake`; choose wgpu-native with
+`pulp_gpu_links_wgpu_native()`, and take the archive path from
+`PULP_SKIA_DAWN_ARCHIVE`. Never re-derive either from `DAWN_LIBRARY`: that is a
+normal variable a nested scope may not see (an `EXISTS` test then links
+wgpu-native beside Skia's Dawn), and a NOTFOUND-sentinel compare treats a stale
+path as a present Dawn. `cmake-pulp-skia-dawn-provider` scans every CMake file
+for such a condition. The rpath
+guidance below still applies
+to a no-Skia (wgpu-native fallback) build and to any other bundled runtime dylib
+(V8).
+
+A GPU plugin/app built without Skia's Dawn links `libwgpu_native.dylib`. The upstream WebGPU FetchContent
 copies the dylib INTO the bundle's `Contents/MacOS` but rpaths the binary only at
 the **build cache** (`~/Library/Caches/Pulp/fetchcontent-src/.../lib`). On the
 build machine that path exists, so the build, codesign, notarize, `auval`,
@@ -525,6 +584,11 @@ wrong for a cross/Intel build on Apple Silicon).
   the per-slice adhoc linker signatures don't merge, and an unsigned arm64
   dylib is **killed at load**. `LC_ID_DYLIB` is already `@rpath/…` and the dylib
   has no `LC_RPATH`, so the `@loader_path` relocatable contract above still holds.
+  The two slice digests are not in that file: it reads them from the
+  `wgpu-native` row of `tools/deps/manifest.json` (`artifacts`), the same pins
+  the single-slice path verifies through `PulpWgpuNative.cmake`. A missing or
+  stale slice digest there fails configure for universal builds only, so a
+  wgpu-native bump must re-record every asset, not just the host's.
 - **No universal libv8.** `PULP_JS_ENGINE=v8` + a universal target is a hard
   `FindV8.cmake` FATAL (v8-builder ships only thin mac slices). Use quickjs/jsc
   for universal, or lipo two thin V8 builds yourself.

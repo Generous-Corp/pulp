@@ -4,6 +4,7 @@
 /// Built-in preset management — save/load/delete/rename/import.
 /// No more rolling your own PresetManager for every plugin.
 
+#include <pulp/state/content_capability_manifest.hpp>
 #include <pulp/state/store.hpp>
 #include <string>
 #include <vector>
@@ -13,7 +14,6 @@
 
 namespace pulp::state {
 
-struct ContentCapabilityManifest;
 
 /// Metadata for a single preset file.
 struct PresetInfo {
@@ -25,6 +25,12 @@ struct PresetInfo {
     std::string description;           ///< Optional description
     std::vector<std::string> tags;     ///< Optional category tags
 };
+
+/// Lists installed content-pack presets for a plugin's content manifest.
+/// `data_root` is the explicit content data root, or empty for the platform
+/// default.
+using ContentPresetSource = std::function<std::vector<PresetInfo>(
+    const ContentCapabilityManifest& manifest, const std::filesystem::path& data_root)>;
 
 /// Built-in preset manager for Pulp plugins.
 ///
@@ -87,8 +93,17 @@ public:
     std::vector<PresetInfo> user_presets() const;
 
     /// Get installed content-pack presets matching this plugin's content
-    /// capabilities. These are read-only expansion/factory presets.
+    /// capabilities. These are read-only expansion/factory presets. Empty
+    /// until both a content plugin id and a content-preset source are set.
     std::vector<PresetInfo> content_presets() const;
+
+    /// Install the reader that lists installed content-pack presets. This state
+    /// layer carries no content-pack reader of its own; the content-pack layer
+    /// provides one (content_registry_preset_source()). Code that opts this manager into
+    /// content discovery installs it together with set_content_plugin_id() or
+    /// set_content_manifest(); the format adapters do neither, so their
+    /// managers list no content-pack presets and carry no content-pack link.
+    void set_content_preset_source(ContentPresetSource source);
 
     /// Opt into installed content-pack discovery for this plugin id.
     void set_content_plugin_id(std::string plugin_id);
@@ -166,6 +181,7 @@ private:
     std::string content_plugin_id_;
     std::vector<std::string> content_capabilities_;
     std::vector<std::string> content_kinds_;
+    ContentPresetSource content_source_;
 
     std::string current_name_;
     bool unsaved_changes_ = false;

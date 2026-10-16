@@ -1275,6 +1275,44 @@
         "subcommands": []
       },
       {
+        "name": "deps",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--format",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--to",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--mise",
+            "kind": "option",
+            "required": false
+          }
+        ],
+        "subcommands": [
+          {
+            "name": "check",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "resolve",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "update",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "design",
         "disposition": "candidate-shared-later",
         "arguments": [
@@ -4917,7 +4955,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.482.3",
+        "version": "0.484.0",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4932,13 +4970,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.482.3",
+        "catalog_version": "0.484.0",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.482.3",
+        "version": "0.484.0",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

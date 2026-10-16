@@ -19,17 +19,45 @@ disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
 [toolchain]
+xcode_build = "17F42"
 # Pin Xcode in-image so font/raster goldens are reproducible. Prefer copying a
 # host-installed Xcode (tart-provision PULP_HOST_XCODE_APP) over an in-guest
 # xcodes download (interactive 2FA).
+clang_format = "21.1.8"
+tart = "2.38.0"
+rust_targets = ["x86_64-apple-darwin"]
+rust = "1.97.1"
+node = "26.10.0"
+python = "3.14.4"
+ninja = "1.13.2"
+cmake = "4.3.3"
 xcode = "26.5"
 
 [brew]
-# Tier 0 universal CI tooling + Tier 2 Pulp build deps.
 packages = [
-  "git", "gh", "rsync", "ccache", "jq", "coreutils", "tailscale",  # tier 0
-  "cmake", "ninja", "python@3.12",                                  # tier 2
+  "git",
+  "git-lfs",
+  "gh",
+  "rsync",
+  "ccache",
+  "jq",
+  "coreutils",
+  "tailscale",
+  "cmake",
+  "ninja",
+  "node",
+  "python@3.12",
+  "rustup",
+  "clang-format",
 ]
+# Homebrew's rustup is keg-only; the bake recipe runs rustup default stable
+# and exposes ~/.cargo/bin. clang-format is required because the CLI shell-out
+# test otherwise hangs until its timeout on the VM golden.
+
+# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
+# source_sha256 = 2c41230c8cc4091c9549efcd00480366a7422dbe60027653d2c55d2677dd6c15
+# generated_platform = macos
+# END GENERATED PULP TOOLCHAIN
 
 [pip]
 # Visual-harness / screenshot tooling.

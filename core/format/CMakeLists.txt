@@ -44,8 +44,8 @@ endforeach()
 unset(_pulp_format_target)
 
 target_sources(pulp-format-core PRIVATE
-    # Emits the Processor vtable (create_view() is the key function), so this
-    # TU anchors the core half. See the comment at the top of format.cpp: the
+    # Emits the Processor vtable (Processor::~Processor() is the key function),
+    # so this TU anchors the core half. The vtable slots still reference
     # vtable's slots reference processor_f64.cpp and ara.cpp, which is why
     # those two must stay in this target as well.
     src/format.cpp
@@ -106,15 +106,7 @@ target_sources(pulp-format-view PRIVATE
 #
 # Headers only, and PRIVATE. This adds view's include directories to this
 # target's own sources and nothing else: no view archive joins the link
-# closure, and nothing propagates to pulp::dsl, pulp::sequence, or any other
-# consumer. That is the whole point of the split -- the Skia/Dawn archives stay
-# out -- and it is enforced by the core-only link proof
-# (pulp-test-format-core-only-consumer) plus the symbol checks, not by this
-# declaration alone.
-#
-# The narrow, honest statement of the rule: pulp-format-core LINKS without the
-# view layer; it does not COMPILE without view headers, in exactly this one
-# translation unit.
+# closure, and nothing propagates to consumers.
 target_include_directories(pulp-format-core PRIVATE
     $<TARGET_PROPERTY:pulp-view-core,INTERFACE_INCLUDE_DIRECTORIES>)
 
@@ -150,6 +142,8 @@ target_link_libraries(pulp-format-view
         pulp::format-core
         # Public ViewBridge headers expose native View types, not WebView.
         pulp::view-core
+        pulp::view-tooling
+        pulp::view-audio
 )
 
 target_link_libraries(pulp-format
@@ -281,6 +275,28 @@ if(PULP_HAS_CLAP)
     # per-plugin clap_entry.cpp TU. The entry target defines PULP_CLAP_GUI=1;
     # the shared adapter must do the same or GUI members shift later fields.
     target_compile_definitions(pulp-format-view PRIVATE PULP_CLAP=1 PULP_CLAP_GUI=1)
+
+    # The same adapter without the GUI extension, for editor-less plug-ins
+    # (pulp_add_plugin NO_EDITOR). PULP_CLAP_GUI is undefined here and in the
+    # entry TU of such a plug-in, so PulpClapPlugin has the view-free layout on
+    # both sides. Links pulp::format-core only: an editor-less CLAP image then
+    # carries no view, canvas, render, Skia or Dawn code.
+    add_library(pulp-format-clap-core
+        src/clap_adapter.cpp
+        src/clap_remote_controls.cpp
+        src/clap_note_name.cpp
+    )
+    add_library(pulp::format-clap-core ALIAS pulp-format-clap-core)
+    target_include_directories(pulp-format-clap-core
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_link_libraries(pulp-format-clap-core PUBLIC pulp::format-core clap)
+    target_compile_definitions(pulp-format-clap-core PRIVATE PULP_CLAP=1)
+    if(PULP_HAS_AUSDK)
+        set_target_properties(pulp-format-clap-core PROPERTIES CXX_STANDARD 23)
+    endif()
 endif()
 
 # LV2 adapter

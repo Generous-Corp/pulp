@@ -5,52 +5,22 @@ name: Control shipping native matrix
 # native nm/readelf/dumpbin/lipo report as CI evidence.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/control-shipping-native.yml'
-      - 'CMakeLists.txt'
-      - 'core/events/**'
-      - 'core/format/**'
-      - 'core/platform/**'
-      - 'core/runtime/**'
-      - 'core/state/**'
-      - 'inspect/**'
-      - 'tools/cli/**'
-      - 'tools/cmake/**'
-      - 'tools/mcp/**'
-      - 'tools/scripts/verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_control_shipping_native_workflow.py'
-      - 'tools/validation/sdk-smoke/**'
+  schedule:
+    - cron: '59 3 * * *'
   pull_request:
-    paths:
-      - '.github/workflows/control-shipping-native.yml'
-      - 'CMakeLists.txt'
-      - 'core/events/**'
-      - 'core/format/**'
-      - 'core/platform/**'
-      - 'core/runtime/**'
-      - 'core/state/**'
-      - 'inspect/**'
-      - 'tools/cli/**'
-      - 'tools/cmake/**'
-      - 'tools/mcp/**'
-      - 'tools/scripts/verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_control_shipping_native_workflow.py'
-      - 'tools/validation/sdk-smoke/**'
+    types: [auto_merge_enabled]
   workflow_dispatch: {}
 
 permissions:
   contents: read
 
 concurrency:
-  group: control-shipping-native-${{ github.ref }}
+  group: control-shipping-native-${{ github.event_name == 'schedule' && 'nightly' || format('arm-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
   native:
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     strategy:
       fail-fast: false
       matrix:
@@ -82,13 +52,13 @@ jobs:
             cmake_architectures: ''
             sdk_formats: 'Standalone;VST3;CLAP;LV2'
             report_formats: 'Standalone,VST3,CLAP,LV2'
-            report_architectures: 'x86_64'
+            report_architectures: 'x86_64-win'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     name: ${{ matrix.leg }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -303,7 +273,7 @@ jobs:
 
       - name: Upload installed-SDK GPU-audio lifecycle receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: control-shipping-${{ matrix.leg }}-gpu-audio-lifecycle
           if-no-files-found: error
@@ -346,7 +316,7 @@ jobs:
             --output '${{ matrix.leg }}.native-shipping-leg.json'
 
       - name: Upload native scanner reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: control-shipping-${{ matrix.leg }}
           if-no-files-found: error
@@ -360,10 +330,10 @@ jobs:
     runs-on: ubuntu-latest
     name: consolidated evidence
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: control-shipping-*
           path: native-evidence
@@ -376,7 +346,7 @@ jobs:
             --output control-shipping-native-evidence.json
         shell: bash
       - name: Upload consolidated evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: control-shipping-native-evidence
           if-no-files-found: error

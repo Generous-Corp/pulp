@@ -517,6 +517,19 @@ scalar fails that check. Verify with:
 python3 -c "import yaml; yaml.safe_load(open('docs/status/cli-commands.yaml')); print('OK')"
 ```
 
+`::` is the same trap: a plain scalar such as `github (::warning:: annotations)`
+fails to parse, and `tools/scripts/pulp_tooling_disposition.py` reports it as
+"cannot parse cli-commands.yaml", not as your entry.
+
+A new command (a script command too) is also a new Vellum tooling surface:
+`python3 tools/scripts/pulp_tooling_disposition.py --write` adds it to
+`docs/status/pulp-tooling-disposition.json` as `UNCLASSIFIED`, which fails the
+check until you set its disposition by hand (`pulp-owned` for a Pulp-only
+workflow). Editing `cli-commands.yaml` also touches the
+`design-output-and-packaging` Vellum watch family, so the push needs a watch
+event (`python3 tools/scripts/vellum_watch_preflight.py --write-event
+--rationale "..."`, then commit it).
+
 ### 3. Decide: does this need a slash command?
 
 **Create a slash command** (`.claude/commands/<name>.md`) if:
@@ -633,7 +646,13 @@ must be safe sibling basenames, and an exact-named sidecar must still match the
 artifact filename (with the supported `.exe` form) before consent is bound. Keep
 canonical sidecar stems equal to their manifest target, never use a
 marker-bearing sibling fallback for canonical evidence, and exclude
-plugin-format subtrees from standalone scanning in every traversal. Keep
+plugin-format subtrees from standalone scanning in every traversal. A macOS
+`.app` keeps its sidecars in `Contents/Resources`, not beside the executable in
+`Contents/MacOS` (Apple reserves it for code and a non `--deep` signature fails
+on JSON there); resolve sidecar locations only through
+`pulp::inspect::control_sidecar_directories()` and
+`control_sidecar_executable_directory()`, which also keep the legacy location
+readable, rather than joining paths onto the executable's directory. Keep
 `cmd_inspect.cpp`, `cmd_inspect_unavailable.cpp`, `inspector_shipping_report.*`,
 `docs/guides/development-inspector-shipping.md`, `docs/reference/cli.md`, and
 `docs/status/cli-commands.yaml` aligned. It intentionally has no MCP tool until
@@ -1094,6 +1113,34 @@ to impose on plugin projects. Set `cmake.add_subdirectory=false`; generation
 must use `FetchContent_MakeAvailable()` with an inert `SOURCE_SUBDIR`, then
 create the declared interface target itself. `sst-tuning-library` is the
 reference case.
+
+Every generated block now uses the inert `SOURCE_SUBDIR pulp-package-populate-only`
+and hands `add_subdirectory` to `_pulp_package_make_available(<id> <commit>
+<integrity> ON|OFF)`, because the package must be populated and its archive
+digest verified BEFORE its own CMake runs. Blocks are rendered from the lock
+entry (full commit + integrity), never from the registry tag.
+
+### Package pinning: two implementations, one recipe
+
+`pulp add` / `pulp update` live twice: Rust (`experimental/pulp-rs/src/cmd/pkg.rs`
++ `src/pkg/pin.rs`, what the user-facing `pulp` dispatches) and C++
+(`package_commands_*.cpp` + `package_pin.hpp`, reached as `pulp-cpp`). Change
+both or neither. Gotchas:
+
+- `git ls-remote <url> <tag>` with a ref pattern drops the peeled `^{}` line, so
+  an annotated tag resolves to the TAG OBJECT id, not the commit. List all tags
+  (`ls-remote --tags <url>`) and filter in code. The `rev-parse <id>^{commit}`
+  equality check after the fetch is what catches this; keep it.
+- The integrity hashes `git ls-tree -r -z --full-tree <commit>`, never `git
+  archive` (attributes, CRLF config and `export-subst` change archive bytes). The
+  CMake side writes the listing with `OUTPUT_FILE` because CMake strings cannot
+  hold the NUL separators. Never cache a passing verification: the checkout can
+  be edited between configures.
+- The CMake verifier text exists once, in `tools/packages/pulp-packages-verify.cmake`.
+  Rust `include_str!`s it; the C++ raw string is asserted byte-for-byte equal to
+  it by `test_cli_package_commands.cpp`. Edit the file, then paste into C++.
+- Tests pin through an injected pinner (`run_add_with` / `set_source_pinner_for_testing`);
+  real-git coverage uses a `file://` fixture repo, so no test touches the network.
 
 ### `pulp dev --hot-dsp` — live DSP hot-swap dev loop
 
@@ -2044,6 +2091,18 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search all skills: `grep -r "pulp <name>" .agents/skills/`
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
+
+## The macOS CLI force-load list names implementation archives, not modules
+
+`tools/cli/CMakeLists.txt` force-loads a fixed list of static archives into
+`pulp-cli` on Apple, because helper objects that become needed while ld64 is
+already scanning an archive are otherwise skipped and the installed CLI links
+with undefined symbols. The list is of TARGETS, so when code the CLI uses moves
+into its own archive the new target must join the list. The design importer is
+the example: it left `pulp-view-core` for `pulp-design-import`, and only
+force-loading `pulp-view-core` would no longer pull the importer's objects.
+Guard each entry with `if(TARGET …)` (the importer target exists only with
+`PULP_ENABLE_DESIGN_IMPORT=ON`).
 
 ## CLI Git/CMake shell helpers
 
@@ -3443,6 +3502,16 @@ present, else the tier-0 default `tier0_default_build_jobs()` =
 `tier0_default_build_jobs()`. `build_parallelism_guard.py` fails CI on a bare
 `--parallel`/`-j` anywhere under `tools/cli/`.
 
+For an already-configured, one-shot CMake build, use
+`run_governed_cmake_build()` rather than assembling another shell command.
+`pulp create` uses it after either standalone or in-tree configure;
+`pulp project bump --verify-builds` uses `GovernedBuildOutput::Quiet` so its
+rollback and output contract stay intact. Pass the project root and build
+directory separately: the helper quotes paths and arguments, takes the lease,
+caps jobs, and applies QoS, watchdog, and the build-directory lock. Do not use
+`BuildPlan::select_and_build()` for these paths: its focus/migration behavior
+and spinner output change their command contracts.
+
 ## Standalone render seam for headless RT / audio tests
 
 `StandaloneApp`'s device-callback body lives in a private
@@ -3835,3 +3904,11 @@ command contract and run the paired UI build and clean-output lint tests. Keep
 the CLI dispatch, Rust/C++ help summaries, command documentation, and the
 clean-output manifest-role rules synchronized. A generated or vendor fixture
 must be hash-verified even when it is excluded from authored-source linting.
+
+## Advisory lane dispatch
+
+The `pulp pr` wrapper invokes `tools/scripts/dispatch_advisory_lanes.sh` only
+after a successful delegated Shipyard arm/ship path, and deliberately skips
+`--no-arm`. Keep this hook after arming so advisory workflow dispatches bind to
+the approved head; direct `shipyard pr` remains an interim gap until Shipyard
+provides a native arm hook.

@@ -4,6 +4,7 @@
   "scanners": {
     "tools/ci/source_selftests.py": "walks test/**/*.cmake for ctest registrations; test/ routes to the native build",
     "tools/ci/test_source_selftests.py": "walks temporary trees",
+    "tools/scripts/test_check_apple_bundle_signing.py": "walks the temporary bundles it builds",
     "tools/ci/test_drift_fast.py": "walks test/ for registration names; tools/ci routes to the native build",
     "tools/scripts/gate_python_imports_check.py": "reads the configured ctest inventory; runs in the pr-fast tier on the native gate",
     "tools/scripts/gpu_audio_p2_campaign.py": "authenticates the canonical tracked campaign driver with git ls-files; it does not walk tools/ payloads or scan non-native source trees",
@@ -38,6 +39,7 @@
     "tools/scripts/mac_objc_source_list_guard.py": "globs core/*/platform/mac",
     "tools/scripts/web_timeline_source_closure_check.py": "walks core/*/src",
     "tools/import/test_project_import_ir_schema.py": "globs only its own fixtures under tools/import/fixtures",
-    "tools/scripts/test_wide_non_native.py": "this file; wide_non_native.HARD_NATIVE keeps any change to it native"
+    "tools/scripts/test_wide_non_native.py": "this file; wide_non_native.HARD_NATIVE keeps any change to it native",
+    "tools/scripts/render_upward_edge_check.py": "walks core/render sources and reads CMakeLists.txt, core/**/CMakeLists.txt and tools/cmake/*.cmake for target_sources() calls; it never reads tools/scripts, tools/testing or tools/import-validation content"
   }
 }

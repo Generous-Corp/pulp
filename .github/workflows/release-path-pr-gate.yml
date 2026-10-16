@@ -44,7 +44,13 @@ on:
       - 'examples/threejs-native-demo/**'
       - 'CMakeLists.txt'
       - '.github/workflows/release-cli.yml'
+      - '.github/workflows/release-dry-run.yml'
       - '.github/workflows/release-path-pr-gate.yml'
+      - 'tools/ci/release_package_cli.sh'
+      - 'tools/ci/release_path_changed.py'
+  # A queue batch runs the gate only when it touches the paths above;
+  # merge_group takes no `paths:` filter, so the classify job decides.
+  merge_group:
   workflow_dispatch:
 
 # Multiple PRs touching the same release-path files can stack up;
@@ -59,18 +65,56 @@ permissions:
   contents: read
 
 jobs:
+  # Decide whether this run builds. A pull request already passed the `paths:`
+  # filter and a manual dispatch is deliberate; a queue batch is checked
+  # against the same list (tools/ci/release_path_changed.py reads it from
+  # this file).
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'merge_group'
+        with:
+          lfs: false
+          sparse-checkout: |
+            .github/workflows/release-path-pr-gate.yml
+            tools/ci/release_path_changed.py
+          sparse-checkout-cone-mode: false
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.merge_group.base_sha }}
+          HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "merge_group" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api "repos/${{ github.repository }}/compare/${BASE}...${HEAD}" \
+            --jq '.files[].filename' > "$RUNNER_TEMP/changed.txt"
+          run="$(python3 tools/ci/release_path_changed.py \
+            --workflow .github/workflows/release-path-pr-gate.yml \
+            --files "$RUNNER_TEMP/changed.txt")"
+          echo "Queue batch touches the release path: ${run}"
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+
   # Keep the PR-time release-path darwin leg on the same macOS runner policy as
   # release-cli.yml. The gate exercises the same release build path, so routing
   # it through raw GitHub-hosted macos-15 recreates the same hosted-queue
   # starvation this workflow is meant to catch before tags.
   resolve-macos-runner:
+    needs: classify
+    if: needs.classify.outputs.run == 'true'
     runs-on: ubuntu-latest
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
     steps:
       # Only the resolver is needed; it owns the opt-in class-label rewrite so
       # the three release workflows share one tested implementation.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
           sparse-checkout: tools/scripts/resolve_release_runners.py
@@ -107,7 +151,8 @@ jobs:
           echo "runs_on_json=${selector}" >> "$GITHUB_OUTPUT"
 
   release-build:
-    needs: resolve-macos-runner
+    needs: [classify, resolve-macos-runner]
+    if: needs.classify.outputs.run == 'true'
     name: Release-path build (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -121,7 +166,7 @@ jobs:
     runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Release-path Skia artifacts are fetched explicitly below. Keep LFS
           # off to match release-cli.yml and avoid requiring git-lfs on the
@@ -133,6 +178,32 @@ jobs:
         uses: ./.github/actions/install-linux-build-deps
         with:
           profile: native-webview
+
+      # The FetchContent seed and the configure-check cache on a self-hosted
+      # host can be written by earlier jobs, PR gate jobs included, so this job
+      # points setup.sh and CMake at a fresh job-local root: every dependency
+      # is re-fetched at its pin, and no cached configure-check file is
+      # include()d. The Windows subbuild base moves with it. tools/scripts/test_release_cache_isolation.py holds every
+      # signing or publishing job to this step and to CCACHE_DISABLE.
+      - name: Isolate the build from shared caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A per-dependency source override would bypass the fresh root.
+          if overrides="$(env | grep '^PULP_FETCHCONTENT_SOURCE_DIR_' | cut -d= -f1)"; then
+            echo "::error::runner environment overrides dependency sources: ${overrides//$'\n'/ }"
+            exit 1
+          fi
+          root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -m "$root")"; fi
+          rm -rf "$root"
+          mkdir -p "$root/src" "$root/fc" "$root/cc"
+          echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src" >> "$GITHUB_ENV"
+          echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc" >> "$GITHUB_ENV"
+          # PulpConfigureCheckCache.cmake include()s the files it finds here,
+          # so a shared directory would run CMake an earlier job wrote.
+          echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc" >> "$GITHUB_ENV"
+
 
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
@@ -167,6 +238,53 @@ jobs:
       # surfaces the same flag combinations that get exercised at
       # release time (PULP_REQUIRE_GPU_FOR_SDK=ON, WebView=OFF on
       # Linux to keep the CLI portable).
+      # Packaging needs the Rust build/pulp CLI; same step as release-cli.yml.
+      - name: Ensure a working Rust toolchain on PATH
+        if: runner.os != 'Windows'
+        run: |
+          runs() { "$1/cargo" --version >/dev/null 2>&1; }
+          use() { echo "$1" >> "$GITHUB_PATH"; echo "rust: using cargo at $1 ($("$1/cargo" --version))"; }
+          if command -v cargo >/dev/null 2>&1 && cargo --version >/dev/null 2>&1; then
+            echo "rust: cargo already works on PATH ($(cargo --version))"; exit 0
+          fi
+          if runs "$HOME/.cargo/bin"; then use "$HOME/.cargo/bin"; exit 0; fi
+          # Broken rustup proxy / dangling shim — fall back to a toolchain's
+          # direct bin (a real cargo binary, no proxy needed).
+          for tc in "$HOME"/.rustup/toolchains/*/bin; do
+            if runs "$tc"; then use "$tc"; exit 0; fi
+          done
+          # Last resort: no usable toolchain on this runner. This is the normal
+          # state of a fresh Tart VM golden provisioned only for the C++
+          # Build-and-Test lane (cmake/ninja, no cargo) — release-cli is the
+          # first VM workload that builds the Rust build/pulp CLI. Bootstrap
+          # rustup so the release lane is self-sufficient on ANY runner (VM or
+          # bare-metal) instead of depending on operator-baked Rust. The
+          # toolchain is pinned (experimental/pulp-rs/rust-toolchain.toml =
+          # stable), so this resolves the same compiler the bare-metal runners
+          # already use — no reproducibility drift from installing it here.
+          echo "rust: no usable cargo on this runner — bootstrapping rustup (pinned stable)"
+          # --no-modify-path: never touch the runner's shell profiles (this
+          # fallback can fire on a persistent home, not just a disposable VM).
+          if curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+               | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path >/dev/null 2>&1; then
+            # rust-toolchain.toml also declares rustfmt+clippy; front-load them
+            # here (best-effort) so any component fetch happens in this step
+            # instead of stalling the CMake-driven cargo build later.
+            "$HOME/.cargo/bin/rustup" component add rustfmt clippy >/dev/null 2>&1 || true
+            if runs "$HOME/.cargo/bin"; then use "$HOME/.cargo/bin"; exit 0; fi
+          fi
+          echo "::error::No working cargo and the rustup bootstrap failed. release-cli needs Rust to build the user-facing build/pulp CLI — refusing to ship a CLI-less tarball." >&2
+          exit 1
+        shell: bash
+
+      - name: Prepare pinned Node runtime for design import
+        shell: bash
+        run: |
+          node_path="$RUNNER_TEMP/pulp-node-runtime/node"
+          python3 tools/scripts/prepare_node_runtime.py \
+            --platform "${{ matrix.platform }}" --output "$node_path"
+          echo "PULP_NODE_RUNTIME_EXECUTABLE=$node_path" >> "$GITHUB_ENV"
+
       - name: Configure (CLI, no WebView on Linux, GPU required)
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
@@ -177,11 +295,11 @@ jobs:
               SCENE3D="-DPULP_ENABLE_SCENE3D=ON"
               ;;
           esac
-          # Examples OFF to match release-cli.yml, whose build steps this gate
-          # reproduces. The build below narrows to `--target pulp-cli`, so this
-          # trims configure work rather than compile time.
+          # Examples OFF to match release-cli.yml, whose build and package
+          # steps this gate reproduces.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             -DSKIA_DIR="$PWD/external/skia-build" \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
@@ -192,11 +310,19 @@ jobs:
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
         shell: bash
 
-      # Build the same target release-cli.yml builds. The link step
-      # is where the SkUnicode core/icu order bug surfaces (and where
-      # the fontconfig undefineds surfaced in the previous Skia bump).
-      - name: Build pulp-cli (release path)
-        run: tools/ci/governed-build.sh cmake --build build --config Release --target pulp-cli
+      # Build everything release-cli.yml builds: packaging needs pulp,
+      # pulp-cpp, pulp-mcp, import-design and the inspector binaries. The
+      # link step is where the SkUnicode core/icu order bug surfaces (and
+      # where the fontconfig undefineds surfaced in the previous Skia bump).
+      - name: Build (release path)
+        run: tools/ci/governed-build.sh cmake --build build --config Release
+        shell: bash
+
+      # Package with the script release-cli.yml packages with, against the
+      # isolated dependency root above. A change to how a release finds its
+      # runtime libraries fails here, at PR time, not after the tag.
+      - name: Package CLI (release path)
+        run: bash tools/ci/release_package_cli.sh "${{ matrix.platform }}"
         shell: bash
 
       # Sanity: the binary actually runs. release-cli.yml has a

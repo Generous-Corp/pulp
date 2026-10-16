@@ -1,0 +1,70 @@
+{
+  "id": "view-audio-step-grid-extraction",
+  "title": "Move StepGridView ownership into the extracted view-audio target",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g2h-c-view-audio-20261014",
+  "owned_paths": [
+    "core/view/audio/include/pulp/view/audio_widgets.hpp",
+    "core/view/audio/include/pulp/view/step_grid_view.hpp",
+    "core/view/audio/src/step_grid_view.cpp",
+    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/include/pulp/view/step_grid_view.hpp",
+    "core/view/src/step_grid_view.cpp",
+    "docs/status/sequencer-exposure/rows/view-audio-step-grid-extraction.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/view/audio/include/pulp/view/step_grid_view.hpp",
+      "needles": ["class StepGridView"]
+    },
+    {
+      "path": "core/view/cmake/PulpViewSources.cmake",
+      "needles": ["audio/src/step_grid_view.cpp", "target_sources(pulp-view-audio PRIVATE"]
+    },
+    {
+      "path": "test/cmake/view_host_tests.cmake",
+      "needles": ["pulp-view-audio-carve", "pulp-view-core-audio-free"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The installed public include path remains pulp/view/step_grid_view.hpp while the implementation moves to the exported pulp-view-audio target.",
+      "evidence": [
+        {
+          "path": "core/view/audio/include/pulp/view/step_grid_view.hpp",
+          "needles": ["class StepGridView"],
+          "kind": "sdk_header"
+        },
+        {
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": ["pulp-view-audio"],
+          "kind": "sdk_target"
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "This extraction changes native view ownership and adds no offline Timeline CLI surface."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "This extraction changes native view ownership and adds no offline Timeline MCP surface."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "This extraction changes native view ownership and adds no live Product control operation."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "This extraction changes native view ownership and adds no design-time agent capability."
+    }
+  }
+}

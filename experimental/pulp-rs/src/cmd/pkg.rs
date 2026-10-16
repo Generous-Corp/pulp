@@ -33,6 +33,7 @@ use crate::pkg::{
     cmake,
     license::{self, LicenseVerdict},
     metadata,
+    pin::{self, GitPinner, SourcePinner},
     registry::{self, LockedPackage, PackageDescriptor, Registry},
     targets::{self, PlatformTarget},
 };
@@ -373,13 +374,31 @@ pub fn parse_add_args(args: &[String]) -> AddArgs {
     out
 }
 
-/// Run `pulp-rs add <package>`.
+/// Run `pulp-rs add <package>`, pinning the package with `git`.
 ///
 /// # Errors
 ///
 /// Registry / lock I/O; rejected licenses without override;
 /// unsupported platforms without `--platform-guard`.
 pub fn run_add(args: &AddArgs, out: &mut impl Write) -> Result<i32> {
+    run_add_with(args, out, &GitPinner)
+}
+
+/// Run `pulp-rs add <package>` with an explicit [`SourcePinner`].
+///
+/// The registry ref is resolved to a full commit and an archive integrity
+/// before anything is written; a package that cannot be pinned is not
+/// added. The lock entry records the commit, the integrity, the SPDX
+/// license, and any license override used.
+///
+/// # Errors
+///
+/// Registry / lock I/O.
+pub fn run_add_with(
+    args: &AddArgs,
+    out: &mut impl Write,
+    pinner: &dyn SourcePinner,
+) -> Result<i32> {
     let Some(package_id) = args.package_id.as_deref() else {
         print_add_help(out);
         return Ok(0);
@@ -561,41 +580,77 @@ pub fn run_add(args: &AddArgs, out: &mut impl Write) -> Result<i32> {
         }
     }
 
+    let source_pin = match pinner.pin(&pkg.fetch.git_repository, &pkg.fetch.git_tag) {
+        Ok(p) if pin::is_pinned(&p.commit, &p.integrity) => p,
+        Ok(p) => {
+            writeln!(
+                out,
+                "{red}✗{reset} Could not pin {}: resolved commit '{}' / integrity '{}' is malformed",
+                pkg.name,
+                p.commit,
+                p.integrity,
+                red = color::red(),
+                reset = color::reset()
+            )
+            .map_err(io)?;
+            return Ok(1);
+        }
+        Err(e) => {
+            writeln!(
+                out,
+                "{red}✗{reset} Could not pin {} at {} ({}): {e}",
+                pkg.name,
+                pkg.fetch.git_tag,
+                pkg.fetch.git_repository,
+                red = color::red(),
+                reset = color::reset()
+            )
+            .map_err(io)?;
+            return Ok(1);
+        }
+    };
+    let license_acceptance = if verdict == LicenseVerdict::Rejected && args.license_override {
+        args.accepted_license.as_deref().map_or_else(
+            || "commercial".to_owned(),
+            |spdx| format!("accept-license:{spdx}"),
+        )
+    } else {
+        String::new()
+    };
+    lock.packages.insert(
+        package_id.to_owned(),
+        LockedPackage {
+            version: pkg.version.clone(),
+            resolved: pkg.fetch.git_repository.clone(),
+            integrity: source_pin.integrity.clone(),
+            commit: source_pin.commit.clone(),
+            license: pkg.license.clone(),
+            license_acceptance,
+        },
+    );
+
+    // The lock is written first: generated CMake is derived from it, so a
+    // failed CMake write leaves a lock that regenerates the same file rather
+    // than CMake that names a pin no lock records.
+    registry::save_lock(&lock_path, &lock)?;
+
     if !args.no_cmake {
-        lock.packages.insert(
-            package_id.to_owned(),
-            LockedPackage {
-                version: pkg.version.clone(),
-                resolved: pkg.fetch.git_repository.clone(),
-                integrity: String::new(),
-                commit: pkg.fetch.git_tag.clone(),
-            },
-        );
         let cmake_path = root.join("cmake").join("pulp-packages.cmake");
         let cmake_content = cmake::generate_packages_cmake(&lock, &reg);
         write_atomic(&cmake_path, cmake_content.as_bytes())?;
         ensure_cmake_include(&root)?;
     }
 
-    lock.packages.insert(
-        package_id.to_owned(),
-        LockedPackage {
-            version: pkg.version.clone(),
-            resolved: pkg.fetch.git_repository.clone(),
-            integrity: String::new(),
-            commit: pkg.fetch.git_tag.clone(),
-        },
-    );
-    registry::save_lock(&lock_path, &lock)?;
-
     metadata::update_dependencies_md(&root, &pkg, true)?;
     metadata::update_notice_md(&root, &pkg, true)?;
 
     writeln!(
         out,
-        "{green}✓{reset} Added {} v{}",
+        "{green}✓{reset} Added {} v{} (commit {}, {})",
         pkg.name,
         pkg.version,
+        source_pin.commit,
+        source_pin.integrity,
         green = color::green(),
         reset = color::reset()
     )
@@ -698,12 +753,30 @@ pub fn run_remove(args: &[String], out: &mut impl Write) -> Result<i32> {
 
 // ── update ─────────────────────────────────────────────────────────
 
-/// Run `pulp-rs update [--apply]`.
+/// Run `pulp-rs update [--apply]`, re-pinning with `git`.
 ///
 /// # Errors
 ///
 /// Registry / lock I/O.
 pub fn run_update(args: &[String], out: &mut impl Write) -> Result<i32> {
+    run_update_with(args, out, &GitPinner)
+}
+
+/// Run `pulp-rs update [--apply]` with an explicit [`SourcePinner`].
+///
+/// A package needs an update when the registry version moved or when its
+/// lock entry has no full commit + integrity (written before packages were
+/// pinned). `--apply` re-pins each one; a package that cannot be pinned
+/// keeps its old entry and the command exits 1.
+///
+/// # Errors
+///
+/// Registry / lock I/O.
+pub fn run_update_with(
+    args: &[String],
+    out: &mut impl Write,
+    pinner: &dyn SourcePinner,
+) -> Result<i32> {
     let root = resolve_root()?;
     let lock_path = root.join("packages.lock.json");
     if !lock_path.is_file() {
@@ -716,13 +789,18 @@ pub fn run_update(args: &[String], out: &mut impl Write) -> Result<i32> {
     let mut lock = registry::load_lock(&lock_path);
     let apply = args.iter().any(|a| a == "--apply");
     let mut has_updates = false;
+    let mut pin_failures = 0_usize;
 
     for (id, lp) in &mut lock.packages {
         let Some(pkg) = reg.packages.get(id) else {
             continue;
         };
-        if lp.version != pkg.version {
-            has_updates = true;
+        let version_moved = lp.version != pkg.version;
+        if !version_moved && pin::is_pinned(&lp.commit, &lp.integrity) {
+            continue;
+        }
+        has_updates = true;
+        if version_moved {
             writeln!(
                 out,
                 "  {name}: {dim}{old}{reset} → {green}{new}{reset}",
@@ -734,9 +812,32 @@ pub fn run_update(args: &[String], out: &mut impl Write) -> Result<i32> {
                 new = pkg.version,
             )
             .map_err(io)?;
-            if apply {
-                lp.version.clone_from(&pkg.version);
-                lp.commit.clone_from(&pkg.fetch.git_tag);
+        } else {
+            writeln!(
+                out,
+                "  {name}: {ver} is not pinned (no full commit + integrity) → re-pin",
+                name = pkg.name,
+                ver = lp.version,
+            )
+            .map_err(io)?;
+        }
+        if apply {
+            match pinner.pin(&pkg.fetch.git_repository, &pkg.fetch.git_tag) {
+                Ok(p) if pin::is_pinned(&p.commit, &p.integrity) => {
+                    lp.version.clone_from(&pkg.version);
+                    lp.resolved.clone_from(&pkg.fetch.git_repository);
+                    lp.commit = p.commit;
+                    lp.integrity = p.integrity;
+                    lp.license.clone_from(&pkg.license);
+                }
+                Ok(_) => {
+                    pin_failures += 1;
+                    writeln!(out, "    could not pin {}: malformed pin", pkg.name).map_err(io)?;
+                }
+                Err(e) => {
+                    pin_failures += 1;
+                    writeln!(out, "    could not pin {}: {e}", pkg.name).map_err(io)?;
+                }
             }
         }
     }
@@ -759,6 +860,16 @@ pub fn run_update(args: &[String], out: &mut impl Write) -> Result<i32> {
             &root.join("cmake").join("pulp-packages.cmake"),
             body.as_bytes(),
         )?;
+        if pin_failures > 0 {
+            writeln!(
+                out,
+                "{red}✗{reset} {pin_failures} package(s) could not be pinned and were left unchanged",
+                red = color::red(),
+                reset = color::reset()
+            )
+            .map_err(io)?;
+            return Ok(1);
+        }
         writeln!(
             out,
             "{green}✓{reset} Updated packages and regenerated cmake/pulp-packages.cmake",

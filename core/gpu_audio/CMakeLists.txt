@@ -4,11 +4,11 @@ add_library(pulp::gpu-audio ALIAS pulp-gpu-audio)
 target_include_directories(pulp-gpu-audio
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        # The public GPU-node headers (gpu_convolver.hpp, gpu_stft.hpp, ...)
-        # render::GpuCompute, so they #include <pulp/render/gpu_compute.hpp>. Those
+        # Some public GPU-toolkit headers (gpu_stft.hpp, spectral_stack.hpp, ...)
+        # use render::GpuCompute, so they #include <pulp/render/gpu_compute.hpp>. Those
         # render headers are Dawn-free (opaque void* device/queue handles), so
         # exposing render's include dir keeps the gpu_audio public headers
-        # self-contained even in a GPU-off configure where pulp::render isn't
+        # self-contained even in a GPU-off configure where pulp::gpu-device isn't
         # linked (the transport is still built there). $<INSTALL_INTERFACE:include>
         # already covers render's headers in the installed SDK.
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/core/render/include>
@@ -42,6 +42,16 @@ target_sources(pulp-gpu-audio
         src/detail/shared_io_convolution_session.cpp
         src/detail/shared_io_trace.cpp
 )
+
+if(APPLE AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
+    # The native observer is private qualification tooling; keep Objective-C++
+    # and Metal linkage out of non-Apple and iOS builds.
+    target_sources(pulp-gpu-audio PRIVATE src/detail/native_runtime_identity_mac.mm)
+    target_link_libraries(pulp-gpu-audio PRIVATE "-framework Metal" "-framework IOKit"
+                          "-framework CoreFoundation" objc)
+else()
+    target_sources(pulp-gpu-audio PRIVATE src/detail/native_runtime_identity_stub.cpp)
+endif()
 
 target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
 
@@ -77,8 +87,7 @@ set(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE FALSE CACHE INTERNAL
 set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO FALSE CACHE INTERNAL
     "Pulp GPU-audio includes the Dawn shared-I/O provider" FORCE)
 
-if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
-   AND EXISTS "${DAWN_LIBRARY}")
+if(APPLE AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
     set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO TRUE CACHE INTERNAL
         "Pulp GPU-audio includes the Dawn shared-I/O provider" FORCE)
     # D15 is deliberately an opt-in installed-prefix integration.  The Vellum
@@ -87,6 +96,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
     # absent or incomplete prefix leaves the established P1 provider (and the
     # CPU fallback available to callers) unchanged.
     if(PULP_GPU_AUDIO_VELLUM_D15_PREFIX)
+        message(WARNING
+            "Pulp GPU-audio: requested Vellum 0.1.7 is retired; D15 awaits Vellum 0.1.8")
         find_package(Vellum 0.1.7 EXACT CONFIG QUIET
             PATHS "${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}"
             PATH_SUFFIXES lib/cmake/Vellum
@@ -209,9 +220,11 @@ target_link_libraries(pulp-gpu-audio
 )
 
 # The GPU convolver node uses render::GpuCompute (FFT) + signal::Convolver (CPU
-# fallback). Without pulp::render, compile no-render definitions that satisfy the
-# public API and let callers fall back cleanly at runtime.
-if(TARGET pulp::render)
+# fallback). GpuCompute is implemented by the GPU device layer, so the GPU path
+# links pulp::gpu-device and never reaches the 2D renderer. Without the device
+# layer, compile no-render definitions that satisfy the public API and let
+# callers fall back cleanly at runtime.
+if(TARGET pulp::gpu-device)
     # src/web/web_gpu_convolver.cpp is the submit/collect (never-blocking)
     # counterpart of the GpuConvolver node, written for a single-threaded event
     # loop. It is plain C++ over the GpuCompute interface, so it builds and is
@@ -222,7 +235,7 @@ if(TARGET pulp::render)
         src/gpu_convolver.cpp src/gpu_multi_convolver.cpp src/gpu_stft.cpp
         src/gpu_spectral_freeze.cpp src/gpu_spectral_morph.cpp
         src/spectral_stack.cpp src/web/web_gpu_convolver.cpp)
-    target_link_libraries(pulp-gpu-audio PUBLIC pulp::render pulp::signal)
+    target_link_libraries(pulp-gpu-audio PUBLIC pulp::gpu-device pulp::signal)
 else()
     target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver_no_render.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::signal)

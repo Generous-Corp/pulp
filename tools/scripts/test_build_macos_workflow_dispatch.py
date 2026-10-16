@@ -717,7 +717,7 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         document = yaml.safe_load(RECONCILER.read_text(encoding="utf-8"))
         _assert_reconciler(document)
         pending = _job_text("publish-macos-pending")
-        upload = pending.index("actions/upload-artifact@v4")
+        upload = pending.index("actions/upload-artifact@")
         create = pending.index("--raw-field name=macos")
         self.assertLess(upload, create)
 
@@ -728,7 +728,7 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
             (
                 "reconciler checks out source",
                 lambda doc: doc["jobs"]["reconcile"]["steps"].insert(
-                    0, {"uses": "actions/checkout@v5"}
+                    0, {"uses": "actions/checkout@v7"}
                 ),
             ),
             (
@@ -861,7 +861,7 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
                 self.assertIn(isolated, text)
         checkout = next(
             step for step in build["steps"]
-            if step.get("uses") == "actions/checkout@v5"
+            if step.get("uses") == "actions/checkout@v7"
         )
         self.assertEqual(checkout["with"]["clean"], True)
         self.assertEqual(checkout["with"]["persist-credentials"], False)
@@ -940,7 +940,7 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
             (
                 "privileged reporter checks out source",
                 lambda doc: doc["jobs"]["complete-macos-check"]["steps"].insert(
-                    0, {"uses": "actions/checkout@v5"}
+                    0, {"uses": "actions/checkout@v7"}
                 ),
             ),
             (

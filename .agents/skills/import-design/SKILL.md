@@ -527,6 +527,47 @@ knowing before you touch that file:
   Production native promotion is disabled; `threshold_eligible` is advisory
   evidence only. See `docs/tools/importer-differential-lab.md`.
 
+- `pulp-design-ir-observe` replays input headlessly: ordered `--click x,y`,
+  `--drag x1,y1:x2,y2` and `--key <name>` (`tab`/`shift+tab` traverse focus
+  as the window hosts do; other keys go to the focused view) run after layout
+  and BEFORE the render, so the PNG shows the post-interaction state. Steps
+  require `--interaction-log <json>`; the log records per step the hit
+  target's anchor and child-index path, `handled`, focus, and tree-ordered
+  control state. Two gotchas: a bare click never moves a knob (drag does),
+  and anchors are not unique — the figma-plugin scene fixture gives three
+  siblings one `stable_anchor_id` — so compare by `path`, not by anchor.
+
+- `pulp-design-ir-observe --backend gpu` renders through Skia Graphite on a
+  Dawn device (the default stays `skia`, the CPU raster, byte-identical to
+  before), and `--render-receipt <json>` records the backend actually used,
+  the adapter, frame outcome, readback, device loss, Skia milestone and Dawn
+  revision. A GPU request that cannot render fails; it never comes back as a
+  CPU render. Gotchas: an unscaled image blit renders byte-identically on
+  Graphite and CPU raster, so pixels alone cannot catch a silent fallback on
+  such a design (check the receipt and which GPU driver loaded); Pulp's macOS
+  GPU binaries also load `libwgpu_native.dylib`, a second WebGPU C API next to
+  Skia's static Dawn; and a SECOND Dawn copy in the process (e.g. via
+  `DYLD_INSERT_LIBRARIES`) is not benign — the observer then hits WebGPU
+  validation errors and a Tint internal compiler error. `--gpu-fault` seeds
+  failures for parity-lane calibration only.
+
+- `pulp-ui-frames-observe` records an imported panel (`--design-ir`) or a
+  scripted UI (`--script`) frame by frame under a fixed host clock: a
+  `pulp-ui-frame-schedule-v1` file supplies the host timestamps, the
+  StateStore parameters, and timed hover/click/drag/key/context-press,
+  `set_param`, `resize` and editor `attach_view`/`detach_view` events
+  (`test/fixtures/ui-frames/`). It follows the host frame contract exactly,
+  including the SECOND continuity check after `advance_host_frame`: keeping
+  only `begin_host_frame`'s answer stalls an input-started animation (a knob's
+  hover glow froze at 0.37 for nine frames). Gotchas it makes visible: a
+  view-first scripted document's first mounted frame paints `bindWidgetToParam`
+  controls at 0, one frame before the binding service catches up. Script
+  timers and `performance.now()` read the schedule's host clock by default
+  (`WidgetBridge::set_time_source`, `--timer-clock schedule`); pass
+  `--timer-clock wall` to see what a real host does, where a timer fires when
+  wall time passes its deadline however few frames that took. `Date.now()` is
+  always the engine's wall clock, so never derive timing from it in a fixture.
+
 **The lane that works (Figma is the source of truth):**
 ```bash
 # 1) Export the Figma NODE to a scene (faithful vectors + geometry + assets).
@@ -1902,7 +1943,9 @@ SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
   (`RecognitionResolver`) is the ONE place that combines recognition SOURCES
   into a merged `component_set_key → kind` (and `→ factory_id`) table. Sources,
   in precedence order (later wins on key collision):
-  1. built-in Pulp Figma Library (`RecognitionResolver::with_builtin_library()`,
+  1. built-in Pulp Figma Library (`recognition_resolver_with_builtin_library()`,
+     a Pulp-owned pack in `recognition_audio_pack.{hpp,cpp}` linked as
+     `pulp-design-import-audio-pack`, NOT part of the generic resolver;
      mirrored in code from `tools/figma-plugin/library-manifest.json` and pinned
      against the JSON by a drift-guard test),
   2. the user's `--recognition-manifest` (flat library-manifest shape),
@@ -2089,6 +2132,29 @@ Two consequences when changing that radius:
 - Measure the arc radius in a band tight around the expected value. A wider band
   silently averages in the design's own concentric decoration (kelvin's copper
   hairline at r≈89 and tick ring at r≈98) and reports a radius a pixel high.
+
+### Meters, waveforms and spectra go through the view-core display seam
+
+Native materialization and the generated C++ never name `Meter`,
+`WaveformView` or `SpectrumView`: a `meter`/`waveform`/`spectrum` node is made
+with `make_data_display("pulp.level" | "pulp.series" | "pulp.bins")` and
+configured through `LevelDisplay`/`SeriesDisplay`/`BinDisplay`; binding goes
+through `bind_imported_level_display`/`bind_imported_series_display`, in both
+the materializer and the generated binding helpers. Those call the
+provider-neutral virtual and then the deprecated `bind_meter`/
+`bind_waveform_display` through the binder `pulp::view-audio` registers, so
+emit the helper, never a bare `ctx.bind_level_display`, or old-only contexts
+go silently unbound. `setMeterColors` fills through one
+`set_level_fill(optional background, stops)` call: a gradient must never
+restate the background. With no provider registered the materializer
+returns a placeholder plus a `data-display-unavailable` diagnostic and the
+binding reports `native-binding-not-applied`. Generated code keeps that
+property: the non-faithful path emits a `View` fallback for a null factory
+result, and the faithful_svg path must not (its variable is a
+`unique_ptr<DesignFrameView>`). The guard is `[data-display]` in
+`test_design_import_native_materializer.cpp`, which compiles generated displays
+in both modes against view-core headers only and scans emitted output for
+provider-only names.
 
 ### Native codegen fidelity gaps
 
@@ -2945,6 +3011,24 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   vertical}`), grid (`gridTemplate*`/`gridAutoFlow`/`gridColumn`/`gridRow`), and
   text `runs` are all written now; mirror this for future IR additions and add a
   `[serialization]` round-trip test.
+- **A document-loaded asset stays inside its document.** With an
+  `asset_base_directory`, `resolve_asset_file` honours a manifest `local_path`
+  or `file://` `original_uri` only when the path stays inside that directory
+  — judged by text first (`..` folded, backslashes as separators, absolute,
+  drive-letter and UNC roots refused, no lookup) and then by the resolved path
+  (symlinks). A declared SHA-256 alone does not admit an escaping path,
+  because the document controls that hash; the one outside root is Pulp's own
+  asset cache (`design_import_asset_cache_directory()`), where an absolute path
+  loads only if its resolved file is in the cache and matches the hash. A refusal logs `asset '…' refused — … resolves
+  outside the document directory` and reads as unresolved. It is decided
+  before any lookup on purpose: refusing only files that exist would tell a
+  crafted manifest which outside files are present. `collect_design_ir_assets`
+  records an external local file by absolute path, so a document that keeps
+  that path will not load the asset. Every `pulp import-design` lane that
+  writes a document (js, ir-json, cpp, browser import) runs
+  `localize_ir_assets`, which copies it to `assets/<sha256><ext>` first; a
+  library caller that serializes DesignIR itself must do the same.
+  `import-design-external-asset-localized` pins the CLI behaviour end to end.
 - **Pencil stroke lives in an attribute.** Shape stroke can arrive as
   `attributes["stroke_color"]` (+ `stroke_width`/`stroke-width`), NOT
   `style.border_color`. `synthesize_primitive_paths` consumes both, else a
@@ -2960,6 +3044,51 @@ Lessons from the di-1..di-5 closeout review — keep these invariants:
   fills its axis even when the node has an explicit cross-axis size (Yoga clamps
   up to the min) — no longer a no-op. (Text-run UTF-16→byte offset conversion is
   also handled now — see the per-range text section.)
+- **Never hand DesignIR bytes to `choc::json::parse` directly.** The pinned
+  CHOC fork checks for end of input only after a backslash, so a document cut
+  inside a string literal makes it read past the buffer (the observer died with
+  SIGBUS), and its `ParseError` aborts any caller that does not catch it.
+  `parse_design_ir_json` bounds-checks the bytes first (terminated strings and
+  `\u` escapes, balanced nesting within `kMaxDesignIrJsonDepth`, no embedded
+  NUL) and throws `DesignIrParseError`; a CLI that loads a DesignIR catches it
+  and exits 1 with the reason. Malformed fixtures for this path live in the
+  parity harness corpus (`tools/parity/corpus/fixtures/malformed/` in Vellum).
+
+### Malformed imports fail closed or warn — never pass silently
+
+The rejection corpus (Vellum `tools/parity/corpus/fixtures/malformed/`) holds
+each of these to a code. Keep the codes and the wording the lane's regexes
+match:
+
+- **A DesignIR envelope newer than this build warns; it is not refused.**
+  The reader deliberately keeps and round-trips any `version` (tests pin
+  this), so the check lives in the native resolver:
+  `document-version-unsupported` with the text `unsupported DesignIR version
+  N`. Do not move it into `parse_design_ir_json`: refusing there breaks the
+  preserve contract, and it was ruled out.
+- **Two ZIP members that land on one file refuse the import.**
+  `zip_entry_policy.hpp` keys members by the lexically normalized,
+  case-folded path. `Scene.pulp.json` and `./assets//a.png` collide with
+  `scene.pulp.json` and `assets/a.png` on a case-insensitive volume.
+- **The native resolver warns on `node-type-unknown` and
+  `identity-duplicate`.** Each warning is a diagnostic plus a
+  `[pulp:warn] design-import:` line. "Unknown" means `kind_from_type` does not
+  recognize the type and it is not a vector kind. The warning fires even when
+  the node's audio role or name still resolves it. Duplicates are found by a
+  document-order walk of `stable_anchor_id`.
+- **A successful decode does not prove an image is intact.** Skia's PNG
+  decoder fills the rows of a truncated file with transparent pixels and
+  returns `kSuccess`, and the node paints blank. `canvas::probe_image_file`
+  therefore also walks the PNG chunks (whole chunks, correct CRCs, an `IEND`).
+  `asset-undecodable` comes from that probe. A PNG with a bad CRC now warns
+  even when it displays. Test fixtures need real CRCs: the 67-byte
+  `tiny_png_bytes()` in `test_import_design_tool.cpp` has a wrong IDAT length,
+  so it fails the probe.
+- **Web fonts that fail in Chromium are named.** The capture health probe
+  lists `document.fonts` faces whose `status` is `error` as
+  `provenance.health.failed_fonts`. The lowering turns each one into a
+  `font-undecodable` warning. The capture stays `healthy`, because text still
+  paints in a fallback face.
 
 ### Faithful-vector lane (Plan B): `faithful_svg` render mode → `DesignFrameView`
 
@@ -6954,6 +7083,16 @@ directory and use `--portable-state-assets`. This emits package-relative paths
 and rejects any paint that resolves outside the packaged runtime; absolute
 capture-host paths are validation evidence only and must not enter artifacts.
 
+**Explicit resolver activation is a supported state-selection contract.** A
+captured atlas entry with no `match` selector remains inactive unless the
+embedder installs `globalThis.__pulpMaterializedStateResolver__` and returns
+that entry's stable id (for example, `home`). The resolver path must still run
+the normal captured-state commit: select the entry, call `setImageSource` for
+its portable paint, and make the image authority visible. Keep a regression
+test for this sequence; a fixture that merely contains an atlas entry can pass
+while painting nothing. Selector matching and resolver-driven selection are
+separate contracts and should be validated independently.
+
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and
 attributes failing pixels to nodes. Two traps are baked into the *metric*, not
 the code, and both were found by measuring rather than reasoning:
@@ -7468,3 +7607,14 @@ Import-validation round-trip harnesses must route Pulp target builds through
 build receipt. This applies to the seven Pulp harnesses (`v0`, `figma`, `pencil`,
 `stitch`, `rn`, `designmd`, and `jsx`). Leave a separate external-project build
 (such as Spectr) on its own toolchain boundary.
+
+## Captured canvas authority
+
+Reference-paint state atlases must opt into `--canvas-authority` when a captured
+canvas image is intended to be the native visual authority. The transformer's
+canonical match is the registered `canvas` element; broad DOM selectors such as
+`#root` can be absent from the materialized registry and leave the atlas
+inactive without an error. Keep this mode explicit and fail closed on missing
+or malformed `canvas_bindings`, multiple implicit states, or non-canvas match
+selectors. The optional `canvas_index` preserves identity when a capture has
+multiple canvases; live canvas behavior remains a separate proof surface.

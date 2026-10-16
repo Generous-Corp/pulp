@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.940.0
+    VERSION 0.982.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -102,6 +102,13 @@ option(PULP_CHANGED_SURFACE_INVENTORY_TARGET
        "Validate the exact filtered CTest inventory for Shipyard's declared shadow-selection target"
        OFF)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
+option(PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC
+       "Build the private staged wgpu-native architecture diagnostic" OFF)
+if(PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC AND
+   (NOT PULP_BUILD_TESTS OR NOT PULP_ENABLE_GPU))
+    message(FATAL_ERROR
+        "The staged wgpu-native diagnostic requires PULP_BUILD_TESTS=ON and PULP_ENABLE_GPU=ON")
+endif()
 option(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF
        "Require GPU-audio library and probes to use the manifest-pinned Skia/Dawn generation"
        OFF)
@@ -191,6 +198,8 @@ if(PULP_INTEL_CANARY)
     endif()
     message(STATUS "Pulp: Intel canary lint clean.")
 endif()
+# Report host tools that differ from tools/toolchain/manifest.toml.
+include("${PULP_ROOT_DIR}/tools/cmake/PulpToolchainCheck.cmake")
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
 # Lottie / Bodymovin JSON animation playback via the bundled skottie module.
 # Opt-in (default OFF): builds that don't use it link nothing extra and the
@@ -408,6 +417,7 @@ add_subdirectory(core/timeline_editor)
 add_subdirectory(core/playback)
 add_subdirectory(core/events)
 add_subdirectory(core/sample_bank_manifest)
+add_subdirectory(core/content)
 add_subdirectory(core/state)
 add_subdirectory(core/audio)
 if(PULP_ENABLE_AUTHORING_CAPSULE)
@@ -429,7 +439,7 @@ endif()
 if(PULP_ENABLE_GPU)
     add_subdirectory(core/render)
 endif()
-# After core/render so the GPU convolver node can link pulp::render when GPU is
+# After core/render so the GPU convolver node can link pulp::gpu-device when GPU is
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
@@ -548,6 +558,146 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "For a stripped build set -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF.")
     endif()
     enable_testing()
+    # The file-api query is retained in the build tree so the Vellum closure
+    # receipt can be regenerated from the exact configured target graph. The
+    # gate is enforcing; only explicitly pending P4/P12/P13/P17 debts remain
+    # allowlisted and are removed as those carve PRs land.
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
+    file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    # The D3 manifest describes the GPU-backed Vellum extraction graph. Keep
+    # its positive graph receipt/gate on GPU-enabled configurations: the
+    # sanitizer and other CPU-only lanes intentionally omit those targets, so
+    # reporting them as missing would turn an out-of-scope graph into a false
+    # failure. The policy and negative controls below remain enabled for every
+    # desktop test configuration.
+    if(PULP_ENABLE_GPU)
+        add_test(NAME pulp.vellum-closure-boundary
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                manifest
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
+        set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-gate
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                gate
+                --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+                --allowlist "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_allowlist.json"
+                --generate
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
+        set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+        add_test(NAME pulp.vellum-view-core-pulp-kept
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_view_core_pulp_kept_check.py"
+                --manifest "${CMAKE_BINARY_DIR}/vellum-closure.json"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+        # The units exported so far, and render, hold no forbidden mirror
+        # edge in any file, comments included; export refuses one.
+        add_test(NAME pulp.vellum-closure-export-mentions
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                mentions
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit render-3d --unit state-core)
+        set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+        # The units the first export carries, checked exactly as export checks
+        # them: provenance, configure, generated-input digests, Skia link
+        # inputs, owned files, mirrored links and Pulp-owned mentions.
+        add_test(NAME pulp.vellum-closure-export-units
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py"
+                export-check
+                --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}"
+                --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
+                --unit foundation --unit gpu-device-api --unit canvas --unit render-2d --unit state-core)
+        set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
+            DEPENDS pulp.vellum-closure-boundary
+            LABELS "pr")
+    else()
+        # Register the gate as an explicit skip so a CPU-only configuration
+        # reports it as not run rather than dropping it silently.
+        message(STATUS "pulp.vellum-closure-boundary/gate: skipped, PULP_ENABLE_GPU is OFF")
+        add_test(NAME pulp.vellum-closure-boundary
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum closure boundary needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-gate
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum closure gate needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-gate PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-view-core-pulp-kept
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum view-core Pulp-kept check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-export-mentions
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum export mention check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-export-mentions PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+        add_test(NAME pulp.vellum-closure-export-units
+            COMMAND "${Python3_EXECUTABLE}" -c
+                "import sys; print('SKIP: Vellum export-unit check needs PULP_ENABLE_GPU=ON'); sys.exit(77)")
+        set_tests_properties(pulp.vellum-closure-export-units PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "pr")
+    endif()
+    add_test(NAME pulp.vellum-closure-gate-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json"
+            --break "perl -0pi -e 's/pulp::runtime/pulp::audio/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_gate_fixture.json")
+    set_tests_properties(pulp.vellum-closure-gate-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-external-input-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json"
+            --break "perl -0pi -e 's/https:\\/\\/github.com\\/danielraffel\\/choc.git/build-tree/; s/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60/unresolved/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
+    set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-edge-negative
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
+            --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json"
+            --break "perl -0pi -e 's/pulp::view-audio/pulp::audio/'"
+            --no-build
+            --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_fixture.json --allowlist ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_edge_allowlist_fixture.json")
+    set_tests_properties(pulp.vellum-closure-edge-negative PROPERTIES
+        RESOURCE_LOCK pulp-source-git-index
+        LABELS "pr")
+    add_test(NAME pulp.vellum-closure-policy-selftest
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/test_vellum_closure.py")
+    set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
+        LABELS "pr")
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
     FetchContent_Declare(
@@ -678,8 +828,11 @@ endif()
 # ordinary unit-test owners above intentionally load before those public helper
 # modules.
 if(PULP_BUILD_TESTS)
-    add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/bundle_name_quoting)
+    add_subdirectory(test/fixtures/render_provider_floor)
+    add_subdirectory(test/fixtures/native_ui_link_floor)
+    add_subdirectory(test/fixtures/no_editor_link_floor)
+    add_subdirectory(test/fixtures/data_display_editor)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
@@ -876,7 +1029,8 @@ endif()
 if(ANDROID)
     add_library(pulp-jni SHARED
         core/platform/src/android/jni_bridge.cpp
-        core/platform/src/android/jni_motion.cpp
+        core/view/platform/android/jni_motion.cpp
+        core/audio/platform/android/audio_jni.cpp
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
     target_include_directories(pulp-jni PRIVATE
@@ -901,6 +1055,16 @@ if(ANDROID)
         android
         log
     )
+    # The Android app shell: it owns the GPU surface, drives the view hierarchy
+    # and the widget bridge, and plays the demo synth, so it sits at the top of
+    # the closure with the JNI bridge rather than inside pulp-render.
+    if(TARGET pulp-render AND PULP_ENABLE_GPU)
+        target_sources(pulp-jni PRIVATE
+            core/render/platform/android/gpu_surface_android.cpp
+            core/render/platform/android/gpu_surface_android_jni.cpp
+        )
+        target_link_libraries(pulp-jni PRIVATE pulp::render)
+    endif()
     # Ensure all static library symbols are included (needed for JNI registration)
     # Ensure JNI exports from static libs are included in the shared lib.
     # Without --whole-archive, the linker strips "unused" JNI_OnLoad and
@@ -910,6 +1074,7 @@ if(ANDROID)
         $<TARGET_FILE:pulp-platform>
         $<TARGET_FILE:pulp-audio>
         $<$<TARGET_EXISTS:pulp-render>:$<TARGET_FILE:pulp-render>>
+        $<$<TARGET_EXISTS:pulp-gpu-device>:$<TARGET_FILE:pulp-gpu-device>>
         -Wl,--no-whole-archive)
 
     # TalkBack accessibility JNI entry points live in pulp-view
@@ -939,6 +1104,20 @@ endif()
 # Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
 
+# Match the target names exported by find_package(Pulp) for source consumers.
+# Aliases are global targets, so the parent of add_subdirectory(Pulp) sees them.
+foreach(_pulp_export_target IN LISTS PULP_SDK_TARGETS)
+    if(TARGET "${_pulp_export_target}")
+        get_target_property(_pulp_export_name "${_pulp_export_target}" EXPORT_NAME)
+        if(NOT _pulp_export_name)
+            string(REGEX REPLACE "^pulp-" "" _pulp_export_name "${_pulp_export_target}")
+        endif()
+        if(NOT TARGET "Pulp::${_pulp_export_name}")
+            add_library("Pulp::${_pulp_export_name}" ALIAS "${_pulp_export_target}")
+        endif()
+    endif()
+endforeach()
+
 # Build-specific Forge metadata is separate from the statically audited public
 # header install surface. The catalog module installs only share/pulp JSON.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpForgeCatalogInstall.cmake)
@@ -953,19 +1132,22 @@ pulp_install_forge_catalog()
 # specific targets one by one, but each release-cli cycle reveals a
 # new failing target (most recently examples/view-bridge-demo).
 #
-# This final pass walks every executable defined in the project tree
-# and applies `pulp_link_fontconfig_after_skia` so fontconfig appears
-# at the END of every consumer's link line. No-op on macOS/Windows/Android.
+# This final pass walks every executable and shared/module library defined in
+# the project tree and applies `pulp_link_fontconfig_after_skia` so fontconfig
+# appears at the END of every consumer's link line. MODULE targets matter here:
+# plug-in fixtures are loaded by a host after the link, so an unresolved Skia
+# fontconfig symbol can otherwise escape the linker's usual executable checks.
+# No-op on macOS/Windows/Android.
 if(UNIX AND NOT APPLE AND NOT ANDROID)
     include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake")
     include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCollectTargets.cmake")
     pulp_collect_targets_recursive(
-        _all_executables
+        _all_link_consumers
         "${PULP_ROOT_DIR}"
-        TYPES EXECUTABLE
+        TYPES EXECUTABLE MODULE_LIBRARY SHARED_LIBRARY
     )
-    foreach(_exec ${_all_executables})
-        pulp_link_fontconfig_after_skia(${_exec})
+    foreach(_consumer ${_all_link_consumers})
+        pulp_link_fontconfig_after_skia(${_consumer})
     endforeach()
 endif()
 

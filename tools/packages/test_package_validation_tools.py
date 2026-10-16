@@ -331,6 +331,105 @@ class ValidateRegistryTests(unittest.TestCase):
         )
         self.assertEqual(errors, [])
 
+    def test_validate_tool_registry_requires_sha256_on_every_binary_source(self) -> None:
+        good = "a" * 64
+        errors = vr.validate_tool_registry(
+            {
+                "tools": {
+                    "tool": {
+                        "managed_by_pulp": True,
+                        "pinned_version": "1.0.0",
+                        "binary_sources": {
+                            "macOS-arm64": {"url_template": "https://e/x.zip", "sha256": good},
+                            "Linux-x64": {"url_template": "https://e/x.tar.gz"},
+                            "Windows-x64": {"url_template": "https://e/x.zip", "sha256": "A" * 64},
+                            "Linux-arm64": {"url_template": "https://e/x.zip", "sha256": "ab12"},
+                        },
+                    }
+                }
+            }
+        )
+        joined = "\n".join(errors)
+        self.assertEqual(len(errors), 3, joined)
+        self.assertIn("binary_sources.Linux-x64 must declare 'sha256'", joined)
+        self.assertIn("binary_sources.Windows-x64", joined)
+        self.assertIn("binary_sources.Linux-arm64", joined)
+        self.assertNotIn("macOS-arm64", joined)
+
+    def test_binary_source_digest_rule_applies_to_unmanaged_tools_too(self) -> None:
+        errors = vr.validate_tool_registry(
+            {"tools": {"external": {"managed_by_pulp": False,
+                                    "binary_sources": {"Linux-x64": {"url_template": "u"}}}}}
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("external: binary_sources.Linux-x64", errors[0])
+
+    def test_code_owned_digests_must_match_the_owning_fetcher(self) -> None:
+        digest = "b" * 64
+        with tempfile.TemporaryDirectory() as td:
+            owner = pathlib.Path(td) / "fetch.rs"
+            owner.write_text(f'sha256: "{digest}",\n', encoding="utf-8")
+            registry = {"tools": {"fetched": {"binary_sources": {
+                "Linux-x64": {"sha256": digest}}}}}
+            with module_attr(vr, "ROOT", pathlib.Path(td)), \
+                    module_attr(vr, "CODE_OWNED_DIGESTS", {"fetched": owner}):
+                self.assertEqual(vr.validate_code_owned_digests(registry), [])
+                registry["tools"]["fetched"]["binary_sources"]["Linux-x64"]["sha256"] = "c" * 64
+                errors = vr.validate_code_owned_digests(registry)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("does not appear in fetch.rs", errors[0])
+
+    def test_shipped_tool_registry_digests_are_complete_and_match_code(self) -> None:
+        shipped = json.loads((ROOT / "tool-registry.json").read_text(encoding="utf-8"))
+        sources = [s for t in shipped["tools"].values()
+                   for s in (t.get("binary_sources") or {}).values()]
+        self.assertTrue(sources, "control: the shipped registry has binary sources")
+        self.assertEqual(vr.validate_tool_registry(shipped), [])
+        self.assertEqual(vr.validate_code_owned_digests(shipped), [])
+
+    def test_bundleable_requires_a_permissive_license(self) -> None:
+        cases = {
+            "gpl": ("GPL-3.0-or-later", False),
+            "lgpl": ("LGPL-2.1-or-later", False),
+            "agpl": ("AGPL-3.0-only", False),
+            "prose": ("Google Chrome Terms of Service", False),
+            "missing": (None, False),
+            "empty": ("", False),
+            "gpl-and-mit": ("MIT AND GPL-2.0-only", False),
+            "mit": ("MIT", True),
+            "dual": ("MIT OR Apache-2.0", True),
+            "gpl-or-mit": ("(GPL-2.0-only OR MIT)", True),
+            # AND binds tighter than OR, and parentheses group: these two
+            # always require a GPL license.
+            "gpl-and-group": ("GPL-3.0-only AND (MIT OR Apache-2.0)", False),
+            "group-and-gpl": ("(MIT OR GPL-2.0-only) AND GPL-3.0-only", False),
+            "and-group-or-mit": ("(MIT AND GPL-2.0-only) OR Apache-2.0", True),
+            "precedence": ("MIT OR GPL-2.0-only AND GPL-3.0-only", True),
+            "all-permissive-group": ("(MIT OR Apache-2.0) AND BSD-3-Clause", True),
+            "with-exception": ("Apache-2.0 WITH LLVM-exception", False),
+            "with-in-group": ("(Apache-2.0 WITH LLVM-exception) OR GPL-2.0-only", False),
+            "with-then-or": ("Apache-2.0 WITH LLVM-exception OR MIT", False),
+            "unbalanced": ("(MIT OR Apache-2.0", False),
+            "dangling-or": ("MIT OR", False),
+            "trailing-token": ("MIT Apache-2.0", False),
+        }
+        tools = {name: {"bundleable": True, "license": lic}
+                 for name, (lic, _) in cases.items()}
+        tools["unbundled-gpl"] = {"bundleable": False, "license": "GPL-3.0-only"}
+        joined = "\n".join(vr.validate_tool_registry({"tools": tools}))
+        for name, (_, allowed) in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(f"  {name}: 'bundleable: true'" in joined, not allowed, joined)
+        self.assertNotIn("unbundled-gpl", joined)
+
+    def test_shipped_tool_registry_bundles_nothing_copyleft(self) -> None:
+        shipped = json.loads((ROOT / "tool-registry.json").read_text(encoding="utf-8"))
+        self.assertIn("ffmpeg", shipped["tools"], "control: the registry lists ffmpeg")
+        self.assertFalse(shipped["tools"]["ffmpeg"]["bundleable"])
+        self.assertTrue(shipped["tools"]["ffmpeg"]["license"].startswith("GPL-"))
+        bundle_errors = [e for e in vr.validate_tool_registry(shipped) if "bundleable" in e]
+        self.assertEqual(bundle_errors, [])
+
     def test_main_reports_tool_registry_update_override_error(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
@@ -388,6 +487,56 @@ class ValidateRegistryTests(unittest.TestCase):
             self.assertIn("Validating tool-registry.json (1 tools)", text)
             self.assertIn("Tool-registry update/override errors:", text)
             self.assertIn("unupdatable", text)
+
+
+    def test_git_tag_pin_rejects_branches_and_abbreviated_commits(self) -> None:
+        for moving in ("master", "main", "Main", "develop", "trunk", "HEAD", "refs/heads/release"):
+            err = vr.git_tag_pin_error(moving)
+            self.assertIsNotNone(err, moving)
+            self.assertIn("branch", err)
+        for short in ("1fb1f075", "1FB1F075", "abc1", "1fb1f075a5d66e85bfc8f488c3f3626840cb3a1"):
+            err = vr.git_tag_pin_error(short)
+            self.assertIsNotNone(err, short)
+            self.assertIn("abbreviated", err)
+        for bad in ("", "   ", None, 7, " v1.0"):
+            self.assertIsNotNone(vr.git_tag_pin_error(bad), repr(bad))
+
+    def test_git_tag_pin_accepts_release_tags_and_full_commits(self) -> None:
+        for pinned in ("1.0.7", "v2.3.1", "release_1.1.0", "20240101",
+                       "1fb1f075a5d66e85bfc8f488c3f3626840cb3a1d"):
+            self.assertIsNone(vr.git_tag_pin_error(pinned), pinned)
+
+    def test_structural_validation_rejects_unpinned_fetch(self) -> None:
+        def registry(tag: str) -> dict:
+            return {
+                "registry_version": 2,
+                "packages": {
+                    "pkg": {
+                        "version": "1.0.0",
+                        "fetch": {"method": "FetchContent",
+                                  "git_repository": "https://example.com/pkg.git",
+                                  "git_tag": tag},
+                        "verification": {"verified_version": "1.0.0"},
+                        "platforms": {"macOS": {}, "iOS": {}},
+                    }
+                },
+            }
+
+        errors, _ = vr.validate_structural(registry("master"))
+        self.assertTrue(any("pkg" in e and "branch name" in e for e in errors), errors)
+        errors, _ = vr.validate_structural(registry("1fb1f075"))
+        self.assertTrue(any("pkg" in e and "abbreviated" in e for e in errors), errors)
+        errors, _ = vr.validate_structural(registry("v1.0.0"))
+        self.assertEqual(errors, [])
+
+    def test_shipped_registry_pins_every_package(self) -> None:
+        registry = json.loads((ROOT / "registry.json").read_text(encoding="utf-8"))
+        packages = registry["packages"]
+        self.assertGreater(len(packages), 0)
+        unpinned = {slug: vr.git_tag_pin_error(pkg["fetch"]["git_tag"])
+                    for slug, pkg in packages.items()
+                    if vr.git_tag_pin_error(pkg["fetch"]["git_tag"])}
+        self.assertEqual(unpinned, {})
 
 
 class FreshnessCheckTests(unittest.TestCase):

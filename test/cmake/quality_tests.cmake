@@ -80,6 +80,36 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(vellum-boundary-lint vellum-boundary-lint-negative-contract
         PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
 
+    # The foundation layer (core/platform, core/runtime, core/simd) must not
+    # include audio, view, format or any other upper-layer header. Lexical and
+    # build-free; the self-test plants each crossing kind and must turn red.
+    add_test(NAME foundation-include-lint
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/foundation_include_lint.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME foundation-include-lint-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_foundation_include_lint.py")
+    set_tests_properties(foundation-include-lint foundation-include-lint-negative-contract
+        PROPERTIES LABELS "pr" TIMEOUT 60)
+
+    # Inheritance entries are one file per change event so concurrent pull
+    # requests do not conflict; the checker keeps the older single-file ledger
+    # frozen, requires an entry for every change or expansion-watch event that
+    # claims Vellum inherits it, and with --base rejects editing or deleting an
+    # existing entry. --base auto compares against the GitHub event's base
+    # commit in CI (merge-group checkouts carry no origin/main) and against
+    # origin/main locally. The self-test plants each violation and must turn red.
+    add_test(NAME vellum-inheritance-ledger
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/vellum_inheritance_ledger_check.py"
+            --base auto)
+    add_test(NAME vellum-inheritance-ledger-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_inheritance_ledger_check.py")
+    set_tests_properties(vellum-inheritance-ledger vellum-inheritance-ledger-negative-contract
+        PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
+
     # Keep one checked-in, license-free source fixture on the same instrument
     # as the importer output gate. The companion unittest plants every lint
     # class and must turn red, so a vacuous clean fixture cannot make this gate
@@ -102,6 +132,15 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ui-build/test_ui_build.py")
     set_tests_properties(pulp-ui-build-contracts PROPERTIES
         LABELS "pr;design-import" TIMEOUT 60)
+
+    # The view-core Pulp-kept closure assertion (pulp.vellum-view-core-pulp-kept)
+    # reads a configured closure manifest; this self-test plants each violation
+    # it must catch against the checked-in D3 rules.
+    add_test(NAME vellum-view-core-pulp-kept-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_view_core_pulp_kept_check.py")
+    set_tests_properties(vellum-view-core-pulp-kept-negative-contract PROPERTIES
+        LABELS "pr" TIMEOUT 60)
 
     add_test(NAME gpu-audio-p4-evidence-selftest
         COMMAND ${Python3_EXECUTABLE}
@@ -176,10 +215,26 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-manifest-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/agent_capability_manifest.py" --check)
+    add_test(NAME host-adapter-tracing-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/check_host_adapter_tracing_contract.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME host-adapter-tracing-contract-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_host_adapter_tracing_contract.py")
+    set_tests_properties(host-adapter-tracing-contract
+        host-adapter-tracing-contract-selftest PROPERTIES LABELS "pr;format")
     add_test(NAME agent-capability-manifest-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")
-    set_tests_properties(agent-capability-manifest-selftest PROPERTIES PROCESSORS 8)
+    # Median 76.5 s, p95 78.6 s across 86 Linux exclusive-shard runs, so the
+    # suite-wide 120 s default left 1.5x headroom. A slow runner that stretched
+    # every test in its shard about 1.7x pushed it past 120 s. Hold it to the
+    # same 300 s budget as its rederive sibling and the other whole-machine
+    # self-tests, which covers that slowdown with room to spare.
+    set_tests_properties(agent-capability-manifest-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
@@ -288,6 +343,10 @@ if(Python3_Interpreter_FOUND)
 
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
+    if(UNIX)
+        add_test(NAME ci-cause-notices-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_ci_cause_notices.py")
+    endif()
     if(UNIX)
         add_test(NAME linux-runner-lane-contract COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_linux_runner_lane_contract.py")
@@ -706,6 +765,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME vellum-workflow-dispatch COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_workflow_dispatch.py")
     set_tests_properties(vellum-workflow-dispatch PROPERTIES TIMEOUT 120)
+    # A sanitizer configure's inventory differs from the gate profile's, so the
+    # sanitizer lanes must exclude every gate-inventory check, and every such
+    # check must carry the label. Text-only: no PyYAML, no build tree.
+    add_test(NAME sanitizer-gate-inventory-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_sanitizer_gate_inventory.py")
+    set_tests_properties(sanitizer-gate-inventory-contract PROPERTIES TIMEOUT 120)
     # The privileged Vellum gate constructs its exact base+head candidate
     # locally. Exercise both a clean merge and a real content conflict so the
     # conflict path cannot degrade into an untested fail-open branch.
@@ -782,6 +847,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_binary_identity_shadow.py")
         set_tests_properties(binary-identity-shadow-selftest PROPERTIES TIMEOUT 120)
+        # The merge-group preamble's HOLD backstop (group decoding, trust rule,
+        # fail-open on unreadable input, build.yml wiring).
+        add_test(NAME merge-group-hold-check-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_hold_check.py")
+        set_tests_properties(merge-group-hold-check-selftest PROPERTIES TIMEOUT 60)
         # The one merge-group step that runs all four shadow instruments.
         add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")
@@ -856,6 +926,9 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_build_dir_lock.py")
         set_tests_properties(checkout-location-guard-selftest build-dir-lock-selftest
             PROPERTIES TIMEOUT 120)
+        add_test(NAME pulp-worktree-creation-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_pulp_worktree_creation.py")
+        set_tests_properties(pulp-worktree-creation-selftest PROPERTIES TIMEOUT 120)
     endif()
 
     # Shadow-mode affected-test set the merge-group macos job annotates after
@@ -1156,6 +1229,9 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME portable-ci-timeout-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_run_with_timeout.py")
     endif()
+    # Pure Python against a recorded host observation; runs on every host.
+    add_test(NAME proxmox-host-watch-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_host_watch.py")
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME proxmox-ephemeral-linux-runner-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_runner_linux.py")
@@ -1416,6 +1492,9 @@ if(Python3_Interpreter_FOUND)
             # Diff-scoped like script-test-inputs-drift; see PULP_DIFF_SCOPED there.
             set_tests_properties(changed-surface-script-families-drift PROPERTIES
                 TIMEOUT 120 SKIP_RETURN_CODE 77 PULP_DIFF_SCOPED TRUE)
+            # gate-inventory: see script-test-inputs-drift.
+            set_property(TEST changed-surface-script-families-drift APPEND PROPERTY
+                LABELS gate-inventory)
             # A bounded run's base configure is FetchContent-disconnected, so a
             # marked dependency must download only through FetchContent. This
             # configured tree must hold its source, so an absent tree fails.
@@ -1496,6 +1575,13 @@ if(Python3_Interpreter_FOUND)
     # passes on a matching one (skips off-macOS / without clang+ar+lipo).
     add_test(NAME findskia-arch-assert-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_findskia_arch_assert.py")
+
+    # Windows ARM64 Skia archives keep their static libraries below an arm64
+    # slice directory. This fixture configures CMake's Windows platform without
+    # a compiler and proves the slice is selected, while a flat-only fixture
+    # stays fail-closed instead of claiming ARM64 support.
+    add_test(NAME findskia-windows-arm64-slice-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_findskia_windows_arm64_slice.py")
 
     # SDK-consumer sweep: the WHAT-builds / WHICH-binaries-measured / HOW-reported
     # decision logic of the turnkey runner that rebuilds every downstream consumer
@@ -1585,6 +1671,11 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
         # Stages live processes and worktrees on the host it runs on.
         set_property(TEST clean-worktree-builds-selftest APPEND PROPERTY LABELS environment-bound)
+        add_test(NAME clean-worktree-planning-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_planning
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(clean-worktree-planning-selftest PROPERTIES TIMEOUT 300)
+        set_property(TEST clean-worktree-planning-selftest APPEND PROPERTY LABELS environment-bound)
 
         # clean_worktrees.sh removes whole worktrees, so its guard is the one
         # that must never be merely present: the suite stages a live process and

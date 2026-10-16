@@ -50,6 +50,12 @@ PROVENANCE_BINDING_FIELDS = (
     "provider_asset_manifest_sha256",
     "dawn_archive_manifest_sha256",
 )
+PROVIDER_IDENTITY_SCHEMA = "pulp.gpu-audio-provider-identity.v1"
+PROVIDER_IDENTITY_FIELDS = (
+    "expected_asset_sha256", "validated_asset_sha256", "expected_dawn_revision",
+    "header_dawn_revision", "linked_dawn_archive_sha256", "manifest_sha256",
+    "generation_receipt_sha256",
+)
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -79,7 +85,47 @@ def _nonnegative_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-def _validate_provider_identity(provenance: dict[str, Any]) -> None:
+def validate_provider_identity_fixture(path: Path) -> dict[str, Any]:
+    """Load an exact-provider receipt and bind it to this checkout's manifest."""
+
+    return load_provider_identity_receipt(path)[0]
+
+
+def load_provider_identity_receipt(path: Path) -> tuple[dict[str, Any], str]:
+    """The validated receipt and the SHA-256 of the exact bytes validated.
+
+    The file is read once. Hashing a second read for the campaign manifest
+    would record whatever the path held then, which need not be the receipt
+    that passed these checks.
+    """
+
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("provider identity fixture must be a regular file")
+    try:
+        raw = path.read_bytes()
+        fixture = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("provider identity fixture is not valid JSON") from exc
+    if not isinstance(fixture, dict) or fixture.get("schema") != PROVIDER_IDENTITY_SCHEMA \
+            or fixture.get("status") != "passed" \
+            or fixture.get("provider_identity_status") != "passed":
+        raise RuntimeError("provider identity fixture is not a passed exact-provider receipt")
+    for field in PROVIDER_IDENTITY_FIELDS:
+        value = fixture.get(field)
+        pattern = r"[0-9a-fA-F]{40}" if field in ("expected_dawn_revision", "header_dawn_revision") else r"[0-9a-fA-F]{64}"
+        if not isinstance(value, str) or re.fullmatch(pattern, value) is None:
+            raise RuntimeError(f"provider identity fixture {field} is invalid")
+    manifest_path = REPO_ROOT / "tools/deps/manifest.json"
+    if not _matches_sha256(manifest_path, fixture["manifest_sha256"]):
+        raise RuntimeError("provider identity fixture is not bound to the current provider manifest")
+    if fixture["expected_asset_sha256"] != fixture["validated_asset_sha256"] \
+            or fixture["expected_dawn_revision"] != fixture["header_dawn_revision"]:
+        raise RuntimeError("provider identity fixture contains inconsistent provider identity")
+    return fixture, hashlib.sha256(raw).hexdigest()
+
+
+def _validate_provider_identity(provenance: dict[str, Any],
+                                expected_fixture: dict[str, Any] | None = None) -> None:
     """Require observed native provider identity, never metadata-only labels."""
 
     if provenance.get("provider_identity_status") != "passed" or provenance.get(
@@ -122,6 +168,18 @@ def _validate_provider_identity(provenance: dict[str, Any]) -> None:
         native_backend = provenance["native_runtime_backend"]
     if native_backend.casefold() != adapter_backend:
         raise RuntimeError("raw provenance native runtime backend disagrees with adapter backend")
+    if expected_fixture is not None:
+        if provenance.get("provider_revision") != expected_fixture["expected_dawn_revision"]:
+            raise RuntimeError("raw provenance provider revision disagrees with exact-provider receipt")
+        if provenance.get("provider_asset_sha256") != expected_fixture["validated_asset_sha256"]:
+            raise RuntimeError("raw provenance provider asset disagrees with exact-provider receipt")
+        if provenance.get("dawn_archive_sha256") != expected_fixture["linked_dawn_archive_sha256"]:
+            raise RuntimeError("raw provenance Dawn archive disagrees with exact-provider receipt")
+        bindings = provenance.get("manifest_bindings")
+        if not isinstance(bindings, dict) or any(
+                bindings.get(field) != expected_fixture["manifest_sha256"]
+                for field in ("provider_asset_manifest_sha256", "dawn_archive_manifest_sha256")):
+            raise RuntimeError("raw provenance manifest bindings disagree with exact-provider receipt")
 
 
 def _validate_run_identity(provenance: dict[str, Any]) -> None:
@@ -204,8 +262,11 @@ def validate_host_preflight(path: Path, expected_source_revision: str,
         "host_vitals": receipt.get("host_vitals_level") == "green",
         "contention": receipt.get("gpu_contention") is False
         and receipt.get("ui_contention") is False,
-        "thermal": isinstance(receipt.get("thermal_state"), str)
-        and bool(receipt["thermal_state"].strip()),
+        # The producer only emits a passed receipt for a current nominal
+        # Foundation thermal observation.  Keep the consumer fail-closed as
+        # well: a caller-supplied receipt must not relabel fair/serious/unknown
+        # thermal state as an admitted quiet host.
+        "thermal": receipt.get("thermal_state") == "nominal",
     }
     gpu_observation = receipt.get("gpu_health_observation")
     gpu_source = receipt.get("gpu_health_source")
@@ -428,9 +489,10 @@ class LosslessLifecycleObserver:
 
     def validate(self, expected_probe_sha256: str | None = None,
                  expected_manifest_sha256: str | None = None,
-                 receipt: dict[str, Any] | None = None) -> None:
+                 receipt: dict[str, Any] | None = None,
+                 expected_provider_identity: dict[str, Any] | None = None) -> None:
         validate_identity_rows(list(self._rows), expected_probe_sha256,
-                               expected_manifest_sha256, receipt)
+                               expected_manifest_sha256, receipt, expected_provider_identity)
 
 
 def observe_jsonl(path: Path) -> LosslessLifecycleObserver:
@@ -454,6 +516,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--output-dir", type=Path)
     p.add_argument("--host-preflight", type=Path,
                    help="fresh source-bound quiet-host receipt (required for hardware runs)")
+    p.add_argument("--provider-identity-receipt", type=Path,
+                   help="passed exact-provider receipt bound to tools/deps/manifest.json (required for hardware runs)")
     p.add_argument("--frames", type=int, default=32, choices=(32, 64, 128))
     p.add_argument("--blocks", type=int, default=REQUIRED_MEASURED_BLOCKS)
     p.add_argument("--warmup", type=int, default=16)
@@ -573,7 +637,8 @@ def validate_negative_control_receipt(receipt: dict[str, Any]) -> None:
 
 def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None = None,
                           expected_manifest_sha256: str | None = None,
-                          receipt: dict[str, Any] | None = None) -> None:
+                          receipt: dict[str, Any] | None = None,
+                          expected_provider_identity: dict[str, Any] | None = None) -> None:
     provenance_rows = [r for r in rows if r.get("kind") == "provenance"]
     if len(provenance_rows) != 1 or provenance_rows[0].get("schema") != "pulp.gpu-audio.p2.raw.v1":
         raise RuntimeError("raw provenance row missing or has unexpected schema")
@@ -584,7 +649,7 @@ def validate_identity_rows(rows: list[dict], expected_probe_sha256: str | None =
     executable_sha256 = provenance.get("executable_observed_sha256")
     if not isinstance(executable_sha256, str) or SHA256_RE.fullmatch(executable_sha256) is None:
         raise RuntimeError("raw provenance lacks an exact observed executable hash")
-    _validate_provider_identity(provenance)
+    _validate_provider_identity(provenance, expected_provider_identity)
     _validate_run_identity(provenance)
     if expected_probe_sha256 is not None and executable_sha256 != expected_probe_sha256:
         raise RuntimeError("raw provenance executable hash does not match the campaign probe")
@@ -750,9 +815,15 @@ def run(args: argparse.Namespace) -> int:
         raise RuntimeError(f"acceptance campaign requires exactly {REQUIRED_MEASURED_BLOCKS} measured blocks")
     source_revision, driver_sha256 = _source_provenance()
     initial_source_provenance = (source_revision, driver_sha256)
+    if args.expected_source_revision is None:
+        raise RuntimeError("--expected-source-revision is required for a hardware campaign")
     if args.host_preflight is None:
         raise RuntimeError("--host-preflight is required for a hardware campaign")
+    if args.provider_identity_receipt is None:
+        raise RuntimeError("--provider-identity-receipt is required for a hardware campaign")
     host_preflight = validate_host_preflight(args.host_preflight, source_revision)
+    provider_identity, provider_identity_receipt_sha256 = load_provider_identity_receipt(
+        args.provider_identity_receipt)
     host_preflight_sha256 = sha256(args.host_preflight)
     if args.expected_source_revision is not None and args.expected_source_revision != source_revision:
         raise RuntimeError("expected source revision does not match the measured source")
@@ -781,7 +852,8 @@ def run(args: argparse.Namespace) -> int:
         if not control_raw.is_file():
             raise RuntimeError("negative control did not produce a raw census")
         control_observer = observe_jsonl(control_raw)
-        control_observer.validate(probe_sha256, receipt=control_receipt)
+        control_observer.validate(probe_sha256, receipt=control_receipt,
+                                  expected_provider_identity=provider_identity)
         control_rows = control_observer.rows
         campaign_manifest_digest = control_rows[0].get("provenance_manifest_sha256")
         negative_control = {"argv": control, "returncode": control_proc.returncode,
@@ -820,7 +892,8 @@ def run(args: argparse.Namespace) -> int:
                         observer = observe_jsonl(raw_path)
                         if len(observer.rows) < 2 or observer.rows[0].get("kind") != "provenance":
                             raise RuntimeError(f"{slots=} {lead=} missing streamed provenance/rows")
-                        observer.validate(probe_sha256, campaign_manifest_digest, receipt)
+                        observer.validate(probe_sha256, campaign_manifest_digest, receipt,
+                                          provider_identity)
                         parsed_rows = observer.rows
                         provenance = parsed_rows[0]
                         if provenance.get("run_kind") != run_kind:
@@ -869,6 +942,8 @@ def run(args: argparse.Namespace) -> int:
                 "probe_sha256": probe_sha256, "probe_path": str(args.probe.resolve()),
                 "host_preflight_sha256": host_preflight_sha256,
                 "host_preflight_path": str(args.host_preflight.resolve()),
+                "provider_identity_receipt_sha256": provider_identity_receipt_sha256,
+                "provider_identity_receipt_path": str(args.provider_identity_receipt.resolve()),
                 "host_id": host_preflight["host_id"],
                 "machine_id": platform.node() or "unavailable", "host_platform": platform.platform(),
                 "negative_control": negative_control,

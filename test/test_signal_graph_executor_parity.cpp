@@ -35,6 +35,11 @@ using pulp::host::SignalGraphExecutorRouting;
 using pulp::host::build_signal_graph_executor_routing;
 using pulp::host::signal_graph_executor_eligible;
 
+// Defined with the other wide-graph helpers below; declared here because the
+// publication-race regression test intentionally sits beside the other
+// lifecycle tests.
+void build_wide_signal_graph(SignalGraph& g, int n, bool parallel);
+
 std::vector<float> ramp(int n, float seed) {
     std::vector<float> v(static_cast<std::size_t>(n));
     for (int i = 0; i < n; ++i) {
@@ -529,8 +534,7 @@ TEST_CASE("SignalGraph re-prepare while the executor path renders is race-free",
     });
     // Bounded: an unbounded spin here hangs the suite if the audio thread never
     // starts, where the CHECK below reports that as the failure it is.
-    CHECK(pulp::test::wait_for_condition(
-        [&] { return started.load(std::memory_order_acquire); }));
+    CHECK(pulp::test::wait_for_condition([&] { return started.load(std::memory_order_acquire); }));
     bool prepared_all = true;
     for (int i = 0; i < 200; ++i) {
         if (!g.prepare(kSr, kFrames)) {  // builds + publishes fresh snapshots
@@ -2073,6 +2077,67 @@ void build_wide_signal_graph(SignalGraph& g, int n, bool parallel) {
 
 }  // namespace
 
+TEST_CASE("standalone executor routing build serializes with publication",
+          "[host][graph][executor][routing][rt-safety][threads][tsan]") {
+    // The standalone builder resolves raw pointers into the published
+    // CompiledGraph and then stores an opaque keepalive. Exercise that whole
+    // sequence against repeated prepare/release publication so a resolver
+    // cannot observe one generation while the keepalive pins another (or race
+    // the publisher-owned Slot::live() shared_ptr).
+    SignalGraph g;
+    build_wide_signal_graph(g, 8, /*parallel=*/true);
+    // Start from an unprepared generation so the builder's rejection path is
+    // exercised deterministically before publication begins.
+    g.release();
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> started{false};
+    std::atomic<std::uint64_t> builds{0};
+    std::atomic<std::uint64_t> successful_builds{0};
+    std::atomic<std::uint64_t> rejected_builds{0};
+    std::atomic<bool> invalid_result{false};
+    std::thread builder([&] {
+        started.store(true, std::memory_order_release);
+        while (!stop.load(std::memory_order_relaxed)) {
+            SignalGraphExecutorRouting routing;
+            const bool built = build_signal_graph_executor_routing(g, routing);
+            if (built) {
+                if (!routing.valid || !routing.snapshot_keepalive ||
+                    routing.snapshot.buffer_slot_count() == 0) {
+                    invalid_result.store(true, std::memory_order_relaxed);
+                }
+                successful_builds.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                rejected_builds.fetch_add(1, std::memory_order_relaxed);
+            }
+            builds.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    CHECK(pulp::test::wait_for_condition([&] { return started.load(std::memory_order_acquire); }));
+    REQUIRE(pulp::test::wait_for_condition(
+        [&] { return rejected_builds.load(std::memory_order_relaxed) > 0; }));
+    bool prepared_all = true;
+    for (int i = 0; i < 100; ++i) {
+        if (!g.prepare(kSr, kFrames)) {
+            prepared_all = false;
+            break;
+        }
+        g.release();
+    }
+    // Leave the graph in its normal prepared state for the postcondition and
+    // for the builder's final iterations.
+    prepared_all = g.prepare(kSr, kFrames) && prepared_all;
+    stop.store(true, std::memory_order_release);
+    builder.join();
+
+    REQUIRE(prepared_all);
+    REQUIRE(builds.load(std::memory_order_relaxed) > 0);
+    REQUIRE(successful_builds.load(std::memory_order_relaxed) > 0);
+    REQUIRE(rejected_builds.load(std::memory_order_relaxed) > 0);
+    CHECK_FALSE(invalid_result.load(std::memory_order_relaxed));
+}
+
 TEST_CASE("SignalGraph::process parallel path matches legacy: wide graph",
           "[host][graph][executor][routing][parity][parallel]") {
     SignalGraph legacy, par;
@@ -2135,17 +2200,24 @@ TEST_CASE("SignalGraph::process parallel path does not allocate on the audio thr
 
 TEST_CASE("SignalGraph re-prepare while the parallel path renders is race-free",
           "[host][graph][executor][routing][rt-safety][threads][parallel]") {
-    // Hammer process() (parallel path, multi-threaded) on the audio thread while
-    // another thread re-prepares. The worker pool is a long-lived member (not
-    // restarted on same-worker-count re-prepares), and each routed snapshot/pool
-    // rides the RCU lifetime — surfaces a pool-lifecycle or retired-snapshot race
-    // under TSan.
-    SignalGraph g;
+    // The disabled control is the independent walk oracle. A wide level must
+    // dispatch through workers after every re-prepare, not silently downgrade
+    // to the serial executor or the walk while snapshots are retired.
+    SignalGraph g, walk;
     build_wide_signal_graph(g, 8, /*parallel=*/true);
+    build_wide_signal_graph(walk, 8, /*parallel=*/false);
+    walk.set_canonical_executor_routing_enabled(false);
+    const std::vector<std::vector<float>> input{std::vector<float>(kFrames, 0.3f),
+                                                std::vector<float>(kFrames, 0.2f)};
+    const auto expected = run_graph_process(walk, kFrames, input, 2);
+    REQUIRE(walk.routing_executor_stats().blocks_processed == 0);
+    REQUIRE(g.routed_execution_status(kFrames).routed_path_ready());
 
     std::atomic<bool> stop{false};
     std::atomic<bool> started{false};
     std::atomic<std::uint64_t> blocks{0};
+    std::atomic<std::uint64_t> rendered{0};
+    std::atomic<bool> output_mismatch{false};
     std::thread audio([&] {
         std::vector<float> li(kFrames, 0.3f), ri(kFrames, 0.2f);
         std::vector<float> lo(kFrames, 0.0f), ro(kFrames, 0.0f);
@@ -2155,7 +2227,20 @@ TEST_CASE("SignalGraph re-prepare while the parallel path renders is race-free",
         pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
         started.store(true, std::memory_order_release);
         while (!stop.load(std::memory_order_relaxed)) {
-            g.process(ov, iv, kFrames);
+            g.process(ov, iv, kFrames); // a re-prepare may cause a silent gap
+            bool non_silent = false;
+            for (int i = 0; i < kFrames; ++i) {
+                non_silent |= lo[i] != 0.0f || ro[i] != 0.0f;
+            }
+            if (non_silent) {
+                for (int i = 0; i < kFrames; ++i) {
+                    if (lo[i] != expected[0][i] || ro[i] != expected[1][i]) {
+                        output_mismatch.store(true, std::memory_order_relaxed);
+                        break;
+                    }
+                }
+                rendered.fetch_add(1, std::memory_order_relaxed);
+            }
             blocks.fetch_add(1, std::memory_order_relaxed);
         }
     });
@@ -2163,14 +2248,60 @@ TEST_CASE("SignalGraph re-prepare while the parallel path renders is race-free",
     // starts, where the CHECK below reports that as the failure it is.
     CHECK(pulp::test::wait_for_condition(
         [&] { return started.load(std::memory_order_acquire); }));
-    bool prepared_all = true;
+    bool prepared_all = true, parallel_resumed_all = true;
     for (int i = 0; i < 200; ++i) {
-        if (!g.prepare(kSr, kFrames)) prepared_all = false;
+        if (!g.prepare(kSr, kFrames)) {
+            prepared_all = false;
+            break;
+        }
+        const auto dispatched = g.routing_executor_stats().parallel_levels_dispatched;
+        if (!pulp::test::wait_for_condition([&] {
+                return g.routing_executor_stats().parallel_levels_dispatched > dispatched;
+            })) {
+            parallel_resumed_all = false;
+            break;
+        }
     }
     stop.store(true, std::memory_order_relaxed);
     audio.join();
     REQUIRE(prepared_all);
-    CHECK(blocks.load() > 0);
+    REQUIRE(parallel_resumed_all);
+    REQUIRE(blocks.load() > 0);
+    REQUIRE(rendered.load() > 0);
+    CHECK_FALSE(output_mismatch.load());
+    const auto active_stats = g.routing_executor_stats();
+    CHECK(active_stats.blocks_processed >= 200);
+    CHECK(active_stats.parallel_levels_dispatched >= 200);
+    CHECK(active_stats.invalid_blocks == 0);
+    CHECK(active_stats.invalid_snapshots == 0);
+    CHECK(active_stats.command_scratch_failures == 0);
+    CHECK(active_stats.node_failures == 0);
+    CHECK(g.routed_walk_fallbacks() == 0);
+    CHECK(g.routed_only_execution_failures() == 0);
+    CHECK(walk.routing_executor_stats().blocks_processed == 0);
+
+    // release() unpublishes the snapshot; the pool remains allocated, but no
+    // post-release process block may reach it. A positive block afterwards must
+    // clear the caller's output without touching executor stats.
+    g.release();
+    const auto before = g.routing_executor_stats();
+    std::vector<float> li(kFrames, 0.3f), ri(kFrames, 0.2f);
+    std::vector<float> lo(kFrames, 1.0f), ro(kFrames, 1.0f);
+    std::array<const float*, 2> ic{li.data(), ri.data()};
+    std::array<float*, 2> oc{lo.data(), ro.data()};
+    pulp::audio::BufferView<const float> iv(ic.data(), 2, kFrames);
+    pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
+    g.process(ov, iv, kFrames);
+    for (int i = 0; i < kFrames; ++i) {
+        CHECK(lo[i] == 0.0f);
+        CHECK(ro[i] == 0.0f);
+    }
+    const auto after = g.routing_executor_stats();
+    CHECK(after.blocks_processed == before.blocks_processed);
+    CHECK(after.parallel_levels_dispatched == before.parallel_levels_dispatched);
+    CHECK(after.serial_levels_run == before.serial_levels_run);
+    CHECK(g.routed_walk_fallbacks() == 0);
+    CHECK(g.routed_only_execution_failures() == 0);
 }
 
 namespace {

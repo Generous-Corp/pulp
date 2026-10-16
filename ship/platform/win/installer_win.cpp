@@ -133,8 +133,12 @@ std::string generate_nsis_script(const InstallerConfig& config) {
         }
 
         namespace fs = std::filesystem;
-        auto filename = fs::path(plugin.source_path).filename().string();
-        nsi << "  RMDir /r \"" << out_dir << "\\" << filename << "\"\n";
+        const auto filename = fs::path(plugin.source_path).filename().string();
+        if (fs::is_directory(plugin.source_path)) {
+            nsi << "  RMDir /r \"" << out_dir << "\\" << filename << "\"\n";
+        } else {
+            nsi << "  Delete \"" << out_dir << "\\" << filename << "\"\n";
+        }
     }
     if (has_start_menu) {
         nsi << "  Delete \"" << smprograms_dir << "\\" << config.product_name << ".lnk\"\n";

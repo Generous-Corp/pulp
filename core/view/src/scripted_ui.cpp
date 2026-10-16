@@ -15,6 +15,20 @@
 namespace pulp::view {
 
 namespace {
+std::atomic<ScriptInspectorPortFactory> g_script_inspector_port_factory{nullptr};
+} // namespace
+
+ScriptInspectorPort::~ScriptInspectorPort() = default;
+
+void set_script_inspector_port_factory(ScriptInspectorPortFactory factory) noexcept {
+    g_script_inspector_port_factory.store(factory, std::memory_order_release);
+}
+
+ScriptInspectorPortFactory script_inspector_port_factory() noexcept {
+    return g_script_inspector_port_factory.load(std::memory_order_acquire);
+}
+
+namespace {
 
 std::atomic<std::uint64_t> next_scripted_ui_identity{0};
 
@@ -37,9 +51,9 @@ std::optional<std::filesystem::file_time_type> safe_last_write_time(const std::f
     return time;
 }
 
-void load_script_before_deadline(
-    WidgetBridge& bridge, ScriptEngine& engine, const std::string& code,
-    std::optional<ScriptInspectorBridge::EvaluationDeadline> deadline) {
+void load_script_before_deadline(WidgetBridge& bridge, ScriptEngine& engine,
+                                 const std::string& code,
+                                 std::optional<ScriptInspectorPort::EvaluationDeadline> deadline) {
     if (!deadline) {
         bridge.load_script(code);
         return;
@@ -102,8 +116,12 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
                         const ValueChannelVisitor& visitor) { visitor(channels); }})
     , log_callback_(default_log_callback())
 {
-    inspector_bridge_.set_post_evaluation_reset(
-        [this](auto deadline) { return reset_after_runtime_evaluation(deadline); });
+    if (const auto make_port = script_inspector_port_factory()) {
+        inspector_port_ = make_port();
+        if (inspector_port_)
+            inspector_port_->set_post_evaluation_reset(
+                [this](auto deadline) { return reset_after_runtime_evaluation(deadline); });
+    }
 }
 
 void ScriptedUiSession::set_log_callback(LogCallback callback) {
@@ -161,7 +179,8 @@ void ScriptedUiSession::release_root() noexcept {
     // from being silently dropped by a session that never reached a frame.
     // reset_after_runtime_evaluation() logs and quarantines on failure.
     try {
-        (void)inspector_bridge_.run_pending_post_evaluation_reset();
+        if (inspector_port_)
+            (void)inspector_port_->run_pending_post_evaluation_reset();
     } catch (...) {
         // Destructors must not throw. The reset itself is already contained;
         // this covers the allocation the drain does around it.
@@ -172,7 +191,7 @@ void ScriptedUiSession::release_root() noexcept {
     // capabilities(); a host that wired the bridge to a control router must
     // stop that server's reader thread, clear DomainHandler's borrowed runtime
     // evaluator, and destroy the evaluator BEFORE destroying this session.
-    inspector_bridge_.detach();
+    detach_inspector_port();
     // Any live or previously detached realm may still be borrowed by a native
     // accessibility callback that re-entered owner teardown. Unpublish first,
     // detach realm-owned Views without destroying them, then transfer their
@@ -349,6 +368,15 @@ bool ScriptedUiSession::load_now(std::string* error) {
         });
     }
 
+    // Bound controls show their parameters from the frame the document mounts
+    // in. The per-frame binding service otherwise first runs on the NEXT
+    // poll(), and a deferred mount is presented before that poll: by poll()
+    // itself, and by a content-first open straight after
+    // complete_pending_load(). That frame painted every bindWidgetToParam
+    // control at its construction default, then jumped to the parameter.
+    if (bridge_)
+        bridge_->service_param_bindings();
+
     last_theme_exists_ = std::filesystem::exists(theme_path_);
     last_theme_write_time_ = last_theme_exists_ ? safe_last_write_time(theme_path_) : std::nullopt;
     root_.request_repaint();
@@ -409,7 +437,7 @@ bool ScriptedUiSession::poll(std::string* error) {
     // it returns to its run loop; the containment is identical, because
     // nothing evaluated reaches a frame on either schedule.
     const auto pending_reset_error =
-        inspector_bridge_.run_pending_post_evaluation_reset();
+        inspector_port_ ? inspector_port_->run_pending_post_evaluation_reset() : std::string{};
     // Destruction of the realm retired by the previous inspector pump may call
     // platform hosts or user-supplied widget releasers. Run it before this
     // frame's request pump, never inside the previous response deadline.
@@ -495,7 +523,7 @@ bool ScriptedUiSession::poll(std::string* error) {
     // frame pump can run: arbitrary evaluated code may have queued timers,
     // animation frames, Promise jobs, or event callbacks that would otherwise
     // escape the request watchdog and execute later without a deadline.
-    if (inspector_bridge_.pump())
+    if (inspector_port_ && inspector_port_->pump())
         changed = true;
     if (reloader_ && reloader_->poll_reload()) {
         changed = true;
@@ -507,7 +535,7 @@ bool ScriptedUiSession::poll(std::string* error) {
 }
 
 std::string ScriptedUiSession::reset_after_runtime_evaluation(
-    ScriptInspectorBridge::EvaluationDeadline deadline) {
+    ScriptInspectorPort::EvaluationDeadline deadline) {
     std::string reset_error;
     if (!last_good_code_.empty() && !last_good_script_path_.empty()
         && rebuild_from_code(
@@ -520,7 +548,7 @@ std::string ScriptedUiSession::reset_after_runtime_evaluation(
 
     runtime::log_error(
         "Scripted UI reset after Runtime.evaluate failed: {}", reset_error);
-    inspector_bridge_.detach();
+    detach_inspector_port();
     if (bridge_)
         bridge_->quarantine_realm();
     runtime_realm_quarantined_ = true;
@@ -541,6 +569,12 @@ void ScriptedUiSession::set_repaint_callback(std::function<void()> cb) {
 void ScriptedUiSession::set_host_kind(std::string kind) {
     host_kind_ = std::move(kind);
     if (bridge_) bridge_->set_host_kind(host_kind_);
+}
+
+void ScriptedUiSession::set_time_source(WidgetBridge::TimeSource source) {
+    time_source_ = std::move(source);
+    if (bridge_)
+        bridge_->set_time_source(time_source_);
 }
 
 void ScriptedUiSession::set_post_evaluation_reset_callback(
@@ -609,9 +643,8 @@ void ScriptedUiSession::install_native_message_handler(
 }
 
 bool ScriptedUiSession::rebuild_from_code(
-    const std::string& code, const std::filesystem::path& source_path,
-    bool preserve_state, std::string* error,
-    std::optional<ScriptInspectorBridge::EvaluationDeadline> deadline) {
+    const std::string& code, const std::filesystem::path& source_path, bool preserve_state,
+    std::string* error, std::optional<ScriptInspectorPort::EvaluationDeadline> deadline) {
     // JS-axis reload timings (item 1.2). steady_clock; UI/control thread only.
     using clock = std::chrono::steady_clock;
     const auto t0 = clock::now();
@@ -650,7 +683,7 @@ bool ScriptedUiSession::rebuild_from_code(
             next_bridge->clear_for_realm_replacement();
             next_bridge.reset();
             next_engine.reset();
-            inspector_bridge_.detach();
+            detach_inspector_port();
             bridge_.reset();
             engine_.reset();
             return;
@@ -660,10 +693,10 @@ bool ScriptedUiSession::rebuild_from_code(
         // the session so reset_after_runtime_evaluation() can quarantine it in
         // constant work; destroying it here would leave its root-owned widgets
         // and callbacks dangling after the deadline.
-        inspector_bridge_.detach();
+        detach_inspector_port();
         engine_ = std::move(next_engine);
         bridge_ = std::move(next_bridge);
-        inspector_bridge_.attach(engine_.get());
+        attach_inspector_port(engine_.get());
         // The deadline reset's caller quarantines this retained realm in
         // constant work.
     };
@@ -718,6 +751,7 @@ bool ScriptedUiSession::rebuild_from_code(
             probe_bridge->set_asset_roots(asset_roots_);
             probe_bridge->set_script_base_dir(source_path.parent_path());
             probe_bridge->set_host_kind(host_kind_);
+            probe_bridge->set_time_source(time_source_);
             load_script_before_deadline(*probe_bridge, *probe_engine, code, deadline);
         }
         const auto t_probe = clock::now();
@@ -785,6 +819,7 @@ bool ScriptedUiSession::rebuild_from_code(
         next_bridge->set_asset_roots(asset_roots_);
         next_bridge->set_script_base_dir(source_path.parent_path());
         next_bridge->set_host_kind(host_kind_);
+        next_bridge->set_time_source(time_source_);
         if (repaint_callback_) {
             next_bridge->set_repaint_callback(repaint_callback_);
         }
@@ -802,14 +837,14 @@ bool ScriptedUiSession::rebuild_from_code(
         // bracket the swap atomically w.r.t. the engine thread; a concurrent
         // interrupt() either completes on the still-alive old engine or sees the
         // null gap.
-        inspector_bridge_.detach();
+        detach_inspector_port();
         engine_ = std::move(next_engine);
         bridge_ = std::move(next_bridge);
         // Re-point the inspector bridge at the freshly-committed engine so a
         // debug console survives hot reloads. attach() runs on the UI/engine
         // thread (same thread as poll()'s pump), which it records for
         // inline-eval detection.
-        inspector_bridge_.attach(engine_.get());
+        attach_inspector_port(engine_.get());
         check_deadline();
         // Infallible apply of the pre-resolved theme — no failure point past the
         // commit (item 1.5). A deadline reset must reapply the cached effective

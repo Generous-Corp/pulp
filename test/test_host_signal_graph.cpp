@@ -1081,6 +1081,48 @@ TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
     REQUIRE(retire_iterations.load(std::memory_order_relaxed) > 0);
 }
 
+TEST_CASE("SignalGraph routed status pins its snapshot during prepare and release",
+          "[host][graph][race][tsan][lifecycle]") {
+    SignalGraph graph;
+    auto in = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto out = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    std::atomic<bool> stop{false};
+    std::atomic<long> status_reads{0};
+    std::atomic<bool> coherent{true};
+    std::thread status_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            const auto status = graph.routed_execution_status(64);
+            if ((status.serial_selected && !status.serial_snapshot_valid) ||
+                (status.parallel_selected && !status.parallel_snapshot_valid) ||
+                (!status.prepared && (status.serial_selected || status.parallel_selected))) {
+                coherent.store(false, std::memory_order_relaxed);
+            }
+            status_reads.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    // Only the compiled snapshot changes across threads. The authored topology
+    // remains fixed, so this exercises status access versus Slot retirement.
+    (void)pulp::test::wait_for_progress(status_reads);
+    for (int i = 0; i < 32; ++i) {
+        graph.release();
+        if (!graph.prepare(48000.0, 64)) {
+            coherent.store(false, std::memory_order_relaxed);
+            break;
+        }
+    }
+    stop.store(true, std::memory_order_release);
+    status_thread.join();
+
+    REQUIRE(status_reads.load(std::memory_order_relaxed) > 0);
+    REQUIRE(coherent.load(std::memory_order_relaxed));
+}
+
 TEST_CASE("SignalGraph control-thread node-field edits serialize against prepare",
           "[host][graph][race][rt-safety][tsan]") {
     // Companion to the snapshot-lifetime test above, which deliberately left the
@@ -3152,6 +3194,46 @@ TEST_CASE("SignalGraph preserves pending MIDI egress by rejecting a live swap",
         REQUIRE_FALSE(graph.extract_midi(midi_out, arrived));
         CHECK(arrived.empty());
     }
+}
+
+TEST_CASE("SignalGraph ordinary failed live swap invalidates the published snapshot",
+          "[host][graph][live-swap][lifecycle]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto gain = graph.add_gain_node("gain");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 8));
+    REQUIRE(graph.set_node_gain(gain, 0.5f));
+
+    // Feedback changes the execution state carried by a compiled snapshot, so
+    // prepare_swap must reject the candidate. Ordinary refusals fail closed by
+    // invalidating the published snapshot; only the documented MIDI-output
+    // pending-egress refusal keeps the old snapshot readable.
+    graph.begin_swap_edit();
+    REQUIRE(graph.connect_feedback(gain, 0, gain, 0));
+    REQUIRE(graph.prepare_swap(48000.0, 8) == SignalGraph::SwapResult::NeedsEagerPrepare);
+
+    std::array<float, 8> input_samples{};
+    std::array<float, 8> output_samples{};
+    input_samples[0] = 1.0f;
+    const float* input_ptrs[1] = {input_samples.data()};
+    float* output_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> input_view(input_ptrs, 1, 8);
+    pulp::audio::BufferView<float> output_view(output_ptrs, 1, 8);
+
+    // No candidate was published, and the ordinary refusal invalidated the
+    // live snapshot. Until the caller performs an eager prepare, processing is
+    // therefore silent rather than accidentally rendering the feedback graph.
+    graph.process(output_view, input_view, 8);
+    for (const float sample : output_samples)
+        CHECK(sample == 0.0f);
+    std::fill(input_samples.begin(), input_samples.end(), 0.0f);
+    std::fill(output_samples.begin(), output_samples.end(), 0.0f);
+    graph.process(output_view, input_view, 8);
+    for (const float sample : output_samples)
+        CHECK(sample == 0.0f);
 }
 
 TEST_CASE("SignalGraph MIDI egress queue retains earliest blocks on overflow",

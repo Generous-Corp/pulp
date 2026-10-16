@@ -157,7 +157,7 @@ only helps keychains created *after* the change; an existing keychain keeps its
 old ACL.
 
 The combined installer also supports repeatable
-`--plugin-scripts <au|vst3|clap> <bundle name> <scripts directory>` entries.
+`--plugin-scripts <au|vst3|clap|aax> <bundle name> <scripts directory>` entries.
 Use this for format-specific postinstall work, such as refreshing the macOS
 Audio Unit registrar after replacing an AU. Match the bundle name exactly and
 attach the hook only to the format that needs it; attaching an AU refresh to an
@@ -165,15 +165,21 @@ optional standalone app leaves plugin-only installs stale. Hooks must be
 executable, must resolve the active console user safely, and must treat a
 missing cache or already-stopped registrar as success.
 
-**Control-shipping sidecars are relocated for you.** CMake emits
-`*.inspector-capabilities.json` / `*.control-shipping*.json` beside the target,
-which for a bundle target lands in `Contents/MacOS` — where Apple permits code
-only, so `codesign` fails with `code object is not signed at all / In
-subcomponent: ….json`. `deep_sign()` moves them to
-`Contents/Resources/pulp-control-shipping-evidence` before signing, preserving
-the receipts. A consumer `package.sh` that *deletes* them first is both
-redundant and lossy: it destroys build provenance the installer would have
-sealed into the bundle.
+**Control-shipping sidecars live in `Contents/Resources`.** The build writes
+`*.inspector-capabilities.json` / `*.control-shipping*.json` for a macOS bundle
+into `Contents/Resources` (`_pulp_control_sidecar_dir` in
+`PulpControlShipping.cmake`), never `Contents/MacOS`, where Apple permits code
+only: there `codesign` (non `--deep`, as `pulp ship sign` signs) fails with
+`code object is not signed at all / In subcomponent: ….json`. The POST_BUILD
+step also deletes copies an older SDK left in `Contents/MacOS`, so incremental
+build trees heal. Readers find them through
+`pulp::inspect::control_sidecar_directories()` (Resources first, then the
+legacy location). `build_combined_installer.sh` refuses, before any signing, a
+bundle that still has them in `Contents/MacOS`; it no longer moves them, since a
+file moved at sign time is not the file the build verified. A consumer
+`package.sh` must not delete them: they are build provenance sealed into the
+bundle. `macos-plugin-bundle-signing` (ctest) signs the fixture's Standalone,
+VST3, CLAP and AU copies non-deep and verifies them strictly.
 
 `deep_sign()` also walks `Contents/Helpers` before sealing a bundle. Products
 may carry nested helper apps there, including their own executables and
@@ -475,12 +481,10 @@ lookup too. Guarded by the `vst3-bundle-layout` ctest
 (`tools/cmake/scripts/check_vst3_bundle_layout.py`).
 
 The same Apple rule applies inside `Contents/MacOS/`: only code belongs there.
-Pulp's control-shipping JSON is intentionally emitted beside an unsigned build
-target so the scanner can bind its proof to that exact binary. Before Developer
-ID signing, `build_combined_installer.sh` preserves those manifests and reports
-under `Contents/Resources/pulp-control-shipping-evidence/`; leaving them beside
-the Mach-O makes `codesign` report the JSON as an unsigned subcomponent. The
-signer also resolves `CFBundleExecutable` from `Info.plist` for every bundle
+Pulp's control-shipping JSON is therefore emitted into `Contents/Resources` of
+a macOS bundle (beside the binary for plain executables and iOS shallow
+bundles); leaving it beside the Mach-O makes `codesign` report the JSON as an
+unsigned subcomponent. The signer also resolves `CFBundleExecutable` from `Info.plist` for every bundle
 kind. Do not derive the main executable by stripping only `.app`: doing so
 double-signs the main binary in `.component`, `.vst3`, and `.clap` bundles and
 can trigger the same misleading subcomponent failure.
@@ -488,7 +492,8 @@ can trigger the same misleading subcomponent failure.
 ### Every bundle carries `pulp-build-info.json` — read it before guessing
 
 `pulp_add_plugin()` writes `Contents/Resources/pulp-build-info.json`
-(`pulp.build-info.v1`) into every bundle it makes, POST_BUILD, so the record is
+(`pulp.build-info.v1`; `<bundle>/pulp-build-info.json` in a shallow iOS-family
+bundle) into every bundle it makes, POST_BUILD, so the record is
 sealed by `pulp ship sign` like any other resource. It names the product
 version and source commit, build type/archs/min-OS, the SDK version, and embeds
 the SDK's `share/pulp/runtime-pins.json` (Skia release + commit + asset digest,
@@ -840,6 +845,40 @@ NSIS/Windows needed). It places VST3/CLAP under `$COMMONFILES\{VST3,CLAP}`
 apps get a Start-menu shortcut** under `$SMPROGRAMS\<publisher>` (removed on
 uninstall); plugins get none. When you touch the generator, add/extend the
 pure-output assertions.
+
+**Windows file-versus-bundle uninstall.** A plugin source may be either a
+single file (for example, a `.clap` DLL) or a directory bundle (for example,
+`Foo.vst3`). The NSIS uninstall command must match that shape: use `Delete`
+for files and `RMDir /r` for directories. Do not discover or install an
+additional staging DLL alongside the canonical VST3 bundle merely to make
+uninstall simpler; the generated `VST3/<name>.vst3/Contents/<arch>-win/`
+bundle is the installed consumer path, and discovering both forms creates
+duplicate NSIS entries and file/directory collisions.
+
+**Windows VST3 runtime proof is bundle-plus-sidecars, not DLL proof.** Each
+`Contents/<arch>-win/` slice is a consumer unit: keep its VST3 binary adjacent
+to the matching `*.pulp-build-info.json` and, when the built product/provider
+declares them, ICU data (for example `icudtl.dat`) and optional GPU runtime
+DLLs. A ZIP or installer that contains only the VST3/DLL is incomplete even
+when a descriptor scan succeeds. Spectr's Skia/Dawn Windows build declares
+ICU as required; a GPU DLL is required only when that exact build links and
+declares one. Before calling a Windows package
+usable, bind the exact archive digest to an entry listing and
+schema/architecture/source-SHA checks, install it into an isolated root, hash
+the installed slice and declared sidecars, then run a normal REAPER scan,
+instance, editor-open, and non-flat audio control. A cache row or `fx=0`
+without an editor/audio receipt is only discovery evidence. Keep a negative
+fixture that removes one sidecar declared required by that package and require
+the package validator or host smoke to reject it; restore the canonical bundle
+before any subsequent host run.
+
+For mixed ARM64/ARM64EC or x64 packages, validate every slice independently:
+sidecars and optional DLLs must be architecture-matched and named by the same
+slice. Do not reuse an ARM64EC sidecar for x64 (or vice versa), and do not
+promote a package from one host architecture based on a different slice's
+REAPER result. Preserve the archive, installed-file hashes, host log, and
+screenshot/audio receipt together so a later reviewer can reproduce the exact
+consumer path.
 
 **Auto-update decision (W7): DEFERRED.** No WinSparkle/auto-update is wired on
 Windows. Rationale: Pulp targets developers shipping their own apps/plugins,
@@ -1330,6 +1369,22 @@ The shortened `v3.8.0` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.
 
+### A signed or published build reads no shared cache
+
+Self-hosted VMs mount the host's ccache and FetchContent source cache writable
+into every job, and PR gate VMs run PR code with the same mounts, so a signed
+build that read them could link an object or dependency source any PR planted.
+`release-cli.yml` `build-cli`, `sign-and-release.yml` `build-and-sign-macos` and
+`wclap-cloudflare.yml` `build-prove-deploy` therefore set job-level
+`CCACHE_DISABLE: "1"`, run "Isolate the build from shared caches" (a fresh
+`RUNNER_TEMP` root for `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` and
+`PULP_FETCHCONTENT_BASE_DIR`) before their first build step, and use no
+`actions/cache` or Namespace cache volume. A new signing or deploy job must do
+the same: `tools/scripts/test_release_cache_isolation.py` finds such jobs by
+their signing/deploy capability and fails one that skips either setting. The
+cold compile is the accepted price; do not re-add ccache to a release to save
+minutes.
+
 ### Never run `validation` ctest tests in `sign-and-release.yml`
 
 The `Test` step in `.github/workflows/sign-and-release.yml` MUST pass
@@ -1362,7 +1417,7 @@ into `.github/workflows/workflow-lint.yml` so any future PR touching
 
 ### `sign-and-release.yml` must declare `contents: write`
 
-Every release workflow that uses `softprops/action-gh-release@v2` with
+Every release workflow that uses `softprops/action-gh-release@v3` with
 `generate_release_notes: true` — or that otherwise PATCHes the release
 entry — needs an explicit job-level `permissions: contents: write`
 block. Without it the job inherits a read-only token on `push: tags`
@@ -1658,6 +1713,7 @@ tools/scripts/build_combined_installer.sh \
   --plugin au   build/AU/MyPlugin.component \
   --plugin vst3 build/VST3/MyPlugin.vst3 \
   --plugin clap build/CLAP/MyPlugin.clap \
+  --plugin aax  signed/MyPlugin.aaxplugin \
   --app "Standalone app" build/examples/myplugin/MyPlugin.app \
   --app "Diagnostics helper" "/path/MyPlugin Diagnostics.app" /path/Kit.entitlements \
   --content "Sample models" "Example .nam captures" \
@@ -1665,9 +1721,21 @@ tools/scripts/build_combined_installer.sh \
 ```
 
 It produces ONE component-selectable, notarized installer (Customize pane picks
-AU/VST3/CLAP/Standalone/Diagnostics). It deep-signs every bundle (inner dylibs
-first → `@loader_path`) and runs `check_bundle_relocatable.py --strict` on each,
-so a build that only works on the build machine never ships. Identities are the
+AU/VST3/CLAP/AAX/Standalone/Diagnostics). It deep-signs every AU/VST3/CLAP
+bundle (inner dylibs first → `@loader_path`) and runs
+`check_bundle_relocatable.py --strict` on each, so a build that only works on
+the build machine never ships. **An `aax` bundle is the exception: it must
+arrive already PACE-wrapped and Developer-ID signed** (`wraptool sign` wraps the
+executable and seals the bundle in one step; Pro Tools refuses a merely
+codesigned AAX, and a `codesign --force` after wraptool strips the wrap). The
+recipe only verifies it — `codesign --verify`, `wraptool verify`
+(`PULP_AAX_WRAPTOOL` overrides the path), and the same relocatability check —
+and installs it as a "Pro Tools" choice under
+`/Library/Application Support/Avid/Audio/Plug-Ins`. An unsigned AAX, or one that
+fails `wraptool verify`, refuses the whole package. **Without wraptool it fails
+closed too**: a merely codesigned AAX looks shippable and Pro Tools will not load
+it, so the build machine must have PACE's tooling, or the caller must pass
+`--allow-unverified-aax-wrap` and own that risk. Identities are the
 `security find-identity` hashes from the dedicated `pulp-signing` keychain (NOT
 the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
 copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.

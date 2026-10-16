@@ -51,11 +51,21 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             "    ? globalThis.__pulpBatchUpdates__ : undefined;"
             "  return (typeof batch === 'function') ? batch(fn, arg) : fn(arg);"
             "}"
+            // Each frame callback runs inside a `js` span named after the
+            // function, so a trace attributes the rAF flush to the callbacks
+            // that spent it (a Pro Tools capture showed 2 ms per flush with
+            // nothing below `raf_flush` to say where). `__traceBegin__` returns
+            // false when the span stack refused the open, and only an opened
+            // span is closed. With tracing off the hooks keep depth
+            // bookkeeping only.
             "function __invokeFrame__(id, now) {"
             "  var fn = __frameCallbacks__[id];"
             "  if (fn) {"
             "    delete __frameCallbacks__[id];"
-            "    __pulpRunHostCallback__(fn, now);"
+            "    var traced = (typeof __traceBegin__ === 'function')"
+            "      && __traceBegin__('raf:' + (fn.name || 'anonymous')) === true;"
+            "    try { __pulpRunHostCallback__(fn, now); }"
+            "    finally { if (traced) __traceEnd__(); }"
             "  }"
             "}"
             // Timer registry for native setTimeout / setInterval. Callbacks
@@ -72,8 +82,7 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             "    if (typeof console !== 'undefined' && console.error)"
             "      console.error('timer:', e);"
             "  }"
-            "}"
-        );
+            "}");
     }
 
     BridgeApiContext api{self.engine_};
@@ -227,7 +236,7 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
         auto delay_ms = std::chrono::milliseconds(static_cast<long long>(delay));
         WidgetBridge::PendingTimer t;
         t.id = id;
-        t.deadline = std::chrono::steady_clock::now() + delay_ms;
+        t.deadline = self.time_now() + delay_ms;
         t.interval = delay_ms;
         t.repeating = repeat;
         // Replace any prior schedule for this id (shouldn't happen, but
@@ -250,7 +259,7 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
 
     register_bridge_function(api, "__flushTimers__", [&self](choc::javascript::ArgumentList) {
         if (self.pending_timers_.empty()) return choc::value::Value();
-        auto now = std::chrono::steady_clock::now();
+        auto now = self.time_now();
         std::vector<int> to_fire;
         // Two-phase: first collect ids whose deadline has passed, then
         // fire them. Mutating pending_timers_ while iterating would lose
@@ -292,22 +301,23 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
     // see inside it. These name what is inside. The pair is balanced by the
     // script, so safe_dispatch_eval force-closes whatever the handler leaves
     // open and reports it rather than silently re-parenting later slices.
-    register_bridge_function(api, "__traceBegin__", [](choc::javascript::ArgumentList args) {
+    register_trace_seam_function(api, "__traceBegin__", [](choc::javascript::ArgumentList args) {
         return choc::value::createBool(js_trace::begin(args.get<std::string>(0, "js_scope")));
     });
 
-    register_bridge_function(api, "__traceEnd__", [](choc::javascript::ArgumentList) {
+    register_trace_seam_function(api, "__traceEnd__", [](choc::javascript::ArgumentList) {
         return choc::value::createBool(js_trace::end());
     });
 
     // Balance bookkeeping, readable from script and from a test. Kept in one
-    // native so the four counters are always read from the same instant.
+    // native so the counters are always read from the same instant.
     register_bridge_function(api, "__traceStats__", [](choc::javascript::ArgumentList) {
-        return choc::value::createObject("PulpTraceStats",
-            "depth", static_cast<int64_t>(js_trace::open_depth()),
-            "forceClosed", static_cast<int64_t>(js_trace::force_closed_count()),
-            "unmatchedEnd", static_cast<int64_t>(js_trace::unmatched_end_count()),
-            "refused", static_cast<int64_t>(js_trace::refused_count()));
+        return choc::value::createObject(
+            "PulpTraceStats", "depth", static_cast<int64_t>(js_trace::open_depth()), "forceClosed",
+            static_cast<int64_t>(js_trace::force_closed_count()), "unmatchedEnd",
+            static_cast<int64_t>(js_trace::unmatched_end_count()), "refused",
+            static_cast<int64_t>(js_trace::refused_count()), "beginInsideNative",
+            static_cast<int64_t>(js_trace::begun_inside_native_count()));
     });
 
     // Install the JS-side `pulpTrace` global wrapping the natives.
@@ -328,10 +338,10 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
     );
 
     // performance.now() - high-resolution monotonic time in milliseconds.
-    register_bridge_function(api, "__performanceNow__", [](choc::javascript::ArgumentList) {
-        static auto start = std::chrono::steady_clock::now();
-        auto now = std::chrono::steady_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(now - start).count();
+    register_bridge_function(api, "__performanceNow__", [&self](choc::javascript::ArgumentList) {
+        double ms =
+            std::chrono::duration<double, std::milli>(self.time_now() - self.performance_epoch_)
+                .count();
         return choc::value::createFloat64(ms);
     });
 
@@ -342,6 +352,18 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
     register_bridge_function(api, "hostKind", [&self](choc::javascript::ArgumentList) {
         return choc::value::createString(self.host_kind());
     });
+}
+
+// Script-visible time (timers, performance.now(), the rAF timestamp) reads
+// this clock; a harness on a fixed frame schedule installs its own source.
+// performance.now() restarts at zero for this bridge when the source changes.
+void WidgetBridge::set_time_source(TimeSource source) {
+    time_source_ = std::move(source);
+    performance_epoch_ = time_now();
+}
+
+std::chrono::steady_clock::time_point WidgetBridge::time_now() const {
+    return time_source_ ? time_source_() : std::chrono::steady_clock::now();
 }
 
 } // namespace pulp::view

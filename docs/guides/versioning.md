@@ -13,7 +13,9 @@ Pulp versions three surfaces independently:
   the SDK that downstream consumers receive.
 - **Claude Code plugin** — `.claude-plugin/plugin.json` `version`
   and `.claude-plugin/marketplace.json` `version`.
-- **Shipyard pinned binary** — `tools/shipyard.toml`, consumed by
+- **Shipyard pinned binary** — `[shipyard]` in `tools/toolchain/manifest.toml`
+  (version, repo, and the sha256 of every release asset), generated into
+  `tools/shipyard.toml` and `tools/toolchain/shipyard.sha256`, consumed by
   `tools/install-shipyard.sh`. This is an upstream release we
   consume, not a surface we ship; see [Dependency Update
   Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for pin bumps.
@@ -69,6 +71,7 @@ the self-tests for the compiler-asymmetry lints:
 | `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |
 | `safe_path_guard_lint.py` | an untrusted-path guard in `core/` or `tools/cli/` that trusts `is_absolute()`, which on Windows accepts `/x`, `\x` and `C:x`, instead of calling `pulp::runtime::is_safe_relative_path` |
 | `text_encoding_lint.py` | Python text I/O (`read_text`, `write_text`, `open`, `subprocess` with `text=True`) without `encoding=`, which decodes with cp1252 on Windows; the existing backlog is held by a per-file baseline (`text_encoding_baseline.json`) that can only go down |
+| `python_floor_syntax_check.py` | a tracked `*.py` file that Python 3.12 parses but 3.11, the gates' floor, rejects: an f-string field that reuses the enclosing quote or holds a backslash (including a line continuation, or in a nested f-string's text), comment or (single-quoted) line break. CI runs 3.12, so only a 3.11 run (CMake's default on a stock Homebrew Mac) would see it |
 
 `gates.sh` runs `designated_initializer_lint.py` diff-scoped and
 `win32_include_lint.py` over `core/*/include` before a push, and
@@ -164,6 +167,28 @@ PULP_SKIP_PREPUSH=1 git push                   # skip ALL gates (true emergencie
 
 The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env vars are accepted as silent no-ops — they used to *promote* advisory warnings to hard failures, which is now the default. Setting them just confirms what you already get.
 
+### A push to a queued PR is refused
+
+A PR in the merge queue never needs a rebase or a merge of main: the queue
+builds it on top of current main. GitHub also refuses pushes to a queued
+branch, so pushing one anyway only ran the multi-minute pre-push build before
+the rejection, and led agents to dequeue and retry in a loop. The hook
+therefore runs `tools/scripts/prepush_queue_rebase_hint.py --refuse-queued`
+first, before every gate and the diff-coverage build, and refuses the push when
+GraphQL shows the branch's open PR in the queue.
+
+| Setting | Effect |
+|---------|--------|
+| (default) | refuse a push to a queued PR; armed-but-not-queued only gets the advisory hint |
+| `PULP_QUEUE_REBASE_TIMEOUT` | lookup budget in seconds (default 3) |
+
+There is no override, and `PULP_SKIP_PREPUSH=1` does not bypass the refusal:
+an override recreates the dequeue loop. To change a queued PR, either open a new
+PR, or dequeue it through the guarded `ghapp` path with a stated reason
+(`GHAPP_QUEUE_REMOVAL_REASON=defect-fix`) and then push. A lookup that cannot answer
+(no `ghapp`/`gh`, auth, network, timeout, bad JSON) prints
+`queued-PR check skipped` and lets the push continue.
+
 ---
 
 ## CI workflow
@@ -177,8 +202,19 @@ repository-scoped `PULP_LOCAL_LINUX_RUNS_ON_JSON` lane. Keeping those selectors
 distinct prevents automatic branch content from matching the less-isolated
 repository runner through GitHub's subset-based label selection.
 
-Every gate in this workflow compares HEAD against the **merge-base** of the
-base branch and HEAD, which the "Resolve diff base" step computes once. The
+Every gate in this workflow compares HEAD against one diff base, which the
+"Resolve diff base" step computes once through `tools/scripts/ci_diff_base.py`
+(tests: `tools/scripts/test_ci_diff_base.py`, run by the same workflow).
+
+- On `merge_group` the base is the queue entry's own
+  `github.event.merge_group.base_sha`. A merge-group commit is built on top of
+  every entry ahead of it, so a merge-base with `origin/main` would put those
+  entries' commits in this entry's range. A `fix:` touching no surface in an
+  entry ahead would then eject the innocent entry behind it while the offender
+  merged. A run with no `base_sha`, or one that is not an ancestor of HEAD,
+  fails closed instead of falling back.
+- On `pull_request` and manual dispatch the base is the **merge-base** of the
+  base branch and HEAD. The
 base tip is the wrong anchor for any gate that reads a file *at* the base
 (`node_abi_gate.py`'s virtual order, `skill_path_map_lint.py`'s co-claim map,
 `hotspot_size_guard.py`'s new-file list): a PR merely behind `main` would be
@@ -205,13 +241,24 @@ only when the PR grew it relative to the merge-base, which is the same
 rebase-stable rule the hotspot guard uses. A `Fanout-Grow: <path|all> reason="..."`
 trailer authorizes deliberate growth.
 
-The workflow's last step, **Source-only selftests**, runs every registration
-listed in `tools/ci/source_selftests.json` with
-`tools/ci/source_selftests.py run --min-count 130`. Those are Python ctests that
-read only the checkout; the required `macos` gate excludes their
-`source-selftest` label on gate events, so this required context is where they
-block a merge. The step needs the full-history checkout this job already does
-and nothing but the standard library. See
+The workflow runs every registration listed in
+`tools/ci/source_selftests.json` with `tools/ci/source_selftests.py run
+--min-count 130`. Those are Python ctests that read only the checkout; the
+required `macos` gate excludes their `source-selftest` label on gate events, so
+this workflow is where they block a merge. The run is split across jobs by
+`lane_parts()`:
+- The **Source-only selftests** step of the `Version & skill sync checks` job
+  runs `--part shared`, the entries that share the machine.
+- The `Exclusive source selftests 1/2` and `2/2` jobs run `--part exclusive
+  --shard N/2`. These are the entries with `PROCESSORS` above 1, each still
+  alone on its runner.
+
+The required context **`Enforce version & skill sync`** is a third job. It needs
+both, runs `if: always()`, and fails unless both concluded `success`, so a
+failed, cancelled or skipped part fails the check. Before the split, the
+whole-machine entries ran one after another at the end of a single job. That
+was about 70% of the selftest step and most of the check's ~10 min P50. Every
+job needs the full-history checkout and nothing but the standard library. See
 [test-lanes.md](test-lanes.md#the-source-selftest-lane) for how a test joins or
 leaves the lane.
 
@@ -566,22 +613,40 @@ coverage silently.
 
 ## Shipyard-binary pin bumps
 
-When a new Shipyard release drops, the pin lives in `tools/shipyard.toml`
-(consumed by `tools/install-shipyard.sh`). Bumping it is a normal
+When a new Shipyard release drops, the pin lives in `[shipyard]` of
+`tools/toolchain/manifest.toml`: the release tag, the repository, and the
+sha256 of every release asset. `tools/toolchain/generate.py` writes the tag and
+repository into `tools/shipyard.toml` (the file Shipyard itself reads) and the
+digests into `tools/toolchain/shipyard.sha256`. Bumping it is a normal
 dependency-pin update, not a Pulp-versioning event:
 
 ```bash
 python3 tools/deps/audit.py --strict --check-upstream --format markdown
-shipyard pin bump --to vX.Y.Z
+python3 tools/toolchain/generate.py --shipyard vX.Y.Z
+./tools/install-shipyard.sh && shipyard --version
 python3 tools/deps/validate_hosts.py
 ```
 
-Prefer `shipyard pin bump` over hand-editing `tools/shipyard.toml`. It owns
-the stale-worktree, downgrade, redundant-main-pin, version, and release-asset
-guards. The pin file holds only `version` and `repo`: `tools/install-shipyard.sh`
-runs the upstream installer at that tag, which picks the platform asset (since
-v0.50.0 an Apple-Silicon-only signed `.dmg` on macOS) and verifies its checksum
-itself, so a bump changes `version` and nothing else.
+`generate.py --shipyard` takes every asset digest from the release's own
+`checksums.sha256` and refuses a tag older than the current pin (a downgrade is
+a hand edit of the manifest in a reviewed PR). `shipyard pin bump` still edits
+only `tools/shipyard.toml`, so its change fails the
+`toolchain-test_generate-selftest` drift test, whose message names the command
+above. Use `generate.py --shipyard` until `shipyard pin bump` calls it.
+
+The upstream installer verifies no checksum, so `tools/install-shipyard.sh`
+downloads the platform assets itself (the CLI and, on Linux and Windows, the
+workstream provider; on macOS the signed `.dmg`) and refuses any whose sha256
+differs from the pin before the installer runs. It names the URL, both digests
+and the command that accepts a re-published asset in a reviewed PR. After the
+installer finishes it checks that the installed binary is the verified one (on
+macOS, the binaries inside the verified `.dmg`), because the installer
+downloads again. On a mismatch it removes the new binaries and puts back the
+ones it replaced, so nothing unverified is left on `PATH`. The upstream
+`install.sh` itself is pinned too (`installer_sha256` in the manifest): the
+wrapper downloads it from the pinned repository's tag, refuses it if its sha256
+differs, and runs only the verified copy. `SHIPYARD_SKIP_DOWNLOAD=1` reuses an
+installed binary and prints that the binary was not verified.
 
 Pulp tracks the latest verified public Shipyard release by default while still
 recording an immutable exact tag. Automation should propose the newest release;
@@ -662,3 +727,10 @@ v0.80.4 keeps Git-over-SSH pushes alive during Pulp's long pre-push proof while
 preserving any explicitly configured SSH identity or proxy command. Without it,
 a successful local proof can still end in an expired SSH connection and waste
 the entire validation cycle.
+
+### Coverage cadence
+
+The hosted macOS Coverage workflow is advisory and runs on the main schedule or
+through an arm-time `workflow_dispatch` of the approved PR head. It does not
+start for every pull request push; the required version and skill checks remain
+unchanged.

@@ -158,7 +158,9 @@ Two environment facts worth knowing before you read its output:
 - **Coverage is opt-in.** Pass your test target(s) to measure it. With no target
   the whole-tree coverage build takes ~30 minutes, so the script skips it and
   tells you rather than appearing to hang. It also skips automatically when your
-  diff contains no C/C++ — there is nothing to cover.
+  diff contains no C/C++ — there is nothing to cover. A coverage run that was skipped
+  rather than measured (the host was starved, or it is a maintainer CI host
+  that refuses local builds) reports NOT CHECKED, never a pass or a fail.
 
 ### Path-based gates can fire on files you barely touched
 
@@ -237,9 +239,20 @@ Push the branch, then `gh pr create`. Do **not** run `shipyard pr`, and do not
 arm auto-merge — that is the maintainer's call.
 
 If the PR opens but required checks show `MISSING` rather than pending, the
-workflows did not dispatch; say so rather than waiting it out. (A PR opened by an
-app token does not auto-trigger `pull_request` workflows — the maintainer can
-dispatch them.)
+workflows did not run on its head; say so rather than waiting it out. An
+App-opened PR does trigger `pull_request` workflows like any other: across the
+fleet's last 180 pull requests (165 opened by `shipyard-local[bot]`), every one
+targeting `main` had `pull_request` runs on its head. A missing check means one
+of three things, and the CI skill's slow/stuck-PR steps tell them apart:
+- the trigger refused (a base other than `main`, a path filter), so no run
+  exists on the head;
+- a run exists on the head but sits `pending` with zero jobs, because a
+  superseded run holds the workflow's concurrency group (case 1b): the check
+  reads `MISSING` because its job was never created;
+- a run was cancelled.
+
+The fix is never a `workflow_dispatch`, nor `shipyard rescue`, which dispatches
+one: a dispatch checks out the branch tip rather than the merge ref.
 
 ### If you have READ access only (the common case)
 You cannot push a branch. Two good options:

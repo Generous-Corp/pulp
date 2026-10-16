@@ -50,6 +50,12 @@ class P2CampaignContractTests(unittest.TestCase):
             with patch.object(campaign, "REPO_ROOT", Path(root)):
                 receipt = campaign.validate_host_preflight(path, source)
             self.assertEqual(receipt["host_id"], "m5-studio")
+            receipt["thermal_state"] = "serious"
+            path.write_text(json.dumps(receipt), encoding="utf-8")
+            with patch.object(campaign, "REPO_ROOT", Path(root)):
+                with self.assertRaisesRegex(RuntimeError, "thermal"):
+                    campaign.validate_host_preflight(path, source)
+            receipt["thermal_state"] = "nominal"
             receipt["gpu_health_observation"]["observation"]["measured_at_utc"] = "2000-01-01T00:00:00Z"
             path.write_text(json.dumps(receipt), encoding="utf-8")
             with patch.object(campaign, "REPO_ROOT", Path(root)):
@@ -206,6 +212,182 @@ class P2CampaignContractTests(unittest.TestCase):
         changed[0]["manifest_bindings"]["dawn_archive_sha256"] = "1" * 64
         with self.assertRaises(RuntimeError):
             campaign.validate_identity_rows(changed, expected_sha)
+
+    def test_provider_identity_fixture_binds_raw_rows_independently(self):
+        rows = self._rows()
+        fixture = {
+            "schema": campaign.PROVIDER_IDENTITY_SCHEMA, "status": "passed",
+            "provider_identity_status": "passed",
+            "expected_asset_sha256": rows[0]["provider_asset_sha256"],
+            "validated_asset_sha256": rows[0]["provider_asset_sha256"],
+            "expected_dawn_revision": rows[0]["provider_revision"],
+            "header_dawn_revision": rows[0]["provider_revision"],
+            "linked_dawn_archive_sha256": rows[0]["dawn_archive_sha256"],
+            "manifest_sha256": "1" * 64,
+            "generation_receipt_sha256": "2" * 64,
+        }
+        rows[0]["manifest_bindings"]["provider_asset_manifest_sha256"] = fixture["manifest_sha256"]
+        rows[0]["manifest_bindings"]["dawn_archive_manifest_sha256"] = fixture["manifest_sha256"]
+        rows[0]["provenance_manifest_sha256"] = campaign.provenance_manifest_sha256(rows[0])
+        campaign.validate_identity_rows(rows, rows[0]["executable_observed_sha256"],
+                                        expected_provider_identity=fixture)
+        invalid = [dict(row) for row in rows]
+        invalid[0]["provider_revision"] = "f" * 40
+        with self.assertRaisesRegex(RuntimeError, "provider revision"):
+            campaign.validate_identity_rows(
+                invalid, invalid[0]["executable_observed_sha256"],
+                expected_provider_identity=fixture)
+
+    def test_provider_identity_fixture_requires_current_manifest(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            manifest = root_path / "tools/deps/manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("{}\n", encoding="utf-8")
+            fixture = root_path / "provider.json"
+            payload = {
+                "schema": campaign.PROVIDER_IDENTITY_SCHEMA, "status": "passed",
+                "provider_identity_status": "passed",
+                "expected_asset_sha256": "a" * 64, "validated_asset_sha256": "a" * 64,
+                "expected_dawn_revision": "b" * 40, "header_dawn_revision": "b" * 40,
+                "linked_dawn_archive_sha256": "c" * 64,
+                "manifest_sha256": campaign.sha256(manifest),
+                "generation_receipt_sha256": "d" * 64,
+            }
+            fixture.write_text(json.dumps(payload), encoding="utf-8")
+            with patch.object(campaign, "REPO_ROOT", root_path):
+                self.assertEqual(campaign.validate_provider_identity_fixture(fixture), payload)
+                manifest.write_text("changed\n", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "current provider manifest"):
+                    campaign.validate_provider_identity_fixture(fixture)
+
+    def _bound_rows_and_fixture(self):
+        rows = self._rows()
+        fixture = {
+            "schema": campaign.PROVIDER_IDENTITY_SCHEMA, "status": "passed",
+            "provider_identity_status": "passed",
+            "expected_asset_sha256": rows[0]["provider_asset_sha256"],
+            "validated_asset_sha256": rows[0]["provider_asset_sha256"],
+            "expected_dawn_revision": rows[0]["provider_revision"],
+            "header_dawn_revision": rows[0]["provider_revision"],
+            "linked_dawn_archive_sha256": rows[0]["dawn_archive_sha256"],
+            "manifest_sha256": "1" * 64,
+            "generation_receipt_sha256": "2" * 64,
+        }
+        rows[0]["manifest_bindings"]["provider_asset_manifest_sha256"] = fixture["manifest_sha256"]
+        rows[0]["manifest_bindings"]["dawn_archive_manifest_sha256"] = fixture["manifest_sha256"]
+        rows[0]["provenance_manifest_sha256"] = campaign.provenance_manifest_sha256(rows[0])
+        return rows, fixture
+
+    def _assert_binding_refused(self, rows, fixture, message):
+        rows[0]["provenance_manifest_sha256"] = campaign.provenance_manifest_sha256(rows[0])
+        with self.assertRaisesRegex(RuntimeError, message):
+            campaign.validate_identity_rows(rows, rows[0]["executable_observed_sha256"],
+                                            expected_provider_identity=fixture)
+
+    def test_raw_rows_must_carry_the_receipts_dawn_archive(self):
+        rows, fixture = self._bound_rows_and_fixture()
+        rows[0]["dawn_archive_sha256"] = "9" * 64
+        rows[0]["manifest_bindings"]["dawn_archive_sha256"] = "9" * 64
+        self._assert_binding_refused(rows, fixture, "Dawn archive disagrees")
+
+    def test_raw_rows_must_bind_each_manifest_field_to_the_receipt(self):
+        for field in ("provider_asset_manifest_sha256", "dawn_archive_manifest_sha256"):
+            with self.subTest(field=field):
+                rows, fixture = self._bound_rows_and_fixture()
+                rows[0]["manifest_bindings"][field] = "9" * 64
+                self._assert_binding_refused(rows, fixture, "manifest bindings disagree")
+
+    def test_control_matching_raw_rows_bind_to_the_receipt(self):
+        rows, fixture = self._bound_rows_and_fixture()
+        campaign.validate_identity_rows(rows, rows[0]["executable_observed_sha256"],
+                                        expected_provider_identity=fixture)
+
+    def _receipt(self, root_path, **changes):
+        manifest = root_path / "tools/deps/manifest.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text("{}\n", encoding="utf-8")
+        payload = {
+            "schema": campaign.PROVIDER_IDENTITY_SCHEMA, "status": "passed",
+            "provider_identity_status": "passed",
+            "expected_asset_sha256": "a" * 64, "validated_asset_sha256": "a" * 64,
+            "expected_dawn_revision": "b" * 40, "header_dawn_revision": "b" * 40,
+            "linked_dawn_archive_sha256": "c" * 64,
+            "manifest_sha256": campaign.sha256(manifest),
+            "generation_receipt_sha256": "d" * 64,
+        }
+        payload.update(changes)
+        receipt = root_path / "provider.json"
+        receipt.write_text(json.dumps(payload), encoding="utf-8")
+        return receipt, payload
+
+    def test_receipt_with_inconsistent_identity_pairs_is_refused(self):
+        cases = {"asset pair": {"validated_asset_sha256": "e" * 64},
+                 "revision pair": {"header_dawn_revision": "f" * 40}}
+        for name, change in cases.items():
+            with self.subTest(pair=name), tempfile.TemporaryDirectory() as root:
+                receipt, _ = self._receipt(Path(root), **change)
+                with patch.object(campaign, "REPO_ROOT", Path(root)):
+                    with self.assertRaisesRegex(RuntimeError, "inconsistent provider identity"):
+                        campaign.validate_provider_identity_fixture(receipt)
+
+    def test_a_symlinked_receipt_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            receipt, payload = self._receipt(Path(root))
+            link = Path(root) / "linked.json"
+            link.symlink_to(receipt)
+            with patch.object(campaign, "REPO_ROOT", Path(root)):
+                self.assertEqual(campaign.validate_provider_identity_fixture(receipt), payload)
+                with self.assertRaisesRegex(RuntimeError, "must be a regular file"):
+                    campaign.validate_provider_identity_fixture(link)
+
+    def test_receipt_digest_is_of_the_bytes_that_were_validated(self):
+        # The path holds different bytes from the ones the validator reads, as
+        # if the file were replaced between the check and a later re-read. The
+        # recorded digest must be of what was validated.
+        with tempfile.TemporaryDirectory() as root:
+            receipt, payload = self._receipt(Path(root))
+            validated = receipt.read_bytes()
+            receipt.write_text(json.dumps(dict(payload, status="swapped")), encoding="utf-8")
+            with patch.object(campaign, "REPO_ROOT", Path(root)), \
+                    patch.object(Path, "read_bytes", return_value=validated):
+                fixture, digest = campaign.load_provider_identity_receipt(receipt)
+            self.assertEqual(fixture, payload)
+            self.assertEqual(digest, campaign.hashlib.sha256(validated).hexdigest())
+            self.assertNotEqual(digest, campaign.sha256(receipt))
+
+    def test_the_campaign_records_the_validated_receipt_digest(self):
+        # A full hardware campaign cannot run here; pin that run() records the
+        # loader's digest rather than hashing the receipt path again.
+        import inspect
+        source = inspect.getsource(campaign.run)
+        self.assertIn("load_provider_identity_receipt(", source)
+        self.assertIn('"provider_identity_receipt_sha256": provider_identity_receipt_sha256', source)
+        self.assertNotIn("sha256(args.provider_identity_receipt)", source)
+
+    def _hardware_args(self, root, *extra):
+        probe = Path(root) / "probe"
+        probe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        probe.chmod(probe.stat().st_mode | stat.S_IXUSR)
+        preflight = Path(root) / "preflight.json"
+        preflight.write_text("{}", encoding="utf-8")
+        return campaign.parse_args([
+            "--probe", str(probe), "--output-dir", str(Path(root) / "out"),
+            "--host-preflight", str(preflight), *extra])
+
+    def test_a_hardware_campaign_requires_the_provider_identity_receipt(self):
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(campaign, "_source_provenance", return_value=("a" * 40, "b" * 64)):
+            args = self._hardware_args(root, "--expected-source-revision", "a" * 40)
+            with self.assertRaisesRegex(RuntimeError, "--provider-identity-receipt is required"):
+                campaign.run(args)
+
+    def test_control_a_hardware_campaign_requires_the_source_revision_first(self):
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(campaign, "_source_provenance", return_value=("a" * 40, "b" * 64)):
+            args = self._hardware_args(root)
+            with self.assertRaisesRegex(RuntimeError, "--expected-source-revision is required"):
+                campaign.run(args)
 
     def test_observed_device_id_zero_is_allowed(self):
         rows = self._rows()

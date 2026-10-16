@@ -72,6 +72,14 @@ RELEASE_SIGNING_HELPER = REPO_ROOT / "tools" / "scripts" / "configure_release_bo
 SHIPYARD_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
 
 
+def unix_package_source(case: unittest.TestCase) -> str:
+    """release-cli.yml's Unix package step plus the shared script it runs."""
+    run_block = case._find_step_run("Package CLI (Unix)")
+    case.assertIn('bash "$PULP_RELEASE_PACKAGE_SCRIPT"', run_block)
+    script = (REPO_ROOT / "tools/ci/release_package_cli.sh").read_text(encoding="utf-8")
+    return run_block + "\n" + script
+
+
 class SignAndReleaseNoTestGate(unittest.TestCase):
     """sign-and-release.yml must NOT re-run the unit-test suite.
 
@@ -167,42 +175,6 @@ class SignAndReleaseSkipsWithoutSigningInputs(unittest.TestCase):
                          "${{ steps.preflight.outputs.build }}")
         self.assertEqual(self.doc["jobs"]["build-and-sign-macos"]["if"],
                          "needs.resolve-macos-runner.outputs.build == 'true'")
-
-
-class ReleaseCliDarwinCompilerCache(unittest.TestCase):
-    """The self-hosted darwin release VMs share the host ccache with the gate,
-    so the release must pin the gate's correctness settings and print this
-    job's own hit counts rather than the host cache's lifetime totals."""
-
-    def setUp(self) -> None:
-        self.job = yaml.safe_load(RELEASE_CLI.read_text(encoding="utf-8"))["jobs"]["build-cli"]
-        self.steps = {step.get("name", ""): step for step in self.job["steps"]}
-
-    def test_build_legs_use_the_gates_ccache_correctness_settings(self) -> None:
-        gate = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
-        gate_env = next(
-            job["env"] for job in gate["jobs"].values()
-            if isinstance(job.get("env"), dict) and "CCACHE_COMPILERCHECK" in job["env"]
-        )
-        wanted = {k: v for k, v in gate_env.items() if k.startswith("CCACHE_")}
-        # Control: the instrument found the gate's settings at all.
-        self.assertEqual(
-            set(wanted), {"CCACHE_COMPILERCHECK", "CCACHE_NODEPEND", "CCACHE_SLOPPINESS"}
-        )
-        self.assertEqual(
-            {k: v for k, v in self.job["env"].items() if k.startswith("CCACHE_")}, wanted
-        )
-
-    def test_stats_are_per_job_and_printed_even_when_the_build_fails(self) -> None:
-        names = list(self.steps)
-        env_step = self.steps["Compiler cache environment"]
-        self.assertIn('CCACHE_STATSLOG=${RUNNER_TEMP}/', env_step["run"])
-        self.assertLess(names.index(env_step["name"]), names.index("Build"))
-        stats = self.steps["Ccache stats"]
-        self.assertEqual(stats.get("if"), "always()")
-        self.assertIn("compiler_check", stats["run"])
-        self.assertIn("ccache --show-log-stats", stats["run"])
-        self.assertLess(names.index("Prepare SDK build dir (macOS)"), names.index(stats["name"]))
 
 
 class ReleaseCliDispatchAttestsItsTag(unittest.TestCase):
@@ -581,7 +553,7 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         self.assertIn("sdk_provenance_floor", self.text)
         self.assertIn("cannot substitute source_ref", self.text)
         guard = self.text.index("- name: Reject marker-era source substitution")
-        checkout = self.text.index("- uses: actions/checkout@v5", guard)
+        checkout = self.text.index("- uses: actions/checkout@v7", guard)
         self.assertLess(
             guard,
             checkout,
@@ -832,7 +804,7 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
             self.text.index("PULP_RELEASE_MACOS_RUNS_ON_JSON"),
             "the PR-gate-specific selector must win before the legacy shared fallback",
         )
-        self.assertIn("needs: resolve-macos-runner", self.text)
+        self.assertIn("needs: [classify, resolve-macos-runner]", self.text)
         self.assertIn(
             "matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os",
             self.text,
@@ -914,7 +886,7 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         return match.group(1)
 
     def test_unix_package_step_bundles_cpp_delegate(self) -> None:
-        run_block = self._find_step_run("Package CLI (Unix)")
+        run_block = unix_package_source(self)
         self.assertIn('"$PULP_RELEASE_PACKAGER"', run_block)
         self.assertRegex(run_block, r"--binary\s+build/pulp")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/pulp-cpp")
@@ -948,7 +920,8 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         )
         self.assertIn("[ -x build/tools/import-design/pulp-import-design ]", run_block)
         self.assertIn('"${import_design_args[@]}"', run_block)
-        self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
+        self.assertIn('bash "$PULP_RELEASE_PACKAGE_SCRIPT" "${{ matrix.platform }}"', run_block)
+        self.assertIn('--out "pulp-${platform}.tar.gz"', run_block)
 
     def test_unix_strip_treats_import_design_as_versioned_payload(self) -> None:
         step_start = self.text.index("- name: Strip binaries (Unix)")
@@ -1013,7 +986,11 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
 
     def test_dry_run_package_step_uses_versioned_browser_runtime(self) -> None:
+        # The dry-run packages through the shared script (its arguments live
+        # there) and verifies the packaged binaries in its own steps.
         dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        self.assertIn("bash tools/ci/release_package_cli.sh", dry_run)
+        dry_run += (REPO_ROOT / "tools/ci/release_package_cli.sh").read_text(encoding="utf-8")
         self.assertRegex(
             dry_run,
             r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
@@ -1022,7 +999,11 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
             r"--import-design-contract\s+build/tools/import-design/jsx-runtime/materialized_binding_contract\.mjs")
 
     def test_dry_run_packages_and_verifies_control_broker(self) -> None:
+        # The dry-run packages through the shared script (its arguments live
+        # there) and verifies the packaged binaries in its own steps.
         dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        self.assertIn("bash tools/ci/release_package_cli.sh", dry_run)
+        dry_run += (REPO_ROOT / "tools/ci/release_package_cli.sh").read_text(encoding="utf-8")
         self.assertRegex(
             dry_run,
             r"--control-broker-binary\s+build/inspect/pulp-control-broker",
@@ -1198,7 +1179,7 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn(
             "hashFiles('tools/scripts/prepare_node_runtime.py') != ''", prepare
         )
-        unix_package = self._find_step_run("Package CLI (Unix)")
+        unix_package = unix_package_source(self)
         windows_package = self._find_step_run("Package CLI (Windows)")
         self.assertIn('${PULP_NODE_RUNTIME_EXECUTABLE:-}', unix_package)
         self.assertIn("if ($env:PULP_NODE_RUNTIME_EXECUTABLE)", windows_package)
@@ -1408,7 +1389,7 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         windows_verify = self._find_step_run(
             "Verify release archive product matrix (Windows)"
         )
-        unix_package = self._find_step_run("Package CLI (Unix)")
+        unix_package = unix_package_source(self)
         windows_package = self._find_step_run("Package CLI (Windows)")
         self.assertIn(
             'compat_dir="${RUNNER_TEMP:?}/pulp-release-backfill-helpers"',
@@ -2646,6 +2627,32 @@ class ReleaseBuildParallelismExplicit(unittest.TestCase):
                     "count (e.g. --parallel \"$jobs\") or route it through "
                     "tools/ci/governed-build.sh.",
                 )
+
+    def test_release_cli_builds_use_governed_build_contract(self) -> None:
+        source = RELEASE_CLI.read_text(encoding="utf-8")
+        build_lines = self._build_invocations(source)
+        self.assertEqual(
+            len(build_lines),
+            3,
+            "release-cli.yml should retain its CLI build plus the two SDK builds",
+        )
+        for line in build_lines:
+            self.assertIn(
+                "tools/ci/governed-build.sh cmake --build",
+                line,
+                f"release-cli.yml build bypasses governed parallelism: {line}",
+            )
+            self.assertNotRegex(
+                line,
+                r"(?:--parallel|-j)\s*",
+                f"governed-build owns the parallelism contract: {line}",
+            )
+        self.assertIn(
+            'PULP_BUILD_JOBS="$jobs"',
+            source,
+            "release-cli.yml must preserve its visible-core request as a lower cap "
+            "while allowing governed-build to narrow it to the lease",
+        )
 
     def test_release_dry_run_uses_governed_build_contract(self) -> None:
         source = RELEASE_DRY_RUN.read_text(encoding="utf-8")

@@ -155,5 +155,81 @@ class EndToEndCodegen(unittest.TestCase):
             self.assertFalse(out.exists())
 
 
+class EntryConsistency(unittest.TestCase):
+    """A note must describe the release it is filed under: the file name,
+    `version` and `applies_if` must agree, or `pulp upgrade --notes` shows
+    it for the wrong hop or never (a renamed v0.945.2.md once kept
+    `version = "0.943.1"` and passed every other check)."""
+
+    def _codegen(self, name: str, frontmatter: str) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            _write_doc(tmp, name, frontmatter)
+            return subprocess.run(
+                [sys.executable, str(SCRIPT), "--docs-dir", str(tmp), "--out", str(tmp / "out.cpp")],
+                capture_output=True, text=True, encoding="utf-8")
+
+    def test_consistent_note_passes(self):
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\n'
+                            'applies_if = "cli_version_from < 0.945.2 && cli_version_to >= 0.945.2"')
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_file_name_and_version_disagree(self):
+        res = self._codegen("v0.945.2.md", 'version = "0.943.1"\n'
+                            'applies_if = "cli_version_from < 0.943.1 && cli_version_to >= 0.943.1"')
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("file name says 0.945.2", res.stderr)
+
+    def test_applies_if_selects_a_hop_before_the_version(self):
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\n'
+                            'applies_if = "cli_version_from < 0.943.1 && cli_version_to >= 0.943.1"')
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("must be exactly", res.stderr)
+
+    def test_applies_if_never_crosses_the_version(self):
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\napplies_if = "cli_version_to < 0.1.0"')
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("must be exactly", res.stderr)
+
+    def test_applies_if_that_does_not_parse(self):
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\napplies_if = "from < 0.945.2"')
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("must be exactly", res.stderr)
+
+    def test_applies_if_that_also_selects_an_unrelated_hop(self):
+        # Crosses 0.945.2 and not its predecessor, so a boundary probe passes
+        # it, yet the `||` arm also selects every hop inside 1.0.x.
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\n'
+                            'applies_if = "cli_version_from < 0.945.2 && cli_version_to >= 0.945.2'
+                            ' || cli_version_from >= 1.0.0 && cli_version_to < 1.1.0"')
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("must be exactly", res.stderr)
+        self.assertIn("nothing else", res.stderr)
+
+    def test_canonical_applies_if_with_other_spacing_passes(self):
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\n'
+                            'applies_if = "  cli_version_from<0.945.2  &&  cli_version_to>=0.945.2 "')
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_canonical_shape_with_mismatched_bounds_is_rejected(self):
+        res = self._codegen("v0.945.2.md", 'version = "0.945.2"\n'
+                            'applies_if = "cli_version_from < 0.945.2 && cli_version_to >= 0.946.0"')
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("must be exactly", res.stderr)
+
+    def test_empty_applies_if_and_free_form_names_are_allowed(self):
+        res = self._codegen("notes.md", 'version = "0.31.0"')
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_evaluator_matches_the_documented_grammar(self):
+        ev = _bmi.evaluate_applies_if
+        expr = "cli_version_from < 0.27.0 && cli_version_to >= 0.27.0"
+        self.assertTrue(ev(expr, "0.26.0", "0.27.0"))
+        self.assertFalse(ev(expr, "0.27.0", "0.28.0"))
+        self.assertTrue(ev("(cli_version_to == v1.0.0) || cli_version_from != 0.1.0", "0.1.0", "1.0.0"))
+        with self.assertRaises(_bmi.AppliesIfError):
+            ev("cli_version_from <", "0.1.0", "0.2.0")
+
+
 if __name__ == "__main__":
     unittest.main()

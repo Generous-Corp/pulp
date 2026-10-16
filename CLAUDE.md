@@ -1009,6 +1009,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
 - A vector ILLUSTRATION group imported as a flat stack of boxes instead of art. → `tools/import-design/figma_rasterize_vector_frames.py`
 - Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit. → `tools/import-design/figma_rest_export.py`
+- Validate a fresh authored HTML fixture's Chromium receipt, native import receipt, and planted negative interaction. → `tools/import-design/fresh_plugin_fixture_validation.mjs`
+  - ⚠ **Cannot see:** Acceptance evidence for a named fixture only; it does not prove general HTML importer coverage or semantic native-widget reconstruction.
 - Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
 - Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
 - Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget. → `tools/import-design/make_catalog_component.py`
@@ -1070,6 +1072,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **editor-open** — measure what a host shows while a plug-in editor opens
 - A user reports an AU editor opening in stages in Logic (small/placeholder, then empty, then the UI) and you need the stages a host window actually showed out of process, and how long the host waited for the view. → `tools/editor-open/editor_open_oop_probe.sh`
   - ⚠ **Cannot see:** Reads back the host's own window with CGWindowListCreateImage, which must run in the logged-in GUI session (hence --gui-session over ssh) and has read back only the host backdrop on a macOS 27 host while the editor was demonstrably drawing; a run whose every image is host-empty proves the instrument blind, not the editor. It sees what is composited, not why — pair it with a trace from the plug-in process (~/.config/pulp/trace-autostart in a traced build).
+- You need host-side evidence that built plug-in bundles (CLAP, VST3, AU v2) load, open/resize/close/reopen their editors, keep audio byte-identical with the editor open, and coexist with another plug-in in one process — the data the Vellum parity host lane compares. → `tools/editor-open/host_lane_probe.sh`
+  - ⚠ **Cannot see:** Records observations, never a verdict — the paired comparison and its negative controls live in Vellum tools/parity/host_lane.py. Read-back uses CGWindowListCreateImage on the probe's own off-screen window; a frame with read=false is a blind instrument, not an empty editor. Animated editors do not reproduce pixel for pixel across runs.
 
 **import-validation**
 - Validate a Chromium DevTools Protocol browser-render receipt before comparing an imported native render. → `tools/import-validation/verify_browser_fidelity_receipt.py`
@@ -1175,17 +1179,18 @@ and the required gate excludes **five** label groups —
 `validation|slow|performance|bench|quality-lab`. `slow` is a genuinely long test
 (e.g. the iOS try-compile). `validation` is the **example** plugins' real-host
 `pluginval`/`auval`/`clap-dlopen` validators — the only users of that label;
-these are reported by the advisory `example-validation` lane and do not block
-until that context is promoted to required. `performance`, `bench`, and
+these are reported by the advisory `example-validation` lane on nightly and
+approved-head dispatches from `pulp pr`/Shipyard arm; no automatic pull-request
+run, and no blocking status until promoted to required. `performance`, `bench`, and
 `quality-lab` are relative-timing and CPU-budget measurements: they are robust
 to steady load but not to the load *variance* a runner hosting concurrent build
-VMs produces, so they cannot hold a required gate there. They still run on
-push, on the nightly, and on the advisory `cross-platform-check` lane — which
+VMs produces, so they cannot hold a required gate there. They still run on pushes to `main`, on the nightly, and on the advisory
+`cross-platform-check` dispatch — which
 excludes only `validation|slow`, so a timing test lands there on x86-64 Linux
 and Windows and on arm64 Linux.
-`build.yml`'s required `macos` job configures examples OFF; examples compile on the
-advisory `example-validation` lane, and on Shipyard's opt-in local `mac` lane
-only when requested (`--target mac`), until that lane is promoted to required.
+`build.yml`'s required `macos` job configures examples OFF; examples compile on
+the nightly or approved-head `example-validation` dispatch, and on Shipyard's
+opt-in local `mac` lane only when requested (`--target mac`), until promoted.
 That dedicated lane compiles
 the full examples tree on Linux and compiles plus runs the available hosted
 validators on macOS (auval and built-in CLAP dlopen checks; pluginval and
@@ -1514,9 +1519,8 @@ When in doubt, validate in the branch/worktree first and merge to `main` second.
 
 ### Local Diff-Coverage Check
 
-Before pushing a PR, run a local diff-coverage check to catch the same
-`Diff coverage required (75%)` gate that CI runs. Saves a 20-min CI
-roundtrip on coverage-only failures.
+Before pushing a PR, run local diff coverage to catch instrumentation or attribution regressions.
+Coverage no longer runs it on pull requests; this advisory result is not a merge gate and still saves a CI roundtrip.
 
 ```bash
 # Focused: only targets/tests the diff reaches (pre-push runs this)

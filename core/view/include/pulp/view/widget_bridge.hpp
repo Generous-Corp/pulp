@@ -418,6 +418,12 @@ public:
     void set_host_kind(std::string kind) { host_kind_ = std::move(kind); }
     const std::string& host_kind() const { return host_kind_; }
 
+    /// Clock for script timers, performance.now() and the rAF timestamp
+    /// (default steady_clock::now; Date.now() never follows it).
+    using TimeSource = std::function<std::chrono::steady_clock::time_point()>;
+    void set_time_source(TimeSource source);
+    std::chrono::steady_clock::time_point time_now() const;
+
     // Inspect the native texture backing a canvas element when the native GPU
     // bridge is active. Used by low-level native WebGPU/Skia validation.
     CanvasWidget::NativeGpuTextureFrame describe_native_canvas_frame(const std::string& canvas_id) const;
@@ -575,6 +581,8 @@ private:
     // Model-agnostic AI CLI command (default: Claude)
     std::string ai_cli_command_ = "claude --print --model {model}";
     std::string host_kind_ = "unknown";
+    TimeSource time_source_;
+    std::chrono::steady_clock::time_point performance_epoch_ = std::chrono::steady_clock::now();
 
     struct AsyncExecResult {
         std::string callback_id;

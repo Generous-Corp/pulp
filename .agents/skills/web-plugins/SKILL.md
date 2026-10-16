@@ -27,6 +27,31 @@ and WebCLAP steps run from nested working directories, so those two calls must
 use `bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`; a relative
 `tools/ci/` path resolves inside the demo tree and fails before compilation.
 
+## Web lanes fetch their inputs fresh, never from `$HOME`
+
+The WebCLAP deploy (`wclap-cloudflare.yml`) publishes a site, and the GPU-audio
+proof runs on shared self-hosted Macs where PR jobs also run. Neither may build
+from anything an earlier job could have written. choc is fetched at an exact
+commit (`CHOC_COMMIT`, the `pulp-webview-dnd-poc1` tag's commit) into
+`RUNNER_TEMP`, and the step checks the checked-out HEAD equals it. The Skia wasm
+slice archive is checked against the manifest digest on every run (one left at
+`$HOME/.cache/pulp/skia-wasm/<sha256>.zip` is reused only after it passes, else
+re-downloaded) and unpacked fresh into `RUNNER_TEMP`, as is wasi-sdk. That
+"Fetch and verify the Skia wasm slice" step is the one path. The deploy job
+restores no `actions/cache`; on a main push it only saves the verified archive
+(`actions/cache/save`) for `web-plugins.yml` PR runs, which re-verify it. Its
+`setup-node` sets `package-manager-cache: false`, because setup-node v5+ restores
+an npm cache by itself when a package.json names a packageManager. Its
+wrangler-action step pins `wranglerVersion` to an exact 4.x.y; wrangler-action v4
+otherwise installs the latest wrangler in the middle of the production deploy.
+`test_release_cache_isolation.py` checks both. Bump the pin deliberately, to a
+release that has been out about a week, never a same-day `latest`. Do not reintroduce
+`[ -d "$HOME/choc-src" ] ||`, `if [ ! -d "$HOME/skia-wasm" ]` or an
+`actions/cache` restore of an extracted tree: a reused tree cannot be checked
+against its pin. The deploy job also disables ccache and re-fetches FetchContent
+sources (see the `ship` skill); `test_release_cache_isolation.py` holds it to
+that.
+
 ## wasm DSP builds get `pulp::simd` as inline scalar code
 
 Signal headers (`fir_filter.hpp`, `oversampling*.hpp`, `zero_latency_convolver.hpp`,
@@ -877,6 +902,9 @@ The `WAMv2 + WebCLAP (Linux, headless Chrome)` lane
 The lane pins emsdk (never `latest`) and fetches the Skia wasm slice from
 `tools/deps/manifest.json` — see the `ci` skill's `web-plugins.yml` section
 before touching either.
+The unpacked slice lives at `$SKIA_WASM_ROOT` (under `$RUNNER_TEMP`), never
+`~/skia-wasm`. A build step that needs it reads that variable, after the
+"Fetch and verify the Skia wasm slice" step has run in the same job.
 
 ### A native/WASM semantic oracle must share the production object closure
 
@@ -1031,6 +1059,13 @@ all native tests stayed green, but the required WebCLAP build failed at `wasm-ld
 `sanitize_yoga_measurement` / `resolve_yoga_measure_dimension` until the helper was added to
 `_PULP_WEBUI_VIEW_SOURCES`. Treat every new out-of-line dependency of an already-listed wasm UI
 source as a paired `PulpWebUi.cmake` edit, even when the helper has no web-specific code.
+
+A MOVE breaks it at configure time instead: the list names paths, so a TU that moves directory
+leaves a path that no longer exists, and configure fails with `Cannot find source file` and `No
+SOURCES given to target`. The audio widgets moving to `core/view/audio/` (the `pulp-view-audio`
+target) did this to `eq_curve_view.cpp` and the split `widgets/visualizers.cpp`. When you move a
+`core/view/**` file, grep `PulpWebUi.cmake` for its old path, and add any new include directory
+to `_PULP_WEBUI_INCLUDES` (here `core/view/audio/include`).
 
 When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
 defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build

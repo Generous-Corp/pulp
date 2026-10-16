@@ -13,9 +13,12 @@ direction for as long as the mistake survives.
 This asks the run itself. It classifies the `macos` job by the steps that
 actually ran:
 
-    executed            a Test step ran, so the suite genuinely reported
+    executed            a full-suite Test step ran, so the suite reported
+    tier-only           only a pull-request-head tier ran (the fast
+                        deterministic tier or the affected-tests tier); the
+                        full suite did not, and the merge queue runs it
     built-but-untested  the build ran but no Test step did
-    not-executed        neither ran -- a bootstrap or receipt-reuse green
+    not-executed        none of those ran -- a bootstrap or receipt-reuse green
 
 Read-only. Exits 0 on a successful classification; with --require-executed it
 exits 1 unless the suite genuinely ran, so a script can gate on it.
@@ -31,14 +34,24 @@ import sys
 
 DEFAULT_REPO = "Generous-Corp/pulp"
 
-# The workflow's suite steps are "Test (non-Windows)" and "Test (Windows ...)".
-TEST_STEP_RE = re.compile(r"^\s*Test\s*\(", re.IGNORECASE)
+# Keep this in step-name terms because the Actions jobs API exposes names, not
+# workflow step ids. The full-suite steps in `.github/workflows/build.yml` are
+# `Test (<platform>)`. The two pull-request-head tiers are evidence that a tier
+# ran, never that the suite did: build.yml says the fast tier "is NOT test
+# evidence for the merge", and the affected tier can select nothing. The other
+# `Test ...` steps are receipts or capability checks and count as neither.
+TEST_STEP_RE = re.compile(r"^\s*Test\s+\([^)]*\)", re.IGNORECASE)
+TIER_STEP_RE = re.compile(
+    r"^\s*Test\s+(?:fast deterministic tier\b|what this pull request reaches\b)",
+    re.IGNORECASE,
+)
 BUILD_STEP_RE = re.compile(r"^\s*Build\s*$", re.IGNORECASE)
 
 # A step with any other conclusion (skipped, cancelled, null) did not run.
 RAN_CONCLUSIONS = frozenset({"success", "failure"})
 
 EXECUTED = "executed"
+TIER_ONLY = "tier-only"
 BUILT_BUT_UNTESTED = "built-but-untested"
 NOT_EXECUTED = "not-executed"
 
@@ -59,6 +72,8 @@ def classify_steps(steps: list[dict]) -> str:
     """Classify a job's step list. Pure; the network wrapper feeds it."""
     if any(TEST_STEP_RE.match(_name(s)) and _ran(s) for s in steps):
         return EXECUTED
+    if any(TIER_STEP_RE.match(_name(s)) and _ran(s) for s in steps):
+        return TIER_ONLY
     if any(BUILD_STEP_RE.match(_name(s)) and _ran(s) for s in steps):
         return BUILT_BUT_UNTESTED
     return NOT_EXECUTED
@@ -67,6 +82,10 @@ def classify_steps(steps: list[dict]) -> str:
 def describe(verdict: str) -> str:
     return {
         EXECUTED: "the macOS test suite ran and reported",
+        TIER_ONLY: (
+            "only a pull-request-head tier ran (fast or affected tests); the "
+            "full suite did NOT -- the merge queue runs it"
+        ),
         BUILT_BUT_UNTESTED: (
             "the macOS build ran but NO test step did -- this green says "
             "nothing about the suite"
@@ -109,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--require-executed",
         action="store_true",
-        help="exit nonzero unless the suite genuinely ran",
+        help="exit nonzero unless the full suite genuinely ran "
+        "(a tier-only run does not count)",
     )
     parser.add_argument("--format", choices=("text", "json"), default="text")
     args = parser.parse_args(argv)

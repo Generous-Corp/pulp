@@ -16,6 +16,14 @@ description: |
 - Building or routing nodes in `SignalGraph`.
 - Writing tests that need to load a real plug-in binary.
 
+When narrowing a public SignalGraph header, keep `signal_graph.hpp` as the
+compatibility umbrella and make each implementation file include the focused
+processor adapter header when it calls adapter methods. If a lifetime helper
+needs an incomplete adapter type, define its destructor out of line in the
+host implementation. Build both `pulp-host` and the focused header-compile
+target so the dependency reduction does not silently break existing umbrella
+consumers.
+
 ## Mental model
 
 `PluginSlot` is the uniform interface. Each format backend is a single
@@ -43,6 +51,14 @@ sidechain ordering semantics explicit; do not sort those streams as ordinary
 audio edges. Add a permutation replay with a topology mutation negative control
 when changing this path so agents can distinguish deterministic replay from a
 test that only passes for one insertion order.
+
+### SignalGraph snapshot readers
+
+`runtime::Slot::live()` is publisher-thread-only. A status or telemetry
+accessor that traverses the prepared `CompiledGraph` while `prepare()` or
+`release()` may run must hold `live_slot_.read()` for the entire traversal.
+Keep concurrent lifecycle tests on a fixed authored topology; racing graph
+authoring against preparation tests a separate mutation contract.
 
 ## CLAP reference backend
 
@@ -346,6 +362,16 @@ Two things that bite when baking analog VCF nodes:
 
 ## Signal graph gotchas
 
+`core/host/src/signal_graph_authoring.cpp` owns control-thread node and
+connection authoring: add/remove mutators, connection validation, and their
+`GraphMutationLock` plus `invalidate_live_locked_()` ordering. Keep those
+operations there when changing topology. `signal_graph.cpp` retains the
+compile/process spine; `signal_graph_live_swap.cpp` owns staged publication,
+and `signal_graph_reference_walk.cpp` remains the independent execution oracle.
+The authoring extraction changes source ownership, not the graph's public
+contract or real-time lock rules. Recheck the host graph and executor parity
+suites after moving a method across these translation units.
+
 ### A hosted device's latency is discovered once, on the control thread
 
 `PluginSlot::latency_query()` exists because `latency_samples()` returns an
@@ -496,7 +522,7 @@ save/reopen render proof beside the legacy caller-owned route controls.
     the `begin_swap_edit` / `prepare_swap` / `abort_swap_edit` transaction with its
     crossfade publish and rollback, `snapshot_is_plugin_reinit_free_locked_`, and
     the load-admission gate — lives in `core/host/src/signal_graph_live_swap.cpp`,
-    so `signal_graph.cpp` keeps the topology/compile/process spine. The file
+    so `signal_graph.cpp` keeps the compile/process spine. The file
     arrangement mirrors `signal_graph_reference_walk.cpp`, but the *reason* does
     NOT: these are still ordinary `SignalGraph` members that name its private
     nested types, only their definitions moved. **The reference walk's
@@ -1714,7 +1740,7 @@ Keep these host graph invariants covered by tests:
 
 `pulp::view::PluginManagerPanel` sits on top of the scanner backend and
 gives host apps a ready-made "manage plugins" UI. The widget is
-header-only (`core/view/include/pulp/view/plugin_manager_panel.hpp`)
+header-only (`core/view/audio/include/pulp/view/plugin_manager_panel.hpp`)
 and drives everything through `PluginManagerModel`:
 
 - Tests use `InMemoryPluginManagerModel` — pre-populate `scanned_rows`,

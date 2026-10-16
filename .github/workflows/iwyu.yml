@@ -70,7 +70,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Need base branch history to compute changed files on PR.
           fetch-depth: 0
@@ -212,7 +212,7 @@ jobs:
         # track the false-positive rate and decide when to flip to
         # blocking.
         if: always() && steps.files.outputs.scope == 'full'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: iwyu-full-scan-${{ github.sha }}
           path: iwyu-raw.txt
@@ -221,7 +221,7 @@ jobs:
 
       - name: Upload changed-files report (PR scan)
         if: always() && steps.files.outputs.scope == 'pr'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: iwyu-pr-report-${{ github.sha }}
           path: |

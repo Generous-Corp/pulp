@@ -14,11 +14,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 PINNED_TOKEN_ACTION = (
     "actions/create-github-app-token@"
-    "fee1f7d63c2ff003460e3d139729b119787bc349"
+    "bcd2ba49218906704ab6c1aa796996da409d3eb1"
 )
 PINNED_CHECKOUT_ACTION = (
     "actions/checkout@"
-    "11d5960a326750d5838078e36cf38b85af677262"
+    "3d3c42e5aac5ba805825da76410c181273ba90b1"
 )
 RUNNER_EXPRESSION = (
     "${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON "
@@ -145,18 +145,29 @@ class VellumAuthorityWorkflowTests(unittest.TestCase):
             r'(?m)^\s*(?:bash|sh|python3)\s+"?\$proposed_tree(?:/|\")',
         )
 
-    def test_pull_request_freeze_compares_from_proposed_merge_base(self) -> None:
+    def test_pull_request_freeze_compares_from_live_main_candidate(self) -> None:
         value = workflow("vellum-freeze-check.yml")
         job = value["jobs"]["freeze-check"]
         comparison_step = step_named(job, "Resolve exact comparison")
         comparison = comparison_step["run"]
-        self.assertIn('protected_base="$(git rev-parse --verify "$GITHUB_SHA^1")"', comparison)
-        self.assertIn('git fetch --no-tags origin refs/heads/main', comparison)
-        self.assertIn('live_base="$(git rev-parse --verify FETCH_HEAD)"', comparison)
-        self.assertIn('[[ "$protected_base" != "$live_base" ]]', comparison)
-        self.assertIn('echo "base=$protected_base"', comparison)
+        self.assertIn("'+refs/heads/main:refs/vellum/live-main'", comparison)
+        self.assertIn(
+            "live_base=\"$(git rev-parse --verify 'refs/vellum/live-main^{commit}')\"",
+            comparison,
+        )
+        self.assertIn("tools/scripts/vellum_trusted_merge.py", comparison)
+        self.assertIn('--base "$live_base"', comparison)
+        self.assertIn('--head "$source_head"', comparison)
+        self.assertIn('[[ "$parents" != "$candidate $live_base $source_head" ]]', comparison)
+        self.assertIn('git checkout --quiet --detach "$candidate"', comparison)
+        self.assertIn('echo "base=$live_base"', comparison)
+        self.assertIn('echo "head=$candidate"', comparison)
+        # A stale GitHub merge ref is no longer a failure, and neither the
+        # event's merge ref nor the payload PR base may become the comparison.
+        self.assertNotIn("rerun this check", comparison)
+        self.assertNotIn("$GITHUB_SHA", comparison)
+        self.assertNotIn("FETCH_HEAD", comparison)
         self.assertNotIn("PR_BASE", comparison_step.get("env", {}))
-        self.assertNotIn('git fetch --no-tags origin "$PR_BASE"', comparison)
 
     def test_merge_result_is_bound_to_resolved_base_and_source_head(self) -> None:
         value = workflow("vellum-trusted-gate.yml")

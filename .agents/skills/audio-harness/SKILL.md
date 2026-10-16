@@ -5,6 +5,18 @@ description: The measurement surface for ALL Pulp DSP and audio-pipeline work �
 
 # Audio harness (observability + validation)
 
+## Windows ARM64/ARM64EC adapter boundary
+
+The Windows audio harness remains an offline evidence lane: run it against a
+deterministic WAV rendered by the plugin host and retain the exact binary,
+sample rate, block size, and artifact hash. A native ARM64 or ARM64EC/ARM64X
+plugin load check does not prove DAW compatibility. REAPER ARM64 is an
+ARM64X/ARM64EC host, so its scan, failed-scan list, real instance, render, and
+desktop screenshot must be recorded separately; a cache entry or
+`LoadLibrary`/factory result is discovery evidence only. If the host instance
+cannot be observed, report the DAW rung as unverified and do not promote the
+audio-lab result to plugin acceptance.
+
 Pulp's agent-first way to turn "I can't hear it" / "does this sound right?" into
 **inspectable, deterministic signal evidence** — without a device, speakers, or a
 debugger. You are reading this skill because you need to prove, measure, debug, or
@@ -1277,6 +1289,38 @@ Durable "why / watch-out-for" notes so this isn't re-litigated (rationale, not w
   the comb self-reference. When you add a click fixture for a new oscillator, grow a REAL polyBLEP
   render (`osc_fixtures.py`), not just a synthetic sum — the synthetic-only fixture is precisely
   the blind spot that let the false-fire ship.
+
+## Proving a modulation path does not alias (LFOs at every rate)
+
+An LFO is a continuous function of phase; what aliases is how a destination
+SAMPLES it. Two regimes, and `pulp/signal/lfo_sampling.hpp` has the
+band-limited sample for each:
+
+| Destination takes a value | Alias source | Band-limited sample |
+|---|---|---|
+| once per block / hop (spectral mask, filter restage, host-rate parameter) | the waveform read at one phase per block: a cycle shorter than two blocks folds into a block-rate stepper | `lfo_wave_mean(wave, phase_start, phase_end)` -- the exact mean over the block's phase interval (box filter, first null at the block rate). Above the block Nyquist the swing collapses to the wave's average instead of folding; below it, the value at the block's centre. Closed form, so a 2 kHz LFO costs what a 0.2 Hz one does. |
+| every sample (gain, AM, per-sample smoother) | the trivial square / saw / triangle folding its own harmonics | `lfo_wave_bandlimited(wave, phase, increment)` -- polyBLEP / polyBLAMP at every corner; sine needs nothing. Sub-audio, it touches only the two samples at each corner. |
+
+`LfoT` carries both: `set_band_limited(true)` (off by default, so existing
+patches read bit for bit) and `next_mean(samples)` for a block-rate consumer.
+
+**Measure it, don't reason about it.** `measure_modulation_sidebands(signal,
+carrier_hz, modulation_hz, sample_rate)` grades the A/B: run a steady tone
+through the path with the modulation on, and read
+
+- `sideband_db` -- energy at carrier +/- k * f_mod (the modulation itself), and
+- `residual_db` -- energy anywhere else in the band (what the PATH added: hold
+  images, folded modulation, noise), both re the carrier.
+
+Pair every claim with its controls, as `test_audio_doctor.cpp` does: the
+unmodulated run (`modulation_hz = 0`) sets the residual floor, a textbook AM
+fixture must read its sidebands at the computed level, and a block-held
+fixture above the block rate must read no sidebands and a loud residual -- so
+a gate that passes could not have passed on a broken instrument. Sweep sample
+rate, block size and modulation rate, because the block rate is the thing that
+moves. The first consumer was Spectr's Bank LFO, which read -8 dB of residual
+re a 1 kHz carrier at 1/256 beat before its spectral targets took the
+interval mean.
 
 ## Proving reported latency
 

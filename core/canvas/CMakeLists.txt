@@ -69,6 +69,8 @@ target_sources(pulp-canvas PRIVATE
     # See include/pulp/canvas/image_codecs.hpp for the public API.
     src/image_codecs_gif.cpp
     src/image_codecs_tiff.cpp
+    # Full-decode probe for file images; reports `unavailable` without Skia.
+    src/image_probe.cpp
 )
 
 # Text shaping via SkParagraph (default ON when Skia available, can be disabled)

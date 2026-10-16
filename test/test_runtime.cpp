@@ -1283,9 +1283,9 @@ TEST_CASE("pulp_build_info constants are populated at configure time",
         pulp::runtime::kSdkVersion));
 
     // Git SHA is optional (empty when not a checkout). When present it is
-    // exactly 12 hex chars whatever the clone, so one commit builds the
-    // same bytes from a shallow checkout and a full one.
+    // the complete immutable commit identity so receipts can bind a binary
+    // to the exact source revision.
     if (!pulp::runtime::kGitSha.empty()) {
-        REQUIRE(pulp::runtime::kGitSha.size() == 12);
+        REQUIRE(pulp::runtime::kGitSha.size() == 40);
     }
 }

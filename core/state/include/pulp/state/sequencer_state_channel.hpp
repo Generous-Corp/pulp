@@ -33,9 +33,9 @@
 /// — never per cell edit (it is a large copy).
 ///
 /// NEUTRAL PRODUCER CONTRACT: the authoritative writer is any single thread. It
-/// need NOT be a pulp::format::Processor and this header includes nothing from
-/// <pulp/format/...> or <pulp/state/store...> — only runtime primitives. A
-/// non-Pulp engine can own the channel and drive it directly (see
+/// need NOT be a framework processor and this header includes nothing from the
+/// format or state-store layers — only runtime primitives. A non-framework
+/// engine can own the channel and drive it directly (see
 /// step_edit_reducer.hpp for the reference apply/drain logic and the docs page
 /// docs/reference/sequencer-state-channel.md for the full contract).
 ///

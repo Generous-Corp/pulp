@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "source": "figma-plugin",
+  "root": {
+    "type": "frame",
+    "name": "controls",
+    "style": {
+      "backgroundColor": "#14171c",
+      "width": 240,
+      "height": 160
+    },
+    "layout": {
+      "direction": "row",
+      "gap": 0,
+      "paddingTop": 0,
+      "paddingRight": 0,
+      "paddingBottom": 0,
+      "paddingLeft": 0,
+      "justify": "flex-start",
+      "align": "flex-start",
+      "wrap": false,
+      "widthMode": "fixed",
+      "heightMode": "fixed"
+    },
+    "stable_anchor_id": "controls-root",
+    "children": [
+      {
+        "type": "frame",
+        "name": "Knob",
+        "style": {
+          "width": 80,
+          "height": 80
+        },
+        "layout": {
+          "direction": "column",
+          "gap": 0,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "justify": "flex-start",
+          "align": "flex-start",
+          "wrap": false,
+          "widthMode": "fixed",
+          "heightMode": "fixed"
+        },
+        "audioWidget": "knob",
+        "label": "Cutoff",
+        "min": 0,
+        "max": 1,
+        "default": 0.5,
+        "stable_anchor_id": "cutoff-knob",
+        "children": []
+      },
+      {
+        "type": "frame",
+        "name": "Fader",
+        "style": {
+          "width": 40,
+          "height": 120
+        },
+        "layout": {
+          "direction": "column",
+          "gap": 0,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "justify": "flex-start",
+          "align": "flex-start",
+          "wrap": false,
+          "widthMode": "fixed",
+          "heightMode": "fixed"
+        },
+        "audioWidget": "fader",
+        "label": "Level",
+        "min": 0,
+        "max": 1,
+        "default": 0.25,
+        "stable_anchor_id": "level-fader",
+        "children": []
+      }
+    ]
+  }
+}

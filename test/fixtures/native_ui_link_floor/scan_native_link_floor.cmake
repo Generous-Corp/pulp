@@ -2,6 +2,9 @@ if(NOT NATIVE_STANDALONE OR NOT NATIVE_CLAP OR
    NOT WEBKIT_POSITIVE_CONTROL OR NOT JSC_POSITIVE_CONTROL)
     message(FATAL_ERROR "native link-floor scanner requires all artifact paths")
 endif()
+if(NOT DEFINED EXPECT_DAWN)
+    message(FATAL_ERROR "native link-floor scanner requires EXPECT_DAWN provider selection")
+endif()
 
 foreach(_artifact
         "${NATIVE_STANDALONE}"
@@ -37,6 +40,20 @@ if(NOT _jsc_positive_deps MATCHES "JavaScriptCore.framework")
         "positive control does not link JavaScriptCore; the absence scanner is not mutation-sensitive:\n${_jsc_positive_deps}")
 endif()
 
+# wgpu-native positive control. The native artifacts render through Skia
+# Graphite on Skia's static Dawn and must not load libwgpu_native: when two
+# plug-ins share a host, dyld shares one copy per process by install name.
+if(WGPU_POSITIVE_CONTROL)
+    if(NOT EXISTS "${WGPU_POSITIVE_CONTROL}")
+        message(FATAL_ERROR "wgpu positive control does not exist: ${WGPU_POSITIVE_CONTROL}")
+    endif()
+    _otool(_wgpu_positive_deps "${WGPU_POSITIVE_CONTROL}")
+    if(NOT _wgpu_positive_deps MATCHES "libwgpu_native")
+        message(FATAL_ERROR
+            "positive control does not load libwgpu_native; the absence scanner is not mutation-sensitive:\n${_wgpu_positive_deps}")
+    endif()
+endif()
+
 foreach(_artifact "${NATIVE_STANDALONE}" "${NATIVE_CLAP}")
     _otool(_deps "${_artifact}")
     if(_deps MATCHES "WebKit.framework")
@@ -49,8 +66,14 @@ foreach(_artifact "${NATIVE_STANDALONE}" "${NATIVE_CLAP}")
     elseif(_deps MATCHES "JavaScriptCore.framework")
         message(FATAL_ERROR "QuickJS native artifact links forbidden JavaScriptCore: ${_artifact}\n${_deps}")
     endif()
-    if(NOT _deps MATCHES "libwgpu_native.dylib")
-        message(FATAL_ERROR "native artifact lost wgpu-native: ${_artifact}\n${_deps}")
+    if(EXPECT_DAWN)
+        if(_deps MATCHES "libwgpu_native")
+            message(FATAL_ERROR
+                "native artifact loads wgpu-native beside Skia's Dawn: ${_artifact}\n${_deps}")
+        endif()
+    elseif(NOT _deps MATCHES "libwgpu_native")
+        message(FATAL_ERROR
+            "native artifact lost the wgpu-native fallback provider: ${_artifact}\n${_deps}")
     endif()
 
     execute_process(
@@ -62,6 +85,16 @@ foreach(_artifact "${NATIVE_STANDALONE}" "${NATIVE_CLAP}")
         message(FATAL_ERROR
             "native artifact lost ScriptedUiSession symbols: ${_artifact}\n${_nm_error}")
     endif()
+    # The selected GPU provider must still be present; an artifact with no
+    # provider at all would pass the mutually-exclusive provider check for the
+    # wrong reason.
+    if(EXPECT_DAWN)
+        if(NOT _symbols MATCHES "dawn::native::")
+            message(FATAL_ERROR "native artifact lost Skia's Dawn (dawn::native): ${_artifact}")
+        endif()
+    elseif(_symbols MATCHES "dawn::native::")
+        message(FATAL_ERROR "wgpu-native fallback artifact unexpectedly contains Dawn symbols: ${_artifact}")
+    endif()
     if(_symbols MATCHES "WebViewPanel|WKWebView|choc::ui::WebView")
         message(FATAL_ERROR
             "native artifact contains forbidden WebView symbols: ${_artifact}")
@@ -69,9 +102,14 @@ foreach(_artifact "${NATIVE_STANDALONE}" "${NATIVE_CLAP}")
 
     get_filename_component(_artifact_dir "${_artifact}" DIRECTORY)
     file(GLOB_RECURSE _resources LIST_DIRECTORIES false "${_artifact_dir}/*")
-    if(NOT "${_artifact_dir}/libwgpu_native.dylib" IN_LIST _resources)
+    if(EXPECT_DAWN)
+        if("${_resources}" MATCHES "libwgpu_native")
+            message(FATAL_ERROR
+                "native artifact staged libwgpu_native beside its Dawn executable: ${_artifact_dir}\n${_resources}")
+        endif()
+    elseif(NOT "${_resources}" MATCHES "libwgpu_native")
         message(FATAL_ERROR
-            "native artifact did not stage libwgpu_native.dylib beside its executable: ${_artifact_dir}")
+            "wgpu-native artifact did not stage libwgpu_native beside its executable: ${_artifact_dir}\n${_resources}")
     endif()
     if("${_resources}" MATCHES "WebKit|WebView")
         message(FATAL_ERROR
@@ -84,5 +122,10 @@ if(EXPECT_JSC)
 else()
     set(_engine_contract "JavaScriptCore absent")
 endif()
+if(EXPECT_DAWN)
+    set(_provider_contract "Dawn present; wgpu-native absent")
+else()
+    set(_provider_contract "wgpu-native present; Dawn absent")
+endif()
 message(STATUS
-    "native link floor verified: ScriptedUiSession + wgpu present; WebKit absent; ${_engine_contract}")
+    "native link floor verified: ScriptedUiSession + ${_provider_contract}; WebKit absent; ${_engine_contract}")

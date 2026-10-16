@@ -88,10 +88,10 @@ guards = [".github/workflows/**", "tools/ci/**", "tools/local-ci/**"]
 [[decision]]
 id = 2
 layer = "default"
-tags = ["auto-rebase", "behind", "dirty"]
-title = "No unattended auto-rebase of BEHIND/DIRTY PRs — surface only."
-why = "Version-line races make BEHIND routine; a scripted rebase once mis-resolved and flattened a PR's diff to zero files."
-do_not = "A 'clever' unattended rebase: mis-resolving the bump lands wrong content on main."
+tags = ["auto-rebase", "behind", "dirty", "update-branch"]
+title = "No unattended rebase of BEHIND/DIRTY PRs. The single fenced carrier may merge-update a BEHIND, armed, approved PR, never DIRTY."
+why = "A scripted rebase once mis-resolved the version line and flattened a PR's diff. GitHub's merge-only update-branch rewrites nothing and refuses on conflict, and the own-lines invariant checks every update against the approved head."
+do_not = "Rebase unattended; touch a DIRTY or CONFLICTING PR; update before Q1 and the own-lines invariant exist; update an unarmed PR, or a head that moved since its approval record; update more than 2 times per PR per day, or while a required run on the head is live."
 guards = [".github/workflows/**", "tools/ci/**"]
 
 [[decision]]
@@ -160,10 +160,10 @@ guards = [".github/workflows/**", ".shipyard/config.toml", "tools/ci/**"]
 [[decision]]
 id = 15
 layer = "default"
-tags = ["recovery", "cross-host", "fencing"]
-title = "Recovery is origin-host-only; no cross-host takeover without real fencing."
-why = "Host-local state stores have no fencing token; two hosts would race."
-do_not = "Cross-host takeover before an incident demands it (none has)."
+tags = ["recovery", "cross-host", "fencing", "carrier", "singleton"]
+title = "One fenced carrier fleet-wide acts on GitHub facts alone; every other host is inert. Host-local recovery stays origin-host-only."
+why = "Host-local state stores have no fencing token, so two hosts acting from them would race. Dead-owner PRs (#9650 3.4 d, #9658 never re-armed, 27 min to 37.5 h to first fix) showed the carrier is needed. Fencing: exactly one host runs --mode live --authority; every other install is inert, and the quarantine stops a second live controller. That controller reads only GitHub, under a host lock and a write-ahead intent."
+do_not = "Install a second live controller; let a controller act from host-local state; act on a PR whose head has no approval record; skip the inert canary before live."
 guards = ["tools/ci/**", "tools/local-ci/**"]
 
 [[decision]]
@@ -227,10 +227,10 @@ guards = [".shipyard/config.toml", ".github/workflows/**"]
 [[decision]]
 id = 10
 layer = "pulp"
-tags = ["bump-at-merge", "version-bump", "in-branch", "1008"]
-title = "The version bump lives IN THE BRANCH, verifiable pre-merge — never applied at merge."
-why = "A fix once merged bumpless (issue 1008) → no tag → no release, silently. Bump-at-merge was proposed 2026-07-14 and retracted the same day."
-do_not = "Bump-at-merge in any costume. A 'single writer at land' design must show on paper how it preserves the pre-merge guarantee before graduating."
+tags = ["bump-at-merge", "version-bump", "in-branch", "version-at-land", "pending-intent-liveness", "1008"]
+title = "Every merge to main declares its version intent pre-merge (Version-Bump trailer, gated at PR time); version-at-land applies it after land; an intent the bot has not applied within the drain cadence alarms (pending-intent liveness)."
+why = "A fix once merged bumpless (issue 1008) → no tag → no release, silently. Bump-at-merge was proposed 2026-07-14 and retracted the same day because it lost the pre-merge guarantee. Version-at-land keeps that guarantee by gating the declared intent at PR time; the bot's bump PR (e.g. #10251) only applies it. The row previously read 'the bump lives IN THE BRANCH' after version-at-land had graduated, which sent the 2026-10-14 release-stall plan to a ruling it did not need; rewritten per that ruling."
+do_not = "Reintroduce in-branch bump commits as a requirement; ship a land-time writer without the pending-intent liveness alarm; squash (row 16)."
 guards = [".github/workflows/**", ".shipyard/config.toml"]
 
 [[decision]]

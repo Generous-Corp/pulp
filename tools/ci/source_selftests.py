@@ -15,9 +15,13 @@ follow from one manifest, so they cannot drift apart:
 * ``tools/ci/ctest_gate_args.py`` excludes that label on the gate events
   (``pull_request``, ``workflow_dispatch``, ``merge_group``). Every other lane,
   including ``push`` to main, still runs them.
-* ``.github/workflows/version-skill-check.yml`` (the required
-  ``Enforce version & skill sync`` context, which reports on ``merge_group``)
-  runs every entry with ``run``, so each one stays on a REQUIRED check.
+* ``.github/workflows/version-skill-check.yml`` runs every entry with
+  ``run``, split into ``lane_parts``: the shared part beside the other version
+  and skill checks, and each whole-machine entry (``PROCESSORS`` above 1) in
+  one of ``EXCLUSIVE_SHARDS`` sibling jobs, where it still runs alone. The
+  required ``Enforce version & skill sync`` context (which reports on
+  ``merge_group``) needs every one of those jobs and fails unless all
+  succeeded, so each entry stays on a REQUIRED check.
 
 ``check`` is the guard. It runs on the macOS gate itself (it needs a configured
 build tree) and fails when a label and the manifest disagree, when a manifest
@@ -204,23 +208,31 @@ class _Slots:
             self.cond.notify_all()
 
 
-def ctest_verdict(entry: dict[str, Any], returncode: int, output: str) -> int:
-    """The exit status ctest would record, given the test's properties.
+def ctest_outcome(entry: dict[str, Any], returncode: int, output: str) -> tuple[int, bool]:
+    """(exit status, skipped) as ctest would record them, given the test's properties.
 
-    PASS_REGULAR_EXPRESSION decides pass/fail by output alone, a
-    SKIP_RETURN_CODE exit is a skip (reported as a pass, marked in the
-    output), and WILL_FAIL inverts the result, all as ctest does.
+    A SKIP_RETURN_CODE exit or SKIP_REGULAR_EXPRESSION match is a skip: status
+    0 and ``skipped`` true, so a caller can keep skips out of its pass count.
+    Otherwise PASS_REGULAR_EXPRESSION decides pass/fail by output alone, and
+    WILL_FAIL inverts the result, all as ctest does.
     """
     skip = entry.get("skip_return_code")
     if skip is not None and returncode == int(skip):
-        return 0
+        return 0, True
+    # A CMake regex `.` also matches a newline.
+    if any(re.search(p, output or "", re.DOTALL) for p in entry.get("skip_regex") or []):
+        return 0, True
     patterns = entry.get("pass_regex") or []
     if patterns:
-        # A CMake regex `.` also matches a newline.
         returncode = 0 if any(re.search(p, output or "", re.DOTALL) for p in patterns) else 1
     if entry.get("will_fail"):
         returncode = 0 if returncode != 0 else 1
-    return returncode
+    return returncode, False
+
+
+def ctest_verdict(entry: dict[str, Any], returncode: int, output: str) -> int:
+    """The exit status ctest would record; a skip is 0 (see ctest_outcome)."""
+    return ctest_outcome(entry, returncode, output)[0]
 
 
 def _run_one(
@@ -272,8 +284,8 @@ def _run_one(
                     timeout=timeout,
                     check=False,
                 )
-                result.update(returncode=ctest_verdict(entry, proc.returncode, proc.stdout),
-                              output=proc.stdout)
+                verdict, skipped = ctest_outcome(entry, proc.returncode, proc.stdout)
+                result.update(returncode=verdict, skipped=skipped, output=proc.stdout)
             except subprocess.TimeoutExpired as exc:
                 out = exc.stdout or ""
                 if isinstance(out, bytes):
@@ -325,7 +337,9 @@ def run(
             res = future.result()
             results.append(res)
             verdict = "Passed" if res["returncode"] == 0 else "***Failed"
-            if res["returncode"] == 0 and res["attempts"] > 1:
+            if res["returncode"] == 0 and res.get("skipped"):
+                verdict = "Skipped"
+            elif res["returncode"] == 0 and res["attempts"] > 1:
                 verdict = "Passed (after retry)"
             print(
                 f"{index:4d}/{len(entries)} {res['name']} ... {verdict} "
@@ -334,6 +348,247 @@ def run(
                 flush=True,
             )
     return results
+
+
+# --------------------------------------------------------------------------
+# lane parts: how the required lane splits the manifest across jobs
+
+# Which sibling job runs each whole-machine entry, balanced on measured wall
+# time (hosted ubuntu-latest, fast-run seconds): dpr-runner 132.5 +
+# external-adapter 11.3 against v2-evidence 69.0 + manifest 60.9 +
+# rederive 26.6. The two agent-capability entries share a resource lock, so
+# they stay together. `check` fails when an exclusive entry is missing here,
+# a name here is not an exclusive entry, or a lock group is split; until it
+# is placed, an unplanned entry still runs, on the lightest shard.
+# version-skill-check.yml lists the same shard numbers in its matrix.
+EXCLUSIVE_SHARD_PLAN: tuple[tuple[str, ...], ...] = (
+    ("gpu-dpr-runner-selftest", "gpu-first-visible-external-adapter-selftest"),
+    (
+        "gpu-dpr-v2-evidence-selftest",
+        "agent-capability-manifest-selftest",
+        "agent-capability-rederive-selftest",
+    ),
+)
+EXCLUSIVE_SHARDS = len(EXCLUSIVE_SHARD_PLAN)
+SHARED_PART = "shared"
+EXCLUSIVE_PART = "exclusive"
+
+
+def is_exclusive(entry: dict[str, Any]) -> bool:
+    """An entry calibrated to have the machine to itself (``PROCESSORS`` > 1)."""
+    return int(entry.get("processors") or 1) > 1
+
+
+def lane_parts(
+    entries: list[dict[str, Any]],
+    shards: int = EXCLUSIVE_SHARDS,
+    plan: tuple[tuple[str, ...], ...] = EXCLUSIVE_SHARD_PLAN,
+) -> dict[str, list[dict[str, Any]]]:
+    """Split the manifest into the shared part and ``shards`` exclusive shards.
+
+    Every entry lands in exactly one part. Entries that share a resource lock
+    with an exclusive entry travel with it, so a lock never spans two jobs.
+    An exclusive group goes to the shard ``plan`` names for its first planned
+    member; a group the plan does not name goes, longest-timeout first, to the
+    lightest shard, so it still runs. The result is a deterministic function of
+    the manifest and the plan, so every job computes the same split without
+    coordinating.
+    """
+    if shards < 1:
+        raise ValueError("shards must be at least 1")
+    planned = {name: i for i, names in enumerate(plan[:shards]) for name in names}
+    parent = {e["name"]: e["name"] for e in entries}
+
+    def find(name: str) -> str:
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    holders: dict[str, str] = {}
+    for item in entries:
+        for lock in item.get("resource_lock") or []:
+            if lock in holders:
+                parent[find(item["name"])] = find(holders[lock])
+            else:
+                holders[lock] = item["name"]
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in entries:
+        groups.setdefault(find(item["name"]), []).append(item)
+    exclusive = [g for g in groups.values() if any(is_exclusive(e) for e in g)]
+    in_exclusive = {e["name"] for g in exclusive for e in g}
+
+    def weight(group: list[dict[str, Any]]) -> float:
+        return sum(float(e.get("timeout") or DEFAULT_TIMEOUT) for e in group)
+
+    keys = [f"{EXCLUSIVE_PART}-{i}/{shards}" for i in range(1, shards + 1)]
+    load = {key: 0.0 for key in keys}
+    result: dict[str, list[dict[str, Any]]] = {SHARED_PART: [
+        e for e in entries if e["name"] not in in_exclusive]}
+    result.update({key: [] for key in keys})
+    unplanned = []
+    for group in sorted(exclusive, key=lambda g: min(e["name"] for e in g)):
+        slots = sorted({planned[e["name"]] for e in group if e["name"] in planned})
+        if slots:
+            key = keys[slots[0]]
+            load[key] += weight(group)
+            result[key].extend(group)
+        else:
+            unplanned.append(group)
+    for group in sorted(unplanned, key=lambda g: (-weight(g), min(e["name"] for e in g))):
+        key = min(keys, key=lambda k: (load[k], keys.index(k)))
+        load[key] += weight(group)
+        result[key].extend(group)
+    return result
+
+
+def part_errors(
+    entries: list[dict[str, Any]],
+    shards: int = EXCLUSIVE_SHARDS,
+    plan: tuple[tuple[str, ...], ...] = EXCLUSIVE_SHARD_PLAN,
+) -> list[str]:
+    """Ways the split could drop or double-run an entry, or drift from the plan."""
+    errors: list[str] = []
+    counts: dict[str, int] = {}
+    parts = lane_parts(entries, shards, plan)
+    exclusive_names = {e["name"] for e in entries if is_exclusive(e)}
+    planned_names = [name for names in plan for name in names]
+    if len(plan) != shards:
+        errors.append(f"EXCLUSIVE_SHARD_PLAN lists {len(plan)} shards, not {shards}")
+    for name in sorted({n for n in planned_names if planned_names.count(n) > 1}):
+        errors.append(f"{name}: named in more than one EXCLUSIVE_SHARD_PLAN shard")
+    for name in sorted(set(planned_names) - exclusive_names):
+        errors.append(f"{name}: in EXCLUSIVE_SHARD_PLAN but not a whole-machine manifest entry")
+    for name in sorted(exclusive_names - set(planned_names)):
+        errors.append(
+            f"{name}: runs in an exclusive shard but EXCLUSIVE_SHARD_PLAN does not "
+            "place it; add it to the shard that keeps the two balanced"
+        )
+    for index, names in enumerate(plan[:shards]):
+        key = f"{EXCLUSIVE_PART}-{index + 1}/{shards}"
+        held = {e["name"] for e in parts[key]}
+        for name in names:
+            if name in exclusive_names and name not in held:
+                errors.append(
+                    f"{name}: EXCLUSIVE_SHARD_PLAN puts it in shard {index + 1} but a "
+                    "shared resource lock carries it to another shard"
+                )
+    for members in parts.values():
+        for item in members:
+            counts[item["name"]] = counts.get(item["name"], 0) + 1
+    for item in entries:
+        seen = counts.get(item["name"], 0)
+        if seen != 1:
+            errors.append(f"{item['name']}: runs in {seen} lane parts, not exactly one")
+    return errors
+
+
+def select_part(
+    entries: list[dict[str, Any]], part: str, shard: str | None
+) -> list[dict[str, Any]]:
+    """The entries one lane job runs; raises ValueError on a bad selector."""
+    if part == "all":
+        if shard:
+            raise ValueError("--shard needs --part exclusive")
+        return entries
+    if part == SHARED_PART:
+        if shard:
+            raise ValueError("--shard needs --part exclusive")
+        return lane_parts(entries)[SHARED_PART]
+    match = re.fullmatch(r"(\d+)/(\d+)", shard or "")
+    if not match:
+        raise ValueError("--part exclusive needs --shard I/N")
+    index, total = int(match.group(1)), int(match.group(2))
+    if total != EXCLUSIVE_SHARDS or not 1 <= index <= total:
+        raise ValueError(
+            f"--shard {shard} does not name one of the {EXCLUSIVE_SHARDS} "
+            "exclusive shards this script defines"
+        )
+    return lane_parts(entries)[f"{EXCLUSIVE_PART}-{index}/{total}"]
+
+
+def _step_lines(lines: list[str], index: int) -> list[str]:
+    """The lines of the workflow step whose body holds ``lines[index]``."""
+    start = index
+    while start > 0 and not lines[start].lstrip().startswith("- "):
+        start -= 1
+    if not lines[start].lstrip().startswith("- "):
+        return [lines[index]]
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        end += 1
+    return lines[start:end]
+
+
+def _job_lines(lines: list[str], job: str) -> list[str]:
+    """A top-level job's own lines (two-space job ids under ``jobs:``)."""
+    try:
+        start = lines.index(f"  {job}:")
+    except ValueError:
+        return []
+    end = start + 1
+    while end < len(lines) and not (lines[end].startswith("  ") and lines[end][2:3].strip()
+                                    and not lines[end].startswith("   ")):
+        end += 1
+    return lines[start:end]
+
+
+def neutralizer_errors(lane_workflow_text: str, needles: tuple[str, ...]) -> list[str]:
+    """Ways to keep a lane part wired yet stop it from deciding the check.
+
+    A step-level ``if:`` can skip a part's run step while its job still
+    succeeds, and ``continue-on-error`` turns a red step or job into a green
+    one, so the required aggregator would read success for work that never
+    passed.
+    """
+    errors: list[str] = []
+    lines = lane_workflow_text.splitlines()
+    for needle in needles:
+        for index, line in enumerate(lines):
+            if needle not in line:
+                continue
+            step = _step_lines(lines, index)
+            # The first key of a step sits after its "- " marker.
+            for key in [step[0].replace("- ", "  ", 1), *step[1:]]:
+                stripped = key.strip()
+                if stripped.startswith(("if:", "continue-on-error:")):
+                    errors.append(f"the step running `{needle}` carries `{stripped}`; "
+                                  "it could skip or soften that part of the required lane")
+    for job in ("version-skill-check", "exclusive-selftests", "enforce"):
+        for line in _job_lines(lines, job):
+            if line.startswith("    continue-on-error:"):
+                errors.append(f"job {job} sets `{line.strip()}`; a failing part would "
+                              "conclude success and pass the required aggregator")
+    return errors
+
+
+def wiring_errors(lane_workflow_text: str) -> list[str]:
+    """The lane workflow must run every part of the split."""
+    errors: list[str] = []
+    workflow = LANE_WORKFLOW.relative_to(REPO_ROOT)
+    shared = "tools/ci/source_selftests.py run --min-count 130 --part shared"
+    exclusive = (
+        "tools/ci/source_selftests.py run --min-count 130 --part exclusive "
+        f"--shard ${{{{ matrix.shard }}}}/{EXCLUSIVE_SHARDS}"
+    )
+    matrix = "shard: [" + ", ".join(str(i) for i in range(1, EXCLUSIVE_SHARDS + 1)) + "]"
+    for needle, what in (
+        (shared, "the shared part"),
+        (exclusive, "the exclusive shards"),
+        (matrix, f"all {EXCLUSIVE_SHARDS} exclusive shards"),
+    ):
+        if needle not in lane_workflow_text:
+            errors.append(
+                f"{workflow} no longer runs {what} (`{needle}`); the {LABEL} tests "
+                "in it would run on no required lane"
+            )
+    errors.extend(f"{workflow}: {error}"
+                  for error in neutralizer_errors(lane_workflow_text, (shared, exclusive)))
+    return errors
 
 
 # --------------------------------------------------------------------------
@@ -557,6 +812,9 @@ def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
         entry["pass_regex"] = value if isinstance(value, list) else str(value).split(";")
     if props.get("SKIP_RETURN_CODE") not in (None, ""):
         entry["skip_return_code"] = int(props["SKIP_RETURN_CODE"])
+    if props.get("SKIP_REGULAR_EXPRESSION"):
+        value = props["SKIP_REGULAR_EXPRESSION"]
+        entry["skip_regex"] = value if isinstance(value, list) else str(value).split(";")
     if str(props.get("WILL_FAIL", "")).upper() in ("1", "ON", "TRUE", "YES"):
         entry["will_fail"] = True
     if props.get("ENVIRONMENT"):
@@ -757,17 +1015,24 @@ def _cmake_calls(source: str, command: str) -> list[list[str]]:
     """Argument lists of every ``command(...)`` call, parentheses balanced."""
     calls = []
     for match in re.finditer(r"(?im)^\s*" + command + r"\s*\(", source):
-        depth, index = 1, match.end()
+        # A line comment inside the call is not an argument: its words would
+        # shift every later PROPERTIES key/value pair.
+        depth, index, quoted, kept = 1, match.end(), False, []
         while index < len(source) and depth:
             char = source[index]
-            if char == "#" and (index == 0 or source[index - 1] != "\\"):
+            if char == '"' and source[index - 1] != "\\":
+                quoted = not quoted
+            elif not quoted and char == "#":
                 index = source.find("\n", index)
                 if index < 0:
                     break
                 continue
-            depth += {"(": 1, ")": -1}.get(char, 0)
+            elif not quoted:
+                depth += {"(": 1, ")": -1}.get(char, 0)
+            if depth:
+                kept.append(char)
             index += 1
-        calls.append(_cmake_args(source[match.end():index - 1]))
+        calls.append(_cmake_args("".join(kept)))
     return calls
 
 
@@ -1017,6 +1282,7 @@ def check(
     require_all: bool,
     gate_label_excludes: dict[str, str],
     lane_workflow_text: str,
+    shard_plan: tuple[tuple[str, ...], ...] = EXCLUSIVE_SHARD_PLAN,
 ) -> list[str]:
     """Every way the two lanes could disagree, as a list of error strings."""
     errors: list[str] = []
@@ -1103,12 +1369,8 @@ def check(
                 f"gate event {event} does not exclude {LABEL}; the moved tests "
                 "would run twice (harmless) but the wiring has drifted"
             )
-    invocation = "tools/ci/source_selftests.py run"
-    if invocation not in lane_workflow_text:
-        errors.append(
-            f"{LANE_WORKFLOW.relative_to(REPO_ROOT)} no longer invokes "
-            f"`{invocation}`; the {LABEL} tests would run on no required lane"
-        )
+    errors.extend(wiring_errors(lane_workflow_text))
+    errors.extend(part_errors(entries, plan=shard_plan))
     return errors
 
 
@@ -1188,11 +1450,19 @@ def _run_and_report(args: argparse.Namespace, parser: argparse.ArgumentParser,
     for res in caused:
         print(f"\n===== {res['name']} (exit {res['returncode']}) =====")
         print(res.get("output", "")[-6000:])
+    skipped = [r for r in results if r["returncode"] == 0 and r.get("skipped")]
+    passed = len(results) - len(failed) - len(skipped)
     print(
-        f"\nsource-selftests: {len(results) - len(failed)} passed, "
+        f"\nsource-selftests: {passed} passed, {len(skipped)} skipped, "
         f"{len(caused)} failed, {len(preexisting)} pre-existing on base, "
         f"out of {len(results)} in {time.monotonic() - start:.1f}s"
     )
+    if results and passed == 0 and not failed:
+        # Every selected entry skipped: nothing was executed, so the lane has
+        # no evidence either way and must not report green.
+        print("source-selftests: every selected entry skipped; nothing was executed",
+              flush=True)
+        return 1
     return 1 if caused or len(results) != len(entries) else 0
 
 
@@ -1207,6 +1477,18 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=1,
         help="fail when the manifest lists fewer entries (a shrunken lane)",
+    )
+    p_run.add_argument(
+        "--part",
+        choices=("all", SHARED_PART, EXCLUSIVE_PART),
+        default="all",
+        help="run one part of the manifest's split across the required lane's "
+        "jobs (see lane_parts); --min-count still counts the whole manifest",
+    )
+    p_run.add_argument(
+        "--shard",
+        metavar="I/N",
+        help="with --part exclusive: which exclusive shard to run",
     )
     p_run.add_argument(
         "--workflow",
@@ -1299,6 +1581,21 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+        if args.part != "all" or args.shard:
+            if args.workflow or args.ctest_python or args.changed_from:
+                parser.error("--part/--shard split the manifest; they take no other selector")
+            total = len(entries)
+            try:
+                entries = select_part(entries, args.part, args.shard)
+            except ValueError as exc:
+                parser.error(str(exc))
+            label = args.part + (f" {args.shard}" if args.shard else "")
+            print(f"source-selftests: lane part {label}: {len(entries)} of {total} entries",
+                  flush=True)
+            if not entries:
+                print(f"source-selftests: lane part {label} is empty; the split no longer "
+                      "matches the workflow", file=sys.stderr)
+                return 1
         if args.workflow or args.ctest_python:
             for entry in [e for e in entries if e["name"] in WORKFLOW_LOCAL_SKIPS]:
                 entries.remove(entry)

@@ -20,6 +20,7 @@
 #include <pulp/state/properties_file.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/command_registry.hpp>
+#include <pulp/view/register_audio_widgets.hpp>
 
 #include <algorithm>
 #include <array>
@@ -314,6 +315,7 @@ void constrain_audio_config(StandaloneConfig& config) {
 StandaloneApp::StandaloneApp(ProcessorFactory factory)
     : factory_(factory)
 {
+    pulp::view::register_audio_widgets();
 }
 
 StandaloneApp::~StandaloneApp() {

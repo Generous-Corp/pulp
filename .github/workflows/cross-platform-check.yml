@@ -61,7 +61,7 @@ jobs:
     env:
       PULP_BUILD_DIR: build-linux
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -126,12 +126,12 @@ jobs:
 
       - name: Build
         shell: bash
-        # A literal --parallel 4, as build.yml's hosted Windows leg uses: these
-        # are ephemeral 4-core GitHub-hosted runners that share with nobody,
-        # so the host build governor has nothing to divide. Without it the
-        # default generators build serially (Makefiles `make -j1`, Visual
-        # Studio MSBuild one project at a time) and every leg hit its timeout.
-        run: cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4 2>&1 | tee build-linux.log
+        # Route the cross-platform build through the shared governor. The
+        # wrapper keeps the runner-specific target/configuration unchanged
+        # while owning parallelism and build-directory locking.
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release 2>&1 | tee build-linux.log
 
       - name: Install visual-analysis Python dependencies
         # The same script build.yml and sanitizers.yml call, so the
@@ -164,7 +164,7 @@ jobs:
 
       - name: Upload Linux build + test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cross-platform-linux-logs
           path: |
@@ -186,7 +186,7 @@ jobs:
     env:
       PULP_BUILD_DIR: build-linux-arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -238,12 +238,11 @@ jobs:
 
       - name: Build
         shell: bash
-        # A literal --parallel 4, as build.yml's hosted Windows leg uses: these
-        # are ephemeral 4-core GitHub-hosted runners that share with nobody,
-        # so the host build governor has nothing to divide. Without it the
-        # default generators build serially (Makefiles `make -j1`, Visual
-        # Studio MSBuild one project at a time) and every leg hit its timeout.
-        run: cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4 2>&1 | tee build-linux.log
+        # Keep the hosted cross-platform configuration while using the shared
+        # governor for bounded parallelism and build-directory locking.
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release 2>&1 | tee build-linux.log
 
       - name: Install visual-analysis Python dependencies
         # The same script build.yml and sanitizers.yml call, so the
@@ -270,7 +269,7 @@ jobs:
 
       - name: Upload Linux build + test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cross-platform-linux-arm64-logs
           path: |
@@ -292,7 +291,7 @@ jobs:
     env:
       PULP_BUILD_DIR: build-windows
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -334,13 +333,13 @@ jobs:
 
       - name: Build
         shell: bash
-        # A literal --parallel 4, as build.yml's hosted Windows leg uses: these
-        # are ephemeral 4-core GitHub-hosted runners that share with nobody,
-        # so the host build governor has nothing to divide. Without it the
-        # default generators build serially (Makefiles `make -j1`, Visual
-        # Studio MSBuild one project at a time) and every leg hit its timeout.
         id: build
-        run: cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4 2>&1 | tee build-windows.log
+        # The wrapper is invoked from Git Bash on the hosted Windows runner;
+        # it preserves the MSBuild configuration while owning parallelism and
+        # the build-directory lock.
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release 2>&1 | tee build-windows.log
 
       - name: Test (UTF-8 code page wrapped)
         # Runs after a build that finished with errors, not only after a clean
@@ -387,7 +386,7 @@ jobs:
 
       - name: Upload Windows build + test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cross-platform-windows-logs
           path: |
@@ -415,32 +414,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: false
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           packages: platform-tools
 
       - name: Install NDK
         run: sdkmanager "ndk;30.0.14904198"
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      # Dependency and wrapper downloads only. The native build tree
+      # (android/app/.cxx) is never cached: it is build output, its key could
+      # not track the sources, and it never restored. Restore runs on
+      # GitHub-hosted runners only; a push to main is the only writer.
+      - name: Restore Gradle caches (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        id: gradle-cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-            android/app/.cxx
-          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle.kts') }}
-          restore-keys: ${{ runner.os }}-gradle-
+          key: ${{ runner.os }}-gradle-${{ runner.arch }}-jdk17-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-${{ runner.arch }}-jdk17-
 
       - name: Build Android APK (arm64-v8a + x86_64)
         working-directory: android
@@ -448,6 +453,22 @@ jobs:
         shell: bash
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/30.0.14904198
+
+      # A running daemon holds locks under ~/.gradle/caches, which made the
+      # Windows save fail its tar step on every run.
+      - name: Stop the Gradle daemon before saving its caches
+        if: runner.environment == 'github-hosted' && github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && steps.gradle-cache.outputs.cache-hit != 'true'
+        working-directory: android
+        run: ./gradlew --stop
+
+      - name: Save Gradle caches (main, GitHub-hosted)
+        if: runner.environment == 'github-hosted' && github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && steps.gradle-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
 
       - name: Verify APK contains libpulp.so
         shell: bash
@@ -467,7 +488,7 @@ jobs:
 
       - name: Upload Android build logs + APK
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cross-platform-android-logs
           path: |

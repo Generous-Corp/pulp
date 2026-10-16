@@ -10,6 +10,7 @@
 //! | [`targets`]  | Platform-target parsing + pulp.toml read/write                          |
 //! | [`metadata`] | Alphabetical insertion into `DEPENDENCIES.md` / `NOTICE.md`            |
 //! | [`cmake`]    | Pure render of `cmake/pulp-packages.cmake` from lock + registry        |
+//! | [`pin`]      | Registry ref → full commit + archive integrity for `packages.lock.json` |
 //!
 //! The `cmd::pkg` module and `cmd::audit` module compose these to run
 //! each subcommand.
@@ -31,5 +32,6 @@
 pub mod cmake;
 pub mod license;
 pub mod metadata;
+pub mod pin;
 pub mod registry;
 pub mod targets;

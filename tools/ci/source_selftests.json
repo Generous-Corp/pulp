@@ -26,6 +26,7 @@
       "argv": [
         "{repo}/tools/scripts/test_agent_capability_manifest.py"
       ],
+      "timeout": 300.0,
       "resource_lock": [
         "agent-capability-manifest-source"
       ],
@@ -72,6 +73,13 @@
       "name": "build-dir-lock-selftest",
       "argv": [
         "{repo}/tools/ci/test_build_dir_lock.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "build-governance-paths-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_build_governance_paths.py"
       ],
       "timeout": 120.0
     },
@@ -167,6 +175,16 @@
       "timeout": 600.0
     },
     {
+      "name": "clean-worktree-planning-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_clean_worktree_planning"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 300.0
+    },
+    {
       "name": "clean-worktrees-selftest",
       "argv": [
         "-m",
@@ -247,6 +265,12 @@
       ]
     },
     {
+      "name": "dsp-capability-registry-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_dsp_capability_registry.py"
+      ]
+    },
+    {
       "name": "dsp-provenance-audit-selftest",
       "argv": [
         "{repo}/tools/scripts/test_dsp_provenance_audit.py"
@@ -257,6 +281,13 @@
       "argv": [
         "{repo}/tools/test_dsp_vocabulary.py"
       ]
+    },
+    {
+      "name": "evidence-archive-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_evidence_archive.py"
+      ],
+      "timeout": 60.0
     },
     {
       "name": "fleet-remote-probe-selftest",
@@ -511,6 +542,12 @@
       "timeout": 120.0
     },
     {
+      "name": "make-catalog-component-selftest",
+      "argv": [
+        "{repo}/tools/import-design/test_make_catalog_component.py"
+      ]
+    },
+    {
       "name": "measure-min-os-selftest",
       "argv": [
         "{repo}/tools/scripts/test_measure_min_os.py"
@@ -588,6 +625,12 @@
       ]
     },
     {
+      "name": "proxmox-host-watch-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_proxmox_host_watch.py"
+      ]
+    },
+    {
       "name": "pulp-editor-bridge-contract-gate-selftest",
       "argv": [
         "{repo}/tools/bridge/bridge_contract_gate_checks.py"
@@ -607,6 +650,13 @@
         "{repo}/tools/bridge/bridge_gen_checks.py"
       ],
       "timeout": 60.0
+    },
+    {
+      "name": "pulp-worktree-creation-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_pulp_worktree_creation.py"
+      ],
+      "timeout": 120.0
     },
     {
       "name": "queue-batch-attribute-selftest",
@@ -941,6 +991,30 @@
       "name": "tmp-leak-guard-selftest",
       "argv": [
         "{repo}/tools/scripts/test_tmp_leak_guard.py"
+      ]
+    },
+    {
+      "name": "toolchain-check_env-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_check_env.py"
+      ]
+    },
+    {
+      "name": "toolchain-mise_profile-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_mise_profile.py"
+      ]
+    },
+    {
+      "name": "toolchain-test_generate-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_generate.py"
+      ]
+    },
+    {
+      "name": "toolchain-update-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_update.py"
       ]
     },
     {

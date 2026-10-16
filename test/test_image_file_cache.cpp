@@ -10,11 +10,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/canvas/image_file_cache.hpp>
+#include <pulp/canvas/skia_canvas.hpp>
 
 #include "include/core/SkImage.h"
+#include "include/core/SkBitmap.h"
 #include "include/core/SkSurface.h"
 
+#include <array>
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 using namespace pulp::canvas;
 
@@ -27,6 +33,81 @@ sk_sp<SkImage> make_dummy_image() {
 }
 
 } // namespace
+
+TEST_CASE("Static embedded sprite decodes once across canvas frames",
+          "[canvas][image-cache][embedded]") {
+    // 2x1 RGBA PNG: red, blue. Static storage is part of this API's contract.
+    static constexpr std::uint8_t png[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0xf4,
+        0x22, 0x7f, 0x8a, 0x00, 0x00, 0x00, 0x0e, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0x00, 0x42, 0xff, 0x01, 0x0f, 0xf9, 0x03, 0xfd, 0x85, 0x11, 0x99, 0x76, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    };
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+
+    for (int frame = 0; frame < 2; ++frame) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(4, 2));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        REQUIRE(canvas.draw_image_from_static_data_rect(png, sizeof(png), 1, 0, 1, 1, 0, 0, 4, 2));
+        SkBitmap pixels;
+        REQUIRE(pixels.tryAllocN32Pixels(4, 2));
+        REQUIRE(surface->readPixels(pixels, 0, 0));
+        const auto color = pixels.getColor(2, 1);
+        REQUIRE(SkColorGetB(color) > 200);
+        REQUIRE(SkColorGetR(color) < 50);
+    }
+    REQUIRE(cache.stats().builds == 1);
+    REQUIRE(cache.stats().hits == 1);
+}
+
+TEST_CASE("Static embedded sprites key distinct bytes with the same size",
+          "[canvas][image-cache][embedded]") {
+    // Same 2x1 dimensions and size as the fixture above, but different pixels
+    // and a distinct address. This catches keys that accidentally omit the
+    // source address or size.
+    static constexpr std::uint8_t green_yellow_png[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0xf4,
+        0x22, 0x7f, 0x8a, 0x00, 0x00, 0x00, 0x0e, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60,
+        0x60, 0x60, 0xf8, 0x0f, 0x02, 0x00, 0x0e, 0xfa, 0x04, 0xfc, 0xa2, 0xab, 0xed, 0xce, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    };
+
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+
+    auto draw_and_read = [](const std::uint8_t* png, size_t size) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(2, 1));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        REQUIRE(canvas.draw_image_from_static_data_rect(png, size, 0, 0, 2, 1, 0, 0, 2, 1));
+        SkBitmap pixels;
+        REQUIRE(pixels.tryAllocN32Pixels(2, 1));
+        REQUIRE(surface->readPixels(pixels, 0, 0));
+        return std::array<SkColor, 2>{pixels.getColor(0, 0), pixels.getColor(1, 0)};
+    };
+
+    static constexpr std::uint8_t red_blue_png[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0xf4,
+        0x22, 0x7f, 0x8a, 0x00, 0x00, 0x00, 0x0e, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0x00, 0x42, 0xff, 0x01, 0x0f, 0xf9, 0x03, 0xfd, 0x85, 0x11, 0x99, 0x76, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    };
+    const auto first = draw_and_read(red_blue_png, sizeof(red_blue_png));
+    const auto second = draw_and_read(green_yellow_png, sizeof(green_yellow_png));
+    REQUIRE(first[0] != second[0]);
+    REQUIRE(first[1] != second[1]);
+    REQUIRE(cache.stats().builds == 2);
+    REQUIRE(cache.stats().hits == 0);
+}
 
 TEST_CASE("ImageFileCache: miss builds, hit reuses", "[canvas][image-cache][issue-6223]") {
     auto& cache = ImageFileCache::instance();
@@ -80,6 +161,210 @@ TEST_CASE("ImageFileCache: distinct paths and backends key separately",
     REQUIRE(a != b);
     REQUIRE(builds.load() == 3);  // both were hits
     REQUIRE(cache.stats().hits == 2);
+}
+
+TEST_CASE("ImageFileCache: clear_backend removes only one GPU backend",
+          "[canvas][image-cache][embedded]") {
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+
+    std::atomic<int> builds{0};
+    auto build = [&]() -> sk_sp<SkImage> {
+        ++builds;
+        return make_dummy_image();
+    };
+    const void* gpu_a = reinterpret_cast<const void*>(0xCAFE);
+    const void* gpu_b = reinterpret_cast<const void*>(0xBABE);
+
+    cache.get_or_build("/tmp/shared.png", gpu_a, build);
+    cache.get_or_build("/tmp/shared.png", gpu_b, build);
+    REQUIRE(cache.stats().size == 2);
+    cache.clear_backend(gpu_a);
+    REQUIRE(cache.stats().size == 1);
+    cache.get_or_build("/tmp/shared.png", gpu_b, build);
+    REQUIRE(builds.load() == 2); // backend B entry remains a hit
+    cache.get_or_build("/tmp/shared.png", gpu_a, build);
+    REQUIRE(builds.load() == 3); // backend A was invalidated
+}
+
+TEST_CASE("ImageFileCache: same-key concurrent builds are coalesced",
+          "[canvas][image-cache][embedded]") {
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const void* backend = reinterpret_cast<const void*>(0xDADA);
+    std::atomic<int> builds{0};
+    std::atomic<bool> started{false};
+    std::atomic<bool> release{false};
+    std::mutex gate_mutex;
+    std::condition_variable gate_cv;
+    auto build = [&]() -> sk_sp<SkImage> {
+        ++builds;
+        started.store(true, std::memory_order_release);
+        gate_cv.notify_all();
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        gate_cv.wait_for(lock, std::chrono::seconds(10),
+                         [&] { return release.load(std::memory_order_acquire); });
+        return make_dummy_image();
+    };
+    sk_sp<SkImage> first, second;
+    std::thread t1([&] { first = cache.get_or_build("/tmp/concurrent.png", backend, build); });
+    {
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        REQUIRE(gate_cv.wait_for(lock, std::chrono::seconds(10),
+                                 [&] { return started.load(std::memory_order_acquire); }));
+    }
+    std::thread t2([&] { second = cache.get_or_build("/tmp/concurrent.png", backend, build); });
+    release.store(true, std::memory_order_release);
+    gate_cv.notify_all();
+    t1.join();
+    t2.join();
+    REQUIRE(first != nullptr);
+    REQUIRE(second == first);
+    REQUIRE(builds.load() == 1);
+    REQUIRE(cache.stats().hits == 1);
+}
+
+TEST_CASE("ImageFileCache: clear_backend waits for an in-flight build",
+          "[canvas][image-cache][embedded]") {
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const void* backend = reinterpret_cast<const void*>(0xD0D0);
+    std::atomic<int> builds{0};
+    std::atomic<bool> started{false};
+    std::atomic<bool> release{false};
+    std::mutex gate_mutex;
+    std::condition_variable gate_cv;
+    auto build = [&]() -> sk_sp<SkImage> {
+        ++builds;
+        started.store(true, std::memory_order_release);
+        gate_cv.notify_all();
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        gate_cv.wait_for(lock, std::chrono::seconds(10),
+                         [&] { return release.load(std::memory_order_acquire); });
+        return make_dummy_image();
+    };
+    std::thread painter([&] { cache.get_or_build("/tmp/teardown.png", backend, build); });
+    {
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        REQUIRE(gate_cv.wait_for(lock, std::chrono::seconds(10),
+                                 [&] { return started.load(std::memory_order_acquire); }));
+    }
+    std::atomic<bool> invalidated{false};
+    std::thread invalidator([&] {
+        cache.clear_backend(backend);
+        invalidated.store(true, std::memory_order_release);
+    });
+    for (int i = 0; i < 1000 && !invalidated.load(std::memory_order_acquire); ++i)
+        std::this_thread::yield();
+    REQUIRE(!invalidated.load(std::memory_order_acquire));
+    release.store(true, std::memory_order_release);
+    gate_cv.notify_all();
+    painter.join();
+    invalidator.join();
+    REQUIRE(cache.stats().size == 0);
+    cache.get_or_build("/tmp/teardown.png", backend, [&] {
+        ++builds;
+        return make_dummy_image();
+    });
+    REQUIRE(builds.load() == 2);
+}
+
+TEST_CASE("ImageFileCache: clear waits for an in-flight build", "[canvas][image-cache][embedded]") {
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const void* backend = reinterpret_cast<const void*>(0xC1EA);
+    std::atomic<int> builds{0};
+    std::atomic<bool> started{false};
+    std::atomic<bool> release{false};
+    std::mutex gate_mutex;
+    std::condition_variable gate_cv;
+    auto build = [&]() -> sk_sp<SkImage> {
+        ++builds;
+        started.store(true, std::memory_order_release);
+        gate_cv.notify_all();
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        gate_cv.wait_for(lock, std::chrono::seconds(10),
+                         [&] { return release.load(std::memory_order_acquire); });
+        return make_dummy_image();
+    };
+    std::thread painter([&] { cache.get_or_build("/tmp/clear.png", backend, build); });
+    {
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        REQUIRE(gate_cv.wait_for(lock, std::chrono::seconds(10),
+                                 [&] { return started.load(std::memory_order_acquire); }));
+    }
+    std::atomic<bool> cleared{false};
+    std::thread invalidator([&] {
+        cache.clear();
+        cleared.store(true, std::memory_order_release);
+    });
+    for (int i = 0; i < 1000 && !cleared.load(std::memory_order_acquire); ++i)
+        std::this_thread::yield();
+    REQUIRE(!cleared.load(std::memory_order_acquire));
+    release.store(true, std::memory_order_release);
+    gate_cv.notify_all();
+    painter.join();
+    invalidator.join();
+    REQUIRE(cleared.load(std::memory_order_acquire));
+    REQUIRE(cache.stats().size == 0);
+}
+
+TEST_CASE("ImageFileCache: disabling wakes a coalesced waiter", "[canvas][image-cache][embedded]") {
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const void* backend = reinterpret_cast<const void*>(0xD1D1);
+    std::atomic<int> builds{0};
+    std::atomic<bool> first_started{false};
+    std::atomic<bool> release_first{false};
+    std::mutex gate_mutex;
+    std::condition_variable gate_cv;
+    auto build = [&]() -> sk_sp<SkImage> {
+        const int n = ++builds;
+        if (n == 1) {
+            first_started.store(true, std::memory_order_release);
+            gate_cv.notify_all();
+            std::unique_lock<std::mutex> lock(gate_mutex);
+            gate_cv.wait_for(lock, std::chrono::seconds(10),
+                             [&] { return release_first.load(std::memory_order_acquire); });
+        }
+        return make_dummy_image();
+    };
+    std::thread first([&] { cache.get_or_build("/tmp/disable.png", backend, build); });
+    {
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        REQUIRE(gate_cv.wait_for(lock, std::chrono::seconds(10),
+                                 [&] { return first_started.load(std::memory_order_acquire); }));
+    }
+    std::atomic<bool> second_done{false};
+    std::condition_variable second_done_cv;
+    std::thread second([&] {
+        cache.get_or_build("/tmp/disable.png", backend, build);
+        second_done.store(true, std::memory_order_release);
+        second_done_cv.notify_one();
+    });
+    cache.set_enabled(false);
+    {
+        std::unique_lock<std::mutex> lock(gate_mutex);
+        REQUIRE(second_done_cv.wait_for(lock, std::chrono::seconds(10), [&] {
+            return second_done.load(std::memory_order_acquire);
+        }));
+    }
+    release_first.store(true, std::memory_order_release);
+    gate_cv.notify_all();
+    first.join();
+    second.join();
+    REQUIRE(builds.load() == 2);
+    cache.set_enabled(true);
 }
 
 TEST_CASE("ImageFileCache: clear() forces a rebuild (invalidation hook)",

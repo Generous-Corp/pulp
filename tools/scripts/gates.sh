@@ -85,8 +85,32 @@ if [ -z "$ROOT" ]; then
 fi
 cd "$ROOT" || exit 2
 
+if git remote get-url origin >/dev/null 2>&1; then
+    if ! git fetch --quiet origin main; then
+        echo "gates.sh: could not refresh origin/main; refusing to validate a stale base" >&2
+        exit 2
+    fi
+fi
+
 PYTHON="${PYTHON:-python3}"
 BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
+
+MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
+if [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
+    "$PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$BASE" --head HEAD || exit $?
+fi
+
+# A tartci host that carries the required gate VMs refuses the heavy local
+# lanes (gate_host_policy.sh); the cheap gates below still run. The profile
+# decides, not the hostname.
+# shellcheck source=gate_host_policy.sh
+source "$ROOT/tools/scripts/gate_host_policy.sh"
+gate_host_builds_skipped=0
+gate_host_skipped_what="the build-gate configure and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python)"
+if pulp_gate_host_builds_reserved; then
+    gate_host_builds_skipped=1
+    pulp_gate_host_skip_line "$gate_host_skipped_what" "tools/scripts/gates.sh $BASE"
+fi
 
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
@@ -118,8 +142,10 @@ CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 LIVE_BUILD_CHECK="$ROOT/tools/scripts/live_build_check.py"
 DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
+FOUNDATION_INCLUDE_LINT="$ROOT/tools/scripts/foundation_include_lint.py"
 SAFE_PATH_LINT="$ROOT/tools/scripts/safe_path_guard_lint.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
+PYTHON_FLOOR_SYNTAX="$ROOT/tools/scripts/python_floor_syntax_check.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 SCHEDULE_BACKSTOP="$ROOT/tools/scripts/schedule_backstop_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
@@ -164,6 +190,10 @@ fi
 fail=0
 # Every suite a lane could not run locally, collected for the summary.
 not_checked_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-not-checked.XXXXXX")"
+if [ "$gate_host_builds_skipped" -eq 1 ]; then
+    # Listed in the summary, so the verdict reads "not a full pass" here.
+    echo "[gate-host] NOT CHECKED: $gate_host_skipped_what — refused on this gate host (TARTCI_ROLE=${PULP_GATE_HOST_ROLE:-unknown}); run tools/scripts/gates.sh $BASE on a TARTCI_ROLE=light host (m1) or a disposable VM" >>"$not_checked_log"
+fi
 trap 'rm -f "$not_checked_log"' EXIT
 
 echo "gates: base = $BASE" >&2
@@ -223,7 +253,8 @@ fi
 # the authority — a local refusal can only stop what CI would also refuse.
 # `--inventories` also runs the freeze job's inventory verifiers (cut manifest,
 # ownership projection, tooling disposition) and prints the regenerate command
-# for a stale one (exit 11). It also runs the job's change-event checker,
+# for a stale one (exit 11), or names the interpreter when a verifier cannot
+# run at all, e.g. without PyYAML (exit 13). It also runs the job's change-event checker,
 # `vellum_freeze_check.py`: a touched path in a transferred slice of
 # `.github/vellum-ownership.json` owes a `.github/vellum-change-events/` event,
 # and the script prints that JSON (or writes it with `--write-change-event
@@ -233,7 +264,8 @@ if [ -f "$VELLUM_HINT" ]; then
     echo "▸ vellum watch-event coverage (merge-base $BASE..HEAD)" >&2
     "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
-    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ]; then
+    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ] ||
+       [ "$vellum_rc" -eq 13 ]; then
         fail=1
     fi
 fi
@@ -554,11 +586,21 @@ fi
 # NOT CHECKED instead of configuring. The families check runs a build-free
 # prediction first and, when its configured half cannot run on a change to a
 # surface it blocks, FAILS instead of NOT CHECKED (the required gate checks it).
+# On a gate host the lane still runs, but never configures: the build-free
+# families prediction can still FAIL, and the configured halves report NOT
+# CHECKED unless a current build already exists.
 if [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
     echo "" >&2
-    echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (configures build-gate when the diff can drift them)" >&2
+    sti_no_configure="${PULP_GATES_NO_CONFIGURE:-}"
+    if [ "$gate_host_builds_skipped" -eq 1 ]; then
+        sti_no_configure=1
+        echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (gate host: build-free checks only, never configures)" >&2
+    else
+        echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (configures build-gate when the diff can drift them)" >&2
+    fi
     sti_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-script-inputs.XXXXXX")"
-    if ! "$PYTHON" "$ROOT/tools/scripts/gates_script_inputs.py" --base "$BASE" --repo-root "$ROOT" >"$sti_log" 2>&1; then
+    if ! PULP_GATES_NO_CONFIGURE="$sti_no_configure" \
+            "$PYTHON" "$ROOT/tools/scripts/gates_script_inputs.py" --base "$BASE" --repo-root "$ROOT" >"$sti_log" 2>&1; then
         fail=1
     fi
     grep -v "^NOT CHECKED locally: " "$sti_log" >&2
@@ -584,7 +626,7 @@ fi
 # test it fails also fails there, it prints PRE-EXISTING ON BASE and does not
 # fail this script, so a red main is not chased as the branch's fault. A new
 # failing test inside that suite still fails. PULP_SKIP_SOURCE_SELFTESTS=1 skips both.
-if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
+if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
     for src_lane in manifest workflow-lint pr-fast ctest-python; do
         echo "" >&2
         src_lane_args=()
@@ -751,6 +793,18 @@ if [ -f "$WIN32_INCLUDE_LINT" ]; then
     fi
 fi
 
+# ── 9c. foundation include lint (core/platform, runtime, simd stay bottom) ──
+# The foundation layer is linked by every other subsystem, so an upper-layer
+# include here (audio, view, format, ...) leaks that layer into audio-free
+# consumers. Lexical, whole-tree, sub-second.
+if [ -f "$FOUNDATION_INCLUDE_LINT" ]; then
+    echo "" >&2
+    echo "▸ foundation include lint (no upper-layer includes in core/platform|runtime|simd)" >&2
+    if ! "$PYTHON" "$FOUNDATION_INCLUDE_LINT" --root "$ROOT" >&2; then
+        fail=1
+    fi
+fi
+
 if [ -f "$SAFE_PATH_LINT" ]; then
     echo "" >&2
     echo "▸ safe-path guard lint (untrusted paths screened by the shared helper)" >&2
@@ -763,6 +817,17 @@ if [ -f "$TEXT_ENCODING_LINT" ]; then
     echo "" >&2
     echo "▸ text-encoding lint (Python text I/O names its encoding; per-file ratchet)" >&2
     if ! "$PYTHON" "$TEXT_ENCODING_LINT" --root "$ROOT" --base "$(git -C "$ROOT" merge-base "$BASE" HEAD)" >&2; then
+        fail=1
+    fi
+fi
+
+# Whole-tree, a few seconds. Python 3.12 accepts f-strings that 3.11, the
+# gates' floor, rejects; one such file breaks every 3.11 run of a gate that
+# parses it, while the 3.12 CI runner stays green.
+if [ -f "$PYTHON_FLOOR_SYNTAX" ]; then
+    echo "" >&2
+    echo "▸ Python floor syntax (every tracked *.py parses on Python 3.11)" >&2
+    if ! "$PYTHON" "$PYTHON_FLOOR_SYNTAX" >&2; then
         fail=1
     fi
 fi
@@ -1060,6 +1125,15 @@ EOF
 fi
 
 # ── Summary ────────────────────────────────────────────────────────────────
+diff_cover_hint() {
+    if [ "$gate_host_builds_skipped" -eq 1 ]; then
+        echo "  Diff-coverage NOT run, and refused on this gate host. Run it on a" >&2
+        echo "  TARTCI_ROLE=light host (m1) or a disposable VM:" >&2
+    else
+        echo "  Diff-coverage NOT run (slow). When you want it:" >&2
+    fi
+    echo "    tools/scripts/local_diff_cover.sh [test_target ...]" >&2
+}
 echo "" >&2
 not_checked=0
 if [ -s "$not_checked_log" ]; then
@@ -1076,14 +1150,12 @@ if [ "$fail" -eq 0 ] && { [ "$not_checked" -gt 0 ] || [ -n "$no_build" ]; }; the
         echo "       Configure one with Ninja (pulp build), or set PULP_GATES_BUILD_DIR." >&2
     fi
     echo "" >&2
-    echo "  Diff-coverage NOT run (slow). When you want it:" >&2
-    echo "    tools/scripts/local_diff_cover.sh [test_target ...]" >&2
+    diff_cover_hint
     exit 0
 elif [ "$fail" -eq 0 ]; then
     echo "gates: ✓ all gates pass — safe to push." >&2
     echo "" >&2
-    echo "  Diff-coverage NOT run (slow). When you want it:" >&2
-    echo "    tools/scripts/local_diff_cover.sh [test_target ...]" >&2
+    diff_cover_hint
     exit 0
 else
     echo "gates: ✗ one or more gates failed (see above)." >&2

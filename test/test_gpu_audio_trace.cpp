@@ -5,6 +5,7 @@
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
 #include "harness/rt_allocation_probe.hpp"
+#include "support/physical_qualification_outcome.hpp"
 
 #include <pulp/runtime/trace.hpp>
 #include <pulp/runtime/trace_session.hpp>
@@ -1360,6 +1361,73 @@ TEST_CASE("staged async records require quiescent ownership before producer drai
     CHECK(state.take_completed().empty());
 }
 
+TEST_CASE("Provider identity without a native runtime source is unavailable, not failed",
+          "[gpu_audio][trace]") {
+    using Gate = SharedIoProviderIdentityGate;
+    using Outcome = pulp::test::PhysicalQualificationOutcome;
+    SharedIoProviderIdentity identity;
+    identity.authenticated = true;
+    identity.native_runtime_authenticated = true;
+    CHECK(gate_shared_io_provider_identity(identity) == Gate::Authenticated);
+    // What DawnSharedIoProvider reports today: provider and adapter
+    // authenticated, no independent native-runtime identity.
+    identity.native_runtime_authenticated = false;
+    CHECK(gate_shared_io_provider_identity(identity) == Gate::NativeRuntimeUnavailable);
+    identity.authenticated = false;
+    CHECK(gate_shared_io_provider_identity(identity) == Gate::Unauthenticated);
+    identity.native_runtime_authenticated = true;
+    CHECK(gate_shared_io_provider_identity(identity) == Gate::Unauthenticated);
+
+    // The verdict both physical qualifications (the WaveNet qualification and
+    // the paced convolution probe) report.
+    CHECK(pulp::test::physical_qualification_outcome(true, Gate::Authenticated) ==
+          Outcome::Completed);
+    CHECK(pulp::test::physical_qualification_outcome(true, Gate::NativeRuntimeUnavailable) ==
+          Outcome::Unavailable);
+    CHECK(pulp::test::physical_qualification_outcome(true, Gate::Unauthenticated) ==
+          Outcome::Failed);
+    // Failed evidence stays a failure: an identity gap never hides it.
+    CHECK(pulp::test::physical_qualification_outcome(false, Gate::NativeRuntimeUnavailable) ==
+          Outcome::Failed);
+    CHECK(pulp::test::physical_qualification_outcome(false, Gate::Authenticated) ==
+          Outcome::Failed);
+}
+
+TEST_CASE("Native observer gap preserves authenticated provider identity",
+          "[gpu_audio][trace][provider]") {
+    SharedIoProviderIdentity identity;
+    identity.provider_revision = "dawn-revision";
+    identity.adapter_name = "Apple GPU";
+    identity.adapter_backend = "Metal";
+    identity.adapter_vendor_id = 0x106b;
+    identity.authenticated = true;
+    identity.native_runtime_authenticated = false;
+
+    CHECK(identity.authenticated);
+    CHECK(gate_shared_io_provider_identity(identity) ==
+          SharedIoProviderIdentityGate::NativeRuntimeUnavailable);
+}
+
+TEST_CASE("P2 probe cannot start admissions without authenticated native identity",
+          "[gpu_audio][trace][p2]") {
+    using Gate = SharedIoProviderIdentityGate;
+    using Admission = pulp::test::PhysicalQualificationAdmission;
+    std::uint32_t admissions = 0;
+    const auto arm = [&](Gate gate) {
+        return pulp::test::arm_physical_qualification_trial(gate, [&] {
+            ++admissions;
+            return true;
+        });
+    };
+
+    CHECK(arm(Gate::NativeRuntimeUnavailable) == Admission::Unavailable);
+    CHECK(admissions == 0);
+    CHECK(arm(Gate::Unauthenticated) == Admission::Failed);
+    CHECK(admissions == 0);
+    CHECK(arm(Gate::Authenticated) == Admission::Allowed);
+    CHECK(admissions == 1);
+}
+
 TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trace][p4]") {
     static_assert(noexcept(valid_provider_receipt_digest(
         std::declval<const SharedIoProviderIdentity&>(), std::string_view{}, std::string_view{})));
@@ -1375,6 +1443,8 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     context.watchdog_ns = 2000;
     context.transfer_counters_direct = context.timing_provenance_direct = true;
     set_authenticated_test_provider_identity(context);
+    CHECK(qualify_gpu_convolver_trial_context(context) ==
+          GpuConvolverTrialQualification::Qualified);
     REQUIRE(valid_gpu_convolver_trial_context(context));
     auto tampered_digest = context;
     tampered_digest.immutable_receipt_digest[0] =
@@ -1386,10 +1456,19 @@ TEST_CASE("P4 trace context rejects an invalid thermal state", "[gpu_audio][trac
     auto forged_authentication = context;
     forged_authentication.provider_identity.authenticated = false;
     CHECK_FALSE(valid_gpu_convolver_trial_context(forged_authentication));
-    auto forged_runtime_authentication = context;
-    forged_runtime_authentication.provider_identity.native_runtime_authenticated = false;
-    CHECK_FALSE(valid_gpu_convolver_trial_context(forged_runtime_authentication));
+    auto unavailable_native_identity = context;
+    unavailable_native_identity.provider_identity.native_runtime_authenticated = false;
+    CHECK(qualify_gpu_convolver_trial_context(unavailable_native_identity) ==
+          GpuConvolverTrialQualification::UnavailableNativeIdentity);
+    CHECK_FALSE(valid_gpu_convolver_trial_context(unavailable_native_identity));
+    auto missing_native_backend = context;
+    missing_native_backend.provider_identity.native_runtime_backend.clear();
+    CHECK(qualify_gpu_convolver_trial_context(missing_native_backend) ==
+          GpuConvolverTrialQualification::UnavailableNativeIdentity);
+    CHECK_FALSE(valid_gpu_convolver_trial_context(missing_native_backend));
     context.max_inflight = 3;
+    CHECK(qualify_gpu_convolver_trial_context(context) ==
+          GpuConvolverTrialQualification::InvalidContext);
     REQUIRE_FALSE(valid_gpu_convolver_trial_context(context));
     context.max_inflight = 2;
     context.thermal_state = static_cast<GpuConvolverThermalState>(255);

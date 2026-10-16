@@ -89,6 +89,9 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GOVERNED_BUILD="$SCRIPT_DIR/../ci/governed-build.sh"
+
 FILE=""
 BREAK_CMD=""
 BUILD_DIR=""
@@ -175,6 +178,9 @@ if ! git diff --quiet -- "$FILE"; then
 fi
 
 BUILD_LOG="$(mktemp)"
+# Pristine bytes of the clean file, for a restore that needs no git lock.
+PRISTINE="$(mktemp)"
+cp -p "$FILE" "$PRISTINE"
 
 # Artifacts the first invalidate() removes are moved here instead of deleted.
 # They were built from the committed source, which is what the tree holds again
@@ -211,7 +217,7 @@ PY
     say "build dir: $2 removed artifact(s) rebuilt by --target, $1 outside it put back as they were"
 }
 
-trap 'rm -f "$BUILD_LOG"; put_back_stash' EXIT
+trap 'rm -f "$BUILD_LOG" "$PRISTINE"; put_back_stash' EXIT
 
 # Delete the objects built from this source so the rebuild cannot be skipped on
 # a timestamp comparison. Header-only edits have no object of their own, so the
@@ -324,7 +330,8 @@ build_and_verify_recompile() {
         fi
         return 0
     fi
-    if ! cmake --build "$BUILD_DIR" --target "$TARGET" -j "$JOBS" > "$BUILD_LOG" 2>&1; then
+    if ! PULP_BUILD_JOBS="$JOBS" bash "$GOVERNED_BUILD" \
+        cmake --build "$BUILD_DIR" --target "$TARGET" > "$BUILD_LOG" 2>&1; then
         if grep -qE '\berror:' "$BUILD_LOG"; then
             # A break that does not compile still proves the test depends on the
             # code, but it is not the same evidence, so say which one happened.
@@ -380,7 +387,11 @@ run_test() {
 }
 
 restore() {
-    git checkout -- "$FILE" || return 1
+    # Copy the pristine bytes back rather than "git checkout", which takes
+    # .git/index.lock and fails while any other git process holds it; the
+    # git diff below (no lock needed) proves the result matches the index.
+    cp -p "$PRISTINE" "$FILE" || return 1
+    git diff --quiet -- "$FILE" || return 1
     [ "$PYTHON_MODE" -eq 0 ] || purge_pycache
     bump_mtime
     invalidate

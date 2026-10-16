@@ -2,6 +2,7 @@
 #include "design_ir_helpers.hpp"
 
 #include "design_binding_metadata.hpp"
+#include "design_import_document_checks.hpp"
 
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
@@ -14,6 +15,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/designed_control_painter.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/data_display.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
@@ -306,25 +308,25 @@ bool bind_imported_view(View& view,
                             .gesture_contract = text_or_empty(md.gesture_contract)});
         return true;
     }
-    if (auto* meter = dynamic_cast<Meter*>(&view);
-        meter && has_text(md.meter_source) && has_text(md.meter_channel)) {
-        ctx.bind_meter(*meter,
-                       NativeImportMeterBindingDescriptor{
-                           .route_id = text_or_empty(md.route_id),
-                           .meter_source = text_or_empty(md.meter_source),
-                           .channel = text_or_empty(md.meter_channel),
-                           .value_key = text_or_empty(md.meter_value_key),
-                           .event_contract = text_or_empty(md.event_contract)});
+    if (auto* level = dynamic_cast<LevelDisplay*>(&view);
+        level && has_text(md.meter_source) && has_text(md.meter_channel)) {
+        const NativeImportMeterBindingDescriptor descriptor{
+            .route_id = text_or_empty(md.route_id),
+            .meter_source = text_or_empty(md.meter_source),
+            .channel = text_or_empty(md.meter_channel),
+            .value_key = text_or_empty(md.meter_value_key),
+            .event_contract = text_or_empty(md.event_contract)};
+        bind_imported_level_display(ctx, view, *level, descriptor);
         return true;
     }
-    if (auto* waveform = dynamic_cast<WaveformView*>(&view);
-        waveform && has_text(md.param_key) && has_text(md.waveform_shape)) {
-        ctx.bind_waveform_display(*waveform,
-                                  NativeImportWaveformBindingDescriptor{
-                                      .route_id = text_or_empty(md.route_id),
-                                      .param_key = text_or_empty(md.param_key),
-                                      .shape = text_or_empty(md.waveform_shape),
-                                      .event_contract = text_or_empty(md.event_contract)});
+    if (auto* series = dynamic_cast<SeriesDisplay*>(&view);
+        series && has_text(md.param_key) && has_text(md.waveform_shape)) {
+        const NativeImportWaveformBindingDescriptor descriptor{
+            .route_id = text_or_empty(md.route_id),
+            .param_key = text_or_empty(md.param_key),
+            .shape = text_or_empty(md.waveform_shape),
+            .event_contract = text_or_empty(md.event_contract)};
+        bind_imported_series_display(ctx, view, *series, descriptor);
         return true;
     }
     if (auto* editor = dynamic_cast<TextEditor*>(&view);
@@ -387,9 +389,11 @@ bool can_bind_imported_view(View& view,
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
         return true;
-    if (dynamic_cast<Meter*>(&view) && has_text(md.meter_source) && has_text(md.meter_channel))
+    if (dynamic_cast<LevelDisplay*>(&view) && has_text(md.meter_source) &&
+        has_text(md.meter_channel))
         return true;
-    if (dynamic_cast<WaveformView*>(&view) && has_text(md.param_key) && has_text(md.waveform_shape))
+    if (dynamic_cast<SeriesDisplay*>(&view) && has_text(md.param_key) &&
+        has_text(md.waveform_shape))
         return true;
     if (dynamic_cast<TextEditor*>(&view) && (has_text(md.value_key) || has_text(md.initial_value)))
         return true;
@@ -782,6 +786,10 @@ ResolvedNativeNode resolve_node(const IRNode& node,
                                 std::string_view path,
                                 const AssetIndex& assets) {
     ResolvedNativeNode out;
+    std::vector<ImportDiagnostic> type_scratch;
+    if (!node.type.empty() && !kind_from_type(node, path, type_scratch) &&
+        !is_vector_kind(lower_copy(node.type)))
+        append_unknown_node_type_diagnostic(node, path, out.diagnostics);
     // Browser capture carries both the live parameter role (audio_widget) and
     // the authored presentation (type). A select is collapsed; a tab remains
     // segmented. Respect the more specific presentation before the generic
@@ -1172,6 +1180,18 @@ std::unique_ptr<View> make_asset_placeholder(const IRNode& node,
             node,
             asset_id.empty() ? std::optional<std::string>("srcAssetId") : std::nullopt));
     }
+    return std::make_unique<View>();
+}
+
+std::unique_ptr<View> make_data_display_placeholder(const IRNode& node, std::string_view path,
+                                                    std::string_view id,
+                                                    std::vector<ImportDiagnostic>& diagnostics) {
+    diagnostics.push_back(diagnostic(ImportDiagnosticSeverity::warning,
+                                     ImportDiagnosticKind::unsupported_property,
+                                     "data-display-unavailable", std::string(path),
+                                     "data display '" + std::string(id) +
+                                         "' is unavailable; link pulp::view or pulp::view-audio",
+                                     node));
     return std::make_unique<View>();
 }
 
@@ -2452,11 +2472,15 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return fader;
         }
         case NativeWidgetKind::meter: {
-            auto meter = std::make_unique<Meter>();
-            meter->set_level(semantics.normalized_value, semantics.peak_value);
+            auto meter = make_data_display("pulp.level");
+            auto* level = meter ? dynamic_cast<LevelDisplay*>(meter.get()) : nullptr;
+            if (!level)
+                return make_data_display_placeholder(node, path, "pulp.level", diagnostics);
+            level->set_levels(semantics.normalized_value, semantics.peak_value);
             if (semantics.horizontal)
-                meter->set_orientation(Meter::Orientation::horizontal);
-            if (options.preview_mode) meter->set_render_style(WidgetRenderStyle::minimal);
+                level->set_level_orientation(LevelDisplay::Orientation::horizontal);
+            if (options.preview_mode)
+                level->set_level_render_style(WidgetRenderStyle::minimal);
             return meter;
         }
         case NativeWidgetKind::xy_pad: {
@@ -2468,13 +2492,20 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return pad;
         }
         case NativeWidgetKind::waveform: {
-            auto waveform = std::make_unique<WaveformView>();
+            auto waveform = make_data_display("pulp.series");
+            auto* series = waveform ? dynamic_cast<SeriesDisplay*>(waveform.get()) : nullptr;
+            if (!series)
+                return make_data_display_placeholder(node, path, "pulp.series", diagnostics);
             if (semantics.waveform_shape)
-                waveform->set_preview_shape(*semantics.waveform_shape);
+                series->set_series_preview(*semantics.waveform_shape);
             return waveform;
         }
-        case NativeWidgetKind::spectrum:
-            return std::make_unique<SpectrumView>();
+        case NativeWidgetKind::spectrum: {
+            auto spectrum = make_data_display("pulp.bins");
+            if (!spectrum || dynamic_cast<BinDisplay*>(spectrum.get()) == nullptr)
+                return make_data_display_placeholder(node, path, "pulp.bins", diagnostics);
+            return spectrum;
+        }
         case NativeWidgetKind::image_view: {
             const auto asset_id = first_asset_id(node);
             if (!asset_id)
@@ -2485,6 +2516,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             auto uri = resolved_asset_uri(*asset, options.asset_base_directory);
             if (uri.empty())
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
+            append_undecodable_image_diagnostic(node, path, *asset, uri, diagnostics);
             auto image = std::make_unique<ImageView>();
             image->set_image_source(uri);
             // Forward the importer-sampled per-shape gradient. Storing it is
@@ -3022,6 +3054,8 @@ ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
                                             const IRAssetManifest& manifest) {
     const auto& effective_manifest = manifest.assets.empty() ? ir.asset_manifest : manifest;
     auto resolved = resolve_node(ir.root, "$", index_assets(effective_manifest));
+    append_document_version_diagnostic(ir, resolved.diagnostics);
+    append_duplicate_anchor_diagnostics(ir.root, resolved.diagnostics);
     resolved.diagnostics.insert(resolved.diagnostics.end(),
                                 ir.diagnostics.begin(),
                                 ir.diagnostics.end());

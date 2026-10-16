@@ -5,9 +5,11 @@
 # tool pins: it uses mise only as a trusted, cross-platform task runner around
 # Pulp's existing lock-aware installer. Host-tool pins move to a separate,
 # generated cross-platform mise.lock after registry replay succeeds.
+# The pinned toolchain is opt-in through MISE_ENV=toolchain.
 
 [settings]
 auto_install = false
+locked = true
 
 [tasks.visual-deps]
 description = "Install Pulp's hash-pinned visual-analysis Python dependencies"
@@ -24,3 +26,13 @@ run = "tools/ci/install_visual_python_deps.sh ${PULP_BUILD_DIR:-build}"
 [tasks.visual-check-windows]
 description = "Verify the visual-analysis dependencies with Windows Python"
 run = "python tools/scripts/check_visual_python_deps.py"
+
+# BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
+# source_sha256 = 2c41230c8cc4091c9549efcd00480366a7422dbe60027653d2c55d2677dd6c15
+[tasks.npm-deps]
+description = "Install project npm dependencies from the committed lockfiles (npm ci)"
+run = [
+  "npm ci --prefix tools/import-design/jsx-runtime --no-audit --no-fund",
+  "npm ci --prefix tools/scripts --no-audit --no-fund",
+]
+# END GENERATED PULP TOOLCHAIN

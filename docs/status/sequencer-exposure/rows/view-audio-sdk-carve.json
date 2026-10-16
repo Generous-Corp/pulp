@@ -1,0 +1,76 @@
+{
+  "id": "view-audio-sdk-carve",
+  "title": "Audio view headers move into the installed view-audio target",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "b56c2381-00d8-42da-97ad-b8094464ac0e",
+  "owned_paths": [
+    "core/view/audio/include/pulp/view/eq_curve_view.hpp",
+    "core/view/audio/include/pulp/view/visualization_bridge.hpp",
+    "core/timeline_view/CMakeLists.txt",
+    "docs/status/sequencer-exposure/rows/view-audio-sdk-carve.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/view/audio/include/pulp/view/eq_curve_view.hpp",
+      "needles": ["class EqCurveView : public View"]
+    },
+    {
+      "path": "core/view/audio/include/pulp/view/visualization_bridge.hpp",
+      "needles": ["struct SpectrumData", "struct WaveformData"]
+    },
+    {
+      "path": "core/view/CMakeLists.txt",
+      "needles": ["add_library(pulp-view-audio)", "target_link_libraries(pulp-view-audio PUBLIC pulp::audio pulp::signal pulp::midi)"]
+    },
+    {
+      "path": "core/timeline_view/CMakeLists.txt",
+      "needles": ["pulp::view-audio"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The public header names stay under pulp/view and the installed SDK copies the audio include tree. The separate view-audio target supplies their audio and signal dependencies and remains in the view umbrella; the timeline piano-roll ruler now consumes that target explicitly after the shared MIDI keyboard moved into the audio slice. Release and installed-consumer evidence remain pending.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/view/audio/include/pulp/view/eq_curve_view.hpp",
+          "needles": ["class EqCurveView : public View"]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/view/audio/include/pulp/view/visualization_bridge.hpp",
+          "needles": ["struct SpectrumData", "struct WaveformData"]
+        },
+        {
+          "kind": "sdk_target",
+          "path": "core/view/CMakeLists.txt",
+          "needles": ["add_library(pulp-view-audio)", "target_link_libraries(pulp-view-audio PUBLIC pulp::audio pulp::signal pulp::midi)"]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The header and target relocation changes no offline timeline CLI command, document, or handler."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The header and target relocation changes no offline timeline MCP definition or handler."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The relocation adds no live product control operation, grant, or executor binding."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The relocation does not change the design-time agent capability manifest."
+    }
+  }
+}

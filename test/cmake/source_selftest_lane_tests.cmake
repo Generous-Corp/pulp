@@ -33,6 +33,41 @@ add_test(NAME shipyard-target-defaults-selftest
         "${CMAKE_SOURCE_DIR}/tools/ci/test_shipyard_target_defaults.py")
 set_tests_properties(shipyard-target-defaults-selftest PROPERTIES TIMEOUT 60)
 
+add_test(NAME evidence-archive-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_evidence_archive.py")
+set_tests_properties(evidence-archive-selftest PROPERTIES TIMEOUT 60)
+
+# W17 toolchain tests are source-only and belong to the same required lane.
+add_test(NAME toolchain-test_generate-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/toolchain/test_generate.py")
+add_test(NAME toolchain-mise_profile-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/toolchain/test_mise_profile.py")
+add_test(NAME toolchain-check_env-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/toolchain/test_check_env.py")
+add_test(NAME toolchain-update-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/toolchain/test_update.py")
+add_test(NAME dsp-capability-registry-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_dsp_capability_registry.py")
+
+# The catalog generator regression is source-only and must be visible to the
+# source-selftest lane as well as the manifest runner.
+add_test(NAME make-catalog-component-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-design/test_make_catalog_component.py")
+
+# Build-governance path coverage is source-only and must run on the required
+# build-free self-test lane, where it protects every local build helper.
+add_test(NAME build-governance-paths-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_build_governance_paths.py")
+set_tests_properties(build-governance-paths-selftest PROPERTIES TIMEOUT 120)
+
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_pulp_source_selftest_manifest}")
@@ -68,6 +103,8 @@ add_test(NAME source-selftest-lane-contract
         --build-dir "${CMAKE_BINARY_DIR}"
         --ctest "${CMAKE_CTEST_COMMAND}"
         ${_pulp_source_selftest_require_all})
+# gate-inventory: the manifest mirrors the gate configure's registrations.
+set_property(TEST source-selftest-lane-contract APPEND PROPERTY LABELS gate-inventory)
 add_test(NAME source-selftest-lane-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_source_selftests.py")

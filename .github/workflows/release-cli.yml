@@ -80,8 +80,10 @@ jobs:
   #      `actions/checkout` default `clean: true` (git clean -ffdx) wipes the
   #      untracked build dirs each run, so a release build on the persistent
   #      self-hosted disk is clean-by-construction (no warm-dir ODR). The
-  #      host-shared ccache IS reused there; build-cli pins the same
-  #      correctness settings the PR gate uses and prints per-job hit counts.
+  #      host-shared ccache and FetchContent source cache are NOT read there:
+  #      PR jobs can write both, so build-cli disables ccache and re-fetches
+  #      every dependency into a job-local root ("Isolate the build from
+  #      shared caches").
   #   3. PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON — Namespace cloud (off for cost).
   #   4. GitHub-hosted macos-15 — last-resort fallback.
   #
@@ -134,7 +136,7 @@ jobs:
       # Evaluate marker-era policy before the operator-selected source_ref is
       # checked out. Otherwise that ref could supply an older matrix that omits
       # sdk_provenance_floor and thereby disable its own guard.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # This first checkout is a trusted policy bootstrap. The source build
           # checkout below may use an operator-selected ref, but only after the
@@ -218,7 +220,7 @@ jobs:
           print("pre-marker repair: source_ref substitution remains permitted")
           PY
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           lfs: false
@@ -305,15 +307,12 @@ jobs:
       contents: read
       id-token: write
       attestations: write
-    # The same ccache correctness settings the required macOS gate uses
-    # (build.yml's macos job env). The self-hosted macOS release VMs share the
-    # host's ccache with the gate, so without them a release inherits the
-    # runner service's depend mode and mtime compiler keying — the settings
-    # behind the stale-object poisoning the gate pins these against.
+    # Signed, attested artifacts never read a cache an untrusted run can
+    # write. The self-hosted release VMs mount the host's ccache writable, and
+    # PR gate VMs run PR code with the same mount, so a cached object could be
+    # planted by any PR. Every object in a release is compiled here.
     env:
-      CCACHE_COMPILERCHECK: content
-      CCACHE_NODEPEND: "true"
-      CCACHE_SLOPPINESS: time_macros
+      CCACHE_DISABLE: "1"
 
     steps:
       - name: Container pre-setup (ubuntu:22.04 — build toolchain the bare image lacks)
@@ -379,7 +378,7 @@ jobs:
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # lfs: false — release-cli fetches the Skia binaries explicitly via
           # fetch_skia_for_release.py (see "Fetch Skia prebuilt binaries" below;
@@ -422,10 +421,6 @@ jobs:
             fi
           done
 
-      - name: Set up Namespace macOS cache
-        if: matrix.os == 'macos-15' && contains(needs.resolve-macos-runner.outputs.runs_on_json, 'namespace-profile')
-        uses: ./.github/actions/setup-namespace-macos-cache
-
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         uses: ./.github/actions/install-linux-build-deps
@@ -450,17 +445,34 @@ jobs:
             fi
           done
 
-      - name: Bootstrap dependencies
-        run: ./setup.sh --ci --deps-only
-        shell: bash
-
-      - name: Compiler cache environment
+      # The FetchContent seed and the configure-check cache on a self-hosted
+      # host can be written by earlier jobs, PR gate jobs included, so this job
+      # points setup.sh and CMake at a fresh job-local root: every dependency
+      # is re-fetched at its pin, and no cached configure-check file is
+      # include()d. The Windows subbuild base moves with it. tools/scripts/test_release_cache_isolation.py holds every
+      # signing or publishing job to this step and to CCACHE_DISABLE.
+      - name: Isolate the build from shared caches
         shell: bash
         run: |
           set -euo pipefail
-          # Per-job counters. The self-hosted macOS cache is shared by every
-          # job on the host, so its own totals say nothing about this build.
-          echo "CCACHE_STATSLOG=${RUNNER_TEMP}/ccache-stats.log" >> "$GITHUB_ENV"
+          # A per-dependency source override would bypass the fresh root.
+          if overrides="$(env | grep '^PULP_FETCHCONTENT_SOURCE_DIR_' | cut -d= -f1)"; then
+            echo "::error::runner environment overrides dependency sources: ${overrides//$'\n'/ }"
+            exit 1
+          fi
+          root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -m "$root")"; fi
+          rm -rf "$root"
+          mkdir -p "$root/src" "$root/fc" "$root/cc"
+          echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src" >> "$GITHUB_ENV"
+          echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc" >> "$GITHUB_ENV"
+          # PulpConfigureCheckCache.cmake include()s the files it finds here,
+          # so a shared directory would run CMake an earlier job wrote.
+          echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc" >> "$GITHUB_ENV"
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
 
       # Fetch Skia prebuilt binaries — the root fix for pulp #1817.
       #
@@ -470,10 +482,9 @@ jobs:
       # binaries are pinned in tools/deps/manifest.json and live at
       # skia-builder's GitHub release assets — neither bootstrap nor
       # actions/checkout's LFS pull populates them, so we fetch here
-      # explicitly. Platforms without a published skia-builder asset
-      # (windows-*) print INFO and continue without GPU;
-      # PULP_REQUIRE_GPU_FOR_SDK is gated on the same condition so
-      # configure doesn't trip on them.
+      # explicitly. Every platform in the GPU-required case above has an
+      # exact asset and digest in tools/deps/manifest.json; a missing or
+      # mismatched archive must fail the release rather than ship a fallback UI.
 
       # Backfill safety net (pulp #1962): when a workflow_dispatch
       # backfill leaves source_ref blank, actions/checkout uses the old
@@ -609,6 +620,7 @@ jobs:
           mkdir -p "$compat_dir/tools/scripts"
           for path in \
               tools/scripts/package_cli.py \
+              tools/ci/release_package_cli.sh \
               tools/scripts/release_artifact_contents.py \
               tools/scripts/release_product_matrix.json \
               tools/scripts/json_schema_lite.py \
@@ -619,6 +631,7 @@ jobs:
               ; do
             if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
                 && { [ "$path" = tools/scripts/package_cli.py ] \
+                  || [ "$path" = tools/ci/release_package_cli.sh ] \
                   || [ "$path" = tools/scripts/release_artifact_contents.py ] \
                   || [ "$path" = tools/scripts/json_schema_lite.py ] \
                   || [ "$path" = tools/scripts/sdk_capability_handoff.py ] \
@@ -631,6 +644,13 @@ jobs:
                 # package_cli.py resolves the import-design runtime manifest
                 # relative to tools/scripts, so preserve that layout.
                 compat_path="$compat_dir/tools/scripts/package_cli.py"
+              fi
+              # The dispatched tag's checkout can predate the shared Unix
+              # package script; run main's copy (it reads build/ and
+              # CMakeLists.txt from the cwd, which stays the tag checkout).
+              if [ "$path" = tools/ci/release_package_cli.sh ]; then
+                mkdir -p "$compat_dir/tools/ci"
+                compat_path="$compat_dir/tools/ci/release_package_cli.sh"
               fi
               curl -fsSL "$url" -o "$compat_path"
               continue
@@ -691,6 +711,8 @@ jobs:
               >> "$GITHUB_ENV"
             echo "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py" \
               >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGE_SCRIPT=$compat_dir/tools/ci/release_package_cli.sh" \
+              >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_CMAKE=$compat_dir/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
           else
@@ -700,6 +722,8 @@ jobs:
             echo "PULP_SDK_PROVENANCE_HELPER=tools/scripts/sdk_provenance.py" \
               >> "$GITHUB_ENV"
             echo "PULP_RELEASE_PACKAGER=tools/scripts/package_cli.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGE_SCRIPT=tools/ci/release_package_cli.sh" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_CMAKE=tools/cmake/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
@@ -853,16 +877,15 @@ jobs:
         # failure. Only enable it for platforms whose Skia binaries we just
         # fetched (matrix-platforms with an entry in fetch_skia_for_release.py's
         # MATRIX_TO_MANIFEST + a published release_assets entry in
-        # tools/deps/manifest.json). darwin-arm64, linux-x64, and linux-arm64
-        # all have published assets today; windows-* continues to build
-        # without Skia until its assets ship.
+        # tools/deps/manifest.json). Windows x64 and ARM64 are included so
+        # their SDKs cannot silently fall back to the slider-only CPU editor.
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
           SCENE3D="-DPULP_ENABLE_SCENE3D=OFF"
           case "${{ matrix.platform }}" in
-            darwin-arm64|darwin-x64|linux-x64|linux-arm64)
+            darwin-arm64|darwin-x64|linux-x64|linux-arm64|windows-x64|windows-arm64)
               REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
               SCENE3D="-DPULP_ENABLE_SCENE3D=ON"
               ;;
@@ -927,23 +950,18 @@ jobs:
         # Makefiles `[ NN%]` progress lines, strictly monotonic (a parallel
         # make interleaves them out of order).
         #
-        # Full visible core count is the DELIBERATE bound on this lane, not an
-        # oversight: every release leg runs on an ephemeral, single-tenant
-        # runner (GitHub-hosted image or a dedicated release Tart VM), so the
-        # host-melt concern behind the governed-share rule in build.yml does
-        # not apply — admission control happens at the VM/runner level (how
-        # many release VMs a host boots), not by throttling each build. The
-        # count is still explicit, so build_parallelism_guard.py's bare-flag
-        # class stays satisfied. The cores/memory echo exists so run logs
-        # record what the runner actually offered — if a leg ever OOMs here,
-        # the fix is more RAM per release VM or fewer concurrent VMs, and the
-        # log carries the numbers to decide with.
+        # Request the visible core count as the upper bound, then route the
+        # build through governed-build.sh. A tartci lease may narrow that
+        # request when the release leg shares a host; the wrapper exports the
+        # effective CMAKE_BUILD_PARALLEL_LEVEL and records the granted share.
+        # The cores/memory echo remains so run logs record what the runner
+        # offered when diagnosing an OOM or a constrained lease.
         run: |
           set -euo pipefail
           jobs="${NUMBER_OF_PROCESSORS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
           mem="$(sysctl -n hw.memsize 2>/dev/null || awk '/MemTotal/ {print $2 * 1024; exit}' /proc/meminfo 2>/dev/null || echo unknown)"
           echo "Build parallelism: --parallel ${jobs} (visible cores=${jobs}, mem_bytes=${mem})"
-          cmake --build build --config Release --parallel "$jobs"
+          PULP_BUILD_JOBS="$jobs" tools/ci/governed-build.sh cmake --build build --config Release
         shell: bash
 
       - name: Normalize CLI binary layout (Unix)
@@ -1053,59 +1071,11 @@ jobs:
         if: runner.os != 'Windows'
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
-          MATRIX_PLATFORM: ${{ matrix.platform }}
-        run: |
-          import_design_args=()
-          control_broker_args=()
-          control_standalone_host_args=()
-          if [ -x build/tools/import-design/pulp-import-design ] \
-              && [ -d build/tools/import-design/browser_capture-v1 ]; then
-            import_design_args=(
-              --import-design-binary build/tools/import-design/pulp-import-design
-              --import-design-runtime-dir build/tools/import-design/browser_capture-v1
-            )
-            if python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "0.918.0"; then
-              test -f build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
-              test -f build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
-              test -f build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
-              import_design_args+=(
-                --import-design-contract build/tools/import-design/jsx-runtime/materialized_binding_contract.mjs
-                --import-design-source-emitter build/tools/import-design/jsx-runtime/materialized_source_emitter.mjs
-                --import-design-ids-map build/tools/import-design/jsx-runtime/materialized_ids_map.mjs
-              )
-            else
-              import_design_args+=(--allow-missing-import-design-contract)
-            fi
-            if [ -n "${PULP_NODE_RUNTIME_EXECUTABLE:-}" ]; then
-              import_design_args+=(
-                --node-runtime "$PULP_NODE_RUNTIME_EXECUTABLE"
-                --node-license "$(dirname "$PULP_NODE_RUNTIME_EXECUTABLE")/node.LICENSE"
-              )
-            fi
-          fi
-          if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
-              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
-            control_broker_args=(
-              --control-broker-binary build/inspect/pulp-control-broker
-            )
-          fi
-          if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
-              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_STANDALONE_HOST_FLOOR"; then
-            control_standalone_host_args=(
-              --control-standalone-host-binary build/inspect/pulp-control-standalone-host
-              --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json
-            )
-          fi
-          python3 "$PULP_RELEASE_PACKAGER" \
-            --binary build/pulp \
-            --cpp-binary build/tools/cli/pulp-cpp \
-            --mcp-binary build/tools/mcp/pulp-mcp \
-            "${control_broker_args[@]}" \
-            "${control_standalone_host_args[@]}" \
-            "${import_design_args[@]}" \
-            --build-dir build \
-            --platform ${{ matrix.platform }} \
-            --out pulp-${{ matrix.platform }}.tar.gz
+        # The one Unix packaging step: release-dry-run.yml and the release-path
+        # PR gate run this same script (tools/scripts/test_release_package_step.py).
+        # PULP_RELEASE_PACKAGE_SCRIPT is main's copy on a dispatch (the tag can
+        # predate the script), the checkout's otherwise.
+        run: bash "$PULP_RELEASE_PACKAGE_SCRIPT" "${{ matrix.platform }}" "$RELEASE_TAG"
         shell: bash
 
       - name: Package CLI (Windows)
@@ -1203,12 +1173,12 @@ jobs:
           # Build everything the SDK install step needs. This is a full
           # second build on Linux, but it's required to keep the CLI
           # binary (built in `build/` with WebView=OFF) portable.
-          # Explicit full-core parallelism, same rationale + guard contract as
-          # the "Build" step above (ephemeral single-tenant runner; a bare
-          # `cmake --build` here is a silent -j1 under Unix Makefiles).
+          # Request the visible core count, then let governed-build.sh acquire
+          # and report the effective lease share. A bare `cmake --build` here
+          # would be a silent -j1 under Unix Makefiles.
           jobs="${NUMBER_OF_PROCESSORS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
-          echo "SDK build parallelism: --parallel ${jobs}"
-          cmake --build build-sdk --config Release --parallel "$jobs"
+          echo "SDK build parallelism request: --parallel ${jobs}"
+          PULP_BUILD_JOBS="$jobs" tools/ci/governed-build.sh cmake --build build-sdk --config Release
         shell: bash
 
       - name: Report Linux SDK glibc floor (min-OS validation)
@@ -1267,8 +1237,8 @@ jobs:
             "${GPU_AUDIO_FLAGS[@]}" \
             $EXTRA_ARCH
           jobs="${NUMBER_OF_PROCESSORS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
-          echo "SDK build parallelism: --parallel ${jobs}"
-          cmake --build build-sdk --config Release --parallel "$jobs"
+          echo "SDK build parallelism request: --parallel ${jobs}"
+          PULP_BUILD_JOBS="$jobs" tools/ci/governed-build.sh cmake --build build-sdk --config Release
         shell: bash
 
       - name: Build SDK tarball (Unix)
@@ -1434,25 +1404,6 @@ jobs:
       # artifact. A workflow_dispatch backfill may build an old tag while the
       # release job itself runs from current main, so the release job must not
       # read compatibility metadata from its own checkout.
-      # The proof that the cache is configured the way the gate's is, and how
-      # much of this build it served. Per-job numbers come from CCACHE_STATSLOG.
-      - name: Ccache stats
-        if: always()
-        shell: bash
-        run: |
-          if ! command -v ccache >/dev/null 2>&1; then
-            echo "ccache not available; skipping stats"
-            exit 0
-          fi
-          ccache --version | head -1
-          ccache --show-config 2>/dev/null \
-            | grep -iE 'compiler_check|depend_mode|direct_mode|sloppiness|cache_dir|base_dir|stats_log' || true
-          if [ -s "${CCACHE_STATSLOG:-}" ]; then
-            ccache --show-log-stats -v || ccache --show-stats
-          else
-            echo "no compile in this job went through ccache (empty stats log)"
-          fi
-
       - name: Record macOS release floor
         if: runner.os == 'macOS'
         env:
@@ -1489,7 +1440,7 @@ jobs:
             pulp-sdk-${{ matrix.platform }}.*
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-${{ matrix.platform }}
           path: pulp-${{ matrix.platform }}.*
@@ -1499,7 +1450,7 @@ jobs:
           retention-days: 7
 
       - name: Upload SDK artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pulp-sdk-${{ matrix.platform }}
           path: pulp-sdk-${{ matrix.platform }}.*
@@ -1550,7 +1501,7 @@ jobs:
 
     steps:
       - name: Download CLI artifact for this platform
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pulp-${{ matrix.platform }}
           path: artifact-in/
@@ -1582,7 +1533,7 @@ jobs:
       # (custom root, no opt-in); that must be a warning, not a failed install.
       - name: Check out the installer and install-layout checker
         if: runner.os != 'Windows'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           path: installer-src
@@ -1866,7 +1817,7 @@ jobs:
       CCACHE_NODEPEND: "true"
       CCACHE_SLOPPINESS: time_macros
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
           ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref != '' && inputs.source_ref || inputs.version) || '' }}
@@ -1945,7 +1896,7 @@ jobs:
       attestations: write
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # compose_release_notes.py walks tag-to-tag ranges, and
           # GitHub's generated-notes endpoint needs the release tag in
@@ -1954,7 +1905,7 @@ jobs:
           fetch-tags: true
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: artifacts/
 
@@ -2064,7 +2015,7 @@ jobs:
 
       - name: Create release
         if: steps.existing.outputs.published != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           # Bare tag name (owner: drop the "Pulp CLI" prefix — one product, one

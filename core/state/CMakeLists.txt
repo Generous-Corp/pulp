@@ -11,18 +11,34 @@ target_sources(pulp-state PRIVATE
     src/store.cpp
     src/state_migration.cpp
     src/param_json.cpp
-    src/content_registry.cpp
     src/preset_manager.cpp
+    src/content_capability_manifest.cpp
     src/state_tree.cpp
     src/state_tree_sync.cpp
     src/properties_file.cpp
 )
 
 target_link_libraries(pulp-state PUBLIC pulp::runtime)
-target_link_libraries(pulp-state PRIVATE pulp::events pulp::sample-bank-manifest)
+target_link_libraries(pulp-state PRIVATE pulp::events)
 
 # CHOC headers (used by store.cpp for endianness utilities)
 target_include_directories(pulp-state PRIVATE
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz>
 )
+
+# Configure a CTest that checks the concrete archive's direct link closure.
+# Compatibility consumers configure this subsystem without the repository test
+# tree; only the top-level Pulp test build has the template and registers it.
+if(EXISTS "${CMAKE_SOURCE_DIR}/test/cmake/pulp_state_link_closure.cmake.in")
+get_target_property(_pulp_state_direct_links pulp-state LINK_LIBRARIES)
+if(NOT _pulp_state_direct_links)
+    set(_pulp_state_direct_links "")
+endif()
+string(REPLACE ";" "\\;" _pulp_state_direct_links_escaped "${_pulp_state_direct_links}")
+configure_file(
+    ${CMAKE_SOURCE_DIR}/test/cmake/pulp_state_link_closure.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/pulp_state_link_closure.cmake
+    @ONLY
+)
+endif()
