@@ -80,6 +80,37 @@ TEST_CASE("UmpBuffer copies retain prepared realtime sorting storage",
     }
 }
 
+TEST_CASE("UmpBuffer growth prepares sorting before realtime admission",
+          "[midi][ump][ordering][rt-safety]") {
+    for (int overload = 0; overload < 3; ++overload) {
+        UmpBuffer buffer;
+        const auto initial_capacity = buffer.capacity();
+        for (std::size_t i = 0; i <= initial_capacity; ++i) {
+            UmpPacket packet;
+            packet.words[0] = static_cast<std::uint32_t>(i);
+            UmpEvent event{packet, static_cast<int>(i % 3)};
+            if (overload == 0) REQUIRE(buffer.add(event));
+            else if (overload == 1) REQUIRE(buffer.add(std::move(event)));
+            else REQUIRE(buffer.add(packet, event.sample_offset));
+        }
+        const auto prepared_capacity = buffer.capacity();
+        REQUIRE(prepared_capacity > initial_capacity);
+        buffer.set_realtime_capacity_limit(true);
+        {
+            pulp::test::RtAllocationProbe probe;
+            buffer.sort();
+            buffer.clear();
+            for (std::size_t i = 0; i < prepared_capacity; ++i)
+                REQUIRE(buffer.add(UmpPacket{}, static_cast<int>(i % 3)));
+            buffer.sort();
+            buffer.sort();
+            REQUIRE_FALSE(buffer.add(UmpPacket{}));
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
+        REQUIRE(buffer.capacity() == prepared_capacity);
+    }
+}
+
 TEST_CASE("UmpBuffer accepts moved events and exposes const iteration",
           "[midi][ump]") {
     UmpBuffer buf;

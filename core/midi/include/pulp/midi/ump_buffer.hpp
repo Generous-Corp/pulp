@@ -65,6 +65,7 @@ public:
             return false;
         }
         events_.push_back(e);
+        prepare_sort_after_growth();
         return true;
     }
     bool add(UmpEvent&& e) {
@@ -73,6 +74,7 @@ public:
             return false;
         }
         events_.push_back(std::move(e));
+        prepare_sort_after_growth();
         return true;
     }
     bool add(const UmpPacket& p, int32_t sample_offset = 0) {
@@ -81,6 +83,7 @@ public:
             return false;
         }
         events_.push_back({p, sample_offset});
+        prepare_sort_after_growth();
         return true;
     }
 
@@ -130,6 +133,12 @@ public:
     const UmpEvent& operator[](std::size_t i) const { return events_[i]; }
 
 private:
+    void prepare_sort_after_growth() {
+        if (!limit_to_reserved_capacity_) {
+            sort_indices_.reserve(events_.capacity());
+            sort_events_.reserve(events_.capacity());
+        }
+    }
     bool can_append() const {
         return !limit_to_reserved_capacity_ || events_.size() < events_.capacity();
     }
