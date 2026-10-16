@@ -372,11 +372,40 @@ def _write_coveragerc(surfaces: list[CoverageSurface]) -> None:
 
 # The skip status CTest is told about with SKIP_RETURN_CODE across this tree.
 SKIP_EXIT = 77
-# argparse's message when a script was started without arguments it requires.
-# Such a script is a CTest-driven check (`--build-dir`, `--ndk`, `--root`, ...)
-# that this pass cannot supply; it is reported as not runnable here, not as a
-# failure.
-_MISSING_ARGUMENTS = "the following arguments are required"
+
+# Test files this pass may report as skipped, and why. A skip by any other file
+# fails the run, so a test that starts skipping cannot vanish into this list
+# silently; an entry whose file ran its checks is reported as stale.
+EXPECTED_SKIPS: dict[str, str] = {
+    "tools/scripts/test_agent_capability_installed_sdk.py":
+        "CTest supplies --build-dir (an installed SDK tree)",
+    "tools/scripts/test_android_aligned_buffer.py": "CTest supplies --ndk",
+    "tools/scripts/test_consumption_census_contract_note.py":
+        "CTest supplies --build-dir and --repo-root",
+    "tools/scripts/test_ctest_duplicate_registration.py": "CTest supplies --build-dir",
+    "tools/scripts/test_ctest_measured_budgets.py": "CTest supplies --build-dir",
+    "tools/scripts/test_ctest_scheduling_contract.py": "CTest supplies --build-dir",
+    "tools/scripts/test_gpu_health_installed_fronts.py": "CTest supplies --prefix",
+    "tools/scripts/test_view_audio_carve.py": "CTest supplies --root",
+    "tools/scripts/test_ccache_pch_isolation.py": "exits 77 without ccache and Ninja",
+    "tools/scripts/test_configure_check_cache.py": "exits 77 without a configured build tree",
+    "tools/scripts/test_gpu_dpr_calibration_failure_proof.py":
+        "exits 77 without the native DPR measurement producer",
+}
+
+# argparse's last line when a script was started without arguments it
+# requires: "<prog>: error: the following arguments are required: ...". Such a
+# script is a CTest-driven check that this pass cannot supply.
+_MISSING_ARGUMENTS = re.compile(r"^(?P<prog>\S+): error: the following arguments are required: ")
+
+
+def _missing_required_arguments(script: Path, stderr: str) -> bool:
+    """Whether the script itself, not something it ran, refused its arguments."""
+    lines = [line for line in stderr.splitlines() if line.strip()]
+    if not lines:
+        return False
+    match = _MISSING_ARGUMENTS.match(lines[-1])
+    return bool(match) and match.group("prog") == script.name
 
 
 def _run_test(test_path: Path, env: dict[str, str]) -> int:
@@ -404,7 +433,7 @@ def _run_test(test_path: Path, env: dict[str, str]) -> int:
     if stderr:
         sys.stderr.write(stderr)
         sys.stderr.flush()
-    if proc.returncode == 2 and _MISSING_ARGUMENTS in stderr:
+    if proc.returncode == 2 and _missing_required_arguments(test_path, stderr):
         return SKIP_EXIT
     return proc.returncode
 
@@ -464,12 +493,18 @@ def main(argv: list[str] | None = None) -> int:
 
     failures: list[str] = []
     skipped: list[str] = []
+    stale: list[str] = []
     for test_path in tests:
+        rel = test_path.relative_to(REPO_ROOT).as_posix()
         rc = _run_test(test_path, env)
-        if rc == SKIP_EXIT:
-            skipped.append(str(test_path.relative_to(REPO_ROOT)))
+        if rc == SKIP_EXIT and rel in EXPECTED_SKIPS:
+            skipped.append(rel)
+        elif rc == SKIP_EXIT:
+            failures.append(f"{rel} (skipped, and not in EXPECTED_SKIPS)")
         elif rc != 0:
-            failures.append(f"{test_path.relative_to(REPO_ROOT)} (exit {rc})")
+            failures.append(f"{rel} (exit {rc})")
+        elif rel in EXPECTED_SKIPS:
+            stale.append(rel)
 
     try:
         _build_reports(surfaces)
@@ -485,8 +520,18 @@ def main(argv: list[str] | None = None) -> int:
         # Exit 77, or a CTest-driven script started without its required
         # arguments: neither ran its checks here, so neither is a pass.
         print(f"Skipped {len(skipped)} test file(s) that did not run here:")
-        for path in skipped:
-            print(f"  - {path}")
+        for index, path in enumerate(skipped, 1):
+            print(f"  - {path}: {EXPECTED_SKIPS[path]}")
+            print(f"::warning title=Python coverage skip {index}/{len(skipped)}::"
+                  f"{path} did not run here: {EXPECTED_SKIPS[path]}")
+
+    if stale:
+        # Reported, not failed: some expected skips depend on the host (ccache,
+        # a configured tree), so a file can run on one machine and skip on
+        # another.
+        for path in stale:
+            print(f"::warning title=Stale EXPECTED_SKIPS entry::{path} ran its checks; "
+                  "remove it from EXPECTED_SKIPS if it no longer needs to skip")
 
     if failures:
         print("", file=sys.stderr)
