@@ -326,9 +326,12 @@ section is here so the direction is visible, not as instructions.
   pinned environment.
 - **Rust from the manifest.** Generate `rust-toolchain.toml` from the manifest
   so cargo uses the pinned Rust instead of the current `stable`.
-- **CI images built from the lock.** The macOS CI image installs its tools with
-  `mise install --locked` instead of unpinned Homebrew packages, and an image is
-  only promoted when its recorded tool versions match the manifest.
+- **CI images built from the lock.** `.shipyard/vm-image.mise.toml` and
+  `tools/ci/mise-golden-layer.sh` bake a candidate golden with the pinned
+  toolchain installed (`mise install --locked`, Rust by name) and a receipt of
+  what the guest holds. Gate lanes do not use it yet; one lane moves to it
+  behind a flag after a one-host trial, and an image is only promoted when its
+  receipt matches the manifest.
 - **Enforcement on the required CI gate**, after a warn-only period.
 - **A `toolchain.mise` setting for SDK projects.** The SDK installer would
   default to setting up mise for a new plugin project, with a fully supported
