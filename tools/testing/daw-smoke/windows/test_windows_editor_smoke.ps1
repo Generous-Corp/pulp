@@ -23,6 +23,44 @@ try {
     $machine=Get-PeMachine $path;$keys=Get-ReaperScanKeys $machine
     Check ($machine -eq $fixture[1] -and $keys[0] -eq $fixture[2] -and $keys[1] -eq 'clap_path') ('PE architecture/scan keys '+$fixture[1])
   }
+  function New-HybridFixture([string]$Path,[int]$Version,[bool]$BadPointer=$false) {
+    $bytes=New-Object byte[] 1536;$optional=152;$section=392
+    [BitConverter]::GetBytes([uint16]0x5a4d).CopyTo($bytes,0)
+    [BitConverter]::GetBytes([uint32]128).CopyTo($bytes,60)
+    [BitConverter]::GetBytes([uint32]0x4550).CopyTo($bytes,128)
+    [BitConverter]::GetBytes([uint16]0x8664).CopyTo($bytes,132)
+    [BitConverter]::GetBytes([uint16]1).CopyTo($bytes,134)
+    [BitConverter]::GetBytes([uint16]240).CopyTo($bytes,148)
+    [BitConverter]::GetBytes([uint16]0x20b).CopyTo($bytes,$optional)
+    [BitConverter]::GetBytes([uint64]0x140000000).CopyTo($bytes,$optional+24)
+    [BitConverter]::GetBytes([uint32]16).CopyTo($bytes,$optional+108)
+    foreach($entry in @(@(8,1024),@(12,4096),@(16,1024),@(20,512))){[BitConverter]::GetBytes([uint32]$entry[1]).CopyTo($bytes,$section+$entry[0])}
+    if($Version -gt 0){
+      [BitConverter]::GetBytes([uint32]4096).CopyTo($bytes,$optional+192)
+      [BitConverter]::GetBytes([uint32]320).CopyTo($bytes,$optional+196)
+      [BitConverter]::GetBytes([uint32]320).CopyTo($bytes,512)
+      $pointer=if($BadPointer){[uint64]0x140500000}else{[uint64]0x140001200}
+      [BitConverter]::GetBytes($pointer).CopyTo($bytes,712)
+      [BitConverter]::GetBytes([uint32]$Version).CopyTo($bytes,1024)
+      [BitConverter]::GetBytes([uint32]0x1240).CopyTo($bytes,1028)
+      [BitConverter]::GetBytes([uint32]3).CopyTo($bytes,1032)
+    }
+    [IO.File]::WriteAllBytes($Path,$bytes)
+  }
+  $pure=Join-Path $root 'amd64-pure.exe';New-HybridFixture $pure 0
+  $identity=Get-PeIdentity $pure
+  Check ($identity.coff_machine_hex -eq '0x8664' -and $identity.execution_abi -eq 'x64' -and $identity.metadata_status -eq 'absent') 'AMD64 without CHPE retains x64 ABI and raw machine'
+  foreach($version in @(1,2)){
+    $hybrid=Join-Path $root ('amd64-chpe-v'+$version+'.exe');New-HybridFixture $hybrid $version
+    $identity=Get-PeIdentity $hybrid
+    Check ($identity.coff_machine_hex -eq '0x8664' -and $identity.execution_abi -eq 'arm64ec' -and $identity.metadata_status -eq 'validated_chpe' -and $identity.code_map_bytes -eq 24 -and (Get-ReaperScanKeys $identity.execution_abi)[0] -eq 'vstpath_winarm64') ('AMD64 CHPE v'+$version+' maps ARM64EC scan ABI')
+  }
+  $invalid=Join-Path $root 'amd64-invalid-chpe.exe';New-HybridFixture $invalid 1 $true
+  $identity=Get-PeIdentity $invalid
+  Check ($identity.coff_machine_hex -eq '0x8664' -and $identity.execution_abi -eq 'unknown' -and $identity.metadata_status -eq 'unavailable') 'unmapped CHPE pointer preserves raw machine and unknown ABI'
+  Reject {Get-ReaperScanKeys $identity.execution_abi} 'unknown ABI refuses scan routing'
+  $future=Join-Path $root 'amd64-future-chpe.exe';New-HybridFixture $future 99
+  Check ((Get-PeIdentity $future).execution_abi -eq 'unknown') 'unknown CHPE version is not guessed'
   [IO.File]::WriteAllBytes((Join-Path $root 'bad.exe'),[byte[]]@(0,0))
   Reject {Get-PeMachine (Join-Path $root 'bad.exe')} 'invalid PE refused'
   Check ((Join-WindowsArguments @('-cfgfile','C:\Space Folder\reaper.ini','C:\script path\start.lua')) -eq '"-cfgfile" "C:\Space Folder\reaper.ini" "C:\script path\start.lua"') 'paths with spaces preserve argument boundaries'

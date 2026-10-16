@@ -45,8 +45,8 @@ function Start-Owned([string[]]$Arguments,[string]$Label) {
 try {
   if(-not(Test-Path -LiteralPath $ReaperExe -PathType Leaf)){throw "REAPER executable missing: $ReaperExe"}
   $script:reaper=(Resolve-Path -LiteralPath $ReaperExe).Path
-  $machine=Get-PeMachine $reaper; $keys=Get-ReaperScanKeys $machine
-  $receipt.host=@{path=$reaper;machine=$machine;sha256=(Get-FileHash -LiteralPath $reaper -Algorithm SHA256).Hash}
+  $hostPe=Get-PeIdentity $reaper; $keys=Get-ReaperScanKeys $hostPe.execution_abi
+  $receipt.host=@{path=$reaper;pe=$hostPe;sha256=(Get-FileHash -LiteralPath $reaper -Algorithm SHA256).Hash}
   if(-not(Test-Path -LiteralPath (Join-Path $SeedProfile 'reaper.ini') -PathType Leaf)){throw 'SeedProfile must contain an initialized reaper.ini'}
   if(-not(Test-Path -LiteralPath $PluginPath)){throw "Plugin missing: $PluginPath"}
   $plugin=(Resolve-Path -LiteralPath $PluginPath).Path
@@ -126,7 +126,9 @@ try {
   foreach($module in $modules){
     $hash=(Get-FileHash -LiteralPath $module.FileName -Algorithm SHA256).Hash
     Assert-ModuleBinding $module.FileName $hash $manifest
-    $bound+=@{path=$module.FileName;sha256=$hash;machine=(Get-PeMachine $module.FileName)}
+    $pluginPe=Get-PeIdentity $module.FileName
+    if($pluginPe.execution_abi -eq 'unknown'){throw 'Loaded plugin ABI metadata is unavailable'}
+    $bound+=@{path=$module.FileName;sha256=$hash;pe=$pluginPe}
   }
   if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
   $receipt.loaded_plugin=$bound[0]

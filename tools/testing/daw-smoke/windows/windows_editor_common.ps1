@@ -81,3 +81,54 @@ function Assert-EditorEvidence([long]$Hwnd, [bool]$Exists, [bool]$Visible, [bool
   if (-not $Owned) { throw 'Floating editor belongs to another process' }
   if (-not $ForegroundBelongs) { throw 'Foreground is not the bound editor or its child/popup' }
 }
+
+# ARM64EC images commonly retain AMD64 COFF machine 0x8664. Keep that raw
+# identity separate from the ABI derived from validated CHPE load metadata.
+function Get-PeIdentity([string]$Path) {
+  $rawMachine=Get-PeMachine $Path
+  $result=[ordered]@{coff_machine=$rawMachine;coff_machine_hex=$null;optional_magic=$null;execution_abi=$rawMachine;metadata_status='absent';chpe_metadata_pointer=$null;chpe_metadata_version=$null;code_map_rva=$null;code_map_count=$null;code_composition='not_inferred'}
+  $f=[IO.File]::OpenRead($Path);$b=New-Object IO.BinaryReader($f)
+  try {
+    $f.Position=60;$nt=$b.ReadUInt32();$f.Position=$nt+4;$result.coff_machine_hex=('0x{0:X4}' -f $b.ReadUInt16());$sections=$b.ReadUInt16()
+    $f.Position=$nt+20;$optionalSize=$b.ReadUInt16();$optional=$nt+24;$sectionStart=$optional+$optionalSize
+    if($optionalSize -lt 112 -or $sections -gt 96 -or $sectionStart+$sections*40 -gt $f.Length){throw 'Incomplete PE optional header/section table'}
+    $f.Position=$optional;$magic=$b.ReadUInt16();$result.optional_magic=('0x{0:X}' -f $magic)
+    if($magic -ne 0x20b){throw 'Expected PE32+ optional header'}
+    $f.Position=$optional+24;$imageBase=$b.ReadUInt64();$result.image_base=('0x{0:X}' -f $imageBase)
+    $f.Position=$optional+108;$directoryCount=$b.ReadUInt32()
+    function Find-PeOffset([uint32]$Rva,[long]$Length) {
+      for($i=0;$i -lt $sections;$i++){
+        $f.Position=$sectionStart+$i*40+8;$virtualSize=$b.ReadUInt32();$virtualAddress=$b.ReadUInt32();$rawSize=$b.ReadUInt32();$rawPointer=$b.ReadUInt32()
+        if($Rva -ge $virtualAddress -and $Rva-$virtualAddress -lt [Math]::Max($virtualSize,$rawSize)){
+          $delta=[long]$Rva-$virtualAddress;$offset=[long]$rawPointer+$delta
+          if($delta+$Length -gt $rawSize -or $offset+$Length -gt $f.Length){throw 'Metadata RVA exceeds file-backed section'}
+          return $offset
+        }
+      }
+      throw 'Metadata RVA is not mapped'
+    }
+    if($directoryCount -le 10){return [pscustomobject]$result}
+    if($optionalSize -lt 200){throw 'Incomplete load-config directory entry'}
+    $f.Position=$optional+192;$loadRva=$b.ReadUInt32();$loadSize=$b.ReadUInt32()
+    $result.load_config_rva=$loadRva;$result.load_config_size=$loadSize
+    if($loadRva -eq 0 -and $loadSize -eq 0){return [pscustomobject]$result}
+    if($loadRva -eq 0 -or $loadSize -lt 4){throw 'Invalid load-config directory'}
+    $loadOffset=Find-PeOffset $loadRva $loadSize;$f.Position=$loadOffset;$configSize=$b.ReadUInt32()
+    if($configSize -gt $loadSize -or $configSize -lt 4){throw 'Invalid load-config structure size'}
+    if($configSize -lt 208){return [pscustomobject]$result}
+    $f.Position=$loadOffset+200;$chpe=$b.ReadUInt64();$result.chpe_metadata_pointer=('0x{0:X}' -f $chpe)
+    if($chpe -eq 0){return [pscustomobject]$result}
+    if($chpe -lt $imageBase -or $chpe-$imageBase -gt [uint32]::MaxValue){throw 'Invalid CHPE metadata VA'}
+    $offset=Find-PeOffset ([uint32]($chpe-$imageBase)) 12;$f.Position=$offset
+    $version=$b.ReadUInt32();$codeMap=$b.ReadUInt32();$count=$b.ReadUInt32()
+    $result.chpe_metadata_version=$version;$result.metadata_file_offset=$offset;$result.code_map_rva=$codeMap;$result.code_map_count=$count
+    if($version -notin @(1,2) -or $count -eq 0 -or $count -gt 100000){throw 'Unsupported/empty CHPE metadata'}
+    $result.code_map_file_offset=Find-PeOffset $codeMap ([long]$count*8);$result.code_map_bytes=[long]$count*8
+    $result.metadata_status='validated_chpe'
+    if($rawMachine -eq 'x64'){$result.execution_abi='arm64ec'}
+    return [pscustomobject]$result
+  } catch {
+    $result.execution_abi='unknown';$result.metadata_status='unavailable';$result.metadata_error=$_.Exception.Message
+    return [pscustomobject]$result
+  } finally {$b.Dispose();$f.Dispose()}
+}

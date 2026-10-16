@@ -30,8 +30,13 @@ The cache basename only establishes scan progress; it is never artifact proof.
 The isolated scan root is last in the VST3 scan list for duplicate-class
 resolution. A mismatching live module makes the run INCONCLUSIVE.
 
-The host executable determines the VST scan key: `vstpath64` for x64 and
-`vstpath_winarm64` for ARM64/ARM64EC/ARM64X. CLAP uses `clap_path`.
+The host executable determines the VST scan key: `vstpath64` for the x64 ABI and
+`vstpath_winarm64` for ARM64/ARM64EC/ARM64X. ARM64EC can retain an AMD64 COFF
+header; validated CHPE load-config metadata distinguishes that hybrid from an
+AMD64 image without CHPE metadata. Receipts preserve raw COFF fields, metadata
+status and derived ABI separately. Unavailable/unsupported metadata refuses scan
+routing. These fields do not assert every instruction's ISA or native ARM64
+execution. CLAP uses `clap_path`.
 Startup, scan and parameter action have separate bounded budgets. A unique run
 token prevents stale host status from satisfying the handshake. Terminal
 status retains insertion evidence, actual normalized parameter observations,
