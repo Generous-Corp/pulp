@@ -244,7 +244,30 @@ native importer, the comparator, or the `0.995` visual threshold.
   dropped-node, geometry, color, blank-render, crop, and DPR-shift negatives.
   RmlUi output is a calibration reference only; it does not establish Pulp
   lifecycle, host, or production-rendering parity.
+- **Lynx headless capture.** Keep CSS viewport dimensions separate from PNG
+  dimensions, declare DPR explicitly, and record a settle/readiness policy
+  before capture. Stable authored tags and structured per-fixture receipts are
+  useful additions to Pulp's existing Chromium-only comparison. Lynx's
+  multi-browser oracle is intentionally not adopted; Pulp keeps Chromium as
+  its sole browser oracle.
 
 The next safe step is to add these as advisory fixtures and receipts, run them
 repeatedly across cold/warm and held-out splits, and review the residuals before
 considering any threshold or promotion change.
+
+### Phase 0 residual decomposition
+
+The visual comparator now emits a measurement-only `residual_decomposition`.
+It uses a perimeter-derived foreground mask and reports three disjoint buckets:
+one-pixel foreground edge bands, shared foreground interior pixels, and
+foreground-mask disagreement. Each bucket carries its pixel count, RGB and
+alpha error, and a diagnostic similarity score. This separates likely
+antialiasing differences from misplaced, missing, or unexpectedly materialized
+content without changing the existing global or foreground score. The mask is
+intentionally diagnostic: a small fixture whose foreground occupies most of
+the image must not invert the background by using a whole-image mode.
+
+The Phase 0 gate remains advisory. It requires deterministic three-run native
+receipts, exact structure/geometry/typography, and planted negatives that fail
+closed. It does not establish pixel parity, lower the `0.995` threshold, or
+authorize retained-plan/compiler work.

@@ -632,6 +632,91 @@ def visual_metrics(
     threshold = 2
     reference_background = Counter(ref_pixels).most_common(1)[0][0]
     candidate_background = Counter(candidate_pixels).most_common(1)[0][0]
+    # Keep the existing score untouched, but classify the residual so a low
+    # foreground score can be distinguished from a layout/materialization
+    # defect.  The masks intentionally use the same conservative foreground
+    # rule as the score above.  A one-pixel boundary band is diagnostic only:
+    # it is not a renderer tolerance and never affects promotion.
+    width, height = logical_size
+    # Prefer the perimeter color for the diagnostic mask.  A small fixture can
+    # legitimately contain more foreground than background, so a whole-image
+    # mode would invert the mask and make the decomposition misleading.
+    border_indices = [
+        index for index in range(width * height)
+        if index // width in (0, height - 1)
+        or index % width in (0, width - 1)
+    ]
+    reference_mask_background = Counter(
+        ref_pixels[index] for index in border_indices).most_common(1)[0][0]
+    candidate_mask_background = Counter(
+        candidate_pixels[index] for index in border_indices).most_common(1)[0][0]
+    reference_foreground = [
+        sum(abs(a - b) for a, b in zip(pixel[:3], reference_mask_background[:3])) > 18
+        for pixel in ref_pixels
+    ]
+    candidate_foreground = [
+        sum(abs(a - b) for a, b in zip(pixel[:3], candidate_mask_background[:3])) > 18
+        for pixel in candidate_pixels
+    ]
+
+    def boundary_band(mask: list[bool], radius: int = 1) -> list[bool]:
+        band = [False] * (width * height)
+        for y in range(height):
+            for x in range(width):
+                index = y * width + x
+                value = mask[index]
+                for dy in range(-radius, radius + 1):
+                    for dx in range(-radius, radius + 1):
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < width and 0 <= ny < height:
+                            if mask[ny * width + nx] != value:
+                                band[index] = True
+                                break
+                    if band[index]:
+                        break
+        return band
+
+    reference_edge = boundary_band(reference_foreground)
+    candidate_edge = boundary_band(candidate_foreground)
+
+    def residual_bucket(indices: list[int]) -> dict[str, Any]:
+        if not indices:
+            return {
+                "pixel_count": 0,
+                "mean_channel_error": 0.0,
+                "mean_alpha_error": 0.0,
+                "score": 1.0,
+            }
+        rgb_error = sum(
+            sum(abs(a - b) for a, b in zip(ref_pixels[index][:3], candidate_pixels[index][:3]))
+            for index in indices
+        )
+        alpha_error = sum(
+            abs(ref_pixels[index][3] - candidate_pixels[index][3])
+            for index in indices
+        )
+        count = len(indices)
+        mean_rgb = rgb_error / (count * 3.0)
+        mean_alpha = alpha_error / count
+        score = max(0.0, 1.0 - ((rgb_error + alpha_error) / (count * 4.0)) / 255.0)
+        return {
+            "pixel_count": count,
+            "mean_channel_error": round(mean_rgb, 6),
+            "mean_alpha_error": round(mean_alpha, 6),
+            "score": round(score, 6),
+        }
+
+    edge_band_indices: list[int] = []
+    shared_interior_indices: list[int] = []
+    mask_disagreement_indices: list[int] = []
+    for index, (ref_fg, candidate_fg) in enumerate(
+            zip(reference_foreground, candidate_foreground)):
+        if ref_fg != candidate_fg:
+            mask_disagreement_indices.append(index)
+        elif ref_fg and (reference_edge[index] or candidate_edge[index]):
+            edge_band_indices.append(index)
+        elif ref_fg and candidate_fg:
+            shared_interior_indices.append(index)
     for ref_pixel, candidate_pixel in zip(ref_pixels, candidate_pixels):
         delta = sum(abs(a - b) for a, b in zip(ref_pixel[:3], candidate_pixel[:3]))
         alpha_delta = abs(ref_pixel[3] - candidate_pixel[3])
@@ -682,6 +767,13 @@ def visual_metrics(
         "foreground_pixel_count": foreground_samples,
         "differing_pixel_count": differing,
         "differing_pixel_fraction": round(differing / samples, 6),
+        "residual_decomposition": {
+            "algorithm": "foreground-mask-boundary-band-v1",
+            "edge_band_radius_pixels": 1,
+            "edge_band": residual_bucket(edge_band_indices),
+            "shared_foreground_interior": residual_bucket(shared_interior_indices),
+            "foreground_mask_disagreement": residual_bucket(mask_disagreement_indices),
+        },
         "width": logical_size[0],
         "height": logical_size[1],
         "artifacts": {

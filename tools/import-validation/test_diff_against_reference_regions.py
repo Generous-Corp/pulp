@@ -24,6 +24,8 @@ from unittest import mock
 
 THIS_DIR = Path(__file__).resolve().parent
 SCRIPT = THIS_DIR / "diff_against_reference_regions.py"
+sys.path.insert(0, str(THIS_DIR))
+from importer_differential import core  # noqa: E402
 SPEC = importlib.util.spec_from_file_location("diff_against_reference_regions", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 regions_mod = importlib.util.module_from_spec(SPEC)
@@ -576,6 +578,58 @@ class TestRegionHelpers(unittest.TestCase):
         self.assertIn("(BLANK)", text)
         self.assertIn("Failed regions: dark", text)
         self.assertEqual(stderr.getvalue(), "")
+
+
+class TestVisualResidualDecomposition(unittest.TestCase):
+    def test_edge_residual_is_separate_from_shared_interior(self) -> None:
+        from PIL import Image
+
+        reference = Image.new("RGBA", (7, 7), "white")
+        candidate = Image.new("RGBA", (7, 7), "white")
+        for y in range(1, 6):
+            for x in range(1, 6):
+                reference.putpixel((x, y), (0, 0, 0, 255))
+                candidate.putpixel((x, y), (0, 0, 0, 255))
+        for x, y in ((1, 1), (5, 1), (1, 5), (5, 5)):
+            candidate.putpixel((x, y), (120, 120, 120, 255))
+
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            reference.save(tmp / "reference.png")
+            candidate.save(tmp / "candidate.png")
+            metrics = core.visual_metrics(
+                tmp / "reference.png", tmp / "candidate.png", tmp / "artifacts"
+            )
+
+        decomposition = metrics["residual_decomposition"]
+        self.assertGreater(decomposition["edge_band"]["pixel_count"], 0)
+        self.assertLess(decomposition["edge_band"]["score"], 1.0)
+        self.assertEqual(decomposition["shared_foreground_interior"]["score"], 1.0)
+        self.assertEqual(decomposition["foreground_mask_disagreement"]["pixel_count"], 0)
+
+    def test_shift_is_mask_disagreement_not_renderer_edge_error(self) -> None:
+        from PIL import Image
+
+        reference = Image.new("RGBA", (7, 7), "white")
+        candidate = Image.new("RGBA", (7, 7), "white")
+        for y in range(2, 5):
+            for x in range(1, 4):
+                reference.putpixel((x, y), (0, 0, 0, 255))
+            for x in range(2, 5):
+                candidate.putpixel((x, y), (0, 0, 0, 255))
+
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            reference.save(tmp / "reference.png")
+            candidate.save(tmp / "candidate.png")
+            metrics = core.visual_metrics(
+                tmp / "reference.png", tmp / "candidate.png", tmp / "artifacts"
+            )
+
+        self.assertGreater(
+            metrics["residual_decomposition"]["foreground_mask_disagreement"]["pixel_count"],
+            0,
+        )
 
 
 if __name__ == "__main__":
