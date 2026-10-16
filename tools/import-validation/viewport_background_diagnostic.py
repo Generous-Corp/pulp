@@ -11,12 +11,13 @@ import argparse
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable, TYPE_CHECKING
 
-from PIL import Image
+if TYPE_CHECKING:
+    from PIL import Image
 
 
-def _pixels(image: Image.Image) -> list[tuple[int, int, int, int]]:
+def _pixels(image: Any) -> list[tuple[int, int, int, int]]:
     image = image.convert("RGBA")
     getter = getattr(image, "get_flattened_data", None)
     return list(getter() if getter is not None else image.getdata())
@@ -34,7 +35,7 @@ def _mean(pixels: Iterable[tuple[int, int, int, int]]) -> list[float] | None:
             for channel in range(3)]
 
 
-def measure(reference: Image.Image, candidate: Image.Image,
+def measure(reference: Any, candidate: Any,
             root: tuple[int, int, int, int]) -> dict[str, object]:
     ref = reference.convert("RGBA")
     cand = candidate.convert("RGBA")
@@ -82,6 +83,8 @@ def measure(reference: Image.Image, candidate: Image.Image,
 
 
 def main() -> int:
+    from PIL import Image
+
     parser = argparse.ArgumentParser()
     parser.add_argument("reference", type=Path)
     parser.add_argument("candidate", type=Path)

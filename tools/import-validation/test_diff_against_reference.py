@@ -74,6 +74,23 @@ class FakeRGBAImage:
         return self._pixels
 
 
+class FakeViewportImage:
+    def __init__(self, pixels: list[tuple[int, int, int, int]], size: tuple[int, int]) -> None:
+        self._pixels = pixels
+        self.size = size
+        self.width, self.height = size
+
+    def convert(self, _mode: str) -> "FakeViewportImage":
+        return self
+
+    def getdata(self) -> list[tuple[int, int, int, int]]:
+        return self._pixels
+
+    def getpixel(self, point: tuple[int, int]) -> tuple[int, int, int, int]:
+        x, y = point
+        return self._pixels[y * self.width + x]
+
+
 class HelperScoringTests(unittest.TestCase):
     def test_image_module_imports_pillow_or_reports_install_hint(self) -> None:
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
@@ -176,21 +193,17 @@ class HelperScoringTests(unittest.TestCase):
         self.assertEqual(result["edge_band_pixels"], result["differing_pixels"])
 
     def test_viewport_background_diagnostic_records_outside_root_pixels(self) -> None:
-        from PIL import Image
-
-        reference = Image.new("RGBA", (4, 4), (10, 20, 30, 255))
-        candidate = Image.new("RGBA", (4, 4), (10, 20, 30, 255))
-        candidate.putpixel((0, 0), (99, 88, 77, 255))
-        candidate.putpixel((3, 3), (99, 88, 77, 255))
+        reference = FakeViewportImage([(10, 20, 30, 255)] * 16, (4, 4))
+        candidate_pixels = [(10, 20, 30, 255)] * 16
+        candidate_pixels[0] = candidate_pixels[15] = (99, 88, 77, 255)
+        candidate = FakeViewportImage(candidate_pixels, (4, 4))
         result = background.measure(reference, candidate, (1, 1, 2, 2))
         self.assertEqual(result["schema"], "pulp-viewport-background-diagnostic-v1")
         self.assertEqual(result["corners"]["top_left"]["candidate"], [99, 88, 77])
         self.assertEqual(result["outside_root"]["differing_pixels"], 2)
 
     def test_viewport_background_diagnostic_rejects_out_of_bounds_root(self) -> None:
-        from PIL import Image
-
-        image = Image.new("RGBA", (4, 4), "black")
+        image = FakeViewportImage([(0, 0, 0, 255)] * 16, (4, 4))
         with self.assertRaises(ValueError):
             background.measure(image, image, (0, 0, 5, 4))
 
