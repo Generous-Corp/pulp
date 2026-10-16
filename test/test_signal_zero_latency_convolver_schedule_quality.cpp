@@ -872,6 +872,100 @@ TEST_CASE("Disabling true stereo mutes an active cross tail", "[signal][convolut
     REQUIRE(after_peak < 1e-12);
 }
 
+TEST_CASE("Packed ordinary stereo matches independent 2IR convolutions",
+          "[signal][convolution][acceptance][stereo][packed]") {
+    constexpr int ir_len = 4097;
+    constexpr int frames = 8192;
+    constexpr int kBlock = 128;
+    std::vector<std::vector<double>> ir(2, std::vector<double>(ir_len, 0.0));
+    ir[0][0] = 0.75;
+    ir[0][1] = -0.125;
+    ir[0][1024] = 0.03125;
+    ir[0][4096] = -0.015625;
+    ir[1][0] = 0.00075;
+    ir[1][3] = 0.000125;
+    ir[1][1025] = -0.00003125;
+    ir[1][4096] = 0.000015625;
+
+    auto run = [&]<typename Conv, typename T> {
+        std::vector<T> ir0(ir[0].begin(), ir[0].end());
+        std::vector<T> ir1(ir[1].begin(), ir[1].end());
+        const T* ir_ptrs[2] = {ir0.data(), ir1.data()};
+        Conv conv;
+        conv.prepare(kFs, kBlock, 2);
+        conv.set_normalize_mode(IrNormalizeMode::none);
+        REQUIRE(conv.load_impulse_response(ir_ptrs, 2, ir_len, kFs));
+
+        std::vector<std::vector<T>> input(2, std::vector<T>(frames));
+        Rng rng(0x2A2u);
+        for (int i = 0; i < frames; ++i) {
+            input[0][i] = static_cast<T>(rng.bipolar());
+            input[1][i] = static_cast<T>(0.5 * rng.bipolar() +
+                                         ((i & 1) ? -0.2 : 0.2));
+        }
+        const std::vector<double> x0(input[0].begin(), input[0].end());
+        const std::vector<double> x1(input[1].begin(), input[1].end());
+        const auto want0 = direct_convolve(x0, prepared_taps(conv, 0));
+        const auto want1 = direct_convolve(x1, prepared_taps(conv, 1));
+        const auto got = render(conv, input, kBlock);
+        const std::vector<double> got0(got[0].begin(), got[0].end());
+        const std::vector<double> got1(got[1].begin(), got[1].end());
+        REQUIRE(rms_error_db(got0, want0) < -95.0);
+        REQUIRE(rms_error_db(got1, want1) < -95.0);
+        REQUIRE(amplitude_db(max_abs_error(got0, want0)) < -85.0);
+        REQUIRE(amplitude_db(max_abs_error(got1, want1)) < -85.0);
+
+        conv.reset();
+        std::vector<std::vector<T>> split(2, std::vector<T>(frames));
+        const int sizes[] = {1, 7, 64, 128, 33, 5};
+        int part = 0;
+        for (int pos = 0; pos < frames;) {
+            const int n = std::min(sizes[part++ % 6], frames - pos);
+            const T* in[2] = {input[0].data() + pos, input[1].data() + pos};
+            T* out[2] = {split[0].data() + pos, split[1].data() + pos};
+            conv.process(in, out, n);
+            pos += n;
+        }
+        for (int c = 0; c < 2; ++c) {
+            const std::vector<double> split_d(split[c].begin(), split[c].end());
+            const auto& want = c == 0 ? want0 : want1;
+            REQUIRE(rms_error_db(split_d, want) < -95.0);
+        }
+
+        // Complex packing has a small absolute roundoff floor from the loud
+        // channel. Check quiet and silent channels with an absolute dBFS gate
+        // so the oracle does not turn that floor into a misleading relative
+        // error when the expected signal is near zero.
+        for (int loud = 0; loud < 2; ++loud) {
+            const int quiet = 1 - loud;
+            for (T quiet_gain : {T{0}, T{1e-5}, T{1e-4}}) {
+                Conv quiet_conv;
+                quiet_conv.prepare(kFs, kBlock, 2);
+                quiet_conv.set_normalize_mode(IrNormalizeMode::none);
+                REQUIRE(quiet_conv.load_impulse_response(ir_ptrs, 2, ir_len, kFs));
+                std::vector<std::vector<T>> quiet_input(2, std::vector<T>(frames));
+                Rng quiet_rng(0x5EEDu);
+                for (int i = 0; i < frames; ++i) {
+                    quiet_input[loud][i] = static_cast<T>(0.75 * quiet_rng.bipolar());
+                    quiet_input[quiet][i] = quiet_gain * static_cast<T>(quiet_rng.bipolar());
+                }
+                const std::vector<double> quiet_x(quiet_input[quiet].begin(), quiet_input[quiet].end());
+                const auto quiet_want = direct_convolve(quiet_x, prepared_taps(quiet_conv, quiet));
+                const auto quiet_got = render(quiet_conv, quiet_input, kBlock);
+                for (const auto& channel : quiet_got)
+                    REQUIRE(std::all_of(channel.begin(), channel.end(), [](T sample) {
+                        return std::isfinite(sample);
+                    }));
+                const std::vector<double> quiet_actual(quiet_got[quiet].begin(), quiet_got[quiet].end());
+                REQUIRE(amplitude_db(max_abs_error(quiet_actual, quiet_want)) < -145.0);
+            }
+        }
+    };
+
+    SECTION("float") { run.template operator()<ZeroLatencyConvolver, float>(); }
+    SECTION("double") { run.template operator()<ZeroLatencyConvolver64, double>(); }
+}
+
 TEST_CASE("Packed stereo preserves DC and Nyquist components", "[signal][convolution][stereo]") {
     constexpr int ir_len = 1537;
     constexpr int frames = 4096;
