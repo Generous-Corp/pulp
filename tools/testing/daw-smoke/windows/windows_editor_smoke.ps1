@@ -79,15 +79,18 @@ try {
   }
   if ($warm -and -not $warm.HasExited) { Stop-Process -Id $warm.Id -Force }
   $args = @('-newinst','-cfgfile', $ini, $lua)
+  # The warm scan has its own deadline. Always grant the scripted instance a
+  # full bounded window, even when scanning consumed the entire warm budget.
+  $scriptDeadline = (Get-Date).AddSeconds($TimeoutSec)
   $proc = Start-Process -FilePath $reaper -ArgumentList $args -WorkingDirectory $run -RedirectStandardOutput $reaperOut -RedirectStandardError ($reaperOut + '.err') -PassThru
-  while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath $status)) { Start-Sleep -Milliseconds 250 }
+  while ((Get-Date) -lt $scriptDeadline -and -not (Test-Path -LiteralPath $status)) { Start-Sleep -Milliseconds 250 }
   if (-not (Test-Path -LiteralPath $status)) { Fail-Inconclusive 'REAPER never reported editor status' }
   $hostStatus = Get-Content -Raw -LiteralPath $status
   # FX_SHOWN is only the insertion handshake. If modulation was requested,
   # wait for the Lua driver to finish and report the terminal marker; otherwise
   # a fast wrapper could PASS while the automation never ran.
   $final = if ($ParamIndex -ge 0) { 'MODULATION_DONE' } else { 'EDITOR_SHOWN_NO_MODULATION' }
-  while ((Get-Date) -lt $deadline -and $hostStatus -notmatch [regex]::Escape($final)) {
+  while ((Get-Date) -lt $scriptDeadline -and $hostStatus -notmatch [regex]::Escape($final)) {
     Start-Sleep -Milliseconds 250
     $hostStatus = Get-Content -Raw -LiteralPath $status
   }
