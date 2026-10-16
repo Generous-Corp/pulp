@@ -11804,6 +11804,7 @@
   "toolchain-mise_golden_layer-selftest": {
    "entry": "tools/ci/test_mise_golden_layer.py",
    "inputs": [
+    "tools/ci",
     "tools/ci/mise-golden-layer.sh",
     "tools/ci/tart-provision.sh",
     "tools/ci/test_mise_golden_layer.py",
