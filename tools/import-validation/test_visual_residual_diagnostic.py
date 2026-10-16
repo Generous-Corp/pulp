@@ -71,13 +71,17 @@ class VisualResidualDiagnosticTests(unittest.TestCase):
         candidate = self.reference.copy()
         ImageDraw.Draw(candidate).point((0, 0), fill=(255, 0, 0, 255))
         report = measure(self.reference, candidate, root=(2, 2, 20, 12))
-        self.assertEqual(report["categories"]["outside_root_registration"]["differing_pixels"], 1)
+        self.assertEqual(report["categories"]["outside_root_residual"]["differing_pixels"], 1)
 
     def test_rejects_mismatched_dimensions_and_root(self):
         with self.assertRaises(ValueError):
             measure(self.reference, Image.new("RGBA", (1, 1)))
         with self.assertRaises(ValueError):
             measure(self.reference, self.reference, root=(0, 0, 25, 16))
+        with self.assertRaises(ValueError):
+            measure(self.reference, self.reference, foreground_threshold=-1)
+        with self.assertRaises(ValueError):
+            measure(Image.new("RGBA", (0, 0)), Image.new("RGBA", (0, 0)))
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 This tool is deliberately advisory.  It does not change the importer score or
 make a parity decision.  It classifies differing pixels as an edge-band
 residual, shared-foreground interior color differences, mask/placement
-disagreement, or outside-root registration differences.  The labels are
+  disagreement, or outside-root residuals.  The labels are
 heuristics, not causal proof that a renderer setting is responsible.
 
 ``diff_against_reference.py`` remains the canonical whole-frame residual
@@ -94,12 +94,14 @@ def measure(
     difference_threshold: int = 0,
 ) -> dict[str, object]:
     """Return a stable residual decomposition for equal-sized RGBA images."""
-    if edge_width < 0 or difference_threshold < 0:
-        raise ValueError("edge_width and difference_threshold must be non-negative")
+    if edge_width < 0 or difference_threshold < 0 or foreground_threshold < 0:
+        raise ValueError("edge_width, foreground_threshold, and difference_threshold must be non-negative")
     ref = reference.convert("RGBA")
     cand = candidate.convert("RGBA")
     if ref.size != cand.size:
         raise ValueError(f"image dimensions differ: {ref.size} vs {cand.size}")
+    if not ref.width or not ref.height:
+        raise ValueError("residual images must be non-empty")
     if root is not None:
         x, y, width, height = root
         if width <= 0 or height <= 0 or x < 0 or y < 0 or x + width > ref.width or y + height > ref.height:
@@ -118,7 +120,7 @@ def measure(
         "edge_band_residual": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
         "shared_foreground_interior": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
         "mask_or_placement_interior": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
-        "outside_root_registration": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
+        "outside_root_residual": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
     }
     error_sums = {name: 0 for name in categories}
     for index, (ref_pixel, cand_pixel) in enumerate(zip(ref_pixels, cand_pixels)):
@@ -127,7 +129,7 @@ def measure(
         alpha_only = (ref_pixel[:3] == cand_pixel[:3] and ref_pixel[3] != cand_pixel[3])
         differs = delta > difference_threshold
         if not in_root(px, py):
-            category = "outside_root_registration"
+            category = "outside_root_residual"
         elif (_distance(ref_pixel[:3], ref_background) <= foreground_threshold
               and _distance(cand_pixel[:3], cand_background) <= foreground_threshold):
             category = "background_residual"
