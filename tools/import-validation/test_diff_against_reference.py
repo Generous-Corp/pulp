@@ -33,6 +33,7 @@ from importer_differential.core import (  # noqa: E402
     LabError,
     NativeNode,
     geometry_metrics_with_registration,
+    promotion_recommendation,
     register_browser_nodes_to_native_frame,
 )
 
@@ -139,6 +140,15 @@ class HelperScoringTests(unittest.TestCase):
         self.assertLess(geometry["score"], 1.0)
         self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
         self.assertEqual(geometry["registration_applied"]["x"], -24.0)
+        recommendation = promotion_recommendation(
+            [],
+            {"score": 1.0},
+            geometry,
+            {"score": 1.0},
+            {"score": 1.0},
+        )
+        self.assertFalse(recommendation["threshold_eligible"])
+        self.assertFalse(recommendation["production_promotion_enabled"])
 
     @staticmethod
     def _panel_pixels(*, shift: int = 0, fill: tuple[int, int, int] = (220, 220, 220),
