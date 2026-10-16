@@ -514,7 +514,20 @@ jobs:
             fi
           done
           sudo docker image prune --all --force >/dev/null 2>&1 || true
-          echo "after:"; df -h /
+          # Hosted runners also carry a separate scratch disk at /mnt. Put the
+          # build tree, which holds the instrumented objects and every raw
+          # profile, there, so it no longer shares the root disk with the
+          # toolchains and the runner's own logs. The real path keeps the
+          # build-coverage name, which the coverage ignore regex matches.
+          root_free=$(df -Pk / | awk 'NR==2 {print $4}')
+          mnt_free=$(df -Pk /mnt 2>/dev/null | awk 'NR==2 {print $4}')
+          if [ -n "${mnt_free}" ] && [ "${mnt_free}" -gt "${root_free}" ] && [ ! -e build-coverage ]; then
+            sudo mkdir -p /mnt/build-coverage
+            sudo chown "$(id -u):$(id -g)" /mnt/build-coverage
+            ln -s /mnt/build-coverage build-coverage
+            echo "build-coverage -> /mnt/build-coverage"
+          fi
+          echo "after:"; df -h / /mnt 2>/dev/null || df -h /
 
       - name: Reclaim hosted macOS coverage disk
         # GitHub's standard arm64 image has a tight root disk and the native
@@ -667,14 +680,27 @@ jobs:
           # while the suite runs.
           sampler=""
           if [ "${RUNNER_OS}" != "Windows" ]; then
-            ( while kill -0 "${cov}" 2>/dev/null; do
-                free_gib=$(df -Pk . | awk 'NR==2 {printf "%.1f", $4/1048576}')
+            # A runner that fills its disk loses its whole log, so crossing
+            # each low-space threshold is also raised as an annotation, which
+            # is recorded separately from the log.
+            ( warned=""
+              while kill -0 "${cov}" 2>/dev/null; do
+                root_gib=$(df -Pk / | awk 'NR==2 {printf "%.1f", $4/1048576}')
+                build_gib=$(df -Pk build-coverage/ 2>/dev/null | awk 'NR==2 {printf "%.1f", $4/1048576}')
                 sizes=""
-                for d in build-coverage build-coverage/profraw build-coverage/coverage \
+                for d in build-coverage/ build-coverage/profraw build-coverage/coverage \
                          "${HOME}/.cache/pulp"; do
-                  [ -e "${d}" ] && sizes="${sizes} ${d##*/}=$(du -sk "${d}" 2>/dev/null | awk '{printf "%.1fG", $1/1048576}')"
+                  [ -e "${d}" ] && sizes="${sizes} $(basename "${d}")=$(du -sk "${d}" 2>/dev/null | awk '{printf "%.1fG", $1/1048576}')"
                 done
-                echo "disk-sample: $(date -u +%H:%M:%SZ) free=${free_gib}G${sizes}"
+                line="root_free=${root_gib}G build_disk_free=${build_gib:-?}G${sizes}"
+                echo "disk-sample: $(date -u +%H:%M:%SZ) ${line}"
+                low=$(awk -v a="${root_gib}" -v b="${build_gib:-${root_gib}}" 'BEGIN {print (a < b ? a : b)}')
+                for t in 20 10 5 2; do
+                  if awk -v l="${low}" -v t="${t}" 'BEGIN {exit !(l < t)}' && [[ " ${warned} " != *" ${t} "* ]]; then
+                    warned="${warned} ${t}"
+                    echo "::warning title=coverage disk below ${t} GiB::$(date -u +%H:%M:%SZ) ${line}"
+                  fi
+                done
                 sleep 300
               done ) & sampler=$!
           fi
@@ -688,7 +714,7 @@ jobs:
           if [ -n "${sampler}" ]; then
             kill -TERM "${sampler}" 2>/dev/null || true
             wait "${sampler}" 2>/dev/null || true
-            echo "disk after suite:"; df -h .
+            echo "disk after suite:"; df -h / build-coverage/
           fi
           # Best-effort timeout cleanup. Trigger on EITHER the marker OR a
           # signal-kill exit (143=SIGTERM, 137=SIGKILL — our watchdog's signals),
