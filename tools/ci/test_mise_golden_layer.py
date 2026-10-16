@@ -23,7 +23,7 @@ PROVISION = ROOT / "tools/ci/tart-provision.sh"
 
 FAKE_MISE = """#!/bin/sh
 case "$1" in
-  --version) echo "{version} macos-arm64 (2026-10-13)";;
+  --version) echo "${{FAKE_MISE_VERSION:-{version}}} macos-arm64 (2026-10-13)";;
   install) echo "install $*" >> "$HOME/mise-calls"; [ -n "${{FAKE_MISE_FAIL:-}}" ] && exit 1; exit 0;;
   ls) echo '{{"cmake": [{{"version": "4.3.3"}}]}}';;
 esac
@@ -143,6 +143,36 @@ class LayerTests(unittest.TestCase):
         self.assertEqual(1, out.returncode)
         self.assertIn(f"guest mise has sha256 {'1' * 64}, the manifest pins {self.digest}", out.stderr)
         self.assertFalse((self.guest / "mise-calls").exists())
+
+    def test_a_guest_mise_reporting_another_version_is_refused(self) -> None:
+        # Same bytes, but the guest binary reports a different release.
+        out = self.run_layer(self.manifest(), FAKE_MISE_VERSION="2026.5.16")
+        self.assertEqual(1, out.returncode)
+        self.assertIn(f"guest mise reports 2026.5.16, the manifest pins {self.version}", out.stderr)
+        self.assertFalse((self.guest / "mise-calls").exists())
+
+    def test_toolchain_files_that_differ_from_the_commit_are_refused(self) -> None:
+        # A copy of the layer in its own repository, so the checkout can be dirtied.
+        repo = self.tmp / "repo"
+        (repo / "tools/ci").mkdir(parents=True)
+        shutil.copy2(LAYER, repo / "tools/ci/mise-golden-layer.sh")
+        for name in (".mise.toml", ".mise.toolchain.toml", "mise.toolchain.lock"):
+            shutil.copy2(ROOT / name, repo / name)
+        git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(git + ["add", "-A"], check=True)
+        subprocess.run(git + ["commit", "-q", "-m", "toolchain"], check=True)
+        layer = repo / "tools/ci/mise-golden-layer.sh"
+        env = dict(os.environ, HOME=str(self.host), MISE_LAYER_GUEST="local", MISE_LAYER_GUEST_HOME=str(self.guest))
+        clean = subprocess.run(["bash", str(layer), str(self.manifest()), "10.0.0.1", str(self.receipt)],
+                               env=env, capture_output=True, text=True, encoding="utf-8", check=False)
+        self.assertEqual(0, clean.returncode, clean.stderr)  # control: the clean copy bakes
+        with (repo / ".mise.toml").open("a", encoding="utf-8") as handle:
+            handle.write("# an uncommitted edit\n")
+        dirty = subprocess.run(["bash", str(layer), str(self.manifest()), "10.0.0.1", str(self.receipt)],
+                               env=env, capture_output=True, text=True, encoding="utf-8", check=False)
+        self.assertEqual(1, dirty.returncode)
+        self.assertIn("the toolchain files differ from", dirty.stderr)
 
     def test_a_failed_locked_install_stops_the_layer(self) -> None:
         out = self.run_layer(self.manifest(), FAKE_MISE_FAIL="1")
