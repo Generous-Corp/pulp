@@ -8,7 +8,7 @@ on a shared machine is noisy and a flaky perf gate is worse than none.
 
 ## What it measures
 
-- **Processors** at 48 kHz for block sizes 32, 128 and 512: partitioned,
+- **Processors** at 48 kHz for block sizes 16, 32, 64, 128 and 512: partitioned,
   non-uniform and zero-latency convolution, the FDN reverb, x4 oversampling
   (`fir_biquad`, `polyphase_iir`, `linear_phase_fir`) around a `tanh`, FIR
   filters, character delays, pitch/time, an 8-voice synth loop, compressor,

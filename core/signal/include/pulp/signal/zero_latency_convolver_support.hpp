@@ -302,8 +302,10 @@ public:
                     const int half = len / 2;
                     const int step = n / len;
                     for (int b = cursor; b < cursor + take; ++b) {
-                        const int group = b / half;
-                        const int j = b - group * half;
+                        // half is 2^(stage - 1); keep the butterfly index
+                        // arithmetic as shifts/masks in this hot loop.
+                        const int group = b >> (stage - 1);
+                        const int j = b & (half - 1);
                         const int i = group * len;
                         const auto& tw = plan.twiddles_[static_cast<std::size_t>(j * step)];
                         const std::complex<SampleType> w(static_cast<SampleType>(tw.real()),
