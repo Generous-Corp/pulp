@@ -71,6 +71,12 @@ add_test(NAME build-governance-paths-selftest
         "${CMAKE_SOURCE_DIR}/tools/ci/test_build_governance_paths.py")
 set_tests_properties(build-governance-paths-selftest PROPERTIES TIMEOUT 120)
 
+# Merge-gate evidence validation is source-only and must be registered in the
+# CTest inventory that carries the source-selftest label.
+add_test(NAME shipyard-merge-gate-evidence-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_shipyard_merge_gate_evidence.py")
+
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_pulp_source_selftest_manifest}")

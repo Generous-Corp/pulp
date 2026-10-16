@@ -5189,6 +5189,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-529619f8118c"
+paths = ["tools/scripts/test_shipyard_merge_gate_evidence.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "shipyard-merge-gate-evidence-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-0df1e123a7c0"
 paths = ["tools/scripts/test_silent_revert_guard.py"]
 tests = [
@@ -7281,6 +7315,7 @@ paths = [
   "tools/scripts/test_shared_test_objects_check.py",
   "tools/scripts/test_shell_portability_check.py",
   "tools/scripts/test_shipyard_duplicate_pr_heads.py",
+  "tools/scripts/test_shipyard_merge_gate_evidence.py",
   "tools/scripts/test_silent_revert_guard.py",
   "tools/scripts/test_skia_linux_arm64_asset.py",
   "tools/scripts/test_skills_doc_check.py",
@@ -7838,6 +7873,7 @@ paths = [
   "tools/scripts/test_shared_test_objects_check.py",
   "tools/scripts/test_shell_portability_check.py",
   "tools/scripts/test_shipyard_duplicate_pr_heads.py",
+  "tools/scripts/test_shipyard_merge_gate_evidence.py",
   "tools/scripts/test_silent_revert_guard.py",
   "tools/scripts/test_skia_linux_arm64_asset.py",
   "tools/scripts/test_skills_doc_check.py",
