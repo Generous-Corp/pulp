@@ -1004,18 +1004,32 @@ TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
     // the snapshot UAF, set_node_gain's snapshot store is exercised separately
     // below rather than raced against prepare()'s nodes_ read.
     SignalGraph graph;
+    CustomNodeType delayed;
+    delayed.type_id = "test.snapshot-reader-latency";
+    delayed.num_input_ports = 1;
+    delayed.num_output_ports = 1;
+    delayed.process = [](pulp::audio::BufferView<float>& output,
+                         const pulp::audio::BufferView<const float>& input, int frames) {
+        for (int frame = 0; frame < frames; ++frame)
+            output.channel_ptr(0)[frame] = input.channel_ptr(0)[frame];
+    };
+    delayed.latency_samples = [](double) { return 7; };
+    REQUIRE(graph.register_custom_node_type(delayed));
     auto in   = graph.add_input_node(1, "in");
     auto gain = graph.add_gain_node("gain");
+    auto custom = graph.add_custom_node(delayed.type_id, 1, "delayed");
     auto out  = graph.add_output_node(1, "out");
     auto mi   = graph.add_midi_input_node("keys");
     auto mo   = graph.add_midi_output_node("thru");
     REQUIRE(graph.connect(in, 0, gain, 0));
-    REQUIRE(graph.connect(gain, 0, out, 0));
+    REQUIRE(graph.connect(gain, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, out, 0));
     REQUIRE(graph.connect_midi(mi, mo));
     REQUIRE(graph.prepare(48000.0, 64));
+    REQUIRE(graph.live_custom_latency_samples(custom) == 7);
 
     // set_node_gain's snapshot half (the per-runtime gain atomic store) is
-    // pinned by ProcessReadGuard; cover it directly so all four methods are
+    // pinned by ProcessReadGuard; cover it directly so all five methods are
     // represented even though it is not raced against prepare() below.
     REQUIRE(graph.set_node_gain(gain, 0.5f));
 
@@ -1030,7 +1044,7 @@ TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
     std::atomic<long> retire_iterations{0};
 
     // Reader thread: continuously dereference the live snapshot through the
-    // three pure-snapshot readers. None must crash or read freed memory while
+    // four pure-snapshot readers. None must crash or read freed memory while
     // the retirer churns snapshots underneath them.
     std::thread reader_thread([&] {
         while (!stop.load(std::memory_order_acquire)) {
@@ -1039,6 +1053,9 @@ TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
             graph.extract_midi(mo, arrived);
             const int latency = graph.node_latency_samples(gain);
             if (latency < 0) saw_crash.store(true, std::memory_order_relaxed);
+            const int custom_latency = graph.live_custom_latency_samples(custom);
+            if (custom_latency != 0 && custom_latency != 7)
+                saw_crash.store(true, std::memory_order_relaxed);
             reader_iterations.fetch_add(1, std::memory_order_relaxed);
         }
     });
@@ -1050,8 +1067,8 @@ TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
     std::thread retirer_thread([&] {
         while (!stop.load(std::memory_order_acquire)) {
             graph.prepare(48000.0, 64);
-            graph.disconnect(gain, 0, out, 0);
-            graph.connect(gain, 0, out, 0);
+            graph.disconnect(custom, 0, out, 0);
+            graph.connect(custom, 0, out, 0);
             graph.release();
             graph.prepare(48000.0, 64);
             retire_iterations.fetch_add(1, std::memory_order_relaxed);
