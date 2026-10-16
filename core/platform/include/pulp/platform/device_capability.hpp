@@ -60,7 +60,7 @@ inline constexpr std::size_t kDeviceCapabilityTierCount = 3;
 /// `DeviceCapabilityInputs::thermal_reporting_available`.
 ///
 /// Consumers index a quota table by tier and thermal state together; the table
-/// itself is `pulp::format::device_quotas`.
+/// belongs to the consumer, not to the platform layer.
 enum class ThermalState : std::uint8_t {
     Nominal = 0,
     Fair = 1,
