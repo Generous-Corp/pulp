@@ -213,6 +213,27 @@ class ProfileIndependenceTests(unittest.TestCase):
                 inventory = {"tests": [{"name": "feature-skip", "command": command, "properties": []}]}
                 self.assertEqual(sti.build_list(inventory, self.repo.root)["tests"], {})
 
+    def test_a_scripts_own_dash_c_argument_is_not_an_inline_snippet(self) -> None:
+        # Interpreter options end at the script path; a -c after it belongs to
+        # the script. Treating it as inline code would drop the test from the
+        # input inventory, which fails open in a selection gate.
+        script = str(self.repo.root / "tools/scripts/selftest.py")
+        for suffix, command, expected_args in (
+            ("after-script", ["/usr/bin/python3", script, "-c", "x"], ["-c", "x"]),
+            ("option-value-then-script", ["/usr/bin/python3", "-W", "ignore", script, "-c", "x"],
+             ["-c", "x"]),
+            ("flag-then-script", ["/usr/bin/python3", "-u", script], []),
+        ):
+            with self.subTest(suffix=suffix):
+                kind, entry, args = sti.classify(command, self.repo.root)
+                self.assertEqual((kind, entry, args), ("python", Path(script), expected_args))
+
+    def test_inline_snippet_with_attached_code_is_undeclarable(self) -> None:
+        for command in (["/usr/bin/python3", "-cprint(1)"],
+                        ["/usr/bin/python3", "-u", "-c", "print(1)"]):
+            with self.subTest(command=command):
+                self.assertEqual(sti.classify(command, self.repo.root), ("undeclarable", None, []))
+
     def inventory_with_example(self, keep_root: Path | None = None) -> dict:
         r = str(self.repo.root)
         inv = self.repo.inventory()
