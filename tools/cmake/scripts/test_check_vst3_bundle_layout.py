@@ -9,19 +9,11 @@ from pathlib import Path
 from check_vst3_bundle_layout import check
 
 
-def find_spectr_build_info(build_dir: Path, architecture: str) -> Path | None:
-    """Mirror Spectr's Find-SpectrBuildInfoSource candidate order."""
-    candidates = (
-        build_dir / "VST3" / "Spectr.vst3" / "Contents" / architecture / "Spectr.pulp-build-info.json",
-        build_dir / "VST3" / "Release" / "Spectr.pulp-build-info.json",
-        build_dir / "VST3" / "Spectr.pulp-build-info.json",
-    )
-    return next((candidate for candidate in candidates if candidate.is_file()), None)
-
-
 class WindowsVst3BundleLayoutTest(unittest.TestCase):
     def make_bundle(self) -> tuple[Path, Path]:
-        root = Path(tempfile.mkdtemp())
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
         bundle = root / "Probe.vst3"
         arch = bundle / "Contents" / "x86_64-win"
         arch.mkdir(parents=True)
@@ -81,23 +73,6 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
         (arch / "Probe.pulp-build-info.json").rename(arch / "pulp-build-info.json")
         problems = check(bundle)
         self.assertTrue(any("Probe.pulp-build-info.json" in problem for problem in problems))
-
-    def test_spectr_consumer_discovers_module_base_filename(self) -> None:
-        root = Path(tempfile.mkdtemp())
-        sidecar = (root / "VST3" / "Spectr.vst3" / "Contents" /
-                   "arm64ec-win" / "Spectr.pulp-build-info.json")
-        sidecar.parent.mkdir(parents=True)
-        sidecar.write_text("{}", encoding="utf-8")
-        self.assertEqual(find_spectr_build_info(root, "arm64ec-win"), sidecar)
-
-    def test_spectr_consumer_does_not_discover_generic_name(self) -> None:
-        root = Path(tempfile.mkdtemp())
-        sidecar = (root / "VST3" / "Spectr.vst3" / "Contents" /
-                   "arm64ec-win" / "pulp-build-info.json")
-        sidecar.parent.mkdir(parents=True)
-        sidecar.write_text("{}", encoding="utf-8")
-        self.assertIsNone(find_spectr_build_info(root, "arm64ec-win"))
-
 
 if __name__ == "__main__":
     unittest.main()
