@@ -64,7 +64,7 @@ class WatchdogUnitTests(unittest.TestCase):
         child = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(30)"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            start_new_session=True)
+            encoding="utf-8", start_new_session=True)
         self.addCleanup(lambda: (child.kill(), child.wait(), child.stdout.close()))
         snapshots: list[int] = []
 
