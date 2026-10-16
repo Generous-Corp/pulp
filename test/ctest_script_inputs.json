@@ -5000,8 +5000,12 @@
   "gpu-audio-p2-campaign-contract-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
    "inputs": [
+    "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/gpu_audio_p2_campaign.py",
+    "tools/scripts/gpu_audio_provider_identity.py",
+    "tools/scripts/process_liveness.py",
     "tools/scripts/test_gpu_audio_p2_campaign.py"
    ],
    "kind": "python"

@@ -19,6 +19,8 @@ import sys
 import time
 from typing import Any
 
+import gpu_audio_provider_identity as identity_contract
+
 SCHEMA = "pulp.gpu-audio.p2.authenticated-slots-lead.v1"
 SLOTS = (2, 4, 8, 16)
 LEADS = (1, 2, 4, 8)
@@ -85,18 +87,41 @@ def _nonnegative_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-def validate_provider_identity_fixture(path: Path) -> dict[str, Any]:
+def validate_provider_identity_fixture(path: Path, provider_platform: str | None = None
+                                      ) -> dict[str, Any]:
     """Load an exact-provider receipt and bind it to this checkout's manifest."""
 
-    return load_provider_identity_receipt(path)[0]
+    return load_provider_identity_receipt(path, provider_platform)[0]
 
 
-def load_provider_identity_receipt(path: Path) -> tuple[dict[str, Any], str]:
+def host_provider_platform() -> str:
+    """The Skia release-matrix platform whose provider this host links.
+
+    The campaign measures Metal, so only macOS hosts have a provider platform.
+    """
+
+    if sys.platform != "darwin":
+        raise RuntimeError("the P2 campaign measures Metal and needs a macOS provider platform")
+    machine = platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return "darwin-arm64"
+    if machine in ("x86_64", "amd64"):
+        return "darwin-x64"
+    raise RuntimeError(f"no Skia provider platform for macOS machine {machine!r}")
+
+
+def load_provider_identity_receipt(path: Path, provider_platform: str | None = None
+                                   ) -> tuple[dict[str, Any], str]:
     """The validated receipt and the SHA-256 of the exact bytes validated.
 
     The file is read once. Hashing a second read for the campaign manifest
     would record whatever the path held then, which need not be the receipt
     that passed these checks.
+
+    The receipt's expected asset and Dawn revision are re-derived from the
+    manifest it is bound to, for ``provider_platform`` (the host's when
+    omitted). Matching the manifest's hash alone would accept a hand-written
+    receipt that names any other asset or revision.
     """
 
     if path.is_symlink() or not path.is_file():
@@ -116,11 +141,27 @@ def load_provider_identity_receipt(path: Path) -> tuple[dict[str, Any], str]:
         if not isinstance(value, str) or re.fullmatch(pattern, value) is None:
             raise RuntimeError(f"provider identity fixture {field} is invalid")
     manifest_path = REPO_ROOT / "tools/deps/manifest.json"
-    if not _matches_sha256(manifest_path, fixture["manifest_sha256"]):
+    try:
+        manifest_bytes = (None if manifest_path.is_symlink() or not manifest_path.is_file()
+                          else manifest_path.read_bytes())
+    except OSError:
+        manifest_bytes = None
+    # The same bytes are hashed here and parsed below, so the pins checked
+    # are the ones the receipt's manifest_sha256 names.
+    if manifest_bytes is None or hashlib.sha256(manifest_bytes).hexdigest() != fixture["manifest_sha256"]:
         raise RuntimeError("provider identity fixture is not bound to the current provider manifest")
     if fixture["expected_asset_sha256"] != fixture["validated_asset_sha256"] \
             or fixture["expected_dawn_revision"] != fixture["header_dawn_revision"]:
         raise RuntimeError("provider identity fixture contains inconsistent provider identity")
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+        pinned_dawn, pinned_asset = identity_contract.skia_contract(
+            manifest, provider_platform or host_provider_platform())
+    except (UnicodeError, json.JSONDecodeError, identity_contract.IdentityError) as exc:
+        raise RuntimeError(f"provider manifest does not pin a provider identity: {exc}") from exc
+    if fixture["expected_dawn_revision"].lower() != pinned_dawn.lower() \
+            or fixture["expected_asset_sha256"].lower() != pinned_asset.lower():
+        raise RuntimeError("provider identity fixture names a provider the manifest does not pin")
     return fixture, hashlib.sha256(raw).hexdigest()
 
 
