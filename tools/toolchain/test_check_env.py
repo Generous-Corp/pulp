@@ -398,6 +398,13 @@ class WorkflowStepTests(unittest.TestCase):
             self.assertEqual(0, out.returncode, out.stderr)
             self.assertIn("check_env.py exited 3", out.stdout)
 
+    def test_build_legs_never_auto_install_a_rust_toolchain(self) -> None:
+        text = (REPO_ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        job = text[text.index("\n  build:\n"):]
+        env = job[job.index("\n    env:\n"):job.index("\n    steps:\n")]
+        self.assertIn('PULP_OFFLINE_BUILD: "1"', env)  # control: this is the build job's env
+        self.assertIn('RUSTUP_AUTO_INSTALL: "0"', env)
+
     def test_a_hung_probe_is_bounded(self) -> None:
         self.assertLessEqual(check_env.PROBE_TIMEOUT_S, 5)
         self.assertIn("timeout-minutes: 2", (REPO_ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8"))

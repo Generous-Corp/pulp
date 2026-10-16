@@ -2039,6 +2039,11 @@ so a hung tool cannot stall a leg. It stays report only under `bash -e`
 whatever is missing: no Python on the runner, or a check that cannot read its
 expected versions (exit 3), becomes a warning annotation, never a failed step.
 
+The build legs also set `RUSTUP_AUTO_INSTALL=0`: a rustup proxy would
+otherwise download, mid-build, whatever toolchain `rust-toolchain.toml` names
+when the runner lacks it. With it off, a missing toolchain fails the cargo step
+by name, and the image or the resolve step has to provide it.
+
 ## Build-time Node dependencies are installed before the build, never inside it
 
 The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an
