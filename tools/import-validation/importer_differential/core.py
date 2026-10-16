@@ -563,6 +563,20 @@ def geometry_metrics(
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     errors: list[float] = []
+    browser_by_index = {browser.index: browser for browser, _native, _score in matches}
+
+    def depth(index: int) -> int:
+        seen: set[int] = set()
+        value = 0
+        while index >= 0 and index not in seen:
+            seen.add(index)
+            parent = browser_by_index.get(index)
+            if parent is None or parent.parent < 0:
+                break
+            value += 1
+            index = parent.parent
+        return value
+
     for browser, native, _ in matches:
         if not browser.bounds or not native.bounds:
             continue
@@ -584,6 +598,7 @@ def geometry_metrics(
             # systematic offset by collapsing +N and -N into the same value.
             "signed_delta": dict(zip(labels, [round(v, 6) for v in signed_delta])),
             "max_abs_delta": round(max(abs(v) for v in signed_delta), 6),
+            "depth": depth(browser.index),
             "mean_relative_error": round(mean_error, 6),
         })
     mean_error = statistics.fmean(errors) if errors else 1.0
@@ -595,6 +610,9 @@ def geometry_metrics(
         label: {
             "mean": round(statistics.fmean(values), 6) if values else None,
             "median": round(statistics.median(values), 6) if values else None,
+            "p95_abs": round(sorted(abs(value) for value in values)[
+                min(len(values) - 1, max(0, math.ceil(len(values) * 0.95) - 1))], 6)
+            if values else None,
             "min": min(values) if values else None,
             "max": max(values) if values else None,
         }
@@ -608,7 +626,9 @@ def geometry_metrics(
         "matched_bounds": len(rows),
         "mean_relative_error": round(mean_error, 6),
         "signed_delta_summary": signed_summary,
-        "root_residual": root_rows[0] if root_rows else None,
+        "root_count": len(root_rows),
+        "root_residual": root_rows[0] if len(root_rows) == 1 else None,
+        "root_residuals": root_rows,
         "rows": rows,
     }
 
@@ -623,23 +643,35 @@ def viewport_dpr_audit(
     contradictory provenance. A signed geometry residual is not actionable if
     the two captures used different roots, viewport extents, or device scale.
     """
-    reference = capture.get("reference", {})
-    native_reference = native_capture.get("reference", {})
+    reference = capture.get("reference")
+    native_reference = native_capture.get("reference")
+    resolved = capture.get("provenance", {}).get("viewport", {}).get("resolved")
+    native_resolved = native_capture.get("provenance", {}).get("viewport", {}).get("resolved")
+    if not all(isinstance(item, dict) for item in (reference, native_reference,
+                                                    resolved, native_resolved)):
+        raise LabError("capture is missing object-shaped reference or viewport provenance")
     try:
-        dpr = float(reference["device_scale_factor"])
-        native_dpr = float(native_reference.get("device_scale_factor", dpr))
+        raw_dpr = reference["device_scale_factor"]
+        raw_native_dpr = native_reference["device_scale_factor"]
+        if isinstance(raw_dpr, bool) or isinstance(raw_native_dpr, bool):
+            raise ValueError("boolean device scale")
+        dpr = float(raw_dpr)
+        native_dpr = float(raw_native_dpr)
         logical = (int(reference["logical_width"]), int(reference["logical_height"]))
     except (KeyError, TypeError, ValueError) as exc:
         raise LabError("capture is missing a valid logical extent or device scale") from exc
-    if dpr <= 0 or native_dpr <= 0:
+    if (not math.isfinite(dpr) or not math.isfinite(native_dpr)
+            or dpr <= 0 or native_dpr <= 0):
         raise LabError("capture device scale factor must be positive")
-    resolved = capture.get("provenance", {}).get("viewport", {}).get("resolved", {})
-    native_resolved = native_capture.get("provenance", {}).get("viewport", {}).get("resolved", {})
     resolved_size = (resolved.get("width"), resolved.get("height"))
     native_resolved_size = (native_resolved.get("width"), native_resolved.get("height"))
     expected_pixels = (round(logical[0] * dpr), round(logical[1] * dpr))
     checks = {
-        "logical_size_matches_request": logical == expected_logical_size,
+        # Chromium can capture overflow beyond the requested viewport. The
+        # resolved viewport is the request; the reference extent may be larger.
+        "resolved_viewport_matches_request": resolved_size == expected_logical_size,
+        "logical_extent_covers_request": logical[0] >= expected_logical_size[0]
+        and logical[1] >= expected_logical_size[1],
         "native_logical_size_matches_browser": native_reference.get("logical_width") == logical[0]
         and native_reference.get("logical_height") == logical[1],
         "dpr_matches_native": dpr == native_dpr,
@@ -649,6 +681,7 @@ def viewport_dpr_audit(
     return {
         "schema": "pulp-importer-viewport-dpr-audit-v1",
         "logical_size": list(logical),
+        "requested_viewport": list(expected_logical_size),
         "resolved_viewport": [resolved_size[0], resolved_size[1]],
         "device_scale_factor": dpr,
         "native_device_scale_factor": native_dpr,

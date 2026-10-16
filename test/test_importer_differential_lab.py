@@ -363,6 +363,23 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertFalse(audit["ok"])
         self.assertFalse(audit["checks"]["render_size_matches_dpr"])
 
+    def test_viewport_dpr_audit_requires_native_dpr_and_allows_overflow_extent(self) -> None:
+        capture, native_capture, _source_sha256 = self._bound_captures()
+        capture["reference"] = {
+            "logical_width": 1440, "logical_height": 1200,
+            "device_scale_factor": 2,
+        }
+        native_capture["reference"] = {
+            "logical_width": 1440, "logical_height": 1200,
+        }
+        with self.assertRaisesRegex(LAB.LabError, "device scale"):
+            LAB.viewport_dpr_audit(capture, native_capture, (1280, 800), (2880, 2400))
+        native_capture["reference"]["device_scale_factor"] = 2
+        audit = LAB.viewport_dpr_audit(
+            capture, native_capture, (1280, 800), (2880, 2400))
+        self.assertTrue(audit["ok"])
+        self.assertTrue(audit["checks"]["logical_extent_covers_request"])
+
     def test_viewport_dpr_audit_accepts_matching_root_contract(self) -> None:
         capture, native_capture, _source_sha256 = self._bound_captures()
         for item in (capture, native_capture):
@@ -608,10 +625,23 @@ class DifferentialLabTests(unittest.TestCase):
                                       "browser_interactions": "plan.json"})
             self.assertEqual(report["integrity"]["source_sha256"], source_sha256)
             self.assertTrue(report["integrity"]["source_bound"])
+            self.assertTrue(report["comparison"]["viewport_dpr_audit"]["ok"])
             binding.assert_called_once()
             self.assertEqual(binding.call_args.kwargs["expected_interaction_plan_sha256"], plan_sha256)
             self.assertEqual(image_binding.call_count, 2)
             image_binding.assert_any_call(capture, evidence / "browser.png")
+            with patch.object(
+                LAB, "viewport_dpr_audit",
+                side_effect=LAB.LabError("viewport/DPR audit failed"),
+            ):
+                with patch.object(LAB, "run_command", side_effect=fake_run), \
+                        patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                    with self.assertRaisesRegex(LAB.LabError, "viewport/DPR audit failed"):
+                        LAB.compare_one(
+                            Path("importer"), Path("observer"), source, root / "out-fail", 60,
+                            "claude", Path("chrome"),
+                            fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                              "browser_interactions": "plan.json"})
 
     @requires_pillow
     def test_compare_one_scores_structure_through_the_shared_comparison(self) -> None:
