@@ -60,7 +60,15 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.269.1 (current pin): parses `executable_reuse` in a target's
+# v0.335.0 (current pin): carries `shipyard review-verdict --pr N [--head SHA]
+#   --json`, the repository-side review rule pulp's merge-group backstop calls
+#   (exit 0 approved, 1 refused, 2 unreadable). It takes the signers who may
+#   sign the fleet App's APPROVE only from the base's `[auto_merge]
+#   reviewer_signers`, which pulp's config lists. Its `shipyard changelog
+#   regenerate` renders CHANGELOG.md byte-identically to v0.269.1 for the same
+#   tag graph, and `shipyard config show` merges pulp's config identically.
+#
+# v0.269.1 (earlier pin): parses `executable_reuse` in a target's
 #   `changed_surface_selection`. Shipyard reads that table with
 #   `deny_unknown_fields`, so a host on an older release cannot parse a policy
 #   that declares it and falls back to the full suite on every PR; the pin and
@@ -190,7 +198,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.269.1"
+version = "v0.335.0"
 
 # Release repository. tools/install-shipyard.sh downloads the platform assets
 # from this repository's {version} release, refuses any whose sha256 differs

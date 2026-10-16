@@ -6723,6 +6723,18 @@ a `feat:`/`fix:` title) — expect to add those trailers too.
 
 ### Shipyard pin and behaviour notes
 
+#### The pin carries `shipyard review-verdict`
+
+From v0.335.0 the pinned Shipyard has `shipyard review-verdict --pr N [--head
+SHA] --json`: exit 0 when an approval names the head or carries to it, 1 when
+refused, 2 when unreadable (treat as refused). It reads signers only from the
+base's `[auto_merge] reviewer_signers` and never a host's
+`reviewer-signers.json`, so an App APPROVE without a `reviewer: <name>` line
+naming a listed signer is refused. Before a pin bump, diff `shipyard changelog
+regenerate --stdout` under both pins on the same checkout; v0.269.1 and v0.335.0
+render byte-identically. `shipyard run --pipeline`, which this skill and
+`docs/guides/local-ci.md` still show, exists in neither pin; use `--targets`.
+
 #### The local `mac` lane is opt-in: `shipyard pr` delegates to the required checks
 
 `[targets.mac]` in `.shipyard/config.toml` carries `default = false`, so
