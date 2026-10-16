@@ -70,9 +70,10 @@ def main() -> int:
         if "loss_session.release();" not in source:
             print("typed successful-loss teardown control failed", file=sys.stderr)
             return 1
-        if "auto session = std::make_unique<SharedIoProgramSession>();" not in source or (
-            "session.release();" not in source
-        ):
+        if ("auto session = std::make_unique<SharedIoProgramSession>();" not in source or
+                "const auto fail_session" not in source or
+                source.count("return fail_session(") < 10 or
+                "session.release();" not in source):
             print("typed initial-session teardown control failed", file=sys.stderr)
             return 1
         validated = source.split(
