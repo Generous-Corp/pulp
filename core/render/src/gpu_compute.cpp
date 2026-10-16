@@ -1424,15 +1424,16 @@ public:
         callback_state_->publish_loss(generation, reason);
     }
 
-    void apply_pending_device_loss() {
+    bool apply_pending_device_loss() {
         int reason = -1;
         std::string message;
         const auto pending_generation = callback_state_->take_loss(reason, message);
         if (pending_generation == 0)
-            return;
+            return false;
         if (pending_generation != device_generation())
-            return;
+            return false;
         handle_device_lost(reason, message.empty() ? "reported by device owner" : message);
+        return true;
     }
 
     // ── Compute operations ──────────────────────────────────────────────
@@ -3422,7 +3423,8 @@ public:
 
     std::size_t poll_readbacks() override {
         reap_detached_readbacks();
-        apply_pending_device_loss();
+        if (apply_pending_device_loss())
+            return 0;
         // A completion callback that polls again would re-enter the queue while
         // it is being drained; the outer poll is already draining everything
         // that is ready, so the inner call has nothing to do.
@@ -3432,7 +3434,10 @@ public:
 
         const auto generation_at_entry = device_generation();
         pump_events();
-        apply_pending_device_loss();
+        polling_ = false;
+        if (apply_pending_device_loss())
+            return 0;
+        polling_ = true;
 
         // Loss completion may synchronously reinitialize the device and submit
         // replacement work from a user callback. Leave that new generation for
@@ -4458,7 +4463,8 @@ private:
     }
 
     bool ready_for_work() {
-        apply_pending_device_loss();
+        if (apply_pending_device_loss())
+            return false;
         return initialized_.load(std::memory_order_acquire);
     }
 
