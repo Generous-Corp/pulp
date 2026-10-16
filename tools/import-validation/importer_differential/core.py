@@ -407,9 +407,10 @@ def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
 
 
 def has_identity_signal(browser: BrowserNode, native: NativeNode) -> bool:
-    if (browser.backend_node_id is not None
-            and browser.backend_node_id == native.backend_node_id):
-        return True
+    if browser.backend_node_id is not None and native.backend_node_id is not None:
+        # Both captures have an authoritative DOM identity. Never let a
+        # same-text/same-tag heuristic hide a mismatched capture node.
+        return browser.backend_node_id == native.backend_node_id
     browser_id = browser.attributes.get("id", "")
     if browser_id and browser_id in {native.anchor, native.name}:
         return True

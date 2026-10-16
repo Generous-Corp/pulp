@@ -155,6 +155,16 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(len(missing), 0)
         self.assertEqual(len(extra), 1)
 
+    def test_mismatched_backend_ids_fail_closed_despite_same_text_and_tag(self) -> None:
+        browser = LAB.BrowserNode(
+            1, "span", -1, "Gain", {}, (0, 0, 40, 20), {}, 35)
+        native = LAB.NativeNode(
+            "wrong", "frame", "span", "Gain", None, {}, (0, 0, 40, 20), 99)
+        matches, missing, extra = LAB.match_nodes([browser], [native])
+        self.assertEqual(matches, [])
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(len(extra), 1)
+
     def test_representation_nodes_are_not_structural_element_extras(self) -> None:
         native = [
             LAB.NativeNode("browser:root", "frame", "Browser-evaluated HTML", "", None, {}, None),
