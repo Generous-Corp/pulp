@@ -141,6 +141,21 @@ class CheckEnvTests(unittest.TestCase):
         probe.chmod(0o755)
         self.assertIn("RUSTUP_AUTO_INSTALL=0", check_env.run_version([str(probe), "--version"], None))
 
+    @unittest.skipIf(os.name == "nt", "a shell-script stand-in for mise")
+    def test_version_probe_never_asks_for_a_newer_mise(self) -> None:
+        probe = self.tmp / "mise"
+        probe.write_text('#!/bin/sh\necho "MISE_DISABLE_UPDATE_WARNING=$MISE_DISABLE_UPDATE_WARNING"\n', encoding="utf-8")
+        probe.chmod(0o755)
+        self.assertIn("MISE_DISABLE_UPDATE_WARNING=1", check_env.run_version([str(probe), "--version"], None))
+
+    def test_fleet_path_finds_the_rustup_proxies_and_the_pinned_mise(self) -> None:
+        doc = self.matching()
+        search = check_env.fleet_search_path(doc, self.home, "/usr/bin")
+        parts = search.split(os.pathsep)
+        self.assertEqual(str(self.home / ".local/opt/mise-2026.10.8/bin"), parts[0])
+        self.assertEqual("/usr/bin", parts[-1])
+        self.assertTrue(parts[1].endswith(os.path.join(".cargo", "bin")) or "CARGO_HOME" in os.environ)
+
     def test_unparseable_version_is_reported_as_unknown(self) -> None:
         self.host.text["ninja"] = "ninja: something odd"
         findings = self.collect(self.matching())
@@ -386,6 +401,69 @@ class WorkflowStepTests(unittest.TestCase):
     def test_a_hung_probe_is_bounded(self) -> None:
         self.assertLessEqual(check_env.PROBE_TIMEOUT_S, 5)
         self.assertIn("timeout-minutes: 2", (REPO_ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8"))
+
+
+@unittest.skipIf(os.name == "nt", "the fake tools are shell scripts")
+class RolloutCheckTests(unittest.TestCase):
+    """--fleet-path and --require-tools: the check a host rollout step runs."""
+
+    def run_check(self, root: Path, path: str, *args: str) -> subprocess.CompletedProcess:
+        env = {"PATH": path, "HOME": str(root / "home")}
+        return subprocess.run(
+            [sys.executable, str(HERE / "check_env.py"), "--root", str(root), "--format", "json", *args],
+            env=env, capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+
+    def tree(self, root: Path) -> Path:
+        """Fake tools; rustc only under ~/.cargo/bin, mise only at its pinned path."""
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        for name, text in VERSION_TEXT.items():
+            if name in ("rustc", "mise"):
+                continue
+            (bin_dir / name).write_text(f"#!/bin/sh\nprintf '%s\\n' '{text}'\n", encoding="utf-8")
+            (bin_dir / name).chmod(0o755)
+        cargo = root / "home/.cargo/bin"
+        cargo.mkdir(parents=True)
+        (cargo / "rustc").write_text(f"#!/bin/sh\necho '{VERSION_TEXT['rustc']}'\n", encoding="utf-8")
+        (cargo / "rustc").chmod(0o755)
+        mise = root / "home/.local/opt/mise-2026.10.8/bin/mise"
+        mise.parent.mkdir(parents=True)
+        mise.write_text(f"#!/bin/sh\necho '{VERSION_TEXT['mise']}'\n", encoding="utf-8")
+        mise.chmod(0o755)
+        doc = expected_doc(hashlib.sha256(mise.read_bytes()).hexdigest())
+        doc["mise"]["sha256"] = {check_env.host_platform(): hashlib.sha256(mise.read_bytes()).hexdigest()}
+        # No platform exceptions: on Linux `rust = "absent"` would hide the
+        # missing rustc this control depends on.
+        doc["platform_overrides"] = {}
+        (root / "tools/toolchain").mkdir(parents=True)
+        (root / "tools/toolchain/expected.json").write_text(json.dumps(doc), encoding="utf-8")
+        return bin_dir
+
+    def test_fleet_path_finds_tools_a_non_login_path_misses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            bin_dir = self.tree(root)
+            # Control: the plain PATH misses rustc and mise, and --require-tools refuses.
+            plain = self.run_check(root, str(bin_dir), "--require-tools")
+            self.assertEqual(1, plain.returncode, plain.stdout + plain.stderr)
+            self.assertEqual({"rustc", "mise"}, {f["tool"] for f in json.loads(plain.stdout)["findings"]})
+            fleet = self.run_check(root, str(bin_dir), "--fleet-path", "--require-tools")
+            self.assertEqual(0, fleet.returncode, fleet.stdout + fleet.stderr)
+            self.assertEqual([], json.loads(fleet.stdout)["findings"])
+
+    def test_require_tools_ignores_per_checkout_npm_trees(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            bin_dir = self.tree(root)
+            doc = json.loads((root / "tools/toolchain/expected.json").read_text(encoding="utf-8"))
+            doc["npm_prefixes"] = ["web"]
+            (root / "tools/toolchain/expected.json").write_text(json.dumps(doc), encoding="utf-8")
+            (root / "web").mkdir()
+            (root / "web/package-lock.json").write_text('{"packages": {}}', encoding="utf-8")
+            out = self.run_check(root, str(bin_dir), "--fleet-path", "--require-tools")
+            self.assertEqual(0, out.returncode, out.stdout + out.stderr)
+            self.assertEqual(["npm web"], [f["tool"] for f in json.loads(out.stdout)["findings"]])
 
 
 class FleetReportTests(unittest.TestCase):

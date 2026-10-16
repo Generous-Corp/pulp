@@ -294,3 +294,72 @@ target_include_directories(pulp-foundation
 # Every existing consumer of pulp::runtime keeps resolving these headers by the
 # same include paths, so the split is invisible from above.
 target_link_libraries(pulp-runtime PUBLIC pulp::foundation)
+
+# Public-header manifest: every header this target ships, relative to this
+# directory. The Vellum closure exports exactly these (plus what they include),
+# and the closure tool refuses a header under include/ that is not listed.
+set(PULP_RUNTIME_UNIT_HEADERS
+    include/pulp/runtime/activity_channel.hpp
+    include/pulp/runtime/alive_token.hpp
+    include/pulp/runtime/analytics.hpp
+    include/pulp/runtime/assert.hpp
+    include/pulp/runtime/async_stream.hpp
+    include/pulp/runtime/background_job.hpp
+    include/pulp/runtime/base64.hpp
+    include/pulp/runtime/big_integer.hpp
+    include/pulp/runtime/budget_policy.hpp
+    include/pulp/runtime/child_process.hpp
+    include/pulp/runtime/crypto.hpp
+    include/pulp/runtime/detail/durable_file_replacement.hpp
+    include/pulp/runtime/dynamic_library.hpp
+    include/pulp/runtime/exceptions.hpp
+    include/pulp/runtime/expression.hpp
+    include/pulp/runtime/file_search_path.hpp
+    include/pulp/runtime/high_resolution_timer.hpp
+    include/pulp/runtime/http.hpp
+    include/pulp/runtime/i18n.hpp
+    include/pulp/runtime/identity.hpp
+    include/pulp/runtime/inter_process_lock.hpp
+    include/pulp/runtime/ip_address.hpp
+    include/pulp/runtime/json_rpc.hpp
+    include/pulp/runtime/license.hpp
+    include/pulp/runtime/log.hpp
+    include/pulp/runtime/mac_address.hpp
+    include/pulp/runtime/memory_mapped_file.hpp
+    include/pulp/runtime/memory_message_channel.hpp
+    include/pulp/runtime/message_channel.hpp
+    include/pulp/runtime/model_download.hpp
+    include/pulp/runtime/model_registry.hpp
+    include/pulp/runtime/model_store.hpp
+    include/pulp/runtime/named_pipe.hpp
+    include/pulp/runtime/network_stream.hpp
+    include/pulp/runtime/node_abi.hpp
+    include/pulp/runtime/primes.hpp
+    include/pulp/runtime/range.hpp
+    include/pulp/runtime/result.hpp
+    include/pulp/runtime/runtime.hpp
+    include/pulp/runtime/safe_relative_path.hpp
+    include/pulp/runtime/scope_guard.hpp
+    include/pulp/runtime/scoped_no_alloc.hpp
+    include/pulp/runtime/search_index.hpp
+    include/pulp/runtime/seqlock.hpp
+    include/pulp/runtime/simd.hpp
+    include/pulp/runtime/slot.hpp
+    include/pulp/runtime/socket.hpp
+    include/pulp/runtime/spsc_queue.hpp
+    include/pulp/runtime/spsc_ring_index.hpp
+    include/pulp/runtime/stream.hpp
+    include/pulp/runtime/system.hpp
+    include/pulp/runtime/temporary_file.hpp
+    include/pulp/runtime/text_diff.hpp
+    include/pulp/runtime/trace.hpp
+    include/pulp/runtime/trace_session.hpp
+    include/pulp/runtime/trace_timeout.hpp
+    include/pulp/runtime/triple_buffer.hpp
+    include/pulp/runtime/udev_monitor.hpp
+    include/pulp/runtime/url.hpp
+    include/pulp/runtime/websocket_channel.hpp
+    include/pulp/runtime/xml.hpp
+    include/pulp/runtime/zip.hpp
+)
+set_property(TARGET pulp-runtime PROPERTY PULP_UNIT_HEADERS ${PULP_RUNTIME_UNIT_HEADERS})

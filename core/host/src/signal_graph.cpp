@@ -1378,8 +1378,14 @@ const CustomNodeParamProcessFn* SignalGraph::live_custom_param_processor(
     return &it->second;
 }
 
-std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
+std::shared_ptr<const void> SignalGraph::live_snapshot_handle_locked_() const noexcept {
+    assert_graph_mutation_locked_();
     return live_slot_.live();  // aliases the live CompiledGraph as an opaque keepalive
+}
+
+std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
+    GraphMutationLock mutation_lock(*this);
+    return live_snapshot_handle_locked_();
 }
 
 SignalGraph::RoutedExecutionStatus

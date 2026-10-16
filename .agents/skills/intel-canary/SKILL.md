@@ -131,6 +131,11 @@ lint alone does not establish Intel configuration or native execution.
 - **Allowlist entries are `path :: substring`, not line numbers.** Substrings
   survive line moves and force each exemption to name the exact construct. A
   coarse whole-file exemption would hide a newly-added hardcoded arm asset.
+- **Windows target maps can contain `aarch64`.** The Windows wgpu-native archive
+  uses that token for its ARM slice. Allowlist the literal only when its helper
+  resolves the Windows *target* architecture and has a paired x86_64 branch;
+  `PulpWindowsSkiaProvider.cmake` is the current example. A host-architecture
+  fallback alone does not justify an exemption.
 - **Class 3 skips comment lines** (`^\s*#`, `^\s*//`) but Python **docstrings**
   are not `#` comments — the `fetch_*` docstrings that list `darwin-arm64,
   darwin-x64, …` are allowlisted explicitly.
@@ -182,10 +187,13 @@ The control-shipping artifact scanner is one such contract: its non-Apple
 validation accepts both x86 and ARM spellings emitted by native inspection
 tools, so its paired ARM predicates are narrowly allowlisted.
 
-The lint does not report a stale allowlist entry (one whose substring no
-longer occurs in its file), so delete the entry when the code it excused goes
-away; `PulpWgpuUniversal.cmake`'s `_slice STREQUAL "aarch64"` entry went stale
-that way when its slice digests moved into the dependency manifest.
+An allowlist entry that suppresses no finding in a scanned file is reported
+as class C6 (stale exemption): delete it when the code it excused goes away,
+because a stale entry pre-approves any future line containing the same text.
+Moving a construct to another file makes the old entry stale; the
+`PulpDependencies.cmake` aarch64 comparison went stale that way when Windows
+Skia selection moved into `PulpWindowsSkiaProvider.cmake`. Entries for files
+the scan did not visit (a `--mode=changed` run, a deleted file) are not judged.
 
 When you change the lint, the allowlist, or an Intel workflow:
 

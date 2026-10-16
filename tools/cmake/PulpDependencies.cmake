@@ -94,42 +94,17 @@ if(_pulp_declare_wgpu)
     )
     set(_pulp_restore_arch FALSE)
     if(WIN32)
-        # Use the TARGET platform for wgpu arch selection, not the host
-        # processor. CMAKE_SYSTEM_PROCESSOR reports the HOST arch on
-        # Windows, which is wrong when cross-compiling via -A <platform>.
-        # An ARM64 host building with -A x64 needs x64 wgpu binaries,
-        # not ARM64 — otherwise the linker fails with
-        # "library machine type 'ARM64' conflicts with target 'x64'."
-        if(CMAKE_GENERATOR_PLATFORM)
-            string(TOLOWER "${CMAKE_GENERATOR_PLATFORM}" _pulp_webgpu_processor)
-        else()
-            string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_webgpu_processor)
-        endif()
-        if(_pulp_webgpu_processor STREQUAL "arm64ec" OR _pulp_webgpu_processor STREQUAL "arm64x")
-            message(FATAL_ERROR
-                "Pulp: Windows ${_pulp_webgpu_processor} GPU configure is fail-closed. "
-                "The pinned wgpu-native/Skia provider publishes ARM64 and x64 slices, "
-                "but no ARM64EC/ARM64X-compatible provider. Build and provision a "
-                "matching Skia/Dawn/wgpu provider before configuring PULP_ENABLE_GPU=ON.")
-        elseif(_pulp_webgpu_processor STREQUAL "arm64" OR _pulp_webgpu_processor STREQUAL "aarch64")
+        # Ninja has no CMAKE_GENERATOR_PLATFORM. The shared target resolver
+        # reads the compiler architecture before the host processor, so an
+        # ARM64-hosted x64 compiler selects the x64 runtime and Skia slice.
+        pulp_windows_wgpu_prebuilt_arch(_pulp_webgpu_arch)
+        if(_pulp_webgpu_arch)
             if(DEFINED ARCH)
                 set(_pulp_saved_arch "${ARCH}")
             endif()
-            set(ARCH "aarch64")
+            set(ARCH "${_pulp_webgpu_arch}")
             set(_pulp_restore_arch TRUE)
-            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to aarch64 for ARM64")
-        elseif(_pulp_webgpu_processor STREQUAL "x64" AND CMAKE_SYSTEM_PROCESSOR MATCHES "[Aa][Rr][Mm]64")
-            # Cross-compiling x64 on an ARM64 host. wgpu-native's
-            # detect_system_architecture() sees the HOST processor
-            # (ARM64) and fails with "Unknown architecture" because
-            # it doesn't map Windows ARM64 to a prebuilt arch string.
-            # Explicitly set ARCH=x86_64 so it downloads x64 binaries.
-            if(DEFINED ARCH)
-                set(_pulp_saved_arch "${ARCH}")
-            endif()
-            set(ARCH "x86_64")
-            set(_pulp_restore_arch TRUE)
-            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to x86_64 for x64 cross-compile on ARM64 host")
+            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to ${ARCH} for Windows ${_pulp_windows_target_arch}")
         endif()
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES)
         # Same target-vs-host arch hazard as Windows above, but on Apple.
@@ -282,48 +257,21 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         set(_pulp_skia_plat "wasm")
         set(_pulp_skia_cache_suffix "-wasm")
     elseif(WIN32)
-        # Select the Skia slice from the TARGET architecture. On Windows,
-        # CMAKE_SYSTEM_PROCESSOR can describe the host when cross-compiling,
-        # so prefer CMAKE_GENERATOR_PLATFORM (the -A target) when present.
-        if(CMAKE_GENERATOR_PLATFORM)
-            string(TOLOWER "${CMAKE_GENERATOR_PLATFORM}" _pulp_req_arch)
-        else()
-            string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_req_arch)
+        # The compiler architecture identifies Ninja's target when -A is
+        # unavailable; the helpers compute it themselves, so this arm reads no
+        # architecture variable of its own. ARM64EC/ARM64X assets are
+        # producer-specific and not in the auto-fetch matrix: reuse a matching
+        # archive already staged in an installed SDK or checkout, or fail before
+        # selecting an ARM64 or x64 substitute.
+        pulp_windows_skia_autofetch_resolve(_pulp_skia_plat _pulp_skia_cache_suffix
+            _pulp_staged_skia_root
+            "${PULP_SDK_DIR}/external/skia-build"
+            "${PULP_ROOT_DIR}/external/skia-build")
+        if(_pulp_staged_skia_root)
+            set(SKIA_DIR "${_pulp_staged_skia_root}")
+            message(STATUS "Skia: using staged Windows archive at ${SKIA_DIR}")
         endif()
-        if(_pulp_req_arch STREQUAL "arm64" OR _pulp_req_arch STREQUAL "aarch64")
-            set(_pulp_skia_plat "windows-arm64")
-            set(_pulp_skia_cache_suffix "-arm64")
-        elseif(_pulp_req_arch STREQUAL "x64" OR _pulp_req_arch STREQUAL "amd64" OR _pulp_req_arch STREQUAL "x86_64")
-            set(_pulp_skia_plat "windows-x64")
-            set(_pulp_skia_cache_suffix "-x64")
-        elseif(_pulp_req_arch STREQUAL "arm64ec" OR _pulp_req_arch STREQUAL "arm64x")
-            # ARM64EC/ARM64X assets are producer-specific and are not part of
-            # the ordinary auto-fetch matrix. Reuse a matching archive already
-            # staged in an installed SDK or checkout; otherwise fail before
-            # selecting an ARM64 or x64 substitute.
-            foreach(_pulp_ec_skia_root
-                    "${PULP_SDK_DIR}/external/skia-build"
-                    "${PULP_ROOT_DIR}/external/skia-build")
-                if(EXISTS "${_pulp_ec_skia_root}/build/win-gpu/lib/Release/${_pulp_req_arch}/skia.lib")
-                    set(SKIA_DIR "${_pulp_ec_skia_root}")
-                    message(STATUS "Skia: using staged Windows ${_pulp_req_arch} archive at ${SKIA_DIR}")
-                    break()
-                endif()
-            endforeach()
-            unset(_pulp_ec_skia_root)
-            if(NOT SKIA_DIR)
-                message(FATAL_ERROR
-                    "Pulp: cannot auto-fetch Windows ${_pulp_req_arch} Skia. "
-                    "Stage a matching producer archive and pass -DSKIA_DIR, "
-                    "or install it under PULP_SDK_DIR/external/skia-build.")
-            endif()
-        else()
-            message(FATAL_ERROR
-                "Pulp: cannot select a prebuilt Windows Skia slice for "
-                "target architecture '${_pulp_req_arch}'. Supported values "
-                "are ARM64, ARM64EC, ARM64X, and x64 (set -A when cross-compiling).")
-        endif()
-        unset(_pulp_req_arch)
+        unset(_pulp_staged_skia_root)
     elseif(UNIX)
         if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
             set(_pulp_skia_plat "linux-arm64")
@@ -345,7 +293,7 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         set(_pulp_skia_keying "1")
     endif()
     if(WIN32)
-        file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/skia.lib")
+        pulp_windows_local_skia(_pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build")
     else()
         file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/libskia.a")
     endif()

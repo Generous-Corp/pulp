@@ -753,7 +753,7 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
         return false;
     }
 
-    out.snapshot_keepalive = graph.live_snapshot_handle();
+    out.snapshot_keepalive = graph.live_snapshot_handle_locked_();
     out.valid = true;
     return true;
 }

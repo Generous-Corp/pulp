@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Configure-time contract for the Windows ARM64 Skia archive layout.
+"""Configure-time contract for Windows Skia archive slices.
 
 The published Windows ARM64 slice stores ``skia.lib`` and
-``dawn_combined.lib`` below ``build/win-gpu/lib/Release/arm64`` while x64 is
-flat.  This test uses CMake's Windows platform emulation with a compiler-free
+``dawn_combined.lib`` below ``build/win-gpu/lib/Release/arm64``. x64 releases
+can use a nested ``x64`` directory or the older flat layout. This test uses
+CMake's Windows platform emulation with a compiler-free
 ``project(... NONE)`` fixture, so it runs on the normal macOS/Linux gates too.
 """
 from __future__ import annotations
@@ -25,10 +26,12 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
-    def _make_fixture(self, *, arm64: bool = False, arm64ec: bool = False,
+    def _make_fixture(self, *, arm64: bool = False, x64: bool = False,
+                      arm64ec: bool = False,
                       arm64x: bool = False, flat: bool = False,
                       dawn: bool = True) -> pathlib.Path:
         name = "skia-" + "-".join(n for n, on in (("arm64", arm64),
+                                                   ("x64", x64),
                                                    ("arm64ec", arm64ec),
                                                    ("arm64x", arm64x),
                                                    ("flat", flat)) if on)
@@ -38,6 +41,7 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         # FindSkia only needs archive-shaped paths for this configure test; the
         # real linkable contents are supplied by skia-builder.
         for libdir, present in ((release / "arm64", arm64),
+                                (release / "x64", x64),
                                 (release / "arm64ec", arm64ec),
                                 (release / "arm64x", arm64x),
                                 (release, flat)):
@@ -67,12 +71,12 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
             checks += (f'if(NOT PULP_SKIA_PROVIDES_DAWN STREQUAL "{provider}")\n'
                        f'  message(FATAL_ERROR "unexpected PULP_SKIA_PROVIDES_DAWN=${{PULP_SKIA_PROVIDES_DAWN}} DAWN_LIBRARY=${{DAWN_LIBRARY}}")\n'
                        "endif()\n")
-        if expect_slice in {"arm64", "arm64ec", "arm64x"}:
+        if expect_slice in {"arm64", "arm64ec", "arm64x", "x64"}:
             checks += (f'if(NOT SKIA_LIBRARY MATCHES "/{expect_slice}/skia\\.lib$")\n'
                       f'  message(FATAL_ERROR "{expect_slice} archive slice was not selected: ${{SKIA_LIBRARY}}")\n'
                       "endif()\n")
         elif expect_slice == "flat":
-            checks = ('if(SKIA_LIBRARY MATCHES "/arm64/")\n'
+            checks += ('if(SKIA_LIBRARY MATCHES "/(arm64|x64)/")\n'
                       '  message(FATAL_ERROR "ARM64 archive slice selected for a non-ARM64 target: ${SKIA_LIBRARY}")\n'
                       "endif()\n")
         (project / "CMakeLists.txt").write_text(
@@ -121,6 +125,16 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         output = self._configure(self._make_fixture(arm64=True, flat=True), target_arch="x64",
                                  expect_found=True, expect_slice="flat")
         self.assertNotIn("selecting Windows ARM64 archive slice", output)
+
+    def test_x64_target_on_arm64_host_selects_nested_archive(self) -> None:
+        output = self._configure(self._make_fixture(arm64=True, x64=True, flat=True),
+                                 target_arch="x64", expect_found=True,
+                                 expect_slice="x64", expect_provider=True)
+        self.assertIn("selecting Windows x64 archive slice", output)
+
+    def test_x64_target_does_not_consume_arm64_archive(self) -> None:
+        self._configure(self._make_fixture(arm64=True), target_arch="x64",
+                        expect_found=False)
 
     def test_arm64ec_and_arm64x_targets_select_matching_slices(self) -> None:
         for arch, slice_name, kwargs in (("ARM64EC", "arm64ec", {"arm64ec": True}),

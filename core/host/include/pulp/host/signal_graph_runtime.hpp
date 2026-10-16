@@ -541,6 +541,9 @@ public:
         NodeId id) const noexcept;
     // Opaque keepalive for the live compiled snapshot so a translated routing
     // can pin the lifetime of the gain atomics + plugin slots it references.
+    // Takes the graph mutation lock to copy the snapshot pointer, so it blocks
+    // for the length of a concurrent prepare()/compile. Control thread only:
+    // never call it from the audio thread, nor while holding that lock.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
 
     /// Control-thread view of the actual routed paths embedded in the live
@@ -1622,6 +1625,7 @@ private:
         std::vector<PluginBindingContext>& plugin_ctx,
         std::vector<CustomBindingContext>& custom_ctx,
         format::GraphRuntimeSnapshot& out);
+    std::shared_ptr<const void> live_snapshot_handle_locked_() const noexcept;
     // Shared preflight (generated-graph limits + audio-rate automation
     // event-capacity gate) for prepare() and prepare_swap(). PURE — mutates no
     // live state. Caller holds graph_mutation_mutex_. Returns false (logged) on

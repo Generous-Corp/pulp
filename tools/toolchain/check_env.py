@@ -91,8 +91,10 @@ def run_version(argv: List[str], cwd: Optional[Path]) -> Optional[str]:
 
     RUSTUP_AUTO_INSTALL=0: a rustup proxy otherwise downloads the toolchain a
     rust-toolchain.toml names when it is missing, and this check never fetches.
+    MISE_DISABLE_UPDATE_WARNING=1: `mise --version` otherwise asks GitHub
+    whether a newer mise exists, and a pinned toolchain never queries.
     """
-    env = dict(os.environ, RUSTUP_AUTO_INSTALL="0")
+    env = dict(os.environ, RUSTUP_AUTO_INSTALL="0", MISE_DISABLE_UPDATE_WARNING="1")
     try:
         out = subprocess.run(
             argv, cwd=str(cwd) if cwd else None, capture_output=True, text=True,
@@ -266,6 +268,15 @@ def verdict(findings: List[Finding], enforcement: str, env: Dict[str, str], home
     return EXIT_MISMATCH, banners
 
 
+def fleet_search_path(expected: dict, home: Path, path: str) -> str:
+    """PATH for a host rollout check: the pinned mise's directory and the
+    rustup proxies first. A non-login ssh or launchd job has neither, so an
+    installed rustc 1.97.1 would otherwise be reported missing."""
+    mise_dir = str(Path(expected["mise"]["path"].replace("~", str(home), 1)).parent)
+    cargo_bin = os.path.join(os.environ.get("CARGO_HOME", str(home / ".cargo")), "bin")
+    return os.pathsep.join([mise_dir, cargo_bin] + ([path] if path else []))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--root", type=Path, default=ROOT, help="the Pulp checkout (default: this one)")
@@ -273,6 +284,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--format", choices=("text", "github", "json"), default="text",
                         help="github prints ::warning:: annotations for Actions")
     parser.add_argument("--quiet", action="store_true", help="print nothing when everything matches")
+    parser.add_argument(
+        "--fleet-path", action="store_true",
+        help="also look in the pinned mise's directory and the rustup proxies (~/.cargo/bin), which a "
+             "non-login ssh or launchd PATH lacks; use it for host rollout checks",
+    )
+    parser.add_argument(
+        "--require-tools", action="store_true",
+        help="exit 1 on any host-tool difference whatever the mode (npm trees, which each checkout "
+             "installs, are reported but not counted); for host rollout steps",
+    )
     args = parser.parse_args(argv)
     expected_path = args.expected or args.root / "tools/toolchain/expected.json"
     try:
@@ -286,8 +307,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         return EXIT_NO_BASELINE
     home = Path(os.path.expanduser("~"))
     env = dict(os.environ)
-    findings = collect(expected, args.root, home, host_platform())
+    which: Callable[[str], Optional[str]] = shutil.which
+    if args.fleet_path:
+        search = fleet_search_path(expected, home, env.get("PATH", ""))
+        which = lambda name: shutil.which(name, path=search)  # noqa: E731
+    findings = collect(expected, args.root, home, host_platform(), which=which)
     status, banners = verdict(findings, expected.get("enforcement", "warn"), env, home)
+    if args.require_tools and any(not f.tool.startswith("npm ") for f in findings):
+        status = EXIT_MISMATCH
     mode = expected.get("enforcement", "warn")
     if args.format == "json":
         print(json.dumps({
