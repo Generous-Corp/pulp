@@ -712,6 +712,22 @@ TEST_CASE("A GPU device is not lost until it is",
     REQUIRE(gpu->device_lost());
 }
 
+TEST_CASE("Published GPU loss closes initialization admission immediately",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    const auto generation = gpu->device_generation();
+    REQUIRE(gpu->is_initialized());
+    REQUIRE_FALSE(gpu->device_lost());
+
+    gpu->post_device_lost(generation);
+
+    REQUIRE(gpu->device_lost());
+    REQUIRE_FALSE(gpu->is_initialized());
+}
+
 TEST_CASE("GPU device loss notifications are generation-scoped across reinitialization",
           "[render][gpu][compute][async]") {
     auto gpu = make_gpu();

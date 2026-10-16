@@ -1040,6 +1040,10 @@ static constexpr wgpu::CallbackMode kAsyncCallbackMode =
 
 class DawnGpuCompute : public GpuCompute {
 public:
+    DawnGpuCompute() {
+        callback_state_->initialized = &initialized_;
+    }
+
     ~DawnGpuCompute() override {
         // Close callback publication before teardown. The callback state is
         // shared with backend callbacks and outlives this object if Dawn reports
@@ -1356,15 +1360,20 @@ public:
 
     struct CallbackState {
         std::atomic<bool> alive{true};
+        std::atomic<std::uint64_t> active_generation{0};
         std::atomic<std::uint64_t> pending_generation{0};
         std::atomic<int> pending_reason{-1};
+        std::atomic<bool>* initialized = nullptr;
         mutable std::mutex loss_mutex;
 
         static constexpr std::size_t kMessageCapacity = 256;
 
         void publish_loss(std::uint64_t generation, int reason, wgpu::StringView message = {}) {
             std::lock_guard<std::mutex> lock(loss_mutex);
-            if (generation > pending_generation.load(std::memory_order_relaxed)) {
+            if (generation == active_generation.load(std::memory_order_relaxed) &&
+                generation > pending_generation.load(std::memory_order_relaxed)) {
+                if (initialized)
+                    initialized->store(false, std::memory_order_release);
                 pending_reason.store(reason, std::memory_order_relaxed);
                 const auto count = std::min<std::size_t>(message.length, kMessageCapacity - 1);
                 if (message.data && count != 0)
@@ -1375,8 +1384,9 @@ public:
             }
         }
 
-        void clear_loss() {
+        void begin_generation(std::uint64_t generation) {
             std::lock_guard<std::mutex> lock(loss_mutex);
+            active_generation.store(generation, std::memory_order_release);
             pending_generation.store(0, std::memory_order_release);
         }
 
@@ -1401,9 +1411,9 @@ public:
 
     void begin_initialization() {
         initializing_ = true;
-        generation_.fetch_add(1, std::memory_order_acq_rel);
+        const auto generation = generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
         initialized_.store(false, std::memory_order_release);
-        callback_state_->clear_loss();
+        callback_state_->begin_generation(generation);
         release_device_resources();
     }
 
