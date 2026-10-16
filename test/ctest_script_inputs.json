@@ -11805,6 +11805,8 @@
    "entry": "tools/toolchain/test_mise_profile.py",
    "inputs": [
     "tools/ci",
+    "tools/ci/install_visual_python_deps.sh",
+    "tools/motion/visual/requirements.lock",
     "tools/toolchain/test_mise_profile.py"
    ],
    "kind": "python"
