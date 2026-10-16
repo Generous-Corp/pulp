@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <thread>
 #include <vector>
 
 using pulp::audio::BufferView;
@@ -609,6 +610,22 @@ TEST_CASE("Detached expired maps retain admission capacity after completion",
     REQUIRE(gpu->compute_magnitude_async(
                 pairs.data(), second.data(), kBins, std::chrono::seconds(2),
                 [](const GpuCompute::ReadbackResult&) {}) == 0);
+
+    // Polling with no callback-pending requests still pumps the late map. The
+    // detached slot is then reaped and admission reopens within the grace
+    // window.
+    uint64_t reopened = 0;
+    const auto recovery_deadline = Clock::now() + std::chrono::milliseconds(500);
+    while (reopened == 0 && Clock::now() < recovery_deadline) {
+        gpu->poll_readbacks();
+        reopened = gpu->compute_magnitude_async(
+            pairs.data(), second.data(), kBins, std::chrono::seconds(2),
+            [](const GpuCompute::ReadbackResult&) {});
+        if (reopened == 0)
+            std::this_thread::yield();
+    }
+    REQUIRE(reopened != 0);
+    drain(*gpu);
 }
 
 TEST_CASE("Async admission control rejects past the in-flight cap",

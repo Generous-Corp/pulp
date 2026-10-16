@@ -3430,13 +3430,16 @@ public:
     }
 
     std::size_t poll_readbacks() override {
+        if (polling_)
+            return async_readbacks_.size();
         reap_detached_readbacks();
         if (apply_pending_device_loss())
             return 0;
         // A completion callback that polls again would re-enter the queue while
         // it is being drained; the outer poll is already draining everything
         // that is ready, so the inner call has nothing to do.
-        if (polling_ || async_readbacks_.empty()) return async_readbacks_.size();
+        if (async_readbacks_.empty() && detached_readbacks_.empty())
+            return 0;
 
         polling_ = true;
 
@@ -3444,6 +3447,7 @@ public:
         const auto callback_state = callback_state_;
         pump_events();
         polling_ = false;
+        reap_detached_readbacks();
         if (apply_pending_device_loss())
             return 0;
         polling_ = true;
@@ -3475,11 +3479,11 @@ public:
                 // Late. `dest` is never written; a map that is still pending must
                 // not go back on the free list where a later acquire() could hand
                 // it out mid-map, so the pool drops its reference instead.
-                if (req->resolved.load(std::memory_order_acquire) &&
-                    req->ok.load(std::memory_order_acquire))
+                const bool resolved = req->resolved.load(std::memory_order_acquire);
+                if (resolved && req->ok.load(std::memory_order_acquire))
                     req->buffer.Unmap();
                 if (pool_) pool_->discard(req->buffer);
-                if (!req->resolved.load(std::memory_order_acquire)) {
+                if (!resolved) {
                     req->detached_at = std::chrono::steady_clock::now();
                     detached_readbacks_.push_back(req);
                 }
