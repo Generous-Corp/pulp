@@ -9,6 +9,26 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09832"></a>
+## [0.983.2] - 2026-10-16
+
+- release/version bump ([#10413](https://github.com/Generous-Corp/pulp/pull/10413))
+- forge governed guidance 20261015 ([#10403](https://github.com/Generous-Corp/pulp/pull/10403))
+- fix/script inputs dash c after script ([#10408](https://github.com/Generous-Corp/pulp/pull/10408))
+
+<a id="v09831"></a>
+## [0.983.1] - 2026-10-16
+
+- docs/mise guidance 20261015 ([#10399](https://github.com/Generous-Corp/pulp/pull/10399))
+- codex/hook 127 fix 20261015 ([#10404](https://github.com/Generous-Corp/pulp/pull/10404))
+- codex/importer planning pointer 20261016 ([#10402](https://github.com/Generous-Corp/pulp/pull/10402))
+- codex/nodal custom value dirty landing 20261015 ([#10377](https://github.com/Generous-Corp/pulp/pull/10377))
+- release/version bump ([#10398](https://github.com/Generous-Corp/pulp/pull/10398))
+- ci/intel canary stale allowlist ([#10395](https://github.com/Generous-Corp/pulp/pull/10395))
+- ci/shipyard pin v0.335.0 ([#10393](https://github.com/Generous-Corp/pulp/pull/10393))
+- codex/native import reorder proof 20261016 ([#10394](https://github.com/Generous-Corp/pulp/pull/10394))
+- codex/mise local bootstrap 20261009 ([#9991](https://github.com/Generous-Corp/pulp/pull/9991))
+
 <a id="v09830"></a>
 ## [0.983.0] - 2026-10-16
 
@@ -10863,6 +10883,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.983.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.983.2
+[0.983.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.983.1
 [0.983.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.983.0
 [0.982.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.982.0
 [0.981.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.981.0
