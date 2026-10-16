@@ -1916,6 +1916,17 @@ Rules when touching an adapter's editor-attach path:
   `use_gpu=false` still initializes Dawn, the runtime opt-out is fictional; if
   the CPU path only supports capture and not live presentation, ordinary
   AutoUi editors paint black.
+- **Attached Windows repaint requests must wait for the frame timer.** Scripted
+  document mounting and idle callbacks can request repaint while a frame is
+  being assembled. Calling `render_frame()` synchronously from that request
+  re-enters document mounting and nests drawable acquisition. Keep the dirty
+  mark for the next `WM_TIMER`; preserve explicit unattached capture behavior
+  and the platform `WM_PAINT` path. Validate with the real HWND/Dawn regression
+  and a trace: completed document load and no nested `frame` ancestors prove
+  this repair, while long `gpu_acquire` spans still require separate analysis.
+  The Windows host source belongs to `pulp-view-tooling`; rebuilding only
+  `pulp-view-native` can exit successfully without compiling it. Verify a new
+  final plugin hash and exact loaded module before measuring the result.
 - **AU specifically also needs the Cocoa view advertised** (`kAudioUnitProperty_CocoaUI`)
   or the host shows its own generic param view regardless of the host wiring —
   see the `auv2` skill's "AU v2 MUST advertise its Cocoa view" gotcha.

@@ -389,4 +389,64 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     }
 }
 
+// The real HWND/Dawn host must not recurse when scripted idle work requests a
+// repaint during a frame. An attached repaint is consumed by WM_TIMER; the
+// nested request survives for the next timer tick. This uses the production
+// host and a real GPU surface, rather than a fake invalidation counter.
+TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
+          "[view][plugin-view-host][repaint][windows][gpu]") {
+    constexpr UINT_PTR kTestFrameTimerId = 1;
+    HWND parent = CreateWindowExW(
+        0, L"STATIC", L"Pulp repaint regression", WS_OVERLAPPEDWINDOW,
+        0, 0, 128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    REQUIRE(parent != nullptr);
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(parent);
+    REQUIRE(host->is_attached());
+    if (!host->is_gpu_backed()) {
+        DestroyWindow(parent);
+        SKIP("Dawn GPU unavailable: repaint re-entry requires the GPU host");
+    }
+
+    const HWND child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+
+    int idle_calls = 0;
+    host->set_idle_callback([&] { ++idle_calls; });
+    host->repaint();
+    CHECK(idle_calls == 0);
+    SendMessageW(child, WM_TIMER, kTestFrameTimerId, 0);
+    CHECK(idle_calls == 1);
+
+    idle_calls = 0;
+    bool requested_inside_idle = false;
+    host->set_idle_callback([&] {
+        ++idle_calls;
+        if (!requested_inside_idle) {
+            requested_inside_idle = true;
+            host->repaint();
+        }
+    });
+    host->repaint();
+    CHECK(idle_calls == 0);
+    SendMessageW(child, WM_TIMER, kTestFrameTimerId, 0);
+    CHECK(idle_calls == 1);
+    CHECK(requested_inside_idle);
+    SendMessageW(child, WM_TIMER, kTestFrameTimerId, 0);
+    CHECK(idle_calls == 2);
+
+    host->set_idle_callback({});
+    host->detach();
+    DestroyWindow(parent);
+}
+
 #endif  // _WIN32

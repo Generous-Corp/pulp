@@ -14,9 +14,11 @@
 //     GPU — the VM-verifiable proof.
 //
 // Threading: all window ops run on the calling (UI) thread. There is no internal
-// message loop — the host that owns the parent HWND pumps messages; repaint()
-// invalidates and a WM_PAINT triggers render_frame(). For embed callers that
-// drive frames explicitly (pulp_embed_tick), repaint() renders synchronously.
+// message loop — the host that owns the parent HWND pumps messages; an attached
+// repaint is a dirty mark consumed by the frame timer, so scripted idle work
+// cannot re-enter render_frame() while that frame is still being assembled.
+// Unattached embed callers that drive frames explicitly (pulp_embed_tick) keep
+// the synchronous repaint path.
 
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
@@ -437,6 +439,15 @@ public:
 
     void repaint() override {
         needs_repaint_ = true;
+        // An attached editor is embedded in the DAW's UI thread. Repaint
+        // requests are paced by the frame timer: a scripted idle tick can
+        // request another repaint while PluginFrameRenderer is still running,
+        // and rendering it here would recursively acquire the next drawable
+        // (and re-enter document mount / rAF work). Keep the request dirty and
+        // let the next timer tick consume it. Before attachment the caller has
+        // no timer-backed host loop, so preserve the synchronous capture/embed
+        // behavior.
+        if (attached_.load(std::memory_order_acquire)) return;
         paint_or_invalidate();
     }
 
