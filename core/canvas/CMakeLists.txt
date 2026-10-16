@@ -360,3 +360,59 @@ if(PULP_HAS_SKIA)
     # Android: Skia bundles FreeType + HarfBuzz, no system fontconfig needed
     endif()
 endif()
+
+# Public-header manifest: every header this target ships, relative to this
+# directory. The Vellum closure exports exactly these (plus what they include),
+# and the closure tool refuses a header under include/ that is not listed.
+set(PULP_CANVAS_UNIT_HEADERS
+    include/pulp/canvas/affine_transform.hpp
+    include/pulp/canvas/attributed_string.hpp
+    include/pulp/canvas/bidi.hpp
+    include/pulp/canvas/box_shadow_cache.hpp
+    include/pulp/canvas/bundled_fonts.hpp
+    include/pulp/canvas/canvas.hpp
+    include/pulp/canvas/canvas_capability.hpp
+    include/pulp/canvas/cg_canvas.hpp
+    include/pulp/canvas/drawlist_format.hpp
+    include/pulp/canvas/emoji_segmenter.hpp
+    include/pulp/canvas/font_flight_recorder.hpp
+    include/pulp/canvas/font_options.hpp
+    include/pulp/canvas/font_resolver.hpp
+    include/pulp/canvas/font_scope.hpp
+    include/pulp/canvas/image_codecs.hpp
+    include/pulp/canvas/image_convolution.hpp
+    include/pulp/canvas/image_file_cache.hpp
+    include/pulp/canvas/image_probe.hpp
+    include/pulp/canvas/lottie_animation.hpp
+    include/pulp/canvas/msdf_atlas.hpp
+    include/pulp/canvas/path.hpp
+    include/pulp/canvas/path_measure.hpp
+    include/pulp/canvas/path_to_sdf.hpp
+    include/pulp/canvas/psdf_atlas.hpp
+    include/pulp/canvas/recording_canvas.hpp
+    include/pulp/canvas/rectangle_list.hpp
+    include/pulp/canvas/scene/scene.hpp
+    include/pulp/canvas/scene/scene_group.hpp
+    include/pulp/canvas/scene/scene_image.hpp
+    include/pulp/canvas/scene/scene_node.hpp
+    include/pulp/canvas/scene/scene_path.hpp
+    include/pulp/canvas/scene/scene_shape.hpp
+    include/pulp/canvas/scene/scene_text.hpp
+    include/pulp/canvas/scene_recording.hpp
+    include/pulp/canvas/sdf_atlas.hpp
+    include/pulp/canvas/sdf_atlas_cache.hpp
+    include/pulp/canvas/sdf_effects.hpp
+    include/pulp/canvas/sdf_software_renderer.hpp
+    include/pulp/canvas/sdf_text.hpp
+    include/pulp/canvas/shaped_text.hpp
+    include/pulp/canvas/skia_canvas.hpp
+    include/pulp/canvas/svg.hpp
+    include/pulp/canvas/svg_dom_cache.hpp
+    include/pulp/canvas/text_font_context.hpp
+    include/pulp/canvas/text_layout.hpp
+    include/pulp/canvas/text_run_planner.hpp
+    include/pulp/canvas/text_shaper.hpp
+    include/pulp/canvas/text_utf8.hpp
+    include/pulp/canvas/view_effect.hpp
+)
+set_property(TARGET pulp-canvas PROPERTY PULP_UNIT_HEADERS ${PULP_CANVAS_UNIT_HEADERS})
