@@ -937,41 +937,50 @@ int main() {
         if (loss_provider == nullptr)
             return kProviderUnavailableExit;
         auto loss_program = loss_provider->make_program();
-        SharedIoProgramSession loss_session;
+        auto loss_session = std::make_unique<SharedIoProgramSession>();
+        // Once the second loss session has submitted work, a provider failure
+        // can leave a pinned Metal fence blocked during normal C++ teardown.
+        // Keep this diagnostic fail-closed: abandon the whole session on that
+        // diagnostic-failure path so its native handles die with the process.
+        const auto abandon_loss_session = [&]() noexcept {
+            loss_session.release();
+            return kDiagnosticFailureExit;
+        };
         if (loss_program == nullptr ||
-            !loss_session.prepare({std::move(loss_provider), std::move(loss_program)},
-                                  {.slots = 2,
-                                   .input_bytes_per_slot = 64 * sizeof(float),
-                                   .output_bytes_per_slot = 64 * 3 * sizeof(float),
-                                   .storage_kind = SharedIoArenaProvider::StorageKind::Staged}))
-            return kDiagnosticFailureExit;
-        auto* loss_native = static_cast<WgpuNativeStagedProvider*>(loss_session.owned_provider());
-        auto loss_input = loss_session.acquire_input(902, 0);
-        if (!loss_input || !loss_session.submit({loss_input->token, 0}) ||
+            !loss_session->prepare({std::move(loss_provider), std::move(loss_program)},
+                                   {.slots = 2,
+                                    .input_bytes_per_slot = 64 * sizeof(float),
+                                    .output_bytes_per_slot = 64 * 3 * sizeof(float),
+                                    .storage_kind = SharedIoArenaProvider::StorageKind::Staged}))
+            return abandon_loss_session();
+        auto* loss_native = static_cast<WgpuNativeStagedProvider*>(loss_session->owned_provider());
+        auto loss_input = loss_session->acquire_input(902, 0);
+        if (!loss_input || !loss_session->submit({loss_input->token, 0}) ||
             !loss_native->force_device_loss_for_diagnostic())
-            return kDiagnosticFailureExit;
+            return abandon_loss_session();
         loss_scenario_triggered = true;
 
         std::optional<SharedIoProgramSession::Completion> loss_completion;
         loss_callback_registered = loss_native->wait_for_device_loss_callback() &&
                                    loss_native->device_loss_callback_registered();
-        (void)loss_session.service(0);
+        (void)loss_session->service(0);
         if (!loss_callback_registered || !loss_native->drain())
-            return kDiagnosticFailureExit;
+            return abandon_loss_session();
         for (int attempt = 0; attempt < 10'000 && !loss_completion; ++attempt) {
-            (void)loss_session.service(0);
-            loss_completion = loss_session.pop_completion();
+            (void)loss_session->service(0);
+            loss_completion = loss_session->pop_completion();
             if (!loss_completion)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         if (!loss_completion || loss_completion->status != SharedIoTerminalStatus::RetiredFailed)
-            return kDiagnosticFailureExit;
+            return abandon_loss_session();
         ++loss_terminal_records;
-        loss_no_output_leases = !loss_session.acquire_output(*loss_completion);
+        loss_no_output_leases = !loss_session->acquire_output(*loss_completion);
         loss_reason = loss_native->device_loss_reason();
-        if (!loss_no_output_leases || !loss_session.discard_completion(*loss_completion) ||
-            !loss_session.release())
-            return kDiagnosticFailureExit;
+        if (!loss_no_output_leases || !loss_session->discard_completion(*loss_completion) ||
+            !loss_session->release())
+            return abandon_loss_session();
+        loss_session.reset();
     }
     std::printf("loaded_runtime_path=%s\n", loaded.dli_fname);
     std::printf("input_sha256=%s weights_sha256=%s shader_sha256=%s\n",

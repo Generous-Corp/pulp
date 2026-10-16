@@ -62,6 +62,11 @@ def main() -> int:
         )[0]:
             print("typed unavailable teardown control failed", file=sys.stderr)
             return 1
+        if "const auto abandon_loss_session" not in source or source.count(
+            "return abandon_loss_session();"
+        ) < 4:
+            print("typed loss-session teardown control failed", file=sys.stderr)
+            return 1
         return 0
     if any(getattr(args, name.replace("-", "_")) is None
            for name in ("manifest", "asset", "source-tree", "linked-runtime",
