@@ -547,6 +547,10 @@ knowing before you touch that file:
   runtime-exception counts. This is a process-level teardown control; it does
   not claim that a native editor mount, keyed reorder, or stale-generation
   update is safe. Those controls remain separate acceptance work.
+  The v4 receipt also records the generated artifact's lowering mode. The
+  current fresh panel is `faithful_capture`, meaning the native render is an
+  image-backed diagnostic path; it must not be described as proof that the
+  importer lowered the panel into native elements.
 
 - `pulp-design-ir-observe` replays input headlessly: ordered `--click x,y`,
   `--drag x1,y1:x2,y2` and `--key <name>` (`tab`/`shift+tab` traverse focus

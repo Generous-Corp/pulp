@@ -78,6 +78,9 @@ async function main() {
       { maxBuffer: 4 * 1024 * 1024 });
     const nativeBytes = await readFile(nativeOut);
     assert(nativeBytes.length > 0);
+    const nativeLoweringMode = nativeBytes.includes("setImageSource('root'")
+      ? "faithful_capture"
+      : "native_lowering";
     // The importer writes this alongside the generated artifact when --validate
     // runs. Retain the actual native Skia PNG as evidence; hashing the JS
     // artifact alone cannot prove that a native render occurred.
@@ -99,7 +102,7 @@ async function main() {
     await assert.rejects(runCapture(negative, path.join(tmp, "negative-browser"), browser, true, interactions));
 
     const receipt = {
-      schema: "pulp-fresh-plugin-validation-v3",
+      schema: "pulp-fresh-plugin-validation-v4",
       fixture: path.basename(fixture),
       scope: { behavior: "panel-toggle", keyed_identity_reorder: "deferred" },
       source_sha256: sourceSha,
@@ -120,6 +123,7 @@ async function main() {
       },
       native: {
         backend: "skia",
+        lowering_mode: nativeLoweringMode,
         artifact_sha256: sha256(nativeBytes),
         artifact_bytes: nativeBytes.length,
         render_sha256: sha256(nativeRenderPng),

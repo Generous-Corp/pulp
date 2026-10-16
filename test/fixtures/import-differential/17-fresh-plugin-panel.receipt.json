@@ -1,5 +1,5 @@
 {
-  "schema": "pulp-fresh-plugin-validation-v3",
+  "schema": "pulp-fresh-plugin-validation-v4",
   "fixture": "17-fresh-plugin-panel.html",
   "scope": {
     "behavior": "panel-toggle",
@@ -41,7 +41,8 @@
       "diff_pixels": 6961,
       "total_pixels": 614400,
       "mean_error": 1.04048
-    }
+    },
+    "lowering_mode": "faithful_capture"
   },
   "planted_negative": {
     "mutated_id": "toggle-mutated",
