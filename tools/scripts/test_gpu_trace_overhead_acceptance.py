@@ -1162,12 +1162,19 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
     def test_rolling_history_pin_cannot_change_authority_results(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
         first = MODULE.a2t_scope_inventory(ROOT, head)
-        with mock.patch.object(
-            MODULE,
-            "A2T_SCOPE_HISTORY_BASE",
-            "e5a5217f3ebe0a2ee47b778fd2c393d4b1194cf3",
-        ):
+        # The alternate pin is a later scope-touching first-parent commit inside
+        # the current window. A fixed older commit ages out: every merge to main
+        # adds to its walk until it exceeds A2T_SCOPE_HISTORY_LIMIT and this test
+        # fails on every pull request while the real pin still has room.
+        window = first["scope_touching_revision_window"]["revisions"]
+        self.assertGreaterEqual(len(window), 2)
+        alternate = window[len(window) // 2]["revision"]
+        self.assertNotEqual(alternate, MODULE.A2T_SCOPE_HISTORY_BASE)
+        with mock.patch.object(MODULE, "A2T_SCOPE_HISTORY_BASE", alternate):
             second = MODULE.a2t_scope_inventory(ROOT, head)
+        self.assertNotEqual(
+            first["scope_touching_revision_window"], second["scope_touching_revision_window"]
+        )
         authority_fields = (
             "base_revision",
             "path_deltas",
