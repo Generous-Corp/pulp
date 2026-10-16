@@ -684,7 +684,8 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
     than the tail shows.
     """
 
-    def _run_failing_build(self, build_body: str) -> subprocess.CompletedProcess:
+    def _run_failing_build(self, build_body: str,
+                           extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         """Run run_coverage.sh against a stub cmake whose --build runs build_body."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -730,6 +731,8 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
 
             env = os.environ.copy()
             env["PATH"] = f"{stub_bin}:{env['PATH']}"
+            env.pop("GITHUB_ACTIONS", None)
+            env.update(extra_env or {})
             return subprocess.run(
                 ["bash", str(repo / "scripts" / "run_coverage.sh")],
                 cwd=repo,
@@ -750,6 +753,17 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
         self.assertIn("buried-compile-error", result.stderr)
         self.assertIn("stdout-only-marker", result.stderr)
         self.assertIn("warning: noise 300", result.stderr)
+
+    def test_phases_are_annotated_on_github_actions(self) -> None:
+        # A lost hosted runner keeps its annotations but not its log, so each
+        # phase is also raised as a notice there, and only there.
+        body = '    echo "x.cpp:1:1: error: stop" >&2'
+        on_actions = self._run_failing_build(body, {"GITHUB_ACTIONS": "true"})
+        self.assertIn("::notice title=coverage phase::", on_actions.stdout)
+        self.assertRegex(on_actions.stdout, r"::notice title=coverage phase::\S+ Building")
+        locally = self._run_failing_build(body)
+        self.assertIn("=== Building ===", locally.stdout)
+        self.assertNotIn("::notice", locally.stdout)
 
     def test_a_stderr_error_flood_does_not_hide_stdout_errors(self) -> None:
         # More stderr matches than one log's cap; the stdout-only failure must
