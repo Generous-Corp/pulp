@@ -11,6 +11,10 @@ class MiseProfileTests(unittest.TestCase):
         self.assertIn("auto_install = false", text)
         self.assertIn("locked = true", text)
         self.assertNotIn("auto_update", text)
+        # A pinned mise never asks for a newer release.
+        self.assertIn("disable_update_warning = true", text)
+        # mise ignores self_update.* in a project file and warns on every run.
+        self.assertNotRegex(text, r"(?m)^\s*self_update")
         self.assertIn("install_visual_python_deps.sh", text)
 
     def test_no_lane_invokes_mise(self) -> None:
