@@ -217,12 +217,16 @@ CaptureProvenanceResult validate_capture_provenance(const CaptureProvenanceReque
     if (!equal_hex(*source_sha, *source_hash))
         return fail("capture source SHA-256 does not match the staged input");
 
-    if (envelope.hasObjectMember("documents") && envelope["documents"].isArray() &&
-        envelope["documents"].size() > 0) {
+    if (envelope.hasObjectMember("documents") &&
+        (!envelope["documents"].isArray() || envelope["documents"].size() == 0))
+        return fail("browser DOM snapshot documents are malformed");
+    if (envelope.hasObjectMember("documents")) {
         const auto documents = envelope["documents"];
         std::size_t declared_snapshot_hashes = 0;
         for (uint32_t i = 0; i < documents.size(); ++i) {
             const auto document = documents[static_cast<int>(i)];
+            if (!document.isObject())
+                return fail("browser DOM snapshot documents are malformed");
             if (document.isObject() && document.hasObjectMember("snapshot_sha256"))
                 ++declared_snapshot_hashes;
         }

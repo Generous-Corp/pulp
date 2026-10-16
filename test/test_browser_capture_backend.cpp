@@ -208,8 +208,9 @@ TEST_CASE("browser capture provenance verifies a declared DOM snapshot binding",
     const std::string snapshot = "snapshot bytes";
     tree.write("dom-snapshot.json", snapshot);
     const auto snapshot_hash = pulp::runtime::sha256_hex(snapshot);
+    const auto legacy_envelope = read_file(fixture.envelope);
     auto envelope = replace_once(
-        read_file(fixture.envelope),
+        legacy_envelope,
         R"JSON("reference":)JSON",
         R"JSON("documents":[{"snapshot_asset":"dom-snapshot.json","snapshot_sha256":")JSON" +
             snapshot_hash + R"JSON("}],"reference":)JSON");
@@ -226,6 +227,27 @@ TEST_CASE("browser capture provenance verifies a declared DOM snapshot binding",
     });
     INFO(result.message);
     REQUIRE(result);
+
+    SECTION("malformed document containers do not bypass snapshot validation") {
+        for (const auto* documents : {"{}", "null", "[]", "[null]", "42"}) {
+            const auto malformed = replace_once(
+                legacy_envelope, R"JSON("reference":)JSON",
+                std::string("\"documents\":") + documents + ",\"reference\":");
+            tree.write("capture.json", malformed);
+            const auto rejected = capture::validate_capture_provenance({
+                .envelope = tree.root() / "capture.json",
+                .source = fixture.source,
+                .materialized_document = fixture.materialized,
+                .browser = fixture.browser,
+                .initial_width = 1280,
+                .initial_height = 800,
+                .device_scale_factor = 2,
+            });
+            INFO(documents);
+            REQUIRE_FALSE(rejected);
+            REQUIRE(rejected.message.find("snapshot documents are malformed") != std::string::npos);
+        }
+    }
 
     SECTION("mismatch") {
         auto mismatched = replace_once(
@@ -283,14 +305,9 @@ TEST_CASE("browser capture provenance verifies a declared DOM snapshot binding",
     }
 
     SECTION("escaping symlink") {
-        const auto outside = tree.root().parent_path() /
-                             (tree.root().filename().string() + "-outside-snapshot");
-        {
-            std::ofstream out(outside, std::ios::binary);
-            REQUIRE(out);
-            out << snapshot;
-            REQUIRE(out.good());
-        }
+        TempTree outside_tree("provenance-snapshot-outside");
+        outside_tree.write("snapshot.json", snapshot);
+        const auto outside = outside_tree.root() / "snapshot.json";
         std::error_code ec;
         fs::create_symlink(outside, tree.root() / "escaped-snapshot.json", ec);
         if (ec) {
