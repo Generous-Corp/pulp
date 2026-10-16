@@ -202,15 +202,15 @@ public:
                 if (i & (1 << b)) r |= 1 << (log2_size_ - 1 - b);
             reversed_[static_cast<std::size_t>(i)] = r;
         }
-        // Twiddles are held in double regardless of SampleType: they are a
-        // fixed table, so computing them in double costs nothing at run time
-        // while keeping the float transform's error floor set by the
-        // accumulation rather than by the table.
+        // Compute in double, then store the processing precision once. The
+        // butterflies use these same rounded coefficients without converting
+        // every table load; float plans also need half the table storage.
         twiddles_.resize(static_cast<std::size_t>(std::max(1, size / 2)));
         constexpr double two_pi = 6.283185307179586476925286766559;
         for (int i = 0; i < size / 2; ++i) {
             const double angle = -two_pi * static_cast<double>(i) / static_cast<double>(size);
-            twiddles_[static_cast<std::size_t>(i)] = {std::cos(angle), std::sin(angle)};
+            twiddles_[static_cast<std::size_t>(i)] = {static_cast<SampleType>(std::cos(angle)),
+                                                    static_cast<SampleType>(std::sin(angle))};
         }
     }
 
@@ -413,7 +413,7 @@ private:
     int size_ = 0;
     int log2_size_ = 0;
     std::vector<int> reversed_;
-    std::vector<std::complex<double>> twiddles_;
+    std::vector<std::complex<SampleType>> twiddles_;
 };
 
 }  // namespace detail
