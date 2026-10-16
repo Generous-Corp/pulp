@@ -47,14 +47,17 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
 
     def test_top_level_array_fails_diagnostically(self) -> None:
         _root, bundle = self.make_bundle()
-        (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text("[]\n")
+        (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
+            "[]\n", encoding="utf-8"
+        )
         problems = check(bundle)
         self.assertTrue(any("must contain a JSON object" in problem for problem in problems))
 
     def test_null_runtime_library_list_fails_diagnostically(self) -> None:
         _root, bundle = self.make_bundle()
         (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
-            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": None})
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": None}),
+            encoding="utf-8",
         )
         problems = check(bundle)
         self.assertTrue(any("must be a JSON list" in problem for problem in problems))
@@ -62,7 +65,8 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
     def test_object_runtime_library_list_fails_diagnostically(self) -> None:
         _root, bundle = self.make_bundle()
         (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
-            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": {}})
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": {}}),
+            encoding="utf-8",
         )
         problems = check(bundle)
         self.assertTrue(any("must be a JSON list" in problem for problem in problems))
@@ -70,7 +74,8 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
     def test_non_object_runtime_entry_fails_diagnostically(self) -> None:
         _root, bundle = self.make_bundle()
         (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
-            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": [None]})
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": [None]}),
+            encoding="utf-8",
         )
         problems = check(bundle)
         self.assertTrue(any("entries must be JSON objects" in problem for problem in problems))
@@ -78,7 +83,8 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
     def test_non_string_file_fails_diagnostically(self) -> None:
         _root, bundle = self.make_bundle()
         (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
-            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": [{"file": 7}]})
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": [{"file": 7}]}),
+            encoding="utf-8",
         )
         problems = check(bundle)
         self.assertTrue(any("file must be a JSON string" in problem for problem in problems))
@@ -86,7 +92,8 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
     def test_empty_file_fails_diagnostically(self) -> None:
         _root, bundle = self.make_bundle()
         (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
-            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": [{"file": ""}]})
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": [{"file": ""}]}),
+            encoding="utf-8",
         )
         problems = check(bundle)
         self.assertTrue(any("non-empty basename" in problem for problem in problems))
@@ -98,7 +105,7 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
             manifest.write_text(json.dumps({
                 "schema": "pulp.build-info.v1",
                 "bundled_runtime_libraries": [{"file": value}],
-            }))
+            }), encoding="utf-8")
             problems = check(bundle)
             self.assertTrue(any("plain basename" in problem or "relative basename" in problem
                                 for problem in problems), value)
