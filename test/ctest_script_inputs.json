@@ -7332,6 +7332,14 @@
    ],
    "kind": "python"
   },
+  "pulp-gpu-wgpu-native-staged-verifier-typed-controls": {
+   "entry": "tools/diagnostics/test_verify_wgpu_native_staged.py",
+   "inputs": [
+    "tools/diagnostics/test_verify_wgpu_native_staged.py",
+    "tools/diagnostics/verify_wgpu_native_staged.py"
+   ],
+   "kind": "python"
+  },
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
    "inputs": [
