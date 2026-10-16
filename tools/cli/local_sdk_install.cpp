@@ -452,19 +452,10 @@ fs::path ensure_dev_profile_sdk(const fs::path& repo_root, bool tracing) {
         return {};
     }
 
-    auto lease = TartciAgentBuildLease::acquire(
-        {.project_root = repo_root, .command_kind = "sdk-" + profile});
-    if (!lease.ok()) {
-        std::cerr << "Error: could not acquire build capacity: " << lease.error() << "\n";
-        remove_staging(staging_prefix, active_build_dir);
-        return {};
-    }
-    const int jobs = lease.jobs() > 0 ? lease.jobs() : resolve_local_build_jobs();
-    std::string install_cmd = "cmake --build " + shell_quote(active_build_dir) +
-                              " --target install --parallel " + std::to_string(jobs);
-    install_cmd = apply_agent_build_watchdog(apply_agent_build_qos(install_cmd, lease.qos(), lease.floor()), jobs,
-                                             lease.active());
-    if (run_with_spinner(install_cmd, "Building " + profile + " SDK") != 0) {
+    if (run_governed_cmake_build(repo_root, active_build_dir, {"--target", "install"},
+                                 "sdk-" + profile, GovernedBuildOutput::Spinner,
+                                 "Building " + profile + " SDK",
+                                 "Error: could not acquire build capacity: ") != 0) {
         remove_staging(staging_prefix, active_build_dir);
         return {};
     }
