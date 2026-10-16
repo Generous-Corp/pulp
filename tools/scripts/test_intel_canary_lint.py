@@ -197,6 +197,52 @@ def test_gpu_provider_exemption_does_not_hide_a_new_arm_asset():
     )
 
 
+# ── Stale allowlist entries ─────────────────────────────────────────────────
+def _stale_fixture(cmake_text: str, allow_text: str) -> list:
+    import tempfile
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        (root / "tools" / "cmake").mkdir(parents=True)
+        (root / "tools" / "scripts").mkdir(parents=True)
+        (root / "tools" / "cmake" / "Arch.cmake").write_text(cmake_text, encoding="utf-8")
+        allowlist = root / "tools" / "scripts" / "allow.txt"
+        allowlist.write_text(allow_text, encoding="utf-8")
+        return lint.run("tree", "origin/main", root, allowlist)
+
+
+def test_stale_allowlist_entry_is_a_finding():
+    # The construct the entry excused was rewritten away: the entry now
+    # matches nothing and would pre-approve its next appearance.
+    findings = _stale_fixture(
+        'set(ARCH "x86_64")\n',
+        '# header\ntools/cmake/Arch.cmake :: STREQUAL "aarch64"\n')
+    stale = [f for f in findings if f.klass == 6]
+    assert len(stale) == 1, [f.render() for f in findings]
+    assert stale[0].line == 2 and stale[0].path.endswith("allow.txt"), stale[0].render()
+    assert 'STREQUAL "aarch64"' in stale[0].text
+
+
+def test_control_an_allowlist_entry_in_use_is_not_stale():
+    findings = _stale_fixture(
+        'if(X STREQUAL "aarch64")\nendif()\n',
+        'tools/cmake/Arch.cmake :: STREQUAL "aarch64"\n')
+    assert findings == [], [f.render() for f in findings]
+
+
+def test_control_the_same_construct_without_an_entry_is_flagged():
+    # Proves the fixture's construct really is a finding, so the control above
+    # is clean because the entry suppressed it, not because nothing was found.
+    findings = _stale_fixture('if(X STREQUAL "aarch64")\nendif()\n', "")
+    assert [f.klass for f in findings] == [3], [f.render() for f in findings]
+
+
+def test_an_entry_for_an_unscanned_file_is_not_judged():
+    allow = lint.Allowlist([("tools/cmake/Other.cmake", "aarch64")], [7])
+    assert allow.stale({"tools/cmake/Arch.cmake"}, "allow.txt") == []
+    stale = allow.stale({"tools/cmake/Other.cmake"}, "allow.txt")
+    assert [(f.line, f.klass) for f in stale] == [(7, 6)]
+
+
 # ── End-to-end: the real tree must be clean ──────────────────────────────────
 def test_tree_is_clean():
     root = lint._repo_root()
