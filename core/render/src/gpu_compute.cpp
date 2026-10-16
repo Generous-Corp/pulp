@@ -4360,6 +4360,8 @@ private:
         ReadbackCallback on_complete;
         std::atomic<bool> resolved{false}; // the map callback has fired
         std::atomic<bool> ok{false};       // ... and reported Success
+        std::atomic<bool> abandoned{false};
+        std::atomic<bool> unmap_claimed{false};
     };
 
     void complete(AsyncReadback& req, ReadbackStatus status, uint32_t bytes) {
@@ -4384,8 +4386,10 @@ private:
         while (!pending.empty()) {
             auto req = pending.front();
             pending.pop_front();
+            req->abandoned.store(true, std::memory_order_release);
             if (req->resolved.load(std::memory_order_acquire) &&
-                req->ok.load(std::memory_order_acquire))
+                req->ok.load(std::memory_order_acquire) &&
+                !req->unmap_claimed.exchange(true, std::memory_order_acq_rel))
                 req->buffer.Unmap();
             if (pool_) pool_->discard(req->buffer);
             if (deferred && req->on_complete) {
@@ -4459,6 +4463,10 @@ private:
                             req->ok.store(status == wgpu::MapAsyncStatus::Success,
                                           std::memory_order_release);
                             req->resolved.store(true, std::memory_order_release);
+                            if (req->abandoned.load(std::memory_order_acquire) &&
+                                req->ok.load(std::memory_order_acquire) &&
+                                !req->unmap_claimed.exchange(true, std::memory_order_acq_rel))
+                                req->buffer.Unmap();
                             if (auto counter = resolves.lock())
                                 counter->fetch_add(1, std::memory_order_relaxed);
                             // The owner thread performs Unmap/discard. The callback only
