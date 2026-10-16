@@ -210,7 +210,7 @@ public:
         for (int i = 0; i < size / 2; ++i) {
             const double angle = -two_pi * static_cast<double>(i) / static_cast<double>(size);
             twiddles_[static_cast<std::size_t>(i)] = {static_cast<SampleType>(std::cos(angle)),
-                                                    static_cast<SampleType>(std::sin(angle))};
+                                                      static_cast<SampleType>(std::sin(angle))};
         }
     }
 

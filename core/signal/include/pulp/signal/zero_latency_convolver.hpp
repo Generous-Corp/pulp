@@ -606,9 +606,8 @@ private:
             // A destination's diagonal accumulator holds the packed inverse:
             // real output is diagonal, imaginary output is crossfeed. Extract
             // both into separate cell buffers so render_chunk can gate them.
-            const int cell = packed_stereo
-                                 ? (cell_count_ == 2 ? 0 : (output_job == 0 ? 0 : 3))
-                                 : output_job;
+            const int cell =
+                packed_stereo ? (cell_count_ == 2 ? 0 : (output_job == 0 ? 0 : 3)) : output_job;
             if (!cell_active(cell)) {
                 std::fill(g.ready[static_cast<std::size_t>(cell)].begin(),
                           g.ready[static_cast<std::size_t>(cell)].end(), SampleType{0});

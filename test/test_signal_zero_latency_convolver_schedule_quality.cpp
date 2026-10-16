@@ -900,8 +900,7 @@ TEST_CASE("Packed ordinary stereo matches independent 2IR convolutions",
         Rng rng(0x2A2u);
         for (int i = 0; i < frames; ++i) {
             input[0][i] = static_cast<T>(rng.bipolar());
-            input[1][i] = static_cast<T>(0.5 * rng.bipolar() +
-                                         ((i & 1) ? -0.2 : 0.2));
+            input[1][i] = static_cast<T>(0.5 * rng.bipolar() + ((i & 1) ? -0.2 : 0.2));
         }
         const std::vector<double> x0(input[0].begin(), input[0].end());
         const std::vector<double> x1(input[1].begin(), input[1].end());
@@ -949,21 +948,26 @@ TEST_CASE("Packed ordinary stereo matches independent 2IR convolutions",
                     quiet_input[loud][i] = static_cast<T>(0.75 * quiet_rng.bipolar());
                     quiet_input[quiet][i] = quiet_gain * static_cast<T>(quiet_rng.bipolar());
                 }
-                const std::vector<double> quiet_x(quiet_input[quiet].begin(), quiet_input[quiet].end());
+                const std::vector<double> quiet_x(quiet_input[quiet].begin(),
+                                                  quiet_input[quiet].end());
                 const auto quiet_want = direct_convolve(quiet_x, prepared_taps(quiet_conv, quiet));
                 const auto quiet_got = render(quiet_conv, quiet_input, kBlock);
                 for (const auto& channel : quiet_got)
-                    REQUIRE(std::all_of(channel.begin(), channel.end(), [](T sample) {
-                        return std::isfinite(sample);
-                    }));
-                const std::vector<double> quiet_actual(quiet_got[quiet].begin(), quiet_got[quiet].end());
+                    REQUIRE(std::all_of(channel.begin(), channel.end(),
+                                        [](T sample) { return std::isfinite(sample); }));
+                const std::vector<double> quiet_actual(quiet_got[quiet].begin(),
+                                                       quiet_got[quiet].end());
                 REQUIRE(amplitude_db(max_abs_error(quiet_actual, quiet_want)) < -145.0);
             }
         }
     };
 
-    SECTION("float") { run.template operator()<ZeroLatencyConvolver, float>(); }
-    SECTION("double") { run.template operator()<ZeroLatencyConvolver64, double>(); }
+    SECTION("float") {
+        run.template operator()<ZeroLatencyConvolver, float>();
+    }
+    SECTION("double") {
+        run.template operator()<ZeroLatencyConvolver64, double>();
+    }
 }
 
 TEST_CASE("Packed stereo preserves DC and Nyquist components", "[signal][convolution][stereo]") {
