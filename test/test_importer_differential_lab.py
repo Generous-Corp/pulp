@@ -344,12 +344,55 @@ class DifferentialLabTests(unittest.TestCase):
                          "resolved": {"width": 1280, "height": 800}},
             "browser": {"product": "Chrome", "version": "140.0"},
         }
-        return ({"provenance": json.loads(json.dumps(provenance))},
-                {"provenance": json.loads(json.dumps(provenance))}, source_sha256)
+        return ({"provenance": json.loads(json.dumps(provenance)),
+                 "reference": {"device_scale_factor": 1}},
+                {"provenance": json.loads(json.dumps(provenance)),
+                 "reference": {"device_scale_factor": 1}}, source_sha256)
 
     def test_capture_binding_accepts_captures_of_the_same_input(self) -> None:
         capture, native_capture, source_sha256 = self._bound_captures()
         LAB.verify_capture_binding(capture, native_capture, source_sha256)
+
+    def test_interaction_plan_identity_matches_capture_redaction(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            plan = Path(raw) / "plan.json"
+            plan.write_text(json.dumps({
+                "schema": "pulp-browser-interactions-v1",
+                "version": 1,
+                "actions": [{"action": "click", "selector": "#go"}],
+            }), encoding="utf-8")
+            self.assertEqual(
+                LAB.interaction_plan_sha256(plan),
+                "92231b6cd069d5bd57b91c23334cbe13456cd987664773ca070806f49df1d40c",
+            )
+
+    def test_interaction_plan_identity_matches_javascript_utf16_length(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            plan = Path(raw) / "plan.json"
+            plan.write_text(json.dumps({
+                "schema": "pulp-browser-interactions-v1",
+                "version": 1,
+                "actions": [{"action": "type", "selector": "#name", "text": "😀"}],
+            }), encoding="utf-8")
+            expected = {
+                "schema": "pulp-browser-interactions-v1", "version": 1,
+                "actions": [{"action": "type", "selector": "#name",
+                              "timeout_ms": 5000, "text_length": 2}],
+            }
+            canonical = json.dumps(expected, separators=(",", ":"), ensure_ascii=False).encode()
+            import hashlib
+            self.assertEqual(LAB.interaction_plan_sha256(plan), hashlib.sha256(canonical).hexdigest())
+
+    def test_capture_binding_rejects_unbound_interaction_plan(self) -> None:
+        capture, native_capture, source_sha256 = self._bound_captures()
+        interactions = {"plan_sha256": "a" * 64}
+        capture["provenance"]["interactions"] = interactions
+        native_capture["provenance"]["interactions"] = dict(interactions)
+        with self.assertRaisesRegex(LAB.LabError, "not bound"):
+            LAB.verify_capture_binding(
+                capture, native_capture, source_sha256,
+                expected_interaction_plan_sha256="b" * 64,
+            )
 
     def test_capture_binding_fails_closed_on_each_mismatch(self) -> None:
         cases = {

@@ -3,7 +3,7 @@
   "$id": "https://pulp.audio/schemas/importer-differential-benchmark-v1.schema.json",
   "title": "Pulp importer differential benchmark v1",
   "type": "object",
-  "required": ["schema", "version", "runs", "cold", "warm", "provenance", "run_receipts"],
+  "required": ["schema", "version", "runs", "cold", "warm", "provenance", "run_receipts", "determinism"],
   "properties": {
     "schema": {"const": "pulp-importer-differential-benchmark-v1"},
     "version": {"const": 1},
@@ -21,8 +21,16 @@
         "schema": {"const": "pulp-importer-differential-determinism-v1"},
         "status": {"enum": ["pass", "fail", "unverified"]},
         "required_runs": {"const": 3},
-        "runs": {"type": "integer", "minimum": 0}
-      }
+        "runs": {"type": "integer", "minimum": 0},
+        "fields": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "run_digests": {"type": "array", "minItems": 3, "items": {"type": "object"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"enum": ["pass", "fail"]}}},
+          "then": {"required": ["fields", "run_digests"]}
+        }
+      ]
     }
   },
   "$defs": {
