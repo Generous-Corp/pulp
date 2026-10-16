@@ -403,6 +403,10 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         return device_loss_.observed;
     }
 
+    bool device_loss_callback_registered() const noexcept {
+        return loss_callback_registered_;
+    }
+
     // wgpu-native v24 exposes device destruction as the only portable,
     // controlled loss trigger. This is a diagnostic hook; production provider
     // selection and the public ABI never call it.
@@ -422,7 +426,7 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         return device_loss_.reason;
     }
 
-    bool ordinary_queue_error_is_quarantined() const noexcept {
+    bool queue_error_before_physical_drain_is_quarantined() const noexcept {
         return !physical_drain_;
     }
 
@@ -562,6 +566,9 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         }
         device_ = device_wait.device;
         queue_ = wgpuDeviceGetQueue(device_);
+        loss_callback_registered_ = queue_ != nullptr &&
+                                    device_loss_callback_info.callback == device_lost_callback &&
+                                    device_loss_callback_info.userdata1 == &device_loss_;
         return queue_ != nullptr;
     }
 
@@ -634,6 +641,7 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
     // declared after it and therefore destroyed first during teardown.
     DeviceLossWait device_loss_;
     bool loss_forced_ = false;
+    bool loss_callback_registered_ = false;
     bool physical_drain_ = false;
     bool queue_error_observed_ = false;
     WGPUInstance instance_ = nullptr;
@@ -890,10 +898,10 @@ int main() {
     // the queue callback must become a terminal failure and no output lease
     // may be acquired from that record. A lost device cannot prove that the
     // existing prepared state can resume, so re-prime remains typed unavailable.
-    bool loss_callback_registered = true;
+    bool loss_callback_registered = false;
     bool loss_scenario_triggered = false;
     bool loss_no_output_leases = false;
-    bool ordinary_queue_error_quarantined = false;
+    bool queue_error_before_physical_drain_quarantined = false;
     std::uint32_t loss_terminal_records = 0;
     WGPUDeviceLostReason loss_reason = WGPUDeviceLostReason_Unknown;
     {
@@ -910,6 +918,9 @@ int main() {
                                    .storage_kind = SharedIoArenaProvider::StorageKind::Staged}))
             return kDiagnosticFailureExit;
         auto* loss_native = static_cast<WgpuNativeStagedProvider*>(loss_session.owned_provider());
+        loss_callback_registered = loss_native->device_loss_callback_registered();
+        if (!loss_callback_registered)
+            return kDiagnosticFailureExit;
         auto loss_input = loss_session.acquire_input(901, 0);
         if (!loss_input || !loss_session.submit({loss_input->token, 0}) ||
             !loss_native->force_device_loss_for_diagnostic())
@@ -924,10 +935,10 @@ int main() {
         }
         (void)loss_session.service(0);
         const auto premature_completion = loss_session.pop_completion();
-        ordinary_queue_error_quarantined = !premature_completion &&
-                                           loss_native->queue_error_observed() &&
-                                           loss_native->ordinary_queue_error_is_quarantined();
-        if (premature_completion || !ordinary_queue_error_quarantined ||
+        queue_error_before_physical_drain_quarantined =
+            !premature_completion && loss_native->queue_error_observed() &&
+            loss_native->queue_error_before_physical_drain_is_quarantined();
+        if (premature_completion || !queue_error_before_physical_drain_quarantined ||
             !loss_native->device_loss_observed() || !loss_native->drain())
             return kDiagnosticFailureExit;
         for (int attempt = 0; attempt < 10'000 && !loss_completion; ++attempt) {
@@ -959,8 +970,8 @@ int main() {
                 loss_scenario_triggered ? "triggered" : "unavailable",
                 loss_reason == WGPUDeviceLostReason_Destroyed ? "destroyed" : "unknown",
                 loss_terminal_records, loss_no_output_leases ? "true" : "false");
-    std::printf("queue_error_without_loss=%s\n",
-                ordinary_queue_error_quarantined ? "quarantined" : "unknown");
+    std::printf("queue_error_before_physical_drain_quarantined=%s\n",
+                queue_error_before_physical_drain_quarantined ? "quarantined" : "unknown");
     std::puts(
         "device_loss_proof=callback_terminal_no_output_lease callback_fallback_proof=unavailable");
     return 0;
