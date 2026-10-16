@@ -271,7 +271,7 @@ class MainFlowTests(unittest.TestCase):
                 side_effect=[score_ref, score_cand, residual_ref, residual_cand],
             ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 rc = diff.main()
-            written = json.loads(residual_path.read_text())
+            written = json.loads(residual_path.read_text(encoding="utf-8"))
         self.assertEqual(rc, 0)
         self.assertEqual(stderr.getvalue(), "")
         payload = json.loads(stdout.getvalue())
