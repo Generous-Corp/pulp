@@ -1346,8 +1346,12 @@ public:
         initialized_.store(false, std::memory_order_release);
         emit_gpu_diagnostic(GpuDiagnosticSeverity::fatal, "dawn.device_lost", msg);
         runtime::log_error("GpuCompute: device lost (reason {}): {}", reason, msg);
-        drain_readbacks(ReadbackStatus::Failed);
+        std::vector<DeferredCompletion> deferred;
+        drain_readbacks(ReadbackStatus::Failed, &deferred);
         discard_detached_readbacks();
+        // This is the final operation on `this`: a completion may release the
+        // last owner and destroy the compute object while it runs.
+        invoke_deferred_completions(deferred);
     }
 
     struct CallbackState {
