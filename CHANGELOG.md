@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09861"></a>
+## [0.986.1] - 2026-10-16
+
+- release/version bump ([#10455](https://github.com/Generous-Corp/pulp/pull/10455))
+- codex/gate1 residuals 20261016 ([#10435](https://github.com/Generous-Corp/pulp/pull/10435))
+- verify/windows trace 181bbcdf 20261016 ([#10424](https://github.com/Generous-Corp/pulp/pull/10424))
+- shipyard merge gate schema 20261016 ([#10451](https://github.com/Generous-Corp/pulp/pull/10451))
+
 <a id="v09860"></a>
 ## [0.986.0] - 2026-10-16
 
@@ -10934,6 +10942,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.986.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.1
 [0.986.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.0
 [0.985.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.985.0
 [0.984.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.984.1
