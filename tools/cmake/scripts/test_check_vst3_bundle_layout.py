@@ -43,6 +43,28 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
         (bundle / "Contents" / "x86_64-win" / "pulp-build-info.json").unlink()
         self.assertTrue(any("pulp-build-info.json" in problem for problem in check(bundle)))
 
+    def test_top_level_array_fails_diagnostically(self) -> None:
+        _root, bundle = self.make_bundle()
+        (bundle / "Contents" / "x86_64-win" / "pulp-build-info.json").write_text("[]\n")
+        problems = check(bundle)
+        self.assertTrue(any("must contain a JSON object" in problem for problem in problems))
+
+    def test_null_runtime_library_list_fails_diagnostically(self) -> None:
+        _root, bundle = self.make_bundle()
+        (bundle / "Contents" / "x86_64-win" / "pulp-build-info.json").write_text(
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": None})
+        )
+        problems = check(bundle)
+        self.assertTrue(any("must be a JSON list" in problem for problem in problems))
+
+    def test_object_runtime_library_list_fails_diagnostically(self) -> None:
+        _root, bundle = self.make_bundle()
+        (bundle / "Contents" / "x86_64-win" / "pulp-build-info.json").write_text(
+            json.dumps({"schema": "pulp.build-info.v1", "bundled_runtime_libraries": {}})
+        )
+        problems = check(bundle)
+        self.assertTrue(any("must be a JSON list" in problem for problem in problems))
+
 
 if __name__ == "__main__":
     unittest.main()

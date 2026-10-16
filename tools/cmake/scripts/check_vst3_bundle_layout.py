@@ -71,9 +71,18 @@ def check(bundle: pathlib.Path) -> list[str]:
             except (OSError, json.JSONDecodeError) as exc:
                 problems.append(f"{bundle.name}: invalid {build_info.name}: {exc}")
                 continue
+            if not isinstance(info, dict):
+                problems.append(
+                    f"{bundle.name}: {build_info.name} must contain a JSON object")
+                continue
             if info.get("schema") != "pulp.build-info.v1":
                 problems.append(f"{bundle.name}: {build_info.name} has the wrong schema")
-            for library in info.get("bundled_runtime_libraries", []):
+            libraries = info.get("bundled_runtime_libraries", [])
+            if not isinstance(libraries, list):
+                problems.append(
+                    f"{bundle.name}: bundled_runtime_libraries must be a JSON list")
+                continue
+            for library in libraries:
                 name = library.get("file") if isinstance(library, dict) else None
                 if not name or not (arch_dir / name).is_file():
                     problems.append(
