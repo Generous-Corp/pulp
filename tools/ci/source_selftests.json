@@ -560,6 +560,12 @@
       ]
     },
     {
+      "name": "mise-contract-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_mise_contract.py"
+      ]
+    },
+    {
       "name": "native-intel-runner-group-selftest",
       "argv": [
         "{repo}/tools/ci/test_verify_native_intel_runner_group.py"
