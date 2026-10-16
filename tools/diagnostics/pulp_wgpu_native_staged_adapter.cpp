@@ -16,10 +16,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <cerrno>
 #include <memory>
+#include <poll.h>
 #include <span>
 #include <string>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <thread>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -725,6 +731,91 @@ bool WgpuNativeStagedProgram::release() noexcept {
 
 namespace {
 
+enum class LossProbeStatus : std::uint8_t { Unavailable, Failed, Passed };
+
+struct LossProbeResult {
+    LossProbeStatus status = LossProbeStatus::Unavailable;
+    bool callback_registered = false;
+    WGPUDeviceLostReason reason = WGPUDeviceLostReason_Unknown;
+};
+
+// wgpuDeviceDestroy can block inside a native Metal call on some pinned
+// images. Run this capability-only probe in a child so the parent verifier's
+// watchdog can kill the child and classify the capability gap as unavailable.
+LossProbeResult run_loss_capability_probe() noexcept {
+    int pipe_fds[2]{};
+    if (pipe(pipe_fds) != 0)
+        return {.status = LossProbeStatus::Failed};
+    const auto child = fork();
+    if (child < 0) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        return {.status = LossProbeStatus::Failed};
+    }
+    if (child == 0) {
+        close(pipe_fds[0]);
+        LossProbeResult result{};
+        auto loss_probe_provider = WgpuNativeStagedProvider::create();
+        if (loss_probe_provider == nullptr) {
+            result.status = LossProbeStatus::Unavailable;
+        } else if (!loss_probe_provider->force_device_loss_for_diagnostic()) {
+            result.status = LossProbeStatus::Failed;
+        } else if (!loss_probe_provider->wait_for_device_loss_callback()) {
+            result.status = LossProbeStatus::Unavailable;
+        } else {
+            result.status = LossProbeStatus::Passed;
+            result.callback_registered =
+                loss_probe_provider->device_loss_callback_registered();
+            result.reason = loss_probe_provider->device_loss_reason();
+        }
+        // Never invoke native teardown in this capability-only child. The
+        // parent either reads the result or kills this process on timeout.
+        loss_probe_provider.release();
+        const auto* bytes = reinterpret_cast<const char*>(&result);
+        std::size_t written = 0;
+        while (written < sizeof(result)) {
+            const auto count = write(pipe_fds[1], bytes + written, sizeof(result) - written);
+            if (count <= 0)
+                break;
+            written += static_cast<std::size_t>(count);
+        }
+        close(pipe_fds[1]);
+        _exit(written == sizeof(result) ? 0 : 1);
+    }
+
+    close(pipe_fds[1]);
+    LossProbeResult result{};
+    pollfd descriptor{.fd = pipe_fds[0], .events = POLLIN};
+    const auto poll_status = poll(&descriptor, 1, 8'000);
+    if (poll_status == 0) {
+        kill(child, SIGKILL);
+        waitpid(child, nullptr, 0);
+        close(pipe_fds[0]);
+        return {.status = LossProbeStatus::Unavailable};
+    }
+    if (poll_status < 0) {
+        kill(child, SIGKILL);
+        waitpid(child, nullptr, 0);
+        close(pipe_fds[0]);
+        return {.status = LossProbeStatus::Failed};
+    }
+    auto* bytes = reinterpret_cast<char*>(&result);
+    std::size_t received = 0;
+    while (received < sizeof(result)) {
+        const auto count = read(pipe_fds[0], bytes + received, sizeof(result) - received);
+        if (count <= 0)
+            break;
+        received += static_cast<std::size_t>(count);
+    }
+    close(pipe_fds[0]);
+    int child_status = 0;
+    waitpid(child, &child_status, 0);
+    if (received != sizeof(result) || !WIFEXITED(child_status) ||
+        WEXITSTATUS(child_status) != 0)
+        return {.status = LossProbeStatus::Failed};
+    return result;
+}
+
 bool validate_contract_admission() noexcept {
     using namespace pulp::gpu_audio;
     GpuAudioProgramDescriptor program{
@@ -794,6 +885,20 @@ int main() {
     if (dladdr(reinterpret_cast<const void*>(&wgpuCreateInstance), &loaded) == 0 ||
         loaded.dli_fname == nullptr)
         return 78;
+    std::fputs("wgpu staged diagnostic stage=loss_probe_begin\n", stderr);
+    const auto loss_probe_result = run_loss_capability_probe();
+    if (loss_probe_result.status == LossProbeStatus::Unavailable) {
+        std::fputs("wgpu staged device-loss observation unavailable\n", stderr);
+        return kProviderUnavailableExit;
+    }
+    if (loss_probe_result.status != LossProbeStatus::Passed)
+        return kDiagnosticFailureExit;
+    const bool loss_probe_registered = loss_probe_result.callback_registered;
+    const auto loss_probe_reason = loss_probe_result.reason;
+    if (!loss_probe_registered || loss_probe_reason != WGPUDeviceLostReason_Destroyed)
+        return kDiagnosticFailureExit;
+    std::fputs("wgpu staged diagnostic stage=loss_probe_abandoned\n", stderr);
+
     auto provider = WgpuNativeStagedProvider::create();
     if (provider == nullptr) {
         std::puts("wgpu_native_provider=unavailable");
@@ -803,6 +908,10 @@ int main() {
     auto session = std::make_unique<SharedIoProgramSession>();
     const auto abandon_session = [&]() noexcept { session.release(); };
     const auto fail_session = [&](int code) noexcept {
+        // A short-circuit before prepare leaves the local provider owner live;
+        // abandon both owners so this fail-closed return cannot run native
+        // teardown from either destructor.
+        provider.release();
         abandon_session();
         return code;
     };
@@ -915,39 +1024,6 @@ int main() {
     std::uint32_t loss_terminal_records = 0;
     WGPUDeviceLostReason loss_reason = WGPUDeviceLostReason_Unknown;
     {
-        std::fputs("wgpu staged diagnostic stage=loss_probe_begin\n", stderr);
-        // Probe the controlled loss trigger before preparing an outstanding
-        // submission. Some pinned wgpu-native images accept the callback
-        // descriptor but never deliver a loss notification for destroy();
-        // classify that explicit capability gap as provider-unavailable so
-        // the test skips without leaving callback userdata in flight.
-        auto loss_probe = WgpuNativeStagedProvider::create();
-        if (loss_probe == nullptr)
-            return kProviderUnavailableExit;
-        if (!loss_probe->force_device_loss_for_diagnostic())
-            return kDiagnosticFailureExit;
-        if (!loss_probe->wait_for_device_loss_callback()) {
-            std::fputs("wgpu staged device-loss observation unavailable\n", stderr);
-            // Some pinned wgpu-native images leave their internal Metal fence
-            // wait blocked after destroy() when no loss callback is delivered.
-            // Releasing that provider here would hang the verifier during
-            // teardown, turning the typed unavailable result into a timeout.
-            // The isolated diagnostic process is exiting with 77, so leak the
-            // provider and let the OS reclaim its native handles.
-            loss_probe.release();
-            return kProviderUnavailableExit;
-        }
-        const bool loss_probe_registered = loss_probe->device_loss_callback_registered();
-        const auto loss_probe_reason = loss_probe->device_loss_reason();
-        // The probe is capability-only. Even after a successful callback, the
-        // pinned Metal runtime can block while releasing its idle device
-        // fence. Keep the validated result and abandon this process-scoped
-        // probe before entering the outstanding-submission session.
-        loss_probe.release();
-        if (!loss_probe_registered || loss_probe_reason != WGPUDeviceLostReason_Destroyed)
-            return kDiagnosticFailureExit;
-        std::fputs("wgpu staged diagnostic stage=loss_probe_abandoned\n", stderr);
-
         // The probe above is a capability gate for the session path: only a
         // runtime that delivered the exact callback userdata and Destroyed
         // reason is allowed to enter the outstanding-submission scenario.
@@ -964,6 +1040,9 @@ int main() {
         // Keep this diagnostic fail-closed: abandon the whole session on that
         // diagnostic-failure path so its native handles die with the process.
         const auto abandon_loss_session = [&]() noexcept {
+            // If loss_program creation short-circuits prepare, loss_provider
+            // still owns the native device and must be abandoned separately.
+            loss_provider.release();
             loss_session.release();
             return kDiagnosticFailureExit;
         };

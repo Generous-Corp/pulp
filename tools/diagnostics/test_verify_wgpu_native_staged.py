@@ -53,14 +53,11 @@ def main() -> int:
             return 1
     if args.typed_only:
         source = ADAPTER_SOURCE.read_text(encoding="utf-8")
-        unavailable = source.split(
-            'std::fputs("wgpu staged device-loss observation unavailable\\n", stderr);',
-            1,
-        )
-        if len(unavailable) != 2 or "loss_probe.release();" not in unavailable[1].split(
-            "return kProviderUnavailableExit;", 1
-        )[0]:
-            print("typed unavailable teardown control failed", file=sys.stderr)
+        if ("run_loss_capability_probe()" not in source or
+                "loss_probe_provider.release();" not in source or
+                "kill(child, SIGKILL);" not in source or
+                "poll(&descriptor, 1, 8'000)" not in source):
+            print("typed unavailable probe watchdog control failed", file=sys.stderr)
             return 1
         if "const auto abandon_loss_session" not in source or source.count(
             "return abandon_loss_session();"
@@ -73,17 +70,17 @@ def main() -> int:
         if ("auto session = std::make_unique<SharedIoProgramSession>();" not in source or
                 "const auto fail_session" not in source or
                 source.count("return fail_session(") < 10 or
-                "session.release();" not in source):
+                "session.release();" not in source or
+                "provider.release();" not in source):
             print("typed initial-session teardown control failed", file=sys.stderr)
             return 1
-        validated = source.split(
-            "const bool loss_probe_registered = loss_probe->device_loss_callback_registered();",
-            1,
-        )
-        if len(validated) != 2 or "loss_probe.release();" not in validated[1].split(
-            "auto loss_provider", 1
-        )[0]:
-            print("typed capability-probe teardown control failed", file=sys.stderr)
+        if "loss_provider.release();" not in source:
+            print("typed loss-provider teardown control failed", file=sys.stderr)
+            return 1
+        if ("const auto loss_probe_result = run_loss_capability_probe();" not in source or
+                "loss_probe_result.callback_registered" not in source or
+                "loss_probe_result.reason" not in source):
+            print("typed capability-probe result control failed", file=sys.stderr)
             return 1
         return 0
     if any(getattr(args, name.replace("-", "_")) is None
