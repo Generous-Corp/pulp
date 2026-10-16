@@ -3,7 +3,7 @@
 // starts from source HTML and never consumes a generated artifact as input.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -58,7 +58,11 @@ async function main() {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "pulp-fresh-plugin-"));
   try {
     const browserOut = path.join(tmp, "browser");
-    await runCapture(fixture, browserOut, browser, true, interactions);
+    // execFile resolves only after the capture process has exited. The
+    // capture helper performs its browser teardown in its finally block, so
+    // reading these artifacts after this await is a process-level lifecycle
+    // control, not a claim about native widget lifetime.
+    const browserCaptureResult = await runCapture(fixture, browserOut, browser, true, interactions);
     const browserPng = await readFile(path.join(browserOut, "browser.png"));
     const interactionReport = await readFile(path.join(browserOut, "interaction-report.json"));
     const envelope = JSON.parse(await readFile(path.join(browserOut, "capture.json"), "utf8"));
@@ -68,10 +72,27 @@ async function main() {
     const nativeOut = path.join(tmp, "native.js");
     const native = await exec(importer, ["--from", "claude", "--file", fixture,
       "--emit", "js", "--output", nativeOut, "--validate",
-      "--screenshot-backend", "skia", "--no-bridge-scaffold"],
+      "--screenshot-backend", "skia", "--reference", path.join(browserOut, "browser.png"),
+      "--render-size", "480x320",
+      "--no-bridge-scaffold"],
       { maxBuffer: 4 * 1024 * 1024 });
     const nativeBytes = await readFile(nativeOut);
     assert(nativeBytes.length > 0);
+    const nativeLoweringMode = nativeBytes.includes("setImageSource('root'")
+      ? "faithful_capture"
+      : "native_lowering";
+    // The importer writes this alongside the generated artifact when --validate
+    // runs. Retain the actual native Skia PNG as evidence; hashing the JS
+    // artifact alone cannot prove that a native render occurred.
+    const nativeRenderNames = (await readdir(tmp)).filter((name) => name.endsWith("-render.png"));
+    assert.equal(nativeRenderNames.length, 1, `expected one native render PNG, found ${nativeRenderNames.join(", ")}`);
+    const nativeRenderPath = path.join(tmp, nativeRenderNames[0]);
+    const nativeRenderPng = await readFile(nativeRenderPath);
+    assert(nativeRenderPng.length > 0);
+    const importerOutput = `${native.stdout}\n${native.stderr}`;
+    const similarityMatch = importerOutput.match(/Similarity:\s+(\d+)%\s+\((\d+)\/(\d+) pixels differ, mean error:\s+([0-9.]+)/);
+    assert(similarityMatch, `native comparator result missing from importer output:\n${importerOutput}`);
+    const [, similarityPercent, diffPixels, totalPixels, meanError] = similarityMatch;
     const negative = path.join(tmp, "negative.html");
     const sourceText = source.toString();
     assert(sourceText.includes(negativeSelector), `negative selector not found: ${negativeSelector}`);
@@ -81,8 +102,9 @@ async function main() {
     await assert.rejects(runCapture(negative, path.join(tmp, "negative-browser"), browser, true, interactions));
 
     const receipt = {
-      schema: "pulp-fresh-plugin-validation-v1",
+      schema: "pulp-fresh-plugin-validation-v4",
       fixture: path.basename(fixture),
+      scope: { behavior: "panel-toggle", keyed_identity_reorder: "deferred" },
       source_sha256: sourceSha,
       source_bytes: source.length,
       browser: {
@@ -92,8 +114,32 @@ async function main() {
         screenshot_bytes: browserPng.length,
         interaction_report_sha256: sha256(interactionReport),
         interaction_count: interactionCount,
+        lifecycle: {
+          capture_process_exited_cleanly: true,
+          artifacts_read_after_process_exit: true,
+          browser_health_status: envelope.provenance.health.status,
+          runtime_exception_count: envelope.provenance.health.runtime_exceptions.length,
+        },
       },
-      native: { backend: "skia", artifact_sha256: sha256(nativeBytes), artifact_bytes: nativeBytes.length },
+      native: {
+        backend: "skia",
+        lowering_mode: nativeLoweringMode,
+        artifact_sha256: sha256(nativeBytes),
+        artifact_bytes: nativeBytes.length,
+        render_sha256: sha256(nativeRenderPng),
+        render_bytes: nativeRenderPng.length,
+        lifecycle: {
+          import_process_exited_cleanly: true,
+          artifacts_read_after_process_exit: true,
+        },
+        comparator: {
+          reference: "browser.screenshot_sha256",
+          similarity_percent: Number(similarityPercent),
+          diff_pixels: Number(diffPixels),
+          total_pixels: Number(totalPixels),
+          mean_error: Number(meanError),
+        },
+      },
       planted_negative: { mutated_id: negativeId, browser_capture_rejected: true },
     };
     const expectedReceipt = JSON.parse(await readFile(expectedReceiptPath, "utf8"));
