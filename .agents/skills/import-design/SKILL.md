@@ -5508,6 +5508,18 @@ the differing-pixel count printed beside it. A 200x120 page captured on a
 identical, scaled by 0.0234. Never quote that percentage without checking that
 the two images have the same dimensions.
 
+**DOM snapshot integrity is separate from visual parity.** New Chromium captures
+record `documents[0].snapshot_sha256` over the exact UTF-8 bytes written to
+`dom-snapshot.json`, including its terminal newline. Consumers reject a declared
+malformed or mismatching digest before reading styles; the native lowerer and
+differential lab parse the verified buffer rather than reopening the sidecar.
+Old captures without the field remain usable for ordinary diagnostic analysis,
+but are `legacy-unbound` and cannot qualify for a document-background experiment.
+Recapture them with the new producer; adding a checksum afterward does not
+establish capture-time identity. A matching digest proves consistency with the
+capture envelope, not signing, independent authentication, background-compositing
+correctness, or Chromium/Skia pixel parity.
+
 **The browser capture is deliberately LARGER than the design, so it must be
 registered before it is scored.** The panel's root carries its own padding and
 `capture.mjs` grows the extent so drop shadows and absolutely positioned

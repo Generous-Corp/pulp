@@ -1,5 +1,6 @@
 #include "browser_capture_ir.hpp"
 #include "browser_capture_limits.hpp"
+#include "browser_capture_provenance.hpp"
 #include "browser_capture_styles.hpp"
 #include "browser_capture_tree.hpp"
 
@@ -1674,12 +1675,46 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     std::optional<CapturedStyleIndex> captured_styles;
     const std::string snapshot_asset =
         string_member(documents[static_cast<int>(0)], "snapshot_asset");
-    if (!snapshot_asset.empty()) {
+    const auto document = documents[static_cast<int>(0)];
+    std::size_t declared_snapshot_hashes = 0;
+    for (uint32_t i = 0; i < documents.size(); ++i) {
+        const auto candidate = documents[static_cast<int>(i)];
+        if (candidate.isObject() && candidate.hasObjectMember("snapshot_sha256"))
+            ++declared_snapshot_hashes;
+    }
+    const bool has_snapshot_hash =
+        document.isObject() && document.hasObjectMember("snapshot_sha256");
+    if (declared_snapshot_hashes > 0 &&
+        (documents.size() != 1 || !has_snapshot_hash)) {
+        result.error =
+            "browser DOM snapshot binding requires exactly one document";
+        return result;
+    }
+    const std::string snapshot_hash =
+        string_member(document, "snapshot_sha256");
+    if (has_snapshot_hash) {
+        // New producers bind the exact raw sidecar bytes. Keep legacy
+        // envelopes without this member valid, but fail closed as soon as a
+        // producer declares the binding: verify and parse the same buffer.
+        std::string snapshot_error;
+        const auto verified = browser_capture::read_verified_dom_snapshot(
+            envelope_path, snapshot_asset, snapshot_hash, snapshot_error);
+        if (!verified) {
+            result.error = snapshot_error;
+            return result;
+        }
+        captured_styles = CapturedStyleIndex::load_bytes(
+            verified->bytes, verified->path);
+        if (!captured_styles) {
+            result.error = "browser DOM snapshot sidecar is malformed";
+            return result;
+        }
+    }
+    if (!snapshot_asset.empty() && !has_snapshot_hash) {
         std::string ignored;
         if (const auto snapshot_path =
-                contained_sidecar(envelope_path, snapshot_asset, ignored)) {
+                contained_sidecar(envelope_path, snapshot_asset, ignored))
             captured_styles = CapturedStyleIndex::load(*snapshot_path);
-        }
     }
     // Native drawing needs the painted tree; without a snapshot there is
     // nothing to draw FROM, and silently falling back to the photograph would

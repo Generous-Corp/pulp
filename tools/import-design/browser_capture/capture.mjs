@@ -2150,6 +2150,11 @@ async function runCapture(options) {
     progress.enterPhase("artifact-write");
     const sanitizedSnapshot = sanitizeSnapshot(
       snapshot, server.privatePrefix);
+    // Preserve the positional style-name mapping in the exact bytes we bind.
+    const snapshotBytes = Buffer.from(serializeJson({
+      ...sanitizedSnapshot,
+      computedStyleNames: COMPUTED_STYLES,
+    }), "utf8");
     const interactionReportBytes = interactionReport
       ? serializeJson(interactionReport)
       : "";
@@ -2170,10 +2175,7 @@ async function runCapture(options) {
       // snapshot self-describing, so a consumer never has to hardcode a
       // parallel copy of COMPUTED_STYLES that would silently map a background
       // into a border the first time this list changes.
-      writeJson(path.join(outputDir, "dom-snapshot.json"), {
-        ...sanitizedSnapshot,
-        computedStyleNames: COMPUTED_STYLES,
-      }),
+      writeFile(path.join(outputDir, "dom-snapshot.json"), snapshotBytes),
       writeJson(path.join(outputDir, "semantic-report.json"), semanticReport),
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       writeJson(
@@ -2290,6 +2292,7 @@ async function runCapture(options) {
           snapshot.documents?.[0]?.layout?.nodeIndex?.length ?? 0,
         paint_order: true,
         snapshot_asset: "dom-snapshot.json",
+        snapshot_sha256: sha256(snapshotBytes),
       }],
       assets: [{
         id: "reference:browser",

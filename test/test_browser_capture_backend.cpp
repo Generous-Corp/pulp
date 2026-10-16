@@ -201,6 +201,119 @@ TEST_CASE("browser capture provenance binds source browser viewport and material
     REQUIRE(result);
 }
 
+TEST_CASE("browser capture provenance verifies a declared DOM snapshot binding",
+          "[import-design][browser-capture][provenance]") {
+    TempTree tree("provenance-snapshot");
+    const auto fixture = write_provenance_fixture(tree);
+    const std::string snapshot = "snapshot bytes";
+    tree.write("dom-snapshot.json", snapshot);
+    const auto snapshot_hash = pulp::runtime::sha256_hex(snapshot);
+    auto envelope = replace_once(
+        read_file(fixture.envelope),
+        R"JSON("reference":)JSON",
+        R"JSON("documents":[{"snapshot_asset":"dom-snapshot.json","snapshot_sha256":")JSON" +
+            snapshot_hash + R"JSON("}],"reference":)JSON");
+    tree.write("capture.json", envelope);
+
+    const auto result = capture::validate_capture_provenance({
+        .envelope = tree.root() / "capture.json",
+        .source = fixture.source,
+        .materialized_document = fixture.materialized,
+        .browser = fixture.browser,
+        .initial_width = 1280,
+        .initial_height = 800,
+        .device_scale_factor = 2,
+    });
+    INFO(result.message);
+    REQUIRE(result);
+
+    SECTION("mismatch") {
+        auto mismatched = replace_once(
+            envelope, snapshot_hash,
+            std::string(64, '0'));
+        tree.write("capture.json", mismatched);
+        const auto rejected = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.message.find("does not match its sidecar") !=
+                std::string::npos);
+    }
+
+    SECTION("malformed declaration") {
+        auto malformed = replace_once(
+            envelope, snapshot_hash,
+            "ABCDEF");
+        tree.write("capture.json", malformed);
+        const auto rejected = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.message.find("declaration is malformed") !=
+                std::string::npos);
+    }
+
+    SECTION("missing sidecar") {
+        auto missing = replace_once(
+            envelope, "dom-snapshot.json", "missing-snapshot.json");
+        tree.write("capture.json", missing);
+        const auto rejected = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.message.find("missing") != std::string::npos);
+    }
+
+    SECTION("escaping symlink") {
+        const auto outside = tree.root().parent_path() /
+                             (tree.root().filename().string() + "-outside-snapshot");
+        {
+            std::ofstream out(outside, std::ios::binary);
+            REQUIRE(out);
+            out << snapshot;
+            REQUIRE(out.good());
+        }
+        std::error_code ec;
+        fs::create_symlink(outside, tree.root() / "escaped-snapshot.json", ec);
+        if (ec) {
+            WARN("symlink creation unavailable: " << ec.message());
+            return;
+        }
+        auto escaped = replace_once(
+            envelope, "dom-snapshot.json", "escaped-snapshot.json");
+        tree.write("capture.json", escaped);
+        const auto rejected = capture::validate_capture_provenance({
+            .envelope = tree.root() / "capture.json",
+            .source = fixture.source,
+            .materialized_document = fixture.materialized,
+            .browser = fixture.browser,
+            .initial_width = 1280,
+            .initial_height = 800,
+            .device_scale_factor = 2,
+        });
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.message.find("escapes") != std::string::npos);
+    }
+}
+
 TEST_CASE("browser capture provenance rejects source hash omission and mismatch",
           "[import-design][browser-capture][provenance][negative]") {
     TempTree tree("provenance-source-negative");
