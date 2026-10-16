@@ -58,6 +58,15 @@ class FakeImage:
         return self
 
 
+class FakeRGBAImage:
+    def __init__(self, pixels: list[tuple[int, int, int, int]], size: tuple[int, int]) -> None:
+        self._pixels = pixels
+        self.size = size
+
+    def getdata(self) -> list[tuple[int, int, int, int]]:
+        return self._pixels
+
+
 class HelperScoringTests(unittest.TestCase):
     def test_image_module_imports_pillow_or_reports_install_hint(self) -> None:
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
@@ -119,6 +128,46 @@ class HelperScoringTests(unittest.TestCase):
         self.assertIsNone(opened.resized_to)
         self.assertEqual(opened.converted_to, "RGB")
 
+    def test_residual_profile_detects_alpha_only_changes(self) -> None:
+        reference = FakeRGBAImage([(30, 40, 50, 255)] * 4, (2, 2))
+        candidate = FakeRGBAImage([(30, 40, 50, 128)] * 4, (2, 2))
+        result = diff.residual_profile(reference, candidate)
+        self.assertEqual(result["classification"], "alpha-only")
+        self.assertEqual(result["differing_pixels"], 4)
+        self.assertEqual(result["alpha_only_pixels"], 4)
+
+    def test_residual_profile_detects_small_translation(self) -> None:
+        white = (255, 255, 255, 255)
+        black = (0, 0, 0, 255)
+        reference = [white] * 32
+        candidate = [white] * 32
+        for y in range(4):
+            reference[y * 8 + 2] = black
+            candidate[y * 8 + 3] = black
+        result = diff.residual_profile(
+            FakeRGBAImage(reference, (8, 4)), FakeRGBAImage(candidate, (8, 4)), shift_radius=2)
+        self.assertEqual(result["classification"], "placement-drift")
+        self.assertEqual(result["shift_probe"]["best_shift"]["dx"], 1)
+        self.assertGreater(result["shift_probe"]["improvement"], 0.5)
+
+    def test_residual_profile_identity_and_rgb_inputs_are_supported(self) -> None:
+        image = FakeRGBAImage([(30, 40, 50, 255)] * 4, (2, 2))
+        result = diff.residual_profile(image, image)
+        self.assertEqual(result["classification"], "identical")
+        self.assertEqual(result["differing_fraction"], 0.0)
+
+    def test_residual_profile_identifies_edge_concentrated_raster_difference(self) -> None:
+        white = (255, 255, 255, 255)
+        reference = [white] * 32
+        candidate = [white] * 32
+        for y in range(4):
+            reference[y * 8 + 2] = (0, 0, 0, 255)
+            candidate[y * 8 + 2] = (96, 96, 96, 255)
+        result = diff.residual_profile(
+            FakeRGBAImage(reference, (8, 4)), FakeRGBAImage(candidate, (8, 4)))
+        self.assertEqual(result["classification"], "text-edge/rasterization")
+        self.assertEqual(result["edge_band_pixels"], result["differing_pixels"])
+
 
 class MainFlowTests(unittest.TestCase):
     def _run_main(
@@ -132,6 +181,7 @@ class MainFlowTests(unittest.TestCase):
         cand_img = cand or FakeImage([(255, 255, 255)])
         stdout = io.StringIO()
         stderr = io.StringIO()
+        written = None
         with tempfile.TemporaryDirectory() as tdir:
             root = Path(tdir)
             ref_path = root / "ref.png"
@@ -170,6 +220,39 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(payload["score"], 1.0)
         self.assertEqual(payload["threshold"], 0.99)
         self.assertFalse(payload["blank_candidate"])
+
+    def test_main_writes_residual_profile_without_changing_score(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        score_ref = FakeImage([(255, 255, 255)])
+        score_cand = FakeImage([(255, 255, 255)])
+        residual_ref = FakeRGBAImage([(30, 40, 50, 255)] * 4, (2, 2))
+        residual_cand = FakeRGBAImage([(30, 40, 50, 128)] * 4, (2, 2))
+        with tempfile.TemporaryDirectory() as tdir:
+            root = Path(tdir)
+            ref_path = root / "ref.png"
+            cand_path = root / "cand.png"
+            residual_path = root / "residual.json"
+            ref_path.write_text("ref", encoding="utf-8")
+            cand_path.write_text("cand", encoding="utf-8")
+            with mock.patch.object(
+                sys,
+                "argv",
+                [str(SCRIPT), str(ref_path), str(cand_path), "--json", "--residual-json", str(residual_path)],
+            ), mock.patch.object(
+                diff,
+                "load_normalized",
+                side_effect=[score_ref, score_cand, residual_ref, residual_cand],
+            ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                rc = diff.main()
+            written = json.loads(residual_path.read_text())
+        self.assertEqual(rc, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["score"], 1.0)
+        self.assertEqual(payload["residual_profile"]["classification"], "alpha-only")
+        assert written is not None
+        self.assertEqual(written["alpha_only_pixels"], 4)
 
     def test_main_reports_missing_file_before_loading_images(self) -> None:
         stdout = io.StringIO()

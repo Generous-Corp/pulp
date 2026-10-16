@@ -407,6 +407,35 @@ When the desired Claude screen is not the landing state, add
 from strings found in the HTML or DOM snapshot; require a `wait-for` action on
 a selector that is actually visible.
 
+#### Residual visual diagnostics
+
+Keep the raw comparison threshold unchanged while investigating a sub-threshold
+render. The existing comparator can emit an alpha-aware residual profile:
+
+```bash
+python3 tools/import-validation/diff_against_reference.py \
+  browser.png native.png --residual-json residual.json --json
+```
+
+The profile reports alpha-only pixels, edge-band concentration, per-channel
+absolute deltas, and a bounded small-shift probe. Its classification can point
+to `alpha-only`, `placement-drift`, or `text-edge/rasterization`; it is
+diagnostic evidence and does not establish importer capability or
+Chromium/Skia parity. The raw score and its gate remain authoritative.
+
+If most residuals are outside the imported root, record viewport/background
+registration separately instead of changing the importer to paint a guessed
+background:
+
+```bash
+python3 tools/import-validation/viewport_background_diagnostic.py \
+  browser.png native.png --root-bounds X Y WIDTH HEIGHT --json viewport.json
+```
+
+This records corner colors and modal/mean/differing-pixel summaries outside the
+root. It does not identify the CSS declaration that caused the mismatch; keep
+the source, browser, viewport/DPR, and native receipts alongside it.
+
 The older static/QuickJS parser remains available through `--offline` for
 diagnostics and environments without Chromium. Its optional
 `classnames.json` sidecar maps plain-classname rules for that legacy path; it

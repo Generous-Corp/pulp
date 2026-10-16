@@ -28,6 +28,8 @@ fallback-vs-real), NOT pixel-level antialiasing match.
 
 from __future__ import annotations
 import argparse
+import json
+import math
 import sys
 from pathlib import Path
 
@@ -43,12 +45,170 @@ def _image_module():
     return Image
 
 
-def load_normalized(path: Path, target_size: tuple[int, int]) -> Image.Image:
+def load_normalized(
+    path: Path, target_size: tuple[int, int], mode: str = "RGB"
+) -> Image.Image:
     Image = _image_module()
-    img = Image.open(path).convert("RGB")
+    img = Image.open(path).convert(mode)
     if img.size != target_size:
         img = img.resize(target_size, Image.Resampling.LANCZOS)
     return img
+
+
+def residual_profile(
+    reference: Image.Image,
+    candidate: Image.Image,
+    threshold: int = 8,
+    edge_threshold: int = 16,
+    shift_radius: int = 2,
+) -> dict[str, object]:
+    """Classify residual pixels without changing the canonical fidelity score.
+
+    This is deliberately a diagnostic layer. It separates alpha-only changes,
+    likely translation, and edge-concentrated residuals so a sub-threshold
+    result can be investigated without relaxing the raw gate. The shift probe
+    measures overlap only; it is evidence of translation sensitivity, not a
+    proposed correction.
+    """
+    if reference.size != candidate.size:
+        raise ValueError("residual images must have identical dimensions")
+    if threshold < 0 or edge_threshold < 0 or shift_radius < 0:
+        raise ValueError("residual thresholds must be non-negative")
+
+    ref_pixels = list(reference.getdata())
+    cand_pixels = list(candidate.getdata())
+    if len(ref_pixels) != len(cand_pixels) or not ref_pixels:
+        raise ValueError("residual images must contain the same non-empty pixels")
+    channels = len(ref_pixels[0])
+    if channels not in (3, 4) or any(len(pixel) != channels for pixel in ref_pixels + cand_pixels):
+        raise ValueError("residual images must be RGB or RGBA")
+    width, height = reference.size
+
+    def rgba(pixel: tuple[int, ...]) -> tuple[int, int, int, int]:
+        return (*pixel[:3], pixel[3] if len(pixel) == 4 else 255)
+
+    ref_rgba = [rgba(pixel) for pixel in ref_pixels]
+    cand_rgba = [rgba(pixel) for pixel in cand_pixels]
+
+    def luminance(pixel: tuple[int, int, int, int]) -> float:
+        return 0.2126 * pixel[0] + 0.7152 * pixel[1] + 0.0722 * pixel[2]
+
+    ref_luma = [luminance(pixel) for pixel in ref_rgba]
+
+    def index(x: int, y: int) -> int:
+        return y * width + x
+
+    def edge_strength(x: int, y: int) -> float:
+        center = ref_luma[index(x, y)]
+        neighbors = []
+        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if 0 <= nx < width and 0 <= ny < height:
+                neighbors.append(abs(center - ref_luma[index(nx, ny)]))
+        return max(neighbors, default=0.0)
+
+    def mismatch(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
+        return max(abs(a[i] - b[i]) for i in range(3)) > threshold or abs(a[3] - b[3]) > threshold
+
+    differing = 0
+    alpha_only = 0
+    edge_pixels = 0
+    channel_abs = [0, 0, 0, 0]
+    for ref_pixel, cand_pixel in zip(ref_rgba, cand_rgba):
+        deltas = [abs(ref_pixel[i] - cand_pixel[i]) for i in range(4)]
+        channel_abs = [left + right for left, right in zip(channel_abs, deltas)]
+        rgb_changed = max(deltas[:3]) > threshold
+        alpha_changed = deltas[3] > threshold
+        if rgb_changed or alpha_changed:
+            differing += 1
+            if alpha_changed and not rgb_changed:
+                alpha_only += 1
+        # Edge concentration is evaluated on residual pixels only below.
+
+    for y in range(height):
+        for x in range(width):
+            offset = index(x, y)
+            if mismatch(ref_rgba[offset], cand_rgba[offset]) and edge_strength(x, y) >= edge_threshold:
+                edge_pixels += 1
+
+    def diff_rate(dx: int, dy: int) -> float:
+        compared = 0
+        changed = 0
+        for y in range(0, height, probe_stride):
+            cy = y + dy
+            if not 0 <= cy < height:
+                continue
+            for x in range(0, width, probe_stride):
+                cx = x + dx
+                if not 0 <= cx < width:
+                    continue
+                compared += 1
+                if mismatch(ref_rgba[index(x, y)], cand_rgba[index(cx, cy)]):
+                    changed += 1
+        return changed / compared if compared else math.inf
+
+    # The exact residual counts above remain full-resolution. For the more
+    # expensive translated-image probe, sample a deterministic grid on large
+    # panels so diagnostics stay bounded without affecting the raw score.
+    pixel_count = width * height
+    probe_stride = max(1, math.ceil(math.sqrt(pixel_count / 250_000)))
+    baseline_rate = diff_rate(0, 0)
+    shifts = [
+        {"dx": dx, "dy": dy, "rate": diff_rate(dx, dy)}
+        for dy in range(-shift_radius, shift_radius + 1)
+        for dx in range(-shift_radius, shift_radius + 1)
+    ]
+    best_shift = min(shifts, key=lambda row: (row["rate"], abs(row["dx"]) + abs(row["dy"])))
+    shift_improvement = (
+        (baseline_rate - best_shift["rate"]) / baseline_rate
+        if baseline_rate > 0 else 0.0
+    )
+    edge_fraction = edge_pixels / differing if differing else 0.0
+    alpha_fraction = alpha_only / differing if differing else 0.0
+
+    if differing == 0:
+        classification = "identical"
+    elif alpha_only == differing:
+        classification = "alpha-only"
+    elif shift_improvement >= 0.15:
+        classification = "placement-drift"
+    elif edge_fraction >= 0.65:
+        classification = "text-edge/rasterization"
+    else:
+        classification = "mixed"
+
+    return {
+        "schema": "pulp-visual-residual-profile-v1",
+        "dimensions": {"width": width, "height": height},
+        "thresholds": {
+            "channel": threshold,
+            "edge_luminance": edge_threshold,
+            "shift_radius": shift_radius,
+        },
+        "pixel_count": pixel_count,
+        "differing_pixels": differing,
+        "differing_fraction": differing / pixel_count,
+        "alpha_only_pixels": alpha_only,
+        "alpha_only_fraction": alpha_fraction,
+        "edge_band_pixels": edge_pixels,
+        "edge_band_fraction": edge_fraction,
+        "mean_absolute_delta": {
+            "red": channel_abs[0] / pixel_count,
+            "green": channel_abs[1] / pixel_count,
+            "blue": channel_abs[2] / pixel_count,
+            "alpha": channel_abs[3] / pixel_count,
+        },
+        "shift_probe": {
+            "baseline_rate": baseline_rate,
+            "best_shift": best_shift,
+            "improvement": shift_improvement,
+            "sample_stride": probe_stride,
+        },
+        "classification": classification,
+        "interpretation": (
+            "diagnostic residual classification; it does not change the raw "
+            "fidelity score or establish importer capability"
+        ),
+    }
 
 
 def histogram_similarity(a: Image.Image, b: Image.Image) -> float:
@@ -119,6 +279,14 @@ def main() -> int:
         action="store_true",
         help="Output machine-readable JSON instead of human text",
     )
+    parser.add_argument(
+        "--residual-json",
+        type=Path,
+        help=(
+            "Write an alpha-aware residual profile with edge-band and small-shift "
+            "diagnostics; this never changes the canonical score"
+        ),
+    )
     args = parser.parse_args()
 
     for p in (args.reference, args.candidate):
@@ -148,6 +316,13 @@ def main() -> int:
     dom_cand = dominant_colors(cand)
     score = (hist_sim * 0.4) + (pix_sim * 0.6)
     passed = score >= args.threshold and not blank_cand
+    residual = None
+    if args.residual_json:
+        residual_ref = load_normalized(args.reference, target, mode="RGBA")
+        residual_cand = load_normalized(args.candidate, target, mode="RGBA")
+        residual = residual_profile(residual_ref, residual_cand)
+        args.residual_json.parent.mkdir(parents=True, exist_ok=True)
+        args.residual_json.write_text(json.dumps(residual, indent=2) + "\n", encoding="utf-8")
 
     # Severity tier — diagnostic categorization on top of pass/fail
     if blank_cand:
@@ -167,7 +342,6 @@ def main() -> int:
         diagnosis = "candidate matches reference within tolerance"
 
     if args.json:
-        import json
         print(json.dumps({
             "reference": str(args.reference),
             "candidate": str(args.candidate),
@@ -182,6 +356,7 @@ def main() -> int:
             "blank_reference": blank_ref,
             "dominant_colors_ref": [list(c) for c in dom_ref],
             "dominant_colors_cand": [list(c) for c in dom_cand],
+            **({"residual_profile": residual} if residual is not None else {}),
         }))
     else:
         verdict = "PASS ✓" if passed else "FAIL ✗"
@@ -189,6 +364,9 @@ def main() -> int:
         print(f"  histogram_similarity: {hist_sim:.3f}")
         print(f"  pixel_similarity:     {pix_sim:.3f}")
         print(f"  diagnosis: {diagnosis}")
+        if residual is not None:
+            print(f"  residual_classification: {residual['classification']}")
+            print(f"  residual_differing_pixels: {residual['differing_pixels']}")
         if not passed:
             print(f"  ref dominant colors:  {dom_ref}")
             print(f"  cand dominant colors: {dom_cand}")
