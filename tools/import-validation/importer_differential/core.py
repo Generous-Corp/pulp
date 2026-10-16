@@ -563,10 +563,26 @@ def geometry_metrics(
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     errors: list[float] = []
+    browser_by_index = {browser.index: browser for browser, _native, _score in matches}
+
+    def depth(index: int) -> int:
+        seen: set[int] = set()
+        value = 0
+        while index >= 0 and index not in seen:
+            seen.add(index)
+            parent = browser_by_index.get(index)
+            if parent is None or parent.parent < 0:
+                break
+            value += 1
+            index = parent.parent
+        return value
+
     for browser, native, _ in matches:
         if not browser.bounds or not native.bounds:
             continue
         labels = ("x", "y", "width", "height")
+        signed_delta = [candidate - reference
+                        for reference, candidate in zip(browser.bounds, native.bounds)]
         component_errors = [
             relative_error(reference, candidate)
             for reference, candidate in zip(browser.bounds, native.bounds)
@@ -578,14 +594,171 @@ def geometry_metrics(
             "native_anchor": native.anchor,
             "browser": dict(zip(labels, browser.bounds)),
             "candidate": dict(zip(labels, native.bounds)),
+            # Keep the direction visible. An absolute score can hide a
+            # systematic offset by collapsing +N and -N into the same value.
+            "signed_delta": dict(zip(labels, [round(v, 6) for v in signed_delta])),
+            "max_abs_delta": round(max(abs(v) for v in signed_delta), 6),
+            "depth": depth(browser.index),
             "mean_relative_error": round(mean_error, 6),
         })
     mean_error = statistics.fmean(errors) if errors else 1.0
-    return {
+    signed_columns = {
+        label: [row["signed_delta"][label] for row in rows]
+        for label in ("x", "y", "width", "height")
+    }
+    signed_summary = {
+        label: {
+            "mean": round(statistics.fmean(values), 6) if values else None,
+            "median": round(statistics.median(values), 6) if values else None,
+            "p95_abs": round(sorted(abs(value) for value in values)[
+                min(len(values) - 1, max(0, math.ceil(len(values) * 0.95) - 1))], 6)
+            if values else None,
+            "min": min(values) if values else None,
+            "max": max(values) if values else None,
+        }
+        for label, values in signed_columns.items()
+    }
+    root_indices = {browser.index for browser, _native, _score in matches
+                    if browser.parent < 0}
+    root_rows = [row for row in rows if row["browser_node"] in root_indices]
+    result = {
         "score": round(max(0.0, 1.0 - mean_error), 6),
         "matched_bounds": len(rows),
         "mean_relative_error": round(mean_error, 6),
+        "signed_delta_summary": signed_summary,
+        "root_count": len(root_rows),
+        "root_residual": root_rows[0] if len(root_rows) == 1 else None,
+        "root_residuals": root_rows,
         "rows": rows,
+    }
+    return result
+
+
+def geometry_metrics_with_registration(
+    raw_matches: list[tuple[BrowserNode, NativeNode, float]],
+    registered_matches: list[tuple[BrowserNode, NativeNode, float]],
+    registration: dict[str, float],
+) -> dict[str, Any]:
+    """Return canonical page-space geometry plus an explicit diagnostic view.
+
+    Promotion and aggregate scores must remain based on the raw page-space
+    comparison.  The registered view explains an authenticated panel-local
+    frame contract without allowing that registration to hide a placement
+    mismatch from callers consuming the canonical score.
+    """
+    raw_geometry = geometry_metrics(raw_matches)
+    raw_geometry["registration"] = {
+        "x": 0.0, "y": 0.0, "source": "page-space",
+    }
+    raw_geometry["registered_geometry"] = geometry_metrics(registered_matches)
+    raw_geometry["registration_applied"] = registration
+    return raw_geometry
+
+
+def register_browser_nodes_to_native_frame(
+    nodes: list[BrowserNode], capture: dict[str, Any],
+    native_capture: dict[str, Any],
+) -> tuple[list[BrowserNode], dict[str, float]]:
+    """Translate authenticated page-space bounds into the native panel frame.
+
+    Browser-backed native imports intentionally emit a panel-local root when
+    the authored surface is smaller than the viewport.  Chromium's DOM
+    snapshot still reports page-space bounds, so comparing those coordinates
+    directly creates a constant root-margin residual.  Use only the signed
+    authored-frame metadata carried by both captures; never infer a shift from
+    pixels or from the observed residual.
+    """
+    try:
+        authored = capture["reference"]["authored_frame"]
+        native_authored = native_capture["reference"]["authored_frame"]
+        frame_x = float(authored["x"])
+        frame_y = float(authored["y"])
+        native_frame_x = float(native_authored["x"])
+        native_frame_y = float(native_authored["y"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LabError("capture is missing authenticated authored-frame metadata") from exc
+    if not all(math.isfinite(value) for value in
+               (frame_x, frame_y, native_frame_x, native_frame_y)):
+        raise LabError("authored-frame metadata is non-finite")
+    if abs(frame_x - native_frame_x) > 1e-6 or abs(frame_y - native_frame_y) > 1e-6:
+        raise LabError("browser/native authored-frame metadata disagrees")
+    # The observer is explicitly invoked with the full document extent but
+    # the imported native root is panel-local at origin (the importer records
+    # the authored frame for consumers, it does not place the panel in the
+    # observer canvas).  Register page-space DOM bounds into that origin.
+    dx = -frame_x
+    dy = -frame_y
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return nodes, {"x": 0.0, "y": 0.0, "source": "authenticated-authored-frame"}
+    registered: list[BrowserNode] = []
+    for node in nodes:
+        bounds = node.bounds
+        if bounds is not None:
+            bounds = (bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3])
+        registered.append(BrowserNode(
+            index=node.index, tag=node.tag, parent=node.parent, text=node.text,
+            attributes=node.attributes, bounds=bounds, styles=node.styles,
+            backend_node_id=node.backend_node_id))
+    return registered, {"x": round(dx, 6), "y": round(dy, 6),
+                       "source": "authenticated-authored-frame"}
+
+
+def viewport_dpr_audit(
+    capture: dict[str, Any], native_capture: dict[str, Any],
+    expected_logical_size: tuple[int, int], actual_render_size: tuple[int, int],
+) -> dict[str, Any]:
+    """Record the coordinate contract used by a comparison.
+
+    The audit is diagnostic, but it is deliberately strict about missing or
+    contradictory provenance. A signed geometry residual is not actionable if
+    the two captures used different roots, viewport extents, or device scale.
+    """
+    reference = capture.get("reference")
+    native_reference = native_capture.get("reference")
+    resolved = capture.get("provenance", {}).get("viewport", {}).get("resolved")
+    native_resolved = native_capture.get("provenance", {}).get("viewport", {}).get("resolved")
+    if not all(isinstance(item, dict) for item in (reference, native_reference,
+                                                    resolved, native_resolved)):
+        raise LabError("capture is missing object-shaped reference or viewport provenance")
+    try:
+        raw_dpr = reference["device_scale_factor"]
+        raw_native_dpr = native_reference["device_scale_factor"]
+        if isinstance(raw_dpr, bool) or isinstance(raw_native_dpr, bool):
+            raise ValueError("boolean device scale")
+        dpr = float(raw_dpr)
+        native_dpr = float(raw_native_dpr)
+        logical = (int(reference["logical_width"]), int(reference["logical_height"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LabError("capture is missing a valid logical extent or device scale") from exc
+    if (not math.isfinite(dpr) or not math.isfinite(native_dpr)
+            or dpr <= 0 or native_dpr <= 0):
+        raise LabError("capture device scale factor must be positive")
+    resolved_size = (resolved.get("width"), resolved.get("height"))
+    native_resolved_size = (native_resolved.get("width"), native_resolved.get("height"))
+    expected_pixels = (round(logical[0] * dpr), round(logical[1] * dpr))
+    checks = {
+        # Chromium can capture overflow beyond the requested viewport. The
+        # resolved viewport is the request; the reference extent may be larger.
+        "resolved_viewport_matches_request": resolved_size == expected_logical_size,
+        "logical_extent_covers_request": logical[0] >= expected_logical_size[0]
+        and logical[1] >= expected_logical_size[1],
+        "native_logical_size_matches_browser": native_reference.get("logical_width") == logical[0]
+        and native_reference.get("logical_height") == logical[1],
+        "dpr_matches_native": dpr == native_dpr,
+        "resolved_viewport_matches_native": resolved_size == native_resolved_size,
+        "render_size_matches_dpr": actual_render_size == expected_pixels,
+    }
+    return {
+        "schema": "pulp-importer-viewport-dpr-audit-v1",
+        "logical_size": list(logical),
+        "requested_viewport": list(expected_logical_size),
+        "resolved_viewport": [resolved_size[0], resolved_size[1]],
+        "device_scale_factor": dpr,
+        "native_device_scale_factor": native_dpr,
+        "expected_pixel_size": list(expected_pixels),
+        "actual_render_size": list(actual_render_size),
+        "checks": checks,
+        "ok": all(checks.values()),
     }
 
 
@@ -1097,6 +1270,17 @@ def compare_one(
             or render_receipt.get("ok") is not True):
         raise LabError("native render receipt did not prove a successful Skia render")
 
+    try:
+        from PIL import Image
+        with Image.open(native_render) as image:
+            actual_render_size = image.size
+    except (ImportError, OSError) as exc:
+        raise LabError("native render could not be opened for viewport/DPR audit") from exc
+    viewport_dpr = viewport_dpr_audit(
+        capture, native_capture, (viewport_width, viewport_height), actual_render_size)
+    if not viewport_dpr["ok"]:
+        raise LabError("viewport/DPR audit failed: " + json.dumps(viewport_dpr["checks"], sort_keys=True))
+
     for name in (
         ".pulp-browser-capture-v1", "browser.png", "capture.json",
         "dom-snapshot.json", "semantic-report.json", "tokens.json",
@@ -1108,8 +1292,10 @@ def compare_one(
     recognition = source_recognition(source.read_text(encoding="utf-8", errors="replace"))
     browser_snapshot = json.loads((browser_dir / "dom-snapshot.json").read_text(encoding="utf-8"))
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
-    browser_flat = browser_nodes(browser_snapshot)
+    browser_flat_raw = browser_nodes(browser_snapshot)
     native_flat = native_nodes(native_doc, native_layout_doc)
+    browser_flat, geometry_registration = register_browser_nodes_to_native_frame(
+        browser_flat_raw, capture, native_capture)
     comparison = structural_comparison(browser_flat, native_flat)
     matches = comparison["matches"]
     missing = comparison["missing"]
@@ -1154,7 +1340,12 @@ def compare_one(
             for browser, native, score in matches
         ],
     }
-    geometry = geometry_metrics(matches)
+    # Keep page-space geometry canonical. Registered panel-space geometry is a
+    # diagnostic view of the intentional panel-local contract and must never
+    # silently turn a placement mismatch into a promotion pass.
+    raw_comparison = structural_comparison(browser_flat_raw, native_flat)
+    geometry = geometry_metrics_with_registration(
+        raw_comparison["matches"], matches, geometry_registration)
     typography = typography_metrics(matches)
     visual = visual_metrics(
         browser_dir / "browser.png",
@@ -1304,6 +1495,7 @@ def compare_one(
             "geometry": geometry,
             "typography": typography,
             "visual": visual,
+            "viewport_dpr_audit": viewport_dpr,
         },
         "classifications": classifications,
         "promotion": recommendation,
