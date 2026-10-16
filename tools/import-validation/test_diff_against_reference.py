@@ -28,6 +28,12 @@ assert BACKGROUND_SPEC is not None and BACKGROUND_SPEC.loader is not None
 background = importlib.util.module_from_spec(BACKGROUND_SPEC)
 BACKGROUND_SPEC.loader.exec_module(background)
 
+from importer_differential.core import (  # noqa: E402
+    BrowserNode,
+    LabError,
+    register_browser_nodes_to_native_frame,
+)
+
 
 class FakeImage:
     def __init__(
@@ -92,6 +98,30 @@ class FakeViewportImage:
 
 
 class HelperScoringTests(unittest.TestCase):
+    @staticmethod
+    def _capture(x: float, y: float) -> dict[str, object]:
+        return {"reference": {"authored_frame": {"x": x, "y": y}}}
+
+    def test_authenticated_frame_registers_page_bounds_to_panel_origin(self) -> None:
+        node = BrowserNode(1, "main", -1, "", {}, (45.0, 81.0, 320.0, 18.0), {})
+        registered, metadata = register_browser_nodes_to_native_frame(
+            [node], self._capture(24.0, 24.0), self._capture(24.0, 24.0))
+        self.assertEqual(registered[0].bounds, (21.0, 57.0, 320.0, 18.0))
+        self.assertEqual(metadata["x"], -24.0)
+        self.assertEqual(metadata["y"], -24.0)
+
+    def test_zero_frame_is_identity(self) -> None:
+        nodes = [BrowserNode(1, "main", -1, "", {}, (0.0, 0.0, 320.0, 18.0), {})]
+        registered, metadata = register_browser_nodes_to_native_frame(
+            nodes, self._capture(0.0, 0.0), self._capture(0.0, 0.0))
+        self.assertIs(registered, nodes)
+        self.assertEqual(metadata["x"], 0.0)
+
+    def test_authored_frame_disagreement_fails_closed(self) -> None:
+        with self.assertRaises(LabError):
+            register_browser_nodes_to_native_frame(
+                [], self._capture(24.0, 24.0), self._capture(0.0, 0.0))
+
     @staticmethod
     def _panel_pixels(*, shift: int = 0, fill: tuple[int, int, int] = (220, 220, 220),
                       border_width: int = 2, rounded: bool = False) -> FakeImage:

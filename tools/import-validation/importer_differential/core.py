@@ -621,7 +621,7 @@ def geometry_metrics(
     root_indices = {browser.index for browser, _native, _score in matches
                     if browser.parent < 0}
     root_rows = [row for row in rows if row["browser_node"] in root_indices]
-    return {
+    result = {
         "score": round(max(0.0, 1.0 - mean_error), 6),
         "matched_bounds": len(rows),
         "mean_relative_error": round(mean_error, 6),
@@ -631,6 +631,55 @@ def geometry_metrics(
         "root_residuals": root_rows,
         "rows": rows,
     }
+    return result
+
+
+def register_browser_nodes_to_native_frame(
+    nodes: list[BrowserNode], capture: dict[str, Any],
+    native_capture: dict[str, Any],
+) -> tuple[list[BrowserNode], dict[str, float]]:
+    """Translate authenticated page-space bounds into the native panel frame.
+
+    Browser-backed native imports intentionally emit a panel-local root when
+    the authored surface is smaller than the viewport.  Chromium's DOM
+    snapshot still reports page-space bounds, so comparing those coordinates
+    directly creates a constant root-margin residual.  Use only the signed
+    authored-frame metadata carried by both captures; never infer a shift from
+    pixels or from the observed residual.
+    """
+    try:
+        authored = capture["reference"]["authored_frame"]
+        native_authored = native_capture["reference"]["authored_frame"]
+        frame_x = float(authored["x"])
+        frame_y = float(authored["y"])
+        native_frame_x = float(native_authored["x"])
+        native_frame_y = float(native_authored["y"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LabError("capture is missing authenticated authored-frame metadata") from exc
+    if not all(math.isfinite(value) for value in
+               (frame_x, frame_y, native_frame_x, native_frame_y)):
+        raise LabError("authored-frame metadata is non-finite")
+    if abs(frame_x - native_frame_x) > 1e-6 or abs(frame_y - native_frame_y) > 1e-6:
+        raise LabError("browser/native authored-frame metadata disagrees")
+    # The observer is explicitly invoked with the full document extent but
+    # the imported native root is panel-local at origin (the importer records
+    # the authored frame for consumers, it does not place the panel in the
+    # observer canvas).  Register page-space DOM bounds into that origin.
+    dx = -frame_x
+    dy = -frame_y
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return nodes, {"x": 0.0, "y": 0.0, "source": "authenticated-authored-frame"}
+    registered: list[BrowserNode] = []
+    for node in nodes:
+        bounds = node.bounds
+        if bounds is not None:
+            bounds = (bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3])
+        registered.append(BrowserNode(
+            index=node.index, tag=node.tag, parent=node.parent, text=node.text,
+            attributes=node.attributes, bounds=bounds, styles=node.styles,
+            backend_node_id=node.backend_node_id))
+    return registered, {"x": round(dx, 6), "y": round(dy, 6),
+                       "source": "authenticated-authored-frame"}
 
 
 def viewport_dpr_audit(
@@ -1224,6 +1273,8 @@ def compare_one(
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
     browser_flat = browser_nodes(browser_snapshot)
     native_flat = native_nodes(native_doc, native_layout_doc)
+    browser_flat, geometry_registration = register_browser_nodes_to_native_frame(
+        browser_flat, capture, native_capture)
     comparison = structural_comparison(browser_flat, native_flat)
     matches = comparison["matches"]
     missing = comparison["missing"]
@@ -1269,6 +1320,7 @@ def compare_one(
         ],
     }
     geometry = geometry_metrics(matches)
+    geometry["registration"] = geometry_registration
     typography = typography_metrics(matches)
     visual = visual_metrics(
         browser_dir / "browser.png",
