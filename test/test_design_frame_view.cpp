@@ -1207,8 +1207,13 @@ TEST_CASE("DesignFrameView pushes host->view values to a conduit custom control 
     CHECK(v.element_value(0) == Catch::Approx(0.8f));  // read back through the conduit
     CHECK(echoes == 0);                                // host->view push does NOT echo
 
+    const int pushes = ctl->pushes_;
+    v.set_element_value(0, 0.8f);
+    CHECK(ctl->pushes_ == pushes); // steady host tick is inert
+
     v.set_element_value(0, 1.7f);                      // out-of-range is clamped
     CHECK(ctl->value_ == Catch::Approx(1.0f));
+    CHECK(ctl->pushes_ == pushes + 1);
 
     clear_design_control_factories();
 }
