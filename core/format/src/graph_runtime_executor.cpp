@@ -70,6 +70,90 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
                         const graph::GraphRuntimeNodePlan& node,
                         const graph::GraphRuntimeNodeSlots& slots,
                         std::uint32_t frames) noexcept {
+    // A single zero-delay audio edge needs no reduction: copy it directly and
+    // avoid a memset plus per-sample read/modify/write. Feedback still copies
+    // from its dedicated previous-block slot; delayed edges remain on the
+    // general stateful ring path.
+    const bool one_audio_edge = node.audio_inbound_connection_count == 1 &&
+                                node.single_audio_inbound_connection != 0xFFFFFFFFu;
+    const bool one_edge_per_port =
+        node.input_ports > 1 && node.input_ports <= 64 &&
+        node.audio_inbound_connection_count == node.input_ports &&
+        node.audio_inbound_port_mask == (node.input_ports == 64
+                                             ? ~std::uint64_t{0}
+                                             : ((std::uint64_t{1} << node.input_ports) - 1));
+    if (one_audio_edge) {
+        const auto connection_index = node.single_audio_inbound_connection;
+        const auto& conn = plan.connections[connection_index];
+        float* dst = conn.dest_port < node.input_ports
+                         ? pool.slot_data(slots.input_base + conn.dest_port)
+                         : nullptr;
+        const float* src = nullptr;
+        if (dst != nullptr) {
+            if (conn.feedback) {
+                src = pool.slot_data(assignment.feedback_prev_slot[connection_index]);
+            } else {
+                const auto& src_slots = assignment.nodes[conn.source_index];
+                src = pool.slot_data(src_slots.output_base + conn.source_port);
+                const auto ring = pool.delay_ring(connection_index);
+                if (ring.data != nullptr && ring.delay != 0)
+                    src = nullptr;
+            }
+        }
+        if (dst != nullptr && src != nullptr) {
+            for (std::uint32_t p = 0; p < node.input_ports; ++p) {
+                if (p == conn.dest_port)
+                    continue;
+                if (float* other = pool.slot_data(slots.input_base + p))
+                    std::fill_n(other, frames, 0.0f);
+            }
+            // Keep the exact arithmetic of the old clear-then-`+=` path. In
+            // particular, 0 + -0 is +0 and NaN payload handling follows the
+            // same operation; a raw memcpy would silently change those bits.
+            for (std::uint32_t f = 0; f < frames; ++f)
+                dst[f] = 0.0f + src[f];
+            return;
+        }
+    }
+
+    if (one_edge_per_port) {
+        bool eligible = true;
+        for (std::uint32_t offset = 0; offset < node.inbound_connection_count; ++offset) {
+            const auto connection_index =
+                plan.inbound_connection_indices[node.first_inbound_connection + offset];
+            const auto& conn = plan.connections[connection_index];
+            if (!graph::carries_audio(conn))
+                continue;
+            const auto ring = pool.delay_ring(connection_index);
+            if (ring.data != nullptr && ring.delay != 0) {
+                eligible = false;
+                break;
+            }
+        }
+        if (eligible) {
+            for (std::uint32_t offset = 0; offset < node.inbound_connection_count; ++offset) {
+                const auto connection_index =
+                    plan.inbound_connection_indices[node.first_inbound_connection + offset];
+                const auto& conn = plan.connections[connection_index];
+                if (!graph::carries_audio(conn))
+                    continue;
+                float* dst = pool.slot_data(slots.input_base + conn.dest_port);
+                const float* src =
+                    conn.feedback ? pool.slot_data(assignment.feedback_prev_slot[connection_index])
+                                  : pool.slot_data(assignment.nodes[conn.source_index].output_base +
+                                                   conn.source_port);
+                if (dst == nullptr || src == nullptr) {
+                    eligible = false;
+                    break;
+                }
+                for (std::uint32_t f = 0; f < frames; ++f)
+                    dst[f] = 0.0f + src[f];
+            }
+            if (eligible)
+                return;
+        }
+    }
+
     for (std::uint32_t p = 0; p < node.input_ports; ++p) {
         if (float* dst = pool.slot_data(slots.input_base + p)) {
             std::fill_n(dst, frames, 0.0f);
