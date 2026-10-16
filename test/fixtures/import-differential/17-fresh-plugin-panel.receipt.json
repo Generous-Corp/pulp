@@ -1,6 +1,10 @@
 {
-  "schema": "pulp-fresh-plugin-validation-v2",
+  "schema": "pulp-fresh-plugin-validation-v3",
   "fixture": "17-fresh-plugin-panel.html",
+  "scope": {
+    "behavior": "panel-toggle",
+    "keyed_identity_reorder": "deferred"
+  },
   "source_sha256": "b39adabbe9f66819c4b43d67bad8b9bd4db56bebd9baf3fa11f4e94213743b11",
   "source_bytes": 3093,
   "browser": {
@@ -13,7 +17,13 @@
     "screenshot_sha256": "b1afc4342ba2689cf2ed9a85a519eaa7672321751f2007d6ca232fee941aec02",
     "screenshot_bytes": 24657,
     "interaction_report_sha256": "b40332273adaed7a8250a4b0bc7b9aeb23462452d74f6d0fd1c6060353bdd2e3",
-    "interaction_count": 2
+    "interaction_count": 2,
+    "lifecycle": {
+      "capture_process_exited_cleanly": true,
+      "artifacts_read_after_process_exit": true,
+      "browser_health_status": "healthy",
+      "runtime_exception_count": 0
+    }
   },
   "native": {
     "backend": "skia",
@@ -21,6 +31,10 @@
     "artifact_bytes": 648,
     "render_sha256": "71eba62834d5a8a55e7bec7fd8e71d059162f03dc6fea305f5fa0d04504f4c21",
     "render_bytes": 35881,
+    "lifecycle": {
+      "import_process_exited_cleanly": true,
+      "artifacts_read_after_process_exit": true
+    },
     "comparator": {
       "reference": "browser.screenshot_sha256",
       "similarity_percent": 98,
@@ -32,9 +46,5 @@
   "planted_negative": {
     "mutated_id": "toggle-mutated",
     "browser_capture_rejected": true
-  },
-  "scope": {
-    "behavior": "panel-toggle",
-    "keyed_identity_reorder": "deferred"
   }
 }
