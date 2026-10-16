@@ -916,6 +916,11 @@ step prints every five minutes, and the before/after `df` of "Reclaim hosted
 Linux coverage disk", to see which writer grew. Do not move the leg to a larger
 or paid runner.
 
+A tools test that fails in the Linux Python pass with `ShallowCheckoutError`,
+`HEAD^` or `origin/main..HEAD` errors is reading git history. The leg fetches
+full history before that pass; if one still fails that way, check that the
+fetch step ran before suspecting the test.
+
 ## Compiler coverage is asymmetric — GCC sees only `core/**`
 
 Before you read a green PR as "this compiles everywhere": every Linux lane in PR
