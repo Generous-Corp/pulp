@@ -4418,9 +4418,11 @@ private:
             auto req = pending.front();
             pending.pop_front();
             if (req->resolved.load(std::memory_order_acquire) &&
-                req->ok.load(std::memory_order_acquire))
+                req->ok.load(std::memory_order_acquire)) {
                 req->buffer.Unmap();
-            else {
+                if (pool_)
+                    pool_->discard(req->buffer);
+            } else {
                 if (pool_) pool_->discard(req->buffer);
                 req->detached_at = std::chrono::steady_clock::now();
                 detached_readbacks_.push_back(req);
