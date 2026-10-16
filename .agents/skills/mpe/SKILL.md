@@ -431,3 +431,5 @@ getters inline; put anything with branches/loops in the .cpp.
 ## SysEx core storage and representation
 
 UmpBuffer sorting retains arrival order at equal sample offsets using reserved scratch; reserve before limiting RT growth. UmpSysex7Reassembler reserve(N) resets partial streams and sets the per-group admission bound. Copies preserve prepared capacity; copy/move are non-RT operations, and moved-from instances require reserve before RT reuse. Its callbacks return UMP payload without MIDI1 F0/F7 framing.
+
+RawMidiParserState.reserve_sysex(N) now sets a whole-message admission bound including F0/F7 and resets partial SysEx. Configure off RT; aggregate copies require their own reserve before RT reuse. The default remains64KiB, with F7 included and whole-message overflow rejection.

@@ -50,10 +50,24 @@ namespace pulp::midi {
 inline constexpr std::size_t kRawMidiSysexLimit = 64 * 1024;
 
 struct RawMidiParserState {
+    enum class DropReason { none, overflow, reset, aborted };
+
     /// Prepare internal SysEx storage for realtime use. The reserve includes
-    /// the leading F0 and trailing F7 bytes.
+    /// the leading F0 and trailing F7 bytes. This sets the admission bound
+    /// and discards partial SysEx; call only during non-RT configuration.
+    /// Aggregate copies do not preserve reserved vector capacity: reserve
+    /// each copied instance before RT use.
     void reserve_sysex(std::size_t worst_case_bytes) {
+        reset_sysex();
+        maximum_sysex_bytes = worst_case_bytes;
         sysex_buffer.reserve(worst_case_bytes);
+    }
+
+    /// Discard an incomplete message while retaining prepared capacity.
+    void reset_sysex() noexcept {
+        sysex_buffer.clear();
+        sysex_in_progress = false;
+        last_drop_reason = DropReason::reset;
     }
 
     std::vector<uint8_t> sysex_buffer;
@@ -63,6 +77,9 @@ struct RawMidiParserState {
     uint8_t pending_data[2] = {};
     std::size_t pending_count = 0;
     std::size_t pending_expected = 0;
+
+    std::size_t maximum_sysex_bytes = kRawMidiSysexLimit;
+    DropReason last_drop_reason = DropReason::none;
 };
 
 // Short message = status byte + 0..2 data bytes (channel voice /
@@ -159,10 +176,17 @@ inline void parse_raw_midi_bytes(const uint8_t* buf,
 
         if (state.sysex_in_progress) {
             if (b == 0xF7) {
+                if (state.sysex_buffer.size() >= state.maximum_sysex_bytes) {
+                    state.sysex_buffer.clear();
+                    state.sysex_in_progress = false;
+                    state.last_drop_reason = RawMidiParserState::DropReason::overflow;
+                    continue;
+                }
                 state.sysex_buffer.push_back(b);
                 if (on_sysex) on_sysex(state.sysex_buffer);
                 state.sysex_buffer.clear();
                 state.sysex_in_progress = false;
+                state.last_drop_reason = RawMidiParserState::DropReason::none;
                 continue;
             }
             // A new non-realtime status byte means the F0 stream was
@@ -171,23 +195,32 @@ inline void parse_raw_midi_bytes(const uint8_t* buf,
             if ((b & 0x80) != 0) {
                 state.sysex_buffer.clear();
                 state.sysex_in_progress = false;
+                state.last_drop_reason = RawMidiParserState::DropReason::aborted;
                 // fall through
             } else {
-                state.sysex_buffer.push_back(b);
-                if (state.sysex_buffer.size() > kRawMidiSysexLimit) {
+                if (state.sysex_buffer.size() >= state.maximum_sysex_bytes) {
                     state.sysex_buffer.clear();
                     state.sysex_in_progress = false;
+                    state.last_drop_reason = RawMidiParserState::DropReason::overflow;
+                    continue;
                 }
+                state.sysex_buffer.push_back(b);
                 continue;
             }
         }
 
         if (b == 0xF0) {
             state.sysex_buffer.clear();
-            state.sysex_buffer.push_back(b);
-            state.sysex_in_progress = true;
             state.running_status = 0;
             clear_pending();
+            if (state.maximum_sysex_bytes == 0) {
+                state.sysex_in_progress = false;
+                state.last_drop_reason = RawMidiParserState::DropReason::overflow;
+                continue;
+            }
+            state.sysex_buffer.push_back(b);
+            state.sysex_in_progress = true;
+            state.last_drop_reason = RawMidiParserState::DropReason::none;
             continue;
         }
 

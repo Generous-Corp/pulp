@@ -32,6 +32,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/wavetable_authoring.hpp": "Pulp::audio",
     "pulp/midi/arpeggiator.hpp": "Pulp::midi",
     "pulp/midi/ump_sysex7_reassembler.hpp": "Pulp::midi",
+    "pulp/midi/raw_midi_parser.hpp": "Pulp::midi",
     "pulp/midi/controller_utility_kernels.hpp": "Pulp::midi",
     "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
     "pulp/midi/note_utility_kernels.hpp": "Pulp::midi",
@@ -585,6 +586,16 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "rationale": (
             "The allocator adapter is parameterized by a consumer-defined abstract Voice; "
             "the concrete tracker remains the honest typed entrypoint."
+        ),
+    },
+    {
+        "include": "pulp/midi/raw_midi_parser.hpp",
+        "fingerprint": "sha256:5c37210fa38d1d11ad75d54d7997c50598e99d5f4133152c9ca6c238f98992f1",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Bounded MIDI1 byte-stream parsing and admission diagnostics are transport "
+            "infrastructure, not a generator-facing musical transform."
         ),
     },
     {
