@@ -10,6 +10,20 @@ from unittest.mock import patch
 
 import gpu_audio_p2_campaign as campaign
 
+PINNED_DAWN = "b" * 40
+PINNED_ASSET = "a" * 64
+PLATFORM = "darwin-arm64"
+
+
+def _write_pinned_manifest(path, dawn=PINNED_DAWN, asset=PINNED_ASSET):
+    """A dependency manifest pinning one Skia asset and Dawn revision."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"dependencies": [{
+        "name": "Skia",
+        "determinism": {"built_dawn": dawn,
+                        "release_assets": {"mac-arm64": {"sha256": asset}}},
+    }]}) + "\n", encoding="utf-8")
+
 
 class P2CampaignContractTests(unittest.TestCase):
     def test_host_preflight_requires_fresh_source_bound_quiet_receipt(self):
@@ -242,8 +256,7 @@ class P2CampaignContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             root_path = Path(root)
             manifest = root_path / "tools/deps/manifest.json"
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text("{}\n", encoding="utf-8")
+            _write_pinned_manifest(manifest)
             fixture = root_path / "provider.json"
             payload = {
                 "schema": campaign.PROVIDER_IDENTITY_SCHEMA, "status": "passed",
@@ -256,10 +269,11 @@ class P2CampaignContractTests(unittest.TestCase):
             }
             fixture.write_text(json.dumps(payload), encoding="utf-8")
             with patch.object(campaign, "REPO_ROOT", root_path):
-                self.assertEqual(campaign.validate_provider_identity_fixture(fixture), payload)
+                self.assertEqual(
+                    campaign.validate_provider_identity_fixture(fixture, PLATFORM), payload)
                 manifest.write_text("changed\n", encoding="utf-8")
                 with self.assertRaisesRegex(RuntimeError, "current provider manifest"):
-                    campaign.validate_provider_identity_fixture(fixture)
+                    campaign.validate_provider_identity_fixture(fixture, PLATFORM)
 
     def _bound_rows_and_fixture(self):
         rows = self._rows()
@@ -305,8 +319,7 @@ class P2CampaignContractTests(unittest.TestCase):
 
     def _receipt(self, root_path, **changes):
         manifest = root_path / "tools/deps/manifest.json"
-        manifest.parent.mkdir(parents=True, exist_ok=True)
-        manifest.write_text("{}\n", encoding="utf-8")
+        _write_pinned_manifest(manifest)
         payload = {
             "schema": campaign.PROVIDER_IDENTITY_SCHEMA, "status": "passed",
             "provider_identity_status": "passed",
@@ -331,13 +344,121 @@ class P2CampaignContractTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "inconsistent provider identity"):
                         campaign.validate_provider_identity_fixture(receipt)
 
+    def test_raw_rows_must_carry_the_receipts_provider_asset(self):
+        rows, fixture = self._bound_rows_and_fixture()
+        rows[0]["provider_asset_sha256"] = "9" * 64
+        rows[0]["manifest_bindings"]["provider_asset_sha256"] = "9" * 64
+        self._assert_binding_refused(rows, fixture, "provider asset disagrees")
+
+    def test_receipt_that_did_not_pass_is_refused(self):
+        cases = {"schema": {"schema": "pulp.gpu-audio-provider-identity.v0"},
+                 "status": {"status": "failed"},
+                 "provider status": {"provider_identity_status": "failed"}}
+        for name, change in cases.items():
+            with self.subTest(field=name), tempfile.TemporaryDirectory() as root:
+                receipt, _ = self._receipt(Path(root), **change)
+                with patch.object(campaign, "REPO_ROOT", Path(root)):
+                    with self.assertRaisesRegex(RuntimeError, "not a passed exact-provider receipt"):
+                        campaign.validate_provider_identity_fixture(receipt, PLATFORM)
+
+    def test_receipt_with_a_malformed_hash_field_is_refused(self):
+        # Fields no later check compares, so only the format check can refuse them.
+        cases = {"generation_receipt_sha256": "not-a-digest",
+                 "linked_dawn_archive_sha256": "c" * 63}
+        for field, value in cases.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as root:
+                receipt, _ = self._receipt(Path(root), **{field: value})
+                with patch.object(campaign, "REPO_ROOT", Path(root)):
+                    with self.assertRaisesRegex(RuntimeError, f"{field} is invalid"):
+                        campaign.validate_provider_identity_fixture(receipt, PLATFORM)
+
+    def test_receipt_must_name_the_provider_the_manifest_pins(self):
+        # Each receipt is self-consistent and bound to the manifest's hash; only
+        # the asset or revision differs from what the manifest pins.
+        cases = {"asset": {"expected_asset_sha256": "e" * 64, "validated_asset_sha256": "e" * 64},
+                 "revision": {"expected_dawn_revision": "f" * 40, "header_dawn_revision": "f" * 40}}
+        for name, change in cases.items():
+            with self.subTest(pin=name), tempfile.TemporaryDirectory() as root:
+                receipt, _ = self._receipt(Path(root), **change)
+                with patch.object(campaign, "REPO_ROOT", Path(root)):
+                    with self.assertRaisesRegex(RuntimeError, "manifest does not pin"):
+                        campaign.validate_provider_identity_fixture(receipt, PLATFORM)
+
+    def test_control_receipt_naming_the_pinned_provider_is_accepted(self):
+        with tempfile.TemporaryDirectory() as root:
+            receipt, payload = self._receipt(Path(root))
+            with patch.object(campaign, "REPO_ROOT", Path(root)):
+                self.assertEqual(
+                    campaign.validate_provider_identity_fixture(receipt, PLATFORM), payload)
+
+    def test_receipt_is_checked_against_the_pins_for_its_platform(self):
+        # The manifest pins no asset for this platform, so nothing can match.
+        with tempfile.TemporaryDirectory() as root:
+            receipt, _ = self._receipt(Path(root))
+            with patch.object(campaign, "REPO_ROOT", Path(root)):
+                with self.assertRaisesRegex(RuntimeError, "does not pin a provider identity"):
+                    campaign.validate_provider_identity_fixture(receipt, "darwin-x64")
+
+    def test_host_provider_platform_follows_the_macos_machine(self):
+        with patch.object(campaign.sys, "platform", "darwin"):
+            for machine, expected in (("arm64", "darwin-arm64"), ("x86_64", "darwin-x64")):
+                with self.subTest(machine=machine), \
+                        patch.object(campaign.platform, "machine", return_value=machine):
+                    self.assertEqual(campaign.host_provider_platform(), expected)
+        with patch.object(campaign.sys, "platform", "linux"):
+            with self.assertRaisesRegex(RuntimeError, "macOS provider platform"):
+                campaign.host_provider_platform()
+
+    def test_run_checks_every_raw_census_against_the_receipt(self):
+        # run() must hand the validated receipt to both the negative control's
+        # and the measured runs' validate(); without it the raw rows are never
+        # compared with the receipt at all.
+        identity = {"marker": "validated-receipt"}
+        seen = []
+
+        class Stop(Exception):
+            pass
+
+        class Observer:
+            rows = [{"kind": "provenance", "provenance_manifest_sha256": "1" * 64},
+                    {"kind": "record"}]
+
+            def validate(self, expected_probe_sha256=None, expected_manifest_sha256=None,
+                         receipt=None, expected_provider_identity=None):
+                seen.append(expected_provider_identity)
+                if len(seen) == 2:
+                    raise Stop()
+
+        def fake_probe(argv, **_kwargs):
+            out = Path(next(a for a in argv if a.startswith("--output-dir=")).split("=", 1)[1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "receipt.json").write_text("{}", encoding="utf-8")
+            (out / "raw.jsonl").write_text("", encoding="utf-8")
+            return campaign.subprocess.CompletedProcess(argv, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(campaign, "_source_provenance", return_value=("a" * 40, "b" * 64)), \
+                patch.object(campaign, "validate_host_preflight", return_value={}), \
+                patch.object(campaign, "load_provider_identity_receipt",
+                             return_value=(identity, "d" * 64)), \
+                patch.object(campaign.subprocess, "run", side_effect=fake_probe), \
+                patch.object(campaign, "validate_negative_control_receipt"), \
+                patch.object(campaign, "validate_receipt"), \
+                patch.object(campaign, "observe_jsonl", return_value=Observer()):
+            args = self._hardware_args(root, "--expected-source-revision", "a" * 40,
+                                       "--provider-identity-receipt", str(Path(root) / "p.json"))
+            with self.assertRaises(Stop):
+                campaign.run(args)
+        self.assertEqual(seen, [identity, identity])
+
     def test_a_symlinked_receipt_is_refused(self):
         with tempfile.TemporaryDirectory() as root:
             receipt, payload = self._receipt(Path(root))
             link = Path(root) / "linked.json"
             link.symlink_to(receipt)
             with patch.object(campaign, "REPO_ROOT", Path(root)):
-                self.assertEqual(campaign.validate_provider_identity_fixture(receipt), payload)
+                self.assertEqual(
+                    campaign.validate_provider_identity_fixture(receipt, PLATFORM), payload)
                 with self.assertRaisesRegex(RuntimeError, "must be a regular file"):
                     campaign.validate_provider_identity_fixture(link)
 
@@ -349,9 +470,14 @@ class P2CampaignContractTests(unittest.TestCase):
             receipt, payload = self._receipt(Path(root))
             validated = receipt.read_bytes()
             receipt.write_text(json.dumps(dict(payload, status="swapped")), encoding="utf-8")
+            real_read_bytes = Path.read_bytes
+
+            def read_bytes(path):
+                return validated if path == receipt else real_read_bytes(path)
+
             with patch.object(campaign, "REPO_ROOT", Path(root)), \
-                    patch.object(Path, "read_bytes", return_value=validated):
-                fixture, digest = campaign.load_provider_identity_receipt(receipt)
+                    patch.object(Path, "read_bytes", read_bytes):
+                fixture, digest = campaign.load_provider_identity_receipt(receipt, PLATFORM)
             self.assertEqual(fixture, payload)
             self.assertEqual(digest, campaign.hashlib.sha256(validated).hexdigest())
             self.assertNotEqual(digest, campaign.sha256(receipt))
