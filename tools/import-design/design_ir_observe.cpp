@@ -397,8 +397,6 @@ const char* frame_outcome_name(pulp::render::FrameOutcome outcome) {
     return "unknown";
 }
 
-
-
 // Renders through Skia Graphite on a Dawn device with no presentation surface:
 // the composition HeadlessSurface uses, opened up so the receipt can record the
 // adapter, the frame outcome and whether the device survived the frame. The

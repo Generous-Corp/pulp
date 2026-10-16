@@ -593,6 +593,12 @@ knowing before you touch that file:
   validation errors and a Tint internal compiler error. `--gpu-fault` seeds
   failures for parity-lane calibration only.
 
+  Keep provider-version reads and device-loss injection inside the private
+  render implementation. Including Dawn/WebGPU headers in the importer bypasses
+  that boundary; putting the observer declaration under `core/render/include`
+  also exports a development diagnostic into the installed SDK. The source
+  boundary regression checks both mistakes, alongside the GPU receipt tests.
+
 - `pulp-ui-frames-observe` records an imported panel (`--design-ir`) or a
   scripted UI (`--script`) frame by frame under a fixed host clock: a
   `pulp-ui-frame-schedule-v1` file supplies the host timestamps, the
