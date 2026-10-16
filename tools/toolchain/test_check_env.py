@@ -433,6 +433,9 @@ class RolloutCheckTests(unittest.TestCase):
         mise.chmod(0o755)
         doc = expected_doc(hashlib.sha256(mise.read_bytes()).hexdigest())
         doc["mise"]["sha256"] = {check_env.host_platform(): hashlib.sha256(mise.read_bytes()).hexdigest()}
+        # No platform exceptions: on Linux `rust = "absent"` would hide the
+        # missing rustc this control depends on.
+        doc["platform_overrides"] = {}
         (root / "tools/toolchain").mkdir(parents=True)
         (root / "tools/toolchain/expected.json").write_text(json.dumps(doc), encoding="utf-8")
         return bin_dir
