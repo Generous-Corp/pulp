@@ -1088,6 +1088,13 @@
       "timeout": 60.0
     },
     {
+      "name": "vst3-bundle-layout-selftest",
+      "argv": [
+        "{repo}/tools/cmake/scripts/test_check_vst3_bundle_layout.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "web-timeline-source-closure-selftest",
       "argv": [
         "{repo}/tools/scripts/test_web_timeline_source_closure_check.py"
