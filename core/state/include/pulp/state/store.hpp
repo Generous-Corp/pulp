@@ -52,6 +52,8 @@ struct ParameterGestureApplyResult {
     std::uint64_t generation = 0;
 };
 
+class StateStore;
+
 /// Opaque exact identity captured when asynchronous work is ordered against a
 /// parameter. The identity includes the value bits and a monotonic per-slot
 /// revision, so equal values written at different times remain distinct.
@@ -72,9 +74,11 @@ class ParameterFeedbackBaseline {
 
   private:
     friend class StateStore;
-    ParameterFeedbackBaseline(ParamID id, std::uint64_t packed_identity)
-        : id_(id), packed_identity_(packed_identity), valid_(true) {}
+    ParameterFeedbackBaseline(const StateStore* owner, ParamID id,
+                              std::uint64_t packed_identity)
+        : owner_(owner), id_(id), packed_identity_(packed_identity), valid_(true) {}
 
+    const StateStore* owner_ = nullptr;
     ParamID id_ = 0;
     std::uint64_t packed_identity_ = 0;
     bool valid_ = false;

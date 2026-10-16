@@ -1438,6 +1438,21 @@ TEST_CASE("conditional RT feedback rejects unknown parameter and mismatched toke
     CHECK(wrong_id.status == ConditionalParameterApplyStatus::InvalidParameter);
 }
 
+TEST_CASE("conditional RT feedback rejects a token from another store",
+          "[state][store][feedback][negative]") {
+    StateStore store_a;
+    store_a.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    StateStore store_b;
+    store_b.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+
+    const auto baseline = store_a.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+    const auto result = store_b.set_value_rt_if_baseline(*baseline, 0.75f);
+
+    CHECK(result.status == ConditionalParameterApplyStatus::InvalidParameter);
+    CHECK_THAT(store_b.get_value(1), WithinAbs(0.0f, 0.001f));
+}
+
 TEST_CASE("StateStore preserves parameter display conversion callbacks",
           "[state][store]") {
     StateStore store;
