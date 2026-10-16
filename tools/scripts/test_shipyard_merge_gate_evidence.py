@@ -49,7 +49,12 @@ class EvidenceTest(unittest.TestCase):
             item = self.valid(); item["repository"] = repository; self.signed(item)
             with self.assertRaisesRegex(evidence.EvidenceError, "repository"):
                 evidence.validate(item)
-        for timestamp in (" not a date", "2026-10-16T00:00:00+01:00", "2026-10-16"):
+        for timestamp in (
+            " not a date", "2026-10-16T00:00:00+01:00", "2026-10-16",
+            "20261016T000000Z", "2026-W42-5T00:00:00Z",
+            "2026-10-16T00:00Z", "2026-10-16 00:00:00Z",
+            "2026-10-16T00:00:00.123456789Z", "2026-10-16T24:00:00Z",
+        ):
             item = self.valid(); item["merged_at"] = timestamp; self.signed(item)
             with self.assertRaisesRegex(evidence.EvidenceError, "merged_at"):
                 evidence.validate(item)
@@ -74,6 +79,14 @@ class EvidenceTest(unittest.TestCase):
             evidence.validate(item)
         item = self.valid(); item["source_digests"] = ["3" * 64]; self.signed(item)
         with self.assertRaisesRegex(evidence.EvidenceError, "referenced"):
+            evidence.validate(item)
+        item = self.valid(); item["source_digests"] = [{}]; self.signed(item)
+        with self.assertRaisesRegex(evidence.EvidenceError, "SHA-256"):
+            evidence.validate(item)
+
+    def test_zero_digest_is_rejected(self):
+        item = self.valid(); item["review"]["digest"] = "0" * 64; self.signed(item)
+        with self.assertRaisesRegex(evidence.EvidenceError, "SHA-256"):
             evidence.validate(item)
 
     def test_duplicate_json_keys_are_rejected(self):

@@ -2,9 +2,9 @@
 """Validate the immutable evidence envelope consumed by Shipyard merge receipts.
 
 This module deliberately only validates evidence; it does not query GitHub or
- publish attestations. A producer must supply every field and the digest binds
- the complete canonical payload. The digest is an integrity check, not an
- authenticity proof; a producer/attestation layer must establish provenance.
+publish attestations. A producer must supply every field and the digest binds
+the complete canonical payload. The digest is an integrity check, not an
+authenticity proof; a producer/attestation layer must establish provenance.
 """
 
 from __future__ import annotations
@@ -22,6 +22,9 @@ DOMAIN = b"shipyard-merge-gate-evidence-v1\0"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 HASH = re.compile(r"^[0-9a-f]{64}$")
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+RFC3339_UTC = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d{1,6})?Z$"
+)
 
 
 class EvidenceError(ValueError):
@@ -52,7 +55,7 @@ def _hash(value: Any, label: str) -> None:
 
 
 def _merged_at(value: Any) -> None:
-    if not isinstance(value, str) or not value.endswith("Z"):
+    if not isinstance(value, str) or not RFC3339_UTC.fullmatch(value):
         raise EvidenceError("merged_at must be an RFC 3339 UTC timestamp")
     try:
         parsed = datetime.fromisoformat(value[:-1] + "+00:00")
@@ -124,10 +127,10 @@ def validate(value: Any) -> dict[str, Any]:
     source_digests = value["source_digests"]
     if not isinstance(source_digests, list) or not source_digests:
         raise EvidenceError("source_digests must be non-empty")
-    if len(set(source_digests)) != len(source_digests):
-        raise EvidenceError("source_digests must be unique")
     for item in source_digests:
         _hash(item, "source_digest")
+    if len(set(source_digests)) != len(source_digests):
+        raise EvidenceError("source_digests must be unique")
     referenced = {review["digest"], *(check["source_digest"] for check in checks)}
     if not referenced.issubset(set(source_digests)):
         raise EvidenceError("source_digests must contain every referenced source digest")
