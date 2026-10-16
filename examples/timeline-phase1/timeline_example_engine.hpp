@@ -58,6 +58,8 @@ class TimelineExampleEngine {
     playback::TransportError set_loop_samples(bool enabled, std::int64_t start,
                                               std::int64_t end) noexcept;
     bool prepared() const noexcept;
+    /// Test oracle for synth voice state. Call only while audio processing is stopped;
+    /// the voice state is not synchronized for concurrent reads.
     bool synth_has_active_notes() const noexcept;
     const playback::TransportSnapshot& last_transport() const noexcept;
 
