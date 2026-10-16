@@ -29,7 +29,10 @@ questions are answered in order:
 The control plane in `codecov.yml`, `.github/workflows/coverage.yml`,
 `.github/workflows/android.yml`, and the helper scripts under
 `tools/scripts/` defines what currently counts. The target tiers in
-`ci/coverage-targets.yaml` come after that. A low percentage on a
+`ci/coverage-targets.yaml` come after that. Every first-party source file
+must fall in exactly one tier; `test_coverage_tier_check.py` fails on any that
+fall in none, so a new `core/<subsystem>` directory needs its tier entry in the
+same change. A low percentage on a
 correctly represented surface is a test-gap problem; a missing or `null`
 surface is a Codecov-truth problem.
 
