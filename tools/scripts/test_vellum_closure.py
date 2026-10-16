@@ -1370,6 +1370,19 @@ class GeneratedDigestTests(unittest.TestCase):
             producer.write_text(inline_comment, encoding="utf-8")
             self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
                              "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
+            separator_comment = original.replace(
+                ")\nset(PULP_JS_EMBEDDED_HEADER",
+                ") # separator\nset(PULP_JS_EMBEDDED_HEADER", 1,
+            )
+            producer.write_text(separator_comment, encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
+                             "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
+            producer.write_bytes(original.replace("\n", "\r\n").encode("utf-8"))
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
+                             "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
+            producer.write_text(original.rstrip("\n"), encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"],
+                             "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c")
             for extra in ("    js/unbound.js\n", "    ${OTHER}/js/unbound.js\n", "    ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js\n"):
                 producer.write_text(original.replace(closing, "\n" + extra + ")", 1), encoding="utf-8")
                 self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), extra)
@@ -1421,6 +1434,24 @@ class GeneratedDigestTests(unittest.TestCase):
                 ("NBSP is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set\u00a0(PULP_JS_PRELUDES", 1)),
                 ("vertical tab is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set\v(PULP_JS_PRELUDES", 1)),
                 ("form feed is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set(PULP_JS_PRELUDES\f", 1)),
+                ("consecutive commands without whitespace", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ")set(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("consecutive commands separated by spaces", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ") set(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("consecutive commands separated by tabs", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ")\tset(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("bracket comment command separator", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ")#[[x]]set(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("newline before command opening parenthesis", original.replace(
+                    "set(PULP_JS_PRELUDES",
+                    "set\n(PULP_JS_PRELUDES", 1)),
+                ("bracket comment before command opening parenthesis", original.replace(
+                    "set(PULP_JS_PRELUDES",
+                    "set#[[x]](PULP_JS_PRELUDES", 1)),
             )
             for description, mutation in adversarial_mutations:
                 producer.write_text(mutation, encoding="utf-8")
