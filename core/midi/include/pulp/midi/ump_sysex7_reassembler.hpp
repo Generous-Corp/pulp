@@ -29,8 +29,9 @@
 //     byte 4 = (word1 >>  8) & 0xFF
 //     byte 5 = (word1 >>  0) & 0xFF
 //
-// Reference: MIDI 2.0 UMP specification §4.7 "Data Messages — System
-// Exclusive 7-bit (sysex7)".
+// Reference: MIDI Association Universal MIDI Packet (UMP) and MIDI 2.0
+// Protocol Specification, System Exclusive 7-bit Data Messages.
+// https://midi.org/universal-midi-packet-ump-and-midi-2-0-protocol-specification
 //
 // Why a shared reassembler
 // ========================

@@ -1,18 +1,7 @@
-// Tests for UmpSysex7Reassembler — shared UMP Type-0x3 sysex7
-// reassembler extracted from the AUv3 / CoreMIDI inline state machines.
-//
-// Pinned regressions:
-//   - #239 / #292 P1: per-packet word cursor must advance correctly;
-//     the second word's top nibble can match a continuation packet's
-//     payload byte. Tested by feeding contrived packet pairs where
-//     word1 begins with what looks like a status byte.
-//   - #292 P2: orphaned continue/end packets are dropped silently;
-//     they must not corrupt an unrelated in-progress accumulator or
-//     emit a partial payload.
-//   - Interleaved single-packet sysex (status 0x0) on top of an open
-//     start (status 0x1) accumulator must not consume the open state.
-//   - Reserved status nibbles (0x4..0xF) drop without disturbing the
-//     accumulator.
+// SysEx7 reassembly isolates UMP groups and rejects malformed packets and
+// oversized whole messages. A complete packet replaces an unfinished message
+// on its own group; other groups retain their independent partial payloads.
+// Prepared storage bounds both accepted messages and overflow recovery.
 
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
 
