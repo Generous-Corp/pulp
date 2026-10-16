@@ -186,6 +186,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-gpu-wgpu-native-staged-diagnostic": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/diagnostics/pulp_wgpu_native_staged_adapter.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-au-v2-param-display": {
    "data": "none",
    "inputs": [],
@@ -1858,21 +1870,6 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
-  "pulp-test-mac-platform-harness": {
-   "data": "declared",
-   "detected_sources": [
-    "test/test_mac_platform_harness.cpp"
-   ],
-   "inputs": [
-    "planning"
-   ],
-   "kind": "compiled",
-   "sources": [
-    "test/mac_window_harness.mm",
-    "test/test_mac_platform_harness.cpp"
-   ],
-   "undeclared_sources": []
-  },
   "pulp-test-mcp-server": {
    "data": "declared",
    "detected_sources": [
@@ -2318,8 +2315,8 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
-  "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
+  "pulp-gpu-wgpu-native-staged-diagnostic",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -2329,7 +2326,6 @@
   "pulp-project-package-publish-helper",
   "pulp-reload-ship-fixture-dev",
   "pulp-reload-ship-fixture-ship",
-  "pulp-render-provider-floor-wgpu-control",
   "pulp-sampler-cli-sidecar-probe",
   "pulp-sampler-heritage-render-wav",
   "pulp-sampler-render-wav",
@@ -2371,7 +2367,6 @@
   "pulp-test-browser-capture-import",
   "pulp-test-build-check",
   "pulp-test-canvas-drawlist-format",
-  "pulp-test-canvas-widget-layer-gpu",
   "pulp-test-cfrunloop-cooperation",
   "pulp-test-character-delay",
   "pulp-test-child-process-standard-input",
@@ -2486,7 +2481,6 @@
   "pulp-test-coremidi-shared-client",
   "pulp-test-cross-platform-audio-golden",
   "pulp-test-crossfade",
-  "pulp-test-css-gradient-render",
   "pulp-test-css-translator-gaps-1434",
   "pulp-test-data-display-link-floor",
   "pulp-test-data-display-plugin-editor",
@@ -2581,8 +2575,6 @@
   "pulp-test-group-app-view",
   "pulp-test-group-canvas",
   "pulp-test-group-canvas-text",
-  "pulp-test-group-canvas-text-gpu",
-  "pulp-test-group-canvas-text-view-gpu",
   "pulp-test-group-cap-audio",
   "pulp-test-group-cap-clap",
   "pulp-test-group-cap-format",
@@ -2692,7 +2684,6 @@
   "pulp-test-lv2-host-discovery",
   "pulp-test-lv2-rt",
   "pulp-test-mac-hover-cursor-live",
-  "pulp-test-mac-platform-harness",
   "pulp-test-matrix",
   "pulp-test-matrix-compressor",
   "pulp-test-matrix-drums",
@@ -2758,8 +2749,6 @@
   "pulp-test-playback-program-wire",
   "pulp-test-playback-track-automation-renderer",
   "pulp-test-playback-transport",
-  "pulp-test-plugin-editor-headless-gpu",
-  "pulp-test-plugin-editor-host-smoke-mac",
   "pulp-test-plugin-manager-panel",
   "pulp-test-plugin-state-io",
   "pulp-test-plugin-view-host-design-viewport",
@@ -2878,7 +2867,6 @@
   "pulp-test-synthesiser",
   "pulp-test-template-ui-scripts",
   "pulp-test-texture-atlas",
-  "pulp-test-threejs-bridge",
   "pulp-test-tilt-eq",
   "pulp-test-tilt-eq-no-exceptions",
   "pulp-test-timebase-groove-kernels",
@@ -2937,7 +2925,6 @@
   "pulp-test-web-demos",
   "pulp-test-web-gpu-convolver",
   "pulp-test-webgpu-mock-buffer",
-  "pulp-test-webgpu-native-draw",
   "pulp-test-widget-bridge-api-contracts",
   "pulp-test-widget-bridge-no-gpu-gates",
   "pulp-test-windowing",
@@ -6307,41 +6294,6 @@
    ],
    "kind": "shell"
   },
-  "import-design-external-asset-localized": {
-   "entry": "test/test_import_design_external_asset.py",
-   "inputs": [
-    "test/test_import_design_external_asset.py"
-   ],
-   "kind": "python"
-  },
-  "import-design-ir-observe-asset-escape": {
-   "entry": "test/test_design_ir_observe_asset_escape.py",
-   "inputs": [
-    "test/test_design_ir_observe_asset_escape.py"
-   ],
-   "kind": "python"
-  },
-  "import-design-ir-observe-gpu": {
-   "entry": "test/test_design_ir_observe_gpu.py",
-   "inputs": [
-    "test/test_design_ir_observe_gpu.py"
-   ],
-   "kind": "python"
-  },
-  "import-design-ir-observe-interactions": {
-   "entry": "test/test_design_ir_observe_interactions.py",
-   "inputs": [
-    "test/test_design_ir_observe_interactions.py"
-   ],
-   "kind": "python"
-  },
-  "import-design-ir-observe-malformed": {
-   "entry": "test/test_design_ir_observe_malformed.py",
-   "inputs": [
-    "test/test_design_ir_observe_malformed.py"
-   ],
-   "kind": "python"
-  },
   "import-fidelity-diff": {
    "entry": "test/test_import_fidelity_diff.py",
    "inputs": [
@@ -6353,16 +6305,6 @@
    "entry": "test/test_layout_parity.py",
    "inputs": [
     "test/test_layout_parity.py"
-   ],
-   "kind": "python"
-  },
-  "import-layout-parity-gate": {
-   "entry": "test/test_layout_parity_gate.py",
-   "inputs": [
-    "test/fixtures/imports/fig/synthetic.fig",
-    "test/test_layout_parity_gate.py",
-    "tools/import-design/fig_decode.mjs",
-    "tools/import-design/layout_parity.py"
    ],
    "kind": "python"
   },
@@ -6385,13 +6327,6 @@
    "inputs": [
     "tools/import-design/realtime_contract.py",
     "tools/import-design/test_realtime_contract.py"
-   ],
-   "kind": "python"
-  },
-  "import-ui-frames-observe": {
-   "entry": "test/test_ui_frames_observe.py",
-   "inputs": [
-    "test/test_ui_frames_observe.py"
    ],
    "kind": "python"
   },
