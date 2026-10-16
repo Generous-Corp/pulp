@@ -40,7 +40,24 @@ struct UmpEvent {
 /// allocate and belong on a non-realtime path.
 class UmpBuffer {
 public:
-    UmpBuffer() { events_.reserve(kInitialCapacity); }
+    UmpBuffer() { reserve(kInitialCapacity); }
+    UmpBuffer(const UmpBuffer& other)
+        : events_(other.events_),
+          limit_to_reserved_capacity_(other.limit_to_reserved_capacity_),
+          dropped_events_(other.dropped_events_) {
+        reserve(other.capacity());
+    }
+    UmpBuffer& operator=(const UmpBuffer& other) {
+        if (this != &other) {
+            events_ = other.events_;
+            limit_to_reserved_capacity_ = other.limit_to_reserved_capacity_;
+            dropped_events_ = other.dropped_events_;
+            reserve(other.capacity());
+        }
+        return *this;
+    }
+    UmpBuffer(UmpBuffer&&) noexcept = default;
+    UmpBuffer& operator=(UmpBuffer&&) noexcept = default;
 
     bool add(const UmpEvent& e) {
         if (!can_append()) {
@@ -75,17 +92,34 @@ public:
     std::size_t size() const { return events_.size(); }
     std::size_t capacity() const { return events_.capacity(); }
     std::uint32_t dropped_event_count() const { return dropped_events_; }
-    void reserve(std::size_t capacity) { events_.reserve(capacity); }
+    void reserve(std::size_t capacity) {
+        events_.reserve(capacity);
+        sort_indices_.reserve(events_.capacity());
+        sort_events_.reserve(events_.capacity());
+    }
     void set_realtime_capacity_limit(bool enabled = true) {
         limit_to_reserved_capacity_ = enabled;
     }
     bool realtime_capacity_limited() const { return limit_to_reserved_capacity_; }
 
+    /// Sort by sample offset, preserving arrival order for equal offsets.
+    /// Scratch storage is prepared by reserve(); sorting a prepared buffer
+    /// does not allocate. As with add(), unreserved growth is non-realtime.
     void sort() {
-        std::sort(events_.begin(), events_.end(),
-            [](const UmpEvent& a, const UmpEvent& b) {
-                return a.sample_offset < b.sample_offset;
+        const auto count = events_.size();
+        if (count < 2) return;
+        sort_indices_.resize(count);
+        for (std::size_t i = 0; i < count; ++i) sort_indices_[i] = i;
+        std::sort(sort_indices_.begin(), sort_indices_.end(),
+            [this](std::size_t a, std::size_t b) {
+                if (events_[a].sample_offset != events_[b].sample_offset)
+                    return events_[a].sample_offset < events_[b].sample_offset;
+                return a < b;
             });
+        sort_events_.resize(count);
+        for (std::size_t i = 0; i < count; ++i)
+            sort_events_[i] = events_[sort_indices_[i]];
+        events_.swap(sort_events_);
     }
 
     auto begin()       { return events_.begin(); }
@@ -107,6 +141,8 @@ private:
 
     static constexpr std::size_t kInitialCapacity = 128;
     std::vector<UmpEvent> events_;
+    std::vector<std::size_t> sort_indices_;
+    std::vector<UmpEvent> sort_events_;
     bool limit_to_reserved_capacity_ = false;
     std::uint32_t dropped_events_ = 0;
 };
