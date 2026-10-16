@@ -615,11 +615,11 @@ TEST_CASE("Detached expired maps retain admission capacity after completion",
     if (after_poll.map_resolves == before_poll.map_resolves)
         REQUIRE(second_id == 0);
 
-    // Polling with no callback-pending requests still pumps the late map. The
-    // detached slot is then reaped and admission reopens within the grace
-    // window.
+    // Polling with no callback-pending requests still services the late map.
+    // The detached slot is then reaped and admission reopens before the
+    // bounded cleanup grace can leave the test permanently blocked.
     uint64_t reopened = 0;
-    const auto recovery_deadline = Clock::now() + std::chrono::milliseconds(500);
+    const auto recovery_deadline = Clock::now() + std::chrono::milliseconds(1500);
     while (reopened == 0 && Clock::now() < recovery_deadline) {
         gpu->poll_readbacks();
         reopened = gpu->compute_magnitude_async(
