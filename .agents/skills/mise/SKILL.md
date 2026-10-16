@@ -42,6 +42,38 @@ A pinned-toolchain claim requires all of the following:
 If any item is absent, label the result host-toolchain evidence. Do not infer
 pinned versions from a generated config that was not actually used.
 
+## Checking a host or VM rollout step
+
+A fleet host, an ssh session or a launchd job has neither the pinned mise's
+directory nor the rustup proxies (`~/.cargo/bin`) on its PATH, so a plain
+`check_env.py` there reports an installed Rust as missing. Rollout steps run
+the one command that judges them:
+
+```bash
+MISE_ENV=toolchain mise exec -- python3 tools/toolchain/check_env.py --fleet-path --require-tools
+```
+
+`--fleet-path` also searches those directories; `--require-tools` exits 1 on
+any host-tool difference whatever the manifest's mode, while only reporting the
+npm trees each checkout installs for itself (`pulp deps resolve`).
+`tools/toolchain/fleet_report.py` runs the check over ssh on several hosts and
+prints one drift table; it installs nothing.
+
+Read the versions a build actually used from its CMakeCache and configure log
+(`CMAKE_COMMAND`, `CMAKE_MAKE_PROGRAM`, `Found Python3`), not from the profile.
+On macOS, CMake's FindPython prefers a Python.framework install over PATH; the
+configure of a Pulp checkout sets `Python3_FIND_FRAMEWORK=LAST` when
+`MISE_ENV=toolchain` is set so the pinned interpreter wins. A build directory
+configured before opting in keeps its cached interpreter: configure a fresh one.
+
+## Platform exceptions in the lock
+
+Some tools are not locked on every platform, by declaration in the manifest's
+`unlocked` table: Tart is macOS-only, and conda-forge publishes no
+windows-arm64 clang-format, so windows-arm64 keeps its own clang-format. The
+drift test refuses any other missing platform row; never "fix" an exception by
+hand-editing the lock.
+
 ## Scope and boundaries
 
 - Keep `MISE_ENV=toolchain` opt-in at shell entry. It prevents a checkout from
