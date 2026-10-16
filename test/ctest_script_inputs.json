@@ -6437,6 +6437,14 @@
    ],
    "kind": "python"
   },
+  "import-validation-visual-residual-diagnostic-selftest": {
+   "entry": "tools/import-validation/test_visual_residual_diagnostic.py",
+   "inputs": [
+    "tools/import-validation/test_visual_residual_diagnostic.py",
+    "tools/import-validation/visual_residual_diagnostic.py"
+   ],
+   "kind": "python"
+  },
   "import-vendored-runtime-staleness": {
    "entry": "tools/import-validation/test_check_vendored_runtime.py",
    "inputs": [

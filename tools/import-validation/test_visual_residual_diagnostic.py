@@ -1,13 +1,9 @@
 import unittest
 
-try:
-    from PIL import Image, ImageDraw
-    from visual_residual_diagnostic import measure
-except ModuleNotFoundError:  # The tool's optional Pillow dependency is absent in some gates.
-    Image = ImageDraw = measure = None
+from PIL import Image, ImageDraw
+from visual_residual_diagnostic import measure
 
 
-@unittest.skipUnless(Image is not None, "Pillow is unavailable")
 class VisualResidualDiagnosticTests(unittest.TestCase):
     def setUp(self):
         self.reference = Image.new("RGBA", (24, 16), (20, 20, 20, 255))
