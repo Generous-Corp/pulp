@@ -3415,6 +3415,7 @@ public:
     }
 
     std::size_t poll_readbacks() override {
+        reap_detached_readbacks();
         apply_pending_device_loss();
         // A completion callback that polls again would re-enter the queue while
         // it is being drained; the outer poll is already draining everything
@@ -4360,9 +4361,18 @@ private:
         ReadbackCallback on_complete;
         std::atomic<bool> resolved{false}; // the map callback has fired
         std::atomic<bool> ok{false};       // ... and reported Success
-        std::atomic<bool> abandoned{false};
-        std::atomic<bool> unmap_claimed{false};
     };
+
+    void reap_detached_readbacks() {
+        while (!detached_readbacks_.empty()) {
+            auto& req = detached_readbacks_.front();
+            if (!req->resolved.load(std::memory_order_acquire))
+                break;
+            if (req->ok.load(std::memory_order_acquire))
+                req->buffer.Unmap();
+            detached_readbacks_.pop_front();
+        }
+    }
 
     void complete(AsyncReadback& req, ReadbackStatus status, uint32_t bytes) {
         if (status == ReadbackStatus::Expired) ++stats_->expired;
@@ -4386,12 +4396,13 @@ private:
         while (!pending.empty()) {
             auto req = pending.front();
             pending.pop_front();
-            req->abandoned.store(true, std::memory_order_release);
             if (req->resolved.load(std::memory_order_acquire) &&
-                req->ok.load(std::memory_order_acquire) &&
-                !req->unmap_claimed.exchange(true, std::memory_order_acq_rel))
+                req->ok.load(std::memory_order_acquire))
                 req->buffer.Unmap();
-            if (pool_) pool_->discard(req->buffer);
+            else {
+                if (pool_) pool_->discard(req->buffer);
+                detached_readbacks_.push_back(req);
+            }
             if (deferred && req->on_complete) {
                 if (status == ReadbackStatus::Expired)
                     ++stats_->expired;
@@ -4463,10 +4474,6 @@ private:
                             req->ok.store(status == wgpu::MapAsyncStatus::Success,
                                           std::memory_order_release);
                             req->resolved.store(true, std::memory_order_release);
-                            if (req->abandoned.load(std::memory_order_acquire) &&
-                                req->ok.load(std::memory_order_acquire) &&
-                                !req->unmap_claimed.exchange(true, std::memory_order_acq_rel))
-                                req->buffer.Unmap();
                             if (auto counter = resolves.lock())
                                 counter->fetch_add(1, std::memory_order_relaxed);
                             // The owner thread performs Unmap/discard. The callback only
@@ -4481,6 +4488,7 @@ private:
     bool polling_ = false;
     std::size_t max_readbacks_in_flight_ = 4;
     std::deque<std::shared_ptr<AsyncReadback>> async_readbacks_;
+    std::deque<std::shared_ptr<AsyncReadback>> detached_readbacks_;
 
     // Held by shared_ptr because the map callback that bumps `map_resolves` can
     // outlive this object (a map on a shared device resolves from whatever pumps
