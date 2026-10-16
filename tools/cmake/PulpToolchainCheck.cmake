@@ -6,6 +6,16 @@
 # manifest is in warn mode it exits 0 and its lines are printed as status; in
 # enforce mode a difference exits 1 and stops the configure. A GitHub Actions
 # leg runs the same check as its own step, so it is skipped there.
+#
+# In the pinned environment (MISE_ENV=toolchain), find_package(Python3) must
+# take the pinned interpreter mise puts first on PATH. On macOS FindPython
+# searches Python.framework installs before PATH by default, so a Homebrew
+# framework Python otherwise wins over it. A build dir configured before this
+# keeps its cached Python3_EXECUTABLE; configure it fresh.
+if(PROJECT_IS_TOP_LEVEL AND "$ENV{MISE_ENV}" STREQUAL "toolchain"
+   AND NOT DEFINED Python3_FIND_FRAMEWORK)
+    set(Python3_FIND_FRAMEWORK LAST)
+endif()
 if(NOT PROJECT_IS_TOP_LEVEL OR DEFINED ENV{GITHUB_ACTIONS}
    OR NOT EXISTS "${PULP_ROOT_DIR}/tools/toolchain/check_env.py")
     return()

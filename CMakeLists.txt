@@ -24,6 +24,10 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCheckoutLocation.cmake)  # r
 # directory in both cases. (The find_package(Pulp) path instead keys off
 # CMAKE_CURRENT_LIST_DIR in the installed helpers.)
 set(PULP_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "Pulp source tree root")
+# Report host tools that differ from tools/toolchain/manifest.toml, and in the
+# pinned environment make find_package(Python3) take the pinned interpreter.
+# Runs before anything looks for Python.
+include("${PULP_ROOT_DIR}/tools/cmake/PulpToolchainCheck.cmake")
 
 # ── Default build type, link pool, link maps ─────────────────────────────
 # All three must run before any target is declared.
@@ -198,8 +202,6 @@ if(PULP_INTEL_CANARY)
     endif()
     message(STATUS "Pulp: Intel canary lint clean.")
 endif()
-# Report host tools that differ from tools/toolchain/manifest.toml.
-include("${PULP_ROOT_DIR}/tools/cmake/PulpToolchainCheck.cmake")
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
 # Lottie / Bodymovin JSON animation playback via the bundled skottie module.
 # Opt-in (default OFF): builds that don't use it link nothing extra and the

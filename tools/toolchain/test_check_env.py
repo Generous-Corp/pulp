@@ -398,6 +398,13 @@ class WorkflowStepTests(unittest.TestCase):
             self.assertEqual(0, out.returncode, out.stderr)
             self.assertIn("check_env.py exited 3", out.stdout)
 
+    def test_build_legs_never_auto_install_a_rust_toolchain(self) -> None:
+        text = (REPO_ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        job = text[text.index("\n  build:\n"):]
+        env = job[job.index("\n    env:\n"):job.index("\n    steps:\n")]
+        self.assertIn('PULP_OFFLINE_BUILD: "1"', env)  # control: this is the build job's env
+        self.assertIn('RUSTUP_AUTO_INSTALL: "0"', env)
+
     def test_a_hung_probe_is_bounded(self) -> None:
         self.assertLessEqual(check_env.PROBE_TIMEOUT_S, 5)
         self.assertIn("timeout-minutes: 2", (REPO_ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8"))
@@ -525,7 +532,8 @@ REPO = HERE.parents[1]
 class ConfigureWiringTests(unittest.TestCase):
     """tools/cmake/PulpToolchainCheck.cmake runs the check once per configure."""
 
-    def configure(self, exit_code: int, *, subproject: bool = False, env_extra=None) -> subprocess.CompletedProcess:
+    def configure(self, exit_code: int, *, subproject: bool = False, env_extra=None,
+                  after: str = "", defines=()) -> subprocess.CompletedProcess:
         td = tempfile.mkdtemp(prefix="pulp-toolchain-cmake-")
         self.addCleanup(shutil.rmtree, td, True)
         root = Path(td)
@@ -539,7 +547,7 @@ class ConfigureWiringTests(unittest.TestCase):
         module = REPO / "tools/cmake/PulpToolchainCheck.cmake"
         (fake / "CMakeLists.txt").write_text(
             "cmake_minimum_required(VERSION 3.21)\nproject(FakePulp NONE)\n"
-            f'set(PULP_ROOT_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}")\ninclude("{module}")\n', encoding="utf-8")
+            f'set(PULP_ROOT_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}")\ninclude("{module}")\n{after}', encoding="utf-8")
         source = fake
         if subproject:
             outer = root / "outer"
@@ -548,12 +556,31 @@ class ConfigureWiringTests(unittest.TestCase):
                 f'cmake_minimum_required(VERSION 3.21)\nproject(Outer NONE)\nadd_subdirectory("{fake}" pulp)\n',
                 encoding="utf-8")
             source = outer
-        env = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"}
+        env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", "MISE_ENV")}
         env.update(env_extra or {})
         self.ran = fake / "tools/toolchain/ran"
         return subprocess.run(
-            ["cmake", "-S", str(source), "-B", str(root / "build"), f"-DPython3_EXECUTABLE={sys.executable}"],
+            ["cmake", "-S", str(source), "-B", str(root / "build"), f"-DPython3_EXECUTABLE={sys.executable}",
+             *defines],
             env=env, capture_output=True, text=True, encoding="utf-8", check=False)
+
+    SHOW = 'message(STATUS "FRAMEWORK=[${Python3_FIND_FRAMEWORK}]")\n'
+
+    def test_the_pinned_environment_prefers_the_path_python(self) -> None:
+        # macOS FindPython otherwise takes a framework Python before the pinned
+        # one mise puts first on PATH.
+        pinned = self.configure(0, after=self.SHOW, env_extra={"MISE_ENV": "toolchain"})
+        self.assertIn("FRAMEWORK=[LAST]", pinned.stdout, pinned.stderr)
+        # Controls: outside the pinned environment, and an explicit choice, are untouched.
+        self.assertIn("FRAMEWORK=[]", self.configure(0, after=self.SHOW).stdout)
+        explicit = self.configure(0, after=self.SHOW, env_extra={"MISE_ENV": "toolchain"},
+                                  defines=("-DPython3_FIND_FRAMEWORK=FIRST",))
+        self.assertIn("FRAMEWORK=[FIRST]", explicit.stdout)
+
+    def test_the_module_runs_before_anything_finds_python(self) -> None:
+        text = (REPO / "CMakeLists.txt").read_text(encoding="utf-8")
+        include = text.index('include("${PULP_ROOT_DIR}/tools/cmake/PulpToolchainCheck.cmake")')
+        self.assertLess(include, text.index("    find_package(Python3 COMPONENTS"))
 
     def test_warn_mode_prints_and_configures(self) -> None:
         out = self.configure(0)
