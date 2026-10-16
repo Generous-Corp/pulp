@@ -1426,7 +1426,9 @@ TEST_CASE("native materializer preserves stable identity while applying child or
     ir.root.style.height = 40.0f;
 
     const std::array<std::pair<const char*, int>, 3> children = {{
-        {"drive", 2}, {"tone", 0}, {"mix", 1},
+        {"drive", 2},
+        {"tone", 0},
+        {"mix", 1},
     }};
     for (const auto& [anchor, order] : children) {
         IRNode child;
@@ -1440,8 +1442,7 @@ TEST_CASE("native materializer preserves stable identity while applying child or
     }
 
     std::vector<ImportDiagnostic> diagnostics;
-    auto root = build_native_view_tree(ir, ir.asset_manifest,
-                                       {.diagnostics_out = &diagnostics});
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.diagnostics_out = &diagnostics});
     REQUIRE(root);
     CHECK_FALSE(has_code(diagnostics, "identity-duplicate"));
     root->set_bounds({0, 0, 300, 40});
@@ -1475,8 +1476,7 @@ TEST_CASE("native materializer rejects duplicate stable identity before reorder 
     }
 
     std::vector<ImportDiagnostic> diagnostics;
-    auto root = build_native_view_tree(ir, ir.asset_manifest,
-                                       {.diagnostics_out = &diagnostics});
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.diagnostics_out = &diagnostics});
     REQUIRE(root);
     CHECK(has_code(diagnostics, "identity-duplicate"));
 }
