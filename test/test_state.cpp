@@ -1423,6 +1423,7 @@ TEST_CASE("restore advances feedback identity while remaining listener-silent",
 TEST_CASE("conditional RT feedback rejects unknown parameter and mismatched token",
           "[state][store][feedback][negative]") {
     StateStore store;
+    store.add_parameter(make_param_info(0, "Zero", "", {0.0f, 1.0f, 0.0f}));
     store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
     const auto baseline = store.capture_feedback_baseline(1);
     REQUIRE(baseline);
