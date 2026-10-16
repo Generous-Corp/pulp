@@ -66,3 +66,15 @@ record supports no promotion, safe-merge, routing, or release decision. A later
 decision must regenerate both scorecards against the same command and a newly
 checked database state, then record its own `checked_at` and exact-head
 provenance.
+
+## Fleet observation recorded with this receipt
+
+The step-1 `m5s` reachability check was attempted at approximately
+`2026-10-16T14:38Z` and `2026-10-16T14:44Z` through `ssh m5s`, `m5s-lan`, and
+`m5s-wifi`. Each attempt timed out during banner exchange with
+`UNKNOWN:65535`. No restart or promotion was attempted, and the existing m5s
+shadow status remains `NOT ESTIMABLE` because the host is unreachable.
+
+The m1 `PASS DONE` result at `2026-10-16T14:27:38Z` was verified. This host
+observation is recorded for provenance only and does not change either
+scorecard verdict.
