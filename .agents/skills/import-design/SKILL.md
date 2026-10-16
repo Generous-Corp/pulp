@@ -37,6 +37,12 @@ rewrite its source hash to bypass validation. The focused native coverage is
 `pulp-test-browser-capture-backend [*provenance*]`, and a real import must pass
 the browser capture receipt before any native or materialized parity claim.
 
+Importer differential calibration remains diagnostic until the receipt binds the
+PNG digest and physical dimensions, viewport DPR, and interaction plan, then
+records three agreeing source, importer, observer, font, capture, PNG, layout,
+and native render receipt digests. Short campaigns remain unverified, and the
+raw visual threshold is not relaxed by calibration or renderer disagreement.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture

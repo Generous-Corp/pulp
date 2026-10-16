@@ -112,6 +112,12 @@ Browser and native processes still run sequentially within a trial, so their
 timing difference remains diagnostic until a controlled, alternated protocol
 is used.
 
+Each benchmark now records a `determinism` receipt. It is `pass` only after at
+least three runs agree on the source, browser/native capture, browser PNG,
+native PNG, native layout, and native Skia render-receipt digests. One- or
+two-run campaigns remain explicitly `unverified`; a three-run disagreement is
+a failed receipt rather than a reason to average the images together.
+
 Timing numbers become load-bearing only when a caller supplies a frozen budget
 file. The keys are measured importer-lab timings in milliseconds; omitted keys
 are not gated:
@@ -137,6 +143,23 @@ The checked-in corpus covers static HTML, flex, grid, CSS variables,
 pseudo-elements, absolute positioning, SVG, form controls, Canvas, runtime
 state, typography, and media queries. It is a diagnostic seed corpus, not proof
 of general web equivalence.
+
+## Gate 1 calibration controls
+
+The differential lab now carries a strict visual calibration selftest for the
+production visual threshold (`0.995`). It uses a synthetic panel only to pin
+the measurement behavior: a small edge-only tonal change is retained as an
+advisory renderer-variance candidate, while one-pixel placement, color,
+missing-border, wrong-weight, and corner-radius mutations all fall below the
+strict gate. This protects the comparator from becoming permissive while the
+real renderer floor is being measured.
+
+The selftest is not Chromium/Skia evidence. A real disagreement-floor campaign
+must provide authenticated same-source browser and native PNGs, a three-run
+identical receipt, viewport and DPR, font and backend provenance, and the
+corresponding native Skia render receipt. Until that campaign exists, the raw
+visual threshold remains authoritative and no renderer setting or promotion
+policy should change.
 
 The methodology is informed by Octane's retained-plan and longest-task
 benchmarks: preserve the complete receipt and phase boundaries before treating

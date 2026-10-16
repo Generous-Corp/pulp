@@ -92,6 +92,29 @@ class FakeViewportImage:
 
 
 class HelperScoringTests(unittest.TestCase):
+    @staticmethod
+    def _panel_pixels(*, shift: int = 0, fill: tuple[int, int, int] = (220, 220, 220),
+                      border_width: int = 2, rounded: bool = False) -> FakeImage:
+        """Build a deterministic panel for strict planted-negative controls."""
+        width, height = 64, 48
+        background = (24, 28, 36)
+        pixels = [background] * (width * height)
+        left, top, right, bottom = 14 + shift, 10, 49 + shift, 37
+        for y in range(top, bottom + 1):
+            for x in range(left, right + 1):
+                corner = rounded and (
+                    (x - left < 4 and y - top < 4)
+                    or (right - x < 4 and y - top < 4)
+                    or (x - left < 4 and bottom - y < 4)
+                    or (right - x < 4 and bottom - y < 4)
+                )
+                if corner:
+                    continue
+                edge = (x - left < border_width or right - x < border_width
+                        or y - top < border_width or bottom - y < border_width)
+                pixels[y * width + x] = (120, 130, 145) if edge else fill
+        return FakeImage(pixels, size=(width, height))
+
     def test_image_module_imports_pillow_or_reports_install_hint(self) -> None:
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
             if name == "PIL":
@@ -108,6 +131,36 @@ class HelperScoringTests(unittest.TestCase):
         a = FakeImage([(0, 0, 0)], histogram=[1, 2, 3])
         self.assertAlmostEqual(diff.histogram_similarity(a, a), 1.0)
         self.assertEqual(diff.histogram_similarity(FakeImage([], histogram=[]), a), 0.0)
+
+    def test_strict_floor_controls_keep_healthy_edge_variance_advisory(self) -> None:
+        reference = self._panel_pixels()
+        healthy = list(reference._pixels)
+        # A small edge-only tonal change models a renderer AA disagreement. It
+        # must remain inside the strict floor while still being visible to the
+        # residual profiler; it never relaxes the production threshold.
+        for x in range(14, 50):
+            for y in (10, 37):
+                index = y * 64 + x
+                red, green, blue = healthy[index]
+                healthy[index] = (min(255, red + 12), min(255, green + 12), min(255, blue + 12))
+        healthy_image = FakeImage(healthy, size=(64, 48))
+        self.assertGreaterEqual(diff.similarity_score(reference, healthy_image), 0.995)
+        self.assertGreater(diff.residual_profile(reference, healthy_image)["differing_pixels"], 0)
+
+    def test_all_gate_planted_negatives_fail_strict_floor(self) -> None:
+        reference = self._panel_pixels()
+        controls = {
+            "one-pixel-shift": self._panel_pixels(shift=1),
+            "color-change": self._panel_pixels(fill=(90, 220, 160)),
+            "missing-border": self._panel_pixels(border_width=0),
+            "wrong-weight": self._panel_pixels(border_width=4),
+            "corner-radius": self._panel_pixels(rounded=True),
+        }
+        for name, candidate in controls.items():
+            with self.subTest(control=name):
+                self.assertLess(diff.similarity_score(reference, candidate), 0.995)
+                profile = diff.residual_profile(reference, candidate)
+                self.assertGreater(profile["differing_pixels"], 0)
 
     def test_mean_pixel_distance_scores_identical_different_and_mismatched_lengths(self) -> None:
         white = FakeImage([(255, 255, 255)])
