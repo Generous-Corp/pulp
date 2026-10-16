@@ -14,6 +14,9 @@ from verify_wgpu_native_staged import (diagnostic_exit_disposition, parse_output
                                        validate_loss_evidence)
 
 
+ADAPTER_SOURCE = Path(__file__).with_name("pulp_wgpu_native_staged_adapter.cpp")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--typed-only", action="store_true")
@@ -49,6 +52,16 @@ def main() -> int:
             print(f"typed loss evidence negative control failed: {field}", file=sys.stderr)
             return 1
     if args.typed_only:
+        source = ADAPTER_SOURCE.read_text(encoding="utf-8")
+        unavailable = source.split(
+            'std::fputs("wgpu staged device-loss observation unavailable\\n", stderr);',
+            1,
+        )
+        if len(unavailable) != 2 or "loss_probe.release();" not in unavailable[1].split(
+            "return kProviderUnavailableExit;", 1
+        )[0]:
+            print("typed unavailable teardown control failed", file=sys.stderr)
+            return 1
         return 0
     if any(getattr(args, name.replace("-", "_")) is None
            for name in ("manifest", "asset", "source-tree", "linked-runtime",

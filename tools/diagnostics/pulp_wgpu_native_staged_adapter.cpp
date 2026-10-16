@@ -913,6 +913,13 @@ int main() {
             return kDiagnosticFailureExit;
         if (!loss_probe->wait_for_device_loss_callback()) {
             std::fputs("wgpu staged device-loss observation unavailable\n", stderr);
+            // Some pinned wgpu-native images leave their internal Metal fence
+            // wait blocked after destroy() when no loss callback is delivered.
+            // Releasing that provider here would hang the verifier during
+            // teardown, turning the typed unavailable result into a timeout.
+            // The isolated diagnostic process is exiting with 77, so leak the
+            // provider and let the OS reclaim its native handles.
+            loss_probe.release();
             return kProviderUnavailableExit;
         }
         if (!loss_probe->device_loss_callback_registered())
