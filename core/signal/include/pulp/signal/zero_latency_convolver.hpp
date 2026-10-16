@@ -555,24 +555,27 @@ private:
                                 a[i] += x[i] * h[i];
                     }
                 } else {
-                    bool first = true;
+                    const int cross_cell = output_job == 0 ? 2 : 1;
+                    auto& cross_acc = g.accum[static_cast<std::size_t>(cross_cell)];
+                    for (int i = g.job_cursor; i < g.job_cursor + take; ++i) {
+                        acc[static_cast<std::size_t>(i)] = {};
+                        cross_acc[static_cast<std::size_t>(i)] = {};
+                    }
                     for (int source_cell = 0; source_cell < cell_count_; ++source_cell) {
                         const Cell& source = cells_[static_cast<std::size_t>(source_cell)];
-                        if (source.dst != output_job || !cell_active(source_cell)) continue;
+                        if (source.dst != output_job) continue;
                         for (int p = 0; p < np; ++p) {
                             const int slot = (g.slot - p + np) % np;
                             const std::complex<SampleType>* x =
                                 g.spectra[static_cast<std::size_t>(source.src * np + slot)].data();
                             const std::complex<SampleType>* h =
                                 g.ir_spectra[static_cast<std::size_t>(source_cell * np + p)].data();
-                            std::complex<SampleType>* a = acc.data();
-                            if (first)
-                                for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                                    a[i] = x[i] * h[i];
-                            else
-                                for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                                    a[i] += x[i] * h[i];
-                            first = false;
+                            auto* a = acc.data();
+                            auto* b = cross_acc.data();
+                            for (int i = g.job_cursor; i < g.job_cursor + take; ++i) {
+                                if (source_cell == cross_cell) b[i] += x[i] * h[i];
+                                else a[i] += x[i] * h[i];
+                            }
                         }
                     }
                 }
@@ -580,22 +583,39 @@ private:
                 spent += static_cast<long>(take) * unit;
                 if (g.job_cursor > half) {
                     g.job_step = 1;
-                    g.job_cursor = half + 1;
+                    g.job_cursor = fused_stereo ? 0 : half + 1;
                 }
                 continue;
             }
 
             if (g.job_step == 1) {
                 // ── Hermitian mirror onto the upper half ──
-                const int take = static_cast<int>(
-                    std::min<long>(budget - spent, K - g.job_cursor));
+                const int mirror_end = fused_stereo ? half + 1 : K;
+                const long mirror_unit = fused_stereo ? 2L : 1L;
+                const int take = static_cast<int>(std::min<long>(
+                    (budget - spent) / mirror_unit, mirror_end - g.job_cursor));
                 if (take <= 0) break;
                 std::complex<SampleType>* a = acc.data();
-                for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                    a[i] = std::conj(a[K - i]);
+                if (fused_stereo) {
+                    const int cross_cell = output_job == 0 ? 2 : 1;
+                    const auto* b = g.accum[static_cast<std::size_t>(cross_cell)].data();
+                    for (int i = g.job_cursor; i < g.job_cursor + take; ++i) {
+                        const auto av = a[i];
+                        const auto bv = b[i];
+                        if (i == 0 || i == half)
+                            a[i] = {av.real(), bv.real()};
+                        else
+                            a[i] = {av.real() - bv.imag(), av.imag() + bv.real()};
+                        if (i > 0 && i < half)
+                            a[K - i] = {av.real() + bv.imag(), -av.imag() + bv.real()};
+                    }
+                } else {
+                    for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                        a[i] = std::conj(a[K - i]);
+                }
                 g.job_cursor += take;
-                spent += take;
-                if (g.job_cursor >= K) {
+                spent += static_cast<long>(take) * mirror_unit;
+                if (g.job_cursor >= mirror_end) {
                     g.job_step = 2;
                     g.job_cursor = 0;
                     g.fft.begin_inverse_in_place();
@@ -612,13 +632,21 @@ private:
             }
 
             // ── extract: overlap-save keeps the LAST L samples ──
-            const int take = static_cast<int>(std::min<long>(budget - spent, L - g.job_cursor));
+            const long extract_unit = fused_stereo ? 2L : 1L;
+            const int take = static_cast<int>(std::min<long>(
+                (budget - spent) / extract_unit, L - g.job_cursor));
             if (take <= 0) break;
             SampleType* dst = g.ready[static_cast<std::size_t>(cell)].data();
             for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
                 dst[i] = acc[static_cast<std::size_t>(L + i)].real();
+            if (fused_stereo) {
+                const int cross_cell = output_job == 0 ? 2 : 1;
+                SampleType* cross = g.ready[static_cast<std::size_t>(cross_cell)].data();
+                for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
+                    cross[i] = acc[static_cast<std::size_t>(L + i)].imag();
+            }
             g.job_cursor += take;
-            spent += take;
+            spent += static_cast<long>(take) * extract_unit;
             if (g.job_cursor >= L) {
                 ++g.job;
                 g.job_step = 0;
@@ -891,9 +919,12 @@ private:
         g.total_cost +=
             static_cast<long>(cell_count_) *
             (static_cast<long>(K / 2 + 1) * detail::SlicedFftPlanT<SampleType>::kMacCost * np);
-        const int output_jobs = channels_ == 2 && cell_count_ == 4 ? 2 : cell_count_;
+        const bool fused_stereo = channels_ == 2 && cell_count_ == 4;
+        const int output_jobs = fused_stereo ? 2 : cell_count_;
+        const long mirror_cost = fused_stereo ? 2L * (K / 2 + 1) : K / 2 - 1;
+        const long extract_cost = fused_stereo ? 2L * L : L;
         g.total_cost += static_cast<long>(output_jobs) *
-                        (static_cast<long>(K / 2 - 1) + g.plan.inverse_cost() + L);
+                        (mirror_cost + g.plan.inverse_cost() + extract_cost);
         return g;
     }
 

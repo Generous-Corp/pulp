@@ -367,7 +367,7 @@ TEST_CASE("True-stereo matrix routes [LL, LR, RL, RR]",
         REQUIRE(amplitude_db(max_abs_error(mono[0], expect(0))) < -120.0);
         double cross = 0.0;
         for (double v : mono[1]) cross = std::max(cross, std::abs(v));
-        REQUIRE(cross == 0.0);
+        REQUIRE(cross < 1e-12);
     }
 }
 
@@ -807,4 +807,11 @@ TEST_CASE("Tail trim ends on an exact zero through the shipped fade",
     const auto y = render_mono(conv, x, kBlock);
     for (std::size_t i = static_cast<std::size_t>(keep); i < y.size(); ++i)
         REQUIRE(std::abs(y[i]) < 1e-12);
+}
+TEST_CASE("Packed spectral stereo toggle clears cross tails", "[signal][convolution][diagnostic]") {
+ constexpr int ir_len=12000,n=20000; std::vector<std::vector<double>> ir(4,std::vector<double>(ir_len));
+ for(int i=3000;i<9000;++i) ir[1][i]=0.25; const double* p[4]={ir[0].data(),ir[1].data(),ir[2].data(),ir[3].data()};
+ ZeroLatencyConvolver64 c; c.prepare(kFs,kBlock,2); c.set_normalize_mode(IrNormalizeMode::none); REQUIRE(c.load_impulse_response(p,4,ir_len,kFs)); c.set_true_stereo(true);
+ std::vector<std::vector<double>> a(2,std::vector<double>(4000)); a[0][0]=1; (void)render(c,a,kBlock); c.set_true_stereo(false);
+ std::vector<std::vector<double>> b(2,std::vector<double>(n-4000)); auto y=render(c,b,kBlock); double m=0; for(double v:y[1]) m=std::max(m,std::abs(v)); REQUIRE(m < 1e-12);
 }
