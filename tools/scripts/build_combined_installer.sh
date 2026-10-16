@@ -68,11 +68,14 @@ HOST_ARCHITECTURES=""
 # Parallel arrays of components.
 declare -a P_KIND=() P_PATH=()      # plugins: kind + bundle path
 declare -a A_TITLE=() A_PATH=() A_ENT=()  # apps: choice title + bundle path + entitlements (or "")
-declare -a C_TITLE C_DESC C_DEST C_SRC  # content: title + description + install dest + source dir
-declare -a A_GROUP                      # apps: plugin name to nest under ("" = top level)
-declare -a PT_NAME PT_TITLE             # product display titles: bundle name -> title
-declare -a S_TITLE S_DIR                 # app script directories: title -> directory
-declare -a PS_KIND PS_TITLE PS_DIR PS_MATCHED  # plugin script directories
+# Every array starts empty, not merely declared: under `set -u`, bash 4.4 and
+# later report `${#X[@]}` of a declared-but-unassigned array as an unbound
+# variable, while macOS's /bin/bash 3.2 does not.
+declare -a C_TITLE=() C_DESC=() C_DEST=() C_SRC=()  # content: title + description + install dest + source dir
+declare -a A_GROUP=()                   # apps: plugin name to nest under ("" = top level)
+declare -a PT_NAME=() PT_TITLE=()       # product display titles: bundle name -> title
+declare -a S_TITLE=() S_DIR=()          # app script directories: title -> directory
+declare -a PS_KIND=() PS_TITLE=() PS_DIR=() PS_MATCHED=()  # plugin script directories
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
