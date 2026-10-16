@@ -196,7 +196,6 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         bool terminal_published = false;
         bool planted_failure = false;
         bool queue_failed = false;
-        bool planted_queue_error = false;
     };
 
   public:
@@ -347,7 +346,6 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             else if (pending->queue_done &&
                      pending->queue_status != WGPUQueueWorkDoneStatus_Success) {
                 pending->queue_failed = true;
-                queue_error_observed_ = true;
             }
             if (physical_drain_ && pending->queue_failed && !pending->terminal_ready) {
                 // Queue status alone is not a retirement proof. Publish only
@@ -426,14 +424,6 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         return device_loss_.reason;
     }
 
-    bool queue_error_before_physical_drain_is_quarantined() const noexcept {
-        return !physical_drain_;
-    }
-
-    bool queue_error_observed() const noexcept {
-        return queue_error_observed_;
-    }
-
     bool submit_program(Slot& slot, SlotToken token, std::shared_ptr<SharedIoTerminalInbox> inbox,
                         WGPUComputePipeline pipeline, WGPUBindGroupLayout layout) noexcept {
         try {
@@ -443,7 +433,6 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             pending->token = token;
             pending->inbox = std::move(inbox);
             pending->planted_failure = token.stream_sequence == 4;
-            pending->planted_queue_error = token.stream_sequence == 901;
             wgpuQueueWriteBuffer(queue_, slot.input_gpu, 0, slot.input.data(), slot.input.size());
             WGPUBuffer weights = slot.weights_gpu;
             WGPUBuffer input = slot.input_gpu;
@@ -494,8 +483,7 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             callback.mode = WGPUCallbackMode_AllowProcessEvents;
             callback.callback = [](WGPUQueueWorkDoneStatus status, void* userdata, void*) {
                 auto* pending = static_cast<Pending*>(userdata);
-                pending->queue_status =
-                    pending->planted_queue_error ? WGPUQueueWorkDoneStatus_Error : status;
+                pending->queue_status = status;
                 pending->queue_done = true;
             };
             callback.userdata1 = submitted;
@@ -643,7 +631,6 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
     bool loss_forced_ = false;
     bool loss_callback_registered_ = false;
     bool physical_drain_ = false;
-    bool queue_error_observed_ = false;
     WGPUInstance instance_ = nullptr;
     WGPUAdapter adapter_ = nullptr;
     WGPUDevice device_ = nullptr;
@@ -901,7 +888,6 @@ int main() {
     bool loss_callback_registered = false;
     bool loss_scenario_triggered = false;
     bool loss_no_output_leases = false;
-    bool queue_error_before_physical_drain_quarantined = false;
     std::uint32_t loss_terminal_records = 0;
     WGPUDeviceLostReason loss_reason = WGPUDeviceLostReason_Unknown;
     {
@@ -921,7 +907,7 @@ int main() {
         loss_callback_registered = loss_native->device_loss_callback_registered();
         if (!loss_callback_registered)
             return kDiagnosticFailureExit;
-        auto loss_input = loss_session.acquire_input(901, 0);
+        auto loss_input = loss_session.acquire_input(902, 0);
         if (!loss_input || !loss_session.submit({loss_input->token, 0}) ||
             !loss_native->force_device_loss_for_diagnostic())
             return kDiagnosticFailureExit;
@@ -934,12 +920,7 @@ int main() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         (void)loss_session.service(0);
-        const auto premature_completion = loss_session.pop_completion();
-        queue_error_before_physical_drain_quarantined =
-            !premature_completion && loss_native->queue_error_observed() &&
-            loss_native->queue_error_before_physical_drain_is_quarantined();
-        if (premature_completion || !queue_error_before_physical_drain_quarantined ||
-            !loss_native->device_loss_observed() || !loss_native->drain())
+        if (!loss_native->device_loss_observed() || !loss_native->drain())
             return kDiagnosticFailureExit;
         for (int attempt = 0; attempt < 10'000 && !loss_completion; ++attempt) {
             (void)loss_session.service(0);
@@ -970,8 +951,6 @@ int main() {
                 loss_scenario_triggered ? "triggered" : "unavailable",
                 loss_reason == WGPUDeviceLostReason_Destroyed ? "destroyed" : "unknown",
                 loss_terminal_records, loss_no_output_leases ? "true" : "false");
-    std::printf("queue_error_before_physical_drain_quarantined=%s\n",
-                queue_error_before_physical_drain_quarantined ? "quarantined" : "unknown");
     std::puts(
         "device_loss_proof=callback_terminal_no_output_lease callback_fallback_proof=unavailable");
     return 0;

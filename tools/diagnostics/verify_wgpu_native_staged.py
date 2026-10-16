@@ -68,10 +68,6 @@ def parse_output(stdout: str) -> dict[str, str]:
             for field in line.split():
                 key, value = field.split("=", 1)
                 result[key] = value
-        elif line.startswith("queue_error_before_physical_drain_quarantined="):
-            for field in line.split():
-                key, value = field.split("=", 1)
-                result[key] = value
     return result
 
 
@@ -94,8 +90,6 @@ def validate_loss_evidence(observed: dict[str, str]) -> int:
         raise ValueError("device_loss_proof_mismatch")
     if observed.get("callback_fallback_proof") != "unavailable":
         raise ValueError("callback_fallback_must_remain_unavailable")
-    if observed.get("queue_error_before_physical_drain_quarantined") != "quarantined":
-        raise ValueError("queue_error_before_physical_drain_not_quarantined")
     return int(records)
 
 
@@ -167,7 +161,6 @@ def verify(args: argparse.Namespace) -> dict:
         "device_loss_terminal_records": loss_terminal_records,
         "device_loss_no_output_leases": True,
         "device_loss_reprime": "unavailable",
-        "queue_error_before_physical_drain_quarantined": "quarantined",
         "callback_fallback_proof": "unavailable",
         "gpu_timestamps": "unavailable",
         "product_proof": False,

@@ -2151,6 +2151,32 @@ jobs:
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
           rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
 
+      # The staged device-loss diagnostic must execute against wgpu-native as
+      # the sole WebGPU implementation. The ordinary macOS build intentionally
+      # uses Skia's Dawn archive, so configure a separate no-Skia tree rather
+      # than claiming that the regular gate exercised this path. This remains
+      # private diagnostic evidence; it does not qualify the production GPU
+      # provider or product path.
+      - name: Run wgpu-native staged device-loss diagnostic (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          diag_build="${PULP_BUILD_DIR}-wgpu-native"
+          no_skia="${diag_build}/no-skia"
+          mkdir -p "$no_skia"
+          cmake -S . -B "$diag_build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_SKIA_AUTOFETCH=OFF \
+            -DSKIA_DIR="$no_skia" \
+            -DPULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC=ON
+          tools/ci/governed-build.sh cmake --build "$diag_build" \
+            --target pulp-gpu-wgpu-native-staged-diagnostic
+          ctest --test-dir "$diag_build" \
+            --output-on-failure \
+            -R '^pulp-gpu-wgpu-native-staged-diagnostic$'
+
       # A passing iOS gate run is recorded under its input digest so later runs
       # (PR heads and merge groups alike: artifacts are repository-wide, not
       # branch-scoped like the Actions cache) can find it. The Build step skips

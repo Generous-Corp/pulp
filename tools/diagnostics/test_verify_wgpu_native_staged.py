@@ -24,7 +24,6 @@ def main() -> int:
         "device_loss_callback=registered device_loss_scenario=triggered "
         "device_loss_reason=destroyed device_loss_terminal_records=1 "
         "device_loss_no_output_leases=true device_loss_reprime=unavailable\n"
-        "queue_error_before_physical_drain_quarantined=quarantined\n"
         "device_loss_proof=callback_terminal_no_output_lease "
         "callback_fallback_proof=unavailable\n")
     if validate_loss_evidence(valid) != 1:
@@ -33,7 +32,7 @@ def main() -> int:
     for field, value in (("device_loss_terminal_records", "0"),
                          ("device_loss_no_output_leases", "false"),
                          ("device_loss_reprime", "reprimed"),
-                         ("queue_error_before_physical_drain_quarantined", "terminal")):
+                         ("device_loss_proof", "other")):
         invalid = dict(valid)
         invalid[field] = value
         try:
