@@ -2,9 +2,10 @@
 """Decompose a Chromium/native image residual into diagnostic regions.
 
 This tool is deliberately advisory.  It does not change the importer score or
-make a parity decision.  It classifies differing pixels as edge-band
-rasterization, shared-foreground interior color differences, mask/placement
-disagreement, or outside-root registration differences.
+make a parity decision.  It classifies differing pixels as an edge-band
+residual, shared-foreground interior color differences, mask/placement
+disagreement, or outside-root registration differences.  The labels are
+heuristics, not causal proof that a renderer setting is responsible.
 """
 
 from __future__ import annotations
@@ -109,7 +110,8 @@ def measure(
     in_root = _root_predicate(root)
 
     categories = {
-        "edge_band_rasterization": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
+        "background_residual": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
+        "edge_band_residual": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
         "shared_foreground_interior": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
         "mask_or_placement_interior": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
         "outside_root_registration": {"pixels": 0, "differing_pixels": 0, "mean_channel_error": 0.0},
@@ -117,12 +119,16 @@ def measure(
     error_sums = {name: 0 for name in categories}
     for index, (ref_pixel, cand_pixel) in enumerate(zip(ref_pixels, cand_pixels)):
         px, py = index % ref.width, index // ref.width
-        delta = sum(abs(ref_pixel[channel] - cand_pixel[channel]) for channel in range(3)) / 3
+        delta = sum(abs(ref_pixel[channel] - cand_pixel[channel]) for channel in range(4)) / 4
+        alpha_only = (ref_pixel[:3] == cand_pixel[:3] and ref_pixel[3] != cand_pixel[3])
         differs = delta > difference_threshold
         if not in_root(px, py):
             category = "outside_root_registration"
+        elif (_distance(ref_pixel[:3], ref_background) <= foreground_threshold
+              and _distance(cand_pixel[:3], cand_background) <= foreground_threshold):
+            category = "background_residual"
         elif (px, py) in edge:
-            category = "edge_band_rasterization"
+            category = "edge_band_residual"
         elif (px, py) in ref_mask and (px, py) in cand_mask:
             category = "shared_foreground_interior"
         else:
@@ -132,11 +138,15 @@ def measure(
         if differs:
             row["differing_pixels"] += 1
             error_sums[category] += delta
+        if alpha_only:
+            row.setdefault("alpha_only_differing_pixels", 0)
+            row["alpha_only_differing_pixels"] += 1
 
     for name, row in categories.items():
         differing = int(row["differing_pixels"])
         row["mean_channel_error"] = round(error_sums[name] / differing, 6) if differing else 0.0
         row["difference_fraction"] = round(differing / int(row["pixels"]), 6) if row["pixels"] else 0.0
+        row.setdefault("alpha_only_differing_pixels", 0)
 
     return {
         "schema": "pulp-visual-residual-diagnostic-v1",
@@ -146,6 +156,7 @@ def measure(
         "background_rgb": {"reference": list(ref_background), "candidate": list(cand_background)},
         "categories": categories,
         "mask": {"reference_foreground_pixels": len(ref_mask), "candidate_foreground_pixels": len(cand_mask)},
+        "classification_note": "heuristic regions; not causal renderer attribution",
         "diagnostic_only": True,
     }
 

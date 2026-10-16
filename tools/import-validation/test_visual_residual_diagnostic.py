@@ -27,9 +27,35 @@ class VisualResidualDiagnosticTests(unittest.TestCase):
         candidate = Image.new("RGBA", self.reference.size, (20, 20, 20, 255))
         ImageDraw.Draw(candidate).rectangle((7, 4, 18, 11), fill=(220, 220, 220, 255))
         report = measure(self.reference, candidate, root=(2, 2, 20, 12), edge_width=1)
-        edge = report["categories"]["edge_band_rasterization"]["differing_pixels"]
+        edge = report["categories"]["edge_band_residual"]["differing_pixels"]
         mask = report["categories"]["mask_or_placement_interior"]["differing_pixels"]
         self.assertGreater(edge + mask, 0)
+
+    def test_alpha_only_change_is_counted(self):
+        candidate = self.reference.copy()
+        candidate.putpixel((10, 7), (220, 220, 220, 100))
+        report = measure(self.reference, candidate)
+        self.assertEqual(report["categories"]["shared_foreground_interior"]["differing_pixels"], 1)
+        self.assertEqual(report["categories"]["shared_foreground_interior"]["alpha_only_differing_pixels"], 1)
+
+    def test_background_shift_is_reported_without_claiming_cause(self):
+        candidate = Image.new("RGBA", self.reference.size, (24, 24, 24, 255))
+        ImageDraw.Draw(candidate).rectangle((6, 4, 17, 11), fill=(220, 220, 220, 255))
+        report = measure(self.reference, candidate)
+        self.assertTrue(report["diagnostic_only"])
+        self.assertEqual(report["classification_note"], "heuristic regions; not causal renderer attribution")
+        self.assertGreater(report["categories"]["background_residual"]["differing_pixels"], 0)
+
+    def test_removed_shape_is_mask_disagreement(self):
+        candidate = Image.new("RGBA", self.reference.size, (20, 20, 20, 255))
+        ImageDraw.Draw(candidate).rectangle((6, 4, 11, 11), fill=(220, 220, 220, 255))
+        report = measure(self.reference, candidate)
+        self.assertGreater(report["categories"]["mask_or_placement_interior"]["differing_pixels"], 0)
+
+    def test_measurement_is_deterministic(self):
+        candidate = self.reference.copy()
+        ImageDraw.Draw(candidate).point((0, 0), fill=(255, 0, 0, 255))
+        self.assertEqual(measure(self.reference, candidate), measure(self.reference, candidate))
 
     def test_outside_root_is_separated(self):
         candidate = self.reference.copy()

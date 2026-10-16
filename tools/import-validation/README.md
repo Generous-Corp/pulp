@@ -19,7 +19,7 @@ submodule) for the full design.
 | `check_label_coverage.sh` | Structural label-coverage check — string-match expected reference labels against the imported IR. |
 | `reference-labels-spectr.txt` | Ground-truth list of UI labels that must appear in any successful Spectr import. |
 | `verify_rendered_panel.py` | Renders an **emitted `ui.js`** and scores it against the render its importer claimed to produce. Not Spectr-specific and not part of the roundtrip: the subject is the artifact that ships, so it catches a pipeline reporting 0.98 for an artifact that renders at 0.13. See [RENDERED-PANEL-GATE.md](RENDERED-PANEL-GATE.md). |
-| `visual_residual_diagnostic.py` | Diagnostic-only decomposition of two equal-sized PNGs into edge-band rasterization, shared-foreground color, mask/placement, and outside-root registration residuals. It does not alter a score or promotion decision. |
+| `visual_residual_diagnostic.py` | Diagnostic-only heuristic decomposition of two equal-sized PNGs into background, edge-band, shared-foreground color, mask/placement, and outside-root registration regions. It does not alter a score or promotion decision. |
 
 ## Visual residual diagnostics
 
@@ -34,11 +34,13 @@ python3 tools/import-validation/visual_residual_diagnostic.py \
   --json residual.json
 ```
 
-The report labels edge-band differences separately from shared-foreground
+The report labels edge-band residuals separately from shared-foreground
 interior color differences and mask/placement disagreement. Pixels outside the
-declared root are reported independently. These labels are evidence for the
-investigation only; they do not establish Chromium/Skia pixel parity and do
-not change the importer or its thresholds.
+declared root are reported independently. These are thresholded image
+heuristics, not causal attribution to a renderer setting. Use them only with
+an authenticated same-path receipt that binds the Chromium and native images to
+the same source, viewport, DPR, and settle policy. They do not establish
+Chromium/Skia pixel parity and do not change the importer or its thresholds.
 
 ## Semantic probes
 
