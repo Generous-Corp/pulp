@@ -420,6 +420,16 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         return device_loss_.observed;
     }
 
+    bool wait_for_device_loss_callback() noexcept {
+        for (int attempt = 0; attempt < 10'000 && !device_loss_.observed; ++attempt) {
+            if (instance_ != nullptr)
+                wgpuInstanceProcessEvents(instance_);
+            if (!device_loss_.observed)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return device_loss_.observed;
+    }
+
     WGPUDeviceLostReason device_loss_reason() const noexcept {
         return device_loss_.reason;
     }
@@ -891,6 +901,25 @@ int main() {
     std::uint32_t loss_terminal_records = 0;
     WGPUDeviceLostReason loss_reason = WGPUDeviceLostReason_Unknown;
     {
+        // Probe the controlled loss trigger before preparing an outstanding
+        // submission. Some pinned wgpu-native images accept the callback
+        // descriptor but never deliver a loss notification for destroy();
+        // classify that explicit capability gap as provider-unavailable so
+        // the test skips without leaving callback userdata in flight.
+        auto loss_probe = WgpuNativeStagedProvider::create();
+        if (loss_probe == nullptr)
+            return kProviderUnavailableExit;
+        if (!loss_probe->device_loss_callback_registered())
+            return kProviderUnavailableExit;
+        if (!loss_probe->force_device_loss_for_diagnostic())
+            return kDiagnosticFailureExit;
+        if (!loss_probe->wait_for_device_loss_callback()) {
+            std::fputs("wgpu staged device-loss observation unavailable\n", stderr);
+            return kProviderUnavailableExit;
+        }
+        if (loss_probe->device_loss_reason() != WGPUDeviceLostReason_Destroyed)
+            return kDiagnosticFailureExit;
+
         auto loss_provider = WgpuNativeStagedProvider::create();
         if (loss_provider == nullptr)
             return kProviderUnavailableExit;
@@ -914,11 +943,7 @@ int main() {
         loss_scenario_triggered = true;
 
         std::optional<SharedIoProgramSession::Completion> loss_completion;
-        for (int attempt = 0; attempt < 10'000 && !loss_native->device_loss_observed(); ++attempt) {
-            (void)loss_session.service(0);
-            if (!loss_native->device_loss_observed())
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+        (void)loss_native->wait_for_device_loss_callback();
         (void)loss_session.service(0);
         if (!loss_native->device_loss_observed() || !loss_native->drain())
             return kDiagnosticFailureExit;

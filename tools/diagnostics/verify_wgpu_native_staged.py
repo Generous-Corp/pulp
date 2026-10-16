@@ -14,6 +14,16 @@ from pathlib import Path
 
 
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+PROVIDER_UNAVAILABLE_EXIT = 77
+
+
+def diagnostic_exit_disposition(returncode: int) -> str:
+    """Classify the native diagnostic's typed unavailable exit separately."""
+    if returncode == 0:
+        return "passed"
+    if returncode == PROVIDER_UNAVAILABLE_EXIT:
+        return "provider_unavailable"
+    return "diagnostic_failure"
 
 
 def digest(path: Path) -> str:
@@ -111,9 +121,9 @@ def verify(args: argparse.Namespace) -> dict:
     executable_before = digest(executable)
     run = subprocess.run([str(executable)], capture_output=True, text=True,
                          encoding="utf-8", timeout=30, check=False)
-    if run.returncode == 77:
+    if diagnostic_exit_disposition(run.returncode) == "provider_unavailable":
         raise RuntimeError("provider_unavailable")
-    if run.returncode != 0:
+    if diagnostic_exit_disposition(run.returncode) != "passed":
         raise ValueError(f"diagnostic_failed_{run.returncode}: {run.stderr.strip()}")
     observed = parse_output(run.stdout)
     if Path(observed["loaded_runtime_path"]).resolve(strict=True) != linked_runtime:
