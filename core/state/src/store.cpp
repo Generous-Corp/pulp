@@ -536,6 +536,8 @@ StateStore::capture_feedback_baseline(ParamID id) const noexcept {
 
 ConditionalParameterApplyResult
 StateStore::set_value_rt_if_baseline(const ParameterFeedbackBaseline& baseline, float value) {
+    if (!baseline.valid())
+        return {ConditionalParameterApplyStatus::InvalidParameter, 0};
     const auto it = id_to_index_.find(baseline.id());
     if (it == id_to_index_.end())
         return {ConditionalParameterApplyStatus::InvalidParameter, 0};
@@ -1195,14 +1197,22 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         payload_size != header_size + static_cast<std::size_t>(count) * param_size)
         return false;
 
-    // Refuse the whole restore before writing when any addressed slot has
-    // exhausted its bounded packed revision. This keeps restore fail-closed
-    // rather than partially applying a payload and falsely advancing its edge.
+    // Count every payload occurrence per addressed slot before writing. A
+    // duplicate ID consumes one packed revision per occurrence, so checking
+    // only the first occurrence would allow a later write to exhaust and be
+    // silently ignored while deserialize() reports success.
+    std::unordered_map<ParamID, std::uint32_t> payload_occurrences;
+    payload_occurrences.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
         const auto offset = header_size + static_cast<std::size_t>(i) * param_size;
         const ParamID id = choc::memory::readLittleEndian<uint32_t>(data.data() + offset);
         const auto it = id_to_index_.find(id);
-        if (it != id_to_index_.end() && !values_[it->second].revision_available())
+        if (it != id_to_index_.end())
+            ++payload_occurrences[id];
+    }
+    for (const auto& [id, occurrences] : payload_occurrences) {
+        const auto it = id_to_index_.find(id);
+        if (it != id_to_index_.end() && !values_[it->second].revisions_available(occurrences))
             return false;
     }
 

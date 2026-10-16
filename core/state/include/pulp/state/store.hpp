@@ -59,6 +59,10 @@ class ParameterFeedbackBaseline {
   public:
     ParameterFeedbackBaseline() = default;
 
+    bool valid() const noexcept {
+        return valid_;
+    }
+
     ParamID id() const noexcept {
         return id_;
     }
@@ -69,10 +73,11 @@ class ParameterFeedbackBaseline {
   private:
     friend class StateStore;
     ParameterFeedbackBaseline(ParamID id, std::uint64_t packed_identity)
-        : id_(id), packed_identity_(packed_identity) {}
+        : id_(id), packed_identity_(packed_identity), valid_(true) {}
 
     ParamID id_ = 0;
     std::uint64_t packed_identity_ = 0;
+    bool valid_ = false;
 };
 
 enum class ConditionalParameterApplyStatus {

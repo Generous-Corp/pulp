@@ -629,8 +629,12 @@ class ParamValue {
     }
 
     bool revision_available() const noexcept {
-        return revision_from_versioned(versioned_value()) !=
-               std::numeric_limits<std::uint32_t>::max();
+        return revisions_available(1);
+    }
+
+    bool revisions_available(std::uint32_t writes) const noexcept {
+        const auto revision = revision_from_versioned(versioned_value());
+        return revision <= std::numeric_limits<std::uint32_t>::max() - writes;
     }
 
     /// Compatibility name retained for existing callers. The argument is
