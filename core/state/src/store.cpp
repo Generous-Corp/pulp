@@ -547,8 +547,7 @@ StateStore::set_value_rt_if_baseline(const ParameterFeedbackBaseline& baseline, 
     auto expected = baseline.packed_identity();
     active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
     const auto generation = advance_state_generation();
-    const bool applied =
-        values_[index].compare_exchange_versioned(expected, generation, clamped, generation);
+    const bool applied = values_[index].compare_exchange_packed(expected, clamped, generation);
     active_state_writers_.fetch_sub(1, std::memory_order_release);
     if (!applied)
         return {ConditionalParameterApplyStatus::Conflict, values_[index].versioned_value()};
@@ -696,8 +695,8 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
         acquire_gesture(id);
         gesture_acquired = true;
         if (state_generation() == reserved) {
-            value_written = values_[index].compare_exchange_versioned(expected_value, reserved,
-                                                                      desired, reserved);
+            value_written =
+                values_[index].compare_exchange_packed(expected_value, desired, reserved);
             if (value_written && registry_) registry_->notify(id, desired);
         }
         release_gesture(id);
@@ -733,8 +732,8 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
             rollback_observed, rollback_generation, std::memory_order_acq_rel,
             std::memory_order_acquire);
         if (rollback_reserved) {
-            rolled_back = values_[index].compare_exchange_versioned(
-                rollback_expected, rollback_generation, previous, rollback_generation);
+            rolled_back = values_[index].compare_exchange_packed(rollback_expected, previous,
+                                                                 rollback_generation);
         }
         if (rolled_back) {
             PULP_TRY {

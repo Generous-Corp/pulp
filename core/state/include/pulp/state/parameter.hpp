@@ -648,7 +648,21 @@ class ParamValue {
     bool compare_exchange_versioned(VersionedValue& expected,
                                     std::uint64_t expected_generation,
                                     float desired, std::uint64_t generation) {
-        (void)expected_generation;
+        if (!committed_generation_.compare_exchange_strong(
+                expected_generation, generation, std::memory_order_relaxed,
+                std::memory_order_relaxed))
+            return false;
+        return value_.compare_exchange_strong(
+            expected, pack(desired, static_cast<std::uint32_t>(generation)),
+            std::memory_order_relaxed, std::memory_order_relaxed);
+    }
+
+    /// Conditional feedback publication boundary. Unlike the legacy
+    /// generation API above, this compares only the exact packed identity and
+    /// advances its per-parameter revision; the StateStore generation is
+    /// diagnostic metadata and cannot participate in a split check/write.
+    bool compare_exchange_packed(VersionedValue& expected, float desired,
+                                 std::uint64_t generation) {
         const auto current_revision = unpack_generation(expected);
         if (current_revision == std::numeric_limits<std::uint32_t>::max())
             return false;
