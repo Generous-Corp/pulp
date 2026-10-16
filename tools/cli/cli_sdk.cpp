@@ -416,19 +416,9 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
     // Use the same lease/QoS/watchdog/lock policy so a checkout-triggered SDK
     // materialization cannot oversubscribe the host or race another build in
     // the same directory.
-    auto lease = TartciAgentBuildLease::acquire({repo_root, "sdk-checkout", false});
-    if (!lease.ok()) {
-        std::cerr << "Error: could not acquire build capacity: " << lease.error() << "\n";
-        return {};
-    }
-    ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
-    std::string install_cmd = "cmake --build " + shell_quote(build_dir.string()) +
-                              " --target install --parallel " + std::to_string(lease.jobs());
-    install_cmd = apply_build_dir_lock(
-        apply_agent_build_watchdog(apply_agent_build_qos(install_cmd, lease.qos(), lease.floor()),
-                                   lease.jobs(), lease.active()),
-        repo_root, build_dir);
-    if (run_with_spinner(install_cmd, "Installing local SDK") != 0) {
+    if (run_governed_cmake_build(repo_root, build_dir, {"--target", "install"}, "sdk-checkout",
+                                 GovernedBuildOutput::Spinner, "Installing local SDK",
+                                 "Error: could not acquire build capacity: ") != 0) {
         return {};
     }
 
