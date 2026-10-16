@@ -1075,6 +1075,12 @@
       "timeout": 180.0
     },
     {
+      "name": "shipyard-merge-gate-evidence-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_shipyard_merge_gate_evidence.py"
+      ]
+    },
+    {
       "name": "visual-python-deps-selftest",
       "argv": [
         "{repo}/tools/scripts/test_check_visual_python_deps.py"

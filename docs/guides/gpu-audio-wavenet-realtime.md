@@ -5,21 +5,30 @@ shared-memory WaveNet session through `GpuAudioTransport`. It owns model metadat
 dilation arrays and weights copied at construction. There are no public Dawn,
 Metal, provider or queue handles.
 
-An application derives from the node to implement `prime_fallback()` and
-`process_cpu_fallback()`. These must advance the exact CPU model every callback
-and return the output delayed by `lead_blocks * block_size` samples. Set
-`miss_policy = CpuFallback` and `supports_cpu_fallback = true` only when both are
-implemented. The default is silence. A transport miss never executes a worker CPU
-model: the callback consumes its already prepared substitute. This removes a
-second CPU evaluation, but retains the full CPU shadow and does not establish
-CPU-offload savings.
+An application derives from the node to implement `prime_fallback()`,
+`process_cpu_fallback()`, and `cpu_fallback_prepared()`. The witness must return
+true only after the exact CPU model has been allocated and warmed during the
+host-thread prepare step. The fallback methods must advance that model every
+callback and return the output delayed by `lead_blocks * block_size` samples.
+If a derived node overrides `prepare()`, it must allocate and warm this CPU
+shadow before delegating to `GpuWaveNetRealtimeNode::prepare()`; the base
+implementation samples `cpu_fallback_prepared()` during its preparation and
+rejects the node if the witness is still false.
+Set `miss_policy = CpuFallback` and `supports_cpu_fallback = true` only when
+the witness and both methods are implemented. The default is silence. A
+transport miss never executes a worker CPU model: the callback consumes its
+already prepared substitute. This removes a second CPU evaluation, but retains
+the full CPU shadow and does not establish CPU-offload savings.
 
 ## Lifecycle and thread contract
 
 1. Construct and prepare while callback and worker are stopped. The config owns
-   copies of all supplied spans. One existing `GpuWaveNetSession` is created for
-   each channel. Explicit `prewarm_blocks` runs that many zero blocks before
-   streaming; the application's CPU shadow must be warmed identically.
+   copies of all supplied spans. A derived `prepare()` must finish allocation
+   and warmup of its CPU shadow, including the configured zero-block warmup,
+   before calling the base implementation. The base then creates one existing
+   `GpuWaveNetSession` for each channel, samples the witness, and rejects an
+   unprepared fallback. Its provider-side `prewarm_blocks` must match the
+   shadow's warmup so both histories start at the same position.
 2. Prepare `GpuAudioTransport` with this prepared node. Its ring capacity must
    satisfy the transport's ordinary lead requirement. Failed preparation is a
    capability failure; this node cannot silently use the legacy sample FIFO.

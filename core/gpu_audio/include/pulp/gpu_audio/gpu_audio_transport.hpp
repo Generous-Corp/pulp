@@ -107,10 +107,13 @@ class GpuAudioTransport {
     /// node's descriptor supplies channels/block-size/latency; `config` only
     /// carries transport knobs. Returns false if the descriptor is invalid
     /// (zero channels/block, input!=output channels), ring_blocks is too small
-    /// for the latency, or the miss policy is CpuFallback without
-    /// supports_cpu_fallback. Callback and external pump callers must be stopped
-    /// before preparation; an already-prepared shared node retains its sequence
-    /// and fallback history across transport preparation.
+    /// for the latency, or the miss policy is CpuFallback without both
+    /// `supports_cpu_fallback` and a true `cpu_fallback_prepared()` witness.
+    /// The witness must describe the allocation-free, latency-aligned fallback
+    /// built by the node's host-thread preparation. Callback and external pump
+    /// callers must be stopped before preparation; an already-prepared shared
+    /// node retains its sequence and fallback history across transport
+    /// preparation.
     bool prepare(GpuAudioNode* node, const Config& config);
     void release() noexcept;
 

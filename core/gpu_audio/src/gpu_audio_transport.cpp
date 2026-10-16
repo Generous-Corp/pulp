@@ -48,8 +48,10 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     }
     if (desc.block_size == 0 || desc.latency_blocks == 0)
         return false;
-    // CpuFallback miss policy requires a real fallback.
-    if (desc.miss_policy == MissPolicy::CpuFallback && !desc.supports_cpu_fallback) {
+    // CpuFallback requires both a declaration and a host-thread witness that
+    // prepare() built the allocation-free, latency-aligned fallback state.
+    if (desc.miss_policy == MissPolicy::CpuFallback &&
+        (!desc.supports_cpu_fallback || !node->cpu_fallback_prepared())) {
         return false;
     }
     // Need the primed latency plus one in-flight block and one free slot.

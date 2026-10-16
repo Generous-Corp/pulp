@@ -31,7 +31,8 @@ enum class MissPolicy {
     PassthroughDry,
 
     /// Run the node's CPU fallback for the missed block. Requires
-    /// `supports_cpu_fallback` AND a fallback that is kept continuously fed and
+    /// `supports_cpu_fallback`, a true `cpu_fallback_prepared()` witness after
+    /// host preparation, and a fallback that is kept continuously fed and
     /// latency-aligned via `prime_fallback()` — otherwise the substitute is a
     /// stale block with a torn history.
     CpuFallback,
@@ -67,7 +68,8 @@ struct GpuAudioNodeDescriptor {
 ///   allocate scratch prepared in prepare(), and block on readback. It must
 ///   NOT be called from the audio callback.
 /// - process_cpu_fallback(): real-time-safe; used by the transport for the
-///   CpuFallback miss policy. Required if descriptor().supports_cpu_fallback.
+///   CpuFallback miss policy. Required when the descriptor opts into that
+///   policy and `cpu_fallback_prepared()` witnesses a prepared fallback.
 class GpuAudioNode {
 public:
     virtual ~GpuAudioNode() = default;
@@ -76,6 +78,16 @@ public:
 
     /// Non-RT. Allocate/compile/upload static data here.
     virtual bool prepare() = 0;
+
+    /// Host-thread witness that the realtime CPU fallback is already built
+    /// before prepare() returns. A descriptor's `supports_cpu_fallback` bit is
+    /// only a declaration; the transport admits `MissPolicy::CpuFallback`
+    /// after both the declaration and this prepared witness are true. Nodes
+    /// with no verified fallback remain fail-closed and must use silence on a
+    /// miss.
+    virtual bool cpu_fallback_prepared() const noexcept {
+        return false;
+    }
 
     /// Non-RT worker context. Process exactly one block (n == block_size).
     virtual void process_block(const audio::BufferView<const float>& input,
