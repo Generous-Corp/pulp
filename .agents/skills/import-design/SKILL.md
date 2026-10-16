@@ -5520,6 +5520,13 @@ establish capture-time identity. A matching digest proves consistency with the
 capture envelope, not signing, independent authentication, background-compositing
 correctness, or Chromium/Skia pixel parity.
 
+The canonical repeat-run envelope digest excludes only
+`documents[*].snapshot_sha256` at the root of a `pulp-browser-capture-v1`
+envelope. Raw CDP frame IDs can change those exact snapshot bytes between runs.
+Each run still retains and verifies its raw snapshot binding independently;
+canonical envelope equality does not prove semantic DOM determinism. Same-named
+fields in other schemas or nested objects remain covered by the canonical hash.
+
 **The browser capture is deliberately LARGER than the design, so it must be
 registered before it is scored.** The panel's root carries its own padding and
 `capture.mjs` grows the extent so drop shadows and absolutely positioned

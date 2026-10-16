@@ -900,6 +900,54 @@ class DifferentialLabTests(unittest.TestCase):
                 LAB.canonical_json_sha256(first),
                 LAB.canonical_json_sha256(second))
 
+    def test_canonical_capture_digest_excludes_only_raw_document_bindings(self) -> None:
+        first = {"schema": "pulp-browser-capture-v1", "documents": [
+            {"snapshot_asset": "dom-snapshot.json", "snapshot_sha256": "a" * 64}]}
+        raw = json.dumps(first).encode()
+        first["documents"][0]["snapshot_sha256"] = "b" * 64
+        changed = json.dumps(first).encode()
+        self.assertNotEqual(raw, changed)
+        self.assertNotEqual(LAB.hashlib.sha256(raw).hexdigest(),
+                            LAB.hashlib.sha256(changed).hexdigest())
+        self.assertEqual(LAB.canonical_json_sha256(raw), LAB.canonical_json_sha256(changed))
+        first["documents"][0]["snapshot_asset"] = "changed.json"
+        self.assertNotEqual(LAB.canonical_json_sha256(raw),
+                            LAB.canonical_json_sha256(json.dumps(first).encode()))
+
+    def test_canonical_digest_preserves_same_named_fields_outside_capture_document(self) -> None:
+        for document in (
+            {"documents": [{"snapshot_sha256": "a" * 64}]},
+            {"schema": "different", "documents": [{"snapshot_sha256": "a" * 64}]},
+            {"schema": "pulp-browser-capture-v1", "snapshot_sha256": "a" * 64},
+            {"schema": "pulp-browser-capture-v1", "nested": {
+                "documents": [{"snapshot_sha256": "a" * 64}]}},
+            {"schema": "pulp-browser-capture-v1", "documents": [{
+                "nested": {"snapshot_sha256": "a" * 64}}]},
+        ):
+            with self.subTest(document=document):
+                raw = json.dumps(document).encode()
+                changed = raw.replace(("a" * 64).encode(), ("b" * 64).encode())
+                self.assertNotEqual(LAB.canonical_json_sha256(raw),
+                                    LAB.canonical_json_sha256(changed))
+
+    def test_canonical_equivalence_does_not_bypass_snapshot_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            snapshot.write_bytes(b'{"documents":[]}\n')
+            capture = {"schema": "pulp-browser-capture-v1", "documents": [{
+                "snapshot_asset": "dom-snapshot.json",
+                "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+            raw = json.dumps(capture).encode()
+            binding, verified = LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+            self.assertEqual(verified, snapshot.read_bytes())
+            self.assertEqual(binding["status"], "producer-bound")
+            capture["documents"][0]["snapshot_sha256"] = "0" * 64
+            self.assertEqual(LAB.canonical_json_sha256(raw),
+                             LAB.canonical_json_sha256(json.dumps(capture).encode()))
+            with self.assertRaises(LAB.LabError):
+                LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+
     def test_intrinsic_sizing_gap_is_emitted(self) -> None:
         recognition = LAB.source_recognition(
             "<!doctype html><html><body><div>Panel</div></body></html>")

@@ -213,28 +213,37 @@ def interaction_plan_sha256(path: Path) -> str:
 
 
 def canonical_json_sha256(source: Path | bytes) -> str:
-    """Hash JSON evidence after removing documented run-clock fields.
+    """Hash JSON evidence after removing documented per-run envelope fields.
 
     Capture and IR receipts retain elapsed/import timestamps for diagnostics.
     Those fields must not make an otherwise identical campaign appear
-    nondeterministic, so the integrity digest covers the semantic document
-    while the raw file hash remains available for chain-of-custody evidence.
+    nondeterministic. Browser-capture envelopes also omit their exact snapshot
+    binding here: CDP frame IDs vary per capture. Each raw binding is verified
+    separately; this digest does not establish semantic DOM determinism.
     """
     volatile_keys = {"elapsed_ms", "imported_at"}
+    document = json.loads(source if isinstance(source, bytes) else source.read_bytes())
+    capture_envelope = isinstance(document, dict) and document.get("schema") == "pulp-browser-capture-v1"
 
-    def scrub(value: Any) -> Any:
+    def scrub(value: Any, path: tuple[str | int, ...] = ()) -> Any:
         if isinstance(value, dict):
+            # Raw DOM bytes contain capture-local CDP frame IDs. This digest
+            # was historically envelope/output determinism, not semantic DOM
+            # equivalence. Retain and verify raw snapshot bindings separately.
+            document_entry = (capture_envelope and len(path) == 2
+                              and path[0] == "documents" and isinstance(path[1], int))
             return {
-                key: scrub(item)
+                key: scrub(item, (*path, key))
                 for key, item in value.items()
                 if key not in volatile_keys
+                and not (document_entry and key == "snapshot_sha256")
             }
         if isinstance(value, list):
-            return [scrub(item) for item in value]
+            return [scrub(item, (*path, index)) for index, item in enumerate(value)]
         return value
 
     canonical = json.dumps(
-        scrub(json.loads(source if isinstance(source, bytes) else source.read_bytes())),
+        scrub(document),
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
