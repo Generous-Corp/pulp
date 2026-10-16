@@ -41,6 +41,8 @@ heuristics, not causal attribution to a renderer setting. Use them only with
 an authenticated same-path receipt that binds the Chromium and native images to
 the same source, viewport, DPR, and settle policy. They do not establish
 Chromium/Skia pixel parity and do not change the importer or its thresholds.
+The tool's difference threshold is a mean absolute RGBA-channel delta; it is
+not the max-channel threshold used by the canonical whole-frame profile.
 
 For the canonical whole-frame residual profile, use
 `diff_against_reference.py`; this companion exists only when a caller has a

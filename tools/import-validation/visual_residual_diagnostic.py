@@ -142,7 +142,7 @@ def measure(
         if differs:
             row["differing_pixels"] += 1
             error_sums[category] += delta
-        if alpha_only:
+        if alpha_only and differs:
             row.setdefault("alpha_only_differing_pixels", 0)
             row["alpha_only_differing_pixels"] += 1
 
@@ -156,7 +156,9 @@ def measure(
         "schema": "pulp-visual-residual-diagnostic-v1",
         "image": {"width": ref.width, "height": ref.height},
         "root_bounds": None if root is None else {"x": root[0], "y": root[1], "width": root[2], "height": root[3]},
-        "parameters": {"edge_width": edge_width, "foreground_threshold": foreground_threshold, "difference_threshold": difference_threshold},
+        "parameters": {"edge_width": edge_width, "foreground_threshold": foreground_threshold,
+                        "difference_threshold": difference_threshold,
+                        "difference_threshold_semantics": "mean absolute RGBA channel delta"},
         "background_rgb": {"reference": list(ref_background), "candidate": list(cand_background)},
         "categories": categories,
         "mask": {"reference_foreground_pixels": len(ref_mask), "candidate_foreground_pixels": len(cand_mask)},
