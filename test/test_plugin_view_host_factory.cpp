@@ -508,7 +508,7 @@ TEST_CASE("Windows attached editor requires detach before changing parent",
         REQUIRE(original_surface.state == PluginViewHost::GpuSurfaceState::ready);
         REQUIRE(original_surface.surface != nullptr);
     } else {
-        WARN("Dawn GPU unavailable: repeated-attachment GPU lifetime checks skipped");
+        SKIP("Dawn GPU unavailable: repeated-attachment GPU lifetime checks unavailable");
     }
     int surface_notifications = 0;
     auto subscription = host->observe_gpu_surface(
