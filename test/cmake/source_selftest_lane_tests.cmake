@@ -42,6 +42,9 @@ set_tests_properties(evidence-archive-selftest PROPERTIES TIMEOUT 60)
 add_test(NAME toolchain-test_generate-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/toolchain/test_generate.py")
+add_test(NAME toolchain-mise_golden_layer-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_mise_golden_layer.py")
 add_test(NAME toolchain-mise_profile-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/toolchain/test_mise_profile.py")
