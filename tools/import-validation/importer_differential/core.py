@@ -67,6 +67,8 @@ TYPOGRAPHY_MAP = {
 # present and equal in the native style.
 CSS_INITIAL_EQUIVALENTS = {
     "font-style": {"normal"},
+    # "left" equals the initial "start" only for left-to-right content; an RTL
+    # fixture would need "right" here instead.
     "text-align": {"start", "left"},
     "letter-spacing": {"normal", "0px"},
     "line-height": {"normal"},
@@ -469,6 +471,45 @@ def comparable_native_nodes(native: list[NativeNode]) -> tuple[list[NativeNode],
         else:
             comparable.append(node)
     return comparable, ignored
+
+
+def structural_comparison(
+    browser_flat: list[BrowserNode], native_flat: list[NativeNode]
+) -> dict[str, Any]:
+    """Join browser elements to comparable native nodes and score the join.
+
+    Matching runs against comparable native nodes only. A representation node
+    (a text child, the browser root, an html/body wrapper) is excluded from the
+    precision denominator, so it must not be able to supply a match either:
+    a browser element whose only counterpart is a bare text node was lost in
+    lowering and counts as missing. Precision and recall therefore share one
+    population and neither can exceed 1.
+    """
+    comparable_native, ignored_native = comparable_native_nodes(native_flat)
+    matches, missing, extra = match_nodes(browser_flat, comparable_native)
+    matched_parent_by_browser = {
+        browser.index: native.anchor for browser, native, _ in matches}
+    parentage_errors = []
+    for browser, native, _ in matches:
+        expected_parent = matched_parent_by_browser.get(browser.parent)
+        if expected_parent is not None and native.parent_anchor != expected_parent:
+            parentage_errors.append({
+                "browser_node": browser.index,
+                "native_anchor": native.anchor,
+                "expected_native_parent": expected_parent,
+                "actual_native_parent": native.parent_anchor,
+            })
+    structurally_valid_matches = max(0, len(matches) - len(parentage_errors))
+    recall = structurally_valid_matches / max(1, len(browser_flat))
+    precision = structurally_valid_matches / max(1, len(comparable_native))
+    score = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return {
+        "matches": matches, "missing": missing, "extra": extra,
+        "comparable_native": comparable_native, "ignored_native": ignored_native,
+        "parentage_errors": parentage_errors,
+        "structurally_valid_matches": structurally_valid_matches,
+        "precision": precision, "recall": recall, "score": score,
+    }
 
 
 def relative_error(reference: float, candidate: float) -> float:
@@ -949,30 +990,14 @@ def compare_one(
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
     browser_flat = browser_nodes(browser_snapshot)
     native_flat = native_nodes(native_doc, native_layout_doc)
-    matches, missing, extra = match_nodes(browser_flat, native_flat)
-    comparable_native, ignored_native = comparable_native_nodes(native_flat)
-    comparable_native_anchors = {node.anchor for node in comparable_native}
-    extra = [node for node in extra if node.anchor in comparable_native_anchors]
-    matched_parent_by_browser = {
-        browser.index: native.anchor for browser, native, _ in matches}
-    parentage_errors = []
-    for browser, native, _ in matches:
-        expected_parent = matched_parent_by_browser.get(browser.parent)
-        if expected_parent is not None and native.parent_anchor != expected_parent:
-            parentage_errors.append({
-                "browser_node": browser.index,
-                "native_anchor": native.anchor,
-                "expected_native_parent": expected_parent,
-                "actual_native_parent": native.parent_anchor,
-            })
-    denominator = max(1, len(browser_flat))
-    precision_denominator = max(1, len(comparable_native))
-    structurally_valid_matches = max(0, len(matches) - len(parentage_errors))
-    recall = structurally_valid_matches / denominator
-    precision = structurally_valid_matches / precision_denominator
-    structural_score = (
-        2 * precision * recall / (precision + recall)
-        if precision + recall else 0.0)
+    comparison = structural_comparison(browser_flat, native_flat)
+    matches = comparison["matches"]
+    missing = comparison["missing"]
+    extra = comparison["extra"]
+    ignored_native = comparison["ignored_native"]
+    parentage_errors = comparison["parentage_errors"]
+    structurally_valid_matches = comparison["structurally_valid_matches"]
+    structural_score = comparison["score"]
     structural = {
         "score": round(structural_score, 6),
         "browser_node_count": len(browser_flat),

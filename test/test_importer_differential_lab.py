@@ -165,6 +165,44 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(len(missing), 1)
         self.assertEqual(len(extra), 1)
 
+    @staticmethod
+    def _panel_with_gain_span():
+        browser = [
+            LAB.BrowserNode(0, "div", -1, "", {"id": "panel"}, (0, 0, 100, 40), {}, 10),
+            LAB.BrowserNode(1, "span", 0, "Gain", {}, (10, 10, 40, 20), {}, 11),
+        ]
+        return browser
+
+    def test_an_element_lowered_to_bare_text_is_missing_not_matched(self) -> None:
+        # The native lost the span: only a text child carries its text (and
+        # its backend id). That text node is a representation node excluded
+        # from the precision denominator, so it must not count as a match.
+        browser = self._panel_with_gain_span()
+        native = [
+            LAB.NativeNode("panel", "frame", "div", "", None, {}, (0, 0, 100, 40), 10),
+            LAB.NativeNode("gain-text", "text", "#text", "Gain", "panel", {},
+                           (10, 10, 40, 20), 11),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        self.assertLessEqual(result["precision"], 1.0)
+        self.assertEqual([node.tag for node in result["missing"]], ["span"])
+        self.assertEqual(result["structurally_valid_matches"], 1)
+        self.assertAlmostEqual(result["recall"], 0.5)
+        self.assertLess(result["score"], LAB.PROMOTION_THRESHOLDS["structural"])
+
+    def test_control_a_faithful_lowering_scores_one(self) -> None:
+        browser = self._panel_with_gain_span()
+        native = [
+            LAB.NativeNode("panel", "frame", "div", "", None, {}, (0, 0, 100, 40), 10),
+            LAB.NativeNode("gain", "frame", "span", "Gain", "panel", {}, (10, 10, 40, 20), 11),
+            LAB.NativeNode("gain-text", "text", "#text", "Gain", "gain", {}, (10, 10, 40, 20)),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual(result["missing"], [])
+        self.assertEqual(result["structurally_valid_matches"], 2)
+        self.assertAlmostEqual(result["precision"], 1.0)
+        self.assertAlmostEqual(result["score"], 1.0)
+
     def test_representation_nodes_are_not_structural_element_extras(self) -> None:
         native = [
             LAB.NativeNode("browser:root", "frame", "Browser-evaluated HTML", "", None, {}, None),
@@ -381,6 +419,64 @@ class DifferentialLabTests(unittest.TestCase):
                     fixture_metadata={"viewport": {"width": 1, "height": 1}})
             self.assertEqual(report["integrity"]["source_sha256"], source_sha256)
             self.assertTrue(report["integrity"]["source_bound"])
+
+    @requires_pillow
+    def test_compare_one_scores_structure_through_the_shared_comparison(self) -> None:
+        """compare_one reports the score structural_comparison computes."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "panel.html"
+            source.write_text("<div></div>", encoding="utf-8")
+            evidence = root / "evidence"
+            evidence.mkdir()
+            source_sha256 = LAB.sha256_file(source)
+            provenance = {
+                "source": {"sha256": source_sha256},
+                "viewport": {"requested": {"width": 1, "height": 1},
+                             "resolved": {"width": 1, "height": 1}},
+                "browser": {"product": "Chrome", "version": "140.0"},
+            }
+            capture = {
+                "provenance": provenance,
+                "reference": {"logical_width": 1, "logical_height": 1,
+                               "device_scale_factor": 1},
+            }
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
+            Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
+            (evidence / "dom-snapshot.json").write_text(
+                json.dumps({"documents": []}), encoding="utf-8")
+
+            def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                if "--render" in argv:
+                    Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(
+                        Path(argv[argv.index("--render") + 1]))
+                    Path(argv[argv.index("--layout") + 1]).write_text(
+                        json.dumps({"views": []}), encoding="utf-8")
+                    Path(argv[argv.index("--render-receipt") + 1]).write_text(
+                        json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
+                                    "backend_requested": "skia", "backend_used": "skia",
+                                    "ok": True}), encoding="utf-8")
+                else:
+                    output = Path(argv[argv.index("--output") + 1])
+                    output.write_text(json.dumps({"root": {"type": "frame",
+                                                              "children": []}}),
+                                      encoding="utf-8")
+                return LAB.CommandResult(argv, 1, 0, "", "")
+
+            sentinel = {
+                "matches": [], "missing": [], "extra": [], "comparable_native": [],
+                "ignored_native": [], "parentage_errors": [],
+                "structurally_valid_matches": 0, "precision": 0.25, "recall": 0.25,
+                "score": 0.123456,
+            }
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    patch.object(LAB, "structural_comparison", return_value=sentinel):
+                report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1}})
+            self.assertEqual(report["comparison"]["structural"]["score"], 0.123456)
 
     def test_canonical_json_digest_ignores_run_clock_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
