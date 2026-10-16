@@ -20,6 +20,8 @@ from vellum_closure import (
     policy_target_forbidden,
     receipt_path_violations,
     symbol_closure,
+    unit_header_manifests,
+    unit_public_headers,
 )
 
 
@@ -1365,6 +1367,68 @@ class AllowlistGateTests(unittest.TestCase):
                 source_root=None, build_dir=None,
             )
             self.assertEqual(cmd_gate(args), 1)
+
+
+class UnitHeaderManifestTests(unittest.TestCase):
+    """A unit's public surface is its reviewed PULP_UNIT_HEADERS list."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.source = Path(self.tmp.name).resolve()
+        for rel in ("core/rt/include/pulp/rt/used.hpp", "core/rt/include/pulp/rt/result.hpp",
+                    "core/rt/include/pulp/rt/deep.hpp", "core/view/include/pulp/view/kept.hpp",
+                    "core/view/include/pulp/view/core.hpp"):
+            path = self.source / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("#pragma once\n", encoding="utf-8")
+        self.targets = {
+            "a": {"name": "pulp-rt", "paths": {"source": "core/rt"}},
+            "b": {"name": "pulp-view-core", "paths": {"source": "core/view"}},
+            "c": {"name": "pulp-view-tooling", "paths": {"source": "core/view"}},
+        }
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def manifests(self, rt, view=()):
+        return {"pulp-rt": (self.source / "core/rt", list(rt)),
+                "pulp-view-core": (self.source / "core/view", list(view))}
+
+    def test_listed_headers_join_the_closure_even_when_no_source_includes_them(self):
+        files, declared = unit_public_headers(self.targets, ["pulp-rt"], self.source, self.manifests(
+            ["include/pulp/rt/used.hpp", "include/pulp/rt/result.hpp", "include/pulp/rt/deep.hpp"]))
+        self.assertIn(self.source / "core/rt/include/pulp/rt/result.hpp", files)
+        self.assertEqual(declared["pulp-rt"], ["core/rt/include/pulp/rt/deep.hpp", "core/rt/include/pulp/rt/result.hpp",
+                                               "core/rt/include/pulp/rt/used.hpp"])
+
+    def test_an_unlisted_header_in_a_units_own_directory_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, "core/rt/include/pulp/rt/result.hpp is not in any PULP_UNIT_HEADERS"):
+            unit_public_headers(self.targets, ["pulp-rt"], self.source,
+                                self.manifests(["include/pulp/rt/used.hpp", "include/pulp/rt/deep.hpp"]))
+
+    def test_a_listed_header_that_does_not_exist_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, "lists include/pulp/rt/gone.hpp, which does not exist"):
+            unit_public_headers(self.targets, ["pulp-rt"], self.source, self.manifests(
+                ["include/pulp/rt/used.hpp", "include/pulp/rt/result.hpp", "include/pulp/rt/deep.hpp",
+                 "include/pulp/rt/gone.hpp"]))
+
+    def test_a_shared_directory_ships_only_the_list(self):
+        # core/view also holds a Pulp-kept target, so its other headers stay out.
+        files, _ = unit_public_headers(self.targets, ["pulp-view-core"], self.source,
+                                       self.manifests([], ["include/pulp/view/core.hpp"]))
+        self.assertEqual(files, {self.source / "core/view/include/pulp/view/core.hpp"})
+
+    def test_configure_written_manifest_is_required_and_parsed(self):
+        build = self.source / "build"
+        build.mkdir()
+        with self.assertRaisesRegex(SystemExit, "is missing"):
+            unit_header_manifests(build)
+        (build / "vellum-unit-headers.txt").write_text(
+            f"pulp-rt\t{self.source}/core/rt\tinclude/pulp/rt/used.hpp;include/pulp/rt/result.hpp\n"
+            f"pulp-gpu\t{self.source}/core/gpu\t\n", encoding="utf-8")
+        parsed = unit_header_manifests(build)
+        self.assertEqual(parsed["pulp-rt"][1], ["include/pulp/rt/used.hpp", "include/pulp/rt/result.hpp"])
+        self.assertEqual(parsed["pulp-gpu"][1], [])
 
 
 if __name__ == "__main__":
