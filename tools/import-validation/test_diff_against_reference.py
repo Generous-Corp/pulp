@@ -202,6 +202,23 @@ class HelperScoringTests(unittest.TestCase):
         self.assertEqual(result["corners"]["top_left"]["candidate"], [99, 88, 77])
         self.assertEqual(result["outside_root"]["differing_pixels"], 2)
 
+    def test_viewport_background_diagnostic_excludes_inside_root_pixels(self) -> None:
+        reference = FakeViewportImage([(10, 20, 30, 255)] * 16, (4, 4))
+        candidate_pixels = [(10, 20, 30, 255)] * 16
+        # (1, 1) is inside the declared root (1, 1, 2, 2).  This planted
+        # negative proves the probe does not classify every mismatch as
+        # outside-root background registration.
+        candidate_pixels[1 + 1 * 4] = (99, 88, 77, 255)
+        candidate = FakeViewportImage(candidate_pixels, (4, 4))
+        result = background.measure(reference, candidate, (1, 1, 2, 2))
+        self.assertEqual(result["outside_root"]["differing_pixels"], 0)
+
+    def test_viewport_background_diagnostic_rejects_size_mismatch(self) -> None:
+        reference = FakeViewportImage([(0, 0, 0, 255)] * 16, (4, 4))
+        candidate = FakeViewportImage([(0, 0, 0, 255)] * 15, (3, 5))
+        with self.assertRaisesRegex(ValueError, "image dimensions differ"):
+            background.measure(reference, candidate, (0, 0, 2, 2))
+
     def test_viewport_background_diagnostic_rejects_out_of_bounds_root(self) -> None:
         image = FakeViewportImage([(0, 0, 0, 255)] * 16, (4, 4))
         with self.assertRaises(ValueError):
