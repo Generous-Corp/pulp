@@ -2,13 +2,15 @@
 """Validate the immutable evidence envelope consumed by Shipyard merge receipts.
 
 This module deliberately only validates evidence; it does not query GitHub or
-publish attestations. A producer must supply every field and the digest binds
-the complete canonical payload.
+ publish attestations. A producer must supply every field and the digest binds
+ the complete canonical payload. The digest is an integrity check, not an
+ authenticity proof; a producer/attestation layer must establish provenance.
 """
 
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -19,6 +21,7 @@ SCHEMA = "shipyard-merge-gate-evidence/v1"
 DOMAIN = b"shipyard-merge-gate-evidence-v1\0"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 HASH = re.compile(r"^[0-9a-f]{64}$")
+REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 class EvidenceError(ValueError):
@@ -44,8 +47,43 @@ def _sha(value: Any, label: str) -> None:
 
 
 def _hash(value: Any, label: str) -> None:
-    if not isinstance(value, str) or not HASH.fullmatch(value):
+    if not isinstance(value, str) or not HASH.fullmatch(value) or value == "0" * 64:
         raise EvidenceError(f"{label} must be a lowercase SHA-256")
+
+
+def _merged_at(value: Any) -> None:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise EvidenceError("merged_at must be an RFC 3339 UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as error:
+        raise EvidenceError("merged_at must be an RFC 3339 UTC timestamp") from error
+    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+        raise EvidenceError("merged_at must be an RFC 3339 UTC timestamp")
+
+
+def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in result:
+            raise EvidenceError(f"duplicate JSON key: {key}")
+        result[key] = item
+    return result
+
+
+def _reject_constant(value: str) -> None:
+    raise EvidenceError(f"non-finite JSON number: {value}")
+
+
+def load(path: Path) -> Any:
+    try:
+        return json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_constant,
+        )
+    except (OSError, json.JSONDecodeError, EvidenceError) as error:
+        raise EvidenceError(str(error)) from error
 
 
 def validate(value: Any) -> dict[str, Any]:
@@ -54,12 +92,14 @@ def validate(value: Any) -> dict[str, Any]:
     _keys(value, {"schema", "repository", "base_sha", "head_sha", "merge_group_sha", "merge_commit_sha", "merged_at", "review", "required_checks", "source_digests", "evidence_digest"}, "evidence")
     if value["schema"] != SCHEMA:
         raise EvidenceError("unsupported evidence schema")
-    if not isinstance(value["repository"], str) or "/" not in value["repository"]:
+    if not isinstance(value["repository"], str) or not REPOSITORY.fullmatch(value["repository"]):
         raise EvidenceError("repository must be owner/name")
     for field in ("base_sha", "head_sha", "merge_group_sha", "merge_commit_sha"):
         _sha(value[field], field)
-    if not isinstance(value["merged_at"], str) or not value["merged_at"].strip():
-        raise EvidenceError("merged_at is required")
+    identities = [value[field] for field in ("base_sha", "head_sha", "merge_group_sha", "merge_commit_sha")]
+    if len(set(identities)) != len(identities):
+        raise EvidenceError("base, head, merge-group, and merge-commit identities must differ")
+    _merged_at(value["merged_at"])
     review = value["review"]
     if not isinstance(review, dict):
         raise EvidenceError("review evidence is required")
@@ -84,8 +124,13 @@ def validate(value: Any) -> dict[str, Any]:
     source_digests = value["source_digests"]
     if not isinstance(source_digests, list) or not source_digests:
         raise EvidenceError("source_digests must be non-empty")
+    if len(set(source_digests)) != len(source_digests):
+        raise EvidenceError("source_digests must be unique")
     for item in source_digests:
         _hash(item, "source_digest")
+    referenced = {review["digest"], *(check["source_digest"] for check in checks)}
+    if not referenced.issubset(set(source_digests)):
+        raise EvidenceError("source_digests must contain every referenced source digest")
     supplied = value["evidence_digest"]
     _hash(supplied, "evidence_digest")
     unsigned = dict(value)
@@ -100,8 +145,8 @@ def main() -> int:
     parser.add_argument("path", type=Path)
     args = parser.parse_args()
     try:
-        validate(json.loads(args.path.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError, EvidenceError) as error:
+        validate(load(args.path))
+    except EvidenceError as error:
         parser.error(str(error))
     print("valid")
     return 0
