@@ -45,7 +45,7 @@ New-Item -ItemType Directory -Force -Path $portable,$scan | Out-Null
 
 # Stage the exact artifact into an isolated scan directory. REAPER's portable
 # path keys are intentionally explicit; the cache is checked below before any
-# host verdict is accepted.
+# host verdict is accepted. Windows REAPER expects -cfgfile to name reaper.ini.
 if ($Format -eq 'vst3') { Copy-Item -LiteralPath $plugin -Destination $scan -Recurse }
 else { Copy-Item -LiteralPath $plugin -Destination $scan }
 $staged = Join-Path $scan (Split-Path $plugin -Leaf)
@@ -65,7 +65,7 @@ $args = @('-newinst','-cfgfile', $ini, $lua)
 # REAPER executes a startup script only when it is the final positional input;
 # `-script`/`-portable` are not Windows REAPER options. Warm the same profile
 # first so plugin scanning is durable before the scripted instance starts.
-$warm = Start-Process -FilePath $reaper -ArgumentList @('-newinst','-cfgfile',$portable) -WorkingDirectory $run -RedirectStandardOutput $reaperOut -RedirectStandardError ($reaperOut + '.err') -PassThru
+$warm = Start-Process -FilePath $reaper -ArgumentList @('-newinst','-cfgfile',$ini) -WorkingDirectory $run -RedirectStandardOutput $reaperOut -RedirectStandardError ($reaperOut + '.err') -PassThru
 try {
   $deadline = (Get-Date).AddSeconds($TimeoutSec)
   while ((Get-Date) -lt $deadline) {
@@ -78,7 +78,7 @@ try {
     Start-Sleep -Milliseconds 250
   }
   if ($warm -and -not $warm.HasExited) { Stop-Process -Id $warm.Id -Force }
-  $args = @('-newinst','-cfgfile', $portable, $lua)
+  $args = @('-newinst','-cfgfile', $ini, $lua)
   $proc = Start-Process -FilePath $reaper -ArgumentList $args -WorkingDirectory $run -RedirectStandardOutput $reaperOut -RedirectStandardError ($reaperOut + '.err') -PassThru
   while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath $status)) { Start-Sleep -Milliseconds 250 }
   if (-not (Test-Path -LiteralPath $status)) { Fail-Inconclusive 'REAPER never reported editor status' }
