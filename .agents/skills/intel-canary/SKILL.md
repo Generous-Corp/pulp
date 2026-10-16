@@ -131,6 +131,11 @@ lint alone does not establish Intel configuration or native execution.
 - **Allowlist entries are `path :: substring`, not line numbers.** Substrings
   survive line moves and force each exemption to name the exact construct. A
   coarse whole-file exemption would hide a newly-added hardcoded arm asset.
+- **Windows target maps can contain `aarch64`.** The Windows wgpu-native archive
+  uses that token for its ARM slice. Allowlist the literal only when its helper
+  resolves the Windows *target* architecture and has a paired x86_64 branch;
+  `PulpWindowsSkiaProvider.cmake` is the current example. A host-architecture
+  fallback alone does not justify an exemption.
 - **Class 3 skips comment lines** (`^\s*#`, `^\s*//`) but Python **docstrings**
   are not `#` comments — the `fetch_*` docstrings that list `darwin-arm64,
   darwin-x64, …` are allowlisted explicitly.
