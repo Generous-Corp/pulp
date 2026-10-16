@@ -419,16 +419,23 @@ TEST_CASE("Windows attached editor fails closed when frame timer install fails",
     CHECK((GetWindowLongPtrW(child, GWL_STYLE) & WS_POPUP) != 0);
     CHECK_FALSE(IsWindowVisible(child));
 
-    // Clearing the seam proves the failed attach did not poison the host: a
-    // later attach installs a real timer and resumes normal frame delivery.
+    // Clearing the seam permits a retry. On the CPU path a timer dispatch
+    // invalidates the HWND; the subsequent WM_PAINT performs the idle work.
     SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr);
     REQUIRE(host->try_attach_to_parent(parent));
     int idle_calls = 0;
     host->set_idle_callback([&] { ++idle_calls; });
+    REQUIRE(ValidateRect(child, nullptr)); // discard attach-time invalidation
     SendMessageW(child, WM_TIMER, 1, 0);
+    CHECK(idle_calls == 0);
+    REQUIRE(GetUpdateRect(child, nullptr, FALSE));
+    SendMessageW(child, WM_PAINT, 0, 0);
     CHECK(idle_calls == 1);
+    CHECK_FALSE(GetUpdateRect(child, nullptr, FALSE));
     host->detach();
+    REQUIRE(ValidateRect(child, nullptr)); // discard native detach invalidation
     SendMessageW(child, WM_TIMER, 1, 0); // stale queued timer must be inert
+    CHECK_FALSE(GetUpdateRect(child, nullptr, FALSE));
     CHECK(idle_calls == 1);
     host->set_idle_callback({});
     DestroyWindow(parent);

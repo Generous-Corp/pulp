@@ -1145,6 +1145,15 @@ atomics from `process()` instead.
   points are main-thread-only (they forward to host undo grouping). A background
   writer must use `StateStore::run_gesture_on_main()` — see the state notes in
   `binding.hpp`.
+## Parent attachment can fail after GUI creation
+
+Recognizing the requested window API is insufficient for `gui_set_parent()` to
+return true: the native host can refuse attachment, including a Windows frame
+timer failure with a valid parent HWND. Propagate `try_attach_to_parent()` and
+skip the open notification and first-frame preparation on refusal. Keep the
+created GUI available for a later `set_parent()` retry or `gui_destroy()`; a
+refused attempt must not publish an editor-open lifecycle event.
+
 ## Editor resize contract (aspect-lock vs free reflow)
 
 `gui_can_resize` returns resizable **iff `view_size().min_width>0 && min_height>0`** —

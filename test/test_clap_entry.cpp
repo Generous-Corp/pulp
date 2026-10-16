@@ -1281,6 +1281,10 @@ public:
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
     ViewSize view_size() const override { return vs_; }
+    void on_view_opened(pulp::view::View&) override { ++opened; }
+    void on_view_closed(pulp::view::View&) override { ++closed; }
+    int opened = 0;
+    int closed = 0;
 private:
     ViewSize vs_;
 };
@@ -1411,9 +1415,14 @@ struct FakeClapGuiHost {
 class FakePluginViewHost final : public pulp::view::PluginViewHost {
 public:
     pulp::view::NativeViewHandle native_handle() override { return nullptr; }
-    void attach_to_parent(pulp::view::NativeViewHandle) override {}
-    void detach() override {}
+    void attach_to_parent(pulp::view::NativeViewHandle parent) override {
+        ++attach_calls;
+        attached = accept_attach && parent != nullptr;
+    }
+    bool is_attached() const noexcept override { return attached; }
+    void detach() override { attached = false; }
     void repaint() override {}
+    bool present_first_frame() override { ++first_frames; return attached; }
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
     }
@@ -1430,9 +1439,59 @@ public:
     float design_width = 0.0f;
     float design_height = 0.0f;
     float aspect_ratio = 0.0f;
+    bool accept_attach = true;
+    bool attached = false;
+    int attach_calls = 0;
+    int first_frames = 0;
 };
 
 }  // namespace
+
+TEST_CASE("CLAP native attachment refusal leaves the editor unopened and retryable",
+          "[clap][entry][gui][attach]") {
+    using namespace pulp::format::clap_generic;
+
+    pulp::format::clap_adapter::PulpClapPlugin data;
+    make_clap_plugin_with_size(data, ViewSize{400, 300});
+    auto& processor = static_cast<ClapResizeProcessor&>(*data.processor);
+    auto options = pulp::format::ViewBridge::Options::hosted_editor();
+    options.content_first_open = true;
+    data.bridge = std::make_unique<pulp::format::ViewBridge>(
+        processor, data.store, options);
+    REQUIRE(data.bridge->open());
+    auto editor_host = std::make_unique<FakePluginViewHost>();
+    auto& native_host = *editor_host;
+    native_host.accept_attach = false;
+    data.editor_host = std::move(editor_host);
+
+    clap_window_t parent{};
+#ifdef __APPLE__
+    parent.api = CLAP_WINDOW_API_COCOA;
+    parent.cocoa = &parent;
+#elif defined(_WIN32)
+    parent.api = CLAP_WINDOW_API_WIN32;
+    parent.win32 = &parent;
+#elif defined(__linux__)
+    parent.api = CLAP_WINDOW_API_X11;
+    parent.x11 = 1;
+#endif
+    REQUIRE_FALSE(gui_set_parent(&data.plugin, &parent));
+    CHECK(native_host.attach_calls == 1);
+    CHECK_FALSE(native_host.is_attached());
+    CHECK(processor.opened == 0);
+    CHECK(processor.closed == 0);
+    CHECK(native_host.first_frames == 0);
+    REQUIRE(data.bridge->is_open());
+
+    native_host.accept_attach = true;
+    REQUIRE(gui_set_parent(&data.plugin, &parent));
+    CHECK(native_host.attach_calls == 2);
+    CHECK(native_host.is_attached());
+    CHECK(processor.opened == 1);
+    CHECK(native_host.first_frames == 1);
+    gui_destroy(&data.plugin);
+    CHECK(processor.closed == 1);
+}
 
 TEST_CASE("CLAP editor resize negotiates through the host and rolls back refusal",
           "[clap][entry][gui][resize][editor-request]") {

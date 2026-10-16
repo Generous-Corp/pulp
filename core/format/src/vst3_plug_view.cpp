@@ -85,8 +85,9 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
     gpu_surface_binding_ =
         bind_gpu_surface(*editor_host_, bridge_.scripted_ui(), gpu, "VST3");
 
-    editor_host_->attach_to_parent(parent);
-    auto result = CPluginView::attached(parent, type);
+    const auto result = editor_host_->try_attach_to_parent(parent)
+                            ? CPluginView::attached(parent, type)
+                            : kResultFalse;
     if (result != kResultTrue) {
         // Drop the subscription before the session it writes into goes away
         // with bridge_.close().

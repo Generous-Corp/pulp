@@ -1871,6 +1871,11 @@ honoring the `PULP_DISABLE_PLUGIN_GPU` runtime opt-out. Hardcoding
 back to the AutoUi CPU path (the GPU-plugin-view-host work, 2026-05).
 
 Rules when touching an adapter's editor-attach path:
+- Use `try_attach_to_parent()` before reporting attachment success or calling
+  `notify_attached()` / `prepare_first_frame()`. A Windows host can reject a
+  valid parent when its frame timer cannot be installed; a successful VST3
+  `CPluginView::attached()` or a recognized CLAP window API does not prove the
+  native host attached. Keep failure cleanup before the bridge's teardown.
 - A custom `Processor::create_view()` that owns a `ScriptedUiSession` MUST
   override `Processor::active_scripted_ui()` so `ViewBridge` reports
   `uses_script_ui()`, adapters log `mode=scripted`, select the GPU host, and
