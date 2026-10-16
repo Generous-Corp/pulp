@@ -1,0 +1,7 @@
+{
+  "schema": "pulp-keyed-identity-reorder-v1",
+  "keys": ["drive", "tone", "mix"],
+  "reordered_keys": ["mix", "tone", "drive"],
+  "unknown_key": "presence",
+  "duplicate_key": "tone"
+}

@@ -1374,6 +1374,10 @@ jobs:
       # refusing a missing esbuild instead of running `npm install` inside the
       # build; "Install build-time Node dependencies" below provides it first.
       PULP_OFFLINE_BUILD: "1"
+      # A rustup proxy downloads the toolchain a rust-toolchain.toml names when
+      # it is missing, mid-build. Off: a missing toolchain fails the cargo step
+      # by name instead, and the image (or the resolve step) must provide it.
+      RUSTUP_AUTO_INSTALL: "0"
 
     steps:
       # `lfs: false` — pulp's `core.hooksPath = .githooks` (set by

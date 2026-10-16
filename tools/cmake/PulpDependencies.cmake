@@ -332,7 +332,7 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         find_program(_pulp_python3 NAMES python3 python)
         if(_pulp_skia_plat AND _pulp_python3 AND _pulp_skia_cache)
             # The fetcher is also the complete-generation validator: a lone
-            # libskia.a is insufficient when its stamp or Dawn archive is
+            # Skia archive is insufficient when its stamp or Dawn archive is
             # absent, corrupt, empty, or an LFS pointer. A valid warm generation
             # returns immediately without downloading.
             message(STATUS "Skia: validating/provisioning ${_pulp_skia_plat} → ${_pulp_skia_cache} (PULP_SKIA_AUTOFETCH; shared)")
@@ -342,7 +342,14 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
                 WORKING_DIRECTORY ${PULP_ROOT_DIR}
                 RESULT_VARIABLE _pulp_skia_fetch_result)
             if(_pulp_skia_fetch_result EQUAL 0)
-                file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
+                if(WIN32)
+                    # The Windows cache publishes skia.lib, including the
+                    # fetcher's flat x64 layout. Reuse the target-aware probe
+                    # used for checkout-local archives above.
+                    pulp_windows_local_skia(_pulp_cache_skia "${_pulp_skia_cache}")
+                else()
+                    file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
+                endif()
             else()
                 if(_pulp_skia_keying STREQUAL "1")
                     message(FATAL_ERROR

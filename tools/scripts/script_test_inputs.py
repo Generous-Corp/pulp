@@ -469,6 +469,15 @@ class Walker:
         return found
 
 
+# Python interpreter options that take their value as the next argument.
+PYTHON_VALUE_OPTIONS = ("-W", "-X", "-Q")
+
+
+def _is_inline_flag(arg: str) -> bool:
+    """``-c`` alone or with its code attached (``-cprint(1)``), not ``--...``."""
+    return arg == "-c" or (arg.startswith("-c") and not arg.startswith("--"))
+
+
 def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str]]:
     """(kind, entry script, extra args). kind in python|node|shell|undeclarable."""
     if not command:
@@ -478,19 +487,20 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
         return "undeclarable", None, []
     args = command[1:]
     if exe.startswith("python"):
-        # ``-c`` may follow options that consume a separate value (for
-        # example ``-W ignore -c ...``), so do not stop scanning at that
-        # value and mistake it for the entry script.
-        module_at = args.index("-m") if "-m" in args else len(args)
-        if "-c" in args[:module_at]:
+        # Interpreter options end at the first argument that is not one, and
+        # an option that takes a separate value (``-W ignore``) consumes it.
+        # Only a ``-c`` inside that option prefix is an inline snippet: a
+        # ``-c`` after the script path is the script's own argument.
+        i = 0
+        while (i < len(args) and args[i].startswith("-")
+               and args[i] != "-m" and not _is_inline_flag(args[i])):
+            i += 2 if args[i] in PYTHON_VALUE_OPTIONS else 1
+        if i < len(args) and _is_inline_flag(args[i]):
             # Inline interpreter snippets (used by feature-disabled CTest
             # registrations) have no repository entry file or bounded
             # input closure.  They must stay outside this source-input
             # inventory rather than being mistaken for a build-tree path.
             return "undeclarable", None, []
-        i = 0
-        while i < module_at and args[i].startswith("-"):
-            i += 1
         if i < len(args) and args[i] == "-m":
             return "python-module", None, args[i + 1:]
         return ("python", Path(args[i]), args[i + 1:]) if i < len(args) else ("undeclarable", None, [])

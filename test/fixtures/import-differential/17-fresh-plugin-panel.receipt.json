@@ -1,6 +1,10 @@
 {
-  "schema": "pulp-fresh-plugin-validation-v1",
+  "schema": "pulp-fresh-plugin-validation-v4",
   "fixture": "17-fresh-plugin-panel.html",
+  "scope": {
+    "behavior": "panel-toggle",
+    "keyed_identity_reorder": "deferred"
+  },
   "source_sha256": "b39adabbe9f66819c4b43d67bad8b9bd4db56bebd9baf3fa11f4e94213743b11",
   "source_bytes": 3093,
   "browser": {
@@ -13,12 +17,32 @@
     "screenshot_sha256": "b1afc4342ba2689cf2ed9a85a519eaa7672321751f2007d6ca232fee941aec02",
     "screenshot_bytes": 24657,
     "interaction_report_sha256": "b40332273adaed7a8250a4b0bc7b9aeb23462452d74f6d0fd1c6060353bdd2e3",
-    "interaction_count": 2
+    "interaction_count": 2,
+    "lifecycle": {
+      "capture_process_exited_cleanly": true,
+      "artifacts_read_after_process_exit": true,
+      "browser_health_status": "healthy",
+      "runtime_exception_count": 0
+    }
   },
   "native": {
     "backend": "skia",
-    "artifact_sha256": "5fec00ff037425db487bcd1595c54ec60c7ec1dadae92b1c94205c975cbfec26",
-    "artifact_bytes": 649
+    "artifact_sha256": "a04946cc1947f475016eb81189feb3b8210c6ab9444032598d7b4f021f3ac575",
+    "artifact_bytes": 648,
+    "render_sha256": "71eba62834d5a8a55e7bec7fd8e71d059162f03dc6fea305f5fa0d04504f4c21",
+    "render_bytes": 35881,
+    "lifecycle": {
+      "import_process_exited_cleanly": true,
+      "artifacts_read_after_process_exit": true
+    },
+    "comparator": {
+      "reference": "browser.screenshot_sha256",
+      "similarity_percent": 98,
+      "diff_pixels": 6961,
+      "total_pixels": 614400,
+      "mean_error": 1.04048
+    },
+    "lowering_mode": "faithful_capture"
   },
   "planted_negative": {
     "mutated_id": "toggle-mutated",
