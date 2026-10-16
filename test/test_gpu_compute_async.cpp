@@ -814,3 +814,62 @@ TEST_CASE("GPU loss completion may reinitialize without tearing down replacement
     REQUIRE(gpu->is_initialized());
     REQUIRE(gpu->device_generation() > generation);
 }
+
+TEST_CASE("Successful readback completion may destroy its compute owner",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> dest(kBins, -1.0f);
+    bool completed = false;
+    REQUIRE(gpu->compute_magnitude_async(
+                pairs.data(), dest.data(), kBins, std::chrono::seconds(5),
+                [&](const GpuCompute::ReadbackResult& result) {
+                    completed = result.status == GpuCompute::ReadbackStatus::Success;
+                    gpu.reset();
+                }) != 0);
+
+    while (gpu && !completed)
+        gpu->poll_readbacks();
+    REQUIRE(completed);
+    REQUIRE_FALSE(gpu);
+}
+
+TEST_CASE("Successful readback completion leaves replacement generation for a new poll",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> first_dest(kBins, -1.0f), replacement_dest(kBins, -1.0f);
+    bool first_succeeded = false, replacement_succeeded = false;
+    bool reinitialized = false;
+    std::uint64_t replacement_id = 0;
+    const auto old_generation = gpu->device_generation();
+    REQUIRE(gpu->compute_magnitude_async(
+                pairs.data(), first_dest.data(), kBins, std::chrono::seconds(5),
+                [&](const GpuCompute::ReadbackResult& result) {
+                    first_succeeded = result.status == GpuCompute::ReadbackStatus::Success;
+                    reinitialized = gpu->initialize_standalone();
+                    if (reinitialized)
+                        replacement_id = gpu->compute_magnitude_async(
+                            pairs.data(), replacement_dest.data(), kBins,
+                            std::chrono::seconds(5),
+                            [&](const GpuCompute::ReadbackResult& next) {
+                                replacement_succeeded =
+                                    next.status == GpuCompute::ReadbackStatus::Success;
+                            });
+                }) != 0);
+
+    drain(*gpu);
+    REQUIRE(first_succeeded);
+    REQUIRE(reinitialized);
+    REQUIRE(gpu->device_generation() > old_generation);
+    REQUIRE(replacement_id != 0);
+    REQUIRE(replacement_succeeded);
+}

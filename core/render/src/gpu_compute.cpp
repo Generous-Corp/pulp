@@ -3431,6 +3431,7 @@ public:
         polling_ = true;
 
         const auto generation_at_entry = device_generation();
+        const auto callback_state = callback_state_;
         pump_events();
         polling_ = false;
         if (apply_pending_device_loss())
@@ -3473,24 +3474,32 @@ public:
                     detached_readbacks_.push_back(req);
                 }
                 complete(*req, ReadbackStatus::Expired, 0);
-                continue;
+            } else {
+                const void* data = req->ok.load(std::memory_order_acquire)
+                                       ? req->buffer.GetConstMappedRange(0, req->size)
+                                       : nullptr;
+                if (!data) {
+                    if (pool_) pool_->discard(req->buffer);
+                    complete(*req, ReadbackStatus::Failed, 0);
+                } else {
+                    std::memcpy(req->dest, data, req->size);
+                    ++stats_->mapped_readback_memcpy_calls;
+                    stats_->mapped_readback_memcpy_bytes += req->size;
+                    req->buffer.Unmap();
+                    if (pool_) pool_->release(req->buffer);
+                    complete(*req, ReadbackStatus::Success, req->size);
+                }
             }
 
-            const void* data = req->ok.load(std::memory_order_acquire)
-                                   ? req->buffer.GetConstMappedRange(0, req->size)
-                                   : nullptr;
-            if (!data) {
-                if (pool_) pool_->discard(req->buffer);
-                complete(*req, ReadbackStatus::Failed, 0);
-                continue;
+            // A completion may release the last owner. Inspect only the
+            // callback state, which remains alive in this local shared_ptr,
+            // before touching any member again.
+            if (!callback_state->alive.load(std::memory_order_acquire))
+                return 0;
+            if (device_generation() != generation_at_entry) {
+                polling_ = false;
+                return async_readbacks_.size();
             }
-
-            std::memcpy(req->dest, data, req->size);
-            ++stats_->mapped_readback_memcpy_calls;
-            stats_->mapped_readback_memcpy_bytes += req->size;
-            req->buffer.Unmap();
-            if (pool_) pool_->release(req->buffer);
-            complete(*req, ReadbackStatus::Success, req->size);
         }
 
         polling_ = false;
