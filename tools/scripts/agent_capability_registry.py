@@ -31,6 +31,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/voice_runtime_facade.hpp": "Pulp::audio",
     "pulp/audio/wavetable_authoring.hpp": "Pulp::audio",
     "pulp/midi/arpeggiator.hpp": "Pulp::midi",
+    "pulp/midi/ump_sysex7_reassembler.hpp": "Pulp::midi",
     "pulp/midi/controller_utility_kernels.hpp": "Pulp::midi",
     "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
     "pulp/midi/note_utility_kernels.hpp": "Pulp::midi",
@@ -587,8 +588,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/midi/ump_sysex7_reassembler.hpp",
+        "fingerprint": "sha256:8612521ca6663dd819c5c426adf61f795c6deda2de0a395648f119dca40d47b8",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Bounded per-group SysEx7 reassembly and transport diagnostics are MIDI "
+            "ingress infrastructure, not a generator-facing musical transform."
+        ),
+    },
+    {
         "include": "pulp/midi/ump_buffer.hpp",
-        "fingerprint": "sha256:bc5816405c9ef8a2fdf9336d86212319dd70a83a9633c7d515b6c3010c5019e6",
+        "fingerprint": "sha256:c1ea59345f5e6f8892b30024b52aa4f9251f0ed789c57d147408f1a05cd00377",
         "disposition": "capability_support",
         "capability_keys": [
             "midi.arpeggiator", "midi.channel-routing", "midi.controller-mapping",

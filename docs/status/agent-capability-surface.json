@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 134,
+  "inventory_version": 135,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 506,
-    "reviewed_headers": 228,
-    "legacy_unreviewed_headers": 278,
+    "reviewed_headers": 229,
+    "legacy_unreviewed_headers": 277,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 59,
-      "legacy_unreviewed": 278,
+      "infrastructure": 60,
+      "legacy_unreviewed": 277,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -62,8 +62,8 @@
       },
       "midi": {
         "public_headers": 50,
-        "reviewed_headers": 23,
-        "legacy_unreviewed_headers": 27,
+        "reviewed_headers": 24,
+        "legacy_unreviewed_headers": 26,
         "unsupported_headers": 0
       },
       "music": {
@@ -1659,7 +1659,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/ump_buffer.hpp",
-      "fingerprint": "sha256:bc5816405c9ef8a2fdf9336d86212319dd70a83a9633c7d515b6c3010c5019e6",
+      "fingerprint": "sha256:c1ea59345f5e6f8892b30024b52aa4f9251f0ed789c57d147408f1a05cd00377",
       "include": "pulp/midi/ump_buffer.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -1705,11 +1705,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp",
-      "fingerprint": "sha256:f881ddce6a156c2f5916c986c0ac9411890f2cc529987f26e17f93a7139b0dc1",
+      "fingerprint": "sha256:8612521ca6663dd819c5c426adf61f795c6deda2de0a395648f119dca40d47b8",
       "include": "pulp/midi/ump_sysex7_reassembler.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Bounded per-group SysEx7 reassembly and transport diagnostics are MIDI ingress infrastructure, not a generator-facing musical transform."
     },
     {
       "domain": "midi",

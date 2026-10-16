@@ -243,13 +243,13 @@ private:
             // (mmeapi MIM_LONGDATA / ALSA deliver framed SysEx).
             //
             // SysEx7 reassembly is per-stream state, and UMP SysEx7 streams
-            // can interleave across the 16 UMP groups. Keep one reassembler
-            // per group so a Start on group 1 cannot reset/corrupt an
+            // can interleave across the 16 UMP groups. The shared reassembler
+            // isolates each group so a Start on group 1 cannot reset an
             // in-flight stream on group 0. The completion callback fires
             // synchronously inside feed_packet, so a single last_sysex_ts_
             // set immediately before the call stays correct.
             last_sysex_ts_ = ts;
-            sysex_reassemblers_[packet.group() & 0x0F].feed_packet(
+            sysex_reassembler_.feed_packet(
                 packet.words[0], packet.words[1],
                 &WinrtMidiInput::on_sysex_complete, this);
             return;
@@ -300,9 +300,8 @@ private:
     ::winrt::event_token       message_token_{};
     MidiInputCallback          callback_;
     MidiSysexCallback          sysex_callback_;
-    // One reassembler per UMP group (0..15) — SysEx7 streams interleave
-    // across groups, so a single shared reassembler would corrupt them.
-    std::array<UmpSysex7Reassembler, 16> sysex_reassemblers_{};
+    // The reassembler isolates the sixteen UMP groups internally.
+    UmpSysex7Reassembler sysex_reassembler_;
     double                     last_sysex_ts_ = 0.0;
     bool                       is_open_ = false;
     bool                       have_origin_ = false;

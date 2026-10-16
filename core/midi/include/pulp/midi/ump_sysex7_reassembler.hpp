@@ -52,7 +52,8 @@
 // Thread-safety
 // =============
 //
-// The reassembler holds per-stream state (`payload_` + `in_progress_`).
+// The reassembler holds independent state for each UMP group. A configured
+// maximum bounds every logical message; overflow discards the whole message.
 // It is **not** thread-safe — each input port / source should own its
 // own instance. The CoreMIDI input callback is single-threaded per
 // port, and AUv3 render blocks are single-threaded per audio bus, so
@@ -61,28 +62,26 @@
 // RT-safety
 // =========
 //
-// `feed_packet()` may allocate inside the internal `std::vector`s as
-// payload storage grows past current capacity. Callers that want strict
-// RT-safety should `reserve()` the worst-case sysex length up front via
-// `reserve(N)`. After that, start/continue/end, interleaved single-packet
-// sysex, orphan drops, reset(), and status queries do not allocate.
+// `feed_packet()` may allocate inside the internal `std::vector`s as payload
+// storage grows past current capacity. Callers that want strict RT-safety
+// should `reserve()` the configured maximum up front via `reserve(N)`. This
+// also makes N the admission limit; packets that would exceed it are dropped
+// atomically with an overflow diagnostic.
 //
 // Unit tests live in `test/test_ump_sysex7_reassembler.cpp`.
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <utility>
 #include <vector>
 
 namespace pulp::midi {
 
-/// Callback shape: receives the complete sysex payload (the F0..F7
-/// inner bytes — i.e. the payload bytes carried by the type-0x3
-/// stream, with no synthesised F0/F7 framing). UMP sysex7 packets do
-/// not carry F0/F7 framing bytes by design (the framing is implicit
-/// in the start/continue/end status nibble), so the emitted payload
-/// matches what every downstream Pulp MIDI sink expects from
-/// `MidiBuffer::add_sysex()` / `MidiInput::sysex_callback_`.
+/// Callback shape: receives the complete UMP SysEx7 payload bytes, with no
+/// synthesised MIDI 1.0 F0/F7 framing. UMP framing is implicit in the
+/// start/continue/end status nibble; callers crossing into MIDI 1.0 must add
+/// F0/F7 explicitly at that boundary.
 ///
 /// The reassembler invokes this callback exactly once per logical
 /// sysex (either a single complete packet, or a start → continue* →
@@ -98,6 +97,8 @@ using Sysex7EmitFn = void(*)(const std::vector<std::uint8_t>& payload,
 /// Per-stream — see "Thread-safety" in the file header.
 class UmpSysex7Reassembler {
 public:
+    static constexpr std::size_t default_maximum_payload_bytes = 64u * 1024u;
+
     /// Classification of the most recently consumed packet.
     enum class Status {
         /// Single-packet sysex (status nibble 0x0). The emit callback
@@ -118,7 +119,24 @@ public:
         dropped,
     };
 
-    UmpSysex7Reassembler() = default;
+    /// Why the last packet was dropped (or why a partial message was reset).
+    /// This is deliberately separate from Status so existing callers that
+    /// only distinguish emitted versus dropped packets remain source
+    /// compatible while diagnostics can fail closed.
+    enum class DropReason {
+        none,
+        orphan,
+        reserved_status,
+        invalid_size,
+        high_bit_payload,
+        overflow,
+        nested_start,
+        reset,
+    };
+
+    explicit UmpSysex7Reassembler(
+        std::size_t maximum_payload_bytes = default_maximum_payload_bytes)
+        : maximum_payload_bytes_(maximum_payload_bytes) {}
 
     /// Feed a single 2-word UMP packet through the state machine.
     ///
@@ -134,10 +152,26 @@ public:
     /// through verbatim — keep it lightweight to preserve RT-safety.
     Status feed_packet(std::uint32_t word0, std::uint32_t word1,
                        Sysex7EmitFn emit, void* user) noexcept {
+        const std::uint8_t group = static_cast<std::uint8_t>((word0 >> 24) & 0x0F);
+        auto& stream = streams_[group];
+        last_drop_reason_ = DropReason::none;
         const std::uint8_t status =
             static_cast<std::uint8_t>((word0 >> 20) & 0x0F);
         const std::uint32_t size =
             static_cast<std::uint32_t>((word0 >> 16) & 0x0F);
+
+        if (size > 6) {
+            stream.payload.clear();
+            stream.in_progress = false;
+            last_drop_reason_ = DropReason::invalid_size;
+            return Status::dropped;
+        }
+        if (!payload_is_7bit(word0, word1, size)) {
+            stream.payload.clear();
+            stream.in_progress = false;
+            last_drop_reason_ = DropReason::high_bit_payload;
+            return Status::dropped;
+        }
 
         switch (status) {
         case 0x0: {
@@ -147,10 +181,18 @@ public:
             // accumulator. This is genuinely possible: the UMP spec
             // permits independent sysex streams on different groups to
             // interleave through a single endpoint.
-            scratch_.clear();
-            extract_bytes(word0, word1, size, scratch_);
-            if (!scratch_.empty() && emit) {
-                emit(scratch_, user);
+            // A complete packet on this group starts a new logical stream;
+            // discard any unterminated message rather than splicing it.
+            stream.payload.clear();
+            stream.in_progress = false;
+            stream.scratch.clear();
+            if (size > maximum_payload_bytes_) {
+                last_drop_reason_ = DropReason::overflow;
+                return Status::dropped;
+            }
+            extract_bytes(word0, word1, size, stream.scratch);
+            if (!stream.scratch.empty() && emit) {
+                emit(stream.scratch, user);
             }
             return Status::single_packet;
         }
@@ -159,64 +201,132 @@ public:
             // previous in-progress sysex was never closed, it is
             // silently dropped: the spec doesn't allow nested sysex,
             // and resetting is the only sane recovery.
-            payload_.clear();
-            extract_bytes(word0, word1, size, payload_);
-            in_progress_ = true;
+            if (stream.in_progress)
+                last_drop_reason_ = DropReason::nested_start;
+            stream.payload.clear();
+            stream.in_progress = false;
+            if (size > maximum_payload_bytes_) {
+                last_drop_reason_ = DropReason::overflow;
+                return Status::dropped;
+            }
+            extract_bytes(word0, word1, size, stream.payload);
+            stream.in_progress = true;
             return Status::start;
         }
         case 0x2:
-            if (in_progress_) {
-                extract_bytes(word0, word1, size, payload_);
+            if (stream.in_progress) {
+                if (size > maximum_payload_bytes_ ||
+                    stream.payload.size() > maximum_payload_bytes_ - size) {
+                    stream.payload.clear();
+                    stream.in_progress = false;
+                    last_drop_reason_ = DropReason::overflow;
+                    return Status::dropped;
+                }
+                extract_bytes(word0, word1, size, stream.payload);
                 return Status::continued;
             }
             // Orphan continue — drop.
+            last_drop_reason_ = DropReason::orphan;
             return Status::dropped;
         case 0x3:
-            if (in_progress_) {
-                extract_bytes(word0, word1, size, payload_);
-                if (!payload_.empty() && emit) {
-                    emit(payload_, user);
+            if (stream.in_progress) {
+                if (size > maximum_payload_bytes_ ||
+                    stream.payload.size() > maximum_payload_bytes_ - size) {
+                    stream.payload.clear();
+                    stream.in_progress = false;
+                    last_drop_reason_ = DropReason::overflow;
+                    return Status::dropped;
                 }
-                payload_.clear();
-                in_progress_ = false;
+                extract_bytes(word0, word1, size, stream.payload);
+                if (!stream.payload.empty() && emit) {
+                    emit(stream.payload, user);
+                }
+                stream.payload.clear();
+                stream.in_progress = false;
                 return Status::ended;
             }
             // Orphan end — drop.
+            last_drop_reason_ = DropReason::orphan;
             return Status::dropped;
         default:
             // Reserved / unknown status nibble. Per the spec, type-0x3
             // status values 0x4..0xF are reserved; the only sane
-            // behavior for forward compatibility is to drop the
-            // packet without disturbing accumulator state.
+            // behavior is to drop the packet and discard the addressed
+            // group's partial message so malformed data cannot splice.
+            stream.payload.clear();
+            stream.in_progress = false;
+            last_drop_reason_ = DropReason::reserved_status;
             return Status::dropped;
         }
     }
 
     /// True when an in-progress sysex is open (a 0x1 start packet has
     /// been seen and no 0x3 end packet has closed it yet).
-    bool in_progress() const noexcept { return in_progress_; }
+    bool in_progress() const noexcept {
+        for (const auto& stream : streams_)
+            if (stream.in_progress) return true;
+        return false;
+    }
 
     /// Current accumulated payload size in bytes (0 when idle).
-    std::size_t partial_size() const noexcept { return payload_.size(); }
+    std::size_t partial_size(std::uint8_t group = 0) const noexcept {
+        return streams_[group & 0x0F].payload.size();
+    }
 
     /// Reserve worst-case payload capacity to avoid allocations in the
     /// hot path. Safe to call at port-open / prepare() time. The single-
     /// packet scratch buffer is also prepared here so interleaved complete
-    /// sysex packets do not allocate while another sysex is open.
+    /// sysex packets do not allocate while another sysex is open. This sets
+    /// the exact admission bound and discards any current partial streams;
+    /// call it during non-RT configuration.
     void reserve(std::size_t worst_case_bytes) {
-        payload_.reserve(worst_case_bytes);
-        scratch_.reserve(worst_case_bytes < 6 ? 6 : worst_case_bytes);
+        reset();
+        maximum_payload_bytes_ = worst_case_bytes;
+        for (auto& stream : streams_) {
+            stream.payload.reserve(worst_case_bytes);
+            stream.scratch.reserve(6);
+        }
     }
+
+    std::size_t maximum_payload_bytes() const noexcept {
+        return maximum_payload_bytes_;
+    }
+
+    DropReason last_drop_reason() const noexcept { return last_drop_reason_; }
 
     /// Drop any in-progress sysex without emitting. Use on port-close
     /// or when a transport-level reset is observed (e.g. CoreMIDI
     /// endpoint reconnect).
     void reset() noexcept {
-        payload_.clear();
-        in_progress_ = false;
+        for (auto& stream : streams_) {
+            stream.payload.clear();
+            stream.in_progress = false;
+        }
+        last_drop_reason_ = DropReason::reset;
     }
 
 private:
+    struct StreamState {
+        std::vector<std::uint8_t> payload;
+        std::vector<std::uint8_t> scratch;
+        bool in_progress = false;
+    };
+
+    static bool payload_is_7bit(std::uint32_t w0, std::uint32_t w1,
+                                std::uint32_t size) noexcept {
+        const std::uint8_t bytes[6] = {
+            static_cast<std::uint8_t>((w0 >> 8) & 0xFF),
+            static_cast<std::uint8_t>(w0 & 0xFF),
+            static_cast<std::uint8_t>((w1 >> 24) & 0xFF),
+            static_cast<std::uint8_t>((w1 >> 16) & 0xFF),
+            static_cast<std::uint8_t>((w1 >> 8) & 0xFF),
+            static_cast<std::uint8_t>(w1 & 0xFF),
+        };
+        for (std::uint32_t i = 0; i < size; ++i)
+            if ((bytes[i] & 0x80) != 0) return false;
+        return true;
+    }
+
     static void extract_bytes(std::uint32_t w0, std::uint32_t w1,
                               std::uint32_t size,
                               std::vector<std::uint8_t>& out) {
@@ -227,8 +337,8 @@ private:
         //   byte 3 = (w1 >> 16) & 0xFF
         //   byte 4 = (w1 >>  8) & 0xFF
         //   byte 5 = (w1 >>  0) & 0xFF
-        // `size` is the 4-bit field from bits 16-19 of w0 and is in
-        // 0..6. We clamp at 6 defensively.
+        // `size` is the 4-bit field from bits 16-19 of w0. feed_packet()
+        // rejects values above the six payload bytes in a SysEx7 packet.
         const std::uint8_t buf[6] = {
             static_cast<std::uint8_t>((w0 >>  8) & 0xFF),
             static_cast<std::uint8_t>((w0 >>  0) & 0xFF),
@@ -237,13 +347,12 @@ private:
             static_cast<std::uint8_t>((w1 >>  8) & 0xFF),
             static_cast<std::uint8_t>((w1 >>  0) & 0xFF),
         };
-        const std::uint32_t n = (size > 6) ? 6 : size;
-        for (std::uint32_t i = 0; i < n; ++i) out.push_back(buf[i]);
+        for (std::uint32_t i = 0; i < size; ++i) out.push_back(buf[i]);
     }
 
-    std::vector<std::uint8_t> payload_;
-    std::vector<std::uint8_t> scratch_;
-    bool in_progress_ = false;
+    std::array<StreamState, 16> streams_{};
+    std::size_t maximum_payload_bytes_ = default_maximum_payload_bytes;
+    DropReason last_drop_reason_ = DropReason::none;
 };
 
 /// Convenience: feed a packet and collect the emitted payload (if any)
