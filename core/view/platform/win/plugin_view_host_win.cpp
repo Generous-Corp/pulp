@@ -162,6 +162,12 @@ public:
           size_(options.size),
           use_gpu_(options.use_gpu),
           options_(options) {
+        // Test-only fault injection is opted into at construction. Normal
+        // editors never query the environment on their frame path.
+        wchar_t forced_frame_failure[2]{};
+        test_frame_failure_enabled_ = GetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE",
+                                                              forced_frame_failure, 2) > 0 &&
+                                      forced_frame_failure[0] == L'1';
         root_.set_frame_clock(&frame_clock_);
         // Dawn cannot configure presentation until attach_to_parent() gives the
         // HWND its final parent and style, so gpu_surface() is legitimately
@@ -675,6 +681,7 @@ private:
     FrameClock frame_clock_;
     HostFramePump frame_pump_;
     bool needs_repaint_ = true;
+    bool test_frame_failure_enabled_ = false;
     bool continuous_frames_ = false;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
     float design_viewport_w_ = 0.0f;
@@ -928,8 +935,14 @@ private:
         request.capture_width = cap_w;
         request.capture_height = cap_h;
 
+        wchar_t forced_frame_failure[2]{};
+        const bool force_failure = test_frame_failure_enabled_ &&
+                                   GetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE",
+                                                           forced_frame_failure, 2) > 0 &&
+                                   forced_frame_failure[0] == L'1';
         const auto frame =
-            frame_renderer_.render(*gpu_surface_, *skia_surface_, damage_, request);
+            force_failure ? PluginFrameRenderer::Frame{}
+                          : frame_renderer_.render(*gpu_surface_, *skia_surface_, damage_, request);
 
         // A frame that never reached the drawable must not be reported as a
         // rendered frame, and must not retire its damage — the shared renderer
@@ -955,7 +968,16 @@ private:
             if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
         }
 
-        if (!frame.reached_output()) return false;
+        if (!frame.reached_output()) {
+            // The timer consumed its dirty bit before this attempt. Preserved
+            // damage also needs a future dispatch, including after WM_PAINT.
+            // Retry on the existing timer, never recursively. If recreation
+            // failed or GPU retries were exhausted, that tick schedules CPU
+            // raster instead. Successful output with failed readback does not
+            // enter this branch.
+            needs_repaint_ = true;
+            return false;
+        }
         // A failed/empty readback must report false so capture_back_buffer_png()
         // falls back to the raster path instead of returning a blank frame.
         return cap ? frame.readback_ok : true;

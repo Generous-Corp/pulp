@@ -391,6 +391,68 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     }
 }
 
+TEST_CASE("Windows static editor retries a GPU frame that did not reach output",
+          "[view][plugin-view-host][repaint][windows][gpu]") {
+    struct FailureSeamReset {
+        ~FailureSeamReset() {
+            SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", nullptr);
+        }
+    } reset_seam;
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", L"1"));
+    HWND parent =
+        CreateWindowExW(0, L"STATIC", L"Pulp frame retry regression", WS_OVERLAPPEDWINDOW, 0, 0,
+                        128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    REQUIRE(parent != nullptr);
+    struct ParentCleanup {
+        HWND hwnd;
+        ~ParentCleanup() {
+            DestroyWindow(hwnd);
+        }
+    } cleanup{parent};
+    ShowWindow(parent, SW_SHOWNOACTIVATE);
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_background_color(pulp::canvas::Color::rgba8(28, 31, 46));
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    REQUIRE(host->try_attach_to_parent(parent));
+    if (!host->is_gpu_backed()) {
+        SKIP("GPU adapter required to exercise failed drawable retry");
+    }
+    const HWND child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    REQUIRE(root.frame_clock() != nullptr);
+    // No idle callback, animation, or frame subscription: any of those would
+    // keep the timer live and conceal a lost dirty bit.
+    host->repaint();
+    const auto before = root.frame_clock()->frame();
+    SendMessageW(child, WM_TIMER, 1, 0);
+    REQUIRE(root.frame_clock()->frame() == before + 1);
+    CHECK((host->pending_repaint_is_full() || host->has_pending_dirty_bounds()));
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", nullptr));
+    SendMessageW(child, WM_TIMER, 1, 0);
+    REQUIRE(root.frame_clock()->frame() == before + 2);
+    REQUIRE_FALSE(host->pending_repaint_is_full());
+    REQUIRE_FALSE(host->has_pending_dirty_bounds());
+
+    // A native expose paint does not advance the frame clock or start with a
+    // dirty timer bit. Failure there must wake the same paced retry path.
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", L"1"));
+    REQUIRE(InvalidateRect(child, nullptr, FALSE));
+    REQUIRE(UpdateWindow(child));
+    CHECK(root.frame_clock()->frame() == before + 2);
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", nullptr));
+    SendMessageW(child, WM_TIMER, 1, 0);
+    CHECK(root.frame_clock()->frame() == before + 3);
+    REQUIRE_FALSE(host->pending_repaint_is_full());
+    REQUIRE_FALSE(host->has_pending_dirty_bounds());
+    host->detach();
+}
+
 TEST_CASE("Windows attached editor fails closed when frame timer install fails",
           "[view][plugin-view-host][repaint][windows]") {
     struct TimerFailureSeamReset {
