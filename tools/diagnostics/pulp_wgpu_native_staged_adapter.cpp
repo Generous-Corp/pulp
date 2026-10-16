@@ -922,15 +922,15 @@ int main() {
             loss_probe.release();
             return kProviderUnavailableExit;
         }
-        if (!loss_probe->device_loss_callback_registered())
-            return kDiagnosticFailureExit;
-        if (loss_probe->device_loss_reason() != WGPUDeviceLostReason_Destroyed)
-            return kDiagnosticFailureExit;
+        const bool loss_probe_registered = loss_probe->device_loss_callback_registered();
+        const auto loss_probe_reason = loss_probe->device_loss_reason();
         // The probe is capability-only. Even after a successful callback, the
         // pinned Metal runtime can block while releasing its idle device
         // fence. Keep the validated result and abandon this process-scoped
         // probe before entering the outstanding-submission session.
         loss_probe.release();
+        if (!loss_probe_registered || loss_probe_reason != WGPUDeviceLostReason_Destroyed)
+            return kDiagnosticFailureExit;
 
         // The probe above is a capability gate for the session path: only a
         // runtime that delivered the exact callback userdata and Destroyed
@@ -982,10 +982,12 @@ int main() {
         ++loss_terminal_records;
         loss_no_output_leases = !loss_session->acquire_output(*loss_completion);
         loss_reason = loss_native->device_loss_reason();
-        if (!loss_no_output_leases || !loss_session->discard_completion(*loss_completion) ||
-            !loss_session->release())
+        if (!loss_no_output_leases || !loss_session->discard_completion(*loss_completion))
             return abandon_loss_session();
-        loss_session.reset();
+        // The terminal evidence is complete, but releasing the destroyed
+        // provider can still block on a pinned Metal fence. Keep this
+        // process-scoped diagnostic bounded after recording the evidence.
+        loss_session.release();
     }
     std::printf("loaded_runtime_path=%s\n", loaded.dli_fname);
     std::printf("input_sha256=%s weights_sha256=%s shader_sha256=%s\n",

@@ -67,8 +67,11 @@ def main() -> int:
         ) < 4:
             print("typed loss-session teardown control failed", file=sys.stderr)
             return 1
+        if "loss_session.release();" not in source:
+            print("typed successful-loss teardown control failed", file=sys.stderr)
+            return 1
         validated = source.split(
-            "if (loss_probe->device_loss_reason() != WGPUDeviceLostReason_Destroyed)",
+            "const bool loss_probe_registered = loss_probe->device_loss_callback_registered();",
             1,
         )
         if len(validated) != 2 or "loss_probe.release();" not in validated[1].split(
