@@ -101,10 +101,12 @@ def validate(value: Any) -> dict[str, Any]:
         _sha(value[field], field)
     # A fast-forward merge may retain the PR head as the merge commit, and a
     # queue's tested merge-group commit may be the final merge commit. The
-    # producer must prove those identities against live GitHub state; the
-    # schema must not reject valid equality before that check occurs.
+    # base must still differ from every merge identity: a merge-group or final
+    # commit equal to the base proves that no changed head was tested or landed.
     if value["base_sha"] == value["head_sha"]:
         raise EvidenceError("base and head identities must differ")
+    if value["base_sha"] in (value["merge_group_sha"], value["merge_commit_sha"]):
+        raise EvidenceError("base and merge identities must differ")
     _merged_at(value["merged_at"])
     review = value["review"]
     if not isinstance(review, dict):

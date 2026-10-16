@@ -65,6 +65,10 @@ class EvidenceTest(unittest.TestCase):
         item = self.valid(); item["head_sha"] = item["base_sha"]; self.signed(item)
         with self.assertRaisesRegex(evidence.EvidenceError, "base and head"):
             evidence.validate(item)
+        for field in ("merge_group_sha", "merge_commit_sha"):
+            item = self.valid(); item[field] = item["base_sha"]; self.signed(item)
+            with self.assertRaisesRegex(evidence.EvidenceError, "base and merge"):
+                evidence.validate(item)
 
     def test_failed_review_check_and_unknown_fields_fail_closed(self):
         item = self.valid(); item["review"]["verdict"] = "pending"; self.signed(item)
