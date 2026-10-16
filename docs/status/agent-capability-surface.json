@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 134,
+  "inventory_version": 135,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -4876,7 +4876,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/zero_latency_convolver.hpp",
-      "fingerprint": "sha256:b83e4d485420696d9598771185be0856b0fb377dd106c5d6ea76a7b5ef9e124e",
+      "fingerprint": "sha256:14e75e820c09f831548cfb79215ce06d32e664f1b94a4e0b7bafe1885c535e27",
       "include": "pulp/signal/zero_latency_convolver.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4885,7 +4885,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/zero_latency_convolver_support.hpp",
-      "fingerprint": "sha256:2617e8cdff61bb3899d2c2b4529339116634d86c0ec7d7f3492ae929a02cadfb",
+      "fingerprint": "sha256:0645d5fd57a06aba30d7de18d0fadc99d71d1bbb0a3031bc5efa30f26777806f",
       "include": "pulp/signal/zero_latency_convolver_support.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

@@ -591,6 +591,37 @@ TEST_CASE("Per-block compute bound", "[signal][convolution][acceptance][cost]") 
     REQUIRE(static_cast<double>(peak) < 0.5 * naive_single_transform);
 }
 
+TEST_CASE("Packed stereo keeps partition work distributed",
+          "[signal][convolution][acceptance][cost]") {
+    const auto kernel = decaying_noise_ir(65536, 6.0, 0xC05A);
+    const std::vector<float> ir(kernel.begin(), kernel.end());
+    const float* taps[4] = {ir.data(), ir.data(), ir.data(), ir.data()};
+    for (int block : {16, 128, 512}) {
+        for (bool enabled : {false, true}) {
+            ZeroLatencyConvolver conv;
+            conv.prepare(kFs, block, 2);
+            conv.set_true_stereo(enabled);
+            REQUIRE(conv.load_impulse_response(taps, 4, static_cast<int>(ir.size()), kFs));
+            std::vector<float> input(block, 0.01f), left(block), right(block);
+            const float* in[2] = {input.data(), input.data()};
+            float* out[2] = {left.data(), right.data()};
+            const int largest = conv.level_block_length(conv.num_levels() - 1);
+            for (int b = 0; b < 4 * largest / block; ++b) conv.process(in, out, block);
+            const int blocks = 2 * largest / block;
+            long long total = 0, peak = 0;
+            for (int b = 0; b < blocks; ++b) {
+                conv.process(in, out, block);
+                total += conv.last_block_cost();
+                peak = std::max(peak, conv.last_block_cost());
+            }
+            const double mean = static_cast<double>(total) / blocks;
+            INFO("block " << block << ", enabled " << enabled << ", peak/mean " << peak / mean);
+            REQUIRE(mean > 0.0);
+            REQUIRE(peak / mean <= ZeroLatencyConvolver::kBlockCostSlackDefault);
+        }
+    }
+}
+
 TEST_CASE("Resampled IR keeps its first arrival at index 0",
           "[signal][convolution][acceptance][resample]") {
     // A 44.1 kHz IR loaded into a 48 kHz session. If the resampler leaves group
