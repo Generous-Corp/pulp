@@ -847,6 +847,14 @@ and not another: they name the version each one actually ran (for example the
 hosted Linux leg's apt CMake 3.x against the 4.3.3 pin, which is how a
 CMake-4-only script fails only there).
 
+### A Rust step that fails with "toolchain ... is not installed" is the image, not the PR
+
+The `build.yml` build legs set `RUSTUP_AUTO_INSTALL=0`, so a rustup proxy
+never downloads the toolchain `rust-toolchain.toml` names mid-build. If a cargo
+step fails naming a missing toolchain, the runner image or the resolve step
+lacks it: fix the golden (install the manifest's Rust by name), never by
+re-enabling auto-install in the workflow.
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both
