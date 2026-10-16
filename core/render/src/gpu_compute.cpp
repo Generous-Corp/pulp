@@ -1048,7 +1048,14 @@ public:
         // Close callback publication before teardown. The callback state is
         // shared with backend callbacks and outlives this object if Dawn reports
         // a destroyed device as lost during teardown.
-        callback_state_->alive.store(false, std::memory_order_release);
+        // Synchronize with publish_loss() before invalidating the pointer into
+        // this object's initialized_ flag. A backend callback may have already
+        // observed alive=true and be waiting to enter the loss mutex.
+        {
+            std::lock_guard<std::mutex> lock(callback_state_->loss_mutex);
+            callback_state_->alive.store(false, std::memory_order_release);
+            callback_state_->initialized = nullptr;
+        }
         destroying_ = true;
         // The async contract requires every accepted request to complete exactly
         // once, including when destruction is what terminates the request. The
