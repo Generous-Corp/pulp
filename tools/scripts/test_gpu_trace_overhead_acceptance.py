@@ -87,6 +87,15 @@ class DescriptorLimitWithoutResourceTests(unittest.TestCase):
             module._raise_descriptor_limit(module._WINDOWS_CRT_DESCRIPTOR_LIMIT + 1)
 
 
+def _alternate_history_pin(window: list[dict]) -> str:
+    """A later rolling base inside window that still leaves revisions after it.
+
+    (len - 1) // 2 rather than len // 2: a two-revision window must not pin
+    its last revision, which leaves nothing to walk.
+    """
+    return window[(len(window) - 1) // 2]["revision"]
+
+
 class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
     def bound_receipt(self):
         head = MODULE.subprocess.run(
@@ -1159,6 +1168,15 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     ROOT, head, manifest["scope_paths"]
                 )
 
+    def test_alternate_history_pin_leaves_a_later_revision(self):
+        # A pin at the window's last revision would walk to an empty window,
+        # which _a2t_scope_touching_revision_ids rejects.
+        for size in (2, 3, 4, 10):
+            with self.subTest(size=size):
+                window = [{"revision": f"{index:040x}"} for index in range(size)]
+                pin = _alternate_history_pin(window)
+                self.assertLess([row["revision"] for row in window].index(pin), size - 1)
+
     def test_rolling_history_pin_cannot_change_authority_results(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
         first = MODULE.a2t_scope_inventory(ROOT, head)
@@ -1168,7 +1186,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         # fails on every pull request while the real pin still has room.
         window = first["scope_touching_revision_window"]["revisions"]
         self.assertGreaterEqual(len(window), 2)
-        alternate = window[len(window) // 2]["revision"]
+        alternate = _alternate_history_pin(window)
         self.assertNotEqual(alternate, MODULE.A2T_SCOPE_HISTORY_BASE)
         with mock.patch.object(MODULE, "A2T_SCOPE_HISTORY_BASE", alternate):
             second = MODULE.a2t_scope_inventory(ROOT, head)
