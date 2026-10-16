@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 import sys
 
+INCLUDES = re.compile(r'^\s*#\s*(?:include|import)\s*[<"]([^>"]+)[>"]', re.MULTILINE)
+PROVIDER_INCLUDE = re.compile(r'(^|/)(dawn|webgpu|skia)/|^(include|modules|src)/')
 FORBIDDEN = (
-    "include/core/SkMilestone.h",
-    "dawn/dawn_version.h",
-    "webgpu/webgpu_cpp.h",
-    "webgpu/webgpu.h",
     "wgpu::",
+    "dawn::",
+    "skgpu::",
     "dawn_device_handle",
     "dawn_instance_handle",
     "dawn_queue_handle",
@@ -36,11 +37,18 @@ def main() -> int:
     args = parser.parse_args()
     source = args.source.read_text(encoding="utf-8")
     errors = [f"forbidden provider reach-through: {token}" for token in FORBIDDEN if token in source]
+    errors.extend(f"forbidden provider include: {header}" for header in INCLUDES.findall(source)
+                  if PROVIDER_INCLUDE.search(header))
     errors.extend(f"missing observer API use: {token}" for token in REQUIRED if token not in source)
     repository_root = args.source.resolve().parents[2]
-    public_header = repository_root / "core/render/include/pulp/render/render_observer.hpp"
-    if public_header.exists():
-        errors.append(f"observer seam must stay private, found exported header: {public_header}")
+    for include_dir in (repository_root / "core").glob("*/include"):
+        for header in include_dir.rglob("*"):
+            if header.suffix not in {".h", ".hpp"} or not header.is_file():
+                continue
+            contents = header.read_text(encoding="utf-8")
+            if (header.name in {"render_observer.hpp", "render_observer_private.hpp"}
+                    or "RenderToolchainVersions" in contents or "namespace render_observer" in contents):
+                errors.append(f"observer seam must stay private, found exported header: {header}")
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

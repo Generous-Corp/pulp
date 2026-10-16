@@ -510,6 +510,15 @@
       "timeout": 300.0
     },
     {
+      "name": "import-design-ir-observe-provider-boundary",
+      "argv": [
+        "{repo}/test/test_design_ir_observe_provider_boundary.py",
+        "--source",
+        "{repo}/tools/import-design/design_ir_observe.cpp"
+      ],
+      "timeout": 60.0
+    },
+    {
       "name": "inspector-truth-check-selftest",
       "argv": [
         "{repo}/tools/scripts/test_inspector_truth_check.py"
