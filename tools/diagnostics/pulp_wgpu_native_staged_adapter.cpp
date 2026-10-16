@@ -754,10 +754,9 @@ bool wait_for_child(pid_t child, int& status) noexcept {
 void terminate_child_group(pid_t child) noexcept {
     if (child <= 0)
         return;
-    // The child establishes its own process group before entering native code.
-    // Signal both the group and the direct child to cover the short fork/setpgid
-    // race, then reap it so no zombie survives the typed return.
-    (void)kill(-child, SIGKILL);
+    // The verifier launches this diagnostic in its own process group, so a
+    // direct kill here is sufficient for the capability-only child while the
+    // outer timeout can terminate the whole verifier group portably.
     (void)kill(child, SIGKILL);
     int status = 0;
     (void)wait_for_child(child, status);
@@ -789,7 +788,6 @@ LossProbeResult run_loss_capability_probe() noexcept {
     }
     if (child == 0) {
         close(pipe_fds[0]);
-        (void)setpgid(0, 0);
 #if defined(__linux__)
         (void)prctl(PR_SET_PDEATHSIG, SIGKILL);
         if (getppid() == 1)
@@ -834,7 +832,6 @@ LossProbeResult run_loss_capability_probe() noexcept {
     }
 
     close(pipe_fds[1]);
-    (void)setpgid(child, child);
     LossProbeResult result{};
     pollfd descriptor{.fd = pipe_fds[0], .events = POLLIN};
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
