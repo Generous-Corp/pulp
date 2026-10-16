@@ -10,13 +10,45 @@ import sys
 import tempfile
 from pathlib import Path
 
+from verify_wgpu_native_staged import parse_output, validate_loss_evidence
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--typed-only", action="store_true")
     for name in ("manifest", "asset", "source-tree", "linked-runtime", "executable",
                  "verifier"):
-        parser.add_argument(f"--{name}", required=True)
+        parser.add_argument(f"--{name}")
     args = parser.parse_args()
+    valid = parse_output(
+        "device_loss_callback=registered device_loss_scenario=triggered "
+        "device_loss_reason=destroyed device_loss_terminal_records=1 "
+        "device_loss_no_output_leases=true device_loss_reprime=unavailable\n"
+        "queue_error_without_loss=quarantined\n"
+        "device_loss_proof=callback_terminal_no_output_lease "
+        "callback_fallback_proof=unavailable\n")
+    if validate_loss_evidence(valid) != 1:
+        print("typed loss evidence positive control failed", file=sys.stderr)
+        return 1
+    for field, value in (("device_loss_terminal_records", "0"),
+                         ("device_loss_no_output_leases", "false"),
+                         ("device_loss_reprime", "reprimed"),
+                         ("queue_error_without_loss", "terminal")):
+        invalid = dict(valid)
+        invalid[field] = value
+        try:
+            validate_loss_evidence(invalid)
+        except ValueError:
+            pass
+        else:
+            print(f"typed loss evidence negative control failed: {field}", file=sys.stderr)
+            return 1
+    if args.typed_only:
+        return 0
+    if any(getattr(args, name.replace("-", "_")) is None
+           for name in ("manifest", "asset", "source-tree", "linked-runtime",
+                        "executable", "verifier")):
+        parser.error("all identity-control arguments are required unless --typed-only is used")
     with tempfile.TemporaryDirectory(prefix="pulp-wgpu-identity-negative-") as scratch:
         mutated = Path(scratch) / Path(args.linked_runtime).name
         receipt = Path(scratch) / "receipt.json"

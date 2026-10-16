@@ -64,7 +64,39 @@ def parse_output(stdout: str) -> dict[str, str]:
             for field in line.split():
                 key, value = field.split("=", 1)
                 result[key] = value
+        elif line.startswith("device_loss_callback="):
+            for field in line.split():
+                key, value = field.split("=", 1)
+                result[key] = value
+        elif line.startswith("queue_error_without_loss="):
+            for field in line.split():
+                key, value = field.split("=", 1)
+                result[key] = value
     return result
+
+
+def validate_loss_evidence(observed: dict[str, str]) -> int:
+    """Require typed loss evidence before emitting a diagnostic receipt."""
+    if observed.get("device_loss_callback") != "registered":
+        raise ValueError("device_loss_callback_not_registered")
+    if observed.get("device_loss_scenario") != "triggered":
+        raise ValueError("device_loss_scenario_not_triggered")
+    if observed.get("device_loss_reason") != "destroyed":
+        raise ValueError("device_loss_reason_not_destroyed")
+    records = observed.get("device_loss_terminal_records", "")
+    if not records.isdigit() or int(records) < 1:
+        raise ValueError("device_loss_terminal_records_missing")
+    if observed.get("device_loss_no_output_leases") != "true":
+        raise ValueError("device_loss_output_lease_evidence_missing")
+    if observed.get("device_loss_reprime") != "unavailable":
+        raise ValueError("device_loss_reprime_must_remain_unavailable")
+    if observed.get("device_loss_proof") != "callback_terminal_no_output_lease":
+        raise ValueError("device_loss_proof_mismatch")
+    if observed.get("callback_fallback_proof") != "unavailable":
+        raise ValueError("callback_fallback_must_remain_unavailable")
+    if observed.get("queue_error_without_loss") != "quarantined":
+        raise ValueError("ordinary_queue_error_not_quarantined")
+    return int(records)
 
 
 def verify(args: argparse.Namespace) -> dict:
@@ -100,9 +132,9 @@ def verify(args: argparse.Namespace) -> dict:
             raise ValueError(f"invalid_{field}")
     if (observed.get("staged_blocks") != "5" or
             observed.get("planted_completion_failures") != "1" or
-            observed.get("device_loss_proof") != "unavailable" or
             observed.get("callback_fallback_proof") != "unavailable"):
         raise ValueError("diagnostic_disposition_mismatch")
+    loss_terminal_records = validate_loss_evidence(observed)
     error = float(observed["cpu_oracle_max_error"])
     if not math.isfinite(error) or error < 0 or error > 1.0e-5:
         raise ValueError("cpu_oracle_parity_failed")
@@ -128,7 +160,14 @@ def verify(args: argparse.Namespace) -> dict:
         "successful_blocks": 5,
         "retired_failure_blocks": 1,
         "cpu_oracle_max_error": error,
-        "device_loss_proof": "unavailable",
+        "device_loss_callback": "registered",
+        "device_loss_scenario": "triggered",
+        "device_loss_reason": "destroyed",
+        "device_loss_proof": "callback_terminal_no_output_lease",
+        "device_loss_terminal_records": loss_terminal_records,
+        "device_loss_no_output_leases": True,
+        "device_loss_reprime": "unavailable",
+        "queue_error_without_loss": "quarantined",
         "callback_fallback_proof": "unavailable",
         "gpu_timestamps": "unavailable",
         "product_proof": False,
