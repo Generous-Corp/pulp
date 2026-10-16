@@ -1233,10 +1233,9 @@ public:
         // Every in-flight readback is completed as Failed rather than left to
         // expire block after block with no way back.
         dev_desc.SetDeviceLostCallback(
-            kAsyncCallbackMode,
-            [state = callback_state_, generation](const wgpu::Device&,
-                                                  wgpu::DeviceLostReason reason,
-                                                  wgpu::StringView message) {
+            kAsyncCallbackMode, [state = callback_state_, generation](const wgpu::Device&,
+                                                                      wgpu::DeviceLostReason reason,
+                                                                      wgpu::StringView message) {
                 if (!state->alive.load(std::memory_order_acquire))
                     return;
                 state->publish_loss(generation, static_cast<int>(reason), message);
@@ -1362,13 +1361,11 @@ public:
 
         static constexpr std::size_t kMessageCapacity = 256;
 
-        void publish_loss(std::uint64_t generation, int reason,
-                          wgpu::StringView message = {}) {
+        void publish_loss(std::uint64_t generation, int reason, wgpu::StringView message = {}) {
             std::lock_guard<std::mutex> lock(loss_mutex);
             if (generation > pending_generation.load(std::memory_order_relaxed)) {
                 pending_reason.store(reason, std::memory_order_relaxed);
-                const auto count = std::min<std::size_t>(message.length,
-                                                         kMessageCapacity - 1);
+                const auto count = std::min<std::size_t>(message.length, kMessageCapacity - 1);
                 if (message.data && count != 0)
                     std::memcpy(pending_message.data(), message.data, count);
                 pending_message[count] = '\0';
@@ -4432,7 +4429,8 @@ private:
                 if (pool_)
                     pool_->discard(req->buffer);
             } else {
-                if (pool_) pool_->discard(req->buffer);
+                if (pool_)
+                    pool_->discard(req->buffer);
                 req->detached_at = std::chrono::steady_clock::now();
                 detached_readbacks_.push_back(req);
             }
@@ -4458,8 +4456,7 @@ private:
     // True when another async request cannot be admitted. Checked BEFORE any
     // buffer is acquired, so a rejected submit costs nothing.
     bool readbacks_at_cap() const {
-        return async_readbacks_.size() + detached_readbacks_.size() >=
-               max_readbacks_in_flight_;
+        return async_readbacks_.size() + detached_readbacks_.size() >= max_readbacks_in_flight_;
     }
 
     bool ready_for_work() {

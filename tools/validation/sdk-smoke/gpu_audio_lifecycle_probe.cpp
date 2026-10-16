@@ -36,7 +36,9 @@ class LifecycleNode final : public GpuAudioNode {
         return true;
     }
 
-    bool cpu_fallback_prepared() const noexcept override { return true; }
+    bool cpu_fallback_prepared() const noexcept override {
+        return true;
+    }
 
     void process_block(const BufferView<const float>& input, BufferView<float>& output,
                        std::uint32_t n) override {
