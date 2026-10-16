@@ -456,6 +456,16 @@
         ".agents/skills/lv2/**"
       ]
     },
+    "mise": {
+      "paths": [
+        "tools/toolchain/**",
+        ".mise.toml",
+        ".mise.toolchain.toml",
+        "mise.toolchain.lock",
+        ".agents/skills/mise/**",
+        "docs/guides/mise.md"
+      ]
+    },
     "moonbase": {
       "paths": [
         "examples/moonbase-activation/**"
