@@ -19,8 +19,12 @@ class MiseProfileTests(unittest.TestCase):
         self.assertIn("tools/motion/visual/requirements.lock", installer)
         self.assertTrue((ROOT / "tools/motion/visual/requirements.lock").is_file())
 
-    def test_notice_records_optional_mise_dependency(self) -> None:
-        self.assertIn("mise", (ROOT / "NOTICE.md").read_text(encoding="utf-8").lower())
+    def test_mise_is_credited_as_developer_tooling(self) -> None:
+        # mise is developer-installed and never redistributed, so it is
+        # credited in DEPENDENCIES.md and the licensing reference, not in
+        # NOTICE.md, which covers redistributed code.
+        self.assertIn("| mise | MIT |", (ROOT / "DEPENDENCIES.md").read_text(encoding="utf-8"))
+        self.assertIn("[jdx/mise]", (ROOT / "docs/reference/licensing.md").read_text(encoding="utf-8"))
 
     def test_no_lane_invokes_mise(self) -> None:
         for path in (ROOT / ".github", ROOT / ".shipyard", ROOT / "tools/ci"):
