@@ -873,8 +873,8 @@ LossProbeResult run_loss_capability_probe() noexcept {
                 continue;
             terminate_child_group(child);
             close(pipe_fds[0]);
-            return {.status = followup == 0 ? LossProbeStatus::Unavailable
-                                            : LossProbeStatus::Failed};
+            return {.status =
+                        followup == 0 ? LossProbeStatus::Unavailable : LossProbeStatus::Failed};
         }
         if (count == 0 || count < 0)
             break;
