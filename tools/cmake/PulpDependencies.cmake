@@ -258,37 +258,20 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         set(_pulp_skia_cache_suffix "-wasm")
     elseif(WIN32)
         # The compiler architecture identifies Ninja's target when -A is
-        # unavailable. Share it with FindSkia and wgpu-native selection.
-        pulp_windows_skia_autofetch_slice(_pulp_skia_plat _pulp_skia_cache_suffix)
-        if(NOT _pulp_skia_plat AND _pulp_windows_target_arch MATCHES "^arm64(ec|x)-win$")
-            # ARM64EC/ARM64X assets are producer-specific and are not part of
-            # the ordinary auto-fetch matrix. Reuse a matching archive already
-            # staged in an installed SDK or checkout; otherwise fail before
-            # selecting an ARM64 or x64 substitute.
-            string(REGEX REPLACE "-win$" "" _pulp_req_arch "${_pulp_windows_target_arch}")
-            foreach(_pulp_ec_skia_root
-                    "${PULP_SDK_DIR}/external/skia-build"
-                    "${PULP_ROOT_DIR}/external/skia-build")
-                if(EXISTS "${_pulp_ec_skia_root}/build/win-gpu/lib/Release/${_pulp_req_arch}/skia.lib")
-                    set(SKIA_DIR "${_pulp_ec_skia_root}")
-                    message(STATUS "Skia: using staged Windows ${_pulp_req_arch} archive at ${SKIA_DIR}")
-                    break()
-                endif()
-            endforeach()
-            unset(_pulp_ec_skia_root)
-            if(NOT SKIA_DIR)
-                message(FATAL_ERROR
-                    "Pulp: cannot auto-fetch Windows ${_pulp_req_arch} Skia. "
-                    "Stage a matching producer archive and pass -DSKIA_DIR, "
-                    "or install it under PULP_SDK_DIR/external/skia-build.")
-            endif()
-        elseif(NOT _pulp_skia_plat)
-            message(FATAL_ERROR
-                "Pulp: cannot select a prebuilt Windows Skia slice for "
-                "target architecture '${_pulp_windows_target_arch}'. Supported values "
-                "are ARM64, ARM64EC, ARM64X, and x64.")
+        # unavailable; the helpers compute it themselves, so this arm reads no
+        # architecture variable of its own. ARM64EC/ARM64X assets are
+        # producer-specific and not in the auto-fetch matrix: reuse a matching
+        # archive already staged in an installed SDK or checkout, or fail before
+        # selecting an ARM64 or x64 substitute.
+        pulp_windows_skia_autofetch_resolve(_pulp_skia_plat _pulp_skia_cache_suffix
+            _pulp_staged_skia_root
+            "${PULP_SDK_DIR}/external/skia-build"
+            "${PULP_ROOT_DIR}/external/skia-build")
+        if(_pulp_staged_skia_root)
+            set(SKIA_DIR "${_pulp_staged_skia_root}")
+            message(STATUS "Skia: using staged Windows archive at ${SKIA_DIR}")
         endif()
-        unset(_pulp_req_arch)
+        unset(_pulp_staged_skia_root)
     elseif(UNIX)
         if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
             set(_pulp_skia_plat "linux-arm64")
@@ -310,20 +293,7 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         set(_pulp_skia_keying "1")
     endif()
     if(WIN32)
-        set(_pulp_local_skia_dir "${PULP_ROOT_DIR}/external/skia-build/build/win-gpu/lib/Release")
-        if(_pulp_windows_target_arch STREQUAL "x86_64-win")
-            file(GLOB _pulp_local_skia
-                "${_pulp_local_skia_dir}/x64/skia.lib"
-                "${_pulp_local_skia_dir}/skia.lib")
-        elseif(_pulp_windows_target_arch MATCHES "^arm64(ec|x)?-win$")
-            string(REGEX REPLACE "-win$" "" _pulp_local_skia_slice "${_pulp_windows_target_arch}")
-            file(GLOB _pulp_local_skia
-                "${_pulp_local_skia_dir}/${_pulp_local_skia_slice}/skia.lib")
-        else()
-            set(_pulp_local_skia "")
-        endif()
-        unset(_pulp_local_skia_dir)
-        unset(_pulp_local_skia_slice)
+        pulp_windows_local_skia(_pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build")
     else()
         file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/libskia.a")
     endif()
