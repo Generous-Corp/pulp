@@ -391,6 +391,35 @@ class DifferentialLabTests(unittest.TestCase):
             capture, native_capture, (1280, 800), (2560, 1600))
         self.assertTrue(audit["ok"])
 
+    def test_viewport_dpr_audit_each_negative_check_fails_closed(self) -> None:
+        cases = {
+            "resolved_viewport_matches_request": lambda capture, native: (
+                capture["provenance"]["viewport"]["resolved"].update(width=1279)),
+            "logical_extent_covers_request": lambda capture, native: (
+                capture["reference"].update(logical_width=1279)),
+            "native_logical_size_matches_browser": lambda capture, native: (
+                native["reference"].update(logical_width=1279)),
+            "dpr_matches_native": lambda capture, native: (
+                native["reference"].update(device_scale_factor=1)),
+            "resolved_viewport_matches_native": lambda capture, native: (
+                native["provenance"]["viewport"]["resolved"].update(width=1279)),
+            "render_size_matches_dpr": lambda capture, native: None,
+        }
+        for name, mutate in cases.items():
+            with self.subTest(check=name):
+                capture, native_capture, _source_sha256 = self._bound_captures()
+                for item in (capture, native_capture):
+                    item["reference"] = {
+                        "logical_width": 1280, "logical_height": 800,
+                        "device_scale_factor": 2,
+                    }
+                mutate(capture, native_capture)
+                actual_size = (2559, 1600) if name == "render_size_matches_dpr" else (2560, 1600)
+                audit = LAB.viewport_dpr_audit(
+                    capture, native_capture, (1280, 800), actual_size)
+                self.assertFalse(audit["ok"])
+                self.assertFalse(audit["checks"][name])
+
     @staticmethod
     def _bound_captures() -> tuple[dict, dict, str]:
         source_sha256 = "a" * 64
@@ -587,7 +616,8 @@ class DifferentialLabTests(unittest.TestCase):
                 "provenance": provenance,
                 "reference": {"asset_id": "reference:browser",
                                "logical_width": 1, "logical_height": 1,
-                               "device_scale_factor": 1},
+                               "device_scale_factor": 1,
+                               "authored_frame": {"x": 0, "y": 0}},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
@@ -632,6 +662,18 @@ class DifferentialLabTests(unittest.TestCase):
             image_binding.assert_any_call(capture, evidence / "browser.png")
             with patch.object(
                 LAB, "viewport_dpr_audit",
+                return_value={"ok": False, "checks": {"planted_negative": False}},
+            ):
+                with patch.object(LAB, "run_command", side_effect=fake_run), \
+                        patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                    with self.assertRaisesRegex(LAB.LabError, "viewport/DPR audit failed"):
+                        LAB.compare_one(
+                            Path("importer"), Path("observer"), source, root / "out-refusal", 60,
+                            "claude", Path("chrome"),
+                            fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                              "browser_interactions": "plan.json"})
+            with patch.object(
+                LAB, "viewport_dpr_audit",
                 side_effect=LAB.LabError("viewport/DPR audit failed"),
             ):
                 with patch.object(LAB, "run_command", side_effect=fake_run), \
@@ -663,7 +705,8 @@ class DifferentialLabTests(unittest.TestCase):
                 "provenance": provenance,
                 "reference": {"asset_id": "reference:browser",
                                "logical_width": 1, "logical_height": 1,
-                               "device_scale_factor": 1},
+                               "device_scale_factor": 1,
+                               "authored_frame": {"x": 0, "y": 0}},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
