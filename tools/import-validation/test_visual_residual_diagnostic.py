@@ -40,7 +40,7 @@ class VisualResidualDiagnosticTests(unittest.TestCase):
 
     def test_subthreshold_alpha_change_is_not_counted_as_difference(self):
         candidate = self.reference.copy()
-        candidate.putpixel((10, 7), (220, 220, 220, 99))
+        candidate.putpixel((10, 7), (220, 220, 220, 254))
         report = measure(self.reference, candidate, difference_threshold=8)
         self.assertEqual(report["categories"]["shared_foreground_interior"]["differing_pixels"], 0)
         self.assertEqual(report["categories"]["shared_foreground_interior"]["alpha_only_differing_pixels"], 0)
