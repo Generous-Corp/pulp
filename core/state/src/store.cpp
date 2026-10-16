@@ -526,6 +526,35 @@ void StateStore::set_normalized_rt(ParamID id, float normalized) {
     set_value_rt(id, value);
 }
 
+std::optional<ParameterFeedbackBaseline>
+StateStore::capture_feedback_baseline(ParamID id) const noexcept {
+    const auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end()) return std::nullopt;
+    return ParameterFeedbackBaseline{id, values_[it->second].versioned_value()};
+}
+
+ConditionalParameterApplyResult StateStore::set_value_rt_if_baseline(
+    const ParameterFeedbackBaseline& baseline, float value) {
+    const auto it = id_to_index_.find(baseline.id);
+    if (it == id_to_index_.end())
+        return {ConditionalParameterApplyStatus::InvalidParameter, 0};
+
+    const auto index = it->second;
+    const auto clamped = constrain_stored_value(params_[index], value);
+    auto expected = baseline.packed_identity;
+    active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+    const auto generation = advance_state_generation();
+    const bool applied = values_[index].compare_exchange_versioned(
+        expected, generation, clamped, generation);
+    active_state_writers_.fetch_sub(1, std::memory_order_release);
+    if (!applied)
+        return {ConditionalParameterApplyStatus::Conflict,
+                values_[index].versioned_value()};
+
+    if (registry_) registry_->notify_rt(baseline.id, clamped);
+    return {ConditionalParameterApplyStatus::Applied, expected};
+}
+
 std::size_t StateStore::pump_listeners() {
     const std::size_t drained = registry_ ? registry_->drain_main_listeners() : 0;
     service_modulation_watchers();
@@ -644,8 +673,6 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
 
     const auto index = found->second;
     auto expected_value = values_[index].versioned_value();
-    const auto expected_parameter_generation =
-        values_[index].committed_generation();
     const float previous = ParamValue::value_from_versioned(expected_value);
     const float desired = constrain_stored_value(
         params_[index], params_[index].range.denormalize(normalized));
@@ -667,7 +694,7 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
         gesture_acquired = true;
         if (state_generation() == reserved) {
             value_written = values_[index].compare_exchange_versioned(
-                expected_value, expected_parameter_generation, desired, reserved);
+                expected_value, reserved, desired, reserved);
             if (value_written && registry_) registry_->notify(id, desired);
         }
         release_gesture(id);
@@ -683,10 +710,8 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
     }
 
     const bool concurrent = state_generation() != reserved;
-    const auto applied_value = ParamValue::make_versioned_value(desired, reserved);
-    const bool control_value_current =
-        values_[index].committed_generation() == reserved &&
-        values_[index].versioned_value() == applied_value;
+    const auto applied_value = expected_value;
+    const bool control_value_current = values_[index].versioned_value() == applied_value;
     const bool sole_writer =
         active_state_writers_.load(std::memory_order_acquire) == 1;
     if (!callback_failed && value_written && !concurrent &&
@@ -706,7 +731,7 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
             std::memory_order_acquire);
         if (rollback_reserved) {
             rolled_back = values_[index].compare_exchange_versioned(
-                rollback_expected, reserved, previous, rollback_generation);
+                rollback_expected, rollback_generation, previous, rollback_generation);
         }
         if (rolled_back) {
             PULP_TRY {
