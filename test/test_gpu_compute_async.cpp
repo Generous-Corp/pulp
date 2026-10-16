@@ -595,11 +595,11 @@ TEST_CASE("Detached expired maps retain admission capacity after completion",
     std::vector<float> second(kBins, -1.0f);
     GpuCompute::ReadbackResult result{};
     gpu->set_max_readbacks_in_flight(1);
-    REQUIRE(gpu->compute_magnitude_async(
-                pairs.data(), first.data(), kBins, std::chrono::microseconds(0),
-                [&result](const GpuCompute::ReadbackResult& completion) {
-                    result = completion;
-                }) != 0);
+    REQUIRE(gpu->compute_magnitude_async(pairs.data(), first.data(), kBins,
+                                         std::chrono::microseconds(0),
+                                         [&result](const GpuCompute::ReadbackResult& completion) {
+                                             result = completion;
+                                         }) != 0);
 
     // The completion is delivered as Expired while an unresolved map is kept
     // detached. The callback-pending count is zero, but admission remains full
@@ -609,9 +609,9 @@ TEST_CASE("Detached expired maps retain admission capacity after completion",
     REQUIRE(result.status == GpuCompute::ReadbackStatus::Expired);
     REQUIRE(gpu->readbacks_in_flight() == 0);
     const auto after_poll = gpu->async_stats();
-    const auto second_id = gpu->compute_magnitude_async(
-        pairs.data(), second.data(), kBins, std::chrono::seconds(2),
-        [](const GpuCompute::ReadbackResult&) {});
+    const auto second_id =
+        gpu->compute_magnitude_async(pairs.data(), second.data(), kBins, std::chrono::seconds(2),
+                                     [](const GpuCompute::ReadbackResult&) {});
     if (after_poll.map_resolves == before_poll.map_resolves)
         REQUIRE(second_id == 0);
 
@@ -622,9 +622,9 @@ TEST_CASE("Detached expired maps retain admission capacity after completion",
     const auto recovery_deadline = Clock::now() + std::chrono::milliseconds(1500);
     while (reopened == 0 && Clock::now() < recovery_deadline) {
         gpu->poll_readbacks();
-        reopened = gpu->compute_magnitude_async(
-            pairs.data(), second.data(), kBins, std::chrono::seconds(2),
-            [](const GpuCompute::ReadbackResult&) {});
+        reopened = gpu->compute_magnitude_async(pairs.data(), second.data(), kBins,
+                                                std::chrono::seconds(2),
+                                                [](const GpuCompute::ReadbackResult&) {});
         if (reopened == 0)
             std::this_thread::yield();
     }

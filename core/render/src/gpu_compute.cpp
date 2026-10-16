@@ -1039,7 +1039,7 @@ static constexpr wgpu::CallbackMode kAsyncCallbackMode =
 // ── Implementation ──────────────────────────────────────────────────────────
 
 class DawnGpuCompute : public GpuCompute {
-public:
+  public:
     DawnGpuCompute() {
         callback_state_->initialized = &initialized_;
     }
