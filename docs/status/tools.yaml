@@ -193,6 +193,17 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: keyed-identity-reorder-validation
+  path: tools/import-design/keyed_identity_reorder_validation.mjs
+  category: design-import
+  use_when: Validate authored keyed identity declarations, a deterministic reorder digest, and planted duplicate or unknown-key negatives.
+  invocation: node tools/import-design/keyed_identity_reorder_validation.mjs --fixture <fixture.html> --identity <identity.json> --expected-receipt <receipt.json> --receipt <out.json>
+  inputs: An authored HTML fixture with data-pulp-key declarations and a matching identity manifest.
+  outputs: A deterministic identity/reorder receipt with fail-closed duplicate and unknown-key controls.
+  caveat: This is an identity-contract measurement only; it does not prove importer DesignIR reorder behavior, native rendering parity, or lifecycle safety.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: check-palette-health
   path: tools/import-validation/check_palette_health.py
   category: design-import

@@ -1013,6 +1013,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Acceptance evidence for a named fixture only; it does not prove general HTML importer coverage or semantic native-widget reconstruction.
 - Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
 - Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
+- Validate authored keyed identity declarations, a deterministic reorder digest, and planted duplicate or unknown-key negatives. → `tools/import-design/keyed_identity_reorder_validation.mjs`
+  - ⚠ **Cannot see:** This is an identity-contract measurement only; it does not prove importer DesignIR reorder behavior, native rendering parity, or lifecycle safety.
 - Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget. → `tools/import-design/make_catalog_component.py`
 - Run the deterministic materialized-runtime contract and its planted vendor-tag negative control. → `tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs`
 - Preserve executable React behavior behind a Chromium-computed DesignIR without making the behavior tree the visual authority. → `tools/import-design/jsx-runtime/materialized-runtime-transform.mjs`
