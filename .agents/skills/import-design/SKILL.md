@@ -542,7 +542,7 @@ knowing before you touch that file:
   render receipt. A real PNG and repeated identical hashes prove capture
   authenticity and determinism; they still do not prove Chromium/Skia pixel
   parity, font/rasterizer provenance, lifecycle safety, or importer capability.
-  The v3 receipt also records that Chromium capture and native import processes
+  The v4 receipt also records that Chromium capture and native import processes
   exited cleanly before their artifacts were read, plus the browser health and
   runtime-exception counts. This is a process-level teardown control; it does
   not claim that a native editor mount, keyed reorder, or stale-generation
