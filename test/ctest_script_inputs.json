@@ -7335,6 +7335,23 @@
    ],
    "kind": "python"
   },
+  "pulp-gpu-wgpu-native-staged-diagnostic": {
+   "entry": "tools/diagnostics/verify_wgpu_native_staged.py",
+   "inputs": [
+    "tools/deps/manifest.json",
+    "tools/diagnostics/verify_wgpu_native_staged.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-gpu-wgpu-native-staged-identity-negative-control": {
+   "entry": "tools/diagnostics/test_verify_wgpu_native_staged.py",
+   "inputs": [
+    "tools/deps/manifest.json",
+    "tools/diagnostics/test_verify_wgpu_native_staged.py",
+    "tools/diagnostics/verify_wgpu_native_staged.py"
+   ],
+   "kind": "python"
+  },
   "pulp-gpu-wgpu-native-staged-verifier-typed-controls": {
    "entry": "tools/diagnostics/test_verify_wgpu_native_staged.py",
    "inputs": [
