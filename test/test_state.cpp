@@ -1313,8 +1313,8 @@ TEST_CASE("versioned parameter writes use a monotonic packed revision",
     ParamValue value(0.0f);
     REQUIRE(value.set_versioned_if_newer(0.25f, 1, 1));
     REQUIRE(value.set_versioned_if_newer(0.75f, 2, 1));
-    REQUIRE(value.set_versioned_if_newer(0.5f, 1, 2));
-    CHECK_THAT(value.get(), WithinAbs(0.5f, 0.001f));
+    CHECK_FALSE(value.set_versioned_if_newer(0.5f, 1, 2));
+    CHECK_THAT(value.get(), WithinAbs(0.75f, 0.001f));
 
     ParamValue long_lived(0.0f);
     constexpr auto wrap = std::uint64_t{std::numeric_limits<std::uint32_t>::max()};
@@ -1431,6 +1431,10 @@ TEST_CASE("conditional RT feedback rejects unknown parameter and mismatched toke
     CHECK(unknown.status == ConditionalParameterApplyStatus::InvalidParameter);
     const auto wrong_id = store.set_value_rt_if_baseline(ParameterFeedbackBaseline{}, 0.2f);
     CHECK(wrong_id.status == ConditionalParameterApplyStatus::InvalidParameter);
+    StateStore other;
+    other.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    const auto foreign = other.set_value_rt_if_baseline(*baseline, 0.2f);
+    CHECK(foreign.status == ConditionalParameterApplyStatus::InvalidParameter);
 }
 
 TEST_CASE("StateStore preserves parameter display conversion callbacks",

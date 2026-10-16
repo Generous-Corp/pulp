@@ -20,6 +20,8 @@ namespace pulp::events { class EventLoop; }
 
 namespace pulp::state {
 
+class StateStore;
+
 /// Named parameter group for hierarchical UI organization.
 ///
 /// Groups can be nested: set @c parent_id to another group's @c id.
@@ -72,9 +74,10 @@ class ParameterFeedbackBaseline {
 
   private:
     friend class StateStore;
-    ParameterFeedbackBaseline(ParamID id, std::uint64_t packed_identity)
-        : id_(id), packed_identity_(packed_identity), valid_(true) {}
+    ParameterFeedbackBaseline(const StateStore* owner, ParamID id, std::uint64_t packed_identity)
+        : owner_(owner), id_(id), packed_identity_(packed_identity), valid_(true) {}
 
+    const StateStore* owner_ = nullptr;
     ParamID id_ = 0;
     std::uint64_t packed_identity_ = 0;
     bool valid_ = false;
