@@ -380,6 +380,12 @@ architecture (`CMAKE_GENERATOR_PLATFORM` when cross-compiling) and mirror each
 release digest in `external/skia-build/VERSION.md` before running the fetcher and
 host validation gates.
 
+The shared Windows Skia cache contains target-selected `skia.lib`, not Unix
+`libskia.a`. The x64 fetcher can publish a flat `build/win-gpu/lib/Release/`
+layout, while ARM64 slices use architecture subdirectories. After auto-fetch,
+resolve the archive with `pulp_windows_local_skia` so the same target-aware
+selection applies to checkout-local and shared-cache providers.
+
 Even a published fork release can be clobbered. A Windows backfill lane
 re-uploads its slice with `gh release upload --clobber` under the existing
 `chrome/mNNN` tag, so the pinned digest stops matching and the release CLI
