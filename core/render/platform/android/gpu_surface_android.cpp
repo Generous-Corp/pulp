@@ -762,10 +762,13 @@ void android_surface_resized(int width, int height) {
 }
 
 void android_render_frame(float dt) {
-    if (!g_surface_runtime.begin_frame()) return;
+    if (!g_surface_runtime.begin_frame())
+        return;
     struct FrameGuard {
         SurfaceRuntime& runtime;
-        ~FrameGuard() { runtime.end_frame(); }
+        ~FrameGuard() {
+            runtime.end_frame();
+        }
     } frame_guard{g_surface_runtime};
 
     auto* gpu_surface = g_surface_runtime.gpu_surface();
