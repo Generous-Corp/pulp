@@ -6,8 +6,8 @@
 #include <pulp/render/skia_surface.hpp>
 
 #include <android/choreographer.h>
-#include <android/native_window.h>
 #include <android/log.h>
+#include <android/native_window.h>
 
 #include <algorithm>
 #include <atomic>
@@ -50,21 +50,21 @@ void SurfaceRuntime::post_next_frame(const std::shared_ptr<LoopState>& state) {
     // The token is freed at callback entry. It does not keep the runtime alive
     // and therefore cannot leak when the surface is destroyed between frames.
     auto* token = new std::weak_ptr<LoopState>(state);
-    AChoreographer_postFrameCallback(state->choreographer, &SurfaceRuntime::on_vsync,
-                                     token);
+    AChoreographer_postFrameCallback(state->choreographer, &SurfaceRuntime::on_vsync, token);
 }
 
 void SurfaceRuntime::on_vsync(long frame_time_nanos, void* data) {
-    std::unique_ptr<std::weak_ptr<LoopState>> token(
-        static_cast<std::weak_ptr<LoopState>*>(data));
+    std::unique_ptr<std::weak_ptr<LoopState>> token(static_cast<std::weak_ptr<LoopState>*>(data));
     auto state = token->lock();
-    if (!state) return;
+    if (!state)
+        return;
 
     FrameCallback callback;
     float dt = 0.016f;
     {
         std::lock_guard lock(state->mutex);
-        if (!state->running.load(std::memory_order_acquire)) return;
+        if (!state->running.load(std::memory_order_acquire))
+            return;
         if (state->last_frame_nanos > 0) {
             dt = static_cast<float>(frame_time_nanos - state->last_frame_nanos) / 1e9f;
             dt = std::clamp(dt, 0.001f, 0.1f);
@@ -73,7 +73,8 @@ void SurfaceRuntime::on_vsync(long frame_time_nanos, void* data) {
         callback = state->callback;
     }
 
-    if (callback) callback(dt);
+    if (callback)
+        callback(dt);
     post_next_frame(state);
 }
 
@@ -97,7 +98,8 @@ void SurfaceRuntime::start_render_loop() {
 
 void SurfaceRuntime::stop_render_loop() {
     auto state = std::move(loop_state_);
-    if (!state) return;
+    if (!state)
+        return;
     {
         std::lock_guard lock(state->mutex);
         state->running.store(false, std::memory_order_release);
@@ -119,8 +121,8 @@ void SurfaceRuntime::surface_created(ANativeWindow* window, float scale_factor) 
     if (native_window_ || gpu_surface_ || skia_surface_ || loop_state_)
         surface_destroyed();
 
-    PULP_LOGI("SurfaceRuntime: creating surface (%dx%d)",
-              ANativeWindow_getWidth(window), ANativeWindow_getHeight(window));
+    PULP_LOGI("SurfaceRuntime: creating surface (%dx%d)", ANativeWindow_getWidth(window),
+              ANativeWindow_getHeight(window));
     native_window_ = window;
     ANativeWindow_acquire(native_window_);
 
@@ -191,7 +193,8 @@ void SurfaceRuntime::surface_created(ANativeWindow* window, float scale_factor) 
 
 void SurfaceRuntime::surface_resized(int width, int height) {
     std::unique_lock lock(mutex_);
-    if (!surface_valid_ || !gpu_surface_ || !gpu_surface_->is_initialized()) return;
+    if (!surface_valid_ || !gpu_surface_ || !gpu_surface_->is_initialized())
+        return;
     frame_cv_.wait(lock, [this] { return active_frames_ == 0; });
     gpu_surface_->resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
     PULP_LOGI("SurfaceRuntime: resized to %dx%d", width, height);
@@ -221,9 +224,11 @@ void SurfaceRuntime::surface_destroyed() {
 
 bool SurfaceRuntime::begin_frame() {
     std::lock_guard lock(mutex_);
-    if (!surface_valid_ || !gpu_surface_ || !gpu_surface_->is_initialized()) return false;
+    if (!surface_valid_ || !gpu_surface_ || !gpu_surface_->is_initialized())
+        return false;
     ++active_frames_;
-    if (gpu_surface_->begin_frame()) return true;
+    if (gpu_surface_->begin_frame())
+        return true;
     --active_frames_;
     frame_cv_.notify_all();
     return false;
@@ -234,14 +239,16 @@ void SurfaceRuntime::end_frame() {
     GpuSurface* gpu = nullptr;
     {
         std::lock_guard lock(mutex_);
-        if (active_frames_ == 0 || !gpu_surface_) return;
+        if (active_frames_ == 0 || !gpu_surface_)
+            return;
         gpu = gpu_surface_.get();
     }
     gpu->end_frame();
     {
         std::lock_guard lock(mutex_);
         --active_frames_;
-        if (active_frames_ == 0) frame_cv_.notify_all();
+        if (active_frames_ == 0)
+            frame_cv_.notify_all();
     }
 }
 
@@ -256,10 +263,12 @@ SkiaSurface* SurfaceRuntime::skia_surface() const {
 AndroidGpuAdapterIdentity SurfaceRuntime::adapter_identity() const {
     std::lock_guard lock(mutex_);
     AndroidGpuAdapterIdentity identity;
-    if (!gpu_surface_ || !gpu_surface_->is_initialized()) return identity;
+    if (!gpu_surface_ || !gpu_surface_->is_initialized())
+        return identity;
 
     const auto info = gpu_surface_->adapter_info();
-    if (!info.available) return identity;
+    if (!info.available)
+        return identity;
     identity.available = true;
     identity.name = info.name;
     identity.vendor = info.vendor;

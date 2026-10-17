@@ -96,7 +96,7 @@ struct AndroidGpuAdapterIdentity {
 //   * callbacks posted before stop are weak-token callbacks and therefore safe
 //     no-ops after teardown.
 class SurfaceRuntime {
-public:
+  public:
     using FrameCallback = std::function<void(float)>;
 
     explicit SurfaceRuntime(FrameCallback frame_callback);
@@ -120,7 +120,7 @@ public:
     SkiaSurface* skia_surface() const;
     AndroidGpuAdapterIdentity adapter_identity() const;
 
-private:
+  private:
     struct LoopState;
 
     static void on_vsync(long frame_time_nanos, void* data);
