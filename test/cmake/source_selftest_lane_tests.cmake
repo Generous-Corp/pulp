@@ -71,6 +71,14 @@ add_test(NAME build-governance-paths-selftest
         "${CMAKE_SOURCE_DIR}/tools/ci/test_build_governance_paths.py")
 set_tests_properties(build-governance-paths-selftest PROPERTIES TIMEOUT 120)
 
+# The VST3 bundle checker has a source-only fixture suite covering complete
+# x64 bundles and typed-negative manifest/sidecar cases. Keep it on the
+# build-free required lane so the checker itself cannot drift untested.
+add_test(NAME vst3-bundle-layout-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/test_check_vst3_bundle_layout.py")
+set_tests_properties(vst3-bundle-layout-selftest PROPERTIES TIMEOUT 120)
+
 # Merge-gate evidence validation is source-only and must be registered in the
 # CTest inventory that carries the source-selftest label.
 add_test(NAME shipyard-merge-gate-evidence-selftest

@@ -79,7 +79,7 @@ CATALOG = (
      ("mod_lfo", "mod_lpg", "mod_slew", "mod_transient", "mod_env")),
     ("forge_multiband_catalog.hpp", "forge_multiband_catalog.hpp",
      ("multiband_compressor",)),
-    ("forge_pitch_catalog.hpp", "forge_pitch_catalog.hpp",
+    ("forge_pitch_catalog.hpp", "core/host/src/forge_pitch_catalog.cpp",
      ("whammy", "harmony_engine")),
     ("forge_saturator_catalog.hpp", "forge_saturator_catalog.hpp",
      ("saturator",)),

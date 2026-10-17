@@ -9,6 +9,29 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09871"></a>
+## [0.987.1] - 2026-10-17
+
+- release/version bump ([#10498](https://github.com/Generous-Corp/pulp/pull/10498))
+- codex/win vst3 sidecars 20261016 ([#10434](https://github.com/Generous-Corp/pulp/pull/10434))
+- build/mise upstream drift ([#10492](https://github.com/Generous-Corp/pulp/pull/10492))
+- codex/pitch extraction 20261017 ([#10496](https://github.com/Generous-Corp/pulp/pull/10496))
+- release/version bump ([#10495](https://github.com/Generous-Corp/pulp/pull/10495))
+- retained structural benchmark ([#10479](https://github.com/Generous-Corp/pulp/pull/10479))
+- codex/refactor roadmap audit 20261017 ([#10490](https://github.com/Generous-Corp/pulp/pull/10490))
+- ci/coverage python full history ([#10466](https://github.com/Generous-Corp/pulp/pull/10466))
+
+<a id="v09870"></a>
+## [0.987.0] - 2026-10-17
+
+- release/version bump ([#10493](https://github.com/Generous-Corp/pulp/pull/10493))
+- perf/graph direct current refresh 20261018 ([#10488](https://github.com/Generous-Corp/pulp/pull/10488))
+- codex/p2 receipt linkage 20261017 ([#10483](https://github.com/Generous-Corp/pulp/pull/10483))
+- release/version bump ([#10491](https://github.com/Generous-Corp/pulp/pull/10491))
+- release/version bump ([#10487](https://github.com/Generous-Corp/pulp/pull/10487))
+- build/mise 2026.10.11 ([#10484](https://github.com/Generous-Corp/pulp/pull/10484))
+- ci/coverage linux disk ([#10447](https://github.com/Generous-Corp/pulp/pull/10447))
+
 <a id="v09865"></a>
 ## [0.986.5] - 2026-10-17
 
@@ -10977,6 +11000,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.987.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.987.1
+[0.987.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.987.0
 [0.986.5]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.5
 [0.986.4]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.4
 [0.986.3]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.3

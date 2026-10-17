@@ -83,8 +83,13 @@ jobs:
           PULP_CLANG_FORMAT="$(command -v clang-format || true)"
           export PULP_CLANG_FORMAT
           report="$RUNNER_TEMP/format-changed.txt"
+          # The default `bash -e` shell would end the step here on a non-zero
+          # exit, before the report is printed and before the verdict below;
+          # the log would show only "exit code 1". Capture rc instead.
+          set +e
           bash tools/scripts/format_changed.sh --check --base "$BASE_REF" > "$report" 2>&1
           rc=$?
+          set -e
           cat "$report"
           {
             echo "## Format (changed lines)"

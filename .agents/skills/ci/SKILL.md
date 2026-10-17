@@ -115,6 +115,15 @@ on a real PR. Do them in order.
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
 
+## A `run:` step stops at the first failing command
+
+GitHub's default shell for `run:` is `bash -e {0}` (no pipefail), so a step
+stops at a failing command even when the script itself starts with
+`set -uo pipefail`. A step that runs a checker and
+then prints its report or picks a verdict from the exit code must capture the
+code with `set +e` ... `rc=$?` ... `set -e`, or the step ends at the checker
+with only "exit code 1" in the log. `format-changed-check.yml` hit this.
+
 ## Build emitters always use the governor
 
 The PR-head affected-test step reads a marker written immediately before the
@@ -915,6 +924,11 @@ A hosted Linux leg that dies with "No space left on device" leaves no job log
 step prints every five minutes, and the before/after `df` of "Reclaim hosted
 Linux coverage disk", to see which writer grew. Do not move the leg to a larger
 or paid runner.
+
+A tools test that fails in the Linux Python pass with `ShallowCheckoutError`,
+`HEAD^` or `origin/main..HEAD` errors is reading git history. The leg fetches
+full history before that pass; if one still fails that way, check that the
+fetch step ran before suspecting the test.
 
 ## Compiler coverage is asymmetric — GCC sees only `core/**`
 
