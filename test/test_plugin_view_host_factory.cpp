@@ -389,4 +389,111 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     }
 }
 
+TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
+          "[view][plugin-view-host][repaint][windows][gpu]") {
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp repaint regression", WS_OVERLAPPEDWINDOW, 0, 0,
+                            128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } parent;
+    REQUIRE(parent.hwnd != nullptr);
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    int idle_calls = 0;
+    bool requested_inside_idle = false;
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(parent.hwnd);
+    REQUIRE(host->is_attached());
+    // Repeated attachment to the same HWND is an idempotent no-op.
+    host->attach_to_parent(parent.hwnd);
+    CHECK(host->is_attached());
+    if (!host->is_gpu_backed())
+        SKIP("Dawn GPU unavailable: this regression requires a real GPU-backed HWND");
+
+    const auto child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    const auto dispatch_frame_timer = [&] {
+        const auto deadline = GetTickCount64() + 1000;
+        MSG msg{};
+        while (GetTickCount64() < deadline) {
+            if (PeekMessageW(&msg, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+                DispatchMessageW(&msg);
+                return true;
+            }
+            Sleep(1);
+        }
+        return false;
+    };
+    ValidateRect(child, nullptr);
+    host->set_idle_callback([&] { ++idle_calls; });
+    for (int i = 0; i != 32; ++i)
+        host->repaint();
+    CHECK(idle_calls == 0);
+    CHECK(GetUpdateRect(child, nullptr, FALSE) == 0);
+    REQUIRE(dispatch_frame_timer());
+    CHECK(idle_calls == 1);
+
+    idle_calls = 0;
+    host->set_idle_callback([&] {
+        ++idle_calls;
+        if (!requested_inside_idle) {
+            requested_inside_idle = true;
+            host->repaint();
+        }
+    });
+    host->repaint();
+    CHECK(idle_calls == 0);
+    REQUIRE(dispatch_frame_timer());
+    CHECK(requested_inside_idle);
+    CHECK(idle_calls == 1);
+    CHECK(GetUpdateRect(child, nullptr, FALSE) == 0);
+    REQUIRE(dispatch_frame_timer());
+    CHECK(idle_calls == 2);
+    host->set_idle_callback({});
+    host->detach();
+}
+
+TEST_CASE("Windows attached GPU editor rolls back when its frame timer fails",
+          "[view][plugin-view-host][repaint][windows][timer]") {
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp timer failure regression", WS_OVERLAPPEDWINDOW, 0,
+                            0, 128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } parent;
+    REQUIRE(parent.hwnd != nullptr);
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", "1");
+    host->attach_to_parent(parent.hwnd);
+    _putenv_s("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", "");
+
+    CHECK_FALSE(host->is_attached());
+    CHECK(GetParent(static_cast<HWND>(host->native_handle())) == nullptr);
+    host->detach();
+}
+
 #endif  // _WIN32
