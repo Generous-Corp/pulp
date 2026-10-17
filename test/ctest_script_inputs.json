@@ -9225,6 +9225,19 @@
    ],
    "kind": "python"
   },
+  "android-surface-runtime-contract": {
+   "entry": "tools/scripts/test_android_surface_runtime_contract.py",
+   "inputs": [
+    "CMakeLists.txt",
+    "android/app/src/main/kotlin/com/pulp/render/PulpSurfaceView.kt",
+    "core/render/platform/android/gpu_surface_android.cpp",
+    "core/render/platform/android/gpu_surface_android_internal.hpp",
+    "core/render/platform/android/gpu_surface_android_jni.cpp",
+    "core/render/platform/android/surface_runtime_android.cpp",
+    "tools/scripts/test_android_surface_runtime_contract.py"
+   ],
+   "kind": "python"
+  },
   "render-upward-edge-check": {
    "entry": "tools/scripts/render_upward_edge_check.py",
    "inputs": [
