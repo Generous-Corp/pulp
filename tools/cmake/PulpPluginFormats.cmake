@@ -49,7 +49,9 @@ endfunction()
 # staging assertion is satisfied explicitly so a missing call on an ordinary
 # plug-in still fails.
 function(_pulp_mark_editorless_runtime target)
-    set_target_properties(${target} PROPERTIES PULP_RUNTIME_DEPENDENCIES_STAGED TRUE)
+    set_target_properties(${target} PROPERTIES
+        PULP_RUNTIME_DEPENDENCIES_STAGED TRUE
+        PULP_EDITORLESS_RUNTIME TRUE)
 endfunction()
 
 function(_pulp_add_vst3 target name bundle_id version manufacturer category)

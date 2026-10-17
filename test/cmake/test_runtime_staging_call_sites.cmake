@@ -147,6 +147,18 @@ if(_vst3_editorless_sidecar_guard EQUAL -1)
         "PulpPluginFormats.cmake: Windows VST3 sidecar assembly is not guarded for NO_EDITOR")
 endif()
 
+file(READ "${PULP_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake" _build_info)
+foreach(_needle
+        "PULP_EDITORLESS_RUNTIME TRUE"
+        "get_target_property(_editorless \${format_target} PULP_EDITORLESS_RUNTIME)"
+        "if(_staged AND NOT _editorless AND WIN32 AND SKIA_FOUND)")
+    string(FIND "${_plugin_formats}${_build_info}" "${_needle}" _found)
+    if(_found EQUAL -1)
+        list(APPEND _failures
+            "editorless build-info metadata is not excluded from runtime sidecars: ${_needle}")
+    endif()
+endforeach()
+
 # No format helper may call the wgpu primitive directly. It copies ONLY the wgpu
 # runtime — no Apple @loader_path rpath, no Windows ICU data — so a call site
 # left on it produces a module that builds clean and then fails once shared or

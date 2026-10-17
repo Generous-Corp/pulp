@@ -267,8 +267,9 @@ function(_pulp_attach_build_info target format_target format name bundle_id vers
     # holds the libraries) lists none rather than claiming files it lacks.
     set(_libs "")
     get_target_property(_staged ${format_target} PULP_RUNTIME_DEPENDENCIES_STAGED)
+    get_target_property(_editorless ${format_target} PULP_EDITORLESS_RUNTIME)
     set(_wgpu_file "")
-    if(_staged)
+    if(_staged AND NOT _editorless)
         _pulp_build_info_wgpu_runtime_file(_wgpu_file)
     endif()
     if(_wgpu_file)
@@ -278,11 +279,11 @@ function(_pulp_attach_build_info target format_target format name bundle_id vers
         list(APPEND _libs
             "{\"file\": ${_j_file}, \"component\": \"wgpu-native\", \"version\": ${_j_ver}}")
     endif()
-    if(_staged AND WIN32 AND SKIA_FOUND)
+    if(_staged AND NOT _editorless AND WIN32 AND SKIA_FOUND)
         list(APPEND _libs
             "{\"file\": \"icudtl.dat\", \"component\": \"skia-icu-data\", \"version\": null}")
     endif()
-    if(_staged AND COMMAND _pulp_registered_runtime_dependency_targets)
+    if(_staged AND NOT _editorless AND COMMAND _pulp_registered_runtime_dependency_targets)
         _pulp_registered_runtime_dependency_targets(_registered)
         foreach(_runtime_target IN LISTS _registered)
             list(APPEND _libs
