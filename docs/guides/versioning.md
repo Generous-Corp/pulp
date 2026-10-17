@@ -610,6 +610,44 @@ absorbed only when `kill -0` on the PID embedded in its filename fails — never
 on mtime, which would eventually reclaim a slow test's live shard and drop its
 coverage silently.
 
+The hosted **Linux** coverage leg has its own "Reclaim hosted Linux coverage
+disk" step. The ubuntu image arrives with roughly 14 GiB free on its root disk,
+and a full Linux run exhausted it (about 93 minutes in, then about 2 hours in
+after deleting preinstalled SDKs alone). A runner that fills its disk dies
+without a log. On GitHub-hosted runners only, the step deletes preinstalled
+SDKs the job never uses (.NET, Android, GHC, CodeQL, Boost, Swift and similar),
+and, when the runner's separate `/mnt` scratch disk has more room than root,
+makes `build-coverage` a symlink to `/mnt/build-coverage`. The instrumented
+objects and every raw profile then live off the root disk the runner logs to.
+
+On the Linux leg only (the macOS leg's launch is unchanged, and it already runs
+close to full, so a 3 GiB guard could stop it), while the suite runs the
+coverage step prints a `disk-sample:` line every
+minute: free space on root and on the build disk and available memory, plus,
+every fifth sample, the sizes of `build-coverage`, its `profraw` and `coverage`
+subdirectories, and `~/.cache/pulp`. A runner lost to disk or memory exhaustion
+loses its whole log, so crossing 20, 10, 5 and 2 GiB free disk, or 2, 1 and
+0.5 GiB available memory, is also raised as an annotation, which is stored
+apart from the log. `run_coverage.sh` raises a `coverage phase` notice at each
+phase (configure, build, tests, merge, report, export) for the same reason:
+the last one shows how far a lost run got. Annotations and the log only upload
+when a step ends, though, so a runner that dies mid-step loses both. The
+sampler therefore guards the root disk: below 3 GiB free it prints `du` of the
+root-disk directories (`/tmp`, `$HOME`, the runner directory, `/var`) and
+stops the suite, and the step ends with "the root-disk guard stopped the
+coverage suite" and its log intact. The reclaim step also points `TMPDIR` at
+`/mnt/coverage-tmp`, so test temporaries leave root along with the build, and
+routes core files to `/mnt/cores`; the suite itself runs with `ulimit -c 0`,
+since a crashing instrumented binary can write gigabytes of core in seconds.
+Root free space is checked every 10 seconds for the same reason. The suite's
+own stdout and stderr go to `build-coverage/coverage-suite.log` (on `/mnt`),
+because the runner spools a step's output to root before uploading it and
+about 20k tests can produce gigabytes; the step prints only the sampler's
+progress lines (with the current phase), then the phase lines, annotation
+commands and, on failure, the last 200 lines. The full log is uploaded as the
+`coverage-suite-log-<os>-<sha>` artifact.
+Read those before changing anything else.
+
 
 ## Shipyard-binary pin bumps
 
