@@ -709,6 +709,38 @@
                 SKIP_RETURN_CODE 77
                 TIMEOUT 60)
 
+            # Narrow physical proof for the private WaveNet provider's mixed
+            # dilation history layout. The test binds both preparation writes
+            # and runtime copies to the independently expected per-layer byte
+            # sizes; it does not alter the provider's runtime behavior.
+            add_executable(pulp-gpu-dawn-wavenet-history-probe
+                test_gpu_dawn_wavenet_history_probe.cpp)
+            target_link_libraries(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                ../core/gpu_audio/src)
+            target_include_directories(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                ${SKIA_INCLUDE_DIRS})
+            if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+                target_include_directories(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                    "${SKIA_INCLUDE_DIRS}/dawn")
+            endif()
+            target_compile_definitions(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                target_link_libraries(pulp-gpu-dawn-wavenet-history-probe PRIVATE
+                    Vellum::Gpu Vellum::DawnHeaders)
+            endif()
+            add_dependencies(pulp-gpu-dawn-wavenet-history-probe
+                pulp-gpu-dawn-shared-io-provider-probe)
+            add_test(NAME pulp-gpu-dawn-wavenet-history-probe
+                COMMAND pulp-gpu-dawn-wavenet-history-probe)
+            set_tests_properties(pulp-gpu-dawn-wavenet-history-probe PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                SKIP_RETURN_CODE 77
+                TIMEOUT 60)
+
             if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
                 # Matched staged/shared lifecycle screening. This is deliberately
                 # an intermediate p4.matched.v1 diagnostic and never emits p4.raw.v1:
