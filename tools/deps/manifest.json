@@ -502,7 +502,7 @@
       "version": "2026.10.11",
       "source_kind": "developer-supplied",
       "repository": "https://github.com/jdx/mise",
-      "upstream": { "kind": "none" },
+      "upstream": { "kind": "git-tag", "ref": "v2026.10.11" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "external_names": ["mise"],

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import stat
 import tempfile
@@ -185,6 +186,17 @@ class StrictPinTests(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 generate.load(path)
             self.assertIn("evidence.node", str(ctx.exception))
+
+    def test_dependency_inventory_names_the_pinned_mise_release(self) -> None:
+        # The weekly upstream-drift audit compares tools/deps/manifest.json's
+        # mise tag with jdx/mise's latest release, so it must name the release
+        # the toolchain manifest pins, or the audit measures a stale tag.
+        version = tomllib.loads(generate.SOURCE.read_text(encoding="utf-8"))["mise"]["version"]
+        inventory = json.loads((REPO / "tools/deps/manifest.json").read_text(encoding="utf-8"))
+        rows = [d for d in inventory["dependencies"] if d["name"] == "mise"]
+        self.assertEqual(1, len(rows))
+        self.assertEqual(version, rows[0]["version"])
+        self.assertEqual({"kind": "git-tag", "ref": f"v{version}"}, rows[0]["upstream"])
 
     def test_rust_is_not_a_mise_tool(self) -> None:
         source = generate.SOURCE.read_text(encoding="utf-8")
