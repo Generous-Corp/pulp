@@ -101,9 +101,9 @@ remaining host-toolchain path is a migration boundary, not a second set of
 Pulp pins. `setup.sh`, `pulp build`, and public CI still accept hosts without
 mise until their provisioning is migrated and verified.
 
-### 1. Install mise 2026.10.8
+### 1. Install mise 2026.10.11
 
-The lock is generated with mise **2026.10.8**, and only that version is
+The lock is generated with mise **2026.10.11**, and only that version is
 guaranteed to read it the same way: mise releases differ in how they resolve
 some download URLs, so an older mise can read the same config differently or
 reject rows of the lock.
@@ -118,7 +118,7 @@ Linux package manager). On macOS (on Linux use `linux-x64` or `linux-arm64`, and
 `sha256sum -c` in place of `shasum -a 256 -c`):
 
 ```bash
-mise_version=2026.10.8
+mise_version=2026.10.11
 mise_platform=macos-arm64   # or macos-x64
 base="https://github.com/jdx/mise/releases/download/v${mise_version}"
 curl -fL -O "$base/SHASUMS256.txt" -O "$base/SHASUMS256.txt.minisig" \
@@ -134,22 +134,22 @@ mkdir -p ~/.local/bin && install -m 755 mise/bin/mise ~/.local/bin/mise
 mise --version
 ```
 
-Stop if either check fails. As a cross-check, the 2026.10.8 archives have
+Stop if either check fails. As a cross-check, the 2026.10.11 archives have
 these sha256 digests:
 
 | Archive | sha256 |
 |---------|--------|
-| `mise-v2026.10.8-macos-arm64.tar.gz` | `8228699f316dc17931beb86f7a1aac70e4685535430441492ff4e857c72535ad` |
-| `mise-v2026.10.8-macos-x64.tar.gz` | `28c924c5703c6344489bc73227c59da2194eaf7fd962c5f3d233b9524b7419e9` |
-| `mise-v2026.10.8-linux-arm64.tar.gz` | `88aea77e41c2a3c45a9cbd64df9516ba887017442846213b3de178acbd3c9a46` |
-| `mise-v2026.10.8-linux-x64.tar.gz` | `e908ea27810ae358c9a9a7d897ea10197bdc38d39839243e1b36acc31cbef868` |
-| `mise-v2026.10.8-windows-x64.zip` | `2548132f9e8b8dc29027933e47a98582557b448dfec791dbecad66e9c760582b` |
-| `mise-v2026.10.8-windows-arm64.zip` | `c38a2353088896894df4a2e9c4ea4a9d1b2bee290c0dba9ea5a10e43646d41e1` |
+| `mise-v2026.10.11-macos-arm64.tar.gz` | `64592e2978459d91b9dc690352c97d59a8c2b327f586fd201468fa56afe66311` |
+| `mise-v2026.10.11-macos-x64.tar.gz` | `6eaffe02521c700b420ba6930dfbc528951f27c1c9896c827ab6aab7248c75f1` |
+| `mise-v2026.10.11-linux-arm64.tar.gz` | `7534d514495449e267997410583833080ed0b99a0053f3b26a10691794a597b5` |
+| `mise-v2026.10.11-linux-x64.tar.gz` | `a7d0aad3d6782d42675fe0a2732b39bfc356f6cf2b554437f84c597814a2fd85` |
+| `mise-v2026.10.11-windows-x64.zip` | `2337f9fdb13ba51d3bf5831cacec9c59e70fec9630e9ad30f65975eb6b83b162` |
+| `mise-v2026.10.11-windows-arm64.zip` | `6132280c5d2ccd194b26d957ed4c71f830d8114449be50125093e9ca0c95fc4f` |
 
 On Windows, compare `(Get-FileHash <archive> -Algorithm SHA256).Hash` with the
 table (PowerShell prints it in upper case).
 
-The convenience installer `curl https://mise.run | MISE_VERSION=v2026.10.8 sh`
+The convenience installer `curl https://mise.run | MISE_VERSION=v2026.10.11 sh`
 checks the archive's sha256, against digests embedded in the script when you
 ask for the script's own current release and against the release's
 `SHASUMS256.txt` otherwise. It does not check the minisign or GPG signature
@@ -210,7 +210,7 @@ A tool version changes only through a pull request that:
 2. regenerates the derived files with the pinned mise:
 
    ```bash
-   python3 tools/toolchain/generate.py --lock --mise /path/to/mise-2026.10.8
+   python3 tools/toolchain/generate.py --lock --mise /path/to/mise-2026.10.11
    ```
 
    This rewrites `.mise.toolchain.toml`, the generated block in `.mise.toml`,
@@ -223,7 +223,7 @@ A tool version changes only through a pull request that:
 every version and lock checksum that moved, for the pull request body:
 
 ```bash
-python3 tools/toolchain/update.py cmake --to 4.3.4 --mise /path/to/mise-2026.10.8
+python3 tools/toolchain/update.py cmake --to 4.3.4 --mise /path/to/mise-2026.10.11
 python3 tools/toolchain/update.py rust --to 1.98.0      # no lock rows: rustup installs Rust
 python3 tools/toolchain/update.py shipyard --to v0.270.0
 ```
