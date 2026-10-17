@@ -341,6 +341,11 @@ the error lines first: under a parallel build the tail is usually warnings from
 sibling targets that kept compiling after the first failure. A full log is
 still on disk when 100 lines are not enough.
 
+On GitHub Actions, `run_coverage.sh` also raises a `coverage phase` notice at
+each major phase, with available memory. A hosted runner lost to memory or
+disk exhaustion loses its whole log, and the last notice then shows how far
+the run got.
+
 If you see `_deps/catch2-build/src/src/catch2/...: No such file or
 directory` spam on stderr, you're on an older checkout — the canonical
 exclude regex in `scripts/run_coverage.sh` filters these. Update to the
