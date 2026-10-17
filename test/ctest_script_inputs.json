@@ -11887,6 +11887,7 @@
    "entry": "tools/toolchain/test_generate.py",
    "inputs": [
     "tools/cmake",
+    "tools/deps/manifest.json",
     "tools/shipyard.toml",
     "tools/toolchain",
     "tools/toolchain/check_env.py",
