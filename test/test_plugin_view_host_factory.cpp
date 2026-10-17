@@ -392,10 +392,13 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
 TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
           "[view][plugin-view-host][repaint][windows][gpu]") {
     struct ParentWindow {
-        HWND hwnd = CreateWindowExW(0, L"STATIC", L"Pulp repaint regression",
-                                    WS_OVERLAPPEDWINDOW, 0, 0, 128, 128,
-                                    nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-        ~ParentWindow() { if (hwnd) DestroyWindow(hwnd); }
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp repaint regression", WS_OVERLAPPEDWINDOW, 0, 0,
+                            128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
     } parent;
     REQUIRE(parent.hwnd != nullptr);
 
@@ -434,7 +437,8 @@ TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
     };
     ValidateRect(child, nullptr);
     host->set_idle_callback([&] { ++idle_calls; });
-    for (int i = 0; i != 32; ++i) host->repaint();
+    for (int i = 0; i != 32; ++i)
+        host->repaint();
     CHECK(idle_calls == 0);
     CHECK(GetUpdateRect(child, nullptr, FALSE) == 0);
     REQUIRE(dispatch_frame_timer());
@@ -463,10 +467,13 @@ TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
 TEST_CASE("Windows attached GPU editor rolls back when its frame timer fails",
           "[view][plugin-view-host][repaint][windows][timer]") {
     struct ParentWindow {
-        HWND hwnd = CreateWindowExW(0, L"STATIC", L"Pulp timer failure regression",
-                                    WS_OVERLAPPEDWINDOW, 0, 0, 128, 128,
-                                    nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-        ~ParentWindow() { if (hwnd) DestroyWindow(hwnd); }
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp timer failure regression", WS_OVERLAPPEDWINDOW, 0,
+                            0, 128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
     } parent;
     REQUIRE(parent.hwnd != nullptr);
 

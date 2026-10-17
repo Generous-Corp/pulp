@@ -463,7 +463,8 @@ public:
         // from WM_PAINT would immediately generate another WM_PAINT, starving
         // the lower-priority timer that should pace frames and the DAW's idle
         // work. The timer consumes the dirty bit and paints once.
-        if (attached_.load(std::memory_order_acquire)) return;
+        if (attached_.load(std::memory_order_acquire))
+            return;
         // Preserve explicit synchronous painting for an unattached embed.
         paint_or_invalidate();
     }
@@ -686,8 +687,8 @@ private:
         // changing the production timer API or exhausting the process timer
         // quota. It is inert unless a test sets the variable.
         const char* force_failure = std::getenv("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE");
-        if ((force_failure && std::strcmp(force_failure, "1") == 0) ||
-            !hwnd_ || SetTimer(hwnd_, kFrameTimerId, kFrameTimerPeriodMs, nullptr) == 0) {
+        if ((force_failure && std::strcmp(force_failure, "1") == 0) || !hwnd_ ||
+            SetTimer(hwnd_, kFrameTimerId, kFrameTimerPeriodMs, nullptr) == 0) {
             runtime::log_warn("WinPluginViewHost: SetTimer frame pump failed");
             frame_pump_.suspend();
             needs_repaint_ = true;
