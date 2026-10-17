@@ -966,7 +966,7 @@ int main() {
     std::fputs("wgpu staged diagnostic stage=loss_probe_begin\n", stderr);
     const auto loss_probe_result = run_loss_capability_probe();
     if (loss_probe_result.status == LossProbeStatus::CallbackUnavailableAfterDestroy) {
-        std::puts("device_loss_probe_status=callback_unavailable_after_destroy");
+        std::puts("device_loss_observation=probe_timeout_after_destroy");
         std::fputs("wgpu staged device-loss callback unavailable after destroy within 8s\n",
                    stderr);
         return kProviderUnavailableExit;

@@ -107,7 +107,7 @@ jobs:
                   "status": "provider_unavailable",
                   "reason": "provider_unavailable",
                   "claim": "device_loss_callback_unavailable_after_destroy",
-                  "device_loss_probe_status": "callback_unavailable_after_destroy",
+                  "device_loss_observation": "probe_timeout_after_destroy",
                   "device_loss_probe_timeout_ms": 8000,
                   "device_loss_callback": "unavailable",
                   "device_loss_scenario": "unavailable",

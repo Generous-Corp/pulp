@@ -33,12 +33,11 @@ def main() -> int:
             return 1
     unavailable = provider_unavailable_receipt(
         "v24.0.3.1", "a" * 64, "b" * 64, "c" * 64, "d" * 64,
-        "callback_unavailable_after_destroy")
+        "probe_timeout_after_destroy")
     if (unavailable["status"] != "provider_unavailable" or
             unavailable["reason"] != "provider_unavailable" or
             unavailable["claim"] != "device_loss_callback_unavailable_after_destroy" or
-            unavailable["device_loss_probe_status"] !=
-                "callback_unavailable_after_destroy" or
+            unavailable["device_loss_observation"] != "probe_timeout_after_destroy" or
             unavailable["device_loss_probe_timeout_ms"] != 8000 or
             unavailable["device_loss_callback"] != "unavailable" or
             unavailable["device_loss_proof"] != "unavailable" or
@@ -86,7 +85,7 @@ def main() -> int:
         verifier_source = VERIFIER_SOURCE.read_text(encoding="utf-8")
         if ("run_loss_capability_probe()" not in source or
                 "CallbackUnavailableAfterDestroy" not in source or
-                "device_loss_probe_status=callback_unavailable_after_destroy" not in source or
+                "device_loss_observation=probe_timeout_after_destroy" not in source or
                 "loss_probe_provider.release();" not in source or
                 "kill(child, SIGKILL);" not in source or
                 "poll(&descriptor, 1, 8'000)" not in source or

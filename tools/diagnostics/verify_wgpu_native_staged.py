@@ -91,8 +91,8 @@ def parse_output(stdout: str) -> dict[str, str]:
             for field in line.split():
                 key, value = field.split("=", 1)
                 result[key] = value
-        elif line.startswith("device_loss_probe_status="):
-            result["device_loss_probe_status"] = line.split("=", 1)[1]
+        elif line.startswith("device_loss_observation="):
+            result["device_loss_observation"] = line.split("=", 1)[1]
     return result
 
 
@@ -124,17 +124,17 @@ def provider_unavailable_receipt(
     pinned_tree_sha256: str,
     loaded_runtime_sha256: str,
     executable_sha256: str,
-    device_loss_probe_status: str,
+    device_loss_observation: str,
 ) -> dict:
     """Describe a typed loss-observation gap without claiming loss evidence."""
-    if device_loss_probe_status != "callback_unavailable_after_destroy":
+    if device_loss_observation != "probe_timeout_after_destroy":
         raise ValueError("provider_unavailable_probe_untyped")
     return {
         "schema": "pulp.gpu-audio.wgpu-native-staged-diagnostic.v1",
         "status": "provider_unavailable",
         "reason": "provider_unavailable",
         "claim": "device_loss_callback_unavailable_after_destroy",
-        "device_loss_probe_status": device_loss_probe_status,
+        "device_loss_observation": device_loss_observation,
         "device_loss_probe_timeout_ms": 8000,
         "provider_identity_status": "runtime_image_bound_adapter_auth_unavailable",
         "gpu_receipt_authenticated": False,
@@ -203,7 +203,7 @@ def verify(args: argparse.Namespace) -> dict:
             raise ValueError("identity_changed_during_diagnostic")
         return provider_unavailable_receipt(
             version, manifest_before, expected_tree, runtime_before, executable_before,
-            observed.get("device_loss_probe_status", ""))
+            observed.get("device_loss_observation", ""))
     if disposition != "passed":
         raise ValueError(f"diagnostic_failed_{run.returncode}: {run.stderr.strip()}")
     observed = parse_output(run.stdout)

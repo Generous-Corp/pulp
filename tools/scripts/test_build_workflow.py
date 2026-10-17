@@ -62,7 +62,7 @@ class WgpuNativeDiagnosticWorkflowTest(unittest.TestCase):
         self.assertIn('"status": "provider_unavailable"', self.text)
         self.assertIn('"reason": "provider_unavailable"', self.text)
         self.assertIn('"claim": "device_loss_callback_unavailable_after_destroy"', self.text)
-        self.assertIn('"device_loss_probe_status": "callback_unavailable_after_destroy"', self.text)
+        self.assertIn('"device_loss_observation": "probe_timeout_after_destroy"', self.text)
         self.assertIn("test -s \"$receipt\"", self.text)
 
     def test_receipt_checks_preserve_typed_callback_scope(self) -> None:
