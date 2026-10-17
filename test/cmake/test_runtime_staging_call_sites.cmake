@@ -147,6 +147,21 @@ if(_vst3_editorless_sidecar_guard EQUAL -1)
         "PulpPluginFormats.cmake: Windows VST3 sidecar assembly is not guarded for NO_EDITOR")
 endif()
 
+# Reused build directories must not retain runtime sidecars from an earlier
+# editor/provider configuration.  The assembly step removes the managed
+# Windows names before copying the current module and sidecars.
+foreach(_needle
+        "-E rm -f"
+        "${_pulp_vst3_windows_contents}/wgpu_native.dll"
+        "${_pulp_vst3_windows_contents}/libwgpu_native.dll"
+        "${_pulp_vst3_windows_contents}/icudtl.dat")
+    string(FIND "${_plugin_formats}" "${_needle}" _found)
+    if(_found EQUAL -1)
+        list(APPEND _failures
+            "PulpPluginFormats.cmake: Windows VST3 assembly does not clear managed stale sidecars (${_needle})")
+    endif()
+endforeach()
+
 file(READ "${PULP_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake" _build_info)
 foreach(_needle
         "PULP_EDITORLESS_RUNTIME TRUE"

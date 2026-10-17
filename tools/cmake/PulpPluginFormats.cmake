@@ -224,6 +224,15 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         add_custom_command(TARGET ${target}_VST3 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory
                 "${_pulp_vst3_windows_contents}"
+            # A reused build directory can contain sidecars from a previous
+            # editor/provider configuration.  Remove the managed runtime set
+            # before assembling the new bundle so build-info and contents
+            # cannot disagree after switching to NO_EDITOR or another GPU
+            # provider.
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "${_pulp_vst3_windows_contents}/wgpu_native.dll"
+                "${_pulp_vst3_windows_contents}/libwgpu_native.dll"
+                "${_pulp_vst3_windows_contents}/icudtl.dat"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:${target}_VST3>"
                 "${_pulp_vst3_windows_contents}/${name}.vst3"
