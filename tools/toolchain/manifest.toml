@@ -40,8 +40,8 @@ clang_format = { status = "target", source = "the hosted format check pins PyPI 
 # reproducible with the same mise: releases before this one select aqua
 # version-prefix overrides and percent-encoded release URLs differently, so
 # the same [tools] table can lock to different URLs.
-version = "2026.10.8"
-source_commit = "b671d356aaf33b87e48e7469a77abb40c3553c68"
+version = "2026.10.11"
+source_commit = "a24763b05e203e4d8e72702d7bc68214b99fbd06"
 lock_platforms = ["linux-arm64", "linux-x64", "macos-arm64", "macos-x64", "windows-arm64", "windows-x64"]
 # warn: nothing refuses an environment yet. enforce: emits a hard min_version.
 enforcement = "warn"
@@ -52,13 +52,14 @@ lock_sha256 = "3e3d93b19c8ea8f1b8f034e5713bdae59c7c9552d1f26ab725e6309d53b39a05"
 
 # The installed binary hosts run, checked by digest (tools/toolchain/check_env.py).
 # Self-update is off for it: its lib/mise-self-update-instructions.toml points
-# at `pulp deps update mise`. macos-arm64 is the build live on m1, m3, m5 and
-# m5s since 2026-10-12. A rebuild from source_commit that hashes differently is
+# at `pulp deps update mise`. macos-arm64 is a source build of source_commit;
+# each host moves to it in its own rollout step and keeps the previous pinned
+# binary installed beside it as the rollback. A rebuild that hashes differently is
 # a reproducibility finding to investigate, not a replacement. A platform with
 # no digest here is reported as unpinned, never as a match.
 [mise.binary]
-path = "~/.local/opt/mise-2026.10.8/bin/mise"
-sha256 = { macos-arm64 = "87c18142dd67f5848b0236738eb9338976329266937ecd79b11121de64dd2d47" }
+path = "~/.local/opt/mise-2026.10.11/bin/mise"
+sha256 = { macos-arm64 = "25e38f796fff67fc5f4c44f6963d4b8ed15be82a5d9244f693cc55d40a245ee3" }
 
 # One table per tool mise installs. Rust is deliberately absent: rustup
 # installs it and cargo reads rust-toolchain.toml, so the lock never records

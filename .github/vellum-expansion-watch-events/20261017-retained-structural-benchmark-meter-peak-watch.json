@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261017-retained-structural-benchmark-meter-peak-watch",
+  "created_at": "2026-10-17T06:54:27Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "The benchmark-only rebuild control now replays the canonical animated meter peak so its diagnostic update workload matches the existing retained control. This changes benchmark measurement and documentation only; it does not change design-import authority, Chromium behavior, rendering, packaging, or runtime ownership.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -499,7 +499,7 @@
       "name": "mise",
       "category": "developer-tooling",
       "license": "MIT",
-      "version": "2026.10.8",
+      "version": "2026.10.11",
       "source_kind": "developer-supplied",
       "repository": "https://github.com/jdx/mise",
       "upstream": { "kind": "none" },

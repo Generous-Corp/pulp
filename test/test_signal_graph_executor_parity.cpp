@@ -23,6 +23,7 @@
 
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstdint>
 #include <limits>
 #include <thread>
@@ -2694,6 +2695,24 @@ TEST_CASE("Translated routing matches SignalGraph: unresolved custom node pass-t
     const std::vector<std::vector<float>> input{ramp(kFrames, 0.7f)};
     expect_equal(run_legacy(g, kFrames, input, 1),
                  run_routed(exec, routing, kFrames, input, 1));
+
+    // Planted IEEE-754 values exercise the one-edge gather's 0 + source
+    // arithmetic rather than a raw memcpy: signed zero, a payloaded NaN,
+    // infinity, and a subnormal must remain parity-safe across a split block.
+    std::vector<float> specials(static_cast<std::size_t>(kFrames), 0.0f);
+    specials[0] = std::bit_cast<float>(std::uint32_t{0x80000000u});
+    specials[1] = std::bit_cast<float>(std::uint32_t{0x7fc12345u});
+    specials[2] = std::numeric_limits<float>::infinity();
+    specials[3] = std::numeric_limits<float>::denorm_min();
+    const auto first = std::vector<std::vector<float>>{specials};
+    const auto legacy_specials = run_legacy(g, kFrames, first, 1);
+    const auto routed_specials = run_routed(exec, routing, kFrames, first, 1);
+    REQUIRE(legacy_specials.size() == routed_specials.size());
+    for (std::size_t i = 0; i < legacy_specials[0].size(); ++i)
+        REQUIRE(std::bit_cast<std::uint32_t>(legacy_specials[0][i]) ==
+                std::bit_cast<std::uint32_t>(routed_specials[0][i]));
+    const auto second = std::vector<std::vector<float>>{ramp(kFrames, -0.2f)};
+    expect_equal(run_legacy(g, kFrames, second, 1), run_routed(exec, routing, kFrames, second, 1));
 }
 
 // A Custom node's DECLARED intrinsic latency must reach the routed plan's PDC

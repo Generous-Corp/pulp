@@ -118,6 +118,18 @@ change must update the manifest, generated mise files, lock checksum, and
 `DEPENDENCIES.md`/licensing documentation when the dependency inventory changes.
 Do not claim a pin change is complete until the generated-file check is clean.
 
+Moving mise itself (`[mise]` version, `source_commit`, `[mise.binary]`) is a
+source build of the release tag, not an `update.py` run. Before claiming "no
+relock", run `generate.py --lock --mise <new binary>` in a throwaway clone:
+it deletes and rewrites the lock, so a fresh lock mtime plus a clean
+`git status` proves the new mise reproduces it byte for byte. `--check` alone
+never runs mise and cannot show that. On the fleet, the tartci profile's
+`[mise]` table refuses the host install when its binary is missing, so the new
+binary goes onto a host before that host's table changes, and the previous
+binary stays installed as the rollback. A source build at a new path is a new
+program to LuLu on every host; flipping the pin needs no network (the tools are
+already installed), so pre-seed rather than asking for firewall rules.
+
 ## Windows VM recipe
 
 For an ephemeral ARM64 or x64 Windows guest, copy only the locked config and
