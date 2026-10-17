@@ -16,11 +16,15 @@ audio continuity require a product scenario and remain `NOT_EVALUATED` here.
 ```
 
 Use an initialized, registered profile whose first-run dialogs have already
-been dismissed. The harness copies only `reaper.ini` and an existing license
-file into a private temporary profile outside the evidence directory. Cleanup
-removes that copied profile. It never edits the source profile or prints license
-contents. Exported evidence contains no profile or license. Keep user REAPER
-processes and projects untouched.
+been dismissed. The harness copies the non-secret profile into a private
+temporary profile outside the evidence directory, preserves the license only in
+that private profile, and removes old VST/CLAP scan caches before the exact
+staged plugin is scanned. Windows REAPER's `-cfgfile` resource directory
+controls startup and cache resolution; copying only the INI can fall back to
+stale user cache entries and load an old Spectr backup. Cleanup removes that
+copied profile. It never edits the source profile or prints license contents.
+Exported evidence contains no profile or license. Keep user REAPER processes
+and projects untouched.
 
 For CLAP, pass required adjacent files explicitly, for example
 `-SidecarPath 'C:\build\icudtl.dat'`. VST3 bundles are copied recursively.
@@ -96,8 +100,11 @@ Offline render/null tests supplement this evidence. Dummy Audio establishes
 only bounded host-engine behavior, not physical speaker/hardware continuity.
 
 For UI/GPU timing use a separate development trace build from the same source.
-Windows REAPER uses `-newinst -cfgfile <ini> <startup.lua>`; the Lua script is
-its final positional input. Neither `-portable` nor `-script` is supported.
+On Windows, start the complete private profile with
+`-newinst -cfgfile <ini> -new -nosplash <startup.lua>`. A minimal profile can
+stall before startup-script dispatch; the harness copies the non-secret profile
+and removes stale scan caches before launching. Neither `-portable` nor
+`-script` is supported.
 Compare the same assigned modulation with mouse still versus band drawing, and
 settings mouse-still versus scrolling. Buffer input QPC/UTC timing records and
 capture screenshots/state outside the measured windows. Verify received event

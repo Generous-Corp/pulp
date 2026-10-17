@@ -98,8 +98,12 @@ try {
     if($cacheText -match [regex]::Escape([IO.Path]::GetFileName($staged))){$cacheMatch=$true;break}
     Start-Sleep -Milliseconds 250
   }
-  Stop-Owned $warm
   if(-not $cacheMatch){throw 'Scan cache did not acquire staged basename'}
+  Stop-Owned $warm
+  # A complete copied REAPER profile is required here. A minimal profile can
+  # stall before startup-script dispatch; with the private resource directory
+  # and its stale scan caches removed, the documented positional Lua form
+  # executes in the same owned host process that will load the staged module.
   $proc=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash',$lua) 'scripted'
   $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command}
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$hostStatus=$null
