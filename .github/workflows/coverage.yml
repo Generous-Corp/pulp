@@ -713,6 +713,9 @@ jobs:
               # the sampler silently on the first transient failure, such as
               # du racing profile files that the suite creates and deletes.
               set +e +o pipefail
+              # Keep the sampler's own record on /mnt as well as in the step
+              # log, and upload it after the step.
+              exec > >(tee -a build-coverage/coverage-sampler.log) 2>&1
               warned=""
               tick=0
               while kill -0 "${cov}" 2>/dev/null; do
@@ -725,7 +728,7 @@ jobs:
                 # writer can fill root between slower samples; a line is printed
                 # every minute, and du (which walks the whole build tree) runs
                 # every five minutes.
-                if [ $((tick % 30)) -eq 0 ]; then
+                if [ $((tick % 60)) -eq 0 ]; then
                   for d in build-coverage/ build-coverage/profraw build-coverage/coverage \
                            "${HOME}/.cache/pulp"; do
                     [ -e "${d}" ] && sizes="${sizes} $(basename "${d}")=$(du -sk "${d}" 2>/dev/null | awk '{printf "%.1fG", $1/1048576}')"
@@ -734,7 +737,7 @@ jobs:
                 tick=$((tick + 1))
                 mem_gib=$(awk '/^MemAvailable:/ {printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null)
                 line="root_free=${root_gib}G root_inodes_free=${root_inode_pct}% build_disk_free=${build_gib:-?}G mem_available=${mem_gib:-?}G${sizes}"
-                if [ $((tick % 6)) -eq 1 ]; then
+                if [ $((tick % 12)) -eq 1 ]; then
                   phase=$(grep '^=== ' "${suite_log:-/dev/null}" 2>/dev/null | tail -n 1)
                   echo "disk-sample: $(date -u +%H:%M:%SZ) ${line} | ${phase}"
                 fi
@@ -745,6 +748,15 @@ jobs:
                     echo "::warning title=coverage disk below ${t} GiB::$(date -u +%H:%M:%SZ) ${line}"
                   fi
                 done
+                # First time root inodes fall below 20%: name the writers
+                # while there is still room to.
+                if awk -v i="${root_inode_pct:-100}" 'BEGIN {exit !(i < 20)}' && [[ " ${warned} " != *" inode20 "* ]]; then
+                  warned="${warned} inode20"
+                  echo "::warning title=coverage root inodes below 20%::$(date -u +%H:%M:%SZ) ${line}"
+                  echo "--- top 10 root directories by inode count ---"
+                  as_root="sudo -n"; ${as_root} true 2>/dev/null || as_root=""
+                  ${as_root} du -x --inodes -d 3 "${HOME}" /tmp /var /home/runner 2>/dev/null | sort -n | tail -n 10
+                fi
                 if awk -v r="${root_gib}" -v i="${root_inode_pct:-100}" 'BEGIN {exit !(r < 3 || i < 5)}'; then
                   echo "::error title=coverage root disk nearly full::$(date -u +%H:%M:%SZ) ${line}; stopping the suite so this log survives"
                   echo "--- root disk use ---"
@@ -768,7 +780,7 @@ jobs:
                     fi
                   done
                 fi
-                sleep 10
+                sleep 5
               done ) & sampler=$!
           fi
           ( sleep "${budget}"
@@ -823,7 +835,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: coverage-suite-log-${{ matrix.os }}-${{ github.sha }}
-          path: build-coverage/coverage-suite.log
+          path: |
+            build-coverage/coverage-suite.log
+            build-coverage/coverage-sampler.log
           if-no-files-found: ignore
           retention-days: 7
 
