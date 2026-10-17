@@ -69,8 +69,7 @@ struct TinyReference {
 };
 } // namespace
 
-TEST_CASE("WaveNet causal pad is the per-layer history span",
-          "[gpu_audio][shared_io][wavenet]") {
+TEST_CASE("WaveNet causal pad is the per-layer history span", "[gpu_audio][shared_io][wavenet]") {
     CHECK(wavenet_causal_pad(0, 17) == 0);
     CHECK(wavenet_causal_pad(1, 17) == 0);
     CHECK(wavenet_causal_pad(3, 1) == 2);
@@ -105,8 +104,7 @@ TEST_CASE("WaveNet program history sums each activation's causal pad",
     REQUIRE(validate_wavenet_spec(spec).accepted());
     const auto program = DawnSharedIoWavenetProgram::create(spec);
     REQUIRE(program);
-    CHECK(program->history_bytes() ==
-          static_cast<std::size_t>((2 + 4) * 3 * 2 * sizeof(float)));
+    CHECK(program->history_bytes() == static_cast<std::size_t>((2 + 4) * 3 * 2 * sizeof(float)));
 }
 #endif
 

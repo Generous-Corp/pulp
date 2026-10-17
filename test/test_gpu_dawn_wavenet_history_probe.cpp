@@ -101,11 +101,10 @@ int main() {
     // These exact frontend writes bind the two provider allocations to the
     // independently calculated 4-byte and 8-byte causal pads.
     const auto prepared = transfer_counter.snapshot();
-    const bool exact_allocations =
-        prepared.queue_write_buffer_target_size_histogram[4] == 1 &&
-        prepared.queue_write_buffer_target_size_histogram[8] == 2 &&
-        prepared.queue_write_buffer_target_size_histogram[12] == 1 &&
-        prepared.queue_write_buffer_target_size_histogram[16] == 2;
+    const bool exact_allocations = prepared.queue_write_buffer_target_size_histogram[4] == 1 &&
+                                   prepared.queue_write_buffer_target_size_histogram[8] == 2 &&
+                                   prepared.queue_write_buffer_target_size_histogram[12] == 1 &&
+                                   prepared.queue_write_buffer_target_size_histogram[16] == 2;
     if (!exact_allocations) {
         std::cerr << "mixed_dilation_history_proof status=failed stage=allocations"
                   << " queue_writes=" << prepared.queue_write_buffer_calls
@@ -140,11 +139,10 @@ int main() {
     // copies each layer tail back into its resident history. The mixed pads
     // therefore produce two 4-byte and two 8-byte copies exactly.
     const auto submitted = transfer_counter.snapshot();
-    const bool exact_copies =
-        submitted.copy_buffer_to_buffer_calls == 4 &&
-        submitted.copy_buffer_to_buffer_bytes == 24 &&
-        submitted.copy_buffer_to_buffer_size_histogram[4] == 2 &&
-        submitted.copy_buffer_to_buffer_size_histogram[8] == 2;
+    const bool exact_copies = submitted.copy_buffer_to_buffer_calls == 4 &&
+                              submitted.copy_buffer_to_buffer_bytes == 24 &&
+                              submitted.copy_buffer_to_buffer_size_histogram[4] == 2 &&
+                              submitted.copy_buffer_to_buffer_size_histogram[8] == 2;
     const bool released = plan.release() && provider.drain();
     if (!exact_copies || !released) {
         std::cerr << "mixed_dilation_history_proof status=failed stage=copies"

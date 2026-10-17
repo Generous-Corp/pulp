@@ -52,8 +52,7 @@ class DawnTransferCallCounter {
         std::uint64_t copy_buffer_to_buffer_bytes = 0;
         std::array<std::uint64_t, kTransferSizeHistogramBytes>
             copy_buffer_to_buffer_size_histogram{};
-        std::array<std::uint64_t, kTransferSizeHistogramBytes>
-            queue_write_buffer_size_histogram{};
+        std::array<std::uint64_t, kTransferSizeHistogramBytes> queue_write_buffer_size_histogram{};
         std::array<std::uint64_t, kTransferSizeHistogramBytes>
             queue_write_buffer_target_size_histogram{};
         std::uint64_t buffer_map_async_calls = 0;
@@ -198,13 +197,13 @@ class DawnTransferCallCounter {
         return result;
     }
 
-    std::array<std::uint64_t, kTransferSizeHistogramBytes> copy_buffer_size_histogram() const
-        noexcept {
+    std::array<std::uint64_t, kTransferSizeHistogramBytes>
+    copy_buffer_size_histogram() const noexcept {
         return snapshot_sizes(copy_buffer_to_buffer_size_histogram_);
     }
 
-    std::array<std::uint64_t, kTransferSizeHistogramBytes> queue_write_size_histogram() const
-        noexcept {
+    std::array<std::uint64_t, kTransferSizeHistogramBytes>
+    queue_write_size_histogram() const noexcept {
         return snapshot_sizes(queue_write_buffer_size_histogram_);
     }
 
@@ -256,7 +255,7 @@ class DawnTransferCallCounter {
     }
 
     static WGPUBuffer count_device_create_buffer(WGPUDevice device,
-                                                  const WGPUBufferDescriptor* descriptor) {
+                                                 const WGPUBufferDescriptor* descriptor) {
         auto& counter = active();
         auto buffer = counter.original_.deviceCreateBuffer(device, descriptor);
         if (buffer && descriptor)

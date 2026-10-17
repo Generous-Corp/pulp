@@ -1789,8 +1789,8 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             array.pads.push_back(0);
             array.histories.reserve(layer.dilations.size() + 1u);
             for (std::size_t activation = 0; activation <= layer.dilations.size(); ++activation) {
-                const auto history_bytes = static_cast<std::size_t>(C) * array.pads[activation] *
-                                           sizeof(float);
+                const auto history_bytes =
+                    static_cast<std::size_t>(C) * array.pads[activation] * sizeof(float);
                 array.histories.emplace_back();
                 if (history_bytes == 0)
                     continue;
@@ -1805,15 +1805,14 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             const auto rc_w = static_cast<std::uint32_t>(weight_offset);
             weight_offset += static_cast<std::uint64_t>(C) * layer.input_size;
             const auto source_pad = index == 0 ? 0u : plan->arrays[index - 1].pads.back();
-            const RcU rcu{layer.input_size, C, spec.block_size, rc_w, source_pad,
-                          array.pads.front(), 0, 0};
+            const RcU rcu{
+                layer.input_size, C, spec.block_size, rc_w, source_pad, array.pads.front(), 0, 0};
             array.rechannel_u = make_uniform(&rcu, sizeof(rcu));
             if (!array.rechannel_u)
                 return false;
 
             array.layer_u.reserve(layer.dilations.size());
-            for (std::size_t layer_index = 0; layer_index < layer.dilations.size();
-                 ++layer_index) {
+            for (std::size_t layer_index = 0; layer_index < layer.dilations.size(); ++layer_index) {
                 const auto dilation = layer.dilations[layer_index];
                 const auto conv_w = static_cast<std::uint32_t>(weight_offset);
                 weight_offset += static_cast<std::uint64_t>(Z) * C * K;
@@ -1825,9 +1824,22 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
                 weight_offset += static_cast<std::uint64_t>(C) * C;
                 const auto l1_b = static_cast<std::uint32_t>(weight_offset);
                 weight_offset += C;
-                const LyU lyu{C,     K,    spec.block_size, dilation, Z, layer.gated,
-                              array.pads[layer_index], conv_w, conv_b, mix_w, l1_w, l1_b,
-                              array.pads[layer_index + 1u], 0, 0, 0};
+                const LyU lyu{C,
+                              K,
+                              spec.block_size,
+                              dilation,
+                              Z,
+                              layer.gated,
+                              array.pads[layer_index],
+                              conv_w,
+                              conv_b,
+                              mix_w,
+                              l1_w,
+                              l1_b,
+                              array.pads[layer_index + 1u],
+                              0,
+                              0,
+                              0};
                 auto uniform = make_uniform(&lyu, sizeof(lyu));
                 if (!uniform)
                     return false;
@@ -1870,9 +1882,8 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
                 auto& groups = slot_groups.arrays[index];
                 groups.activations.reserve(array.layers + 1u);
                 for (std::size_t activation = 0; activation <= array.layers; ++activation) {
-                    const auto activation_floats =
-                        static_cast<std::size_t>(array.channels) *
-                        (array.pads[activation] + spec.block_size);
+                    const auto activation_floats = static_cast<std::size_t>(array.channels) *
+                                                   (array.pads[activation] + spec.block_size);
                     const auto activation_bytes = activation_floats * sizeof(float);
                     auto buffer = make_storage(activation_bytes);
                     if (!buffer)
@@ -2153,8 +2164,7 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
                     static_cast<std::uint64_t>(array.channels) * pad * sizeof(float);
                 ++impl_->stats.runtime_copy_buffer_calls;
                 encoder.CopyBufferToBuffer(array.histories[activation], 0,
-                                           array_groups.activations[activation], 0,
-                                           history_bytes);
+                                           array_groups.activations[activation], 0, history_bytes);
             }
             if (index > 0) {
                 const auto& previous = groups.arrays[index - 1u];
@@ -2207,8 +2217,8 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
                     continue;
                 const auto history_bytes =
                     static_cast<std::uint64_t>(array.channels) * pad * sizeof(float);
-                const auto tail_offset = static_cast<std::uint64_t>(array.channels) *
-                                         plan.block_size * sizeof(float);
+                const auto tail_offset =
+                    static_cast<std::uint64_t>(array.channels) * plan.block_size * sizeof(float);
                 ++impl_->stats.runtime_copy_buffer_calls;
                 encoder.CopyBufferToBuffer(array_groups.activations[activation], tail_offset,
                                            array.histories[activation], 0, history_bytes);

@@ -34,12 +34,10 @@ struct WavenetProgramSpec {
 
 // Causal history needed by one dilated layer. Providers use this shape-only
 // calculation to size each activation independently.
-constexpr std::uint32_t wavenet_causal_pad(std::uint32_t kernel,
-                                           std::uint32_t dilation) noexcept {
+constexpr std::uint32_t wavenet_causal_pad(std::uint32_t kernel, std::uint32_t dilation) noexcept {
     return kernel == 0
                ? 0
-               : static_cast<std::uint32_t>((static_cast<std::uint64_t>(kernel) - 1u) *
-                                             dilation);
+               : static_cast<std::uint32_t>((static_cast<std::uint64_t>(kernel) - 1u) * dilation);
 }
 
 enum class WavenetSpecError : std::uint8_t {
