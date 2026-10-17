@@ -953,6 +953,7 @@ int main() {
     if (dladdr(reinterpret_cast<const void*>(&wgpuCreateInstance), &loaded) == 0 ||
         loaded.dli_fname == nullptr)
         return 78;
+    std::printf("loaded_runtime_path=%s\n", loaded.dli_fname);
     std::fputs("wgpu staged diagnostic stage=loss_probe_begin\n", stderr);
     const auto loss_probe_result = run_loss_capability_probe();
     if (loss_probe_result.status == LossProbeStatus::Unavailable) {
@@ -1153,7 +1154,6 @@ int main() {
         loss_session.release();
         std::fputs("wgpu staged diagnostic stage=loss_session_abandoned\n", stderr);
     }
-    std::printf("loaded_runtime_path=%s\n", loaded.dli_fname);
     std::printf("input_sha256=%s weights_sha256=%s shader_sha256=%s\n",
                 sha256_hex(submitted_inputs.data(), sizeof(submitted_inputs)).c_str(),
                 sha256_hex(weights.data(), sizeof(weights)).c_str(),

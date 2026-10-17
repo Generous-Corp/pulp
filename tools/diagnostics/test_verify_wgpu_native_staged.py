@@ -128,6 +128,22 @@ def main() -> int:
                 receipt.exists()):
             print(f"negative control failed: {run.returncode} {run.stderr}", file=sys.stderr)
             return 1
+        fake = Path(scratch) / "fake-exit-77"
+        fake.write_text("#!/bin/sh\nexit 77\n", encoding="utf-8")
+        fake.chmod(0o755)
+        fake_receipt = Path(scratch) / "fake-receipt.json"
+        fake_run = subprocess.run(
+            [sys.executable, args.verifier, "--manifest", args.manifest,
+             "--asset", args.asset, "--source-tree", args.source_tree,
+             "--linked-runtime", args.linked_runtime, "--executable", str(fake),
+             "--receipt", str(fake_receipt)],
+            capture_output=True, text=True, encoding="utf-8", timeout=30, check=False)
+        if (fake_run.returncode != 1 or
+                "provider_unavailable_runtime_unbound" not in fake_run.stderr or
+                fake_receipt.exists()):
+            print(f"fake provider-unavailable control failed: {fake_run.returncode} "
+                  f"{fake_run.stderr}", file=sys.stderr)
+            return 1
     return 0
 
 

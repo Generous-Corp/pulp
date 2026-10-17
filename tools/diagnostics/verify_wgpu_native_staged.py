@@ -172,6 +172,11 @@ def verify(args: argparse.Namespace) -> dict:
     run = subprocess.CompletedProcess([str(executable)], process.returncode, stdout, stderr)
     disposition = diagnostic_exit_disposition(run.returncode)
     if disposition == "provider_unavailable":
+        loaded_runtime_path = parse_output(run.stdout).get("loaded_runtime_path")
+        if loaded_runtime_path is None:
+            raise ValueError("provider_unavailable_runtime_unbound")
+        if Path(loaded_runtime_path).resolve(strict=True) != linked_runtime:
+            raise ValueError("provider_unavailable_runtime_unbound")
         if (digest(manifest) != manifest_before or digest(linked_runtime) != runtime_before or
                 digest(executable) != executable_before or tree_digest(source_tree) != expected_tree):
             raise ValueError("identity_changed_during_diagnostic")
