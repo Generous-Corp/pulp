@@ -358,7 +358,7 @@ TEST_CASE("import emit end-to-end materialises a scaffold + provenance marker",
         "done\n");
     fs::permissions(mock, fs::perms::owner_all, fs::perm_options::add);
 
-    fs::path out = td.path / "scaffold";
+    fs::path out = td.path / "scaffold with space";
 
     pulp::platform::ProcessOptions opts;
     opts.timeout_ms = pulp_test_cli::shellout_timeout_ms();  // shared hang guard
@@ -402,6 +402,10 @@ TEST_CASE("import emit end-to-end materialises a scaffold + provenance marker",
     REQUIRE(r.stdout_output.find("governed-build.sh") != std::string::npos);
     REQUIRE(r.stdout_output.find("cmake --build") != std::string::npos);
     REQUIRE(r.stdout_output.find("&& cmake --build") == std::string::npos);
+    const auto build_dir = out / "build";
+    const auto configure_recipe =
+        "cmake -S \"" + out.string() + "\" -B \"" + build_dir.string() + "\" &&";
+    REQUIRE(r.stdout_output.find(configure_recipe) != std::string::npos);
 }
 
 TEST_CASE("import emit end-to-end fails closed when the importer smuggles "
