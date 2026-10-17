@@ -16,10 +16,20 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <cerrno>
+#include <fcntl.h>
 #include <memory>
+#include <poll.h>
 #include <span>
 #include <string>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 #include <thread>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -58,6 +68,9 @@ struct Params { in_ch:u32, out_ch:u32, B:u32, woff:u32 };
 }
 )wgsl";
 
+constexpr int kProviderUnavailableExit = 77;
+constexpr int kDiagnosticFailureExit = 16;
+
 struct AdapterWait {
     WGPUAdapter adapter = nullptr;
     WGPURequestAdapterStatus status = WGPURequestAdapterStatus_Unknown;
@@ -73,6 +86,13 @@ struct DeviceWait {
 struct MapWait {
     WGPUMapAsyncStatus status = WGPUMapAsyncStatus_Unknown;
     bool done = false;
+};
+
+struct DeviceLossWait {
+    bool observed = false;
+    const void* callback_userdata = nullptr;
+    WGPUDeviceLostReason reason = WGPUDeviceLostReason_Unknown;
+    std::string message;
 };
 
 const char* string_view(WGPUStringView value) {
@@ -119,6 +139,15 @@ void device_callback(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStri
 
 void uncaptured_error(const WGPUDevice*, WGPUErrorType type, WGPUStringView message, void*, void*) {
     std::fprintf(stderr, "wgpu error %d: %s\n", static_cast<int>(type), string_view(message));
+}
+
+void device_lost_callback(const WGPUDevice*, WGPUDeviceLostReason reason, WGPUStringView message,
+                          void* userdata, void*) {
+    auto* loss = static_cast<DeviceLossWait*>(userdata);
+    loss->callback_userdata = userdata;
+    loss->reason = reason;
+    loss->message = string_view(message);
+    loss->observed = true;
 }
 
 bool process_until(WGPUInstance instance, bool& done) {
@@ -178,6 +207,7 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         SharedIoTerminalStatus terminal_status = SharedIoTerminalStatus::RetiredFailed;
         bool terminal_published = false;
         bool planted_failure = false;
+        bool queue_failed = false;
     };
 
   public:
@@ -325,6 +355,17 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             if (pending->queue_done && pending->queue_status == WGPUQueueWorkDoneStatus_Success &&
                 !pending->map_started)
                 begin_map(*pending);
+            else if (pending->queue_done &&
+                     pending->queue_status != WGPUQueueWorkDoneStatus_Success) {
+                pending->queue_failed = true;
+            }
+            if (physical_drain_ && pending->queue_failed && !pending->terminal_ready) {
+                // Queue status alone is not a retirement proof. Publish only
+                // after the provider-specific drain barrier has crossed the
+                // device-loss boundary; ordinary queue errors stay quarantined.
+                pending->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+                pending->terminal_ready = true;
+            }
             if (pending->map_started && pending->map_done && !pending->terminal_ready)
                 finish_map(*pending);
             if (pending->terminal_ready && !pending->terminal_published)
@@ -336,6 +377,8 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
     }
 
     bool drain() noexcept override {
+        if (device_loss_.observed)
+            physical_drain_ = true;
         for (int attempt = 0; attempt < 10'000 && !pending_.empty(); ++attempt) {
             poll();
             if (!pending_.empty())
@@ -364,6 +407,45 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
                 .completion_service = true,
                 .device_loss_recovery = false,
                 .gpu_timestamps = false};
+    }
+
+    bool device_lost() const noexcept override {
+        return device_loss_.observed;
+    }
+
+    bool device_loss_callback_registered() const noexcept {
+        // Registration is established by the native callback invoking this
+        // exact state object, never by re-reading the descriptor we assigned.
+        return device_loss_.observed && device_loss_.callback_userdata == &device_loss_;
+    }
+
+    // wgpu-native v24 exposes device destruction as the only portable,
+    // controlled loss trigger. This is a diagnostic hook; production provider
+    // selection and the public ABI never call it.
+    bool force_device_loss_for_diagnostic() noexcept {
+        if (device_ == nullptr || device_loss_.observed || loss_forced_)
+            return false;
+        loss_forced_ = true;
+        wgpuDeviceDestroy(device_);
+        return true;
+    }
+
+    bool device_loss_observed() const noexcept {
+        return device_loss_.observed;
+    }
+
+    bool wait_for_device_loss_callback() noexcept {
+        for (int attempt = 0; attempt < 10'000 && !device_loss_.observed; ++attempt) {
+            if (instance_ != nullptr)
+                wgpuInstanceProcessEvents(instance_);
+            if (!device_loss_.observed)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return device_loss_.observed;
+    }
+
+    WGPUDeviceLostReason device_loss_reason() const noexcept {
+        return device_loss_.reason;
     }
 
     bool submit_program(Slot& slot, SlotToken token, std::shared_ptr<SharedIoTerminalInbox> inbox,
@@ -473,6 +555,12 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
         vendor_id_ = info.vendorID;
         device_id_ = info.deviceID;
         WGPUDeviceDescriptor device_descriptor{};
+        device_loss_.message.clear();
+        WGPUDeviceLostCallbackInfo device_loss_callback_info{};
+        device_loss_callback_info.mode = WGPUCallbackMode_AllowProcessEvents;
+        device_loss_callback_info.callback = device_lost_callback;
+        device_loss_callback_info.userdata1 = &device_loss_;
+        device_descriptor.deviceLostCallbackInfo = device_loss_callback_info;
         WGPUUncapturedErrorCallbackInfo error_callback{};
         error_callback.callback = uncaptured_error;
         device_descriptor.uncapturedErrorCallbackInfo = error_callback;
@@ -558,6 +646,11 @@ class WgpuNativeStagedProvider final : public SharedIoArenaProvider {
             pending.terminal_published = true;
     }
 
+    // Callback state must outlive every native handle: raw handles are
+    // declared after it and therefore destroyed first during teardown.
+    DeviceLossWait device_loss_;
+    bool loss_forced_ = false;
+    bool physical_drain_ = false;
     WGPUInstance instance_ = nullptr;
     WGPUAdapter adapter_ = nullptr;
     WGPUDevice device_ = nullptr;
@@ -642,6 +735,179 @@ bool WgpuNativeStagedProgram::release() noexcept {
 
 namespace {
 
+enum class LossProbeStatus : std::uint8_t {
+    Unavailable,
+    CallbackUnavailableAfterDestroy,
+    Failed,
+    Passed
+};
+
+struct LossProbeResult {
+    LossProbeStatus status = LossProbeStatus::Unavailable;
+    bool callback_registered = false;
+    WGPUDeviceLostReason reason = WGPUDeviceLostReason_Unknown;
+};
+
+bool wait_for_child(pid_t child, int& status) noexcept {
+    while (waitpid(child, &status, 0) < 0) {
+        if (errno != EINTR)
+            return false;
+    }
+    return true;
+}
+
+void terminate_child_group(pid_t child) noexcept {
+    if (child <= 0)
+        return;
+    // The verifier launches this diagnostic in its own process group, so a
+    // direct kill here is sufficient for the capability-only child while the
+    // outer timeout can terminate the whole verifier group portably.
+    (void)kill(child, SIGKILL);
+    int status = 0;
+    (void)wait_for_child(child, status);
+}
+
+// wgpuDeviceDestroy can block inside a native Metal call on some pinned
+// images. Run this capability-only probe in a child so the parent verifier's
+// watchdog can kill the child and classify the capability gap as unavailable.
+LossProbeResult run_loss_capability_probe() noexcept {
+    int pipe_fds[2]{};
+    if (pipe(pipe_fds) != 0)
+        return {.status = LossProbeStatus::Failed};
+    const auto close_on_exec = [](int fd) noexcept {
+        const auto flags = fcntl(fd, F_GETFD);
+        return flags >= 0 && fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0;
+    };
+    const auto nonblocking = fcntl(pipe_fds[0], F_GETFL);
+    if (!close_on_exec(pipe_fds[0]) || !close_on_exec(pipe_fds[1]) || nonblocking < 0 ||
+        fcntl(pipe_fds[0], F_SETFL, nonblocking | O_NONBLOCK) != 0) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        return {.status = LossProbeStatus::Failed};
+    }
+    const auto child = fork();
+    if (child < 0) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        return {.status = LossProbeStatus::Failed};
+    }
+    if (child == 0) {
+        close(pipe_fds[0]);
+#if defined(__linux__)
+        (void)prctl(PR_SET_PDEATHSIG, SIGKILL);
+        if (getppid() == 1)
+            _exit(1);
+#endif
+        const auto null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd >= 0) {
+            (void)dup2(null_fd, STDOUT_FILENO);
+            (void)dup2(null_fd, STDERR_FILENO);
+            if (null_fd > STDERR_FILENO)
+                close(null_fd);
+        } else {
+            close(STDOUT_FILENO);
+            close(STDERR_FILENO);
+        }
+        LossProbeResult result{};
+        auto loss_probe_provider = WgpuNativeStagedProvider::create();
+        if (loss_probe_provider == nullptr) {
+            result.status = LossProbeStatus::Unavailable;
+        } else if (!loss_probe_provider->force_device_loss_for_diagnostic()) {
+            result.status = LossProbeStatus::Failed;
+        } else {
+            // Tell the parent that provider creation and device destruction
+            // both succeeded before waiting for the callback. A parent
+            // watchdog timeout is typed only after this marker is observed.
+            const char destroy_accepted = 'D';
+            if (write(pipe_fds[1], &destroy_accepted, 1) != 1)
+                _exit(1);
+            if (!loss_probe_provider->wait_for_device_loss_callback()) {
+                // The provider was created and destruction was accepted, but
+                // the native callback did not arrive within the bounded
+                // eight-second wait.
+                result.status = LossProbeStatus::CallbackUnavailableAfterDestroy;
+            } else {
+                result.status = LossProbeStatus::Passed;
+                result.callback_registered = loss_probe_provider->device_loss_callback_registered();
+                result.reason = loss_probe_provider->device_loss_reason();
+            }
+        }
+        // Never invoke native teardown in this capability-only child. The
+        // parent either reads the result or kills this process on timeout.
+        loss_probe_provider.release();
+        const auto* bytes = reinterpret_cast<const char*>(&result);
+        std::size_t written = 0;
+        while (written < sizeof(result)) {
+            const auto count = write(pipe_fds[1], bytes + written, sizeof(result) - written);
+            if (count <= 0)
+                break;
+            written += static_cast<std::size_t>(count);
+        }
+        close(pipe_fds[1]);
+        _exit(written == sizeof(result) ? 0 : 1);
+    }
+
+    close(pipe_fds[1]);
+    LossProbeResult result{};
+    pollfd descriptor{.fd = pipe_fds[0], .events = POLLIN};
+    const auto poll_status = poll(&descriptor, 1, 8'000);
+    if (poll_status == 0) {
+        terminate_child_group(child);
+        close(pipe_fds[0]);
+        // No destroy marker arrived, so this remains a generic provider
+        // capability gap rather than a typed loss-observation timeout.
+        return {.status = LossProbeStatus::Unavailable};
+    }
+    if (poll_status < 0) {
+        terminate_child_group(child);
+        close(pipe_fds[0]);
+        return {.status = LossProbeStatus::Failed};
+    }
+    char destroy_accepted = 0;
+    if (read(pipe_fds[0], &destroy_accepted, 1) != 1 || destroy_accepted != 'D') {
+        terminate_child_group(child);
+        close(pipe_fds[0]);
+        return {.status = LossProbeStatus::Failed};
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    auto* bytes = reinterpret_cast<char*>(&result);
+    std::size_t received = 0;
+    while (received < sizeof(result)) {
+        const auto count = read(pipe_fds[0], bytes + received, sizeof(result) - received);
+        if (count > 0) {
+            received += static_cast<std::size_t>(count);
+            continue;
+        }
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       deadline - std::chrono::steady_clock::now())
+                                       .count();
+            if (remaining <= 0) {
+                terminate_child_group(child);
+                close(pipe_fds[0]);
+                return {.status = LossProbeStatus::CallbackUnavailableAfterDestroy};
+            }
+            const auto followup = poll(&descriptor, 1, static_cast<int>(remaining));
+            if (followup > 0)
+                continue;
+            terminate_child_group(child);
+            close(pipe_fds[0]);
+            return {.status = followup == 0 ? LossProbeStatus::CallbackUnavailableAfterDestroy
+                                            : LossProbeStatus::Failed};
+        }
+        if (count == 0 || count < 0)
+            break;
+    }
+    close(pipe_fds[0]);
+    int child_status = 0;
+    if (!wait_for_child(child, child_status) || received != sizeof(result) ||
+        !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
+        return {.status = LossProbeStatus::Failed};
+    return result;
+}
+
 bool validate_contract_admission() noexcept {
     using namespace pulp::gpu_audio;
     GpuAudioProgramDescriptor program{
@@ -711,108 +977,227 @@ int main() {
     if (dladdr(reinterpret_cast<const void*>(&wgpuCreateInstance), &loaded) == 0 ||
         loaded.dli_fname == nullptr)
         return 78;
+    std::printf("loaded_runtime_path=%s\n", loaded.dli_fname);
+    std::fputs("wgpu staged diagnostic stage=loss_probe_begin\n", stderr);
+    const auto loss_probe_result = run_loss_capability_probe();
+    if (loss_probe_result.status == LossProbeStatus::CallbackUnavailableAfterDestroy) {
+        std::puts("device_loss_observation=probe_timeout_after_destroy");
+        std::fputs("wgpu staged device-loss callback unavailable after destroy within 8s\n",
+                   stderr);
+        return kProviderUnavailableExit;
+    }
+    if (loss_probe_result.status == LossProbeStatus::Unavailable) {
+        std::fputs("wgpu staged device-loss observation unavailable\n", stderr);
+        return kProviderUnavailableExit;
+    }
+    if (loss_probe_result.status != LossProbeStatus::Passed)
+        return kDiagnosticFailureExit;
+    const bool loss_probe_registered = loss_probe_result.callback_registered;
+    const auto loss_probe_reason = loss_probe_result.reason;
+    if (!loss_probe_registered || loss_probe_reason != WGPUDeviceLostReason_Destroyed)
+        return kDiagnosticFailureExit;
+    std::fputs("wgpu staged diagnostic stage=loss_probe_abandoned\n", stderr);
+
     auto provider = WgpuNativeStagedProvider::create();
     if (provider == nullptr) {
         std::puts("wgpu_native_provider=unavailable");
         return 77;
     }
     auto program = provider->make_program();
-    SharedIoProgramSession session;
+    auto session = std::make_unique<SharedIoProgramSession>();
+    const auto abandon_session = [&]() noexcept { session.release(); };
+    const auto fail_session = [&](int code) noexcept {
+        // A short-circuit before prepare leaves the local provider owner live;
+        // abandon both owners so this fail-closed return cannot run native
+        // teardown from either destructor.
+        provider.release();
+        abandon_session();
+        return code;
+    };
     if (program == nullptr ||
-        !session.prepare({std::move(provider), std::move(program)},
-                         {.slots = 2,
-                          .input_bytes_per_slot = 64 * sizeof(float),
-                          .output_bytes_per_slot = 64 * 3 * sizeof(float),
-                          .storage_kind = SharedIoArenaProvider::StorageKind::Staged})) {
+        !session->prepare({std::move(provider), std::move(program)},
+                          {.slots = 2,
+                           .input_bytes_per_slot = 64 * sizeof(float),
+                           .output_bytes_per_slot = 64 * 3 * sizeof(float),
+                           .storage_kind = SharedIoArenaProvider::StorageKind::Staged})) {
         std::puts("wgpu_native_session=failed");
-        return 2;
+        return fail_session(2);
     }
+    std::fputs("wgpu staged diagnostic stage=initial_session_ready\n", stderr);
 
     // Exercise the fixed scheduler with two admitted blocks before waiting for
     // either terminal result. This remains a private staged diagnostic; it is
     // not realtime or product/provider evidence.
     std::array<std::optional<SharedIoProgramSession::InputLease>, 2> inflight;
+    std::fputs("wgpu staged diagnostic stage=initial_inflight_begin\n", stderr);
     for (std::size_t i = 0; i < inflight.size(); ++i) {
-        inflight[i] = session.acquire_input(100 + i, 0);
-        if (!inflight[i] || !session.submit({inflight[i]->token, 0}))
-            return 13;
+        inflight[i] = session->acquire_input(100 + i, 0);
+        if (!inflight[i] || !session->submit({inflight[i]->token, 0}))
+            return fail_session(13);
     }
     std::array<std::optional<SharedIoProgramSession::Completion>, 2> inflight_completions;
     for (int attempt = 0;
          attempt < 10'000 && (!inflight_completions[0] || !inflight_completions[1]); ++attempt) {
-        (void)session.service(0);
+        (void)session->service(0);
         for (auto& completion : inflight_completions)
             if (!completion)
-                completion = session.pop_completion();
+                completion = session->pop_completion();
         if (!inflight_completions[0] || !inflight_completions[1])
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     for (const auto& completion : inflight_completions) {
         if (!completion || completion->status != SharedIoTerminalStatus::RetiredSuccess)
-            return 14;
-        auto output = session.acquire_output(*completion);
-        if (!output || !session.release_output({output->token}))
-            return 15;
+            return fail_session(14);
+        auto output = session->acquire_output(*completion);
+        if (!output || !session->release_output({output->token}))
+            return fail_session(15);
     }
+    std::fputs("wgpu staged diagnostic stage=initial_inflight_done\n", stderr);
     constexpr std::array<float, 3> weights{{-0.6180188f, 1.0314025f, -1.0111561f}};
     std::uint32_t successes = 0;
     std::uint32_t failures = 0;
     float max_error = 0.0f;
     std::array<float, 6 * 64> submitted_inputs{};
+    std::fputs("wgpu staged diagnostic stage=initial_sequential_begin\n", stderr);
     for (std::uint64_t sequence = 0; sequence < 6; ++sequence) {
-        auto lease = session.acquire_input(sequence, 0);
+        auto lease = session->acquire_input(sequence, 0);
         if (!lease || lease->bytes.size() != 64 * sizeof(float))
-            return 3;
+            return fail_session(3);
         auto* input = reinterpret_cast<float*>(lease->bytes.data());
         for (std::size_t t = 0; t < 64; ++t)
             input[t] = static_cast<float>(0.17 * std::sin(0.11 * (sequence * 64 + t)) +
                                           0.03 * std::cos(0.037 * (sequence * 64 + t)));
         std::memcpy(submitted_inputs.data() + sequence * 64, input, 64 * sizeof(float));
-        if (!session.submit({lease->token, 0}))
-            return 4;
+        if (!session->submit({lease->token, 0}))
+            return fail_session(4);
         std::optional<SharedIoProgramSession::Completion> completion;
         for (int attempt = 0; attempt < 10'000 && !completion; ++attempt) {
-            (void)session.service(0);
-            completion = session.pop_completion();
+            (void)session->service(0);
+            completion = session->pop_completion();
             if (!completion)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         if (!completion || completion->token.slot.stream_sequence != sequence)
-            return 5;
+            return fail_session(5);
         if (sequence == 4) {
             if (completion->status != SharedIoTerminalStatus::RetiredFailed ||
-                session.acquire_output(*completion) || !session.discard_completion(*completion))
-                return 6;
+                session->acquire_output(*completion) || !session->discard_completion(*completion))
+                return fail_session(6);
             ++failures;
             continue;
         }
         if (completion->status != SharedIoTerminalStatus::RetiredSuccess)
-            return 7;
-        auto output = session.acquire_output(*completion);
+            return fail_session(7);
+        auto output = session->acquire_output(*completion);
         if (!output || output->bytes.size() != 64 * 3 * sizeof(float))
-            return 8;
+            return fail_session(8);
         const auto* values = reinterpret_cast<const float*>(output->bytes.data());
         for (std::size_t t = 0; t < 64; ++t)
             for (std::size_t channel = 0; channel < weights.size(); ++channel) {
                 const float expected = input[t] * weights[channel];
                 const float actual = values[t * weights.size() + channel];
                 if (!std::isfinite(actual))
-                    return 9;
+                    return fail_session(9);
                 max_error = std::max(max_error, std::abs(actual - expected));
             }
-        if (!session.release_output({output->token}))
-            return 10;
+        if (!session->release_output({output->token}))
+            return fail_session(10);
         ++successes;
     }
-    if (!session.release() || successes != 5 || failures != 1 || max_error > 1.0e-5f)
-        return 11;
-    std::printf("loaded_runtime_path=%s\n", loaded.dli_fname);
+    if (successes != 5 || failures != 1 || max_error > 1.0e-5f)
+        return fail_session(11);
+    // This process-scoped diagnostic has already captured all scheduler and
+    // CPU-oracle evidence. The pinned Metal runtime may block while tearing
+    // down the completed provider, so abandon it before native destruction.
+    session.release();
+    std::fputs("wgpu staged diagnostic stage=initial_session_abandoned\n", stderr);
+
+    // Exercise the pinned runtime's controlled loss path in a fresh, bounded
+    // session. The device is destroyed while one submission is outstanding;
+    // the queue callback must become a terminal failure and no output lease
+    // may be acquired from that record. A lost device cannot prove that the
+    // existing prepared state can resume, so re-prime remains typed unavailable.
+    bool loss_callback_registered = false;
+    bool loss_scenario_triggered = false;
+    bool loss_no_output_leases = false;
+    std::uint32_t loss_terminal_records = 0;
+    WGPUDeviceLostReason loss_reason = WGPUDeviceLostReason_Unknown;
+    {
+        // The probe above is a capability gate for the session path: only a
+        // runtime that delivered the exact callback userdata and Destroyed
+        // reason is allowed to enter the outstanding-submission scenario.
+        // Its normal callback path therefore keeps the regular drain/release
+        // cleanup below; only the probe's typed-unavailable branch abandons
+        // ownership to avoid the pinned runtime's blocked fence teardown.
+        auto loss_provider = WgpuNativeStagedProvider::create();
+        if (loss_provider == nullptr)
+            return kProviderUnavailableExit;
+        auto loss_program = loss_provider->make_program();
+        auto loss_session = std::make_unique<SharedIoProgramSession>();
+        // Once the second loss session has submitted work, a provider failure
+        // can leave a pinned Metal fence blocked during normal C++ teardown.
+        // Keep this diagnostic fail-closed: abandon the whole session on that
+        // diagnostic-failure path so its native handles die with the process.
+        const auto abandon_loss_session = [&]() noexcept {
+            // If loss_program creation short-circuits prepare, loss_provider
+            // still owns the native device and must be abandoned separately.
+            loss_provider.release();
+            loss_session.release();
+            return kDiagnosticFailureExit;
+        };
+        if (loss_program == nullptr ||
+            !loss_session->prepare({std::move(loss_provider), std::move(loss_program)},
+                                   {.slots = 2,
+                                    .input_bytes_per_slot = 64 * sizeof(float),
+                                    .output_bytes_per_slot = 64 * 3 * sizeof(float),
+                                    .storage_kind = SharedIoArenaProvider::StorageKind::Staged}))
+            return abandon_loss_session();
+        auto* loss_native = static_cast<WgpuNativeStagedProvider*>(loss_session->owned_provider());
+        auto loss_input = loss_session->acquire_input(902, 0);
+        if (!loss_input || !loss_session->submit({loss_input->token, 0}) ||
+            !loss_native->force_device_loss_for_diagnostic())
+            return abandon_loss_session();
+        loss_scenario_triggered = true;
+
+        std::optional<SharedIoProgramSession::Completion> loss_completion;
+        loss_callback_registered = loss_native->wait_for_device_loss_callback() &&
+                                   loss_native->device_loss_callback_registered();
+        (void)loss_session->service(0);
+        if (!loss_callback_registered || !loss_native->drain())
+            return abandon_loss_session();
+        for (int attempt = 0; attempt < 10'000 && !loss_completion; ++attempt) {
+            (void)loss_session->service(0);
+            loss_completion = loss_session->pop_completion();
+            if (!loss_completion)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!loss_completion || loss_completion->status != SharedIoTerminalStatus::RetiredFailed)
+            return abandon_loss_session();
+        ++loss_terminal_records;
+        loss_no_output_leases = !loss_session->acquire_output(*loss_completion);
+        loss_reason = loss_native->device_loss_reason();
+        if (!loss_no_output_leases || !loss_session->discard_completion(*loss_completion))
+            return abandon_loss_session();
+        // The terminal evidence is complete, but releasing the destroyed
+        // provider can still block on a pinned Metal fence. Keep this
+        // process-scoped diagnostic bounded after recording the evidence.
+        loss_session.release();
+        std::fputs("wgpu staged diagnostic stage=loss_session_abandoned\n", stderr);
+    }
     std::printf("input_sha256=%s weights_sha256=%s shader_sha256=%s\n",
                 sha256_hex(submitted_inputs.data(), sizeof(submitted_inputs)).c_str(),
                 sha256_hex(weights.data(), sizeof(weights)).c_str(),
                 sha256_hex(kShader, std::strlen(kShader)).c_str());
     std::printf("staged_blocks=%u planted_completion_failures=%u cpu_oracle_max_error=%.9g\n",
                 successes, failures, max_error);
-    std::puts("device_loss_proof=unavailable callback_fallback_proof=unavailable");
+    std::printf("device_loss_callback=%s device_loss_scenario=%s device_loss_reason=%s "
+                "device_loss_terminal_records=%u device_loss_no_output_leases=%s "
+                "device_loss_reprime=unavailable\n",
+                loss_callback_registered ? "registered" : "unavailable",
+                loss_scenario_triggered ? "triggered" : "unavailable",
+                loss_reason == WGPUDeviceLostReason_Destroyed ? "destroyed" : "unknown",
+                loss_terminal_records, loss_no_output_leases ? "true" : "false");
+    std::puts(
+        "device_loss_proof=callback_terminal_no_output_lease callback_fallback_proof=unavailable");
     return 0;
 }

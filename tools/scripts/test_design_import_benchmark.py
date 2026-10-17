@@ -282,6 +282,8 @@ class ReportTests(unittest.TestCase):
                 "cpu_frame_ms_p99": 0.2,
                 "frame_ms_median": 1.0,
                 "frame_ms_p99": 2.0,
+                "update_ms_median": 0.2,
+                "update_ms_p99": 0.4,
                 "rss_median_bytes": 900,
                 "rss_p99_bytes": 1024,
                 "rss_peak_bytes": 1024,
@@ -293,6 +295,8 @@ class ReportTests(unittest.TestCase):
                 "cpu_frame_ms_p99": 0.4,
                 "frame_ms_median": 2.0,
                 "frame_ms_p99": 4.0,
+                "update_ms_median": 0.4,
+                "update_ms_p99": 0.8,
                 "rss_median_bytes": 1800,
                 "rss_p99_bytes": 2048,
                 "rss_peak_bytes": 2048,
@@ -321,6 +325,8 @@ class ReportTests(unittest.TestCase):
                 "cpu_frame_ms_p99": 0.2,
                 "frame_ms_median": 1.0,
                 "frame_ms_p99": 2.0,
+                "update_ms_median": 0.2,
+                "update_ms_p99": 0.4,
                 "rss_median_bytes": 900,
                 "rss_p99_bytes": 1024,
                 "rss_peak_bytes": 1024,
@@ -349,6 +355,8 @@ class ReportTests(unittest.TestCase):
                 "cpu_frame_ms_p99": 0.16,
                 "frame_ms_median": 0.8,
                 "frame_ms_p99": 1.6,
+                "update_ms_median": 0.2,
+                "update_ms_p99": 0.4,
                 "rss_median_bytes": 800,
                 "rss_p99_bytes": 1000,
                 "rss_peak_bytes": 1000,
@@ -376,18 +384,35 @@ class ReportTests(unittest.TestCase):
         self.assertAlmostEqual(report["comparisons"]["baked-cpp"]["interactive_cpu_delta_ratio"], -0.7)
         self.assertAlmostEqual(report["comparison"]["interactive_cpu_delta_ratio"], -0.625)
         self.assertAlmostEqual(report["comparison"]["interactive_cpu_frame_p99_delta_ratio"], -0.5)
+        self.assertAlmostEqual(report["comparison"]["interactive_update_median_delta_ratio"], -0.5)
+        self.assertAlmostEqual(report["comparison"]["interactive_update_p99_delta_ratio"], -0.5)
         self.assertAlmostEqual(report["comparison"]["interactive_rss_p99_delta_ratio"], -0.5)
         self.assertEqual(report["comparison"]["live_interactive_js_evaluations"], 10)
 
         markdown = dib.render_markdown(report)
         self.assertIn("Phase 9 gate: **MET**", markdown)
         self.assertIn("CPU frame p99", markdown)
+        self.assertIn("Update median", markdown)
+        self.assertIn("Interactive update p99 delta", markdown)
         self.assertIn("RSS p99", markdown)
         self.assertIn("Estimated live-runtime linked footprint", markdown)
         self.assertIn("pulp-view linked text+data", markdown)
         self.assertIn("baked-cpp", markdown)
         self.assertIn("live interactive evaluations=10", markdown)
         self.assertIn("baked-cpp interactive evaluations=0", markdown)
+
+        rebuild_report = dib.build_report(
+            live,
+            baked,
+            binary,
+            pathlib.Path("/tmp/build"),
+            baked_cpp,
+            baked_native_rebuild=baked,
+        )
+        self.assertIn("baked-native-rebuild", rebuild_report["lanes"])
+        rebuild_markdown = dib.render_markdown(rebuild_report)
+        self.assertIn("| interactive | baked-native-rebuild |", rebuild_markdown)
+        self.assertIn("Interactive update p99 delta (baked-native-rebuild vs live)", rebuild_markdown)
 
     def test_formatters_are_ascii_and_stable(self) -> None:
         self.assertEqual(dib.format_bytes(512), "512 B")

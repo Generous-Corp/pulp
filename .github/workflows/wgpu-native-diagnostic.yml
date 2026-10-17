@@ -1,0 +1,169 @@
+name: wgpu-native staged diagnostic (advisory)
+
+on:
+  pull_request:
+    paths:
+      - 'CMakeLists.txt'
+      - 'tools/deps/manifest.json'
+      - 'tools/diagnostics/pulp_wgpu_native_staged_adapter.cpp'
+      - 'tools/diagnostics/verify_wgpu_native_staged.py'
+      - 'tools/diagnostics/test_verify_wgpu_native_staged.py'
+      - 'test/cmake/render_gpu_surface_tests.cmake'
+      - '.github/workflows/wgpu-native-diagnostic.yml'
+  workflow_dispatch:
+    inputs:
+      run_diagnostic:
+        description: 'Run the pinned wgpu-native staged device-loss diagnostic'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wgpu-native-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-advisory-macos:
+    name: Resolve isolated advisory macOS runner
+    runs-on: ubuntu-latest
+    outputs:
+      selector_json: ${{ steps.resolve.outputs.selector_json }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        shell: bash
+        env:
+          CONFIGURED_JSON: ${{ vars.PULP_ADVISORY_MACOS_RUNS_ON_JSON }}
+        run: |
+          python3 tools/scripts/resolve_advisory_macos_runner.py \
+            --configured-json "$CONFIGURED_JSON" \
+            --fallback-json '"macos-15"' \
+            --event-name "${{ github.event_name }}"
+
+  diagnostic:
+    name: Run pinned wgpu-native device-loss diagnostic (advisory)
+    needs: resolve-advisory-macos
+    if: github.event_name != 'workflow_dispatch' || inputs.run_diagnostic
+    runs-on: ${{ fromJSON(needs.resolve-advisory-macos.outputs.selector_json) }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch build dependencies
+        shell: bash
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure no-Skia wgpu-native diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          diag_build="$RUNNER_TEMP/pulp-wgpu-native-diagnostic"
+          no_skia="$diag_build/no-skia"
+          mkdir -p "$no_skia"
+          cmake -S . -B "$diag_build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_SKIA_AUTOFETCH=OFF \
+            -DSKIA_DIR="$no_skia" \
+            -DPULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC=ON
+          echo "PULP_WGPU_NATIVE_DIAGNOSTIC_BUILD=$diag_build" >> "$GITHUB_ENV"
+
+      - name: Build diagnostic target
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh cmake --build "$PULP_WGPU_NATIVE_DIAGNOSTIC_BUILD" \
+            --target pulp-gpu-wgpu-native-staged-diagnostic
+
+      - name: Run diagnostic and require a typed receipt
+        shell: bash
+        run: |
+          set -uo pipefail
+          receipt="$PULP_WGPU_NATIVE_DIAGNOSTIC_BUILD/test/wgpu-native-staged-receipt.json"
+          ctest --test-dir "$PULP_WGPU_NATIVE_DIAGNOSTIC_BUILD" \
+            --output-on-failure \
+            -R '^pulp-gpu-wgpu-native-staged-diagnostic$'
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "diagnostic did not produce a passing verifier result (ctest=$rc)" >&2
+            exit "$rc"
+          fi
+          test -s "$receipt" || {
+            echo "diagnostic passed without a receipt" >&2
+            exit 1
+          }
+          python3 - "$receipt" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          receipt = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          status = receipt.get("status")
+          if status == "provider_unavailable":
+              required = {
+                  "status": "provider_unavailable",
+                  "reason": "provider_unavailable",
+                  "claim": "device_loss_callback_unavailable_after_destroy",
+                  "device_loss_observation": "probe_timeout_after_destroy",
+                  "device_loss_probe_timeout_ms": 8000,
+                  "device_loss_callback": "unavailable",
+                  "device_loss_scenario": "unavailable",
+                  "device_loss_reason": "unavailable",
+                  "device_loss_proof": "unavailable",
+                  "device_loss_terminal_records": 0,
+                  "device_loss_no_output_leases": "unavailable",
+                  "device_loss_reprime": "unavailable",
+                  "callback_fallback_proof": "unavailable",
+                  "gpu_receipt_authenticated": False,
+                  "product_proof": False,
+              }
+          elif status == "passed":
+              required = {
+                  "status": "passed",
+                  "device_loss_callback": "registered",
+                  "device_loss_scenario": "triggered",
+                  "device_loss_reason": "destroyed",
+                  "device_loss_proof": "callback_terminal_no_output_lease",
+                  "device_loss_no_output_leases": True,
+                  "device_loss_reprime": "unavailable",
+                  "callback_fallback_proof": "unavailable",
+                  "product_proof": False,
+              }
+          else:
+              raise SystemExit(f"unexpected diagnostic receipt status: {status!r}")
+          for key, expected in required.items():
+              if receipt.get(key) != expected:
+                  raise SystemExit(f"receipt field {key}={receipt.get(key)!r}, expected {expected!r}")
+          if status == "passed" and int(receipt.get("device_loss_terminal_records", 0)) < 1:
+              raise SystemExit("receipt has no device-loss terminal record")
+          PY
+
+      - name: Upload verified diagnostic receipt
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wgpu-native-staged-diagnostic-receipt
+          path: ${{ env.PULP_WGPU_NATIVE_DIAGNOSTIC_BUILD }}/test/wgpu-native-staged-receipt.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Summarize diagnostic scope
+        if: always()
+        shell: bash
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## wgpu-native staged diagnostic (advisory)
+
+          This path is isolated from the required macOS build and uses the
+          pinned wgpu-native runtime without Skia/Dawn. A provider capability
+          gap is recorded only when the native runtime accepts device destroy
+          but the device-loss callback remains unavailable within its bounded
+          8-second wait; it is a typed
+          provider_unavailable receipt with no callback proof. A passed receipt must carry callback, destroyed-
+          reason, terminal-record, and no-output-lease evidence. The result
+          remains architecture-only and does not prove a production provider
+          or product path.
+          EOF

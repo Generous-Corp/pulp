@@ -62,6 +62,9 @@ struct PhaseMetrics {
     double frame_ms_median = 0.0;
     double frame_ms_p99 = 0.0;
     double frame_ms_max = 0.0;
+    double update_ms_median = 0.0;
+    double update_ms_p99 = 0.0;
+    double update_ms_max = 0.0;
     std::uint64_t rss_median_bytes = 0;
     std::uint64_t rss_p99_bytes = 0;
     std::uint64_t rss_peak_bytes = 0;
@@ -297,7 +300,7 @@ void apply_bench_tokens(IRTokens& tokens) {
     c["surface-overlay"] = "#2b2d3f";
 }
 
-DesignIR build_baked_ir() {
+DesignIR build_baked_ir(int frame = -1) {
     DesignIR ir;
     ir.source = DesignSource::jsx;
     ir.source_adapter = "phase5-benchmark-fixture";
@@ -342,6 +345,40 @@ DesignIR build_baked_ir() {
     panel.children.push_back(std::move(viewport));
 
     ir.root.children.push_back(std::move(panel));
+
+    if (frame >= 0) {
+        const float t = static_cast<float>(frame) / 60.0f;
+        const auto drive = 0.5f + 0.45f * std::sin(t * 1.7f);
+        const auto tone = 0.5f + 0.35f * std::cos(t * 1.1f);
+        const auto mix = 0.5f + 0.45f * std::sin(t * 0.9f);
+        const auto output = 0.55f + 0.35f * std::sin(t * 1.3f);
+        const auto x = 0.5f + 0.45f * std::sin(t * 0.7f);
+        const auto y = 0.5f + 0.45f * std::cos(t * 0.8f);
+
+        const auto find = [&](auto&& self, IRNode& node, std::string_view id) -> IRNode* {
+            if (node.stable_anchor_id && *node.stable_anchor_id == id)
+                return &node;
+            for (auto& child : node.children) {
+                if (auto* found = self(self, child, id))
+                    return found;
+            }
+            return nullptr;
+        };
+        if (auto* node = find(find, ir.root, "drive"))
+            node->audio_default = drive;
+        if (auto* node = find(find, ir.root, "tone"))
+            node->audio_default = tone;
+        if (auto* node = find(find, ir.root, "mix"))
+            node->audio_default = mix;
+        if (auto* node = find(find, ir.root, "output"))
+            node->audio_default = output;
+        if (auto* node = find(find, ir.root, "shape")) {
+            node->attributes["x"] = std::to_string(x);
+            node->attributes["y"] = std::to_string(y);
+        }
+        if (auto* node = find(find, ir.root, "preset-content"))
+            node->style.top = -static_cast<float>((frame * 3) % 180);
+    }
     return ir;
 }
 
@@ -450,6 +487,57 @@ private:
             else if (auto* fader = dynamic_cast<Fader*>(view)) fader->set_value(value);
             else if (auto* range = dynamic_cast<RangeSlider*>(view)) range->set_value(value);
         }
+    }
+
+    std::unique_ptr<View> root_;
+};
+
+// Control lane for the structural retained experiment. This deliberately
+// rebuilds the same imported DesignIR on every interactive step, so any
+// retained-vs-rebuild claim has a real full-rematerialization comparator. It
+// is diagnostic only; the production baked-native lane above remains the
+// direct-setter baseline.
+class BakedNativeRebuildFixture final : public BenchmarkFixture {
+  public:
+    BakedNativeRebuildFixture() {
+        rebuild(-1);
+    }
+
+    View& root() override {
+        return *root_;
+    }
+
+    void step(int frame) override {
+        rebuild(frame);
+    }
+
+    int js_evaluation_count() const override {
+        return 0;
+    }
+
+  private:
+    void rebuild(int frame) {
+        auto ir = build_baked_ir(frame);
+        NativeMaterializeOptions options;
+        std::vector<ImportDiagnostic> diagnostics;
+        options.diagnostics_out = &diagnostics;
+        auto next = build_native_view_tree(ir, ir.asset_manifest, options);
+        if (!diagnostics.empty()) {
+            std::ostringstream msg;
+            msg << "baked-native-rebuild materialization emitted " << diagnostics.size()
+                << " diagnostics";
+            if (!diagnostics.front().code.empty())
+                msg << "; first=" << diagnostics.front().code;
+            if (!diagnostics.front().message.empty())
+                msg << ": " << diagnostics.front().message;
+            throw std::runtime_error(msg.str());
+        }
+        if (!next)
+            throw std::runtime_error("baked-native-rebuild returned null root");
+        next->set_bounds(
+            {0, 0, static_cast<float>(kFixtureWidth), static_cast<float>(kFixtureHeight)});
+        next->layout_children();
+        root_ = std::move(next);
     }
 
     std::unique_ptr<View> root_;
@@ -683,6 +771,8 @@ layout();
 std::unique_ptr<BenchmarkFixture> make_fixture(const std::string& lane) {
     if (lane == "live") return std::make_unique<LiveFixture>();
     if (lane == "baked-native") return std::make_unique<BakedNativeFixture>();
+    if (lane == "baked-native-rebuild")
+        return std::make_unique<BakedNativeRebuildFixture>();
     if (lane == "baked-cpp") return std::make_unique<BakedCppFixture>();
     return nullptr;
 }
@@ -713,13 +803,18 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     const auto unmarked_start = View::unmarked_paint_mutation_count();
     std::vector<double> frame_ms;
     std::vector<double> frame_cpu_ms;
+    std::vector<double> update_ms;
     std::vector<double> rss_bytes;
 
     int frame = 0;
     do {
         const auto frame_start = Clock::now();
         const auto frame_cpu_start = std::clock();
-        if (interactive) fixture.step(frame);
+        if (interactive) {
+            const auto update_start = Clock::now();
+            fixture.step(frame);
+            update_ms.push_back(elapsed_ms(update_start));
+        }
         metrics.paint_commands_last = render_frame(fixture.root());
         metrics.paint_commands_total += metrics.paint_commands_last;
         ++metrics.paint_calls;
@@ -746,6 +841,11 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     if (!frame_cpu_ms.empty()) {
         metrics.cpu_frame_ms_median = percentile(frame_cpu_ms, 50.0);
         metrics.cpu_frame_ms_p99 = percentile(frame_cpu_ms, 99.0);
+    }
+    if (!update_ms.empty()) {
+        metrics.update_ms_median = percentile(update_ms, 50.0);
+        metrics.update_ms_p99 = percentile(update_ms, 99.0);
+        metrics.update_ms_max = *std::max_element(update_ms.begin(), update_ms.end());
     }
     if (!rss_bytes.empty()) {
         metrics.rss_median_bytes = static_cast<std::uint64_t>(std::llround(percentile(rss_bytes, 50.0)));
@@ -783,6 +883,9 @@ void append_phase_json(std::ostringstream& out,
     out << "    \"frame_ms_median\": " << metrics.frame_ms_median << ",\n";
     out << "    \"frame_ms_p99\": " << metrics.frame_ms_p99 << ",\n";
     out << "    \"frame_ms_max\": " << metrics.frame_ms_max << ",\n";
+    out << "    \"update_ms_median\": " << metrics.update_ms_median << ",\n";
+    out << "    \"update_ms_p99\": " << metrics.update_ms_p99 << ",\n";
+    out << "    \"update_ms_max\": " << metrics.update_ms_max << ",\n";
     out << "    \"rss_median_bytes\": " << metrics.rss_median_bytes << ",\n";
     out << "    \"rss_p99_bytes\": " << metrics.rss_p99_bytes << ",\n";
     out << "    \"rss_peak_bytes\": " << metrics.rss_peak_bytes << ",\n";
@@ -820,7 +923,10 @@ std::string make_json(const Config& config,
     out << "    \"first_frame_paint_commands\": " << startup.first_frame_paint_commands << ",\n";
     out << "    \"rss_after_first_frame_bytes\": " << startup.rss_after_first_frame_bytes << "\n";
     out << "  },\n";
-    out << "  \"interaction_model\": \"value drag plus overflow-panel scroll offset; live lane mutates through JS bridge, baked-native materializes IR, baked-cpp mutates generated-style native widgets directly\",\n";
+    out << "  \"interaction_model\": \"value drag plus overflow-panel scroll offset; live lane "
+           "mutates through JS bridge, baked-native materializes once and uses direct native "
+           "setters, baked-native-rebuild rematerializes the same IR per interactive step, "
+           "baked-cpp mutates generated-style native widgets directly\",\n";
     append_phase_json(out, "idle", idle, true);
     append_phase_json(out, "interactive", interactive, false);
     out << "}\n";
@@ -828,7 +934,8 @@ std::string make_json(const Config& config,
 }
 
 void print_usage(std::ostream& out) {
-    out << "usage: pulp-design-import-bench [--lane=live|baked-native|baked-cpp] "
+    out << "usage: pulp-design-import-bench "
+           "[--lane=live|baked-native|baked-native-rebuild|baked-cpp] "
            "[--idle-ms=N] [--interactive-ms=N] [--target-fps=N] [--output=PATH]\n";
 }
 
@@ -880,9 +987,9 @@ std::optional<Config> parse_args(int argc, char** argv) {
             return std::nullopt;
         }
     }
-    if (config.lane != "live" &&
-        config.lane != "baked-native" &&
-        config.lane != "baked-cpp") return std::nullopt;
+    if (config.lane != "live" && config.lane != "baked-native" &&
+        config.lane != "baked-native-rebuild" && config.lane != "baked-cpp")
+        return std::nullopt;
     config.idle_ms = std::max(0, config.idle_ms);
     config.interactive_ms = std::max(0, config.interactive_ms);
     config.target_fps = std::max(1, config.target_fps);

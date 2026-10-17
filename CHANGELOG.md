@@ -9,6 +9,34 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09864"></a>
+## [0.986.4] - 2026-10-17
+
+- release/version bump ([#10476](https://github.com/Generous-Corp/pulp/pull/10476))
+- validation/root canvas successor 20261016 ([#10475](https://github.com/Generous-Corp/pulp/pull/10475))
+
+<a id="v09863"></a>
+## [0.986.3] - 2026-10-17
+
+- release/version bump ([#10473](https://github.com/Generous-Corp/pulp/pull/10473))
+- codex/document canvas integrity m1 20261016 ([#10471](https://github.com/Generous-Corp/pulp/pull/10471))
+
+<a id="v09862"></a>
+## [0.986.2] - 2026-10-16
+
+- release/version bump ([#10470](https://github.com/Generous-Corp/pulp/pull/10470))
+- ci/python coverage skips ([#10456](https://github.com/Generous-Corp/pulp/pull/10456))
+- test/watchdog first reading and fake fixture path ([#10467](https://github.com/Generous-Corp/pulp/pull/10467))
+- test/validate hosts ref head ([#10461](https://github.com/Generous-Corp/pulp/pull/10461))
+- test/desktop doctor hermetic mac ([#10462](https://github.com/Generous-Corp/pulp/pull/10462))
+- fix/shipyard watchdog cpu delta ([#10463](https://github.com/Generous-Corp/pulp/pull/10463))
+- release/version bump ([#10468](https://github.com/Generous-Corp/pulp/pull/10468))
+- test/decisions contract shim under coverage ([#10459](https://github.com/Generous-Corp/pulp/pull/10459))
+- fix/combined installer empty arrays ([#10460](https://github.com/Generous-Corp/pulp/pull/10460))
+- codex/windows reaper acceptance 20261015 ([#10409](https://github.com/Generous-Corp/pulp/pull/10409))
+- test/frontend ir schema needs planning ([#10458](https://github.com/Generous-Corp/pulp/pull/10458))
+- ci/coverage tiers new subsystems ([#10457](https://github.com/Generous-Corp/pulp/pull/10457))
+
 <a id="v09861"></a>
 ## [0.986.1] - 2026-10-16
 
@@ -10942,6 +10970,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.986.4]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.4
+[0.986.3]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.3
+[0.986.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.2
 [0.986.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.1
 [0.986.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.986.0
 [0.985.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.985.0
