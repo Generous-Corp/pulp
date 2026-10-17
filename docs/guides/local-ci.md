@@ -16,6 +16,12 @@ code and invokes `tools/ci/governed-build.sh` inside that namespace for its
 build. This preserves the lane's runner isolation while applying the same
 bounded worker and build-directory locking policy as the other build emitters.
 
+The advisory Windows release-path, MIDI Services, and BLE compile gates use
+PowerShell for their job steps but invoke `bash tools/ci/governed-build.sh`
+for each CMake build. The governor supplies the worker bound and build-directory
+lock. The main Windows matrix follows the same rule, so custom runner selectors
+cannot bypass the governor.
+
 > Setting up a dedicated machine as a persistent CI runner? See
 > [self-hosted-runner.md](self-hosted-runner.md) for the walkthrough
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
