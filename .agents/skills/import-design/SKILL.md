@@ -5520,6 +5520,16 @@ establish capture-time identity. A matching digest proves consistency with the
 capture envelope, not signing, independent authentication, background-compositing
 correctness, or Chromium/Skia pixel parity.
 
+Native browser lowering can add the computed opaque HTML canvas colour to the
+existing synthetic root, including a panel-sized root. This requires a declared
+verified snapshot hash, unique HTML/body identity, complete supported paint
+facts, and consistent origin-aligned viewport/document/authored geometry. Body
+must be transparent or the same opaque colour; effects, root/body pseudos,
+scroll overflow, ambiguous or missing evidence leave the existing output
+unchanged. Materialized composition and legacy unbound captures gain no fill.
+The existing renderer, root geometry, children, and DPR 2 import contract are
+unchanged. A fill is not a pixel-parity or performance claim.
+
 The canonical repeat-run envelope digest excludes only
 `documents[*].snapshot_sha256` at the root of a `pulp-browser-capture-v1`
 envelope. Raw CDP frame IDs can change those exact snapshot bytes between runs.
