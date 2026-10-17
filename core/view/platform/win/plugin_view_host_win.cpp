@@ -15,8 +15,9 @@
 //
 // Threading: all window ops run on the calling (UI) thread. There is no internal
 // message loop — the host that owns the parent HWND pumps messages; repaint()
-// invalidates and a WM_PAINT triggers render_frame(). For embed callers that
-// drive frames explicitly (pulp_embed_tick), repaint() renders synchronously.
+// marks an attached editor dirty for the frame timer. Input/exposure paints
+// also render through WM_PAINT. Unattached GPU repaint and explicit capture
+// remain synchronous.
 
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
@@ -64,6 +65,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 #include <functional>
@@ -215,6 +217,11 @@ public:
         if (!hwnd_) return;
         HWND parent_hwnd = static_cast<HWND>(parent);
         if (!parent_hwnd) return;
+        const HWND current_parent = GetParent(hwnd_);
+        if (attached_.load(std::memory_order_acquire) && current_parent == parent_hwnd)
+            return;
+        if (current_parent != nullptr || attached_.load(std::memory_order_acquire))
+            detach();
         // Switch WS_POPUP -> WS_CHILD before reparenting (SetParent does not add
         // the style itself); SWP_FRAMECHANGED makes the style edit take effect.
         LONG_PTR style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
@@ -246,8 +253,20 @@ public:
                          SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         }
         ShowWindow(hwnd_, SW_SHOW);
+        if (!start_frame_timer()) {
+            // An attached editor has no synchronous repaint fallback. Roll the
+            // native embedding back before publishing attached_=true, so a
+            // failed timer cannot leave a visible but permanently dirty HWND.
+            ShowWindow(hwnd_, SW_HIDE);
+            SetParent(hwnd_, nullptr);
+            LONG_PTR failed_style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
+            failed_style = (failed_style & ~static_cast<LONG_PTR>(WS_CHILD)) | WS_POPUP;
+            SetWindowLongPtrW(hwnd_, GWL_STYLE, failed_style);
+            SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+            return;
+        }
         attached_.store(true, std::memory_order_release);
-        start_frame_timer();
 #ifdef PULP_HAS_SKIA
         // Dawn configures its presentation surface for the HWND's current
         // native-window shape. Creating it while this HWND is still the hidden
@@ -437,25 +456,24 @@ public:
 
     void repaint() override {
         needs_repaint_ = true;
+        // An attached editor belongs to the DAW's message loop. Coalesce ALL
+        // changes, including scripted timers/rAF and host automation, until
+        // its frame timer. Rendering here can re-enter idle while it is still
+        // mutating the tree. Invalidating here is also unsafe: a rAF scheduled
+        // from WM_PAINT would immediately generate another WM_PAINT, starving
+        // the lower-priority timer that should pace frames and the DAW's idle
+        // work. The timer consumes the dirty bit and paints once.
+        if (attached_.load(std::memory_order_acquire))
+            return;
+        // Preserve explicit synchronous painting for an unattached embed.
         paint_or_invalidate();
     }
 
-    // Coalesced repaint for INPUT-driven updates (mouse down/move/up).
-    //
-    // repaint() renders synchronously on the GPU path, and the swapchain is
-    // configured Fifo (vsync) by default, so acquiring the next texture blocks
-    // until the next refresh. Rendering inline from the wndproc therefore costs
-    // a full vsync-blocked frame PER WM_MOUSEMOVE. Windows delivers moves far
-    // faster than that, so the queue backs up and a dragged control visibly
-    // trails the cursor — the lag is the queued input, not the render cost.
-    //
-    // Invalidating instead lets Windows collapse every move that arrived during
-    // a frame into ONE WM_PAINT, which repaints at the LATEST pointer position.
-    // Mouse handling becomes near-free and the control tracks the cursor.
-    //
-    // Safe for the embed path: these callers only reach us through the wndproc,
-    // which means a message pump exists to deliver the WM_PAINT. Callers that
-    // drive frames explicitly (pulp_embed_tick) still use repaint() directly.
+    // Input can request an earlier paint. InvalidateRect coalesces pointer
+    // bursts instead of rendering once per native input message. Scripted
+    // callbacks run during that paint but request their next frame through
+    // repaint(), so they remain paced by the timer rather than feeding an
+    // endless chain of WM_PAINT messages.
     void request_repaint_from_input() {
         needs_repaint_ = true;
         if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
@@ -664,11 +682,21 @@ private:
     // a retained persistent-scene target. Default OFF.
     bool partial_repaint_enabled_ = false;
 
-    void start_frame_timer() {
-        if (!hwnd_ || SetTimer(hwnd_, kFrameTimerId, kFrameTimerPeriodMs, nullptr) == 0)
+    bool start_frame_timer() {
+        // This opt-in seam makes the attach rollback test deterministic without
+        // changing the production timer API or exhausting the process timer
+        // quota. It is inert unless a test sets the variable.
+        const char* force_failure = std::getenv("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE");
+        if ((force_failure && std::strcmp(force_failure, "1") == 0) || !hwnd_ ||
+            SetTimer(hwnd_, kFrameTimerId, kFrameTimerPeriodMs, nullptr) == 0) {
             runtime::log_warn("WinPluginViewHost: SetTimer frame pump failed");
+            frame_pump_.suspend();
+            needs_repaint_ = true;
+            return false;
+        }
         frame_pump_.suspend();
         needs_repaint_ = true;
+        return true;
     }
 
     void stop_frame_timer() {
