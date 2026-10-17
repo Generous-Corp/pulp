@@ -20,7 +20,10 @@
     "input_output_alias",
     "partial_buffer_overlap"
   ],
-  "callback_allocations": 0,
+  "callback_allocation_probe": {
+    "frames": 128,
+    "allocations": 0
+  },
   "model_support": false,
   "provider_execution": false,
   "product_claim": false
