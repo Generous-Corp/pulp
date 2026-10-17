@@ -6355,6 +6355,14 @@
    ],
    "kind": "python"
   },
+  "import-design-ir-observe-provider-boundary": {
+   "entry": "test/test_design_ir_observe_provider_boundary.py",
+   "inputs": [
+    "test/test_design_ir_observe_provider_boundary.py",
+    "tools/import-design/design_ir_observe.cpp"
+   ],
+   "kind": "python"
+  },
   "import-fidelity-diff": {
    "entry": "test/test_import_fidelity_diff.py",
    "inputs": [
