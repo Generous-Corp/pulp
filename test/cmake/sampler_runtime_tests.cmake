@@ -482,6 +482,7 @@ pulp_add_test_suite(pulp-test-graph-runtime-queue GROUP pulp-test-group-sampler-
 
 # Dense graph runtime plan and bounded topology validation for runtime v2.
 pulp_add_test_suite(pulp-test-graph-runtime-plan GROUP pulp-test-group-sampler-graph-runtime
+    SOURCES test_graph_runtime_plan.cpp
     LIBRARIES pulp::graph)
 
 if(TARGET pulp-host)

@@ -292,6 +292,25 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                                result.plan.outbound_connection_indices);
         }
 
+        // Prepare metadata for the common one-audio-edge gather shape. Event
+        // and automation lanes do not contribute to the audio count.
+        for (auto& node : result.plan.nodes) {
+            node.audio_inbound_connection_count = 0;
+            node.single_audio_inbound_connection = 0xFFFFFFFFu;
+            node.audio_inbound_port_mask = 0;
+            for (std::uint32_t offset = 0; offset < node.inbound_connection_count; ++offset) {
+                const auto connection_index =
+                    result.plan.inbound_connection_indices[node.first_inbound_connection + offset];
+                if (!carries_audio(result.plan.connections[connection_index]))
+                    continue;
+                ++node.audio_inbound_connection_count;
+                node.single_audio_inbound_connection = connection_index;
+                if (result.plan.connections[connection_index].dest_port < 64)
+                    node.audio_inbound_port_mask |=
+                        std::uint64_t{1} << result.plan.connections[connection_index].dest_port;
+            }
+        }
+
         std::vector<std::uint32_t> indegree(result.plan.nodes.size(), 0);
         for (const auto& connection : result.plan.connections) {
             if (!connection.feedback) ++indegree[connection.dest_index];

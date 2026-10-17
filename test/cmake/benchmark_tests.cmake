@@ -38,6 +38,18 @@ if(PULP_BENCHMARK AND TARGET pulp-render)
     endif()
 endif()
 
+# ── Retained graph direct-copy benchmark ────────────────────────────────────
+#
+# Opt-in CPU-only Release evidence. The separate variable avoids enabling the
+# unrelated GPU benchmark headers when this benchmark is configured with
+# PULP_ENABLE_GPU=OFF.
+if(PULP_GRAPH_DIRECT_COPY_BENCHMARK)
+    add_executable(pulp-graph-direct-copy-benchmark
+        test_graph_direct_copy_benchmark.cpp)
+    target_link_libraries(pulp-graph-direct-copy-benchmark PRIVATE
+        pulp::host pulp::format pulp::graph)
+endif()
+
 # ── Oscillator throughput benchmark ─────────────────────────────────────────
 #
 # Tooling-only, gated on PULP_BENCHMARK like the zero-copy benchmark above,

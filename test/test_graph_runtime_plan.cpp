@@ -76,6 +76,8 @@ TEST_CASE("GraphRuntimePlan builds dense node and connection arrays",
     const auto& processor = result.plan.nodes[1];
     REQUIRE(processor.inbound_connection_count == 2);
     REQUIRE(processor.outbound_connection_count == 2);
+    REQUIRE(processor.audio_inbound_connection_count == 2);
+    REQUIRE(processor.audio_inbound_port_mask == 0x3u);
     REQUIRE(result.plan.inbound_connection_indices[processor.first_inbound_connection] == 0);
     REQUIRE(result.plan.inbound_connection_indices[processor.first_inbound_connection + 1] == 1);
     REQUIRE(result.plan.outbound_connection_indices[processor.first_outbound_connection] == 2);
