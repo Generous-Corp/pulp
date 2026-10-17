@@ -628,8 +628,14 @@ loses its whole log, so crossing 20, 10, 5 and 2 GiB free disk, or 2, 1 and
 0.5 GiB available memory, is also raised as an annotation, which is stored
 apart from the log. `run_coverage.sh` raises a `coverage phase` notice at each
 phase (configure, build, tests, merge, report, export) for the same reason:
-the last one shows how far a lost run got. Read those before changing anything
-else.
+the last one shows how far a lost run got. Annotations and the log only upload
+when a step ends, though, so a runner that dies mid-step loses both. The
+sampler therefore guards the root disk: below 3 GiB free it prints `du` of the
+root-disk directories (`/tmp`, `$HOME`, the runner directory, `/var`) and
+stops the suite, and the step ends with "the root-disk guard stopped the
+coverage suite" and its log intact. The reclaim step also points `TMPDIR` at
+`/mnt/coverage-tmp`, so test temporaries leave root along with the build.
+Read those before changing anything else.
 
 
 ## Shipyard-binary pin bumps

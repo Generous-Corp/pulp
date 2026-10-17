@@ -522,10 +522,13 @@ jobs:
           root_free=$(df -Pk / | awk 'NR==2 {print $4}')
           mnt_free=$(df -Pk /mnt 2>/dev/null | awk 'NR==2 {print $4}')
           if [ -n "${mnt_free}" ] && [ "${mnt_free}" -gt "${root_free}" ] && [ ! -e build-coverage ]; then
-            sudo mkdir -p /mnt/build-coverage
-            sudo chown "$(id -u):$(id -g)" /mnt/build-coverage
+            sudo mkdir -p /mnt/build-coverage /mnt/coverage-tmp
+            sudo chown "$(id -u):$(id -g)" /mnt/build-coverage /mnt/coverage-tmp
             ln -s /mnt/build-coverage build-coverage
             echo "build-coverage -> /mnt/build-coverage"
+            # About 20k tests write temporary files; keep them off root too.
+            echo "TMPDIR=/mnt/coverage-tmp" >> "${GITHUB_ENV}"
+            echo "TMPDIR -> /mnt/coverage-tmp"
           fi
           echo "after:"; df -h / /mnt 2>/dev/null || df -h /
 
@@ -680,9 +683,11 @@ jobs:
           # while the suite runs.
           sampler=""
           if [ "${RUNNER_OS}" != "Windows" ]; then
-            # A runner that fills its disk loses its whole log, so crossing
-            # each low-space threshold is also raised as an annotation, which
-            # is recorded separately from the log.
+            # A runner that fills its root disk dies mid-step, and a step that
+            # never ends uploads neither its log nor its annotations. So below
+            # 3 GiB free on root the sampler prints what is using root and
+            # stops the suite: the step then ends normally, and its log
+            # (with these samples) survives.
             ( warned=""
               tick=0
               while kill -0 "${cov}" 2>/dev/null; do
@@ -708,6 +713,16 @@ jobs:
                     echo "::warning title=coverage disk below ${t} GiB::$(date -u +%H:%M:%SZ) ${line}"
                   fi
                 done
+                if awk -v r="${root_gib}" 'BEGIN {exit !(r < 3)}'; then
+                  echo "::error title=coverage root disk nearly full::$(date -u +%H:%M:%SZ) ${line}; stopping the suite so this log survives"
+                  echo "--- root disk use ---"
+                  sudo du -xsh /tmp /var/tmp /var/log "${HOME}" /home/runner/actions-runner /opt /usr/local 2>/dev/null | sort -h
+                  echo "--- largest under \$HOME and /tmp ---"
+                  sudo du -xh -d 2 "${HOME}" /tmp 2>/dev/null | sort -h | tail -n 25
+                  : > "${RUNNER_TEMP:-/tmp}/coverage-disk-guard" 2>/dev/null || true
+                  kill -TERM -- "-${cov}" 2>/dev/null || true
+                  break
+                fi
                 if [ -n "${mem_gib}" ]; then
                   for t in 2 1 0.5; do
                     if awk -v m="${mem_gib}" -v t="${t}" 'BEGIN {exit !(m < t)}' && [[ " ${warned} " != *" mem${t} "* ]]; then
@@ -737,6 +752,11 @@ jobs:
           # leave a PARTIAL Cobertura/LCOV for the verify + Codecov upload steps
           # to publish as a truncated, valid-looking number. A clean miss beats a
           # wrong number.
+          if [ -f "${RUNNER_TEMP:-/tmp}/coverage-disk-guard" ]; then
+            echo "::error::the root-disk guard stopped the coverage suite on ${{ matrix.os }}; see the disk-use listing above. Dropping any partial Cobertura/LCOV."
+            rm -f build-coverage/coverage.cobertura.xml build-coverage/coverage/coverage.lcov 2>/dev/null || true
+            exit 1
+          fi
           if [ -f "${budget_hit}" ] || [ "${rc}" -eq 143 ] || [ "${rc}" -eq 137 ]; then
             echo "::warning::coverage suite interrupted at the internal budget on ${{ matrix.os }}; dropping any partial Cobertura/LCOV."
             rm -f build-coverage/coverage.cobertura.xml \
