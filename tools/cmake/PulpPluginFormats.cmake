@@ -219,7 +219,6 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         # Copy exactly the files declared by the shared staging helper.  Do
         # not mirror the whole linker directory: it also contains imports and
         # diagnostic outputs that are not part of a portable VST3 bundle.
-        pulp_expected_runtime_dependencies(_pulp_vst3_runtime_files)
         add_custom_command(TARGET ${target}_VST3 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory
                 "${_pulp_vst3_windows_contents}"
@@ -228,15 +227,22 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
                 "${_pulp_vst3_windows_contents}/${name}.vst3"
             COMMENT "Assembling Windows VST3 bundle ${name}.vst3"
             VERBATIM)
-        foreach(_pulp_vst3_runtime_file IN LISTS _pulp_vst3_runtime_files)
-            add_custom_command(TARGET ${target}_VST3 POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "$<TARGET_FILE_DIR:${target}_VST3>/${_pulp_vst3_runtime_file}"
-                    "${_pulp_vst3_windows_contents}/${_pulp_vst3_runtime_file}"
-                COMMENT "Copying ${_pulp_vst3_runtime_file} into ${name}.vst3"
-                VERBATIM)
-        endforeach()
-        unset(_pulp_vst3_runtime_file)
+        # NO_EDITOR targets intentionally skip runtime staging because they
+        # link only the format core.  Their bundle still needs the module,
+        # but it must not copy the editor-only sidecars (for example
+        # icudtl.dat), which do not exist beside the target.
+        if(NOT PULP_${target}_NO_EDITOR)
+            pulp_expected_runtime_dependencies(_pulp_vst3_runtime_files)
+            foreach(_pulp_vst3_runtime_file IN LISTS _pulp_vst3_runtime_files)
+                add_custom_command(TARGET ${target}_VST3 POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "$<TARGET_FILE_DIR:${target}_VST3>/${_pulp_vst3_runtime_file}"
+                        "${_pulp_vst3_windows_contents}/${_pulp_vst3_runtime_file}"
+                    COMMENT "Copying ${_pulp_vst3_runtime_file} into ${name}.vst3"
+                    VERBATIM)
+            endforeach()
+            unset(_pulp_vst3_runtime_file)
+        endif()
     endif()
     pulp_assert_runtime_dependencies_staged(${target}_VST3)
     _pulp_attach_control_shipping(${target} ${target}_VST3 VST3)

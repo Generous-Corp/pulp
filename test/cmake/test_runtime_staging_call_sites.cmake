@@ -136,6 +136,17 @@ if(_lv2_editorless EQUAL -1)
         "PulpPluginFormats.cmake: LV2 editorless path no longer marks runtime staging")
 endif()
 
+# Windows VST3 assembly must retain the module for NO_EDITOR targets while
+# skipping editor-only sidecars.  The latter are not staged by the deliberate
+# editorless path, so an unconditional copy would fail only on Windows.
+string(FIND "${_plugin_formats}"
+    "if(NOT PULP_\${target}_NO_EDITOR)\n            pulp_expected_runtime_dependencies(_pulp_vst3_runtime_files)"
+    _vst3_editorless_sidecar_guard)
+if(_vst3_editorless_sidecar_guard EQUAL -1)
+    list(APPEND _failures
+        "PulpPluginFormats.cmake: Windows VST3 sidecar assembly is not guarded for NO_EDITOR")
+endif()
+
 # No format helper may call the wgpu primitive directly. It copies ONLY the wgpu
 # runtime — no Apple @loader_path rpath, no Windows ICU data — so a call site
 # left on it produces a module that builds clean and then fails once shared or
