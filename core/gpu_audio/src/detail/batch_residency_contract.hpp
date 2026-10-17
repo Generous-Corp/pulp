@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -42,6 +43,9 @@ struct BatchResidencySample {
     bool authenticated = false;
     std::uint32_t member_count = 0;
     std::uint32_t member_terminal_count = 0;
+    std::array<std::uint64_t, 16> member_ids{};
+    std::array<std::uint64_t, 16> member_terminal_ids{};
+    bool member_fallback = false;
 };
 
 struct BatchResidencyReceipt {
@@ -58,6 +62,8 @@ struct BatchResidencyReceipt {
     std::uint64_t width_mismatches = 0;
     std::uint64_t residency_mismatches = 0;
     std::uint64_t member_count_mismatches = 0;
+    std::uint64_t member_evidence_mismatches = 0;
+    std::uint64_t dispatch_storage_overflow = 0;
     bool admission_valid = false;
     bool complete = false;
     bool diagnostic_only = true;
@@ -79,14 +85,18 @@ class BatchResidencyEvaluator final {
             ++receipt_.invalid_samples;
         if (sample.authenticated == false)
             ++receipt_.invalid_samples;
+        bool inserted_dispatch = false;
         for (std::size_t i = 0; i < dispatch_ids_.size(); ++i) {
             if (dispatch_ids_[i] == sample.dispatch_id && sample.dispatch_id != 0)
                 ++receipt_.duplicate_dispatch_ids;
             if (dispatch_ids_[i] == 0) {
                 dispatch_ids_[i] = sample.dispatch_id;
+                inserted_dispatch = true;
                 break;
             }
         }
+        if (!inserted_dispatch && sample.dispatch_id != 0)
+            ++receipt_.dispatch_storage_overflow;
         if (seen_sequence_ && sample.sequence != next_sequence_) {
             if (sample.sequence < next_sequence_)
                 ++receipt_.duplicate_dispatch_ids;
@@ -111,6 +121,14 @@ class BatchResidencyEvaluator final {
         if (sample.member_count != admission_.batch_width ||
             sample.member_terminal_count != admission_.batch_width)
             ++receipt_.member_count_mismatches;
+        const auto width = std::min<std::size_t>(sample.member_count, sample.member_ids.size());
+        if (sample.member_count > sample.member_ids.size() || sample.member_fallback) {
+            ++receipt_.member_evidence_mismatches;
+        } else {
+            for (std::size_t i = 0; i < width; ++i)
+                if (sample.member_ids[i] == 0 || sample.member_terminal_ids[i] == 0)
+                    ++receipt_.member_evidence_mismatches;
+        }
         if (sample.dispatch_id == 0 || !sample.gpu_completed)
             ++receipt_.invalid_samples;
     }
@@ -129,9 +147,11 @@ class BatchResidencyEvaluator final {
                        out.sample_count >= BatchResidencyReceipt::minimum_samples &&
                        out.gpu_completed == out.sample_count && out.invalid_samples == 0 &&
                        out.missing_dispatch_ids == 0 && out.duplicate_dispatch_ids == 0 &&
-                       out.sequence_gaps == 0 && out.identity_mismatches == 0 &&
-                       out.width_mismatches == 0 && out.residency_mismatches == 0;
-        out.complete = out.complete && out.member_count_mismatches == 0;
+                       out.sequence_gaps == 0 && out.dispatch_storage_overflow == 0 &&
+                       out.identity_mismatches == 0 && out.width_mismatches == 0 &&
+                       out.residency_mismatches == 0;
+        out.complete =
+            out.complete && out.member_count_mismatches == 0 && out.member_evidence_mismatches == 0;
         return out;
     }
 

@@ -21,21 +21,26 @@ BatchResidencyAdmission admission() {
             .cpu_fallback_prepared = true};
 }
 BatchResidencySample sample(std::uint64_t n) {
-    return {.sequence = n,
-            .dispatch_id = n + 1,
-            .batch_width = 4,
-            .resident_bytes = 4096,
-            .provider_id = 1,
-            .executable_id = 2,
-            .model_id = 3,
-            .resident_plan_id = 4,
-            .generation = 7,
-            .batched_dispatch = true,
-            .resources_resident = true,
-            .gpu_completed = true,
-            .authenticated = true,
-            .member_count = 4,
-            .member_terminal_count = 4};
+    BatchResidencySample result{.sequence = n,
+                                .dispatch_id = n + 1,
+                                .batch_width = 4,
+                                .resident_bytes = 4096,
+                                .provider_id = 1,
+                                .executable_id = 2,
+                                .model_id = 3,
+                                .resident_plan_id = 4,
+                                .generation = 7,
+                                .batched_dispatch = true,
+                                .resources_resident = true,
+                                .gpu_completed = true,
+                                .authenticated = true,
+                                .member_count = 4,
+                                .member_terminal_count = 4};
+    for (std::size_t i = 0; i < 4; ++i) {
+        result.member_ids[i] = i + 1;
+        result.member_terminal_ids[i] = i + 101;
+    }
+    return result;
 }
 } // namespace
 
@@ -104,4 +109,39 @@ TEST_CASE("G1 receipt rejects duplicate dispatch IDs") {
     duplicate.dispatch_id = 1;
     evaluator.observe(duplicate);
     REQUIRE(evaluator.finish().duplicate_dispatch_ids > 0);
+}
+
+TEST_CASE("G1 receipt fails closed on member evidence and dispatch storage overflow") {
+    BatchResidencyEvaluator evaluator(admission());
+    auto bad = sample(0);
+    bad.member_ids[2] = 0;
+    evaluator.observe(bad);
+    REQUIRE(evaluator.finish().member_evidence_mismatches > 0);
+
+    BatchResidencyEvaluator overflow(admission());
+    for (std::uint64_t n = 0; n < 1025; ++n)
+        overflow.observe(sample(n));
+    REQUIRE(overflow.finish().dispatch_storage_overflow > 0);
+    REQUIRE_FALSE(overflow.finish().complete);
+}
+
+TEST_CASE("G1 accepts width two and width four admission matrix") {
+    for (const auto width : {2u, 4u}) {
+        auto a = admission();
+        a.batch_width = width;
+        a.provider_slots = width;
+        BatchResidencyEvaluator evaluator(a);
+        for (std::uint64_t n = 0; n < BatchResidencyReceipt::minimum_samples; ++n) {
+            auto s = sample(n);
+            s.batch_width = width;
+            s.member_count = width;
+            s.member_terminal_count = width;
+            for (std::size_t i = width; i < s.member_ids.size(); ++i) {
+                s.member_ids[i] = 0;
+                s.member_terminal_ids[i] = 0;
+            }
+            evaluator.observe(s);
+        }
+        REQUIRE(evaluator.finish().complete);
+    }
 }
