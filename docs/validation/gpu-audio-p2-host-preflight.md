@@ -24,7 +24,7 @@ still remains `performance_verdict: "unassigned"` until its independent review.
 ## Required campaign inputs
 
 A hardware campaign (anything but `--plan-only`) refuses to start unless it is
-given all three of these:
+given all of these:
 
 - `--host-preflight PATH`: the host admission receipt described above.
 - `--expected-source-revision SHA`: the 40-character Pulp commit the campaign is
@@ -38,6 +38,15 @@ given all three of these:
   must agree, as must its expected and header Dawn revisions. Every raw
   provenance row must then match the receipt's Dawn revision, provider asset,
   linked Dawn archive and manifest bindings.
+- `--provider-configured-receipt PATH` and `--provider-prelink-receipt PATH`:
+  the exact configured and prelink receipt files named by the provider
+  identity receipt. The campaign re-hashes both files and rejects any digest
+  or path mismatch.
+- `--provider-manifest PATH`, `--provider-skia-dir PATH`,
+  `--provider-dawn-header PATH`, and `--provider-dawn-library PATH`: the
+  authoritative manifest and Skia/Dawn inputs used to independently verify the
+  provider identity receipt. These must be the same inputs used to produce the
+  bound receipt.
 
 The campaign reads the provider receipt once and records the SHA-256 of the
 bytes it validated, with its path, in `campaign.json`.
@@ -47,5 +56,11 @@ python3 tools/scripts/gpu_audio_p2_campaign.py \
   --probe build/test/pulp-gpu-shared-io-paced-convolution-probe --output-dir /path/to/new/campaign \
   --host-preflight host-preflight.json \
   --expected-source-revision "$(git rev-parse HEAD)" \
-  --provider-identity-receipt provider-identity.json
+  --provider-identity-receipt provider-identity.json \
+  --provider-configured-receipt configured-receipt.json \
+  --provider-prelink-receipt prelink-receipt.json \
+  --provider-manifest tools/deps/manifest.json \
+  --provider-skia-dir external/skia-build \
+  --provider-dawn-header /path/to/dawn_version.h \
+  --provider-dawn-library /path/to/libdawn.a
 ```
