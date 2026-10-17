@@ -44,6 +44,12 @@ endif()
 # (the Android app shell only reaches a target in an Android configure), so it
 # is registered outside the GPU gate.
 if(Python3_Interpreter_FOUND)
+    add_test(NAME android-surface-runtime-contract
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_android_surface_runtime_contract.py)
+    set_tests_properties(android-surface-runtime-contract
+        PROPERTIES LABELS "android;render;lifecycle" TIMEOUT 30)
+
     add_test(NAME render-upward-edge-check
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tools/scripts/render_upward_edge_check.py

@@ -1094,6 +1094,7 @@ if(ANDROID)
         target_sources(pulp-jni PRIVATE
             core/render/platform/android/gpu_surface_android.cpp
             core/render/platform/android/gpu_surface_android_jni.cpp
+            core/render/platform/android/surface_runtime_android.cpp
         )
         target_link_libraries(pulp-jni PRIVATE pulp::render)
     endif()

@@ -748,8 +748,9 @@ void android_surface_created(ANativeWindow* window) {
     // stays on the Android render/UI thread because both AChoreographer and
     // Dawn/Skia contexts are thread-affine.
     g_surface_runtime.surface_created(window, g_display_density);
-    // The runtime starts the Choreographer loop; its first callback performs
-    // the initial frame on the owning render thread.
+    // Keep the old first-frame behavior even when AChoreographer is unavailable
+    // (the runtime then degrades to the documented touch-only path).
+    android_render_frame();
 }
 
 void android_surface_resized(int width, int height) {
@@ -801,8 +802,8 @@ void android_render_frame(float dt) {
             if (!g_root_view) {
                 create_demo_view_hierarchy(w, h);
             } else {
-                // SurfaceView callbacks run on Android's UI thread; resize
-                // the view tree here on the same thread as the bridge pump.
+                // The runtime and bridge pump share the render-thread owner;
+                // update the tree after a queued SurfaceView resize.
                 const auto bounds = g_root_view->bounds();
                 const float dp_w = w / g_display_density;
                 const float dp_h = h / g_display_density;
