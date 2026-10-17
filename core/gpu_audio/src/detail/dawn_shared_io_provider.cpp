@@ -289,7 +289,7 @@ struct P { in_ch:u32, out_ch:u32, B:u32, woff:u32, src_pad:u32, dst_pad:u32, p0:
 }
 )wgsl";
 constexpr auto kSharedIoWavenetLayerWgsl = R"wgsl(
-struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, pad:u32, conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32, p0:u32, p1:u32, p2:u32, p3:u32 };
+struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, src_pad:u32, conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32, dst_pad:u32, p1:u32, p2:u32, p3:u32 };
 @group(0) @binding(0) var<storage, read> wts:array<f32>;
 @group(0) @binding(1) var<storage, read> ina:array<f32>;
 @group(0) @binding(2) var<storage, read_write> outa:array<f32>;
@@ -298,10 +298,10 @@ struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, pad:u32, conv_w:u32, 
 @group(0) @binding(5) var<uniform> p:P;
 var<workgroup> zbuf:array<f32,128>; var<workgroup> abuf:array<f32,64>;
 @compute @workgroup_size(64) fn main(@builtin(workgroup_id) wid:vec3u,@builtin(local_invocation_id) lid:vec3u){
- let t=wid.x; if(t>=p.B){return;} let lane=lid.x; let C=p.C; let Z=p.Z; let acol=p.pad+t;
+ let t=wid.x; if(t>=p.B){return;} let lane=lid.x; let C=p.C; let Z=p.Z; let acol=p.src_pad+t;
  for(var oc=lane;oc<Z;oc+=64u){var acc=wts[p.conv_b+oc]; for(var k=0u;k<p.K;k++){let back=p.dil*(p.K-1u-k);let base=(acol-back)*C;let wb=p.conv_w+oc*C*p.K+k;for(var ic=0u;ic<C;ic++){acc+=wts[wb+ic*p.K]*ina[base+ic];}} acc+=wts[p.mix_w+oc]*cond[t];zbuf[oc]=acc;}
  workgroupBarrier(); if(p.gated==0u){for(var c=lane;c<C;c+=64u){abuf[c]=tanh(zbuf[c]);}}else{for(var c=lane;c<C;c+=64u){let g=1.0/(1.0+exp(-zbuf[C+c]));abuf[c]=tanh(zbuf[c])*g;}}
- workgroupBarrier(); let hc=t*C; for(var c=lane;c<C;c+=64u){headacc[hc+c]=headacc[hc+c]+abuf[c];} let tc=acol*C; for(var oc=lane;oc<C;oc+=64u){var r=wts[p.l1_b+oc];let rw=p.l1_w+oc*C;for(var ic=0u;ic<C;ic++){r+=wts[rw+ic]*abuf[ic];}outa[tc+oc]=ina[tc+oc]+r;}
+ workgroupBarrier(); let hc=t*C; for(var c=lane;c<C;c+=64u){headacc[hc+c]=headacc[hc+c]+abuf[c];} let src=(p.src_pad+t)*C; let dst=(p.dst_pad+t)*C; for(var oc=lane;oc<C;oc+=64u){var r=wts[p.l1_b+oc];let rw=p.l1_w+oc*C;for(var ic=0u;ic<C;ic++){r+=wts[rw+ic]*abuf[ic];}outa[dst+oc]=ina[src+oc]+r;}
 }
 )wgsl";
 constexpr auto kSharedIoWavenetHeadWgsl = R"wgsl(
@@ -431,7 +431,8 @@ struct DawnSharedIoProvider::Impl {
     std::unique_ptr<ConvolutionPlan> convolution;
     struct WavenetPlan {
         struct Array {
-            std::uint32_t channels = 0, head_size = 0, layers = 0, pad = 0;
+            std::uint32_t channels = 0, head_size = 0, layers = 0;
+            std::vector<std::uint32_t> pads;
             // One history buffer per activation carries the causal stream
             // state between transport slots. Slot-local activations can then
             // be safely reused while the queue preserves stream order.
@@ -1758,8 +1759,8 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             std::uint32_t in_ch, out_ch, B, woff, src_pad, dst_pad, p0, p1;
         };
         struct LyU {
-            std::uint32_t C, K, B, dil, Z, gated, pad, conv_w, conv_b, mix_w, l1_w, l1_b, p0, p1,
-                p2, p3;
+            std::uint32_t C, K, B, dil, Z, gated, src_pad, conv_w, conv_b, mix_w, l1_w, l1_b,
+                dst_pad, p1, p2, p3;
         };
         struct HdU {
             std::uint32_t C, H, B, hr_w, hr_b, bias, p0, p1;
@@ -1778,19 +1779,19 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             const auto K = layer.kernel;
             const auto H = layer.head_size;
             const auto Z = layer.gated ? 2u * C : C;
-            std::uint32_t max_dilation = 0;
-            for (const auto dilation : layer.dilations)
-                max_dilation = std::max(max_dilation, dilation);
-            const auto pad = max_dilation * (K - 1u);
-
             Impl::WavenetPlan::Array array;
             array.channels = C;
             array.head_size = H;
             array.layers = static_cast<std::uint32_t>(layer.dilations.size());
-            array.pad = pad;
-            const auto history_bytes = static_cast<std::size_t>(C) * pad * sizeof(float);
+            array.pads.reserve(layer.dilations.size() + 1u);
+            for (const auto dilation : layer.dilations)
+                array.pads.push_back(wavenet_causal_pad(K, dilation));
+            array.pads.push_back(0);
             array.histories.reserve(layer.dilations.size() + 1u);
             for (std::size_t activation = 0; activation <= layer.dilations.size(); ++activation) {
+                const auto history_bytes = static_cast<std::size_t>(C) * array.pads[activation] *
+                                           sizeof(float);
+                array.histories.emplace_back();
                 if (history_bytes == 0)
                     continue;
                 auto history = make_storage(history_bytes);
@@ -1798,19 +1799,22 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
                     return false;
                 std::vector<float> zero_history(history_bytes / sizeof(float), 0.0f);
                 impl_->queue.WriteBuffer(history, 0, zero_history.data(), history_bytes);
-                array.histories.push_back(std::move(history));
+                array.histories.back() = std::move(history);
             }
 
             const auto rc_w = static_cast<std::uint32_t>(weight_offset);
             weight_offset += static_cast<std::uint64_t>(C) * layer.input_size;
-            const auto source_pad = index == 0 ? 0u : plan->arrays[index - 1].pad;
-            const RcU rcu{layer.input_size, C, spec.block_size, rc_w, source_pad, pad, 0, 0};
+            const auto source_pad = index == 0 ? 0u : plan->arrays[index - 1].pads.back();
+            const RcU rcu{layer.input_size, C, spec.block_size, rc_w, source_pad,
+                          array.pads.front(), 0, 0};
             array.rechannel_u = make_uniform(&rcu, sizeof(rcu));
             if (!array.rechannel_u)
                 return false;
 
             array.layer_u.reserve(layer.dilations.size());
-            for (const auto dilation : layer.dilations) {
+            for (std::size_t layer_index = 0; layer_index < layer.dilations.size();
+                 ++layer_index) {
+                const auto dilation = layer.dilations[layer_index];
                 const auto conv_w = static_cast<std::uint32_t>(weight_offset);
                 weight_offset += static_cast<std::uint64_t>(Z) * C * K;
                 const auto conv_b = static_cast<std::uint32_t>(weight_offset);
@@ -1821,9 +1825,9 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
                 weight_offset += static_cast<std::uint64_t>(C) * C;
                 const auto l1_b = static_cast<std::uint32_t>(weight_offset);
                 weight_offset += C;
-                const LyU lyu{C,      K,      spec.block_size, dilation, Z,    layer.gated, pad,
-                              conv_w, conv_b, mix_w,           l1_w,     l1_b, 0,           0,
-                              0,      0};
+                const LyU lyu{C,     K,    spec.block_size, dilation, Z, layer.gated,
+                              array.pads[layer_index], conv_w, conv_b, mix_w, l1_w, l1_b,
+                              array.pads[layer_index + 1u], 0, 0, 0};
                 auto uniform = make_uniform(&lyu, sizeof(lyu));
                 if (!uniform)
                     return false;
@@ -1864,15 +1868,16 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             for (std::size_t index = 0; index < plan->arrays.size(); ++index) {
                 const auto& array = plan->arrays[index];
                 auto& groups = slot_groups.arrays[index];
-                const auto activation_floats =
-                    static_cast<std::size_t>(array.channels) * (array.pad + spec.block_size);
-                const auto activation_bytes = activation_floats * sizeof(float);
                 groups.activations.reserve(array.layers + 1u);
-                std::vector<float> zero_activation(activation_floats, 0.0f);
                 for (std::size_t activation = 0; activation <= array.layers; ++activation) {
+                    const auto activation_floats =
+                        static_cast<std::size_t>(array.channels) *
+                        (array.pads[activation] + spec.block_size);
+                    const auto activation_bytes = activation_floats * sizeof(float);
                     auto buffer = make_storage(activation_bytes);
                     if (!buffer)
                         return false;
+                    std::vector<float> zero_activation(activation_floats, 0.0f);
                     impl_->queue.WriteBuffer(buffer, 0, zero_activation.data(), activation_bytes);
                     groups.activations.push_back(std::move(buffer));
                 }
@@ -2139,16 +2144,17 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         for (std::size_t index = 0; index < plan.arrays.size(); ++index) {
             const auto& array = plan.arrays[index];
             const auto& array_groups = groups.arrays[index];
-            if (array.pad != 0) {
+            for (std::size_t activation = 0; activation < array_groups.activations.size();
+                 ++activation) {
+                const auto pad = array.pads[activation];
+                if (pad == 0)
+                    continue;
                 const auto history_bytes =
-                    static_cast<std::uint64_t>(array.channels) * array.pad * sizeof(float);
-                for (std::size_t activation = 0; activation < array_groups.activations.size();
-                     ++activation) {
-                    ++impl_->stats.runtime_copy_buffer_calls;
-                    encoder.CopyBufferToBuffer(array.histories[activation], 0,
-                                               array_groups.activations[activation], 0,
-                                               history_bytes);
-                }
+                    static_cast<std::uint64_t>(array.channels) * pad * sizeof(float);
+                ++impl_->stats.runtime_copy_buffer_calls;
+                encoder.CopyBufferToBuffer(array.histories[activation], 0,
+                                           array_groups.activations[activation], 0,
+                                           history_bytes);
             }
             if (index > 0) {
                 const auto& previous = groups.arrays[index - 1u];
@@ -2194,15 +2200,15 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         scale_pass.End();
         for (std::size_t index = 0; index < plan.arrays.size(); ++index) {
             const auto& array = plan.arrays[index];
-            if (array.pad == 0)
-                continue;
-            const auto history_bytes =
-                static_cast<std::uint64_t>(array.channels) * array.pad * sizeof(float);
-            const auto tail_offset =
-                static_cast<std::uint64_t>(array.channels) * plan.block_size * sizeof(float);
             const auto& array_groups = groups.arrays[index];
-            for (std::size_t activation = 0; activation < array_groups.activations.size();
-                 ++activation) {
+            for (std::size_t activation = 0; activation < array.layers; ++activation) {
+                const auto pad = array.pads[activation];
+                if (pad == 0)
+                    continue;
+                const auto history_bytes =
+                    static_cast<std::uint64_t>(array.channels) * pad * sizeof(float);
+                const auto tail_offset = static_cast<std::uint64_t>(array.channels) *
+                                         plan.block_size * sizeof(float);
                 ++impl_->stats.runtime_copy_buffer_calls;
                 encoder.CopyBufferToBuffer(array_groups.activations[activation], tail_offset,
                                            array.histories[activation], 0, history_bytes);
