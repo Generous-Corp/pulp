@@ -3,8 +3,8 @@
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <cassert>
-#if !defined(PULP_WASM)
 #include <chrono>
+#if !defined(PULP_WASM)
 #include <pulp/audio/workgroup.hpp>
 #endif
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
@@ -53,7 +53,24 @@ void cpu_relax() noexcept {
 #endif
 }
 
+std::uint64_t monotonic_now_ns() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+
 } // namespace
+
+void GraphRuntimeWorkerPool::publish_scheduling_receipt(SchedulingReceiptPhase phase,
+                                                        std::uint64_t generation,
+                                                        std::uint32_t worker_index,
+                                                        std::uint32_t task_count) noexcept {
+    const auto hook = scheduling_receipt_hook_for_test_;
+    if (hook == nullptr)
+        return;
+    hook({phase, generation, worker_index, task_count, monotonic_now_ns()},
+         scheduling_receipt_context_for_test_);
+}
 
 GraphRuntimeWorkerPool::~GraphRuntimeWorkerPool() { stop(); }
 
@@ -267,6 +284,8 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
     if (task_count == 0 || fn == nullptr) return;
     // No worker threads: run everything inline on the caller.
     if (worker_count_ <= 1 || threads_.empty()) {
+        publish_scheduling_receipt(SchedulingReceiptPhase::InlineFallback,
+                                   epoch_.load(std::memory_order_relaxed), 0, task_count);
         pulp::signal::ScopedFlushDenormals flush_denormals;
         for (std::uint32_t i = 0; i < task_count; ++i) fn(context, i);
         return;
@@ -277,6 +296,8 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
         // failed. Do not hot-spin retries against the same borrowed handle;
         // remain inline until a later observer publication supplies a new one.
         reheat_requested_.store(false, std::memory_order_release);
+        publish_scheduling_receipt(SchedulingReceiptPhase::InlineFallback,
+                                   epoch_.load(std::memory_order_relaxed), 0, task_count);
         pulp::signal::ScopedFlushDenormals flush_denormals;
         for (std::uint32_t i = 0; i < task_count; ++i) fn(context, i);
         return;
@@ -286,6 +307,8 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
     if (!cold_transition_gate_.compare_exchange_strong(
             gate_expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
         reheat_requested_.store(true, std::memory_order_release);
+        publish_scheduling_receipt(SchedulingReceiptPhase::InlineFallback,
+                                   epoch_.load(std::memory_order_relaxed), 0, task_count);
         pulp::signal::ScopedFlushDenormals flush_denormals;
         for (std::uint32_t i = 0; i < task_count; ++i) fn(context, i);
         return;
@@ -293,6 +316,8 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
     if (active_worker_threads_.load(std::memory_order_acquire) != worker_count_ - 1) {
         reheat_requested_.store(true, std::memory_order_release);
         cold_transition_gate_.store(false, std::memory_order_release);
+        publish_scheduling_receipt(SchedulingReceiptPhase::InlineFallback,
+                                   epoch_.load(std::memory_order_relaxed), 0, task_count);
         pulp::signal::ScopedFlushDenormals flush_denormals;
         for (std::uint32_t i = 0; i < task_count; ++i) fn(context, i);
         return;
@@ -317,7 +342,9 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
     fn_ = fn;
     context_ = context;
     task_count_ = task_count;
-    epoch_.fetch_add(1, std::memory_order_release);
+    const auto generation = epoch_.load(std::memory_order_relaxed) + 1;
+    publish_scheduling_receipt(SchedulingReceiptPhase::Published, generation, 0, task_count);
+    epoch_.store(generation, std::memory_order_release);
 
     // The caller is participant 0.
     run_range(0);
@@ -336,6 +363,8 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
 
 void GraphRuntimeWorkerPool::run_range(std::uint32_t worker_index) noexcept {
     pulp::signal::ScopedFlushDenormals flush_denormals;
+    publish_scheduling_receipt(SchedulingReceiptPhase::WorkerAdmission,
+                               epoch_.load(std::memory_order_relaxed), worker_index, task_count_);
     const Range r = range_for(worker_index, worker_count_, task_count_);
     for (std::uint32_t i = r.begin; i < r.end; ++i) {
         fn_(context_, i);
