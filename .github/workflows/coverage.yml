@@ -494,6 +494,48 @@ jobs:
           python3 -m pip install --user --upgrade numpy || \
             python3 -m pip install --break-system-packages --user --upgrade numpy
 
+      - name: Reclaim hosted Linux coverage disk
+        # The hosted ubuntu image ships ~14 GiB root free, and a full Linux
+        # coverage run (instrumented build of every target plus ~20k tests'
+        # profiles) exhausted it about 93 minutes in. On disposable
+        # GitHub-hosted runners only, delete preinstalled SDKs this job never
+        # uses. Self-hosted machines are never mutated by this step.
+        if: matrix.os == 'linux' && runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "before:"; df -h /
+          for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+                     /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift \
+                     /usr/local/julia* /usr/local/share/powershell /usr/local/share/chromium; do
+            if [ -e "${dir}" ]; then
+              echo "Removing ${dir} ($(sudo du -sh "${dir}" 2>/dev/null | cut -f1))"
+              sudo rm -rf -- "${dir}"
+            fi
+          done
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          # Hosted runners also carry a separate scratch disk at /mnt. Put the
+          # build tree, which holds the instrumented objects and every raw
+          # profile, there, so it no longer shares the root disk with the
+          # toolchains and the runner's own logs. The real path keeps the
+          # build-coverage name, which the coverage ignore regex matches.
+          root_free=$(df -Pk / | awk 'NR==2 {print $4}')
+          mnt_free=$(df -Pk /mnt 2>/dev/null | awk 'NR==2 {print $4}')
+          if [ -n "${mnt_free}" ] && [ "${mnt_free}" -gt "${root_free}" ] && [ ! -e build-coverage ]; then
+            sudo mkdir -p /mnt/build-coverage /mnt/coverage-tmp
+            sudo chown "$(id -u):$(id -g)" /mnt/build-coverage /mnt/coverage-tmp
+            ln -s /mnt/build-coverage build-coverage
+            echo "build-coverage -> /mnt/build-coverage"
+            # About 20k tests write temporary files; keep them off root too.
+            echo "TMPDIR=/mnt/coverage-tmp" >> "${GITHUB_ENV}"
+            echo "TMPDIR -> /mnt/coverage-tmp"
+            # A crashing instrumented test binary can dump gigabytes of core
+            # in seconds; route any core file off root.
+            sudo mkdir -p /mnt/cores && sudo chmod 1777 /mnt/cores
+            sudo sysctl -q -w kernel.core_pattern=/mnt/cores/core.%e.%p || true
+          fi
+          echo "after:"; df -h / /mnt 2>/dev/null || df -h /
+
       - name: Reclaim hosted macOS coverage disk
         # GitHub's standard arm64 image has a tight root disk and the native
         # coverage link previously failed at 98% with ENOSPC. On disposable
@@ -623,6 +665,21 @@ jobs:
               wait "${cov}" 2>/dev/null || true
               exit 1
             fi
+          elif [ "${RUNNER_OS}" = "Linux" ]; then
+            # Hosted Linux only; macOS keeps its launch line below unchanged.
+            # No core files: a crashing instrumented binary can write gigabytes
+            # of core in seconds (core_pattern also points at /mnt on hosted
+            # Linux, for anything that ignores this limit).
+            ulimit -c 0
+            # The runner spools a step's output to its own disk before
+            # uploading it, and the suite's output across about 20k tests can
+            # be gigabytes. The full output goes to a file beside the build;
+            # stdout gets the sampler's progress lines and, at the end, the
+            # phase lines, the annotation commands and (on failure) the tail.
+            mkdir -p build-coverage
+            suite_log="build-coverage/coverage-suite.log"
+            python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+              bash scripts/run_coverage.sh "${coverage_args[@]}" > "${suite_log}" 2>&1 & cov=$!
           else
             python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
               bash scripts/run_coverage.sh "${coverage_args[@]}" & cov=$!
@@ -640,6 +697,74 @@ jobs:
           # write or warning echo can NEVER skip the kill — terminating the suite
           # before the job cap is the entire point. The marker is best-effort; the
           # kill is mandatory.
+          # Disk evidence: a hosted runner that fills its disk dies without a
+          # log, so the sampler below tracks free space, memory and the largest
+          # writers while the suite runs.
+          sampler=""
+          # Hosted Linux only: the 3 GiB guard stops the suite, and the macOS leg
+          # already runs close to full.
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            # A runner that fills its root disk dies mid-step, and a step that
+            # never ends uploads neither its log nor its annotations. So below
+            # 3 GiB free on root the sampler prints what is using root and
+            # stops the suite: the step then ends normally, and its log
+            # (with these samples) survives.
+            ( # The step shell runs with -e and pipefail. Here that would end
+              # the sampler silently on the first transient failure, such as
+              # du racing profile files that the suite creates and deletes.
+              set +e +o pipefail
+              warned=""
+              tick=0
+              while kill -0 "${cov}" 2>/dev/null; do
+                root_gib=$(df -Pk / | awk 'NR==2 {printf "%.1f", $4/1048576}')
+                build_gib=$(df -Pk build-coverage/ 2>/dev/null | awk 'NR==2 {printf "%.1f", $4/1048576}')
+                sizes=""
+                # Free space and memory are read every 10 seconds, since a fast
+                # writer can fill root between slower samples; a line is printed
+                # every minute, and du (which walks the whole build tree) runs
+                # every five minutes.
+                if [ $((tick % 30)) -eq 0 ]; then
+                  for d in build-coverage/ build-coverage/profraw build-coverage/coverage \
+                           "${HOME}/.cache/pulp"; do
+                    [ -e "${d}" ] && sizes="${sizes} $(basename "${d}")=$(du -sk "${d}" 2>/dev/null | awk '{printf "%.1fG", $1/1048576}')"
+                  done
+                fi
+                tick=$((tick + 1))
+                mem_gib=$(awk '/^MemAvailable:/ {printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null)
+                line="root_free=${root_gib}G build_disk_free=${build_gib:-?}G mem_available=${mem_gib:-?}G${sizes}"
+                if [ $((tick % 6)) -eq 1 ]; then
+                  phase=$(grep '^=== ' "${suite_log:-/dev/null}" 2>/dev/null | tail -n 1)
+                  echo "disk-sample: $(date -u +%H:%M:%SZ) ${line} | ${phase}"
+                fi
+                low=$(awk -v a="${root_gib}" -v b="${build_gib:-${root_gib}}" 'BEGIN {print (a < b ? a : b)}')
+                for t in 20 10 5 2; do
+                  if awk -v l="${low}" -v t="${t}" 'BEGIN {exit !(l < t)}' && [[ " ${warned} " != *" ${t} "* ]]; then
+                    warned="${warned} ${t}"
+                    echo "::warning title=coverage disk below ${t} GiB::$(date -u +%H:%M:%SZ) ${line}"
+                  fi
+                done
+                if awk -v r="${root_gib}" 'BEGIN {exit !(r < 3)}'; then
+                  echo "::error title=coverage root disk nearly full::$(date -u +%H:%M:%SZ) ${line}; stopping the suite so this log survives"
+                  echo "--- root disk use ---"
+                  as_root="sudo -n"; ${as_root} true 2>/dev/null || as_root=""
+                  ${as_root} du -xsh /tmp /var/tmp /var/log "${HOME}" /home/runner/actions-runner /opt /usr/local 2>/dev/null | sort -h
+                  echo "--- largest under \$HOME and /tmp ---"
+                  ${as_root} du -xh -d 2 "${HOME}" /tmp 2>/dev/null | sort -h | tail -n 25
+                  : > "${RUNNER_TEMP:-/tmp}/coverage-disk-guard" 2>/dev/null || true
+                  kill -TERM -- "-${cov}" 2>/dev/null || true
+                  break
+                fi
+                if [ -n "${mem_gib}" ]; then
+                  for t in 2 1 0.5; do
+                    if awk -v m="${mem_gib}" -v t="${t}" 'BEGIN {exit !(m < t)}' && [[ " ${warned} " != *" mem${t} "* ]]; then
+                      warned="${warned} mem${t}"
+                      echo "::warning title=coverage memory below ${t} GiB::$(date -u +%H:%M:%SZ) ${line}"
+                    fi
+                  done
+                fi
+                sleep 10
+              done ) & sampler=$!
+          fi
           ( sleep "${budget}"
             echo "::warning::coverage suite hit the ${budget}s best-effort budget; terminating the coverage process tree."
             : > "${budget_hit}" 2>/dev/null || true
@@ -647,12 +772,30 @@ jobs:
           set +e; wait "${cov}"; rc=$?; set -e
           kill -TERM "${watch}" 2>/dev/null || true
           wait "${watch}" 2>/dev/null || true
+          if [ -n "${sampler}" ]; then
+            kill -TERM "${sampler}" 2>/dev/null || true
+            wait "${sampler}" 2>/dev/null || true
+            echo "disk after suite:"; df -h / build-coverage/
+          fi
+          if [ -n "${suite_log:-}" ] && [ -f "${suite_log}" ]; then
+            echo "suite output: ${suite_log} ($(du -h "${suite_log}" | cut -f1)); phases and annotations:"
+            grep -E '^(=== |::)' "${suite_log}" || true
+            if [ "${rc}" -ne 0 ]; then
+              echo "--- last 200 lines of the suite output ---"
+              tail -n 200 "${suite_log}"
+            fi
+          fi
           # Best-effort timeout cleanup. Trigger on EITHER the marker OR a
           # signal-kill exit (143=SIGTERM, 137=SIGKILL — our watchdog's signals),
           # so a marker-write that failed on a Windows RUNNER_TEMP path can't
           # leave a PARTIAL Cobertura/LCOV for the verify + Codecov upload steps
           # to publish as a truncated, valid-looking number. A clean miss beats a
           # wrong number.
+          if [ -f "${RUNNER_TEMP:-/tmp}/coverage-disk-guard" ]; then
+            echo "::error::the root-disk guard stopped the coverage suite on ${{ matrix.os }}; see the disk-use listing above. Dropping any partial Cobertura/LCOV."
+            rm -f build-coverage/coverage.cobertura.xml build-coverage/coverage/coverage.lcov 2>/dev/null || true
+            exit 1
+          fi
           if [ -f "${budget_hit}" ] || [ "${rc}" -eq 143 ] || [ "${rc}" -eq 137 ]; then
             echo "::warning::coverage suite interrupted at the internal budget on ${{ matrix.os }}; dropping any partial Cobertura/LCOV."
             rm -f build-coverage/coverage.cobertura.xml \
@@ -666,6 +809,17 @@ jobs:
           fi
           rm -f "${budget_hit}" 2>/dev/null || true
           exit "${rc}"
+
+      - name: Upload coverage suite output
+        # The suite's full output, kept off the runner's log (see the coverage
+        # step). Uploaded even when the suite failed.
+        if: always() && matrix.os == 'linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-suite-log-${{ matrix.os }}-${{ github.sha }}
+          path: build-coverage/coverage-suite.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Install Python coverage tooling
         # tools/scripts/** is a blind spot in the current dashboard:

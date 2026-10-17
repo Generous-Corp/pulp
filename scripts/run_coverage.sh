@@ -115,7 +115,22 @@ if ! command -v llvm-cov >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "=== Configuring coverage build in ${BUILD_DIR} ==="
+# Phase marker. On GitHub Actions it is also raised as an annotation, which is
+# stored apart from the job log: a hosted runner lost to memory or disk
+# exhaustion loses its whole log, and the annotations are then the only record
+# of how far the run got.
+coverage_phase() {
+    echo "=== $1 ==="
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        local mem=""
+        if [ -r /proc/meminfo ]; then
+            mem=" mem_available=$(awk '/^MemAvailable:/ {printf "%.1fG", $2/1048576}' /proc/meminfo)"
+        fi
+        echo "::notice title=coverage phase::$(date -u +%H:%M:%SZ) $1${mem}"
+    fi
+}
+
+coverage_phase "Configuring coverage build in ${BUILD_DIR}"
 
 # On Windows we need `clang-cl`, not plain `clang`. Some bundled deps
 # (mbedtls, notably) pass MSVC-style flags like /W3 and /utf-8 when
@@ -170,7 +185,7 @@ if ! grep -q '^PULP_ENABLE_COVERAGE:BOOL=ON$' "${CACHE_FILE}" 2>/dev/null; then
     exit 3
 fi
 
-echo "=== Building ==="
+coverage_phase "Building"
 BUILD_LOG="${BUILD_DIR}/build.log"
 BUILD_STDOUT_LOG="${BUILD_DIR}/build.stdout.log"
 if ! PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
@@ -191,7 +206,7 @@ if ! PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
     exit 1
 fi
 
-echo "=== Running tests with LLVM_PROFILE_FILE ==="
+coverage_phase "Running tests with LLVM_PROFILE_FILE"
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 cd "${BUILD_DIR}"
@@ -358,7 +373,7 @@ if [[ "${CTEST_RC}" -ne 0 ]]; then
     ctest --rerun-failed --output-on-failure -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || true
 fi
 
-echo "=== Merging profiles ==="
+coverage_phase "Merging profiles"
 mkdir -p "${REPORT_DIR}"
 PROFDATA="${REPORT_DIR}/pulp.profdata"
 MERGE_LOG="${REPORT_DIR}/llvm-profdata-merge.log"
@@ -612,7 +627,7 @@ if [[ "${VANISHED_OBJECTS}" -gt 25 \
 fi
 echo "=== Wrote ${KEPT_OBJECTS} -object tokens to a response file (avoids Windows ARG_MAX) ==="
 
-echo "=== llvm-cov report (top-level summary) ==="
+coverage_phase "llvm-cov report (top-level summary)"
 llvm-cov report \
     "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \
@@ -662,7 +677,7 @@ if [[ ! -f "${LCOV_COBERTURA}" ]]; then
     exit 1
 fi
 
-echo "=== llvm-cov export → LCOV ==="
+coverage_phase "llvm-cov export → LCOV"
 llvm-cov export --format=lcov \
     "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \

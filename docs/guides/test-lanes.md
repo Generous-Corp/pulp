@@ -596,7 +596,10 @@ The sanitizer workflow keeps ASan and UBSan on non-draft PRs that touch
 `core/**`, while TSan is nightly or explicitly dispatched. Coverage is the only
 matrix with a `max-parallel: 2` cap; sanitizer legs are independent named jobs,
 not one matrix, so no aggregate cap is claimed. These lanes remain advisory and
-do not replace the required Vellum checks.
+do not replace the required Vellum checks. The hosted Linux and macOS coverage
+legs each reclaim preinstalled image content before building, and log disk
+samples while the suite runs; see the versioning guide's hosted coverage disk
+section.
 
 The files under `docs/evidence/hosted-macos-advisory/` are labeled pre-change
 baselines. A post-merge follow-up must capture hosted-macOS running plus queued

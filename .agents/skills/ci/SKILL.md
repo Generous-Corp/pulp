@@ -910,6 +910,12 @@ real but is not what turned the job red. When the C++ build fails,
 lines; under a parallel build, the tail alone is warnings from sibling
 targets that kept compiling.
 
+A hosted Linux leg that dies with "No space left on device" leaves no job log
+(the runner's own log write fails). Read the `disk-sample:` lines the coverage
+step prints every five minutes, and the before/after `df` of "Reclaim hosted
+Linux coverage disk", to see which writer grew. Do not move the leg to a larger
+or paid runner.
+
 ## Compiler coverage is asymmetric — GCC sees only `core/**`
 
 Before you read a green PR as "this compiles everywhere": every Linux lane in PR
