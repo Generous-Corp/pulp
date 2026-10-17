@@ -529,6 +529,10 @@ jobs:
             # About 20k tests write temporary files; keep them off root too.
             echo "TMPDIR=/mnt/coverage-tmp" >> "${GITHUB_ENV}"
             echo "TMPDIR -> /mnt/coverage-tmp"
+            # A crashing instrumented test binary can dump gigabytes of core
+            # in seconds; route any core file off root.
+            sudo mkdir -p /mnt/cores && sudo chmod 1777 /mnt/cores
+            sudo sysctl -q -w kernel.core_pattern=/mnt/cores/core.%e.%p || true
           fi
           echo "after:"; df -h / /mnt 2>/dev/null || df -h /
 
@@ -662,6 +666,10 @@ jobs:
               exit 1
             fi
           else
+            # No core files: a crashing instrumented binary can write gigabytes
+            # of core in seconds (core_pattern also points at /mnt on hosted
+            # Linux, for anything that ignores this limit).
+            ulimit -c 0
             python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
               bash scripts/run_coverage.sh "${coverage_args[@]}" & cov=$!
           fi
@@ -688,15 +696,21 @@ jobs:
             # 3 GiB free on root the sampler prints what is using root and
             # stops the suite: the step then ends normally, and its log
             # (with these samples) survives.
-            ( warned=""
+            ( # The step shell runs with -e and pipefail. Here that would end
+              # the sampler silently on the first transient failure, such as
+              # du racing profile files that the suite creates and deletes.
+              set +e +o pipefail
+              warned=""
               tick=0
               while kill -0 "${cov}" 2>/dev/null; do
                 root_gib=$(df -Pk / | awk 'NR==2 {printf "%.1f", $4/1048576}')
                 build_gib=$(df -Pk build-coverage/ 2>/dev/null | awk 'NR==2 {printf "%.1f", $4/1048576}')
                 sizes=""
-                # du walks the whole build tree, so it runs every fifth sample;
-                # free space and memory are read every minute.
-                if [ $((tick % 5)) -eq 0 ]; then
+                # Free space and memory are read every 10 seconds, since a fast
+                # writer can fill root between slower samples; a line is printed
+                # every minute, and du (which walks the whole build tree) runs
+                # every five minutes.
+                if [ $((tick % 30)) -eq 0 ]; then
                   for d in build-coverage/ build-coverage/profraw build-coverage/coverage \
                            "${HOME}/.cache/pulp"; do
                     [ -e "${d}" ] && sizes="${sizes} $(basename "${d}")=$(du -sk "${d}" 2>/dev/null | awk '{printf "%.1fG", $1/1048576}')"
@@ -705,7 +719,7 @@ jobs:
                 tick=$((tick + 1))
                 mem_gib=$(awk '/^MemAvailable:/ {printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null)
                 line="root_free=${root_gib}G build_disk_free=${build_gib:-?}G mem_available=${mem_gib:-?}G${sizes}"
-                echo "disk-sample: $(date -u +%H:%M:%SZ) ${line}"
+                [ $((tick % 6)) -eq 1 ] && echo "disk-sample: $(date -u +%H:%M:%SZ) ${line}"
                 low=$(awk -v a="${root_gib}" -v b="${build_gib:-${root_gib}}" 'BEGIN {print (a < b ? a : b)}')
                 for t in 20 10 5 2; do
                   if awk -v l="${low}" -v t="${t}" 'BEGIN {exit !(l < t)}' && [[ " ${warned} " != *" ${t} "* ]]; then
@@ -716,9 +730,10 @@ jobs:
                 if awk -v r="${root_gib}" 'BEGIN {exit !(r < 3)}'; then
                   echo "::error title=coverage root disk nearly full::$(date -u +%H:%M:%SZ) ${line}; stopping the suite so this log survives"
                   echo "--- root disk use ---"
-                  sudo du -xsh /tmp /var/tmp /var/log "${HOME}" /home/runner/actions-runner /opt /usr/local 2>/dev/null | sort -h
+                  as_root="sudo -n"; ${as_root} true 2>/dev/null || as_root=""
+                  ${as_root} du -xsh /tmp /var/tmp /var/log "${HOME}" /home/runner/actions-runner /opt /usr/local 2>/dev/null | sort -h
                   echo "--- largest under \$HOME and /tmp ---"
-                  sudo du -xh -d 2 "${HOME}" /tmp 2>/dev/null | sort -h | tail -n 25
+                  ${as_root} du -xh -d 2 "${HOME}" /tmp 2>/dev/null | sort -h | tail -n 25
                   : > "${RUNNER_TEMP:-/tmp}/coverage-disk-guard" 2>/dev/null || true
                   kill -TERM -- "-${cov}" 2>/dev/null || true
                   break
@@ -731,7 +746,7 @@ jobs:
                     fi
                   done
                 fi
-                sleep 60
+                sleep 10
               done ) & sampler=$!
           fi
           ( sleep "${budget}"
