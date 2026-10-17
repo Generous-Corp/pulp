@@ -130,13 +130,21 @@ class BatchResidencyEvaluator final {
         } else {
             for (std::size_t i = 0; i < width; ++i) {
                 if (sample.member_ids[i] == 0 || sample.member_terminal_ids[i] == 0 ||
-                    sample.member_terminal_ids[i] != sample.member_ids[i] + 100)
+                    sample.member_terminal_ids[i] == sample.member_ids[i])
                     ++receipt_.member_evidence_mismatches;
+                if (member_ids_seen_ && (sample.member_ids[i] != member_ids_[i] ||
+                                         sample.member_terminal_ids[i] != member_terminal_ids_[i]))
+                    ++receipt_.member_evidence_mismatches;
+                if (!member_ids_seen_) {
+                    member_ids_[i] = sample.member_ids[i];
+                    member_terminal_ids_[i] = sample.member_terminal_ids[i];
+                }
                 for (std::size_t j = 0; j < i; ++j)
                     if (sample.member_ids[i] == sample.member_ids[j] ||
                         sample.member_terminal_ids[i] == sample.member_terminal_ids[j])
                         ++receipt_.member_evidence_mismatches;
             }
+            member_ids_seen_ = true;
         }
         if (sample.dispatch_id == 0 || !sample.gpu_completed)
             ++receipt_.invalid_samples;
@@ -170,6 +178,9 @@ class BatchResidencyEvaluator final {
     std::uint64_t next_sequence_ = 0;
     bool seen_sequence_ = false;
     std::array<std::uint64_t, 1024> dispatch_ids_{};
+    std::array<std::uint64_t, 16> member_ids_{};
+    std::array<std::uint64_t, 16> member_terminal_ids_{};
+    bool member_ids_seen_ = false;
 };
 
 } // namespace pulp::gpu_audio::detail

@@ -155,7 +155,17 @@ TEST_CASE("G1 rejects duplicate member identities and broken terminal pairing") 
 
     BatchResidencyEvaluator broken_pair(admission());
     bad = sample(0);
-    bad.member_terminal_ids[0] = 999;
+    bad.member_terminal_ids[0] = bad.member_ids[0];
     broken_pair.observe(bad);
     REQUIRE(broken_pair.finish().member_evidence_mismatches > 0);
+}
+
+TEST_CASE("G1 rejects rotating member identities within one stream") {
+    BatchResidencyEvaluator evaluator(admission());
+    evaluator.observe(sample(0));
+    auto rotated = sample(1);
+    rotated.member_ids[0] = 99;
+    rotated.member_terminal_ids[0] = 199;
+    evaluator.observe(rotated);
+    REQUIRE(evaluator.finish().member_evidence_mismatches > 0);
 }
