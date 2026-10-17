@@ -48,6 +48,15 @@ class ParamValueTest {
         value.value_.store(ParamValue::make_versioned_value(0.0f, revision),
                            std::memory_order_relaxed);
     }
+    static bool claim_generation(ParamValue& value, std::uint64_t generation,
+                                 std::uint32_t max_attempts) {
+        return value.claim_generation(generation, max_attempts);
+    }
+    static bool publish_after_generation_claim(ParamValue& value, float next,
+                                               std::uint64_t generation,
+                                               std::uint32_t max_attempts) {
+        return value.publish_after_generation_claim(next, generation, max_attempts);
+    }
 };
 } // namespace pulp::state
 
@@ -1325,6 +1334,12 @@ TEST_CASE("versioned parameter writes use a monotonic packed revision",
     REQUIRE(ordered.set_packed_revisioned(0.75f, 2, 1));
     CHECK_FALSE(ordered.set_packed_revisioned(0.25f, 1, 2));
     CHECK_THAT(ordered.get(), WithinAbs(0.75f, 0.001f));
+
+    ParamValue paused(0.0f);
+    REQUIRE(ParamValueTest::claim_generation(paused, 1, 1));
+    REQUIRE(paused.set_packed_revisioned(0.75f, 2, 1));
+    CHECK_FALSE(ParamValueTest::publish_after_generation_claim(paused, 0.25f, 1, 2));
+    CHECK_THAT(paused.get(), WithinAbs(0.75f, 0.001f));
 
     ParamValue long_lived(0.0f);
     constexpr auto wrap = std::uint64_t{std::numeric_limits<std::uint32_t>::max()};

@@ -678,31 +678,9 @@ class ParamValue {
     /// diagnostic there.
     bool set_packed_revisioned(float value, std::uint64_t generation,
                                std::uint32_t max_attempts) noexcept {
-        auto committed = committed_generation_.load(std::memory_order_relaxed);
-        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-            if (committed >= generation)
-                return false;
-            if (committed_generation_.compare_exchange_strong(
-                    committed, generation, std::memory_order_acq_rel,
-                    std::memory_order_acquire))
-                break;
-        }
-        if (committed_generation_.load(std::memory_order_acquire) != generation)
+        if (!claim_generation(generation, max_attempts))
             return false;
-
-        auto current = value_.load(std::memory_order_acquire);
-        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-            if (committed_generation_.load(std::memory_order_acquire) != generation)
-                return false;
-            const auto revision = unpack_generation(current);
-            if (revision == std::numeric_limits<std::uint32_t>::max())
-                return false;
-            const auto replacement = pack(value, revision + 1);
-            if (value_.compare_exchange_weak(current, replacement, std::memory_order_acq_rel,
-                                             std::memory_order_acquire))
-                return true;
-        }
-        return false;
+        return publish_after_generation_claim(value, generation, max_attempts);
     }
 
     bool compare_exchange_versioned(VersionedValue& expected,
@@ -820,6 +798,38 @@ class ParamValue {
 
   private:
     friend class ParamValueTest;
+
+    bool claim_generation(std::uint64_t generation, std::uint32_t max_attempts) noexcept {
+        auto committed = committed_generation_.load(std::memory_order_relaxed);
+        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+            if (committed >= generation)
+                return false;
+            if (committed_generation_.compare_exchange_strong(
+                    committed, generation, std::memory_order_acq_rel,
+                    std::memory_order_acquire))
+                return true;
+        }
+        return false;
+    }
+
+    bool publish_after_generation_claim(float value, std::uint64_t generation,
+                                        std::uint32_t max_attempts) noexcept {
+        if (committed_generation_.load(std::memory_order_acquire) != generation)
+            return false;
+        auto current = value_.load(std::memory_order_acquire);
+        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+            if (committed_generation_.load(std::memory_order_acquire) != generation)
+                return false;
+            const auto revision = unpack_generation(current);
+            if (revision == std::numeric_limits<std::uint32_t>::max())
+                return false;
+            const auto replacement = pack(value, revision + 1);
+            if (value_.compare_exchange_weak(current, replacement, std::memory_order_acq_rel,
+                                             std::memory_order_acquire))
+                return true;
+        }
+        return false;
+    }
 
     bool set_revisioned(float value, std::uint64_t generation,
                         std::uint32_t max_attempts) noexcept {
