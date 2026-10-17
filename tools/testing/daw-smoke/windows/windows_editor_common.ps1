@@ -33,9 +33,21 @@ function Join-WindowsArguments([string[]]$Arguments) {
 function Read-HostStatus([string]$Path, [string]$Token) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
   $s = @{}
-  foreach ($line in Get-Content -LiteralPath $Path) {
-    $parts = $line -split '=', 2
-    if ($parts.Count -eq 2) { $s[$parts[0]] = $parts[1] }
+  try {
+    # The Lua writer replaces the status file atomically, so a reader can pass
+    # Test-Path just before the old file is removed. Treat that narrow window
+    # as "not published yet"; turning it into a harness failure kills REAPER
+    # while the host is still delivering the valid automation receipt.
+    foreach ($line in Get-Content -LiteralPath $Path) {
+      $parts = $line -split '=', 2
+      if ($parts.Count -eq 2) { $s[$parts[0]] = $parts[1] }
+    }
+  } catch [System.Management.Automation.ItemNotFoundException] {
+    return $null
+  } catch [System.UnauthorizedAccessException] {
+    return $null
+  } catch [System.IO.IOException] {
+    return $null
   }
   if ($s.token -ne $Token) { throw 'Stale or foreign host status token' }
   return $s
