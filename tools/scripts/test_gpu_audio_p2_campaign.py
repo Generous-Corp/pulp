@@ -493,9 +493,13 @@ class P2CampaignContractTests(unittest.TestCase):
             (out / "raw.jsonl").write_text("", encoding="utf-8")
             return campaign.subprocess.CompletedProcess(argv, 0, "", "")
 
+        # Production hardware admission remains macOS-only. This
+        # receipt-propagation test runs on every CI host, so provide a
+        # validated platform fixture instead of weakening that guard.
         with tempfile.TemporaryDirectory() as root, \
                 patch.object(campaign, "_source_provenance", return_value=("a" * 40, "b" * 64)), \
                 patch.object(campaign, "validate_host_preflight", return_value={}), \
+                patch.object(campaign, "host_provider_platform", return_value=PLATFORM), \
                 patch.object(campaign, "load_provider_identity_receipt",
                              return_value=(identity, "d" * 64)), \
                 patch.object(campaign.subprocess, "run", side_effect=fake_probe), \
