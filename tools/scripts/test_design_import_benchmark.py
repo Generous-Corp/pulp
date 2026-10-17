@@ -401,6 +401,19 @@ class ReportTests(unittest.TestCase):
         self.assertIn("live interactive evaluations=10", markdown)
         self.assertIn("baked-cpp interactive evaluations=0", markdown)
 
+        rebuild_report = dib.build_report(
+            live,
+            baked,
+            binary,
+            pathlib.Path("/tmp/build"),
+            baked_cpp,
+            baked_native_rebuild=baked,
+        )
+        self.assertIn("baked-native-rebuild", rebuild_report["lanes"])
+        rebuild_markdown = dib.render_markdown(rebuild_report)
+        self.assertIn("| interactive | baked-native-rebuild |", rebuild_markdown)
+        self.assertIn("Interactive update p99 delta (baked-native-rebuild vs live)", rebuild_markdown)
+
     def test_formatters_are_ascii_and_stable(self) -> None:
         self.assertEqual(dib.format_bytes(512), "512 B")
         self.assertEqual(dib.format_bytes(2048), "2.00 KiB")
