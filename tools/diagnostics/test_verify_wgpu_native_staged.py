@@ -86,6 +86,13 @@ def main() -> int:
         if ("run_loss_capability_probe()" not in source or
                 "CallbackUnavailableAfterDestroy" not in source or
                 "device_loss_observation=probe_timeout_after_destroy" not in source or
+                source.count(
+                    "return {.status = LossProbeStatus::CallbackUnavailableAfterDestroy};"
+                ) < 1 or
+                "followup == 0 ? LossProbeStatus::CallbackUnavailableAfterDestroy" not in source or
+                "const char destroy_accepted = 'D';" not in source or
+                "destroy_accepted != 'D'" not in source or
+                "return {.status = LossProbeStatus::Unavailable};" not in source or
                 "loss_probe_provider.release();" not in source or
                 "kill(child, SIGKILL);" not in source or
                 "poll(&descriptor, 1, 8'000)" not in source or

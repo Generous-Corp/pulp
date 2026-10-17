@@ -814,16 +814,23 @@ LossProbeResult run_loss_capability_probe() noexcept {
             result.status = LossProbeStatus::Unavailable;
         } else if (!loss_probe_provider->force_device_loss_for_diagnostic()) {
             result.status = LossProbeStatus::Failed;
-        } else if (!loss_probe_provider->wait_for_device_loss_callback()) {
-            // The provider was created and destruction was accepted, but the
-            // native callback did not arrive within the bounded eight-second
-            // wait. Keep this distinct from an adapter/provider that could
-            // not be created at all.
-            result.status = LossProbeStatus::CallbackUnavailableAfterDestroy;
         } else {
-            result.status = LossProbeStatus::Passed;
-            result.callback_registered = loss_probe_provider->device_loss_callback_registered();
-            result.reason = loss_probe_provider->device_loss_reason();
+            // Tell the parent that provider creation and device destruction
+            // both succeeded before waiting for the callback. A parent
+            // watchdog timeout is typed only after this marker is observed.
+            const char destroy_accepted = 'D';
+            if (write(pipe_fds[1], &destroy_accepted, 1) != 1)
+                _exit(1);
+            if (!loss_probe_provider->wait_for_device_loss_callback()) {
+                // The provider was created and destruction was accepted, but
+                // the native callback did not arrive within the bounded
+                // eight-second wait.
+                result.status = LossProbeStatus::CallbackUnavailableAfterDestroy;
+            } else {
+                result.status = LossProbeStatus::Passed;
+                result.callback_registered = loss_probe_provider->device_loss_callback_registered();
+                result.reason = loss_probe_provider->device_loss_reason();
+            }
         }
         // Never invoke native teardown in this capability-only child. The
         // parent either reads the result or kills this process on timeout.
@@ -843,11 +850,12 @@ LossProbeResult run_loss_capability_probe() noexcept {
     close(pipe_fds[1]);
     LossProbeResult result{};
     pollfd descriptor{.fd = pipe_fds[0], .events = POLLIN};
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
     const auto poll_status = poll(&descriptor, 1, 8'000);
     if (poll_status == 0) {
         terminate_child_group(child);
         close(pipe_fds[0]);
+        // No destroy marker arrived, so this remains a generic provider
+        // capability gap rather than a typed loss-observation timeout.
         return {.status = LossProbeStatus::Unavailable};
     }
     if (poll_status < 0) {
@@ -855,6 +863,13 @@ LossProbeResult run_loss_capability_probe() noexcept {
         close(pipe_fds[0]);
         return {.status = LossProbeStatus::Failed};
     }
+    char destroy_accepted = 0;
+    if (read(pipe_fds[0], &destroy_accepted, 1) != 1 || destroy_accepted != 'D') {
+        terminate_child_group(child);
+        close(pipe_fds[0]);
+        return {.status = LossProbeStatus::Failed};
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
     auto* bytes = reinterpret_cast<char*>(&result);
     std::size_t received = 0;
     while (received < sizeof(result)) {
@@ -872,15 +887,15 @@ LossProbeResult run_loss_capability_probe() noexcept {
             if (remaining <= 0) {
                 terminate_child_group(child);
                 close(pipe_fds[0]);
-                return {.status = LossProbeStatus::Unavailable};
+                return {.status = LossProbeStatus::CallbackUnavailableAfterDestroy};
             }
             const auto followup = poll(&descriptor, 1, static_cast<int>(remaining));
             if (followup > 0)
                 continue;
             terminate_child_group(child);
             close(pipe_fds[0]);
-            return {.status =
-                        followup == 0 ? LossProbeStatus::Unavailable : LossProbeStatus::Failed};
+            return {.status = followup == 0 ? LossProbeStatus::CallbackUnavailableAfterDestroy
+                                            : LossProbeStatus::Failed};
         }
         if (count == 0 || count < 0)
             break;
