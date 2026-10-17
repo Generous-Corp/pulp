@@ -1215,15 +1215,23 @@ def upstream_status(dep: dict) -> str:
         output = run_git_ls_remote(repo, f"refs/tags/{ref}")
         exact = "present" if output else "missing"
         tag_pattern = dep["upstream"].get("tag_pattern")
+        # A malformed pattern is this row's defect, not a reason to abort the
+        # audit of every other dependency.
+        if tag_pattern:
+            try:
+                re.compile(tag_pattern)
+            except re.error as invalid:
+                return f"{exact}; invalid tag_pattern: {invalid}"
         # Authoritative first, heuristic second — and say which one answered.
         # A release outside the project's own tag pattern (a sub-crate's) is
         # not this dependency's latest, so the filtered tags answer instead.
         try:
             released = github_latest_release(repo)
+            caveat = ""
             if released and tag_pattern and not re.fullmatch(tag_pattern, released):
+                caveat = f" (tag-order guess; releases API answer {released} is outside tag_pattern)"
                 released = None
             latest = released or latest_semver_tag(repo, tag_pattern)
-            caveat = ""
         except ReleaseLookupUnavailable as unavailable:
             latest = latest_semver_tag(repo, tag_pattern)
             caveat = f" (tag-order guess; releases API unavailable: {unavailable})"
