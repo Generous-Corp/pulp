@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -n \"$root\" ] || exit 0; cd \"$root\" || exit 0; /bin/bash \"$root/hooks/scripts/shell-portability-hint.sh\" || exit 0'",
+            "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -n \"$root\" ] || exit 0; cd \"$root\" || exit 0; /bin/bash \"$root/hooks/scripts/shell-portability-hint.sh\"'",
             "timeout": 3000
           }
         ]
