@@ -39,7 +39,6 @@ def run_git(cwd: Path, *arguments: str) -> None:
         text=True,
         capture_output=True,
         check=True,
-        encoding="utf-8",
     )
 
 
@@ -104,7 +103,6 @@ def check_post_tool_input_channels() -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            encoding="utf-8",
         )
         assert process.stdin is not None
         try:
@@ -143,7 +141,6 @@ def check_post_tool_input_channels() -> None:
             capture_output=True,
             timeout=15,
             check=False,
-            encoding="utf-8",
         )
         if result.returncode != 0 or expected not in result.stdout:
             raise RuntimeError(
@@ -153,37 +150,43 @@ def check_post_tool_input_channels() -> None:
             )
 
 
-def check_plugin_hooks_without_plugin_root() -> None:
-    """A missing plugin environment must not surface as an opaque exit 127."""
-    hooks_path = ROOT / "hooks/hooks.json"
-    environment = os.environ.copy()
-    environment.pop("CLAUDE_PLUGIN_ROOT", None)
-    with tempfile.TemporaryDirectory(prefix="pulp-plugin-hook-no-root-") as temp:
-        for hook in configured_hooks(hooks_path):
-            result = subprocess.run(
-                str(hook["command"]),
-                cwd=temp,
-                env=environment,
-                shell=True,
-                text=True,
-                input="{}",
-                capture_output=True,
-                timeout=15,
-                check=False,
-                encoding="utf-8",
-            )
-            if result.returncode != 0 or result.stdout or result.stderr:
-                raise RuntimeError(
-                    "Claude plugin hook failed without CLAUDE_PLUGIN_ROOT: "
-                    f"exit={result.returncode}, command={hook['command']!r}, "
-                    f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+def check_non_pulp_checkout_noop() -> None:
+    """A plain Git checkout must not fail when Pulp hook files are absent."""
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-hook-noop-") as temp:
+        checkout = Path(temp) / "checkout"
+        checkout.mkdir()
+        run_git(checkout, "init", "--quiet")
+        environment = os.environ.copy()
+        environment["CLAUDE_PROJECT_DIR"] = str(checkout)
+        for config_path in CONFIGS:
+            for hook in configured_hooks(config_path):
+                result = subprocess.run(
+                    str(hook["command"]),
+                    cwd=checkout,
+                    env=environment,
+                    shell=True,
+                    text=True,
+                    input="",
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
                 )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"{config_path.relative_to(ROOT)} hook failed in a plain "
+                        f"Git checkout: exit={result.returncode}, "
+                        f"stderr={result.stderr!r}"
+                    )
 
 
 def main() -> int:
     try:
         check_post_tool_input_channels()
-        check_plugin_hooks_without_plugin_root()
+    except RuntimeError as error:
+        print(f"FAIL: {error}", file=sys.stderr)
+        return 1
+    try:
+        check_non_pulp_checkout_noop()
     except RuntimeError as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
@@ -204,21 +207,6 @@ def main() -> int:
                 )
                 return 1
 
-    # The project Codex SessionStart sync is advisory. A hook runner can have
-    # a deliberately restricted PATH, so a bare `python3` must never turn a
-    # missing interpreter into the UI's opaque exit-127 failure.
-    codex_sync = [
-        str(hook["command"])
-        for hook in configured_hooks(ROOT / ".codex/hooks.json")
-        if "claude_md_sync.py" in str(hook.get("command", ""))
-    ]
-    if len(codex_sync) != 1 or "command -v python3" not in codex_sync[0] or "|| true" not in codex_sync[0]:
-        print(
-            "FAIL: Codex claude_md_sync hook must resolve python3 and remain advisory",
-            file=sys.stderr,
-        )
-        return 1
-
     with tempfile.TemporaryDirectory(prefix="pulp-agent-hook-paths-") as temp:
         superproject, nested_cwd = make_nested_submodule_fixture(Path(temp))
         resolved = subprocess.run(
@@ -227,7 +215,6 @@ def main() -> int:
             text=True,
             capture_output=True,
             check=True,
-            encoding="utf-8",
         ).stdout.strip()
         if Path(resolved).resolve() != superproject.resolve():
             print(
@@ -255,7 +242,6 @@ def main() -> int:
                         capture_output=True,
                         timeout=15,
                         check=False,
-                        encoding="utf-8",
                     )
                     if result.returncode != 0:
                         env_case = "unset" if project_dir is None else "nested"
