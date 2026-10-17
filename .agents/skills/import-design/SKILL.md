@@ -5,6 +5,17 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 # Import Design
 
+### Import benchmark rebuild control
+
+The opt-in `baked-native-rebuild` lane in `tools/import-design/design_import_benchmark.cpp`
+is a diagnostic full-rematerialization control. It is useful for measuring the
+cost of rebuilding the same DesignIR, but it does not implement or prove a
+structural retained planner. Keep the normal `baked-native` direct-setter lane
+as the production baseline, and do not claim Chromium/Skia parity or planner
+performance from the control alone. Structural claims require the authenticated
+same-trace native receipts and identity/lifecycle evidence defined by the
+planning trace matrix.
+
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
 ### Materialized browser source emission

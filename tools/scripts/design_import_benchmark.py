@@ -5,6 +5,11 @@ The C++ harness emits one JSON file per lane. This script drives the live,
 baked-native, and baked-cpp lanes, aggregates the three Phase 5 metric groups,
 and estimates the removable live-runtime linked footprint by summing the object
 files that live behind the Phase 9 script-runtime target split.
+
+The optional baked-native-rebuild lane rematerializes the same IR on every
+interactive step. It is a diagnostic control for retained-vs-rebuild work and
+is opt-in because it is intentionally much more expensive than the normal
+live-vs-baked report.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ DEFAULT_LIVE_RUNTIME_OBJECTS = [
     "core/view/CMakeFiles/pulp-view-script.dir/src/widget_bridge_input.cpp.o",
 ]
 
-BAKED_LANES = ("baked-native", "baked-cpp")
+BAKED_LANES = ("baked-native", "baked-native-rebuild", "baked-cpp")
 COUNTER_FIELDS = (
     "bridge_calls",
     "layout_passes",
@@ -358,6 +363,7 @@ def build_report(
     binary_size: dict[str, Any],
     build_dir: Path,
     baked_cpp: dict[str, Any] | None = None,
+    baked_native_rebuild: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     lanes = {
         "live": live,
@@ -369,6 +375,9 @@ def build_report(
     if baked_cpp is not None:
         lanes["baked-cpp"] = baked_cpp
         comparisons["baked-cpp"] = compute_comparison(live, baked_cpp)
+    if baked_native_rebuild is not None:
+        lanes["baked-native-rebuild"] = baked_native_rebuild
+        comparisons["baked-native-rebuild"] = compute_comparison(live, baked_native_rebuild)
 
     return {
         "schema": "pulp-design-import-benchmark-summary-v1",
@@ -541,6 +550,11 @@ def main(argv: list[str] | None = None) -> int:
              "If provided, defaults are replaced.",
     )
     parser.add_argument("--skip-run", action="store_true", help="Only compute binary-size data.")
+    parser.add_argument(
+        "--include-rebuild-lane",
+        action="store_true",
+        help="Also run the diagnostic baked-native-rebuild lane.",
+    )
     args = parser.parse_args(argv)
 
     build_dir = args.build_dir.resolve()
@@ -552,6 +566,11 @@ def main(argv: list[str] | None = None) -> int:
         live = {"lane": "live", "fixture": "not-run", "target_fps": args.target_fps}
         baked = {"lane": "baked-native", "fixture": "not-run", "target_fps": args.target_fps}
         baked_cpp = {"lane": "baked-cpp", "fixture": "not-run", "target_fps": args.target_fps}
+        baked_rebuild = (
+            {"lane": "baked-native-rebuild", "fixture": "not-run", "target_fps": args.target_fps}
+            if args.include_rebuild_lane
+            else None
+        )
     else:
         if not bench_exe.exists():
             print(f"error: benchmark executable not found: {bench_exe}", file=sys.stderr)
@@ -561,8 +580,20 @@ def main(argv: list[str] | None = None) -> int:
             live = run_lane(bench_exe, "live", args.idle_ms, args.interactive_ms, args.target_fps, temp_dir)
             baked = run_lane(bench_exe, "baked-native", args.idle_ms, args.interactive_ms, args.target_fps, temp_dir)
             baked_cpp = run_lane(bench_exe, "baked-cpp", args.idle_ms, args.interactive_ms, args.target_fps, temp_dir)
+            baked_rebuild = (
+                run_lane(
+                    bench_exe,
+                    "baked-native-rebuild",
+                    args.idle_ms,
+                    args.interactive_ms,
+                    args.target_fps,
+                    temp_dir,
+                )
+                if args.include_rebuild_lane
+                else None
+            )
 
-    report = build_report(live, baked, binary_size, build_dir, baked_cpp)
+    report = build_report(live, baked, binary_size, build_dir, baked_cpp, baked_rebuild)
     markdown = render_markdown(report)
 
     if args.output_json:

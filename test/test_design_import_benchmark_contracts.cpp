@@ -127,6 +127,10 @@ TEST_CASE("design-import benchmark argument parser supports split and equals for
     REQUIRE(split_lane->idle_ms == 0);
     REQUIRE(split_lane->interactive_ms == 1);
     REQUIRE(split_lane->target_fps == 2);
+
+    auto rebuild_lane = parse_args_vec({"bench", "--lane=baked-native-rebuild"});
+    REQUIRE(rebuild_lane.has_value());
+    REQUIRE(rebuild_lane->lane == "baked-native-rebuild");
 }
 
 TEST_CASE("design-import benchmark argument parser rejects invalid shapes",
@@ -430,6 +434,16 @@ TEST_CASE("design-import benchmark fixture factory creates the baked-native lane
     REQUIRE(render_frame(baked_native->root()) > 0);
     baked_native->step(12);
     REQUIRE(baked_native->js_evaluation_count() == 0);
+}
+
+TEST_CASE("design-import benchmark fixture factory creates the rebuild control lane",
+          "[design-import][benchmark]") {
+    auto rebuild = make_fixture("baked-native-rebuild");
+    REQUIRE(rebuild != nullptr);
+    REQUIRE(rebuild->root().id() == "bench-root");
+    REQUIRE(render_frame(rebuild->root()) > 0);
+    rebuild->step(12);
+    REQUIRE(rebuild->js_evaluation_count() == 0);
 }
 
 TEST_CASE("design-import benchmark run_phase records idle and interactive contracts",
