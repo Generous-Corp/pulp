@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check-pulp-cli.sh\"; [ -f \"$f\" ] || exit 0; exec bash \"$f\"",
+            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check-pulp-cli.sh\"; [ -f \"$f\" ] || exit 0; /bin/bash \"$f\" || exit 0",
             "timeout": 5000
           }
         ]
@@ -18,17 +18,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/inject-claude-prefs.sh\"; [ -f \"$f\" ] || exit 0; exec bash \"$f\"",
+            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/inject-claude-prefs.sh\"; [ -f \"$f\" ] || exit 0; /bin/bash \"$f\" || exit 0",
             "timeout": 3000
           },
           {
             "type": "command",
-            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/inject-worktree-lineage.sh\"; [ -f \"$f\" ] || exit 0; exec bash \"$f\"",
+            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/inject-worktree-lineage.sh\"; [ -f \"$f\" ] || exit 0; /bin/bash \"$f\" || exit 0",
             "timeout": 3000
           },
           {
             "type": "command",
-            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/decisions-contract-pointer.sh\"; [ -f \"$f\" ] || exit 0; exec bash \"$f\"",
+            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/decisions-contract-pointer.sh\"; [ -f \"$f\" ] || exit 0; /bin/bash \"$f\" || exit 0",
             "timeout": 3000
           },
           {
@@ -45,17 +45,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/docs-reminder.sh\"; [ -f \"$f\" ] || exit 0; exec bash \"$f\"",
+            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/docs-reminder.sh\"; [ -f \"$f\" ] || exit 0; /bin/bash \"$f\" || exit 0",
             "timeout": 3000
           },
           {
             "type": "command",
-            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/cli-plugin-sync.sh\"; [ -f \"$f\" ] || exit 0; exec bash \"$f\"",
+            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/cli-plugin-sync.sh\"; [ -f \"$f\" ] || exit 0; /bin/bash \"$f\" || exit 0",
             "timeout": 10000
           },
           {
             "type": "command",
-            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/decisions-contract-hint.sh\"; [ -f \"$f\" ] || exit 0; exec bash \"$f\"",
+            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/decisions-contract-hint.sh\"; [ -f \"$f\" ] || exit 0; /bin/bash \"$f\" || exit 0",
             "timeout": 3000
           }
         ]
@@ -65,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/tool-registry-reminder.sh\"; [ -f \"$f\" ] || exit 0; exec bash \"$f\"",
+            "command": "[ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] || exit 0; f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/tool-registry-reminder.sh\"; [ -f \"$f\" ] || exit 0; /bin/bash \"$f\" || exit 0",
             "timeout": 3000
           }
         ]
