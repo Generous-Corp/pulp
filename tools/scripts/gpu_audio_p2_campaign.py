@@ -56,7 +56,8 @@ PROVIDER_IDENTITY_SCHEMA = "pulp.gpu-audio-provider-identity.v1"
 PROVIDER_IDENTITY_FIELDS = (
     "expected_asset_sha256", "validated_asset_sha256", "expected_dawn_revision",
     "header_dawn_revision", "linked_dawn_archive_sha256", "manifest_sha256",
-    "generation_receipt_sha256",
+    "generation_receipt_sha256", "executable_sha256",
+    "configured_receipt_sha256", "prelink_receipt_sha256",
 )
 
 
@@ -216,6 +217,8 @@ def _validate_provider_identity(provenance: dict[str, Any],
             raise RuntimeError("raw provenance provider asset disagrees with exact-provider receipt")
         if provenance.get("dawn_archive_sha256") != expected_fixture["linked_dawn_archive_sha256"]:
             raise RuntimeError("raw provenance Dawn archive disagrees with exact-provider receipt")
+        if provenance.get("executable_observed_sha256") != expected_fixture["executable_sha256"]:
+            raise RuntimeError("raw provenance executable disagrees with bound provider receipt")
         bindings = provenance.get("manifest_bindings")
         if not isinstance(bindings, dict) or any(
                 bindings.get(field) != expected_fixture["manifest_sha256"]

@@ -239,6 +239,9 @@ class P2CampaignContractTests(unittest.TestCase):
             "linked_dawn_archive_sha256": rows[0]["dawn_archive_sha256"],
             "manifest_sha256": "1" * 64,
             "generation_receipt_sha256": "2" * 64,
+            "executable_sha256": rows[0]["executable_observed_sha256"],
+            "configured_receipt_sha256": "3" * 64,
+            "prelink_receipt_sha256": "4" * 64,
         }
         rows[0]["manifest_bindings"]["provider_asset_manifest_sha256"] = fixture["manifest_sha256"]
         rows[0]["manifest_bindings"]["dawn_archive_manifest_sha256"] = fixture["manifest_sha256"]
@@ -266,6 +269,9 @@ class P2CampaignContractTests(unittest.TestCase):
                 "linked_dawn_archive_sha256": "c" * 64,
                 "manifest_sha256": campaign.sha256(manifest),
                 "generation_receipt_sha256": "d" * 64,
+                "executable_sha256": "e" * 64,
+                "configured_receipt_sha256": "f" * 64,
+                "prelink_receipt_sha256": "0" * 64,
             }
             fixture.write_text(json.dumps(payload), encoding="utf-8")
             with patch.object(campaign, "REPO_ROOT", root_path):
@@ -287,6 +293,9 @@ class P2CampaignContractTests(unittest.TestCase):
             "linked_dawn_archive_sha256": rows[0]["dawn_archive_sha256"],
             "manifest_sha256": "1" * 64,
             "generation_receipt_sha256": "2" * 64,
+            "executable_sha256": rows[0]["executable_observed_sha256"],
+            "configured_receipt_sha256": "3" * 64,
+            "prelink_receipt_sha256": "4" * 64,
         }
         rows[0]["manifest_bindings"]["provider_asset_manifest_sha256"] = fixture["manifest_sha256"]
         rows[0]["manifest_bindings"]["dawn_archive_manifest_sha256"] = fixture["manifest_sha256"]
@@ -328,6 +337,9 @@ class P2CampaignContractTests(unittest.TestCase):
             "linked_dawn_archive_sha256": "c" * 64,
             "manifest_sha256": campaign.sha256(manifest),
             "generation_receipt_sha256": "d" * 64,
+            "executable_sha256": "e" * 64,
+            "configured_receipt_sha256": "f" * 64,
+            "prelink_receipt_sha256": "0" * 64,
         }
         payload.update(changes)
         receipt = root_path / "provider.json"
@@ -350,6 +362,13 @@ class P2CampaignContractTests(unittest.TestCase):
         rows[0]["manifest_bindings"]["provider_asset_sha256"] = "9" * 64
         self._assert_binding_refused(rows, fixture, "provider asset disagrees")
 
+    def test_raw_rows_must_carry_the_bound_executable(self):
+        rows, fixture = self._bound_rows_and_fixture()
+        rows[0]["executable_observed_sha256"] = "9" * 64
+        with self.assertRaisesRegex(RuntimeError, "executable disagrees"):
+            campaign.validate_identity_rows(rows, rows[0]["executable_observed_sha256"],
+                                            expected_provider_identity=fixture)
+
     def test_receipt_that_did_not_pass_is_refused(self):
         cases = {"schema": {"schema": "pulp.gpu-audio-provider-identity.v0"},
                  "status": {"status": "failed"},
@@ -364,12 +383,25 @@ class P2CampaignContractTests(unittest.TestCase):
     def test_receipt_with_a_malformed_hash_field_is_refused(self):
         # Fields no later check compares, so only the format check can refuse them.
         cases = {"generation_receipt_sha256": "not-a-digest",
-                 "linked_dawn_archive_sha256": "c" * 63}
+                 "linked_dawn_archive_sha256": "c" * 63,
+                 "executable_sha256": "e" * 63,
+                 "configured_receipt_sha256": "f" * 63,
+                 "prelink_receipt_sha256": "0" * 63}
         for field, value in cases.items():
             with self.subTest(field=field), tempfile.TemporaryDirectory() as root:
                 receipt, _ = self._receipt(Path(root), **{field: value})
                 with patch.object(campaign, "REPO_ROOT", Path(root)):
                     with self.assertRaisesRegex(RuntimeError, f"{field} is invalid"):
+                        campaign.validate_provider_identity_fixture(receipt, PLATFORM)
+
+    def test_receipt_requires_bound_build_receipt_hashes(self):
+        for field in ("executable_sha256", "configured_receipt_sha256", "prelink_receipt_sha256"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as root:
+                receipt, payload = self._receipt(Path(root))
+                payload.pop(field)
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                with patch.object(campaign, "REPO_ROOT", Path(root)):
+                    with self.assertRaisesRegex(RuntimeError, field + " is invalid"):
                         campaign.validate_provider_identity_fixture(receipt, PLATFORM)
 
     def test_receipt_must_name_the_provider_the_manifest_pins(self):
