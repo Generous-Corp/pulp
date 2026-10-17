@@ -145,3 +145,17 @@ TEST_CASE("G1 accepts width two and width four admission matrix") {
         REQUIRE(evaluator.finish().complete);
     }
 }
+
+TEST_CASE("G1 rejects duplicate member identities and broken terminal pairing") {
+    BatchResidencyEvaluator duplicate_members(admission());
+    auto bad = sample(0);
+    bad.member_ids[1] = bad.member_ids[0];
+    duplicate_members.observe(bad);
+    REQUIRE(duplicate_members.finish().member_evidence_mismatches > 0);
+
+    BatchResidencyEvaluator broken_pair(admission());
+    bad = sample(0);
+    bad.member_terminal_ids[0] = 999;
+    broken_pair.observe(bad);
+    REQUIRE(broken_pair.finish().member_evidence_mismatches > 0);
+}

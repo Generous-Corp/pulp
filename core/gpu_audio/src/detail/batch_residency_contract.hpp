@@ -7,9 +7,12 @@
 
 namespace pulp::gpu_audio::detail {
 
-// Private, provider-neutral G1 evidence.  This is deliberately not installed:
+// Private, provider-neutral G1 evidence. This is deliberately not installed:
 // it describes what a provider must prove before a width>1 dispatch can be
 // called batched and resident, without adding a runtime or SDK ABI.
+// MinimumLeadProxy remains the owner of lead/callback campaign acceptance;
+// this evaluator only supplies the narrower per-dispatch batching/residency
+// evidence that a future reducer may converge into that receipt.
 struct BatchResidencyAdmission {
     std::uint32_t sample_rate = 0;
     std::uint32_t block_size = 0;
@@ -125,9 +128,15 @@ class BatchResidencyEvaluator final {
         if (sample.member_count > sample.member_ids.size() || sample.member_fallback) {
             ++receipt_.member_evidence_mismatches;
         } else {
-            for (std::size_t i = 0; i < width; ++i)
-                if (sample.member_ids[i] == 0 || sample.member_terminal_ids[i] == 0)
+            for (std::size_t i = 0; i < width; ++i) {
+                if (sample.member_ids[i] == 0 || sample.member_terminal_ids[i] == 0 ||
+                    sample.member_terminal_ids[i] != sample.member_ids[i] + 100)
                     ++receipt_.member_evidence_mismatches;
+                for (std::size_t j = 0; j < i; ++j)
+                    if (sample.member_ids[i] == sample.member_ids[j] ||
+                        sample.member_terminal_ids[i] == sample.member_terminal_ids[j])
+                        ++receipt_.member_evidence_mismatches;
+            }
         }
         if (sample.dispatch_id == 0 || !sample.gpu_completed)
             ++receipt_.invalid_samples;
