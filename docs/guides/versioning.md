@@ -648,6 +648,12 @@ commands and, on failure, the last 200 lines. The full log is uploaded as the
 `coverage-suite-log-<os>-<sha>` artifact.
 Read those before changing anything else.
 
+Before the Python tools pass, the Linux leg fetches the full commit history
+and `origin/main` (about 550 MiB with blobs, which a test that clones the
+checkout at an older commit needs). `actions/checkout` clones one commit deep,
+and about ten tools tests check git ancestry, `HEAD^`, `origin/main..HEAD` or
+pinned revisions; on a truncated history they fail for that reason alone.
+
 
 ## Shipyard-binary pin bumps
 
