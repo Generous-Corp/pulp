@@ -40,6 +40,9 @@ enum class SharedIoFallbackReason : std::uint8_t {
     Teardown,
     CompletionFailed,
     InvalidCallback,
+    PredictionRefused,
+    CalibrationMissing,
+    CalibrationStale,
 };
 
 enum class SharedIoContractError : std::uint8_t {
