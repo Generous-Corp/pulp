@@ -133,6 +133,11 @@ directory explicit, including secondary artifact trees and the Linux RTSan
 lane, but do not include `-j`, `--parallel`, or a host-core probe: the
 governor owns parallelism, leases, and build-directory locking.
 
+Windows workflow steps that use `shell: pwsh` still invoke the same governor
+through `bash tools/ci/governed-build.sh ...`; do not bypass it with a direct
+`cmake --build`. This applies to the main matrix as well as advisory compile
+gates, so custom runner selectors cannot bypass the governor.
+
 The timeline hardening workflow's focused Ninja build follows the same rule:
 `timeline-hardening.yml` must invoke the governor directly and leave worker
 selection to it, even though the lane only builds two timeline test targets.
