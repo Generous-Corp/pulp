@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace pulp::gpu_audio::detail {
@@ -27,6 +28,7 @@ class SharedIoComputePlan {
         SharedIoCalibrationIdentity calibration_identity;
         bool authenticated_calibration = false;
         std::uint64_t calibration_max_age_ns = 0;
+        std::string calibration_source_revision;
     };
     struct SubmitToken {
         SharedIoSlotLedger::SlotToken slot;
@@ -56,9 +58,12 @@ class SharedIoComputePlan {
         std::int64_t gpu_elapsed_ns = -1;
         std::uint64_t predicted_ns = 0;
         SharedIoCalibrationIdentity calibration_identity;
+        SharedIoCalibrationProvenance provenance;
         bool provider_authenticated = false;
         bool synchronized = false;
         bool predictor_underestimate = false;
+        bool terminal_success = false;
+        bool late = false;
         bool stale = false;
         bool terminal = false;
         bool output_acquired = false;
@@ -82,6 +87,9 @@ class SharedIoComputePlan {
         std::uint64_t calibration_rows = 0;
         std::uint64_t invalid_calibration_rows = 0;
         std::uint64_t stale_calibration_rows = 0;
+        std::uint64_t cpu_fallbacks = 0;
+        std::uint64_t rejected_calibration_rows = 0;
+        bool calibration_invalidated = false;
         bool prediction_enabled = false;
         SharedIoPredictionRefusal last_prediction_refusal = SharedIoPredictionRefusal::None;
         SharedIoFallbackReason last_fallback_reason = SharedIoFallbackReason::None;
@@ -120,6 +128,8 @@ class SharedIoComputePlan {
                                                            std::uint64_t deadline_ns) noexcept;
     void record_cpu_fallback(SharedIoFallbackReason reason) noexcept {
         telemetry_.last_fallback_reason = reason;
+        if (telemetry_.cpu_fallbacks != UINT64_MAX)
+            ++telemetry_.cpu_fallbacks;
     }
     bool submit(const SubmitToken& token) noexcept;
     // A pre-submit refusal must return the write lease to the fixed ledger.
@@ -145,6 +155,9 @@ class SharedIoComputePlan {
         for (const auto& receipt : lifecycle_receipts_) {
             SharedIoCalibrationObservation observation;
             observation.identity = receipt.calibration_identity;
+            observation.provenance = receipt.provenance;
+            observation.generation = receipt.generation;
+            observation.sequence = receipt.sequence;
             observation.worker_ns =
                 receipt.worker_ns > 0 ? static_cast<std::uint64_t>(receipt.worker_ns) : 0;
             observation.submitted_ns =
@@ -155,6 +168,14 @@ class SharedIoComputePlan {
                 receipt.visible_ns > 0 ? static_cast<std::uint64_t>(receipt.visible_ns) : 0;
             observation.predicted_ns = receipt.predicted_ns;
             observation.provider_authenticated = receipt.provider_authenticated;
+            observation.terminal_success = receipt.terminal_success;
+            observation.late = receipt.late;
+            observation.stale = receipt.stale;
+            observation.discarded = receipt.discarded;
+            observation.device_lost = receipt.device_lost;
+            observation.output_acquired = receipt.output_acquired;
+            observation.output_released = receipt.output_released;
+            observation.lifecycle_valid = lifecycle_receipt_valid();
             if (!observation.valid())
                 ++telemetry_.invalid_calibration_rows;
             result.push_back(observation);
@@ -199,12 +220,15 @@ class SharedIoComputePlan {
                             SharedIoArena::CompletionStatus status) noexcept;
     void record_terminal(const SharedIoSlotLedger::SlotToken& token,
                          SharedIoArena::CompletionStatus status) noexcept;
+    void record_calibration(LifecycleReceipt&) noexcept;
     LifecycleReceipt* receipt_for(const SharedIoSlotLedger::SlotToken&) noexcept;
 
     SharedIoArena arena_;
     SharedIoArenaProvider* provider_ = nullptr;
     SharedIoExecutionPredictor predictor_;
     SharedIoCalibrationIdentity calibration_identity_;
+    SharedIoCalibrationProvenance calibration_provenance_;
+    SharedIoProviderIdentity provider_identity_snapshot_;
     bool authenticated_calibration_ = false;
     std::uint64_t calibration_max_age_ns_ = 0;
     bool provider_authenticated_ = false;

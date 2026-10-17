@@ -34,9 +34,14 @@ class FakeProvider final : public SharedIoArenaProvider {
     SharedIoProviderIdentity provider_identity() const noexcept override {
         SharedIoProviderIdentity identity;
         identity.authenticated = authenticated_identity;
+        identity.provider_revision = authenticated_identity ? "fake-provider-v1" : "";
+        identity.adapter_name = authenticated_identity ? "fake-adapter" : "";
+        identity.adapter_backend = authenticated_identity ? "fake-backend" : "";
         identity.adapter_vendor_id = 1;
         identity.adapter_device_id = 1;
         identity.native_runtime_authenticated = authenticated_identity;
+        identity.native_runtime_name = authenticated_identity ? "fake-native" : "";
+        identity.native_runtime_backend = authenticated_identity ? "fake-backend" : "";
         return identity;
     }
     ~FakeProvider() override {
@@ -306,9 +311,11 @@ TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle bo
     REQUIRE(plan.drain(0) == 1);
     auto successful = plan.pop_completion();
     REQUIRE(successful);
+    auto successful_output = plan.acquire_output(*successful);
+    REQUIRE(successful_output);
+    REQUIRE(plan.release_output({successful_output->token}));
     CHECK(plan.prediction_estimate().ready);
     CHECK(plan.telemetry().prediction_samples == 1);
-    REQUIRE(plan.discard_completion(*successful));
 
     // A calibrated future deadline is admitted.
     const auto future_deadline =
@@ -357,7 +364,8 @@ TEST_CASE("G3 calibration packet binds identity and synchronized timestamps",
                           .output_bytes_per_slot = 16,
                           .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer,
                           .calibration_identity = identity,
-                          .authenticated_calibration = true}));
+                          .authenticated_calibration = true,
+                          .calibration_source_revision = "test-g3-v1"}));
     plan.set_prediction_policy({.enabled = true, .minimum_samples = 1});
     auto input = plan.acquire_input(1, 0);
     REQUIRE(input);
@@ -365,7 +373,9 @@ TEST_CASE("G3 calibration packet binds identity and synchronized timestamps",
     REQUIRE(plan.drain(0) == 1);
     auto completion = plan.pop_completion();
     REQUIRE(completion);
-    REQUIRE(plan.discard_completion(*completion));
+    auto output = plan.acquire_output(*completion);
+    REQUIRE(output);
+    REQUIRE(plan.release_output({output->token}));
     const auto observations = plan.take_calibration_observations();
     REQUIRE(observations.size() == 1);
     CHECK(observations.front().identity == identity);
@@ -387,19 +397,44 @@ TEST_CASE("G3 calibration packet counts predictor under-estimates",
                                                .load = 1};
     SharedIoExecutionPredictor predictor;
     predictor.configure({.enabled = true, .minimum_samples = 1});
+    predictor.bind_identity(identity);
     SharedIoCalibrationObservation observation{.identity = identity,
+                                               .provenance = {.source_revision = "test-g3-v1",
+                                                              .provider_revision = "provider-v1",
+                                                              .adapter_name = "adapter",
+                                                              .adapter_backend = "backend",
+                                                              .adapter_vendor_id = 1,
+                                                              .adapter_device_id = 1,
+                                                              .native_runtime_name = "native",
+                                                              .native_runtime_backend = "backend",
+                                                              .native_runtime_authenticated = true},
+                                               .generation = 1,
+                                               .sequence = 1,
                                                .worker_ns = 10,
                                                .submitted_ns = 20,
                                                .terminal_ns = 120,
                                                .visible_ns = 130,
                                                .predicted_ns = 1,
-                                               .provider_authenticated = true};
+                                               .provider_authenticated = true,
+                                               .terminal_success = true,
+                                               .output_acquired = true,
+                                               .output_released = true};
     REQUIRE(observation.valid());
     predictor.observe(observation);
     CHECK(predictor.estimate().underestimates == 1);
     CHECK(predictor.estimate().conservative_ns >= observation.execution_ns());
+    auto cross_cell = observation;
+    cross_cell.identity.load += 1;
+    CHECK_FALSE(predictor.observe(cross_cell));
+    CHECK(predictor.estimate().rejected_observations == 1);
     observation.visible_ns = observation.terminal_ns - 1;
     CHECK_FALSE(observation.timestamps_synchronized());
+    CHECK_FALSE(observation.valid());
+    observation.visible_ns = 130;
+    observation.output_released = false;
+    CHECK_FALSE(observation.valid());
+    observation.output_released = true;
+    observation.terminal_success = false;
     CHECK_FALSE(observation.valid());
 }
 
@@ -418,11 +453,13 @@ TEST_CASE("G3 calibration packet refuses stale and unauthenticated cells and rec
                                               .input_bytes_per_slot = 16,
                                               .output_bytes_per_slot = 16,
                                               .calibration_identity = identity,
-                                              .authenticated_calibration = true}));
+                                              .authenticated_calibration = true,
+                                              .calibration_source_revision = "test-g3-v1"}));
     CHECK_FALSE(refused.acquire_input(1, 0));
     CHECK(refused.telemetry().last_prediction_refusal ==
           SharedIoPredictionRefusal::MissingCalibration);
     CHECK(refused.telemetry().last_fallback_reason == SharedIoFallbackReason::CalibrationMissing);
+    CHECK(refused.telemetry().cpu_fallbacks == 1);
     refused.record_cpu_fallback(SharedIoFallbackReason::DeadlineExceeded);
     CHECK(refused.telemetry().last_fallback_reason == SharedIoFallbackReason::DeadlineExceeded);
     REQUIRE(refused.release());
@@ -435,7 +472,8 @@ TEST_CASE("G3 calibration packet refuses stale and unauthenticated cells and rec
                                           .output_bytes_per_slot = 16,
                                           .calibration_identity = identity,
                                           .authenticated_calibration = true,
-                                          .calibration_max_age_ns = 1}));
+                                          .calibration_max_age_ns = 1,
+                                          .calibration_source_revision = "test-g3-v1"}));
     stale.set_prediction_policy({.enabled = true, .minimum_samples = 1});
     auto warmup = stale.acquire_input(1, 0);
     REQUIRE(warmup);
@@ -443,9 +481,16 @@ TEST_CASE("G3 calibration packet refuses stale and unauthenticated cells and rec
     REQUIRE(stale.drain(0) == 1);
     auto done = stale.pop_completion();
     REQUIRE(done);
-    REQUIRE(stale.discard_completion(*done));
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    auto stale_output = stale.acquire_output(*done);
+    REQUIRE(stale_output);
+    REQUIRE(stale.release_output({stale_output->token}));
+    authenticated.authenticated_identity = false;
     CHECK_FALSE(stale.acquire_input(2, 0));
+    CHECK(stale.telemetry().last_prediction_refusal ==
+          SharedIoPredictionRefusal::MissingCalibration);
+    authenticated.authenticated_identity = true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK_FALSE(stale.acquire_input(3, 0));
     CHECK(stale.telemetry().last_prediction_refusal == SharedIoPredictionRefusal::StaleCalibration);
     CHECK(stale.telemetry().last_fallback_reason == SharedIoFallbackReason::CalibrationStale);
     REQUIRE(stale.release());

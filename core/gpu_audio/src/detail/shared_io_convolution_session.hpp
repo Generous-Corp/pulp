@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -50,6 +51,10 @@ class SharedIoConvolutionSession {
         SharedIoArenaProvider::StorageKind storage_kind =
             SharedIoArenaProvider::StorageKind::ImportedHostPointer;
         SharedIoExecutionPredictor::Config prediction{};
+        SharedIoCalibrationIdentity calibration_identity;
+        bool authenticated_calibration = false;
+        std::uint64_t calibration_max_age_ns = 0;
+        std::string calibration_source_revision;
     };
 
     struct ProviderPair {
