@@ -70,10 +70,23 @@ function Copy-PrivateProfile([string]$Source, [string]$Destination, [string]$Evi
   if ($private.StartsWith($export, [StringComparison]::OrdinalIgnoreCase) -or $private -eq $export.TrimEnd([IO.Path]::DirectorySeparatorChar)) { throw 'Private profile cannot be inside exported evidence' }
   if ([IO.Path]::GetFullPath($Source) -eq $private) { throw 'Private profile cannot replace source profile' }
   New-Item -ItemType Directory -Path $private | Out-Null
-  foreach ($name in @('reaper.ini','reaper-license.rk')) {
-    $path = Join-Path $Source $name
-    if (Test-Path -LiteralPath $path -PathType Leaf) { Copy-Item -LiteralPath $path -Destination (Join-Path $private $name) }
+  # `-cfgfile` selects the alternate REAPER resource directory, not just an
+  # isolated INI. Copy the non-secret profile so startup scripts and scan
+  # caches resolve beside the selected reaper.ini rather than falling back to
+  # the user's profile. Cache files are deliberately removed: a stale entry
+  # can make REAPER load an old Spectr backup before the staged exact module.
+  Get-ChildItem -LiteralPath $Source -Force | Where-Object {
+    $_.Name -ne 'reaper-license.rk'
+  } | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $private $_.Name) -Recurse -Force
   }
+  $license = Join-Path $Source 'reaper-license.rk'
+  if (Test-Path -LiteralPath $license -PathType Leaf) {
+    Copy-Item -LiteralPath $license -Destination (Join-Path $private 'reaper-license.rk')
+  }
+  Get-ChildItem -LiteralPath $private -File | Where-Object {
+    $_.Name -match '^reaper-(vstplugins|clap).*\.ini$'
+  } | Remove-Item -Force
 }
 function Assert-EditorWindow([long]$Hwnd, [bool]$Exists, [bool]$Visible, [bool]$Owned) {
   if ($Hwnd -eq 0 -or -not $Exists) { throw 'Floating editor HWND absent' }
