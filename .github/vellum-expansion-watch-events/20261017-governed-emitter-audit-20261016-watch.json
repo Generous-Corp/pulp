@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261017-governed-emitter-audit-20261016-watch",
+  "created_at": "2026-10-17T06:56:59Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "The import CLI now emits the governed build wrapper in its generated next-step recipe and adds a regression assertion. This is a Pulp CLI guidance and test-manifest change only; it moves no design-import, Chromium, rendering, or packaging authority.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-import-emit",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
