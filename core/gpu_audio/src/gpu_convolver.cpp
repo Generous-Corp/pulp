@@ -156,6 +156,34 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     // than silently truncating an out-of-range diagnostic value.
     if (config.completion_wait_ns > kTrialWaitMask)
         return false;
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    // Stage every potentially-throwing operation before changing the
+    // convolver's packed trial fields.  In particular, an allocation failure
+    // while creating SharedIoState or copying its trial config must leave a
+    // previously configured convolver untouched; otherwise a false return
+    // would still arm a partially configured diagnostic on the next prepare.
+    std::optional<GpuConvolverTrialConfig> staged_trial_config;
+    std::unique_ptr<GpuConvolver::SharedIoState> staged_shared_io;
+    try {
+        staged_trial_config = config;
+        if (!convolver.shared_io_) {
+            staged_shared_io = std::make_unique<GpuConvolver::SharedIoState>();
+            staged_shared_io->trial_config = std::move(staged_trial_config);
+        }
+    } catch (...) {
+        return false;
+    }
+
+    if (staged_shared_io) {
+        convolver.shared_io_ = std::move(staged_shared_io);
+    } else {
+        // Swapping an already constructed optional is allocation-free and
+        // preserves the old config until all staging above has succeeded.
+        convolver.shared_io_->trial_config.swap(staged_trial_config);
+    }
+#endif
+
     // Preserve the public class layout while carrying this private probe-only
     // capacity alongside the existing private path selector.
     convolver.trial_requested_path_ =
@@ -173,15 +201,6 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     convolver.trial_completion_wait_ns_ =
         (config.completion_wait_ns & kTrialWaitMask) |
         (static_cast<std::uint64_t>(config.retention_capacity) << kTrialRetentionShift);
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    try {
-        if (!convolver.shared_io_)
-            convolver.shared_io_ = std::make_unique<GpuConvolver::SharedIoState>();
-        convolver.shared_io_->trial_config = config;
-    } catch (...) {
-        return false;
-    }
-#endif
     return true;
 }
 
