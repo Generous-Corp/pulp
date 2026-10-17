@@ -370,6 +370,26 @@ class P2CampaignContractTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "inconsistent provider identity"):
                         campaign.validate_provider_identity_fixture(receipt)
 
+    def test_load_receipt_requires_authoritative_verification_match(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            receipt, payload = self._receipt(root_path)
+            verification = campaign.argparse.Namespace(marker="authoritative")
+            with patch.object(campaign, "REPO_ROOT", root_path), \
+                    patch.object(campaign.identity_contract, "verify", return_value=dict(payload)) as verify:
+                loaded, _ = campaign.load_provider_identity_receipt(
+                    receipt, PLATFORM, verification=verification)
+            self.assertEqual(loaded, payload)
+            verify.assert_called_once_with(verification)
+
+            mismatched = dict(payload)
+            mismatched["configured_receipt_path"] = str(root_path / "other-configured.json")
+            with patch.object(campaign, "REPO_ROOT", root_path), \
+                    patch.object(campaign.identity_contract, "verify", return_value=mismatched):
+                with self.assertRaisesRegex(RuntimeError, "configured_receipt_path disagrees"):
+                    campaign.load_provider_identity_receipt(
+                        receipt, PLATFORM, verification=verification)
+
     def test_raw_rows_must_carry_the_receipts_provider_asset(self):
         rows, fixture = self._bound_rows_and_fixture()
         rows[0]["provider_asset_sha256"] = "9" * 64
@@ -501,7 +521,7 @@ class P2CampaignContractTests(unittest.TestCase):
                 patch.object(campaign, "validate_host_preflight", return_value={}), \
                 patch.object(campaign, "host_provider_platform", return_value=PLATFORM), \
                 patch.object(campaign, "load_provider_identity_receipt",
-                             return_value=(identity, "d" * 64)), \
+                             return_value=(identity, "d" * 64)) as load_receipt, \
                 patch.object(campaign.subprocess, "run", side_effect=fake_probe), \
                 patch.object(campaign, "validate_negative_control_receipt"), \
                 patch.object(campaign, "validate_receipt"), \
@@ -511,6 +531,9 @@ class P2CampaignContractTests(unittest.TestCase):
             with self.assertRaises(Stop):
                 campaign.run(args)
         self.assertEqual(seen, [identity, identity])
+        verification = load_receipt.call_args.kwargs["verification"]
+        self.assertEqual(verification.executable, str(args.probe))
+        self.assertEqual(verification.receipt, str(args.provider_identity_receipt))
 
     def test_a_symlinked_receipt_is_refused(self):
         with tempfile.TemporaryDirectory() as root:
@@ -552,7 +575,7 @@ class P2CampaignContractTests(unittest.TestCase):
         self.assertIn('"provider_identity_receipt_sha256": provider_identity_receipt_sha256', source)
         self.assertNotIn("sha256(args.provider_identity_receipt)", source)
 
-    def _hardware_args(self, root, *extra):
+    def _hardware_args(self, root, *extra, omit_provider=None):
         probe = Path(root) / "probe"
         probe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         probe.chmod(probe.stat().st_mode | stat.S_IXUSR)
@@ -567,13 +590,22 @@ class P2CampaignContractTests(unittest.TestCase):
         dawn_library = Path(root) / "libdawn.a"
         for path in (manifest, configured, prelink, dawn_header, dawn_library):
             path.write_text("{}\n", encoding="utf-8")
+        provider_values = {
+            "provider_configured_receipt": configured,
+            "provider_prelink_receipt": prelink,
+            "provider_manifest": manifest,
+            "provider_skia_dir": skia,
+            "provider_dawn_header": dawn_header,
+            "provider_dawn_library": dawn_library,
+        }
+        provider_args = []
+        for name, value in provider_values.items():
+            if name != omit_provider:
+                provider_args.extend((f"--{name.replace('_', '-')}", str(value)))
         return campaign.parse_args([
             "--probe", str(probe), "--output-dir", str(Path(root) / "out"),
             "--host-preflight", str(preflight),
-            "--provider-configured-receipt", str(configured),
-            "--provider-prelink-receipt", str(prelink),
-            "--provider-manifest", str(manifest), "--provider-skia-dir", str(skia),
-            "--provider-dawn-header", str(dawn_header), "--provider-dawn-library", str(dawn_library), *extra])
+            *provider_args, *extra])
 
     def test_a_hardware_campaign_requires_the_provider_identity_receipt(self):
         with tempfile.TemporaryDirectory() as root, \
@@ -581,6 +613,21 @@ class P2CampaignContractTests(unittest.TestCase):
             args = self._hardware_args(root, "--expected-source-revision", "a" * 40)
             with self.assertRaisesRegex(RuntimeError, "--provider-identity-receipt is required"):
                 campaign.run(args)
+
+    def test_a_hardware_campaign_requires_every_authoritative_provider_input(self):
+        provider_fields = (
+            "provider_configured_receipt", "provider_prelink_receipt",
+            "provider_manifest", "provider_skia_dir", "provider_dawn_header",
+            "provider_dawn_library",
+        )
+        for missing in provider_fields:
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as root, \
+                    patch.object(campaign, "_source_provenance", return_value=("a" * 40, "b" * 64)):
+                    args = self._hardware_args(
+                        root, "--expected-source-revision", "a" * 40, omit_provider=missing)
+                    args.provider_identity_receipt = Path(root) / "provider.json"
+                    with self.assertRaisesRegex(RuntimeError, "all authoritative provider verification inputs are required"):
+                        campaign.run(args)
 
     def test_control_a_hardware_campaign_requires_the_source_revision_first(self):
         with tempfile.TemporaryDirectory() as root, \
