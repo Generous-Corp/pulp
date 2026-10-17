@@ -696,9 +696,10 @@ int run_emit(const ImportOptions& o) {
                                     ? fs::path("tools/ci/governed-build.sh")
                                     : source_root / "tools" / "ci" / "governed-build.sh";
     std::cout << "\nNext steps:\n";
-    std::cout << "  1. Build it:   cmake -S " << o.output.string() << " -B "
-              << (o.output / "build").string() << " && " << shell_quote(governed_build.string())
-              << " cmake --build " << shell_quote((o.output / "build").string()) << "\n";
+    std::cout << "  1. Build it:   cmake -S " << shell_quote(o.output.string()) << " -B "
+              << shell_quote((o.output / "build").string()) << " && "
+              << shell_quote(governed_build.string()) << " cmake --build "
+              << shell_quote((o.output / "build").string()) << "\n";
     std::cout << "  2. " << ie::format_parity_review_step(manifest) << "\n";
     std::cout << "  3. Implement the missing parity work in src/ and rebuild/test; "
                  "any TODO(import) markers are importer-emitted hints.\n";
