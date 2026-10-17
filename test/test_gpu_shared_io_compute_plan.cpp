@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <thread>
 
 using namespace pulp::gpu_audio::detail;
 
@@ -30,6 +31,14 @@ class FakeProvider final : public SharedIoArenaProvider {
     };
 
   public:
+    SharedIoProviderIdentity provider_identity() const noexcept override {
+        SharedIoProviderIdentity identity;
+        identity.authenticated = authenticated_identity;
+        identity.adapter_vendor_id = 1;
+        identity.adapter_device_id = 1;
+        identity.native_runtime_authenticated = authenticated_identity;
+        return identity;
+    }
     ~FakeProvider() override {
         lifecycle_state->provider_destroyed = true;
     }
@@ -164,6 +173,7 @@ class FakeProvider final : public SharedIoArenaProvider {
     bool invalid_lifecycle = false;
     StorageKind storage_kind = StorageKind::ImportedHostPointer;
     bool accept_submissions = true;
+    bool authenticated_identity = false;
     bool require_program_release = false;
     bool program_released = false;
     bool program_destroyed = false;
@@ -315,6 +325,8 @@ TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle bo
     const auto expired_deadline = future_deadline - 2'000'000'000;
     CHECK_FALSE(plan.acquire_input(4, expired_deadline));
     CHECK(plan.telemetry().prediction_refusals == 1);
+    CHECK(plan.telemetry().last_prediction_refusal == SharedIoPredictionRefusal::DeadlineExpired);
+    CHECK(plan.telemetry().last_fallback_reason == SharedIoFallbackReason::PredictionRefused);
     REQUIRE(plan.reprime_when_quiescent());
     CHECK(plan.prediction_estimate().samples == 0);
     CHECK(plan.prediction_estimate().enabled);
@@ -325,6 +337,118 @@ TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle bo
     REQUIRE(disabled_input);
     REQUIRE(plan.cancel({disabled_input->token, 1}));
     REQUIRE(plan.release());
+}
+
+TEST_CASE("G3 calibration packet binds identity and synchronized timestamps",
+          "[gpu_audio][shared_io][prediction][g3]") {
+    FakeProvider provider;
+    provider.authenticated_identity = true;
+    SharedIoComputePlan plan;
+    const SharedIoCalibrationIdentity identity{.model = 11,
+                                               .block_frames = 64,
+                                               .lead_blocks = 2,
+                                               .slots = 1,
+                                               .batch_width = 1,
+                                               .policy = 7,
+                                               .load = 3};
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1,
+                          .input_bytes_per_slot = 16,
+                          .output_bytes_per_slot = 16,
+                          .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer,
+                          .calibration_identity = identity,
+                          .authenticated_calibration = true}));
+    plan.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+    auto input = plan.acquire_input(1, 0);
+    REQUIRE(input);
+    REQUIRE(plan.submit({input->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    REQUIRE(plan.discard_completion(*completion));
+    const auto observations = plan.take_calibration_observations();
+    REQUIRE(observations.size() == 1);
+    CHECK(observations.front().identity == identity);
+    CHECK(observations.front().provider_authenticated);
+    CHECK(observations.front().valid());
+    CHECK(observations.front().visible_ns >= observations.front().terminal_ns);
+    CHECK(plan.telemetry().calibration_rows == 1);
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("G3 calibration packet counts predictor under-estimates",
+          "[gpu_audio][shared_io][prediction][g3]") {
+    const SharedIoCalibrationIdentity identity{.model = 1,
+                                               .block_frames = 64,
+                                               .lead_blocks = 1,
+                                               .slots = 2,
+                                               .batch_width = 1,
+                                               .policy = 2,
+                                               .load = 1};
+    SharedIoExecutionPredictor predictor;
+    predictor.configure({.enabled = true, .minimum_samples = 1});
+    SharedIoCalibrationObservation observation{.identity = identity,
+                                               .worker_ns = 10,
+                                               .submitted_ns = 20,
+                                               .terminal_ns = 120,
+                                               .visible_ns = 130,
+                                               .predicted_ns = 1,
+                                               .provider_authenticated = true};
+    REQUIRE(observation.valid());
+    predictor.observe(observation);
+    CHECK(predictor.estimate().underestimates == 1);
+    CHECK(predictor.estimate().conservative_ns >= observation.execution_ns());
+    observation.visible_ns = observation.terminal_ns - 1;
+    CHECK_FALSE(observation.timestamps_synchronized());
+    CHECK_FALSE(observation.valid());
+}
+
+TEST_CASE("G3 calibration packet refuses stale and unauthenticated cells and records CPU fallback",
+          "[gpu_audio][shared_io][prediction][g3]") {
+    const SharedIoCalibrationIdentity identity{.model = 1,
+                                               .block_frames = 64,
+                                               .lead_blocks = 1,
+                                               .slots = 1,
+                                               .batch_width = 1,
+                                               .policy = 2,
+                                               .load = 1};
+    FakeProvider unauthenticated;
+    SharedIoComputePlan refused;
+    REQUIRE(refused.prepare(unauthenticated, {.slots = 1,
+                                              .input_bytes_per_slot = 16,
+                                              .output_bytes_per_slot = 16,
+                                              .calibration_identity = identity,
+                                              .authenticated_calibration = true}));
+    CHECK_FALSE(refused.acquire_input(1, 0));
+    CHECK(refused.telemetry().last_prediction_refusal ==
+          SharedIoPredictionRefusal::MissingCalibration);
+    CHECK(refused.telemetry().last_fallback_reason == SharedIoFallbackReason::CalibrationMissing);
+    refused.record_cpu_fallback(SharedIoFallbackReason::DeadlineExceeded);
+    CHECK(refused.telemetry().last_fallback_reason == SharedIoFallbackReason::DeadlineExceeded);
+    REQUIRE(refused.release());
+
+    FakeProvider authenticated;
+    authenticated.authenticated_identity = true;
+    SharedIoComputePlan stale;
+    REQUIRE(stale.prepare(authenticated, {.slots = 1,
+                                          .input_bytes_per_slot = 16,
+                                          .output_bytes_per_slot = 16,
+                                          .calibration_identity = identity,
+                                          .authenticated_calibration = true,
+                                          .calibration_max_age_ns = 1}));
+    stale.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+    auto warmup = stale.acquire_input(1, 0);
+    REQUIRE(warmup);
+    REQUIRE(stale.submit({warmup->token, 0}));
+    REQUIRE(stale.drain(0) == 1);
+    auto done = stale.pop_completion();
+    REQUIRE(done);
+    REQUIRE(stale.discard_completion(*done));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK_FALSE(stale.acquire_input(2, 0));
+    CHECK(stale.telemetry().last_prediction_refusal == SharedIoPredictionRefusal::StaleCalibration);
+    CHECK(stale.telemetry().last_fallback_reason == SharedIoFallbackReason::CalibrationStale);
+    REQUIRE(stale.release());
 }
 
 TEST_CASE("shared IO compute plan classifies completion after bounded wake",

@@ -5,6 +5,59 @@
 
 namespace pulp::gpu_audio::detail {
 
+// A calibration cell is deliberately scalar and immutable.  The caller owns
+// the model/provider hash values; this private packet never opens a model or
+// provider registry and therefore cannot accidentally widen the public ABI.
+struct SharedIoCalibrationIdentity {
+    std::uint64_t model = 0;
+    std::uint32_t block_frames = 0;
+    std::uint32_t lead_blocks = 0;
+    std::uint32_t slots = 0;
+    std::uint32_t batch_width = 0;
+    std::uint64_t policy = 0;
+    std::uint64_t load = 0;
+
+    constexpr bool valid() const noexcept {
+        return model != 0 && block_frames != 0 && lead_blocks != 0 && slots != 0 &&
+               batch_width != 0 && policy != 0 && load != 0;
+    }
+    friend constexpr bool operator==(const SharedIoCalibrationIdentity&,
+                                     const SharedIoCalibrationIdentity&) = default;
+};
+
+enum class SharedIoPredictionRefusal : std::uint8_t {
+    None,
+    Disabled,
+    MissingCalibration,
+    StaleCalibration,
+    DeadlineExpired,
+    BoundExceeded,
+};
+
+struct SharedIoCalibrationObservation {
+    SharedIoCalibrationIdentity identity;
+    std::uint64_t worker_ns = 0;
+    std::uint64_t submitted_ns = 0;
+    std::uint64_t terminal_ns = 0;
+    std::uint64_t visible_ns = 0;
+    std::uint64_t predicted_ns = 0;
+    bool provider_authenticated = false;
+
+    constexpr bool timestamps_synchronized() const noexcept {
+        return worker_ns != 0 && submitted_ns >= worker_ns && terminal_ns >= submitted_ns &&
+               visible_ns >= terminal_ns;
+    }
+    constexpr bool valid() const noexcept {
+        return identity.valid() && provider_authenticated && timestamps_synchronized();
+    }
+    constexpr std::uint64_t execution_ns() const noexcept {
+        return terminal_ns >= submitted_ns ? terminal_ns - submitted_ns : 0;
+    }
+    constexpr bool underestimates() const noexcept {
+        return predicted_ns != 0 && execution_ns() > predicted_ns;
+    }
+};
+
 // Private, allocation-free admission policy for a prepared shared-I/O plan.
 // This is deliberately a conservative wall-clock predictor: until an
 // explicitly enabled policy has enough observations, it never changes the
@@ -24,6 +77,7 @@ class SharedIoExecutionPredictor final {
         std::uint64_t mean_ns = 0;
         std::uint64_t deviation_ns = 0;
         std::uint64_t conservative_ns = 0;
+        std::uint64_t underestimates = 0;
         bool ready = false;
     };
 
@@ -38,6 +92,7 @@ class SharedIoExecutionPredictor final {
         mean_ns_ = 0;
         deviation_ns_ = 0;
         peak_ns_ = 0;
+        underestimates_ = 0;
     }
 
     void observe(std::uint64_t elapsed_ns) noexcept {
@@ -67,6 +122,20 @@ class SharedIoExecutionPredictor final {
             ++samples_;
     }
 
+    void observe(const SharedIoCalibrationObservation& observation) noexcept {
+        if (!observation.valid())
+            return;
+        if (observation.underestimates() && underestimates_ != UINT64_MAX)
+            ++underestimates_;
+        observe(observation.execution_ns());
+    }
+
+    void observe_execution(std::uint64_t elapsed_ns, std::uint64_t predicted_ns) noexcept {
+        if (predicted_ns != 0 && elapsed_ns > predicted_ns && underestimates_ != UINT64_MAX)
+            ++underestimates_;
+        observe(elapsed_ns);
+    }
+
     Estimate estimate() const noexcept {
         Estimate out;
         out.enabled = config_.enabled;
@@ -84,6 +153,7 @@ class SharedIoExecutionPredictor final {
         out.conservative_ns = conservative > max_value - config_.safety_margin_ns
                                   ? max_value
                                   : conservative + config_.safety_margin_ns;
+        out.underestimates = underestimates_;
         out.ready = config_.enabled && samples_ >= config_.minimum_samples;
         return out;
     }
@@ -114,6 +184,7 @@ class SharedIoExecutionPredictor final {
     std::uint64_t mean_ns_ = 0;
     std::uint64_t deviation_ns_ = 0;
     std::uint64_t peak_ns_ = 0;
+    std::uint64_t underestimates_ = 0;
 };
 
 } // namespace pulp::gpu_audio::detail

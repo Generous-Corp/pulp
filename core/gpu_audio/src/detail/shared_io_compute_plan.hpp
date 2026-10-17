@@ -2,6 +2,7 @@
 
 #include "shared_io_arena.hpp"
 #include "shared_io_execution_predictor.hpp"
+#include "shared_io_execution_contract.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -21,11 +22,18 @@ class SharedIoComputePlan {
         std::size_t output_bytes_per_slot = 0;
         SharedIoArenaProvider::StorageKind storage_kind =
             SharedIoArenaProvider::StorageKind::ImportedHostPointer;
+        // Opt-in G3 calibration identity.  The default keeps the existing
+        // private predictor behavior and does not require provider metadata.
+        SharedIoCalibrationIdentity calibration_identity;
+        bool authenticated_calibration = false;
+        std::uint64_t calibration_max_age_ns = 0;
     };
     struct SubmitToken {
         SharedIoSlotLedger::SlotToken slot;
         std::uint64_t deadline_ns = 0;
         std::uint64_t submitted_ns = 0;
+        std::uint64_t worker_ns = 0;
+        std::uint64_t predicted_ns = 0;
     };
     struct Completion {
         SubmitToken token;
@@ -43,7 +51,15 @@ class SharedIoComputePlan {
         std::int64_t terminal_ns = -1;
         std::int64_t service_ns = -1;
         std::int64_t delivery_ns = -1;
+        std::int64_t worker_ns = -1;
+        std::int64_t visible_ns = -1;
         std::int64_t gpu_elapsed_ns = -1;
+        std::uint64_t predicted_ns = 0;
+        SharedIoCalibrationIdentity calibration_identity;
+        bool provider_authenticated = false;
+        bool synchronized = false;
+        bool predictor_underestimate = false;
+        bool stale = false;
         bool terminal = false;
         bool output_acquired = false;
         bool output_released = false;
@@ -62,7 +78,13 @@ class SharedIoComputePlan {
         std::uint64_t high_water_in_flight = 0;
         std::uint64_t prediction_samples = 0;
         std::uint64_t prediction_refusals = 0;
+        std::uint64_t prediction_underestimates = 0;
+        std::uint64_t calibration_rows = 0;
+        std::uint64_t invalid_calibration_rows = 0;
+        std::uint64_t stale_calibration_rows = 0;
         bool prediction_enabled = false;
+        SharedIoPredictionRefusal last_prediction_refusal = SharedIoPredictionRefusal::None;
+        SharedIoFallbackReason last_fallback_reason = SharedIoFallbackReason::None;
         // The shared Dawn provider has no timestamp-query/occupancy certificate yet.
         bool gpu_timing_available = false;
         bool occupancy_available = false;
@@ -96,6 +118,9 @@ class SharedIoComputePlan {
     }
     std::optional<SharedIoArena::WriteLease> acquire_input(std::uint64_t sequence,
                                                            std::uint64_t deadline_ns) noexcept;
+    void record_cpu_fallback(SharedIoFallbackReason reason) noexcept {
+        telemetry_.last_fallback_reason = reason;
+    }
     bool submit(const SubmitToken& token) noexcept;
     // A pre-submit refusal must return the write lease to the fixed ledger.
     bool cancel(const SubmitToken& token) noexcept;
@@ -109,6 +134,31 @@ class SharedIoComputePlan {
             return {};
         std::vector<LifecycleReceipt> result(lifecycle_receipts_.begin(),
                                              lifecycle_receipts_.end());
+        lifecycle_receipts_.clear();
+        return result;
+    }
+    std::vector<SharedIoCalibrationObservation> take_calibration_observations() {
+        if (!arena_.quiescent())
+            return {};
+        std::vector<SharedIoCalibrationObservation> result;
+        result.reserve(lifecycle_receipts_.size());
+        for (const auto& receipt : lifecycle_receipts_) {
+            SharedIoCalibrationObservation observation;
+            observation.identity = receipt.calibration_identity;
+            observation.worker_ns =
+                receipt.worker_ns > 0 ? static_cast<std::uint64_t>(receipt.worker_ns) : 0;
+            observation.submitted_ns =
+                receipt.submit_ns > 0 ? static_cast<std::uint64_t>(receipt.submit_ns) : 0;
+            observation.terminal_ns =
+                receipt.terminal_ns > 0 ? static_cast<std::uint64_t>(receipt.terminal_ns) : 0;
+            observation.visible_ns =
+                receipt.visible_ns > 0 ? static_cast<std::uint64_t>(receipt.visible_ns) : 0;
+            observation.predicted_ns = receipt.predicted_ns;
+            observation.provider_authenticated = receipt.provider_authenticated;
+            if (!observation.valid())
+                ++telemetry_.invalid_calibration_rows;
+            result.push_back(observation);
+        }
         lifecycle_receipts_.clear();
         return result;
     }
@@ -154,6 +204,11 @@ class SharedIoComputePlan {
     SharedIoArena arena_;
     SharedIoArenaProvider* provider_ = nullptr;
     SharedIoExecutionPredictor predictor_;
+    SharedIoCalibrationIdentity calibration_identity_;
+    bool authenticated_calibration_ = false;
+    std::uint64_t calibration_max_age_ns_ = 0;
+    bool provider_authenticated_ = false;
+    std::uint64_t last_calibration_ns_ = 0;
     std::vector<Pending> pending_;
     std::vector<Completion> completions_;
     std::vector<LifecycleReceipt> lifecycle_receipts_;
