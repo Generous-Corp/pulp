@@ -100,7 +100,11 @@ def check(bundle: pathlib.Path) -> list[str]:
                 continue
             if info.get("schema") != "pulp.build-info.v1":
                 problems.append(f"{bundle.name}: {build_info.name} has the wrong schema")
-            libraries = info.get("bundled_runtime_libraries", [])
+            if "bundled_runtime_libraries" not in info:
+                problems.append(
+                    f"{bundle.name}: {build_info.name} is missing bundled_runtime_libraries")
+                continue
+            libraries = info["bundled_runtime_libraries"]
             if not isinstance(libraries, list):
                 problems.append(
                     f"{bundle.name}: bundled_runtime_libraries must be a JSON list")

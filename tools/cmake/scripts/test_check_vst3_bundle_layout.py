@@ -45,6 +45,14 @@ class WindowsVst3BundleLayoutTest(unittest.TestCase):
         (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").unlink()
         self.assertTrue(any("Probe.pulp-build-info.json" in problem for problem in check(bundle)))
 
+    def test_missing_runtime_library_list_fails_closed(self) -> None:
+        _root, bundle = self.make_bundle()
+        (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
+            json.dumps({"schema": "pulp.build-info.v1"}), encoding="utf-8"
+        )
+        self.assertTrue(any("missing bundled_runtime_libraries" in problem
+                            for problem in check(bundle)))
+
     def test_top_level_array_fails_diagnostically(self) -> None:
         _root, bundle = self.make_bundle()
         (bundle / "Contents" / "x86_64-win" / "Probe.pulp-build-info.json").write_text(
