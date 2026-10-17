@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 73,
+  "manifest_revision": 74,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -16061,6 +16061,7 @@
             "methods": [
               "done()",
               "begin_forward_from_ring(const SampleType* ring, std::size_t base, std::size_t mask)",
+              "begin_forward_in_place()",
               "begin_inverse_in_place()",
               "cancel()",
               "advance(const SlicedFftPlanT& plan, std::complex<SampleType>* data, long budget)"
