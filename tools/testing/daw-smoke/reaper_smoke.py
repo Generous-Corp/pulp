@@ -86,6 +86,12 @@ from typing import NamedTuple
 
 EXIT_PASS, EXIT_FAIL, EXIT_SKIP, EXIT_INCONCLUSIVE = 0, 1, 2, 3
 
+# REAPER can publish a plugin-cache entry before its scanner has finished
+# committing the descriptor.  A second launch immediately after that publish
+# races the scanner and can report FX_NOT_FOUND.  Keep this short and bounded;
+# it only applies after the target entry is visible.
+PREWARM_CACHE_SETTLE_SECONDS = 2.0
+
 HERE = Path(__file__).resolve().parent
 LUA = HERE / "insert_and_float.lua"
 SEQ_LOOP_LUA = HERE / "sequence_loop_seek.lua"
@@ -391,25 +397,38 @@ class ReaperSession:
         # durable. The scripted launch then starts the same scan from scratch
         # and never reaches the startup Lua. Wait until the target is visible
         # in a plugin cache (bounded by the ordinary mode timeout) instead.
-        warm_deadline = time.time() + self.args.timeout
+        # AU descriptors are registered with AudioComponentRegistrar and do
+        # not appear in REAPER's CLAP/VST cache files. Waiting for those files
+        # makes every AU run burn the whole timeout before the scripted launch.
         target = self.args.plugin_name.casefold()
-        cache_ready = False
-        while time.time() < warm_deadline:
-            time.sleep(0.5)
-            caches = list(self.portable.glob("reaper-*clap*.ini"))
-            caches.extend(self.portable.glob("reaper-*vst*.ini"))
-            for cache in caches:
-                try:
-                    if target in cache.read_text(errors="replace").casefold():
-                        cache_ready = True
-                        break
-                except OSError:
-                    continue
-            if cache_ready:
-                break
+        cache_ready = getattr(self.args, "format", None) == "au"
+        if cache_ready:
+            time.sleep(PREWARM_CACHE_SETTLE_SECONDS)
+        else:
+            warm_deadline = time.time() + self.args.timeout
+            while time.time() < warm_deadline:
+                time.sleep(0.5)
+                caches = list(self.portable.glob("reaper-*clap*.ini"))
+                caches.extend(self.portable.glob("reaper-*vst*.ini"))
+                for cache in caches:
+                    try:
+                        if target in cache.read_text(errors="replace").casefold():
+                            cache_ready = True
+                            break
+                    except OSError:
+                        continue
+                if cache_ready:
+                    break
         if not cache_ready:
             log("pre-warm scan did not publish the target into REAPER's plugin "
                 "cache before timeout; scripted launch may remain inconclusive.")
+        else:
+            # The cache write is not the scanner's completion signal.  Give
+            # REAPER one settle window to finish publishing the descriptor
+            # before stopping the warm process and launching the scripted one.
+            # Without this, fresh CLAP scans intermittently produce
+            # FX_NOT_FOUND even though the cache already contains the target.
+            time.sleep(PREWARM_CACHE_SETTLE_SECONDS)
         stop_reaper_process(warm)
 
         with open(self.reaper_out, "a") as out:

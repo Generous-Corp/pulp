@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/check-pulp-cli.sh\" --session-start'",
+            "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/check-pulp-cli.sh\" ] || exit 0; cd \"$root\" && exec bash \"$root/hooks/scripts/check-pulp-cli.sh\" --session-start'",
             "timeout": 3000
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/shell-portability-hint.sh\"'",
+            "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/shell-portability-hint.sh\" ] || exit 0; cd \"$root\" && exec bash \"$root/hooks/scripts/shell-portability-hint.sh\"'",
             "timeout": 3000
           }
         ]
@@ -31,12 +31,12 @@
         "hooks": [
           {
             "type": "command",
-          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/docs-reminder.sh\"'",
+          "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/docs-reminder.sh\" ] || exit 0; cd \"$root\" && exec bash \"$root/hooks/scripts/docs-reminder.sh\"'",
             "timeout": 3000
           },
           {
             "type": "command",
-          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/cli-plugin-sync.sh\"'",
+          "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/cli-plugin-sync.sh\" ] || exit 0; cd \"$root\" && exec bash \"$root/hooks/scripts/cli-plugin-sync.sh\"'",
             "timeout": 10000
           }
         ]

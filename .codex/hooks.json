@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/shell-portability-hint.sh\"'",
+            "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/shell-portability-hint.sh\" ] || exit 0; cd \"$root\" && exec bash \"$root/hooks/scripts/shell-portability-hint.sh\"'",
             "timeout": 3000
           }
         ]
@@ -32,22 +32,22 @@
         "hooks": [
           {
             "type": "command",
-          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/decisions-contract-pointer.sh\"'",
+          "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/decisions-contract-pointer.sh\" ] || exit 0; cd \"$root\" && exec bash \"$root/hooks/scripts/decisions-contract-pointer.sh\"'",
             "timeout": 3000
           },
           {
             "type": "command",
-          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/inject-worktree-lineage.sh\"'",
+          "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/inject-worktree-lineage.sh\" ] || exit 0; cd \"$root\" && exec bash \"$root/hooks/scripts/inject-worktree-lineage.sh\"'",
             "timeout": 3000
           },
           {
             "type": "command",
-          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/check-pulp-cli.sh\" --session-start'",
+          "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/check-pulp-cli.sh\" ] || exit 0; cd \"$root\" && exec bash \"$root/hooks/scripts/check-pulp-cli.sh\" --session-start'",
             "timeout": 3000
           },
           {
             "type": "command",
-          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" || exit 0; py=\"$(command -v python3 2>/dev/null || true)\"; [ -x \"$py\" ] || { for candidate_py in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do [ -x \"$candidate_py\" ] && py=\"$candidate_py\" && break; done; }; [ -x \"$py\" ] || exit 0; \"$py\" \"$root/hooks/scripts/claude_md_sync.py\" --hook-json || true; exit 0'",
+          "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/claude_md_sync.py\" ] || exit 0; cd \"$root\" && exec /usr/bin/python3 \"$root/hooks/scripts/claude_md_sync.py\" --hook-json'",
             "timeout": 3000
           }
         ]
@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/decisions-contract-hint.sh\"'",
+          "command": "/bin/bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; [ -f \"$root/hooks/scripts/decisions-contract-hint.sh\" ] || exit 0; cd \"$root\" && exec bash \"$root/hooks/scripts/decisions-contract-hint.sh\"'",
             "timeout": 3000
           }
         ]
