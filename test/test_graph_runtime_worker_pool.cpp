@@ -43,6 +43,47 @@ struct FallbackJoinProbe {
     std::atomic<bool> succeed{true};
 };
 
+struct SchedulingReceiptProbe {
+    std::atomic<std::uint32_t> published{0};
+    std::atomic<std::uint32_t> worker_admissions{0};
+    std::atomic<std::uint32_t> inline_fallbacks{0};
+    std::atomic<std::uint32_t> invalid_generations{0};
+    std::atomic<std::uint64_t> published_generation{0};
+    std::atomic<std::uint64_t> published_ns{0};
+    std::atomic<std::uint64_t> first_worker_ns{0};
+    std::atomic<std::uint32_t> worker_mask{0};
+};
+
+void record_scheduling_receipt(const GraphRuntimeWorkerPool::SchedulingReceipt& receipt,
+                               void* context) noexcept {
+    auto* probe = static_cast<SchedulingReceiptProbe*>(context);
+    switch (receipt.phase) {
+    case GraphRuntimeWorkerPool::SchedulingReceiptPhase::Published: {
+        probe->published.fetch_add(1, std::memory_order_relaxed);
+        probe->published_generation.store(receipt.generation, std::memory_order_release);
+        auto first_publication_ns = std::uint64_t{0};
+        probe->published_ns.compare_exchange_strong(first_publication_ns, receipt.timestamp_ns,
+                                                    std::memory_order_release);
+        break;
+    }
+    case GraphRuntimeWorkerPool::SchedulingReceiptPhase::WorkerAdmission: {
+        probe->worker_admissions.fetch_add(1, std::memory_order_relaxed);
+        const auto expected = probe->published_generation.load(std::memory_order_acquire);
+        if (receipt.generation != expected ||
+            receipt.timestamp_ns < probe->published_ns.load(std::memory_order_acquire))
+            probe->invalid_generations.fetch_add(1, std::memory_order_relaxed);
+        auto first = std::uint64_t{0};
+        probe->first_worker_ns.compare_exchange_strong(first, receipt.timestamp_ns,
+                                                       std::memory_order_relaxed);
+        probe->worker_mask.fetch_or(1u << receipt.worker_index, std::memory_order_relaxed);
+        break;
+    }
+    case GraphRuntimeWorkerPool::SchedulingReceiptPhase::InlineFallback:
+        probe->inline_fallbacks.fetch_add(1, std::memory_order_relaxed);
+        break;
+    }
+}
+
 bool fallback_join_probe(void* context) noexcept {
     auto* probe = static_cast<FallbackJoinProbe*>(context);
     probe->attempts.fetch_add(1, std::memory_order_relaxed);
@@ -184,6 +225,54 @@ TEST_CASE("WorkerPool runs every task in a batch exactly once",
         }
         pool.stop();
     }
+}
+
+TEST_CASE("WorkerPool receipt binds static ready frontiers to worker admission",
+          "[format][worker-pool][scheduling]") {
+    GraphRuntimeWorkerPool pool;
+    SchedulingReceiptProbe probe;
+    pool.set_scheduling_receipt_hook_for_test(record_scheduling_receipt, &probe);
+    pool.set_audio_workgroup(nullptr);
+    REQUIRE(pool.start(4));
+
+    // Each call models one dependency-ready frontier from the existing
+    // levelized executor. The pool remains a static fork/join executor; this
+    // test only proves the publication-to-admission identity at that seam.
+    SquareCtx first;
+    first.out.assign(32, 0);
+    pool.run(32, square_task, &first);
+    SquareCtx second;
+    second.out.assign(8, 0);
+    pool.run(8, square_task, &second);
+
+    CHECK(probe.published.load(std::memory_order_relaxed) == 2);
+    CHECK(probe.worker_admissions.load(std::memory_order_relaxed) >= 8);
+    CHECK(probe.inline_fallbacks.load(std::memory_order_relaxed) == 0);
+    CHECK(probe.invalid_generations.load(std::memory_order_relaxed) == 0);
+    CHECK(probe.first_worker_ns.load(std::memory_order_relaxed) >=
+          probe.published_ns.load(std::memory_order_relaxed));
+    CHECK(probe.worker_mask.load(std::memory_order_relaxed) == 0x0Fu);
+    pool.stop();
+}
+
+TEST_CASE("WorkerPool receipt records bounded inline fallback under cold contention",
+          "[format][worker-pool][scheduling][contention]") {
+    SchedulingReceiptProbe probe;
+    FallbackJoinProbe fallback;
+    fallback.succeed.store(false, std::memory_order_relaxed);
+    GraphRuntimeWorkerPool pool;
+    pool.set_fallback_join_hook_for_test(fallback_join_probe, &fallback);
+    pool.set_scheduling_receipt_hook_for_test(record_scheduling_receipt, &probe);
+    REQUIRE(pool.start(4));
+    REQUIRE_FALSE(pool.prepare_audio_workgroup_for_render());
+
+    SquareCtx ctx;
+    ctx.out.assign(64, 0);
+    pool.run(64, square_task, &ctx);
+    CHECK(ctx.runs.load(std::memory_order_relaxed) == 64);
+    CHECK(probe.inline_fallbacks.load(std::memory_order_relaxed) >= 1);
+    CHECK(probe.invalid_generations.load(std::memory_order_relaxed) == 0);
+    pool.stop();
 }
 
 TEST_CASE("WorkerPool reuses the pool across many batches without races",
