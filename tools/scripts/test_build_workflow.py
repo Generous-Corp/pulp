@@ -58,14 +58,17 @@ class WgpuNativeDiagnosticWorkflowTest(unittest.TestCase):
         self.assertEqual(dispatch["type"], "boolean")
         self.assertIs(dispatch["default"], True)
 
-    def test_unavailable_runtime_is_a_failed_advisory_run(self) -> None:
-        self.assertNotIn("SKIP_RETURN_CODE 77", self.text)
-        self.assertNotIn("skip", self.text.lower().split("Run diagnostic", 1)[-1])
-        self.assertIn("diagnostic did not produce a passing verifier result", self.text)
+    def test_unavailable_runtime_is_a_typed_advisory_skip(self) -> None:
+        self.assertIn('"status": "provider_unavailable"', self.text)
+        self.assertIn('"reason": "provider_unavailable"', self.text)
         self.assertIn("test -s \"$receipt\"", self.text)
 
     def test_receipt_checks_preserve_typed_callback_scope(self) -> None:
         for field in (
+            '"status": "provider_unavailable"',
+            '"device_loss_callback": "unavailable"',
+            '"device_loss_proof": "unavailable"',
+            '"device_loss_no_output_leases": "unavailable"',
             '"status": "passed"',
             '"device_loss_callback": "registered"',
             '"device_loss_scenario": "triggered"',

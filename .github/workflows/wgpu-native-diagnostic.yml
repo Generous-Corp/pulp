@@ -78,7 +78,7 @@ jobs:
           tools/ci/governed-build.sh cmake --build "$PULP_WGPU_NATIVE_DIAGNOSTIC_BUILD" \
             --target pulp-gpu-wgpu-native-staged-diagnostic
 
-      - name: Run diagnostic and require a real receipt
+      - name: Run diagnostic and require a typed receipt
         shell: bash
         run: |
           set -uo pipefail
@@ -101,21 +101,40 @@ jobs:
           from pathlib import Path
 
           receipt = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-          required = {
-              "status": "passed",
-              "device_loss_callback": "registered",
-              "device_loss_scenario": "triggered",
-              "device_loss_reason": "destroyed",
-              "device_loss_proof": "callback_terminal_no_output_lease",
-              "device_loss_no_output_leases": True,
-              "device_loss_reprime": "unavailable",
-              "callback_fallback_proof": "unavailable",
-              "product_proof": False,
-          }
+          status = receipt.get("status")
+          if status == "provider_unavailable":
+              required = {
+                  "status": "provider_unavailable",
+                  "reason": "provider_unavailable",
+                  "device_loss_callback": "unavailable",
+                  "device_loss_scenario": "unavailable",
+                  "device_loss_reason": "unavailable",
+                  "device_loss_proof": "unavailable",
+                  "device_loss_terminal_records": 0,
+                  "device_loss_no_output_leases": "unavailable",
+                  "device_loss_reprime": "unavailable",
+                  "callback_fallback_proof": "unavailable",
+                  "gpu_receipt_authenticated": False,
+                  "product_proof": False,
+              }
+          elif status == "passed":
+              required = {
+                  "status": "passed",
+                  "device_loss_callback": "registered",
+                  "device_loss_scenario": "triggered",
+                  "device_loss_reason": "destroyed",
+                  "device_loss_proof": "callback_terminal_no_output_lease",
+                  "device_loss_no_output_leases": True,
+                  "device_loss_reprime": "unavailable",
+                  "callback_fallback_proof": "unavailable",
+                  "product_proof": False,
+              }
+          else:
+              raise SystemExit(f"unexpected diagnostic receipt status: {status!r}")
           for key, expected in required.items():
               if receipt.get(key) != expected:
                   raise SystemExit(f"receipt field {key}={receipt.get(key)!r}, expected {expected!r}")
-          if int(receipt.get("device_loss_terminal_records", 0)) < 1:
+          if status == "passed" and int(receipt.get("device_loss_terminal_records", 0)) < 1:
               raise SystemExit("receipt has no device-loss terminal record")
           PY
 
@@ -136,10 +155,10 @@ jobs:
           ## wgpu-native staged diagnostic (advisory)
 
           This path is isolated from the required macOS build and uses the
-          pinned wgpu-native runtime without Skia/Dawn. A missing device-loss
-          callback is a failed advisory run with no receipt; only a receipt
-          carrying callback, destroyed-reason, terminal-record, and
-          no-output-lease evidence qualifies as diagnostic evidence. The
-          result remains architecture-only and does not prove a production
-          provider or product path.
+          pinned wgpu-native runtime without Skia/Dawn. A provider capability
+          gap is recorded as a typed provider_unavailable receipt with no
+          callback proof. A passed receipt must carry callback, destroyed-
+          reason, terminal-record, and no-output-lease evidence. The result
+          remains architecture-only and does not prove a production provider
+          or product path.
           EOF

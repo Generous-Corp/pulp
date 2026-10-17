@@ -105,6 +105,39 @@ def validate_loss_evidence(observed: dict[str, str]) -> int:
     return int(records)
 
 
+def provider_unavailable_receipt(
+    version: str,
+    manifest_sha256: str,
+    pinned_tree_sha256: str,
+    loaded_runtime_sha256: str,
+    executable_sha256: str,
+) -> dict:
+    """Describe an expected provider capability gap without loss evidence."""
+    return {
+        "schema": "pulp.gpu-audio.wgpu-native-staged-diagnostic.v1",
+        "status": "provider_unavailable",
+        "reason": "provider_unavailable",
+        "claim": "no_diagnostic_evidence",
+        "provider_identity_status": "runtime_image_bound_adapter_auth_unavailable",
+        "gpu_receipt_authenticated": False,
+        "provider_version": version,
+        "manifest_sha256": manifest_sha256,
+        "pinned_tree_sha256": pinned_tree_sha256,
+        "loaded_runtime_sha256": loaded_runtime_sha256,
+        "executable_sha256": executable_sha256,
+        "device_loss_callback": "unavailable",
+        "device_loss_scenario": "unavailable",
+        "device_loss_reason": "unavailable",
+        "device_loss_proof": "unavailable",
+        "device_loss_terminal_records": 0,
+        "device_loss_no_output_leases": "unavailable",
+        "device_loss_reprime": "unavailable",
+        "callback_fallback_proof": "unavailable",
+        "gpu_timestamps": "unavailable",
+        "product_proof": False,
+    }
+
+
 def verify(args: argparse.Namespace) -> dict:
     manifest = Path(args.manifest).resolve(strict=True)
     source_tree = Path(args.source_tree).resolve(strict=True)
@@ -137,9 +170,14 @@ def verify(args: argparse.Namespace) -> dict:
             partial = partial.decode(errors="replace")
         raise ValueError(f"diagnostic_timeout_30s: {partial.strip()}") from exc
     run = subprocess.CompletedProcess([str(executable)], process.returncode, stdout, stderr)
-    if diagnostic_exit_disposition(run.returncode) == "provider_unavailable":
-        raise RuntimeError("provider_unavailable")
-    if diagnostic_exit_disposition(run.returncode) != "passed":
+    disposition = diagnostic_exit_disposition(run.returncode)
+    if disposition == "provider_unavailable":
+        if (digest(manifest) != manifest_before or digest(linked_runtime) != runtime_before or
+                digest(executable) != executable_before or tree_digest(source_tree) != expected_tree):
+            raise ValueError("identity_changed_during_diagnostic")
+        return provider_unavailable_receipt(
+            version, manifest_before, expected_tree, runtime_before, executable_before)
+    if disposition != "passed":
         raise ValueError(f"diagnostic_failed_{run.returncode}: {run.stderr.strip()}")
     observed = parse_output(run.stdout)
     if Path(observed["loaded_runtime_path"]).resolve(strict=True) != linked_runtime:
@@ -208,7 +246,7 @@ def main() -> int:
     encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
     Path(args.receipt).write_text(encoded, encoding="utf-8")
     print(encoded, end="")
-    return 0
+    return PROVIDER_UNAVAILABLE_EXIT if receipt["status"] == "provider_unavailable" else 0
 
 
 if __name__ == "__main__":

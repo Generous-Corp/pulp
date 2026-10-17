@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from verify_wgpu_native_staged import (diagnostic_exit_disposition, parse_output,
+                                       provider_unavailable_receipt,
                                        validate_loss_evidence)
 
 
@@ -30,6 +31,18 @@ def main() -> int:
         if diagnostic_exit_disposition(returncode) != expected:
             print(f"typed exit disposition control failed: {returncode}", file=sys.stderr)
             return 1
+    unavailable = provider_unavailable_receipt(
+        "v24.0.3.1", "a" * 64, "b" * 64, "c" * 64, "d" * 64)
+    if (unavailable["status"] != "provider_unavailable" or
+            unavailable["reason"] != "provider_unavailable" or
+            unavailable["device_loss_callback"] != "unavailable" or
+            unavailable["device_loss_proof"] != "unavailable" or
+            unavailable["device_loss_terminal_records"] != 0 or
+            unavailable["device_loss_no_output_leases"] != "unavailable" or
+            unavailable["gpu_receipt_authenticated"] is not False or
+            unavailable["product_proof"] is not False):
+        print("typed provider-unavailable receipt control failed", file=sys.stderr)
+        return 1
     valid = parse_output(
         "device_loss_callback=registered device_loss_scenario=triggered "
         "device_loss_reason=destroyed device_loss_terminal_records=1 "

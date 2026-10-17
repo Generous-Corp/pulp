@@ -24,7 +24,8 @@
                 --receipt "${CMAKE_CURRENT_BINARY_DIR}/wgpu-native-staged-receipt.json")
         set_tests_properties(pulp-gpu-wgpu-native-staged-diagnostic PROPERTIES
             RESOURCE_LOCK pulp_gpu
-            TIMEOUT 60)
+            TIMEOUT 60
+            SKIP_RETURN_CODE 77)
         add_test(NAME pulp-gpu-wgpu-native-staged-identity-negative-control
             COMMAND "${Python3_EXECUTABLE}"
                 "${PROJECT_SOURCE_DIR}/tools/diagnostics/test_verify_wgpu_native_staged.py"
