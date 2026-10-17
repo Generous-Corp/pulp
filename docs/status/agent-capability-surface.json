@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 139,
+  "inventory_version": 140,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 506,
-    "reviewed_headers": 230,
-    "legacy_unreviewed_headers": 276,
+    "reviewed_headers": 231,
+    "legacy_unreviewed_headers": 275,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 61,
-      "legacy_unreviewed": 276,
+      "infrastructure": 62,
+      "legacy_unreviewed": 275,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 273,
-        "reviewed_headers": 128,
-        "legacy_unreviewed_headers": 145,
+        "reviewed_headers": 129,
+        "legacy_unreviewed_headers": 144,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -4218,11 +4218,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/scoped_flush_denormals.hpp",
-      "fingerprint": "sha256:989e43be3e1f6f2f806f3896116b98f21e6959fda976530659ccf4f7d99c6e16",
+      "fingerprint": "sha256:c394e664d37399ccc736a32dda40b6bae5b2883c8fc5a76f45f8b6d6361c1482",
       "include": "pulp/signal/scoped_flush_denormals.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "ScopedFlushDenormals is numeric-mode infrastructure for processor audio boundaries. It does not expose a standalone generator capability; the Windows MSVC include ordering is part of that shared implementation contract."
     },
     {
       "domain": "signal",

@@ -50,6 +50,11 @@
 
 #if defined(__x86_64__) || defined(_M_X64)
 #define PULP_FLUSH_DENORMALS_X86 1
+#if defined(_MSC_VER)
+// MSVC requires the intrinsic declarations header before the SSE headers,
+// including when compiling the x64 slice of an ARM64EC translation unit.
+#include <intrin.h>
+#endif
 #include <pmmintrin.h>  // DAZ (SSE3 intrinsics header; also pulls SSE)
 #include <xmmintrin.h>  // FTZ + MXCSR access
 #elif (defined(__aarch64__) || defined(_M_ARM64)) && defined(__GNUC__)
