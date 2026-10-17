@@ -180,8 +180,7 @@ float whammy_worst_case_gain(double sample_rate);
 /// needs to align a whammy branch against a dry one has to read this and
 /// compensate itself. Computed by the shipped block rather than by repeating
 /// its expression here.
-int whammy_latency_samples(double sample_rate,
-                           double window_ms = Shifter::kWindowMsDefault);
+int whammy_latency_samples(double sample_rate, double window_ms = Shifter::kWindowMsDefault);
 
 /// The conventional dry/wet default for a mode, for the PRESET layer.
 /// Deliberately not applied when the `pedal_mode` param moves — see the note at
