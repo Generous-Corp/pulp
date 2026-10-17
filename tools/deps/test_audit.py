@@ -924,6 +924,81 @@ class UpstreamLatestDetectionTests(unittest.TestCase):
                 ["refs/tags/v2017.02.07.00", "refs/tags/v3.2.1", "refs/tags/v3.1.0"]),
             "v3.2.1")
 
+    def test_tag_pattern_ignores_another_projects_tags(self) -> None:
+        """jdx/mise also tags sub-crates. Its real releases are year-shaped, so
+        the date filter drops all of them and `mise-sigstore-v0.1.0` would win
+        unless the upstream's own tag pattern restricts the scan."""
+        refs = ["refs/tags/mise-sigstore-v0.1.0", "refs/tags/v2026.10.12",
+                "refs/tags/v2026.10.8", "refs/tags/vfox-v1.4.0",
+                # A sub-crate on its own calendar version, newer than mise's.
+                "refs/tags/aqua-registry-v2026.11.0"]
+        self.assertEqual(
+            audit.latest_semver_tag_from_refs(refs, r"v\d{4}\.\d{1,2}\.\d{1,3}"),
+            "v2026.10.12")
+        self.assertNotIn(audit.latest_semver_tag_from_refs(refs), ("v2026.10.12", "v2026.10.8"))
+
+    def test_tag_pattern_rejects_a_sub_crate_release_from_the_api(self) -> None:
+        dep = {"repository": "https://github.com/jdx/mise",
+               "upstream": {"kind": "git-tag", "ref": "v2026.10.11",
+                            "tag_pattern": r"v\d{4}\.\d{1,2}\.\d{1,3}"}}
+        refs = "\n".join(f"sha\trefs/tags/{t}" for t in
+                         ("mise-sigstore-v0.1.0", "aqua-registry-v2026.11.0",
+                          "v2026.10.11", "v2026.10.12"))
+        with unittest.mock.patch.object(audit, "github_latest_release",
+                                        return_value="mise-sigstore-v0.1.0"), \
+             unittest.mock.patch.object(audit, "run_git_ls_remote",
+                                        side_effect=["sha\trefs/tags/v2026.10.11", refs]):
+            self.assertEqual(
+                audit.upstream_status(dep),
+                "present; latest=v2026.10.12 (tag-order guess; releases API answer "
+                "mise-sigstore-v0.1.0 is outside tag_pattern)")
+
+    def test_tag_pattern_must_match_the_whole_tag(self) -> None:
+        """A tag that only starts like a release (`v2026.10.13x`) is not one."""
+        refs = ["refs/tags/v2026.10.12", "refs/tags/v2026.10.13x",
+                "refs/tags/xv2026.10.14"]
+        self.assertEqual(
+            audit.latest_semver_tag_from_refs(refs, r"v\d{4}\.\d{1,2}\.\d{1,3}"),
+            "v2026.10.12")
+
+    def test_api_answer_must_match_the_whole_tag_pattern(self) -> None:
+        dep = {"repository": "https://github.com/jdx/mise",
+               "upstream": {"kind": "git-tag", "ref": "v2026.10.11",
+                            "tag_pattern": r"v\d{4}\.\d{1,2}\.\d{1,3}"}}
+        refs = "\n".join(f"sha\trefs/tags/{t}" for t in ("v2026.10.11", "v2026.10.12"))
+        with unittest.mock.patch.object(audit, "github_latest_release",
+                                        return_value="v2026.10.13x"), \
+             unittest.mock.patch.object(audit, "run_git_ls_remote",
+                                        side_effect=["sha\trefs/tags/v2026.10.11", refs]):
+            self.assertTrue(audit.upstream_status(dep).startswith("present; latest=v2026.10.12 "))
+
+    def test_an_invalid_tag_pattern_fails_only_its_own_row(self) -> None:
+        dep = {"repository": "https://github.com/jdx/mise",
+               "upstream": {"kind": "git-tag", "ref": "v2026.10.11", "tag_pattern": "v(\\d"}}
+        with unittest.mock.patch.object(audit, "github_latest_release",
+                                        return_value="v2026.10.12"), \
+             unittest.mock.patch.object(audit, "run_git_ls_remote",
+                                        return_value="sha\trefs/tags/v2026.10.11"):
+            status = audit.upstream_status(dep)
+        self.assertTrue(status.startswith("present; invalid tag_pattern: "), status)
+
+    def test_tag_pattern_holds_when_the_releases_api_is_unavailable(self) -> None:
+        """The fallback the year filter broke for mise: with the API down, the
+        tag order alone has to find the project's own latest release."""
+        dep = {"repository": "https://github.com/jdx/mise",
+               "upstream": {"kind": "git-tag", "ref": "v2026.10.11",
+                            "tag_pattern": r"v\d{4}\.\d{1,2}\.\d{1,3}"}}
+        refs = "\n".join(f"sha\trefs/tags/{t}" for t in
+                         ("mise-sigstore-v0.1.0", "aqua-registry-v2026.11.0",
+                          "v2026.10.11", "v2026.10.12"))
+        with unittest.mock.patch.object(audit, "github_latest_release",
+                                        side_effect=audit.ReleaseLookupUnavailable("403")), \
+             unittest.mock.patch.object(audit, "run_git_ls_remote",
+                                        side_effect=["sha\trefs/tags/v2026.10.11", refs]):
+            self.assertEqual(
+                audit.upstream_status(dep),
+                "present; latest=v2026.10.12 (tag-order guess; releases API unavailable: 403)")
+
     def test_highest_real_release_wins(self) -> None:
         self.assertEqual(
             audit.latest_semver_tag_from_refs(

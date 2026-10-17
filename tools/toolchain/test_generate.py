@@ -196,7 +196,13 @@ class StrictPinTests(unittest.TestCase):
         rows = [d for d in inventory["dependencies"] if d["name"] == "mise"]
         self.assertEqual(1, len(rows))
         self.assertEqual(version, rows[0]["version"])
-        self.assertEqual({"kind": "git-tag", "ref": f"v{version}"}, rows[0]["upstream"])
+        upstream = rows[0]["upstream"]
+        self.assertEqual("git-tag", upstream["kind"])
+        self.assertEqual(f"v{version}", upstream["ref"])
+        # jdx/mise also tags sub-crates, so the audit only trusts tags matching
+        # mise's own release pattern; the pinned tag must be one of them.
+        self.assertEqual(r"v\d{4}\.\d{1,2}\.\d{1,3}", upstream["tag_pattern"])
+        self.assertRegex(upstream["ref"], f"^(?:{upstream['tag_pattern']})$")
 
     def test_rust_is_not_a_mise_tool(self) -> None:
         source = generate.SOURCE.read_text(encoding="utf-8")
