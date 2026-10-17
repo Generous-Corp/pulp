@@ -16,6 +16,10 @@ performance from the control alone. Structural claims require the authenticated
 same-trace native receipts and identity/lifecycle evidence defined by the
 planning trace matrix.
 
+The rebuild control must replay the complete fixture state, including secondary
+meter state such as the `peak` value; matching only a primary value changes the
+rendered workload and invalidates retained-versus-rebuild comparisons.
+
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
 ### Materialized browser source emission
