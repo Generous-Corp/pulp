@@ -665,7 +665,8 @@ jobs:
               wait "${cov}" 2>/dev/null || true
               exit 1
             fi
-          else
+          elif [ "${RUNNER_OS}" = "Linux" ]; then
+            # Hosted Linux only; macOS keeps its launch line below unchanged.
             # No core files: a crashing instrumented binary can write gigabytes
             # of core in seconds (core_pattern also points at /mnt on hosted
             # Linux, for anything that ignores this limit).
@@ -679,6 +680,9 @@ jobs:
             suite_log="build-coverage/coverage-suite.log"
             python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
               bash scripts/run_coverage.sh "${coverage_args[@]}" > "${suite_log}" 2>&1 & cov=$!
+          else
+            python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+              bash scripts/run_coverage.sh "${coverage_args[@]}" & cov=$!
           fi
           terminate_coverage_tree() {
             if [ "${RUNNER_OS}" = "Windows" ]; then
@@ -694,10 +698,12 @@ jobs:
           # before the job cap is the entire point. The marker is best-effort; the
           # kill is mandatory.
           # Disk evidence: a hosted runner that fills its disk dies without a
-          # log, so print free space and the largest writers every 5 minutes
-          # while the suite runs.
+          # log, so the sampler below tracks free space, memory and the largest
+          # writers while the suite runs.
           sampler=""
-          if [ "${RUNNER_OS}" != "Windows" ]; then
+          # Hosted Linux only: the 3 GiB guard stops the suite, and the macOS leg
+          # already runs close to full.
+          if [ "${RUNNER_OS}" = "Linux" ]; then
             # A runner that fills its root disk dies mid-step, and a step that
             # never ends uploads neither its log nor its annotations. So below
             # 3 GiB free on root the sampler prints what is using root and
@@ -807,7 +813,7 @@ jobs:
       - name: Upload coverage suite output
         # The suite's full output, kept off the runner's log (see the coverage
         # step). Uploaded even when the suite failed.
-        if: always() && matrix.os != 'windows'
+        if: always() && matrix.os == 'linux'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-suite-log-${{ matrix.os }}-${{ github.sha }}

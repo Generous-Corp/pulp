@@ -620,7 +620,9 @@ and, when the runner's separate `/mnt` scratch disk has more room than root,
 makes `build-coverage` a symlink to `/mnt/build-coverage`. The instrumented
 objects and every raw profile then live off the root disk the runner logs to.
 
-While the suite runs, the coverage step prints a `disk-sample:` line every
+On the Linux leg only (the macOS leg's launch is unchanged, and it already runs
+close to full, so a 3 GiB guard could stop it), while the suite runs the
+coverage step prints a `disk-sample:` line every
 minute: free space on root and on the build disk and available memory, plus,
 every fifth sample, the sizes of `build-coverage`, its `profraw` and `coverage`
 subdirectories, and `~/.cache/pulp`. A runner lost to disk or memory exhaustion
