@@ -9,6 +9,7 @@
 // (PULP_TEST_HAS_PLATFORM_PLUGIN_VIEW_HOST, set from CMake). Apple has built-in
 // NSView/UIView hosts and a different capture contract, so it is excluded.
 
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/drag_drop.hpp>
@@ -31,6 +32,7 @@
 // WIN32_LEAN_AND_MEAN + NOMINMAX guarded before <windows.h> (SendMessageW,
 // WM_SIZE, MAKELPARAM, GetClientRect).
 #include <pulp/platform/win32_sane.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <cstdint>
 #endif
 
@@ -387,6 +389,332 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     } else {
         WARN("no GPU adapter/device (headless CI) — GPU swapchain check skipped");
     }
+}
+
+TEST_CASE("Windows static editor retries a GPU frame that did not reach output",
+          "[view][plugin-view-host][repaint][windows][gpu]") {
+    struct FailureSeamReset {
+        ~FailureSeamReset() {
+            SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", nullptr);
+        }
+    } reset_seam;
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", L"1"));
+    HWND parent =
+        CreateWindowExW(0, L"STATIC", L"Pulp frame retry regression", WS_OVERLAPPEDWINDOW, 0, 0,
+                        128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    REQUIRE(parent != nullptr);
+    struct ParentCleanup {
+        HWND hwnd;
+        ~ParentCleanup() {
+            DestroyWindow(hwnd);
+        }
+    } cleanup{parent};
+    ShowWindow(parent, SW_SHOWNOACTIVATE);
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_background_color(pulp::canvas::Color::rgba8(28, 31, 46));
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    REQUIRE(host->try_attach_to_parent(parent));
+    if (!host->is_gpu_backed()) {
+        SKIP("GPU adapter required to exercise failed drawable retry");
+    }
+    const HWND child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    REQUIRE(root.frame_clock() != nullptr);
+    // No idle callback, animation, or frame subscription: any of those would
+    // keep the timer live and conceal a lost dirty bit.
+    host->repaint();
+    const auto before = root.frame_clock()->frame();
+    SendMessageW(child, WM_TIMER, 1, 0);
+    REQUIRE(root.frame_clock()->frame() == before + 1);
+    CHECK((host->pending_repaint_is_full() || host->has_pending_dirty_bounds()));
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", nullptr));
+    SendMessageW(child, WM_TIMER, 1, 0);
+    REQUIRE(root.frame_clock()->frame() == before + 2);
+    REQUIRE_FALSE(host->pending_repaint_is_full());
+    REQUIRE_FALSE(host->has_pending_dirty_bounds());
+
+    // A native expose paint does not advance the frame clock or start with a
+    // dirty timer bit. Failure there must wake the same paced retry path.
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", L"1"));
+    REQUIRE(InvalidateRect(child, nullptr, FALSE));
+    REQUIRE(UpdateWindow(child));
+    CHECK(root.frame_clock()->frame() == before + 2);
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_FAILURE", nullptr));
+    SendMessageW(child, WM_TIMER, 1, 0);
+    CHECK(root.frame_clock()->frame() == before + 3);
+    REQUIRE_FALSE(host->pending_repaint_is_full());
+    REQUIRE_FALSE(host->has_pending_dirty_bounds());
+    host->detach();
+}
+
+TEST_CASE("Windows attached editor fails closed when frame timer install fails",
+          "[view][plugin-view-host][repaint][windows]") {
+    struct TimerFailureSeamReset {
+        ~TimerFailureSeamReset() {
+            SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr);
+        }
+    } reset_seam;
+    HWND parent =
+        CreateWindowExW(0, L"STATIC", L"Pulp timer failure regression", WS_OVERLAPPEDWINDOW, 0, 0,
+                        128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    REQUIRE(parent != nullptr);
+    struct ParentWindowCleanup {
+        HWND hwnd;
+        ~ParentWindowCleanup() {
+            DestroyWindow(hwnd);
+        }
+    } cleanup_parent{parent};
+    ShowWindow(parent, SW_SHOWNOACTIVATE);
+    REQUIRE(IsWindowVisible(parent));
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = false;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    const HWND child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+
+    SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", L"1");
+    REQUIRE_FALSE(host->try_attach_to_parent(parent));
+    CHECK_FALSE(host->is_attached());
+    CHECK(GetParent(child) == nullptr);
+    CHECK((GetWindowLongPtrW(child, GWL_STYLE) & WS_POPUP) != 0);
+    CHECK_FALSE(IsWindowVisible(child));
+
+    // Clearing the seam permits a retry. On the CPU path a timer dispatch
+    // invalidates the HWND; the subsequent WM_PAINT performs the idle work.
+    SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr);
+    REQUIRE(host->try_attach_to_parent(parent));
+    REQUIRE(IsWindowVisible(child));
+    int idle_calls = 0;
+    host->set_idle_callback([&] { ++idle_calls; });
+    REQUIRE(ValidateRect(child, nullptr)); // discard attach-time invalidation
+    // Receive the installed timer through the real message queue. Keep the
+    // fixture visible so CPU paint invalidation is observable.
+    MSG frame_timer{};
+    bool timer_received = false;
+    const auto timer_deadline = GetTickCount64() + 2000;
+    while (!timer_received && GetTickCount64() < timer_deadline) {
+        if (PeekMessageW(&frame_timer, child, WM_TIMER, WM_TIMER, PM_REMOVE) &&
+            frame_timer.wParam == 1) {
+            timer_received = true;
+            DispatchMessageW(&frame_timer);
+        } else {
+            MsgWaitForMultipleObjectsEx(0, nullptr, 20, QS_TIMER, MWMO_INPUTAVAILABLE);
+        }
+    }
+    REQUIRE(timer_received);
+    CHECK(idle_calls == 0);
+    REQUIRE(GetUpdateRect(child, nullptr, FALSE));
+    REQUIRE(UpdateWindow(child));
+    CHECK(idle_calls == 1);
+    CHECK_FALSE(GetUpdateRect(child, nullptr, FALSE));
+    // A detached window is hidden, so its update region alone cannot prove
+    // that a stale timer did no work. Arm animation and watch the frame clock.
+    REQUIRE(root.frame_clock() != nullptr);
+    root.set_continuous_repaint(true);
+    host->detach();
+    REQUIRE(ValidateRect(child, nullptr)); // discard native detach invalidation
+    const auto frames_before_stale_timer = root.frame_clock()->frame();
+    SendMessageW(child, WM_TIMER, 1, 0); // stale queued timer must be inert
+    CHECK(root.frame_clock()->frame() == frames_before_stale_timer);
+    CHECK_FALSE(GetUpdateRect(child, nullptr, FALSE));
+    CHECK(idle_calls == 1);
+    host->set_idle_callback({});
+}
+
+TEST_CASE("Windows attached editor requires detach before changing parent",
+          "[view][plugin-view-host][repaint][windows]") {
+    struct TimerFailureSeamReset {
+        ~TimerFailureSeamReset() {
+            SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr);
+        }
+    } reset_seam;
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr));
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp repeated attachment", WS_OVERLAPPEDWINDOW, 0, 0,
+                            128, 128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } first_parent, second_parent;
+    REQUIRE(first_parent.hwnd != nullptr);
+    REQUIRE(second_parent.hwnd != nullptr);
+    ShowWindow(first_parent.hwnd, SW_SHOWNOACTIVATE);
+    ShowWindow(second_parent.hwnd, SW_SHOWNOACTIVATE);
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    const HWND child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    REQUIRE(host->try_attach_to_parent(first_parent.hwnd));
+    REQUIRE(IsWindowVisible(child));
+    const auto original_style = GetWindowLongPtrW(child, GWL_STYLE);
+    const auto original_surface = host->gpu_surface_status();
+    const bool had_gpu = host->is_gpu_backed();
+    if (had_gpu) {
+        REQUIRE(original_surface.state == PluginViewHost::GpuSurfaceState::ready);
+        REQUIRE(original_surface.surface != nullptr);
+    } else {
+        SKIP("Dawn GPU unavailable: repeated-attachment GPU lifetime checks unavailable");
+    }
+    int surface_notifications = 0;
+    auto subscription = host->observe_gpu_surface(
+        [&](const PluginViewHost::GpuSurfaceStatus&) { ++surface_notifications; });
+    REQUIRE(surface_notifications == 1);
+    REQUIRE(root.frame_clock() != nullptr);
+    root.set_continuous_repaint(true);
+    REQUIRE(ValidateRect(child, nullptr));
+    MSG frame_timer{};
+    while (PeekMessageW(&frame_timer, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+    }
+    const auto frames_before_repeat = root.frame_clock()->frame();
+
+    const auto check_preserved_attachment = [&] {
+        CHECK(host->is_attached());
+        CHECK(GetParent(child) == first_parent.hwnd);
+        CHECK(GetWindowLongPtrW(child, GWL_STYLE) == original_style);
+        CHECK(IsWindowVisible(child));
+        CHECK_FALSE(GetUpdateRect(child, nullptr, FALSE));
+        CHECK(root.frame_clock()->frame() == frames_before_repeat);
+        CHECK(host->gpu_surface_status().state == original_surface.state);
+        CHECK(host->gpu_surface_status().surface == original_surface.surface);
+        CHECK(surface_notifications == 1);
+    };
+    for (int force_timer_failure = 0; force_timer_failure != 2; ++force_timer_failure) {
+        INFO("new timer installation forced to fail: " << force_timer_failure);
+        REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE",
+                                        force_timer_failure ? L"1" : nullptr));
+        REQUIRE(host->try_attach_to_parent(first_parent.hwnd));
+        check_preserved_attachment();
+        host->attach_to_parent(first_parent.hwnd);
+        check_preserved_attachment();
+        REQUIRE_FALSE(host->try_attach_to_parent(second_parent.hwnd));
+        check_preserved_attachment();
+        host->attach_to_parent(second_parent.hwnd);
+        check_preserved_attachment();
+        REQUIRE_FALSE(host->try_attach_to_parent(nullptr));
+        check_preserved_attachment();
+    }
+
+    // New timer installation is still refused. Delivery after draining the
+    // queue proves that the existing attachment kept its installed timer.
+    bool timer_received = false;
+    const auto timer_deadline = GetTickCount64() + 2000;
+    while (!timer_received && GetTickCount64() < timer_deadline) {
+        if (PeekMessageW(&frame_timer, child, WM_TIMER, WM_TIMER, PM_REMOVE) &&
+            frame_timer.wParam == 1) {
+            timer_received = true;
+            DispatchMessageW(&frame_timer);
+        } else {
+            MsgWaitForMultipleObjectsEx(0, nullptr, 20, QS_TIMER, MWMO_INPUTAVAILABLE);
+        }
+    }
+    REQUIRE(timer_received);
+    CHECK(root.frame_clock()->frame() == frames_before_repeat + 1);
+
+    host->detach();
+    REQUIRE_FALSE(host->is_attached());
+    CHECK(GetParent(child) == nullptr);
+    if (had_gpu) {
+        CHECK(host->gpu_surface_state() == PluginViewHost::GpuSurfaceState::pending);
+        CHECK(host->gpu_surface() == nullptr);
+        CHECK(surface_notifications == 2);
+    }
+    // Once detached, a fresh attachment must install a new timer and may fail.
+    REQUIRE_FALSE(host->try_attach_to_parent(second_parent.hwnd));
+    CHECK_FALSE(host->is_attached());
+    CHECK(GetParent(child) == nullptr);
+    REQUIRE(SetEnvironmentVariableW(L"PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE", nullptr));
+    REQUIRE(host->try_attach_to_parent(second_parent.hwnd));
+    CHECK(GetParent(child) == second_parent.hwnd);
+    CHECK(IsWindowVisible(child));
+    if (had_gpu) {
+        CHECK(host->is_gpu_backed());
+        CHECK(host->gpu_surface_state() == PluginViewHost::GpuSurfaceState::ready);
+        CHECK(host->gpu_surface() != nullptr);
+        CHECK(surface_notifications == 3);
+    }
+    host->detach();
+}
+
+// The real HWND/Dawn host must not recurse when scripted idle work requests a
+// repaint during a frame. An attached repaint is consumed by WM_TIMER; the
+// nested request survives for the next timer tick. This uses the production
+// host and a real GPU surface, rather than a fake invalidation counter.
+TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
+          "[view][plugin-view-host][repaint][windows][gpu]") {
+    constexpr UINT_PTR kTestFrameTimerId = 1;
+    HWND parent =
+        CreateWindowExW(0, L"STATIC", L"Pulp repaint regression", WS_OVERLAPPEDWINDOW, 0, 0, 128,
+                        128, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    REQUIRE(parent != nullptr);
+
+    View root;
+    root.set_bounds({0, 0, 64, 64});
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(parent);
+    REQUIRE(host->is_attached());
+    if (!host->is_gpu_backed()) {
+        DestroyWindow(parent);
+        SKIP("Dawn GPU unavailable: repaint re-entry requires the GPU host");
+    }
+
+    const HWND child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+
+    int idle_calls = 0;
+    host->set_idle_callback([&] { ++idle_calls; });
+    host->repaint();
+    CHECK(idle_calls == 0);
+    SendMessageW(child, WM_TIMER, kTestFrameTimerId, 0);
+    CHECK(idle_calls == 1);
+
+    idle_calls = 0;
+    bool requested_inside_idle = false;
+    host->set_idle_callback([&] {
+        ++idle_calls;
+        if (!requested_inside_idle) {
+            requested_inside_idle = true;
+            host->repaint();
+        }
+    });
+    host->repaint();
+    CHECK(idle_calls == 0);
+    SendMessageW(child, WM_TIMER, kTestFrameTimerId, 0);
+    CHECK(idle_calls == 1);
+    CHECK(requested_inside_idle);
+    SendMessageW(child, WM_TIMER, kTestFrameTimerId, 0);
+    CHECK(idle_calls == 2);
+
+    host->set_idle_callback({});
+    host->detach();
+    DestroyWindow(parent);
 }
 
 #endif  // _WIN32
