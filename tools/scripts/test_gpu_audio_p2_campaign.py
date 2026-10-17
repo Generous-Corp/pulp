@@ -272,7 +272,13 @@ class P2CampaignContractTests(unittest.TestCase):
                 "executable_sha256": "e" * 64,
                 "configured_receipt_sha256": "f" * 64,
                 "prelink_receipt_sha256": "0" * 64,
+                "configured_receipt_path": str(root_path / "configured.json"),
+                "prelink_receipt_path": str(root_path / "prelink.json"),
             }
+            (root_path / "configured.json").write_text('{"configured":true}\n', encoding="utf-8")
+            (root_path / "prelink.json").write_text('{"prelink":true}\n', encoding="utf-8")
+            payload["configured_receipt_sha256"] = campaign.sha256(root_path / "configured.json")
+            payload["prelink_receipt_sha256"] = campaign.sha256(root_path / "prelink.json")
             fixture.write_text(json.dumps(payload), encoding="utf-8")
             with patch.object(campaign, "REPO_ROOT", root_path):
                 self.assertEqual(
@@ -329,6 +335,10 @@ class P2CampaignContractTests(unittest.TestCase):
     def _receipt(self, root_path, **changes):
         manifest = root_path / "tools/deps/manifest.json"
         _write_pinned_manifest(manifest)
+        configured = root_path / "configured.json"
+        prelink = root_path / "prelink.json"
+        configured.write_text('{"status":"passed","stage":"configured"}\n', encoding="utf-8")
+        prelink.write_text('{"status":"passed","stage":"prelink"}\n', encoding="utf-8")
         payload = {
             "schema": campaign.PROVIDER_IDENTITY_SCHEMA, "status": "passed",
             "provider_identity_status": "passed",
@@ -340,7 +350,11 @@ class P2CampaignContractTests(unittest.TestCase):
             "executable_sha256": "e" * 64,
             "configured_receipt_sha256": "f" * 64,
             "prelink_receipt_sha256": "0" * 64,
+            "configured_receipt_path": str(configured),
+            "prelink_receipt_path": str(prelink),
         }
+        payload["configured_receipt_sha256"] = campaign.sha256(configured)
+        payload["prelink_receipt_sha256"] = campaign.sha256(prelink)
         payload.update(changes)
         receipt = root_path / "provider.json"
         receipt.write_text(json.dumps(payload), encoding="utf-8")
@@ -402,6 +416,17 @@ class P2CampaignContractTests(unittest.TestCase):
                 receipt.write_text(json.dumps(payload), encoding="utf-8")
                 with patch.object(campaign, "REPO_ROOT", Path(root)):
                     with self.assertRaisesRegex(RuntimeError, field + " is invalid"):
+                        campaign.validate_provider_identity_fixture(receipt, PLATFORM)
+
+    def test_receipt_rejects_mismatched_configured_or_prelink_bytes(self):
+        for field, filename in (("configured_receipt_sha256", "configured.json"),
+                                ("prelink_receipt_sha256", "prelink.json")):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as root:
+                root_path = Path(root)
+                receipt, _ = self._receipt(root_path)
+                (root_path / filename).write_text('{"tampered":true}\n', encoding="utf-8")
+                with patch.object(campaign, "REPO_ROOT", root_path):
+                    with self.assertRaisesRegex(RuntimeError, field + " does not match"):
                         campaign.validate_provider_identity_fixture(receipt, PLATFORM)
 
     def test_receipt_must_name_the_provider_the_manifest_pins(self):
@@ -529,9 +554,22 @@ class P2CampaignContractTests(unittest.TestCase):
         probe.chmod(probe.stat().st_mode | stat.S_IXUSR)
         preflight = Path(root) / "preflight.json"
         preflight.write_text("{}", encoding="utf-8")
+        manifest = Path(root) / "manifest.json"
+        skia = Path(root) / "skia"
+        skia.mkdir()
+        configured = Path(root) / "configured.json"
+        prelink = Path(root) / "prelink.json"
+        dawn_header = Path(root) / "dawn_version.h"
+        dawn_library = Path(root) / "libdawn.a"
+        for path in (manifest, configured, prelink, dawn_header, dawn_library):
+            path.write_text("{}\n", encoding="utf-8")
         return campaign.parse_args([
             "--probe", str(probe), "--output-dir", str(Path(root) / "out"),
-            "--host-preflight", str(preflight), *extra])
+            "--host-preflight", str(preflight),
+            "--provider-configured-receipt", str(configured),
+            "--provider-prelink-receipt", str(prelink),
+            "--provider-manifest", str(manifest), "--provider-skia-dir", str(skia),
+            "--provider-dawn-header", str(dawn_header), "--provider-dawn-library", str(dawn_library), *extra])
 
     def test_a_hardware_campaign_requires_the_provider_identity_receipt(self):
         with tempfile.TemporaryDirectory() as root, \

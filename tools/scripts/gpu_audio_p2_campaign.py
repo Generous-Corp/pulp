@@ -59,6 +59,10 @@ PROVIDER_IDENTITY_FIELDS = (
     "generation_receipt_sha256", "executable_sha256",
     "configured_receipt_sha256", "prelink_receipt_sha256",
 )
+PROVIDER_RECEIPT_PATH_FIELDS = (
+    ("configured_receipt_path", "configured_receipt_sha256"),
+    ("prelink_receipt_path", "prelink_receipt_sha256"),
+)
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -111,7 +115,8 @@ def host_provider_platform() -> str:
     raise RuntimeError(f"no Skia provider platform for macOS machine {machine!r}")
 
 
-def load_provider_identity_receipt(path: Path, provider_platform: str | None = None
+def load_provider_identity_receipt(path: Path, provider_platform: str | None = None,
+                                   verification: argparse.Namespace | None = None
                                    ) -> tuple[dict[str, Any], str]:
     """The validated receipt and the SHA-256 of the exact bytes validated.
 
@@ -154,6 +159,20 @@ def load_provider_identity_receipt(path: Path, provider_platform: str | None = N
     if fixture["expected_asset_sha256"] != fixture["validated_asset_sha256"] \
             or fixture["expected_dawn_revision"] != fixture["header_dawn_revision"]:
         raise RuntimeError("provider identity fixture contains inconsistent provider identity")
+    for path_field, digest_field in PROVIDER_RECEIPT_PATH_FIELDS:
+        value = fixture.get(path_field)
+        if not isinstance(value, str) or not value or not Path(value).is_absolute():
+            raise RuntimeError(f"provider identity fixture {path_field} is invalid")
+        receipt_path = Path(value)
+        if receipt_path.is_symlink() or not receipt_path.is_file():
+            raise RuntimeError(f"provider identity fixture {path_field} is unavailable")
+        if sha256(receipt_path) != fixture[digest_field]:
+            raise RuntimeError(f"provider identity fixture {digest_field} does not match {path_field}")
+    if verification is not None:
+        verified = identity_contract.verify(verification)
+        for field in (*PROVIDER_IDENTITY_FIELDS, "configured_receipt_path", "prelink_receipt_path"):
+            if verified.get(field) != fixture.get(field):
+                raise RuntimeError(f"provider identity fixture {field} disagrees with authoritative verification")
     try:
         manifest = json.loads(manifest_bytes.decode("utf-8"))
         pinned_dawn, pinned_asset = identity_contract.skia_contract(
@@ -562,6 +581,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="fresh source-bound quiet-host receipt (required for hardware runs)")
     p.add_argument("--provider-identity-receipt", type=Path,
                    help="passed exact-provider receipt bound to tools/deps/manifest.json (required for hardware runs)")
+    p.add_argument("--provider-configured-receipt", type=Path)
+    p.add_argument("--provider-prelink-receipt", type=Path)
+    p.add_argument("--provider-manifest", type=Path)
+    p.add_argument("--provider-skia-dir", type=Path)
+    p.add_argument("--provider-dawn-header", type=Path)
+    p.add_argument("--provider-dawn-library", type=Path)
     p.add_argument("--frames", type=int, default=32, choices=(32, 64, 128))
     p.add_argument("--blocks", type=int, default=REQUIRED_MEASURED_BLOCKS)
     p.add_argument("--warmup", type=int, default=16)
@@ -865,9 +890,25 @@ def run(args: argparse.Namespace) -> int:
         raise RuntimeError("--host-preflight is required for a hardware campaign")
     if args.provider_identity_receipt is None:
         raise RuntimeError("--provider-identity-receipt is required for a hardware campaign")
+    provider_inputs = {
+        "provider_configured_receipt": args.provider_configured_receipt,
+        "provider_prelink_receipt": args.provider_prelink_receipt,
+        "provider_manifest": args.provider_manifest,
+        "provider_skia_dir": args.provider_skia_dir,
+        "provider_dawn_header": args.provider_dawn_header,
+        "provider_dawn_library": args.provider_dawn_library,
+    }
+    if any(value is None for value in provider_inputs.values()):
+        raise RuntimeError("all authoritative provider verification inputs are required")
     host_preflight = validate_host_preflight(args.host_preflight, source_revision)
+    verification = argparse.Namespace(
+        manifest=str(args.provider_manifest), platform=host_provider_platform(),
+        skia_dir=str(args.provider_skia_dir), dawn_header=str(args.provider_dawn_header),
+        dawn_library=str(args.provider_dawn_library), configured_receipt=str(args.provider_configured_receipt),
+        prelink_receipt=str(args.provider_prelink_receipt), executable=str(args.probe),
+        receipt=str(args.provider_identity_receipt))
     provider_identity, provider_identity_receipt_sha256 = load_provider_identity_receipt(
-        args.provider_identity_receipt)
+        args.provider_identity_receipt, verification=verification)
     host_preflight_sha256 = sha256(args.host_preflight)
     if args.expected_source_revision is not None and args.expected_source_revision != source_revision:
         raise RuntimeError("expected source revision does not match the measured source")
