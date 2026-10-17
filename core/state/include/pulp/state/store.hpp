@@ -74,8 +74,7 @@ class ParameterFeedbackBaseline {
 
   private:
     friend class StateStore;
-    ParameterFeedbackBaseline(const StateStore* owner, ParamID id,
-                              std::uint64_t packed_identity)
+    ParameterFeedbackBaseline(const StateStore* owner, ParamID id, std::uint64_t packed_identity)
         : owner_(owner), id_(id), packed_identity_(packed_identity), valid_(true) {}
 
     const StateStore* owner_ = nullptr;

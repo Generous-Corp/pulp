@@ -805,8 +805,7 @@ class ParamValue {
             if (committed >= generation)
                 return false;
             if (committed_generation_.compare_exchange_strong(
-                    committed, generation, std::memory_order_acq_rel,
-                    std::memory_order_acquire))
+                    committed, generation, std::memory_order_acq_rel, std::memory_order_acquire))
                 return true;
         }
         return false;
