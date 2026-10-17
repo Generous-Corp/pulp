@@ -496,6 +496,48 @@ TEST_CASE("G3 calibration packet refuses stale and unauthenticated cells and rec
     REQUIRE(stale.release());
 }
 
+TEST_CASE("G3 receipt overflow poisons a warmed predictor and refuses admission",
+          "[gpu_audio][shared_io][prediction][g3][adversarial]") {
+    FakeProvider provider;
+    provider.authenticated_identity = true;
+    const SharedIoCalibrationIdentity identity{.model = 9,
+                                               .block_frames = 64,
+                                               .lead_blocks = 1,
+                                               .slots = 1,
+                                               .batch_width = 1,
+                                               .policy = 2,
+                                               .load = 1};
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider, {.slots = 1,
+                                    .input_bytes_per_slot = 16,
+                                    .output_bytes_per_slot = 16,
+                                    .calibration_identity = identity,
+                                    .authenticated_calibration = true,
+                                    .calibration_source_revision = "test-g3-overflow"}));
+    plan.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+    for (std::uint64_t sequence = 1; sequence <= SharedIoComputePlan::kLifecycleReceiptCapacity;
+         ++sequence) {
+        auto input = plan.acquire_input(sequence, 0);
+        REQUIRE(input);
+        REQUIRE(plan.submit({input->token, 0}));
+        REQUIRE(plan.drain(0) == 1);
+        auto completion = plan.pop_completion();
+        REQUIRE(completion);
+        auto output = plan.acquire_output(*completion);
+        REQUIRE(output);
+        REQUIRE(plan.release_output({output->token}));
+    }
+    REQUIRE(plan.prediction_estimate().samples > 0);
+    CHECK_FALSE(plan.acquire_input(SharedIoComputePlan::kLifecycleReceiptCapacity + 1, 0));
+    CHECK(plan.lifecycle_receipt_overflow());
+    CHECK(plan.telemetry().calibration_invalidated);
+    CHECK(plan.telemetry().last_prediction_refusal ==
+          SharedIoPredictionRefusal::MissingCalibration);
+    CHECK(plan.prediction_estimate().samples == 0);
+    CHECK_FALSE(plan.acquire_input(SharedIoComputePlan::kLifecycleReceiptCapacity + 2, 0));
+    REQUIRE(plan.release());
+}
+
 TEST_CASE("shared IO compute plan classifies completion after bounded wake",
           "[gpu_audio][shared_io][p2]") {
     FakeProvider provider;

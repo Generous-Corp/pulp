@@ -85,6 +85,14 @@ std::optional<SharedIoArena::WriteLease>
 SharedIoComputePlan::acquire_input(std::uint64_t sequence, std::uint64_t deadline_ns) noexcept {
     const auto now_ns = monotonic_now_ns();
     telemetry_.last_prediction_refusal = SharedIoPredictionRefusal::None;
+    if (authenticated_calibration_ && !lifecycle_receipt_valid()) {
+        predictor_.reset();
+        telemetry_.calibration_invalidated = true;
+        telemetry_.last_prediction_refusal = SharedIoPredictionRefusal::MissingCalibration;
+        record_cpu_fallback(SharedIoFallbackReason::CalibrationMissing);
+        ++telemetry_.prediction_refusals;
+        return std::nullopt;
+    }
     if (authenticated_calibration_ && !calibration_identity_.valid()) {
         telemetry_.last_prediction_refusal = SharedIoPredictionRefusal::MissingCalibration;
         record_cpu_fallback(SharedIoFallbackReason::CalibrationMissing);
@@ -116,6 +124,16 @@ SharedIoComputePlan::acquire_input(std::uint64_t sequence, std::uint64_t deadlin
             : !estimate.ready     ? SharedIoPredictionRefusal::MissingCalibration
                                   : SharedIoPredictionRefusal::BoundExceeded;
         record_cpu_fallback(SharedIoFallbackReason::PredictionRefused);
+        ++telemetry_.prediction_refusals;
+        return std::nullopt;
+    }
+    if (authenticated_calibration_ && lifecycle_receipts_.size() >= kLifecycleReceiptCapacity) {
+        lifecycle_receipt_overflow_ = true;
+        predictor_.reset();
+        telemetry_.calibration_invalidated = true;
+        ++telemetry_.invalid_calibration_rows;
+        telemetry_.last_prediction_refusal = SharedIoPredictionRefusal::MissingCalibration;
+        record_cpu_fallback(SharedIoFallbackReason::CalibrationMissing);
         ++telemetry_.prediction_refusals;
         return std::nullopt;
     }
