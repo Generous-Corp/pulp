@@ -3305,6 +3305,7 @@
    "inputs": [
     ".github/workflows/android.yml",
     ".github/workflows/build-macos.yml",
+    ".github/workflows/build.yml",
     ".github/workflows/cross-platform-check.yml",
     ".github/workflows/gcc-compile-gate.yml",
     ".github/workflows/intel-portability.yml",
@@ -3328,7 +3329,8 @@
     "tools/scripts/contributor_check.sh",
     "tools/scripts/release-cli-local.sh",
     "tools/scripts/sdk_consumer_sweep.py",
-    "tools/validation/downstream/consumer-validation.json"
+    "tools/validation/downstream/consumer-validation.json",
+    "tools/validation/sample_region_installed_sdk.py"
    ],
    "kind": "python"
   },
