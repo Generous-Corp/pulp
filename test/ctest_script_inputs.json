@@ -12149,6 +12149,14 @@
    ],
    "kind": "python"
   },
+  "vst3-bundle-layout-selftest": {
+   "kind": "python",
+   "entry": "tools/cmake/scripts/test_check_vst3_bundle_layout.py",
+   "inputs": [
+    "tools/cmake/scripts/check_vst3_bundle_layout.py",
+    "tools/cmake/scripts/test_check_vst3_bundle_layout.py"
+   ]
+  },
   "wasm-skia-fetch-mapping": {
    "entry": "tools/scripts/verify_wasm_skia_slice.py",
    "inputs": [
