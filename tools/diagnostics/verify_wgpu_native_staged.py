@@ -7,13 +7,31 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
 
 
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+PROVIDER_UNAVAILABLE_EXIT = 77
+MACHO_MAGICS = frozenset({
+    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+    b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+})
+
+
+def diagnostic_exit_disposition(returncode: int) -> str:
+    """Classify the native diagnostic's typed unavailable exit separately."""
+    if returncode == 0:
+        return "passed"
+    if returncode == PROVIDER_UNAVAILABLE_EXIT:
+        return "provider_unavailable"
+    return "diagnostic_failure"
 
 
 def digest(path: Path) -> str:
@@ -22,6 +40,11 @@ def digest(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             sha.update(chunk)
     return sha.hexdigest()
+
+
+def is_macho(path: Path) -> bool:
+    with path.open("rb") as stream:
+        return stream.read(4) in MACHO_MAGICS
 
 
 def tree_digest(root: Path) -> str:
@@ -64,7 +87,73 @@ def parse_output(stdout: str) -> dict[str, str]:
             for field in line.split():
                 key, value = field.split("=", 1)
                 result[key] = value
+        elif line.startswith("device_loss_callback="):
+            for field in line.split():
+                key, value = field.split("=", 1)
+                result[key] = value
+        elif line.startswith("device_loss_observation="):
+            result["device_loss_observation"] = line.split("=", 1)[1]
     return result
+
+
+def validate_loss_evidence(observed: dict[str, str]) -> int:
+    """Require typed loss evidence before emitting a diagnostic receipt."""
+    if observed.get("device_loss_callback") != "registered":
+        raise ValueError("device_loss_callback_not_registered")
+    if observed.get("device_loss_scenario") != "triggered":
+        raise ValueError("device_loss_scenario_not_triggered")
+    if observed.get("device_loss_reason") != "destroyed":
+        raise ValueError("device_loss_reason_not_destroyed")
+    records = observed.get("device_loss_terminal_records", "")
+    if not records.isdigit() or int(records) < 1:
+        raise ValueError("device_loss_terminal_records_missing")
+    if observed.get("device_loss_no_output_leases") != "true":
+        raise ValueError("device_loss_output_lease_evidence_missing")
+    if observed.get("device_loss_reprime") != "unavailable":
+        raise ValueError("device_loss_reprime_must_remain_unavailable")
+    if observed.get("device_loss_proof") != "callback_terminal_no_output_lease":
+        raise ValueError("device_loss_proof_mismatch")
+    if observed.get("callback_fallback_proof") != "unavailable":
+        raise ValueError("callback_fallback_must_remain_unavailable")
+    return int(records)
+
+
+def provider_unavailable_receipt(
+    version: str,
+    manifest_sha256: str,
+    pinned_tree_sha256: str,
+    loaded_runtime_sha256: str,
+    executable_sha256: str,
+    device_loss_observation: str,
+) -> dict:
+    """Describe a typed loss-observation gap without claiming loss evidence."""
+    if device_loss_observation != "probe_timeout_after_destroy":
+        raise ValueError("provider_unavailable_probe_untyped")
+    return {
+        "schema": "pulp.gpu-audio.wgpu-native-staged-diagnostic.v1",
+        "status": "provider_unavailable",
+        "reason": "provider_unavailable",
+        "claim": "device_loss_callback_unavailable_after_destroy",
+        "device_loss_observation": device_loss_observation,
+        "device_loss_probe_timeout_ms": 8000,
+        "provider_identity_status": "runtime_image_bound_adapter_auth_unavailable",
+        "gpu_receipt_authenticated": False,
+        "provider_version": version,
+        "manifest_sha256": manifest_sha256,
+        "pinned_tree_sha256": pinned_tree_sha256,
+        "loaded_runtime_sha256": loaded_runtime_sha256,
+        "executable_sha256": executable_sha256,
+        "device_loss_callback": "unavailable",
+        "device_loss_scenario": "unavailable",
+        "device_loss_reason": "unavailable",
+        "device_loss_proof": "unavailable",
+        "device_loss_terminal_records": 0,
+        "device_loss_no_output_leases": "unavailable",
+        "device_loss_reprime": "unavailable",
+        "callback_fallback_proof": "unavailable",
+        "gpu_timestamps": "unavailable",
+        "product_proof": False,
+    }
 
 
 def verify(args: argparse.Namespace) -> dict:
@@ -83,11 +172,39 @@ def verify(args: argparse.Namespace) -> dict:
     manifest_before = digest(manifest)
     runtime_before = digest(linked_runtime)
     executable_before = digest(executable)
-    run = subprocess.run([str(executable)], capture_output=True, text=True,
-                         encoding="utf-8", timeout=30, check=False)
-    if run.returncode == 77:
-        raise RuntimeError("provider_unavailable")
-    if run.returncode != 0:
+    if not is_macho(executable):
+        raise ValueError("executable_not_macho")
+    process = subprocess.Popen([str(executable)], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                               start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = process.communicate()
+        partial = stderr or exc.stderr or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode(errors="replace")
+        raise ValueError(f"diagnostic_timeout_30s: {partial.strip()}") from exc
+    run = subprocess.CompletedProcess([str(executable)], process.returncode, stdout, stderr)
+    disposition = diagnostic_exit_disposition(run.returncode)
+    if disposition == "provider_unavailable":
+        observed = parse_output(run.stdout)
+        loaded_runtime_path = observed.get("loaded_runtime_path")
+        if loaded_runtime_path is None:
+            raise ValueError("provider_unavailable_runtime_unbound")
+        if Path(loaded_runtime_path).resolve(strict=True) != linked_runtime:
+            raise ValueError("provider_unavailable_runtime_unbound")
+        if (digest(manifest) != manifest_before or digest(linked_runtime) != runtime_before or
+                digest(executable) != executable_before or tree_digest(source_tree) != expected_tree):
+            raise ValueError("identity_changed_during_diagnostic")
+        return provider_unavailable_receipt(
+            version, manifest_before, expected_tree, runtime_before, executable_before,
+            observed.get("device_loss_observation", ""))
+    if disposition != "passed":
         raise ValueError(f"diagnostic_failed_{run.returncode}: {run.stderr.strip()}")
     observed = parse_output(run.stdout)
     if Path(observed["loaded_runtime_path"]).resolve(strict=True) != linked_runtime:
@@ -100,9 +217,9 @@ def verify(args: argparse.Namespace) -> dict:
             raise ValueError(f"invalid_{field}")
     if (observed.get("staged_blocks") != "5" or
             observed.get("planted_completion_failures") != "1" or
-            observed.get("device_loss_proof") != "unavailable" or
             observed.get("callback_fallback_proof") != "unavailable"):
         raise ValueError("diagnostic_disposition_mismatch")
+    loss_terminal_records = validate_loss_evidence(observed)
     error = float(observed["cpu_oracle_max_error"])
     if not math.isfinite(error) or error < 0 or error > 1.0e-5:
         raise ValueError("cpu_oracle_parity_failed")
@@ -128,7 +245,13 @@ def verify(args: argparse.Namespace) -> dict:
         "successful_blocks": 5,
         "retired_failure_blocks": 1,
         "cpu_oracle_max_error": error,
-        "device_loss_proof": "unavailable",
+        "device_loss_callback": "registered",
+        "device_loss_scenario": "triggered",
+        "device_loss_reason": "destroyed",
+        "device_loss_proof": "callback_terminal_no_output_lease",
+        "device_loss_terminal_records": loss_terminal_records,
+        "device_loss_no_output_leases": True,
+        "device_loss_reprime": "unavailable",
         "callback_fallback_proof": "unavailable",
         "gpu_timestamps": "unavailable",
         "product_proof": False,
@@ -150,7 +273,7 @@ def main() -> int:
     encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
     Path(args.receipt).write_text(encoded, encoding="utf-8")
     print(encoded, end="")
-    return 0
+    return PROVIDER_UNAVAILABLE_EXIT if receipt["status"] == "provider_unavailable" else 0
 
 
 if __name__ == "__main__":
