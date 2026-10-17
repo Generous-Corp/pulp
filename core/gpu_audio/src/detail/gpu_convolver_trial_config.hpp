@@ -2,6 +2,7 @@
 
 #include "dawn_shared_io_provider.hpp"
 #include "shared_io_execution_contract.hpp"
+#include "shared_io_execution_predictor.hpp"
 #include "shared_io_provider_identity.hpp"
 #include "shared_io_trace.hpp"
 
@@ -186,6 +187,11 @@ struct GpuConvolverTrialConfig {
     // Private diagnostic retention bound. A probe sets this to its complete
     // callback census size; zero leaves the ordinary runtime queue behavior.
     std::uint32_t retention_capacity = 0;
+    SharedIoExecutionPredictor::Config prediction{};
+    SharedIoCalibrationIdentity calibration_identity;
+    bool authenticated_calibration = false;
+    std::uint64_t calibration_max_age_ns = 0;
+    std::string calibration_source_revision;
 };
 
 // Quiescent diagnostic drain for the complete admission census. This remains

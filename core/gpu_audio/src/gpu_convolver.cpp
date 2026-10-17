@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -47,6 +48,7 @@ std::string GpuConvolver::backend() const {
 
 struct GpuConvolver::SharedIoState {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    std::optional<detail::GpuConvolverTrialConfig> trial_config;
     std::unique_ptr<detail::SharedIoConvolutionSession> session;
     detail::SharedIoConvolutionSession::Callback callback;
     std::vector<float> callback_input;
@@ -171,6 +173,15 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     convolver.trial_completion_wait_ns_ =
         (config.completion_wait_ns & kTrialWaitMask) |
         (static_cast<std::uint64_t>(config.retention_capacity) << kTrialRetentionShift);
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    try {
+        if (!convolver.shared_io_)
+            convolver.shared_io_ = std::make_unique<GpuConvolver::SharedIoState>();
+        convolver.shared_io_->trial_config = config;
+    } catch (...) {
+        return false;
+    }
+#endif
     return true;
 }
 
@@ -279,8 +290,11 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
 bool GpuConvolver::prepare() {
     prepared_ = false;
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    std::optional<detail::GpuConvolverTrialConfig> pending_trial_config;
     if (shared_io_ && shared_io_->session && !shared_io_->session->release())
         return false;
+    if (shared_io_)
+        pending_trial_config = std::move(shared_io_->trial_config);
 #endif
     shared_io_.reset();
     staged_trial_.reset();
@@ -346,6 +360,8 @@ bool GpuConvolver::prepare() {
             const uint32_t shared_capacity = std::max(kSharedIoCapacity, latency_blocks_ + 1u);
             if (fft_size_ <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
                 auto state = std::make_unique<SharedIoState>();
+                if (pending_trial_config)
+                    state->trial_config = std::move(pending_trial_config);
                 const auto samples_per_block = static_cast<std::size_t>(channels_) * block_;
                 state->callback_input.assign(samples_per_block, 0.0f);
                 state->callback_output.assign(samples_per_block, 0.0f);
@@ -376,26 +392,43 @@ bool GpuConvolver::prepare() {
                               .completion_wait_ns =
                                   trial_configured_ ? (trial_completion_wait_ns_ & kTrialWaitMask)
                                                     : 0},
-                         .session = {.pipeline = {.capacity = shared_capacity,
-                                                  .channels = channels_,
-                                                  .block_size = block_,
-                                                  .fft_size = fft_size_,
-                                                  .ir_length = static_cast<uint32_t>(ir_.size()),
-                                                  .lead_blocks = latency_blocks_,
-                                                  .capture_callback_timing =
-                                                      trial_capture_callback_timing_},
-                                     .slots = trial_slots != 0 ? trial_slots : kSharedIoSlots,
-                                     .sample_rate = sample_rate_,
-                                     .trace = {.success_stride = trial_success_stride_,
-                                               .retention_capacity =
-                                                   trial_configured_
-                                                       ? static_cast<std::uint32_t>(
-                                                             trial_completion_wait_ns_ >>
-                                                             kTrialRetentionShift)
-                                                       : 0,
-                                               .capture_admissions = trial_capture_admissions_,
-                                               .enabled = pulp::runtime::kTracingEnabled ||
-                                                          trial_enable_trace_}},
+                         .session =
+                             {.pipeline = {.capacity = shared_capacity,
+                                           .channels = channels_,
+                                           .block_size = block_,
+                                           .fft_size = fft_size_,
+                                           .ir_length = static_cast<uint32_t>(ir_.size()),
+                                           .lead_blocks = latency_blocks_,
+                                           .capture_callback_timing =
+                                               trial_capture_callback_timing_},
+                              .slots = trial_slots != 0 ? trial_slots : kSharedIoSlots,
+                              .sample_rate = sample_rate_,
+                              .trace = {.success_stride = trial_success_stride_,
+                                        .retention_capacity = trial_configured_
+                                                                  ? static_cast<std::uint32_t>(
+                                                                        trial_completion_wait_ns_ >>
+                                                                        kTrialRetentionShift)
+                                                                  : 0,
+                                        .capture_admissions = trial_capture_admissions_,
+                                        .enabled =
+                                            pulp::runtime::kTracingEnabled || trial_enable_trace_},
+                              .prediction = state->trial_config
+                                                ? state->trial_config->prediction
+                                                : detail::SharedIoExecutionPredictor::Config{},
+                              .calibration_identity =
+                                  state->trial_config ? state->trial_config->calibration_identity
+                                                      : detail::SharedIoCalibrationIdentity{},
+                              .authenticated_calibration =
+                                  state->trial_config
+                                      ? state->trial_config->authenticated_calibration
+                                      : false,
+                              .calibration_max_age_ns =
+                                  state->trial_config ? state->trial_config->calibration_max_age_ns
+                                                      : 0,
+                              .calibration_source_revision =
+                                  state->trial_config
+                                      ? state->trial_config->calibration_source_revision
+                                      : std::string{}},
                          .normalized_ir_spectrum = state->normalized_ir_spectrum});
                     // A failed preparation may still own physically live
                     // storage. Retain that session even when it cannot run.

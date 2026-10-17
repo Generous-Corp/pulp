@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <thread>
 
 using namespace pulp::gpu_audio::detail;
 
@@ -30,6 +31,19 @@ class FakeProvider final : public SharedIoArenaProvider {
     };
 
   public:
+    SharedIoProviderIdentity provider_identity() const noexcept override {
+        SharedIoProviderIdentity identity;
+        identity.authenticated = authenticated_identity;
+        identity.provider_revision = authenticated_identity ? "fake-provider-v1" : "";
+        identity.adapter_name = authenticated_identity ? "fake-adapter" : "";
+        identity.adapter_backend = authenticated_identity ? "fake-backend" : "";
+        identity.adapter_vendor_id = 1;
+        identity.adapter_device_id = 1;
+        identity.native_runtime_authenticated = authenticated_identity;
+        identity.native_runtime_name = authenticated_identity ? "fake-native" : "";
+        identity.native_runtime_backend = authenticated_identity ? "fake-backend" : "";
+        return identity;
+    }
     ~FakeProvider() override {
         lifecycle_state->provider_destroyed = true;
     }
@@ -164,6 +178,7 @@ class FakeProvider final : public SharedIoArenaProvider {
     bool invalid_lifecycle = false;
     StorageKind storage_kind = StorageKind::ImportedHostPointer;
     bool accept_submissions = true;
+    bool authenticated_identity = false;
     bool require_program_release = false;
     bool program_released = false;
     bool program_destroyed = false;
@@ -296,9 +311,11 @@ TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle bo
     REQUIRE(plan.drain(0) == 1);
     auto successful = plan.pop_completion();
     REQUIRE(successful);
+    auto successful_output = plan.acquire_output(*successful);
+    REQUIRE(successful_output);
+    REQUIRE(plan.release_output({successful_output->token}));
     CHECK(plan.prediction_estimate().ready);
     CHECK(plan.telemetry().prediction_samples == 1);
-    REQUIRE(plan.discard_completion(*successful));
 
     // A calibrated future deadline is admitted.
     const auto future_deadline =
@@ -315,6 +332,8 @@ TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle bo
     const auto expired_deadline = future_deadline - 2'000'000'000;
     CHECK_FALSE(plan.acquire_input(4, expired_deadline));
     CHECK(plan.telemetry().prediction_refusals == 1);
+    CHECK(plan.telemetry().last_prediction_refusal == SharedIoPredictionRefusal::DeadlineExpired);
+    CHECK(plan.telemetry().last_fallback_reason == SharedIoFallbackReason::PredictionRefused);
     REQUIRE(plan.reprime_when_quiescent());
     CHECK(plan.prediction_estimate().samples == 0);
     CHECK(plan.prediction_estimate().enabled);
@@ -324,6 +343,198 @@ TEST_CASE("shared IO plan prediction admits, refuses, and resets at lifecycle bo
     auto disabled_input = plan.acquire_input(4, 1);
     REQUIRE(disabled_input);
     REQUIRE(plan.cancel({disabled_input->token, 1}));
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("G3 calibration packet binds identity and synchronized timestamps",
+          "[gpu_audio][shared_io][prediction][g3]") {
+    FakeProvider provider;
+    provider.authenticated_identity = true;
+    SharedIoComputePlan plan;
+    const SharedIoCalibrationIdentity identity{.model = 11,
+                                               .block_frames = 64,
+                                               .lead_blocks = 2,
+                                               .slots = 1,
+                                               .batch_width = 1,
+                                               .policy = 7,
+                                               .load = 3};
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1,
+                          .input_bytes_per_slot = 16,
+                          .output_bytes_per_slot = 16,
+                          .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer,
+                          .calibration_identity = identity,
+                          .authenticated_calibration = true,
+                          .calibration_source_revision = "test-g3-v1"}));
+    plan.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+    auto input = plan.acquire_input(1, 0);
+    REQUIRE(input);
+    REQUIRE(plan.submit({input->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    auto output = plan.acquire_output(*completion);
+    REQUIRE(output);
+    REQUIRE(plan.release_output({output->token}));
+    const auto observations = plan.take_calibration_observations();
+    REQUIRE(observations.size() == 1);
+    CHECK(observations.front().identity == identity);
+    CHECK(observations.front().provider_authenticated);
+    CHECK(observations.front().valid());
+    CHECK(observations.front().visible_ns >= observations.front().terminal_ns);
+    CHECK(plan.telemetry().calibration_rows == 1);
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("G3 calibration packet counts predictor under-estimates",
+          "[gpu_audio][shared_io][prediction][g3]") {
+    const SharedIoCalibrationIdentity identity{.model = 1,
+                                               .block_frames = 64,
+                                               .lead_blocks = 1,
+                                               .slots = 2,
+                                               .batch_width = 1,
+                                               .policy = 2,
+                                               .load = 1};
+    SharedIoExecutionPredictor predictor;
+    predictor.configure({.enabled = true, .minimum_samples = 1});
+    predictor.bind_identity(identity);
+    SharedIoCalibrationObservation observation{.identity = identity,
+                                               .provenance = {.source_revision = "test-g3-v1",
+                                                              .provider_revision = "provider-v1",
+                                                              .adapter_name = "adapter",
+                                                              .adapter_backend = "backend",
+                                                              .adapter_vendor_id = 1,
+                                                              .adapter_device_id = 1,
+                                                              .native_runtime_name = "native",
+                                                              .native_runtime_backend = "backend",
+                                                              .native_runtime_authenticated = true},
+                                               .generation = 1,
+                                               .sequence = 1,
+                                               .worker_ns = 10,
+                                               .submitted_ns = 20,
+                                               .terminal_ns = 120,
+                                               .visible_ns = 130,
+                                               .predicted_ns = 1,
+                                               .provider_authenticated = true,
+                                               .terminal_success = true,
+                                               .output_acquired = true,
+                                               .output_released = true};
+    REQUIRE(observation.valid());
+    predictor.observe(observation);
+    CHECK(predictor.estimate().underestimates == 1);
+    CHECK(predictor.estimate().conservative_ns >= observation.execution_ns());
+    auto cross_cell = observation;
+    cross_cell.identity.load += 1;
+    CHECK_FALSE(predictor.observe(cross_cell));
+    CHECK(predictor.estimate().rejected_observations == 1);
+    observation.visible_ns = observation.terminal_ns - 1;
+    CHECK_FALSE(observation.timestamps_synchronized());
+    CHECK_FALSE(observation.valid());
+    observation.visible_ns = 130;
+    observation.output_released = false;
+    CHECK_FALSE(observation.valid());
+    observation.output_released = true;
+    observation.terminal_success = false;
+    CHECK_FALSE(observation.valid());
+}
+
+TEST_CASE("G3 calibration packet refuses stale and unauthenticated cells and records CPU fallback",
+          "[gpu_audio][shared_io][prediction][g3]") {
+    const SharedIoCalibrationIdentity identity{.model = 1,
+                                               .block_frames = 64,
+                                               .lead_blocks = 1,
+                                               .slots = 1,
+                                               .batch_width = 1,
+                                               .policy = 2,
+                                               .load = 1};
+    FakeProvider unauthenticated;
+    SharedIoComputePlan refused;
+    REQUIRE(refused.prepare(unauthenticated, {.slots = 1,
+                                              .input_bytes_per_slot = 16,
+                                              .output_bytes_per_slot = 16,
+                                              .calibration_identity = identity,
+                                              .authenticated_calibration = true,
+                                              .calibration_source_revision = "test-g3-v1"}));
+    CHECK_FALSE(refused.acquire_input(1, 0));
+    CHECK(refused.telemetry().last_prediction_refusal ==
+          SharedIoPredictionRefusal::MissingCalibration);
+    CHECK(refused.telemetry().last_fallback_reason == SharedIoFallbackReason::CalibrationMissing);
+    CHECK(refused.telemetry().cpu_fallbacks == 1);
+    refused.record_cpu_fallback(SharedIoFallbackReason::DeadlineExceeded);
+    CHECK(refused.telemetry().last_fallback_reason == SharedIoFallbackReason::DeadlineExceeded);
+    REQUIRE(refused.release());
+
+    FakeProvider authenticated;
+    authenticated.authenticated_identity = true;
+    SharedIoComputePlan stale;
+    REQUIRE(stale.prepare(authenticated, {.slots = 1,
+                                          .input_bytes_per_slot = 16,
+                                          .output_bytes_per_slot = 16,
+                                          .calibration_identity = identity,
+                                          .authenticated_calibration = true,
+                                          .calibration_max_age_ns = 1,
+                                          .calibration_source_revision = "test-g3-v1"}));
+    stale.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+    auto warmup = stale.acquire_input(1, 0);
+    REQUIRE(warmup);
+    REQUIRE(stale.submit({warmup->token, 0}));
+    REQUIRE(stale.drain(0) == 1);
+    auto done = stale.pop_completion();
+    REQUIRE(done);
+    auto stale_output = stale.acquire_output(*done);
+    REQUIRE(stale_output);
+    REQUIRE(stale.release_output({stale_output->token}));
+    authenticated.authenticated_identity = false;
+    CHECK_FALSE(stale.acquire_input(2, 0));
+    CHECK(stale.telemetry().last_prediction_refusal ==
+          SharedIoPredictionRefusal::MissingCalibration);
+    authenticated.authenticated_identity = true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK_FALSE(stale.acquire_input(3, 0));
+    CHECK(stale.telemetry().last_prediction_refusal == SharedIoPredictionRefusal::StaleCalibration);
+    CHECK(stale.telemetry().last_fallback_reason == SharedIoFallbackReason::CalibrationStale);
+    REQUIRE(stale.release());
+}
+
+TEST_CASE("G3 receipt overflow poisons a warmed predictor and refuses admission",
+          "[gpu_audio][shared_io][prediction][g3][adversarial]") {
+    FakeProvider provider;
+    provider.authenticated_identity = true;
+    const SharedIoCalibrationIdentity identity{.model = 9,
+                                               .block_frames = 64,
+                                               .lead_blocks = 1,
+                                               .slots = 1,
+                                               .batch_width = 1,
+                                               .policy = 2,
+                                               .load = 1};
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider, {.slots = 1,
+                                    .input_bytes_per_slot = 16,
+                                    .output_bytes_per_slot = 16,
+                                    .calibration_identity = identity,
+                                    .authenticated_calibration = true,
+                                    .calibration_source_revision = "test-g3-overflow"}));
+    plan.set_prediction_policy({.enabled = true, .minimum_samples = 1});
+    for (std::uint64_t sequence = 1; sequence <= SharedIoComputePlan::kLifecycleReceiptCapacity;
+         ++sequence) {
+        auto input = plan.acquire_input(sequence, 0);
+        REQUIRE(input);
+        REQUIRE(plan.submit({input->token, 0}));
+        REQUIRE(plan.drain(0) == 1);
+        auto completion = plan.pop_completion();
+        REQUIRE(completion);
+        auto output = plan.acquire_output(*completion);
+        REQUIRE(output);
+        REQUIRE(plan.release_output({output->token}));
+    }
+    REQUIRE(plan.prediction_estimate().samples > 0);
+    CHECK_FALSE(plan.acquire_input(SharedIoComputePlan::kLifecycleReceiptCapacity + 1, 0));
+    CHECK(plan.lifecycle_receipt_overflow());
+    CHECK(plan.telemetry().calibration_invalidated);
+    CHECK(plan.telemetry().last_prediction_refusal ==
+          SharedIoPredictionRefusal::MissingCalibration);
+    CHECK(plan.prediction_estimate().samples == 0);
+    CHECK_FALSE(plan.acquire_input(SharedIoComputePlan::kLifecycleReceiptCapacity + 2, 0));
     REQUIRE(plan.release());
 }
 
