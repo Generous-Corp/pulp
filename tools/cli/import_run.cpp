@@ -684,10 +684,22 @@ int run_emit(const ImportOptions& o) {
               << "\n";
     if (!manifest.verdict.empty())
         std::cout << "  verdict:        " << manifest.verdict << "\n";
+    // Keep the generated scaffold's copyable build recipe under the same
+    // governor as Pulp's other CLI guidance. When this CLI comes from a
+    // source checkout, use that checkout's absolute wrapper so the recipe
+    // remains valid even when the caller is outside the repository. Installed
+    // binaries have no source checkout to resolve, so retain a portable
+    // relative form for consumers that provide the wrapper alongside the
+    // recipe.
+    const auto source_root = find_project_root_from(current_executable_path());
+    const auto governed_build = source_root.empty()
+                                    ? fs::path("tools/ci/governed-build.sh")
+                                    : source_root / "tools" / "ci" / "governed-build.sh";
     std::cout << "\nNext steps:\n";
     std::cout << "  1. Build it:   cmake -S " << o.output.string()
-              << " -B " << (o.output / "build").string() << " && cmake --build "
-              << (o.output / "build").string() << "\n";
+              << " -B " << (o.output / "build").string() << " && "
+              << shell_quote(governed_build.string()) << " cmake --build "
+              << shell_quote((o.output / "build").string()) << "\n";
     std::cout << "  2. " << ie::format_parity_review_step(manifest) << "\n";
     std::cout << "  3. Implement the missing parity work in src/ and rebuild/test; "
                  "any TODO(import) markers are importer-emitted hints.\n";
