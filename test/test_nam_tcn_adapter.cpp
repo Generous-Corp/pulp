@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 #include "support/fixture_root.hpp"
 
@@ -357,6 +358,70 @@ TEST_CASE("serialized NAM artifact matches CPU oracle at 64 and 128 frames with 
     model.process_cpu(in, replay_view, 128, {.epoch = 2, .sequence = 0});
     CHECK(replay[0] == Catch::Approx(-0.01314363f).margin(1.0e-6f));
     CHECK(replay[1] == Catch::Approx(-0.012158165f).margin(1.0e-6f));
+    REQUIRE(model.quiesce());
+    REQUIRE(model.release());
+}
+
+TEST_CASE("serialized NAM artifact has full deterministic CPU-oracle parity",
+          "[gpu_audio][neural][nam][oracle][receipt]") {
+    constexpr auto fixture_sha256 =
+        "66bda2b379289eff079c0755588bc9a92760654d9cc9af1b97cf30d0e92b167d";
+    const auto spec_value = artifact_spec();
+    REQUIRE(spec_value.weights_hash == fixture_sha256);
+
+    NamTcnArtifact oracle;
+    REQUIRE(oracle.load(fixture_path()));
+    NamTcnArtifactAdapter model(spec_value, fixture_path());
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "example.nam",
+                                                 .artifact_hash = fixture_sha256,
+                                                 .max_frames = 128};
+    REQUIRE(model.prepare(context));
+
+    std::array<float, 128> input{};
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = std::sin(static_cast<float>(i) * 0.071f) +
+                   0.25f * std::cos(static_cast<float>(i) * 0.013f);
+    std::array<float, 128> expected{};
+    oracle.process(input.data(), expected.data(), input.size());
+
+    float max_abs_error = 0.0f;
+    for (const std::uint32_t block_size : {32u, 64u, 128u}) {
+        model.reset(1, StreamingResetReason::ModelSwap);
+        std::array<float, 128> actual{};
+        std::size_t offset = 0;
+        while (offset < input.size()) {
+            const auto frames = std::min<std::size_t>(block_size, input.size() - offset);
+            const float* block_input[] = {input.data() + offset};
+            float* block_output[] = {actual.data() + offset};
+            const auto block_in = pulp::audio::BufferView<const float>(block_input, 1, frames);
+            auto block_out = pulp::audio::BufferView<float>(block_output, 1, frames);
+            model.process_cpu(block_in, block_out,
+                              static_cast<std::uint32_t>(frames),
+                              {.epoch = 1, .sequence = static_cast<std::uint64_t>(offset)});
+            offset += frames;
+        }
+        for (std::size_t i = 0; i < actual.size(); ++i)
+            max_abs_error = std::max(max_abs_error, std::abs(actual[i] - expected[i]));
+    }
+    CHECK(max_abs_error <= 1.0e-6f);
+
+    // Reset replay is compared over the complete vector, and remains
+    // allocation-free on the callback path.
+    model.reset(2, StreamingResetReason::ModelSwap);
+    std::array<float, 128> replay{};
+    const float* replay_input[] = {input.data()};
+    float* replay_output[] = {replay.data()};
+    const auto replay_in = pulp::audio::BufferView<const float>(replay_input, 1, input.size());
+    auto replay_out = pulp::audio::BufferView<float>(replay_output, 1, replay.size());
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        model.process_cpu(replay_in, replay_out, 128, {.epoch = 2, .sequence = 0});
+        CHECK(probe.allocation_count() == 0);
+    }
+    for (std::size_t i = 0; i < replay.size(); ++i)
+        max_abs_error = std::max(max_abs_error, std::abs(replay[i] - expected[i]));
+    CHECK(max_abs_error <= 1.0e-6f);
     REQUIRE(model.quiesce());
     REQUIRE(model.release());
 }
