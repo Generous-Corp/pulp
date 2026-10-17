@@ -717,6 +717,8 @@ jobs:
               tick=0
               while kill -0 "${cov}" 2>/dev/null; do
                 root_gib=$(df -Pk / | awk 'NR==2 {printf "%.1f", $4/1048576}')
+                # ENOSPC also means no free inodes, which df -k never shows.
+                root_inode_pct=$(df -Pi / | awk 'NR==2 {if ($2 > 0) printf "%.1f", 100*$4/$2; else print 100}')
                 build_gib=$(df -Pk build-coverage/ 2>/dev/null | awk 'NR==2 {printf "%.1f", $4/1048576}')
                 sizes=""
                 # Free space and memory are read every 10 seconds, since a fast
@@ -731,7 +733,7 @@ jobs:
                 fi
                 tick=$((tick + 1))
                 mem_gib=$(awk '/^MemAvailable:/ {printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null)
-                line="root_free=${root_gib}G build_disk_free=${build_gib:-?}G mem_available=${mem_gib:-?}G${sizes}"
+                line="root_free=${root_gib}G root_inodes_free=${root_inode_pct}% build_disk_free=${build_gib:-?}G mem_available=${mem_gib:-?}G${sizes}"
                 if [ $((tick % 6)) -eq 1 ]; then
                   phase=$(grep '^=== ' "${suite_log:-/dev/null}" 2>/dev/null | tail -n 1)
                   echo "disk-sample: $(date -u +%H:%M:%SZ) ${line} | ${phase}"
@@ -743,11 +745,15 @@ jobs:
                     echo "::warning title=coverage disk below ${t} GiB::$(date -u +%H:%M:%SZ) ${line}"
                   fi
                 done
-                if awk -v r="${root_gib}" 'BEGIN {exit !(r < 3)}'; then
+                if awk -v r="${root_gib}" -v i="${root_inode_pct:-100}" 'BEGIN {exit !(r < 3 || i < 5)}'; then
                   echo "::error title=coverage root disk nearly full::$(date -u +%H:%M:%SZ) ${line}; stopping the suite so this log survives"
                   echo "--- root disk use ---"
                   as_root="sudo -n"; ${as_root} true 2>/dev/null || as_root=""
                   ${as_root} du -xsh /tmp /var/tmp /var/log "${HOME}" /home/runner/actions-runner /opt /usr/local 2>/dev/null | sort -h
+                  echo "--- root inode use ---"
+                  df -Pi /
+                  ${as_root} du -x --inodes -s /tmp /var/tmp /var/log "${HOME}" /home/runner/actions-runner /opt /usr/local 2>/dev/null | sort -n
+                  ${as_root} du -x --inodes -d 2 "${HOME}" /tmp /var 2>/dev/null | sort -n | tail -n 15
                   echo "--- largest under \$HOME and /tmp ---"
                   ${as_root} du -xh -d 2 "${HOME}" /tmp 2>/dev/null | sort -h | tail -n 25
                   : > "${RUNNER_TEMP:-/tmp}/coverage-disk-guard" 2>/dev/null || true
