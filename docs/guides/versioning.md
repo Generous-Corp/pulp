@@ -634,7 +634,10 @@ sampler therefore guards the root disk: below 3 GiB free it prints `du` of the
 root-disk directories (`/tmp`, `$HOME`, the runner directory, `/var`) and
 stops the suite, and the step ends with "the root-disk guard stopped the
 coverage suite" and its log intact. The reclaim step also points `TMPDIR` at
-`/mnt/coverage-tmp`, so test temporaries leave root along with the build.
+`/mnt/coverage-tmp`, so test temporaries leave root along with the build, and
+routes core files to `/mnt/cores`; the suite itself runs with `ulimit -c 0`,
+since a crashing instrumented binary can write gigabytes of core in seconds.
+Root free space is checked every 10 seconds for the same reason.
 Read those before changing anything else.
 
 
