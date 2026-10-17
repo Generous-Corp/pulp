@@ -637,7 +637,13 @@ coverage suite" and its log intact. The reclaim step also points `TMPDIR` at
 `/mnt/coverage-tmp`, so test temporaries leave root along with the build, and
 routes core files to `/mnt/cores`; the suite itself runs with `ulimit -c 0`,
 since a crashing instrumented binary can write gigabytes of core in seconds.
-Root free space is checked every 10 seconds for the same reason.
+Root free space is checked every 10 seconds for the same reason. The suite's
+own stdout and stderr go to `build-coverage/coverage-suite.log` (on `/mnt`),
+because the runner spools a step's output to root before uploading it and
+about 20k tests can produce gigabytes; the step prints only the sampler's
+progress lines (with the current phase), then the phase lines, annotation
+commands and, on failure, the last 200 lines. The full log is uploaded as the
+`coverage-suite-log-<os>-<sha>` artifact.
 Read those before changing anything else.
 
 
