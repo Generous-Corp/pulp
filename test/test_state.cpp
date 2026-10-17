@@ -1318,8 +1318,13 @@ TEST_CASE("versioned parameter writes use a monotonic packed revision",
 
     ParamValue packed(0.0f);
     REQUIRE(packed.set_packed_revisioned(0.25f, 1, 1));
-    REQUIRE(packed.set_packed_revisioned(0.25f, 1, 1));
+    REQUIRE(packed.set_packed_revisioned(0.25f, 2, 1));
     CHECK(ParamValue::revision_from_versioned(packed.versioned_value()) == 2);
+
+    ParamValue ordered(0.0f);
+    REQUIRE(ordered.set_packed_revisioned(0.75f, 2, 1));
+    CHECK_FALSE(ordered.set_packed_revisioned(0.25f, 1, 2));
+    CHECK_THAT(ordered.get(), WithinAbs(0.75f, 0.001f));
 
     ParamValue long_lived(0.0f);
     constexpr auto wrap = std::uint64_t{std::numeric_limits<std::uint32_t>::max()};
@@ -1334,6 +1339,8 @@ TEST_CASE("packed feedback revision exhaustion never wraps", "[state][store][fee
     ParamValueTest::seed_revision(exhausted, std::numeric_limits<std::uint32_t>::max());
     const auto identity = exhausted.versioned_value();
 
+    auto expected = identity;
+    CHECK_FALSE(exhausted.compare_exchange_packed(expected, 0.5f, 1));
     CHECK_FALSE(exhausted.set_versioned_if_newer(0.5f, 1, 4));
     CHECK(exhausted.versioned_value() == identity);
     CHECK(ParamValue::revision_from_versioned(exhausted.versioned_value()) ==

@@ -668,9 +668,41 @@ class ParamValue {
     }
 
     /// StateStore's ordinary base-value publication boundary.
+    ///
+    /// Ordinary writers are ordered by StateStore's global generation. Claim
+    /// that generation before publishing the packed value; a writer that was
+    /// paused after claiming an older generation must not overwrite a newer
+    /// writer that has already published. Conditional feedback deliberately
+    /// uses compare_exchange_packed() below instead, because its exact packed
+    /// identity is the authorization token and the global generation is only
+    /// diagnostic there.
     bool set_packed_revisioned(float value, std::uint64_t generation,
                                std::uint32_t max_attempts) noexcept {
-        return set_revisioned(value, generation, max_attempts);
+        auto committed = committed_generation_.load(std::memory_order_relaxed);
+        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+            if (committed >= generation)
+                return false;
+            if (committed_generation_.compare_exchange_strong(
+                    committed, generation, std::memory_order_acq_rel,
+                    std::memory_order_acquire))
+                break;
+        }
+        if (committed_generation_.load(std::memory_order_acquire) != generation)
+            return false;
+
+        auto current = value_.load(std::memory_order_acquire);
+        for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
+            if (committed_generation_.load(std::memory_order_acquire) != generation)
+                return false;
+            const auto revision = unpack_generation(current);
+            if (revision == std::numeric_limits<std::uint32_t>::max())
+                return false;
+            const auto replacement = pack(value, revision + 1);
+            if (value_.compare_exchange_weak(current, replacement, std::memory_order_acq_rel,
+                                             std::memory_order_acquire))
+                return true;
+        }
+        return false;
     }
 
     bool compare_exchange_versioned(VersionedValue& expected,
