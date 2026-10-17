@@ -391,22 +391,28 @@ class ReaperSession:
         # durable. The scripted launch then starts the same scan from scratch
         # and never reaches the startup Lua. Wait until the target is visible
         # in a plugin cache (bounded by the ordinary mode timeout) instead.
-        warm_deadline = time.time() + self.args.timeout
+        # AU descriptors are registered with AudioComponentRegistrar and do
+        # not appear in REAPER's CLAP/VST cache files. Waiting for those files
+        # makes every AU run burn the whole timeout before the scripted launch.
         target = self.args.plugin_name.casefold()
-        cache_ready = False
-        while time.time() < warm_deadline:
-            time.sleep(0.5)
-            caches = list(self.portable.glob("reaper-*clap*.ini"))
-            caches.extend(self.portable.glob("reaper-*vst*.ini"))
-            for cache in caches:
-                try:
-                    if target in cache.read_text(errors="replace").casefold():
-                        cache_ready = True
-                        break
-                except OSError:
-                    continue
-            if cache_ready:
-                break
+        cache_ready = getattr(self.args, "format", None) == "au"
+        if cache_ready:
+            time.sleep(PREWARM_CACHE_SETTLE_SECONDS)
+        else:
+            warm_deadline = time.time() + self.args.timeout
+            while time.time() < warm_deadline:
+                time.sleep(0.5)
+                caches = list(self.portable.glob("reaper-*clap*.ini"))
+                caches.extend(self.portable.glob("reaper-*vst*.ini"))
+                for cache in caches:
+                    try:
+                        if target in cache.read_text(errors="replace").casefold():
+                            cache_ready = True
+                            break
+                    except OSError:
+                        continue
+                if cache_ready:
+                    break
         if not cache_ready:
             log("pre-warm scan did not publish the target into REAPER's plugin "
                 "cache before timeout; scripted launch may remain inconclusive.")
