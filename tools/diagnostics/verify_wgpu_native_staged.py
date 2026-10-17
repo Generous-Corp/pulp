@@ -17,6 +17,12 @@ from pathlib import Path
 
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 PROVIDER_UNAVAILABLE_EXIT = 77
+MACHO_MAGICS = frozenset({
+    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+    b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+})
 
 
 def diagnostic_exit_disposition(returncode: int) -> str:
@@ -34,6 +40,11 @@ def digest(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             sha.update(chunk)
     return sha.hexdigest()
+
+
+def is_macho(path: Path) -> bool:
+    with path.open("rb") as stream:
+        return stream.read(4) in MACHO_MAGICS
 
 
 def tree_digest(root: Path) -> str:
@@ -154,6 +165,8 @@ def verify(args: argparse.Namespace) -> dict:
     manifest_before = digest(manifest)
     runtime_before = digest(linked_runtime)
     executable_before = digest(executable)
+    if not is_macho(executable):
+        raise ValueError("executable_not_macho")
     process = subprocess.Popen([str(executable)], stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, encoding="utf-8",
                                start_new_session=True)
