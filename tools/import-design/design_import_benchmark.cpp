@@ -321,7 +321,9 @@ DesignIR build_baked_ir(int frame = -1) {
     panel.children.push_back(audio_node("drive", AudioWidgetType::knob, "Drive", 0.64f, 28, 84, 96, 96));
     panel.children.push_back(audio_node("tone", AudioWidgetType::knob, "Tone", 0.38f, 152, 84, 96, 96));
     panel.children.push_back(audio_node("mix", AudioWidgetType::fader, "Mix", 0.42f, 290, 72, 54, 160));
-    panel.children.push_back(audio_node("output", AudioWidgetType::meter, "Output", 0.55f, 380, 72, 42, 160));
+    auto output = audio_node("output", AudioWidgetType::meter, "Output", 0.55f, 380, 72, 42, 160);
+    output.attributes["peak"] = "0.38";
+    panel.children.push_back(std::move(output));
 
     auto xy = audio_node("shape", AudioWidgetType::xy_pad, "Shape", 0.5f, 456, 78, 130, 130);
     xy.attributes["x"] = "0.35";
