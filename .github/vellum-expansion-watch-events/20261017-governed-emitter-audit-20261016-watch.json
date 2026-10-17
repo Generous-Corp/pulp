@@ -10,7 +10,7 @@
   ],
   "rationale": "The import CLI now emits the governed build wrapper in its generated next-step recipe and adds a regression assertion. This is a Pulp CLI guidance and test-manifest change only; it moves no design-import, Chromium, rendering, or packaging authority.",
   "tests": [
-    "ctest --test-dir build -R pulp-test-cli-import-emit",
+    "ctest --test-dir build -R 'import emit' --output-on-failure",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],
