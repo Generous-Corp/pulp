@@ -3218,6 +3218,14 @@
    ],
    "kind": "shell"
   },
+  "android-surface-runtime-contract": {
+   "entry": "tools/scripts/test_android_surface_runtime_contract.py",
+   "inputs": [
+    "core/render/platform/android/surface_runtime_android.cpp",
+    "tools/scripts/test_android_surface_runtime_contract.py"
+   ],
+   "kind": "python"
+  },
   "apple-bundle-signing-check": {
    "entry": "tools/scripts/test_check_apple_bundle_signing.py",
    "inputs": [
