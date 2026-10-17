@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import pathlib
 import sys
 import tempfile
@@ -370,10 +372,12 @@ class CoveragercTests(unittest.TestCase):
 
 class MainFlowTests(unittest.TestCase):
     def setUp(self) -> None:
+        # Made-up names: the runner prints these into the job log, and real
+        # suite names there read as real failures.
         self.tests = [
             rpc.REPO_ROOT / "tools/scripts/test_alpha.py",
-            rpc.REPO_ROOT / "tools/deps/test_audit.py",
-            rpc.REPO_ROOT / "tools/local-ci/test_local_ci.py",
+            rpc.REPO_ROOT / "tools/deps/test_fake_suite_b.py",
+            rpc.REPO_ROOT / "tools/local-ci/test_fake_suite_c.py",
         ]
 
     def test_returns_one_when_no_tests_match(self) -> None:
@@ -482,6 +486,79 @@ class MainFlowTests(unittest.TestCase):
             [surface.source_roots for surface in surfaces],
             [("tools", "core/view/js")],
         )
+
+    def _run_test_with_stderr(self, returncode: int, stderr: str) -> int:
+        fake_proc = mock.Mock(returncode=returncode, stderr=stderr)
+        with mock.patch.object(rpc.subprocess, "run", return_value=fake_proc), \
+             mock.patch.object(rpc.sys, "stderr"):
+            return rpc._run_test(rpc.REPO_ROOT / "tools/scripts/test_alpha.py", {})
+
+    def test_missing_required_arguments_is_reported_as_a_skip(self) -> None:
+        # A CTest-driven script started without its --build-dir cannot run its
+        # checks here; that is a skip, not a pass and not a failure.
+        rc = self._run_test_with_stderr(2, (
+            "usage: test_alpha.py [-h] --build-dir BUILD_DIR\n"
+            "test_alpha.py: error: the following arguments are required: --build-dir\n"))
+        self.assertEqual(rc, rpc.SKIP_EXIT)
+
+    def test_control_any_other_exit_two_is_still_a_failure(self) -> None:
+        self.assertEqual(self._run_test_with_stderr(2, "Traceback ...\nKeyError: 'x'\n"), 2)
+
+    def test_argparse_text_elsewhere_in_stderr_is_not_a_skip(self) -> None:
+        # Only the script's own final usage error counts: the same words from a
+        # child process it ran, or from another program, are an ordinary failure.
+        cases = {
+            "child's error, then a traceback": (
+                "child.py: error: the following arguments are required: --x\n"
+                "Traceback (most recent call last):\nAssertionError\n"),
+            "another program's final line": (
+                "other.py: error: the following arguments are required: --x\n"),
+        }
+        for name, stderr in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(self._run_test_with_stderr(2, stderr), 2)
+
+    def _main_with(self, returns: list[int], expected: dict[str, str]) -> tuple[int, str, str]:
+        results = iter(returns)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(rpc, "_require_supported_coverage"), \
+             mock.patch.object(rpc, "_discover_tests", return_value=self.tests), \
+             mock.patch.object(rpc, "_write_coveragerc"), \
+             mock.patch.object(rpc.shutil, "rmtree"), \
+             mock.patch.object(rpc, "_run_test", side_effect=lambda *_: next(results)), \
+             mock.patch.object(rpc, "_build_reports"), \
+             mock.patch.dict(rpc.EXPECTED_SKIPS, expected, clear=True), \
+             contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            rc = rpc.main([])
+        return rc, stdout.getvalue(), stderr.getvalue()
+
+    def test_expected_skip_does_not_fail_the_run_and_is_annotated(self) -> None:
+        skipped = self.tests[1].relative_to(rpc.REPO_ROOT).as_posix()
+        rc, out, _ = self._main_with([0, rpc.SKIP_EXIT, 0], {skipped: "needs a build tree"})
+        self.assertEqual(rc, 0)
+        self.assertIn("Skipped 1 test file(s)", out)
+        self.assertIn(f"::warning title=Python coverage skip 1/1::{skipped}", out)
+        self.assertIn("needs a build tree", out)
+
+    def test_unexpected_skip_fails_the_run(self) -> None:
+        # Exit 77, or a required-argument refusal (which _run_test reports as
+        # 77), from a file not in EXPECTED_SKIPS is a failure.
+        skipped = self.tests[1].relative_to(rpc.REPO_ROOT).as_posix()
+        rc, _, err = self._main_with([0, rpc.SKIP_EXIT, 0], {})
+        self.assertEqual(rc, 1)
+        self.assertIn(f"{skipped} (skipped, and not in EXPECTED_SKIPS)", err)
+
+    def test_expected_skip_that_ran_is_flagged_stale(self) -> None:
+        ran = self.tests[0].relative_to(rpc.REPO_ROOT).as_posix()
+        rc, out, _ = self._main_with([0, 0, 0], {ran: "needs a build tree"})
+        self.assertEqual(rc, 0)
+        self.assertIn(f"::warning title=Stale EXPECTED_SKIPS entry::{ran} ran its checks", out)
+
+    def test_every_expected_skip_names_an_existing_test_file(self) -> None:
+        for path, reason in rpc.EXPECTED_SKIPS.items():
+            with self.subTest(path=path):
+                self.assertTrue((rpc.REPO_ROOT / path).is_file())
+                self.assertTrue(reason.strip())
 
     def test_run_test_invokes_coverage_cli(self) -> None:
         fake_proc = mock.Mock(returncode=7)

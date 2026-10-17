@@ -537,6 +537,108 @@ class DifferentialLabTests(unittest.TestCase):
             with self.assertRaisesRegex(LAB.LabError, "dimensions"):
                 LAB.verify_capture_image_binding(capture, image_path)
 
+    def test_snapshot_binding_preserves_legacy_but_requires_producer_for_experiment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            snapshot.write_text('{"background":"black"}\n', encoding="utf-8")
+            self.assertEqual(LAB.verify_capture_snapshot_binding({}, evidence)[0],
+                             {"status": "legacy-unbound", "sha256": None})
+            self.assertEqual(LAB.verify_capture_snapshot_binding(
+                {"documents": [{"snapshot_asset": "dom-snapshot.json"}]}, evidence)[0],
+                {"status": "legacy-unbound", "sha256": None})
+            # Legacy native envelopes may name the snapshot through an asset ID.
+            legacy = {"documents": [{"snapshot_asset": "snapshot:main"}]}
+            self.assertEqual(LAB.verify_capture_snapshot_binding(legacy, evidence)[0],
+                             {"status": "legacy-unbound", "sha256": None})
+            with self.assertRaisesRegex(LAB.LabError, "no producer digest"):
+                LAB.verify_capture_snapshot_binding(legacy, evidence, required=True)
+            with self.assertRaisesRegex(LAB.LabError, "no producer digest"):
+                LAB.verify_capture_snapshot_binding({}, evidence, required=True)
+            capture = {"documents": [{"snapshot_asset": "dom-snapshot.json",
+                                      "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+            binding, verified_bytes = LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+            self.assertEqual(verified_bytes, snapshot.read_bytes())
+            self.assertEqual(binding,
+                             {"status": "producer-bound", "sha256": LAB.sha256_file(snapshot)})
+            # A style-only edit and a different valid snapshot are both wrong bytes.
+            for replacement in ('{"background":"white"}\n', '{"documents":[]}\n'):
+                snapshot.write_text(replacement, encoding="utf-8")
+                with self.assertRaisesRegex(LAB.LabError, "does not match"):
+                    LAB.verify_capture_snapshot_binding(capture, evidence)
+            snapshot.unlink()
+            with self.assertRaisesRegex(LAB.LabError, "unavailable"):
+                LAB.verify_capture_snapshot_binding(capture, evidence)
+            # Windows symlink creation requires an optional OS privilege.
+            if sys.platform != "win32":
+                outside = evidence.parent / (evidence.name + "-snapshot.json")
+                try:
+                    outside.write_text('{"background":"black"}\n', encoding="utf-8")
+                    snapshot.symlink_to(outside)
+                    with self.assertRaisesRegex(LAB.LabError, "escapes evidence"):
+                        LAB.verify_capture_snapshot_binding(capture, evidence)
+                finally:
+                    outside.unlink(missing_ok=True)
+
+    def test_snapshot_binding_refuses_oversize_before_open_for_bound_and_legacy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            snapshot.write_bytes(b"123456789")
+            capture = {"documents": [{"snapshot_asset": "dom-snapshot.json",
+                                      "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+            for envelope in ({}, capture):
+                with self.subTest(bound=bool(envelope)), \
+                        patch.object(LAB, "MAX_SNAPSHOT_BYTES", 8), \
+                        patch.object(Path, "open") as opened, \
+                        self.assertRaisesRegex(LAB.LabError, "exceeds 256 MiB"):
+                    LAB.verify_capture_snapshot_binding(envelope, evidence)
+                opened.assert_not_called()
+
+    def test_snapshot_binding_rejects_growth_and_truncation_during_bounded_read(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            original = b'{"documents":[]}\n'
+            fstat = LAB.os.fstat
+            for replacement in (original + b"extra", original[:-1]):
+                snapshot.write_bytes(original)
+                capture = {"documents": [{"snapshot_asset": "dom-snapshot.json",
+                                          "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+
+                def mutate_after_measurement(descriptor):
+                    info = fstat(descriptor)
+                    snapshot.write_bytes(replacement)
+                    return info
+
+                with self.subTest(length=len(replacement)), \
+                        patch.object(LAB.os, "fstat", side_effect=mutate_after_measurement), \
+                        self.assertRaisesRegex(LAB.LabError, "changed during bounded read"):
+                    LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+
+    def test_snapshot_binding_rejects_malformed_declarations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            for digest in (None, True, 12, "", "a" * 63, "A" * 64):
+                with self.subTest(digest=digest), self.assertRaisesRegex(LAB.LabError, "malformed"):
+                    LAB.verify_capture_snapshot_binding({"documents": [{
+                        "snapshot_asset": "dom-snapshot.json", "snapshot_sha256": digest,
+                    }]}, evidence)
+            with self.assertRaisesRegex(LAB.LabError, "dom-snapshot.json document"):
+                LAB.verify_capture_snapshot_binding({"documents": [{
+                    "snapshot_asset": "../dom-snapshot.json", "snapshot_sha256": "a" * 64,
+                }]}, evidence)
+            with self.assertRaisesRegex(LAB.LabError, "exactly one"):
+                LAB.verify_capture_snapshot_binding({"documents": [{
+                    "snapshot_asset": "dom-snapshot.json", "snapshot_sha256": "a" * 64,
+                }, {}]}, evidence)
+            for documents in ([{}], [None], ["x"], {}):
+                for required in (False, True):
+                    with self.subTest(documents=documents, required=required), \
+                            self.assertRaises(LAB.LabError):
+                        LAB.verify_capture_snapshot_binding(
+                            {"documents": documents}, evidence, required=required)
+
     def test_capture_binding_refuses_a_capture_without_provenance(self) -> None:
         _, native_capture, source_sha256 = self._bound_captures()
         with self.assertRaisesRegex(LAB.LabError, "browser capture source hash"):
@@ -626,9 +728,15 @@ class DifferentialLabTests(unittest.TestCase):
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             (evidence / "dom-snapshot.json").write_text(
                 json.dumps({"documents": []}), encoding="utf-8")
+            mutate_snapshot_during_render = False
 
             def fake_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
                 if "--render" in argv:
+                    if mutate_snapshot_during_render:
+                        (evidence / "dom-snapshot.json").write_text(
+                            '{"documents":[],"changedAfterVerification":true}', encoding="utf-8")
+                        (evidence / "capture.json").write_text(
+                            '{"changedAfterVerification":true}', encoding="utf-8")
                     Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(
                         Path(argv[argv.index("--render") + 1]))
                     Path(argv[argv.index("--layout") + 1]).write_text(
@@ -647,7 +755,8 @@ class DifferentialLabTests(unittest.TestCase):
             with patch.object(LAB, "run_command", side_effect=fake_run), \
                     patch.object(LAB, "find_browser_evidence", return_value=evidence), \
                     patch.object(LAB, "verify_capture_binding", wraps=LAB.verify_capture_binding) as binding, \
-                    patch.object(LAB, "verify_capture_image_binding", wraps=LAB.verify_capture_image_binding) as image_binding:
+                    patch.object(LAB, "verify_capture_image_binding", wraps=LAB.verify_capture_image_binding) as image_binding, \
+                    patch.object(LAB, "verify_capture_snapshot_binding", wraps=LAB.verify_capture_snapshot_binding) as snapshot_binding:
                 report = LAB.compare_one(
                     Path("importer"), Path("observer"), source, root / "out", 60,
                     "claude", Path("chrome"),
@@ -660,6 +769,68 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertEqual(binding.call_args.kwargs["expected_interaction_plan_sha256"], plan_sha256)
             self.assertEqual(image_binding.call_count, 2)
             image_binding.assert_any_call(capture, evidence / "browser.png")
+            self.assertEqual(snapshot_binding.call_count, 2)
+            self.assertEqual(report["integrity"]["browser_snapshot_binding"]["status"], "legacy-unbound")
+            # Verify declared bytes on compare_one's real path, before rendering.
+            snapshot_path = evidence / "dom-snapshot.json"
+            capture["documents"] = [{"snapshot_asset": "dom-snapshot.json",
+                                     "snapshot_sha256": LAB.sha256_file(snapshot_path)}]
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
+            verified_capture_bytes = (evidence / "capture.json").read_bytes()
+            mutate_snapshot_during_render = True
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence):
+                bound_report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-bound", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            self.assertEqual(bound_report["integrity"]["browser_snapshot_binding"]["status"], "producer-bound")
+            self.assertEqual(bound_report["integrity"]["native_snapshot_binding"]["sha256"],
+                             capture["documents"][0]["snapshot_sha256"])
+            self.assertEqual(LAB.sha256_file(root / "out-bound/browser/dom-snapshot.json"),
+                             capture["documents"][0]["snapshot_sha256"])
+            self.assertNotEqual(LAB.sha256_file(snapshot_path), capture["documents"][0]["snapshot_sha256"])
+            self.assertEqual((root / "out-bound/browser/capture.json").read_bytes(), verified_capture_bytes)
+            self.assertEqual(bound_report["integrity"]["browser_capture_sha256"],
+                             LAB.sha256_file(root / "out-bound/browser/capture.json"))
+            self.assertEqual(bound_report["integrity"]["native_capture_canonical_sha256"],
+                             LAB.canonical_json_sha256(verified_capture_bytes))
+            mutate_snapshot_during_render = False
+            (evidence / "capture.json").write_bytes(verified_capture_bytes)
+            snapshot_path.write_text('{"documents":[],"changedStyle":"white"}', encoding="utf-8")
+            with patch.object(LAB, "run_command", side_effect=fake_run) as run, \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    self.assertRaisesRegex(LAB.LabError, "snapshot digest does not match"):
+                LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-tampered", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            self.assertFalse(any("--render" in call.args[0] for call in run.call_args_list))
+            snapshot_path.write_text(json.dumps({"documents": []}), encoding="utf-8")
+            # Exercise compare_one's wiring, not just the metrics helper: a
+            # panel-local match must not replace the raw page-space score.
+            capture["reference"]["authored_frame"] = {"x": 0.25, "y": 0.25}
+            (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
+            browser = LAB.BrowserNode(
+                0, "main", -1, "", {}, (0.25, 0.25, 0.5, 0.5), {}, 10)
+            native = LAB.NativeNode(
+                "panel", "frame", "main", "", None, {}, (0, 0, 0.5, 0.5), 10)
+            with patch.object(LAB, "run_command", side_effect=fake_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    patch.object(LAB, "browser_nodes", return_value=[browser]), \
+                    patch.object(LAB, "native_nodes", return_value=[native]):
+                offset_report = LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-offset", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
+            geometry = offset_report["comparison"]["geometry"]
+            self.assertLess(geometry["score"], geometry["registered_geometry"]["score"])
+            self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
+            self.assertEqual(geometry["registration_applied"]["x"], -0.25)
+            self.assertIn("geometry score below 0.980", offset_report["promotion"]["reasons"])
             with patch.object(
                 LAB, "viewport_dpr_audit",
                 return_value={"ok": False, "checks": {"planted_negative": False}},
@@ -770,6 +941,54 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertNotEqual(
                 LAB.canonical_json_sha256(first),
                 LAB.canonical_json_sha256(second))
+
+    def test_canonical_capture_digest_excludes_only_raw_document_bindings(self) -> None:
+        first = {"schema": "pulp-browser-capture-v1", "documents": [
+            {"snapshot_asset": "dom-snapshot.json", "snapshot_sha256": "a" * 64}]}
+        raw = json.dumps(first).encode()
+        first["documents"][0]["snapshot_sha256"] = "b" * 64
+        changed = json.dumps(first).encode()
+        self.assertNotEqual(raw, changed)
+        self.assertNotEqual(LAB.hashlib.sha256(raw).hexdigest(),
+                            LAB.hashlib.sha256(changed).hexdigest())
+        self.assertEqual(LAB.canonical_json_sha256(raw), LAB.canonical_json_sha256(changed))
+        first["documents"][0]["snapshot_asset"] = "changed.json"
+        self.assertNotEqual(LAB.canonical_json_sha256(raw),
+                            LAB.canonical_json_sha256(json.dumps(first).encode()))
+
+    def test_canonical_digest_preserves_same_named_fields_outside_capture_document(self) -> None:
+        for document in (
+            {"documents": [{"snapshot_sha256": "a" * 64}]},
+            {"schema": "different", "documents": [{"snapshot_sha256": "a" * 64}]},
+            {"schema": "pulp-browser-capture-v1", "snapshot_sha256": "a" * 64},
+            {"schema": "pulp-browser-capture-v1", "nested": {
+                "documents": [{"snapshot_sha256": "a" * 64}]}},
+            {"schema": "pulp-browser-capture-v1", "documents": [{
+                "nested": {"snapshot_sha256": "a" * 64}}]},
+        ):
+            with self.subTest(document=document):
+                raw = json.dumps(document).encode()
+                changed = raw.replace(("a" * 64).encode(), ("b" * 64).encode())
+                self.assertNotEqual(LAB.canonical_json_sha256(raw),
+                                    LAB.canonical_json_sha256(changed))
+
+    def test_canonical_equivalence_does_not_bypass_snapshot_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            snapshot = evidence / "dom-snapshot.json"
+            snapshot.write_bytes(b'{"documents":[]}\n')
+            capture = {"schema": "pulp-browser-capture-v1", "documents": [{
+                "snapshot_asset": "dom-snapshot.json",
+                "snapshot_sha256": LAB.sha256_file(snapshot)}]}
+            raw = json.dumps(capture).encode()
+            binding, verified = LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
+            self.assertEqual(verified, snapshot.read_bytes())
+            self.assertEqual(binding["status"], "producer-bound")
+            capture["documents"][0]["snapshot_sha256"] = "0" * 64
+            self.assertEqual(LAB.canonical_json_sha256(raw),
+                             LAB.canonical_json_sha256(json.dumps(capture).encode()))
+            with self.assertRaises(LAB.LabError):
+                LAB.verify_capture_snapshot_binding(capture, evidence, required=True)
 
     def test_intrinsic_sizing_gap_is_emitted(self) -> None:
         recognition = LAB.source_recognition(

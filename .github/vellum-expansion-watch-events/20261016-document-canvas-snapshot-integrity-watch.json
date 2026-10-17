@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261016-document-canvas-snapshot-integrity-watch",
+  "created_at": "2026-10-16T20:09:22Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Bind captured DOM snapshot bytes at the Chromium producer and verify declared bytes before native style consumption and differential analysis; legacy unbound captures remain diagnostic-only for document-background experiments. This is capture evidence integrity, with no rendering, source-authority, root-sizing or threshold change.",
+  "tests": [
+    "python3 test/test_importer_differential_lab.py",
+    "node --test --test-name-pattern=delayed tools/import-design/browser_capture/capture.integration.test.mjs",
+    "pulp-test-browser-capture-import",
+    "pulp-test-browser-capture-backend",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

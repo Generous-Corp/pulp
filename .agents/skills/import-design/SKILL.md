@@ -5,6 +5,17 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 # Import Design
 
+### Import benchmark rebuild control
+
+The opt-in `baked-native-rebuild` lane in `tools/import-design/design_import_benchmark.cpp`
+is a diagnostic full-rematerialization control. It is useful for measuring the
+cost of rebuilding the same DesignIR, but it does not implement or prove a
+structural retained planner. Keep the normal `baked-native` direct-setter lane
+as the production baseline, and do not claim Chromium/Skia parity or planner
+performance from the control alone. Structural claims require the authenticated
+same-trace native receipts and identity/lifecycle evidence defined by the
+planning trace matrix.
+
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
 ### Materialized browser source emission
@@ -5507,6 +5518,35 @@ the differing-pixel count printed beside it. A 200x120 page captured on a
 1280x800 viewport printed `Similarity: 2% (114/96000 pixels differ)` — 99.88%
 identical, scaled by 0.0234. Never quote that percentage without checking that
 the two images have the same dimensions.
+
+**DOM snapshot integrity is separate from visual parity.** New Chromium captures
+record `documents[0].snapshot_sha256` over the exact UTF-8 bytes written to
+`dom-snapshot.json`, including its terminal newline. Consumers reject a declared
+malformed or mismatching digest before reading styles; the native lowerer and
+differential lab parse the verified buffer rather than reopening the sidecar.
+Old captures without the field remain usable for ordinary diagnostic analysis,
+but are `legacy-unbound` and cannot qualify for a document-background experiment.
+Recapture them with the new producer; adding a checksum afterward does not
+establish capture-time identity. A matching digest proves consistency with the
+capture envelope, not signing, independent authentication, background-compositing
+correctness, or Chromium/Skia pixel parity.
+
+Native browser lowering can add the computed opaque HTML canvas colour to the
+existing synthetic root, including a panel-sized root. This requires a declared
+verified snapshot hash, unique HTML/body identity, complete supported paint
+facts, and consistent origin-aligned viewport/document/authored geometry. Body
+must be transparent or the same opaque colour; effects, root/body pseudos,
+scroll overflow, ambiguous or missing evidence leave the existing output
+unchanged. Materialized composition and legacy unbound captures gain no fill.
+The existing renderer, root geometry, children, and DPR 2 import contract are
+unchanged. A fill is not a pixel-parity or performance claim.
+
+The canonical repeat-run envelope digest excludes only
+`documents[*].snapshot_sha256` at the root of a `pulp-browser-capture-v1`
+envelope. Raw CDP frame IDs can change those exact snapshot bytes between runs.
+Each run still retains and verifies its raw snapshot binding independently;
+canonical envelope equality does not prove semantic DOM determinism. Same-named
+fields in other schemas or nested objects remain covered by the canonical hash.
 
 **The browser capture is deliberately LARGER than the design, so it must be
 registered before it is scored.** The panel's root carries its own padding and

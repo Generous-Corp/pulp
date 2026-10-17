@@ -24,8 +24,8 @@
                 --receipt "${CMAKE_CURRENT_BINARY_DIR}/wgpu-native-staged-receipt.json")
         set_tests_properties(pulp-gpu-wgpu-native-staged-diagnostic PROPERTIES
             RESOURCE_LOCK pulp_gpu
-            SKIP_RETURN_CODE 77
-            TIMEOUT 60)
+            TIMEOUT 60
+            SKIP_RETURN_CODE 77)
         add_test(NAME pulp-gpu-wgpu-native-staged-identity-negative-control
             COMMAND "${Python3_EXECUTABLE}"
                 "${PROJECT_SOURCE_DIR}/tools/diagnostics/test_verify_wgpu_native_staged.py"
@@ -37,6 +37,18 @@
                 --verifier "${PROJECT_SOURCE_DIR}/tools/diagnostics/verify_wgpu_native_staged.py")
         set_tests_properties(pulp-gpu-wgpu-native-staged-identity-negative-control PROPERTIES
             TIMEOUT 60)
+    endif()
+
+    # Typed verifier controls are pure Python and must run even when the
+    # opt-in native diagnostic is unavailable. Keep the planted positive and
+    # negative controls in the default test graph whenever Python is present.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME pulp-gpu-wgpu-native-staged-verifier-typed-controls
+            COMMAND "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/diagnostics/test_verify_wgpu_native_staged.py"
+                --typed-only)
+        set_tests_properties(pulp-gpu-wgpu-native-staged-verifier-typed-controls PROPERTIES
+            TIMEOUT 30)
     endif()
 
     add_executable(pulp-test-gpu-surface test_gpu_surface.cpp)

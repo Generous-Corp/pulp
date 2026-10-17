@@ -24,9 +24,26 @@ class Activity:
     last_output: float
 
 
+def cpu_seconds(value: str) -> float:
+    """Cumulative CPU time from ps `time=`: [[dd-]hh:]mm:ss[.ff] on macOS and Linux."""
+    days, _, clock = value.rpartition("-")
+    parts = [float(part) for part in clock.split(":")]
+    seconds = 0.0
+    for part in parts:
+        seconds = seconds * 60 + part
+    return seconds + (int(days) * 86400 if days else 0)
+
+
 def process_snapshot() -> tuple[dict[int, list[int]], dict[int, float]] | None:
+    """Parent links and cumulative CPU seconds for every process.
+
+    Cumulative CPU time, not `%cpu`: Linux reports `%cpu` as an average over
+    the whole process lifetime, so a child that was busy at startup keeps a
+    high figure long after it goes idle, while macOS decays it. Diffing
+    cumulative time between polls measures the same thing on both.
+    """
     result = subprocess.run(
-        ["ps", "-axo", "pid=,ppid=,%cpu="],
+        ["ps", "-axo", "pid=,ppid=,time="],
         check=False,
         capture_output=True,
         text=True,
@@ -40,12 +57,23 @@ def process_snapshot() -> tuple[dict[int, list[int]], dict[int, float]] | None:
         if len(fields) != 3:
             continue
         try:
-            pid, ppid, usage = int(fields[0]), int(fields[1]), float(fields[2])
+            pid, ppid, used = int(fields[0]), int(fields[1]), cpu_seconds(fields[2])
         except ValueError:
             continue
         children.setdefault(ppid, []).append(pid)
-        cpu[pid] = usage
+        cpu[pid] = used
     return children, cpu
+
+
+def cpu_percent(previous: tuple[float, float] | None, now: float, used: float | None) -> float | None:
+    """CPU percent between two polls, or None until two readings exist."""
+    if previous is None or used is None:
+        return None
+    then, used_then = previous
+    elapsed = now - then
+    if elapsed <= 0:
+        return None
+    return max(0.0, used - used_then) / elapsed * 100
 
 
 def descendants(root: int, children: dict[int, list[int]]) -> set[int]:
@@ -121,6 +149,7 @@ def run_once(command: list[str], args: argparse.Namespace) -> tuple[int, bool]:
     reader = threading.Thread(target=stream_output, args=(process.stdout, activity), daemon=True)
     reader.start()
     quiet_since: float | None = None
+    previous_cpu: tuple[float, float] | None = None
 
     while process.poll() is None:
         time.sleep(args.poll_seconds)
@@ -131,7 +160,11 @@ def run_once(command: list[str], args: argparse.Namespace) -> tuple[int, bool]:
             continue
         children, cpu = snapshot
         has_descendants = bool(descendants(process.pid, children))
-        idle_cpu = cpu.get(process.pid, 0.0) <= args.max_idle_cpu
+        used = cpu.get(process.pid)
+        rate = cpu_percent(previous_cpu, now, used)
+        previous_cpu = (now, used) if used is not None else None
+        # No rate yet (first reading) counts as busy: never stop on one sample.
+        idle_cpu = rate is not None and rate <= args.max_idle_cpu
         quiet = now - activity.last_output >= args.stall_seconds
         candidate = quiet and not has_descendants and idle_cpu
         quiet_since = quiet_since or now if candidate else None

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   access,
   mkdir,
@@ -197,12 +198,16 @@ test("real browser capture waits through a delayed DOM commit",
         "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
-      const snapshot = JSON.parse(
-        await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
+      const snapshotBytes = await readFile(path.join(output, "dom-snapshot.json"));
+      const snapshot = JSON.parse(snapshotBytes.toString("utf8"));
       assert.ok(snapshot.strings.includes("DELAYED READY"));
       assert.equal(snapshot.strings.includes("EARLY"), false);
       const envelope = JSON.parse(
         await readFile(path.join(output, "capture.json"), "utf8"));
+      assert.equal(envelope.documents[0].snapshot_asset, "dom-snapshot.json");
+      assert.match(envelope.documents[0].snapshot_sha256, /^[0-9a-f]{64}$/);
+      assert.equal(envelope.documents[0].snapshot_sha256,
+        createHash("sha256").update(snapshotBytes).digest("hex"));
       assert.deepEqual(envelope.provenance.readiness, {
         contract: "__pulpCaptureReady",
         awaited: true,

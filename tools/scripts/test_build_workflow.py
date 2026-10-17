@@ -12,6 +12,9 @@ import yaml
 WORKFLOW = (Path(__file__).parents[2] / ".github/workflows/build.yml").read_text(
     encoding="utf-8"
 )
+WGPU_NATIVE_DIAGNOSTIC_WORKFLOW_PATH = (
+    Path(__file__).parents[2] / ".github/workflows/wgpu-native-diagnostic.yml"
+)
 SANITIZERS_WORKFLOW_PATH = Path(__file__).parents[2] / ".github/workflows/sanitizers.yml"
 
 
@@ -21,6 +24,74 @@ def _workflow() -> dict[str, object]:
 
 def _sanitizers_workflow() -> dict[str, object]:
     return yaml.safe_load(SANITIZERS_WORKFLOW_PATH.read_text(encoding="utf-8"))
+
+
+def _wgpu_native_diagnostic_workflow() -> dict[str, object]:
+    return yaml.safe_load(
+        WGPU_NATIVE_DIAGNOSTIC_WORKFLOW_PATH.read_text(encoding="utf-8")
+    )
+
+
+class WgpuNativeDiagnosticWorkflowTest(unittest.TestCase):
+    """The native callback diagnostic is advisory and fail-closed."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = _wgpu_native_diagnostic_workflow()
+        cls.text = WGPU_NATIVE_DIAGNOSTIC_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    def test_build_gate_does_not_run_the_advisory_diagnostic(self) -> None:
+        build_steps = _build_steps()
+        self.assertNotIn(
+            "Run wgpu-native staged device-loss diagnostic (macOS)", build_steps
+        )
+        self.assertNotIn("pulp-gpu-wgpu-native-staged-diagnostic", WORKFLOW)
+
+    def test_advisory_workflow_has_pull_request_paths_and_manual_dispatch(self) -> None:
+        triggers = self.workflow.get("on", self.workflow.get(True, {}))
+        self.assertIn("pull_request", triggers)
+        self.assertIn("workflow_dispatch", triggers)
+        paths = triggers["pull_request"]["paths"]
+        self.assertIn(".github/workflows/wgpu-native-diagnostic.yml", paths)
+        self.assertIn("test/cmake/render_gpu_surface_tests.cmake", paths)
+        dispatch = triggers["workflow_dispatch"]["inputs"]["run_diagnostic"]
+        self.assertEqual(dispatch["type"], "boolean")
+        self.assertIs(dispatch["default"], True)
+
+    def test_unavailable_runtime_is_a_typed_advisory_skip(self) -> None:
+        self.assertIn('"status": "provider_unavailable"', self.text)
+        self.assertIn('"reason": "provider_unavailable"', self.text)
+        self.assertIn('"claim": "device_loss_callback_unavailable_after_destroy"', self.text)
+        self.assertIn('"device_loss_observation": "probe_timeout_after_destroy"', self.text)
+        self.assertIn("test -s \"$receipt\"", self.text)
+
+    def test_receipt_checks_preserve_typed_callback_scope(self) -> None:
+        for field in (
+            '"status": "provider_unavailable"',
+            '"device_loss_callback": "unavailable"',
+            '"device_loss_proof": "unavailable"',
+            '"device_loss_no_output_leases": "unavailable"',
+            '"status": "passed"',
+            '"device_loss_callback": "registered"',
+            '"device_loss_scenario": "triggered"',
+            '"device_loss_reason": "destroyed"',
+            '"device_loss_proof": "callback_terminal_no_output_lease"',
+            '"device_loss_no_output_leases": True',
+            '"device_loss_reprime": "unavailable"',
+            '"callback_fallback_proof": "unavailable"',
+            '"product_proof": False',
+        ):
+            self.assertIn(field, self.text)
+        self.assertIn("device_loss_terminal_records", self.text)
+        self.assertIn("architecture-only", self.text)
+        self.assertIn("does not prove a production", self.text)
+
+    def test_advisory_runner_is_resolved_and_not_required_build_host(self) -> None:
+        job = self.workflow["jobs"]["diagnostic"]
+        self.assertEqual(job["needs"], "resolve-advisory-macos")
+        self.assertIn("fromJSON(needs.resolve-advisory-macos.outputs.selector_json)", job["runs-on"])
+        self.assertEqual(self.workflow["jobs"]["resolve-advisory-macos"]["runs-on"], "ubuntu-latest")
+        self.assertIn("resolve_advisory_macos_runner.py", self.text)
 
 
 class ProtectedReceiptWorkflowTest(unittest.TestCase):
