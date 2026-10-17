@@ -599,7 +599,8 @@ not one matrix, so no aggregate cap is claimed. These lanes remain advisory and
 do not replace the required Vellum checks. The hosted Linux and macOS coverage
 legs each reclaim preinstalled image content before building, and log disk
 samples while the suite runs; see the versioning guide's hosted coverage disk
-section.
+section. The Linux leg also fetches full git history before its Python tools
+pass, because several tools tests check ancestry.
 
 The files under `docs/evidence/hosted-macos-advisory/` are labeled pre-change
 baselines. A post-merge follow-up must capture hosted-macOS running plus queued
