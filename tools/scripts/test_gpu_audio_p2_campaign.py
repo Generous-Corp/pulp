@@ -532,6 +532,13 @@ class P2CampaignContractTests(unittest.TestCase):
                 campaign.run(args)
         self.assertEqual(seen, [identity, identity])
         verification = load_receipt.call_args.kwargs["verification"]
+        self.assertEqual(verification.manifest, str(args.provider_manifest))
+        self.assertEqual(verification.platform, PLATFORM)
+        self.assertEqual(verification.skia_dir, str(args.provider_skia_dir))
+        self.assertEqual(verification.dawn_header, str(args.provider_dawn_header))
+        self.assertEqual(verification.dawn_library, str(args.provider_dawn_library))
+        self.assertEqual(verification.configured_receipt, str(args.provider_configured_receipt))
+        self.assertEqual(verification.prelink_receipt, str(args.provider_prelink_receipt))
         self.assertEqual(verification.executable, str(args.probe))
         self.assertEqual(verification.receipt, str(args.provider_identity_receipt))
 
