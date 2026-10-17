@@ -397,6 +397,11 @@ TEST_CASE("import emit end-to-end materialises a scaffold + provenance marker",
     REQUIRE(r.stdout_output.find("Materialised Pulp migration scaffold")
             != std::string::npos);
     REQUIRE(r.stdout_output.find("framework-source scan: passed") != std::string::npos);
+    // The CLI wraps long paths for the terminal, so assert the governed
+    // wrapper and build verb independently while rejecting the old raw chain.
+    REQUIRE(r.stdout_output.find("governed-build.sh") != std::string::npos);
+    REQUIRE(r.stdout_output.find("cmake --build") != std::string::npos);
+    REQUIRE(r.stdout_output.find("&& cmake --build") == std::string::npos);
 }
 
 TEST_CASE("import emit end-to-end fails closed when the importer smuggles "
