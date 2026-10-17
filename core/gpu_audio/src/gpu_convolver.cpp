@@ -290,8 +290,11 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
 bool GpuConvolver::prepare() {
     prepared_ = false;
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    std::optional<detail::GpuConvolverTrialConfig> pending_trial_config;
     if (shared_io_ && shared_io_->session && !shared_io_->session->release())
         return false;
+    if (shared_io_)
+        pending_trial_config = std::move(shared_io_->trial_config);
 #endif
     shared_io_.reset();
     staged_trial_.reset();
@@ -357,8 +360,8 @@ bool GpuConvolver::prepare() {
             const uint32_t shared_capacity = std::max(kSharedIoCapacity, latency_blocks_ + 1u);
             if (fft_size_ <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
                 auto state = std::make_unique<SharedIoState>();
-                if (shared_io_)
-                    state->trial_config = std::move(shared_io_->trial_config);
+                if (pending_trial_config)
+                    state->trial_config = std::move(pending_trial_config);
                 const auto samples_per_block = static_cast<std::size_t>(channels_) * block_;
                 state->callback_input.assign(samples_per_block, 0.0f);
                 state->callback_output.assign(samples_per_block, 0.0f);
