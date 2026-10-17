@@ -370,8 +370,10 @@ DesignIR build_baked_ir(int frame = -1) {
             node->audio_default = tone;
         if (auto* node = find(find, ir.root, "mix"))
             node->audio_default = mix;
-        if (auto* node = find(find, ir.root, "output"))
+        if (auto* node = find(find, ir.root, "output")) {
             node->audio_default = output;
+            node->attributes["peak"] = std::to_string(std::max(0.0f, output - 0.18f));
+        }
         if (auto* node = find(find, ir.root, "shape")) {
             node->attributes["x"] = std::to_string(x);
             node->attributes["y"] = std::to_string(y);
