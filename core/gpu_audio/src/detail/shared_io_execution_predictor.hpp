@@ -84,7 +84,7 @@ struct SharedIoCalibrationObservation {
                visible_ns >= terminal_ns;
     }
     constexpr bool valid() const noexcept {
-        return identity.valid() && provenance.valid() && generation != 0 && sequence != 0 &&
+        return identity.valid() && provenance.valid() && generation != 0 &&
                provider_authenticated && terminal_success && !late && !stale && !discarded &&
                !device_lost && output_acquired && output_released && lifecycle_valid &&
                timestamps_synchronized();

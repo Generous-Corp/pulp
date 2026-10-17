@@ -374,6 +374,8 @@ bool SharedIoComputePlan::release_output(const SharedIoArena::ReleaseRecord& rec
 }
 
 void SharedIoComputePlan::record_calibration(LifecycleReceipt& receipt) noexcept {
+    if (provider_ != nullptr && provider_->device_lost())
+        receipt.device_lost = true;
     if (lifecycle_receipt_overflow_ || completion_receipt_overflow_) {
         telemetry_.calibration_invalidated = true;
         ++telemetry_.invalid_calibration_rows;
