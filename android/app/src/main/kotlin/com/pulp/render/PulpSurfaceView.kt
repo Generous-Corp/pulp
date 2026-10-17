@@ -26,8 +26,9 @@ import com.pulp.accessibility.PulpAccessibilityDelegate
  *
  * Key lifecycle contract:
  * - surfaceCreated: pass ANativeWindow to C++ for Dawn/Vulkan surface creation
- * - surfaceDestroyed: SYNCHRONOUSLY block until C++ render thread confirms stop
- *   (returning early while C++ still renders → SIGSEGV)
+ * - surfaceDestroyed: queue teardown on the owner thread; join synchronously
+ *   after initialization, while an in-progress init tears down asynchronously
+ *   without leaving the owner able to use the released Surface.
  * - Touch events dispatched to C++ view hierarchy
  */
 class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Callback {
