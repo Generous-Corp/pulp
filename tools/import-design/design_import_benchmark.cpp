@@ -356,16 +356,22 @@ DesignIR build_baked_ir(int frame = -1) {
         const auto y = 0.5f + 0.45f * std::cos(t * 0.8f);
 
         const auto find = [&](auto&& self, IRNode& node, std::string_view id) -> IRNode* {
-            if (node.stable_anchor_id && *node.stable_anchor_id == id) return &node;
+            if (node.stable_anchor_id && *node.stable_anchor_id == id)
+                return &node;
             for (auto& child : node.children) {
-                if (auto* found = self(self, child, id)) return found;
+                if (auto* found = self(self, child, id))
+                    return found;
             }
             return nullptr;
         };
-        if (auto* node = find(find, ir.root, "drive")) node->audio_default = drive;
-        if (auto* node = find(find, ir.root, "tone")) node->audio_default = tone;
-        if (auto* node = find(find, ir.root, "mix")) node->audio_default = mix;
-        if (auto* node = find(find, ir.root, "output")) node->audio_default = output;
+        if (auto* node = find(find, ir.root, "drive"))
+            node->audio_default = drive;
+        if (auto* node = find(find, ir.root, "tone"))
+            node->audio_default = tone;
+        if (auto* node = find(find, ir.root, "mix"))
+            node->audio_default = mix;
+        if (auto* node = find(find, ir.root, "output"))
+            node->audio_default = output;
         if (auto* node = find(find, ir.root, "shape")) {
             node->attributes["x"] = std::to_string(x);
             node->attributes["y"] = std::to_string(y);
@@ -492,16 +498,24 @@ private:
 // is diagnostic only; the production baked-native lane above remains the
 // direct-setter baseline.
 class BakedNativeRebuildFixture final : public BenchmarkFixture {
-public:
-    BakedNativeRebuildFixture() { rebuild(0); }
+  public:
+    BakedNativeRebuildFixture() {
+        rebuild(-1);
+    }
 
-    View& root() override { return *root_; }
+    View& root() override {
+        return *root_;
+    }
 
-    void step(int frame) override { rebuild(frame); }
+    void step(int frame) override {
+        rebuild(frame);
+    }
 
-    int js_evaluation_count() const override { return 0; }
+    int js_evaluation_count() const override {
+        return 0;
+    }
 
-private:
+  private:
     void rebuild(int frame) {
         auto ir = build_baked_ir(frame);
         NativeMaterializeOptions options;
@@ -512,13 +526,16 @@ private:
             std::ostringstream msg;
             msg << "baked-native-rebuild materialization emitted " << diagnostics.size()
                 << " diagnostics";
-            if (!diagnostics.front().code.empty()) msg << "; first=" << diagnostics.front().code;
-            if (!diagnostics.front().message.empty()) msg << ": " << diagnostics.front().message;
+            if (!diagnostics.front().code.empty())
+                msg << "; first=" << diagnostics.front().code;
+            if (!diagnostics.front().message.empty())
+                msg << ": " << diagnostics.front().message;
             throw std::runtime_error(msg.str());
         }
-        if (!next) throw std::runtime_error("baked-native-rebuild returned null root");
-        next->set_bounds({0, 0, static_cast<float>(kFixtureWidth),
-                          static_cast<float>(kFixtureHeight)});
+        if (!next)
+            throw std::runtime_error("baked-native-rebuild returned null root");
+        next->set_bounds(
+            {0, 0, static_cast<float>(kFixtureWidth), static_cast<float>(kFixtureHeight)});
         next->layout_children();
         root_ = std::move(next);
     }
@@ -754,7 +771,8 @@ layout();
 std::unique_ptr<BenchmarkFixture> make_fixture(const std::string& lane) {
     if (lane == "live") return std::make_unique<LiveFixture>();
     if (lane == "baked-native") return std::make_unique<BakedNativeFixture>();
-    if (lane == "baked-native-rebuild") return std::make_unique<BakedNativeRebuildFixture>();
+    if (lane == "baked-native-rebuild")
+        return std::make_unique<BakedNativeRebuildFixture>();
     if (lane == "baked-cpp") return std::make_unique<BakedCppFixture>();
     return nullptr;
 }
@@ -905,7 +923,10 @@ std::string make_json(const Config& config,
     out << "    \"first_frame_paint_commands\": " << startup.first_frame_paint_commands << ",\n";
     out << "    \"rss_after_first_frame_bytes\": " << startup.rss_after_first_frame_bytes << "\n";
     out << "  },\n";
-    out << "  \"interaction_model\": \"value drag plus overflow-panel scroll offset; live lane mutates through JS bridge, baked-native materializes once and uses direct native setters, baked-native-rebuild rematerializes the same IR per interactive step, baked-cpp mutates generated-style native widgets directly\",\n";
+    out << "  \"interaction_model\": \"value drag plus overflow-panel scroll offset; live lane "
+           "mutates through JS bridge, baked-native materializes once and uses direct native "
+           "setters, baked-native-rebuild rematerializes the same IR per interactive step, "
+           "baked-cpp mutates generated-style native widgets directly\",\n";
     append_phase_json(out, "idle", idle, true);
     append_phase_json(out, "interactive", interactive, false);
     out << "}\n";
@@ -913,7 +934,8 @@ std::string make_json(const Config& config,
 }
 
 void print_usage(std::ostream& out) {
-    out << "usage: pulp-design-import-bench [--lane=live|baked-native|baked-native-rebuild|baked-cpp] "
+    out << "usage: pulp-design-import-bench "
+           "[--lane=live|baked-native|baked-native-rebuild|baked-cpp] "
            "[--idle-ms=N] [--interactive-ms=N] [--target-fps=N] [--output=PATH]\n";
 }
 
@@ -965,10 +987,9 @@ std::optional<Config> parse_args(int argc, char** argv) {
             return std::nullopt;
         }
     }
-    if (config.lane != "live" &&
-        config.lane != "baked-native" &&
-        config.lane != "baked-native-rebuild" &&
-        config.lane != "baked-cpp") return std::nullopt;
+    if (config.lane != "live" && config.lane != "baked-native" &&
+        config.lane != "baked-native-rebuild" && config.lane != "baked-cpp")
+        return std::nullopt;
     config.idle_ms = std::max(0, config.idle_ms);
     config.interactive_ms = std::max(0, config.interactive_ms);
     config.target_fps = std::max(1, config.target_fps);

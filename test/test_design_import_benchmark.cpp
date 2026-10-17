@@ -129,8 +129,7 @@ void require_lane_schema(const std::string& json, const std::string& lane) {
 
 }  // namespace
 
-TEST_CASE("design-import benchmark emits all declared lane JSON",
-          "[design-import][benchmark]") {
+TEST_CASE("design-import benchmark emits all declared lane JSON", "[design-import][benchmark]") {
     set_no_launch_env();
     const auto bin = bench_binary();
     REQUIRE(fs::exists(bin));

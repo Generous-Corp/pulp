@@ -336,6 +336,14 @@ def compute_comparison(live: dict[str, Any], baked: dict[str, Any]) -> dict[str,
             baked_interactive.get("cpu_frame_ms_p99"),
             live_interactive.get("cpu_frame_ms_p99"),
         ),
+        "interactive_update_median_delta_ratio": delta_ratio(
+            baked_interactive.get("update_ms_median"),
+            live_interactive.get("update_ms_median"),
+        ),
+        "interactive_update_p99_delta_ratio": delta_ratio(
+            baked_interactive.get("update_ms_p99"),
+            live_interactive.get("update_ms_p99"),
+        ),
         "interactive_frame_median_delta_ratio": delta_ratio(
             baked_interactive.get("frame_ms_median"),
             live_interactive.get("frame_ms_median"),
@@ -423,8 +431,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "## Steady State",
         "",
-        "| Phase | Lane | Samples | CPU total | CPU frame median | CPU frame p99 | Wall frame median | Wall frame p99 | RSS median | RSS p99 | RSS peak | JS evals |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Phase | Lane | Samples | CPU total | CPU frame median | CPU frame p99 | Wall frame median | Wall frame p99 | Update median | Update p99 | RSS median | RSS p99 | RSS peak | JS evals |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ])
 
     for phase in ("idle", "interactive"):
@@ -438,6 +446,8 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"{format_ms(data.get('cpu_frame_ms_p99'))} | "
                 f"{format_ms(data.get('frame_ms_median'))} | "
                 f"{format_ms(data.get('frame_ms_p99'))} | "
+                f"{format_ms(data.get('update_ms_median'))} | "
+                f"{format_ms(data.get('update_ms_p99'))} | "
                 f"{format_bytes(data.get('rss_median_bytes', 0))} | "
                 f"{format_bytes(data.get('rss_p99_bytes', 0))} | "
                 f"{format_bytes(data.get('rss_peak_bytes', 0))} | "
@@ -515,6 +525,8 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"- Idle CPU delta ({target} vs live): {format_pct(comparison['idle_cpu_delta_ratio'])}",
             f"- Interactive CPU delta ({target} vs live): {format_pct(comparison['interactive_cpu_delta_ratio'])}",
             f"- Interactive CPU-frame p99 delta ({target} vs live): {format_pct(comparison['interactive_cpu_frame_p99_delta_ratio'])}",
+            f"- Interactive update median delta ({target} vs live): {format_pct(comparison['interactive_update_median_delta_ratio'])}",
+            f"- Interactive update p99 delta ({target} vs live): {format_pct(comparison['interactive_update_p99_delta_ratio'])}",
             f"- Interactive p99 frame delta ({target} vs live): {format_pct(comparison['interactive_frame_p99_delta_ratio'])}",
             f"- Idle RSS p99 delta ({target} vs live): {format_pct(comparison['idle_rss_p99_delta_ratio'])}",
             f"- Interactive RSS p99 delta ({target} vs live): {format_pct(comparison['interactive_rss_p99_delta_ratio'])}",
