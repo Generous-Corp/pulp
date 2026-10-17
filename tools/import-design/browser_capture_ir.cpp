@@ -75,6 +75,38 @@ double number_member(const choc::value::ValueView& object,
     return object[key].getWithDefault<double>(fallback);
 }
 
+bool document_canvas_registration(const detail::DocumentCanvasPaint& paint,
+                                  const choc::value::ValueView& envelope) {
+    const auto object = [](const choc::value::ValueView& value, const char* key) {
+        return value.isObject() && value.hasObjectMember(key) ? value[key]
+                                                              : choc::value::ValueView{};
+    };
+    const auto n = [&](const choc::value::ValueView& value, const char* key) {
+        const auto field = object(value, key);
+        return field.isInt() || field.isFloat()
+                   ? field.getWithDefault<double>(std::numeric_limits<double>::quiet_NaN())
+                   : std::numeric_limits<double>::quiet_NaN();
+    };
+    const auto reference = object(envelope, "reference");
+    const auto viewport = object(object(envelope, "provenance"), "viewport");
+    const auto resolved = object(viewport, "resolved");
+    const auto extent = object(viewport, "document");
+    const auto surface = object(extent, "primary_surface");
+    const auto authored = object(reference, "authored_frame");
+    const double width = paint.width, height = paint.height;
+    const double dpr = n(reference, "device_scale_factor");
+    if (!std::isfinite(dpr) || dpr <= 0 || n(viewport, "device_scale_factor") != dpr ||
+        n(reference, "logical_width") != width || n(reference, "logical_height") != height ||
+        n(resolved, "width") != width || n(resolved, "height") != height ||
+        n(extent, "width") != width || n(extent, "height") != height || n(surface, "left") != 0 ||
+        n(surface, "top") != 0 || n(authored, "x") != 0 || n(authored, "y") != 0)
+        return false;
+    const double panel_width = n(surface, "width"), panel_height = n(surface, "height");
+    return std::isfinite(panel_width) && std::isfinite(panel_height) && panel_width > 0 &&
+           panel_height > 0 && panel_width <= width && panel_height <= height &&
+           n(authored, "width") == panel_width && n(authored, "height") == panel_height;
+}
+
 bool bool_member(const choc::value::ValueView& object,
                  const char* key,
                  bool fallback = false) {
@@ -1673,6 +1705,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // file, still lowers to a faithful capture. It just gains no appearance,
     // which is strictly what the pipeline did before.
     std::optional<CapturedStyleIndex> captured_styles;
+    std::optional<std::string> canvas_background;
     const std::string snapshot_asset =
         string_member(documents[static_cast<int>(0)], "snapshot_asset");
     const auto document = documents[static_cast<int>(0)];
@@ -1705,6 +1738,12 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             result.error = "browser DOM snapshot sidecar is malformed";
             return result;
         }
+        // Evidence was extracted during the same parse as the styles. It is
+        // authorized only here, after the producer's declared hash verified.
+        const auto& paint = captured_styles->document_canvas_paint();
+        if (options.native_panel_lowering && !options.materialized_canvas_composition && paint &&
+            document_canvas_registration(*paint, envelope))
+            canvas_background = paint->color;
     }
     if (!snapshot_asset.empty() && !has_snapshot_hash) {
         std::string ignored;
@@ -1787,7 +1826,10 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         ir.root.attributes["materialized_canvas_validation_asset"] =
             *canvas_composite_asset_id;
     } else if (native_lowering) {
-        // No backdrop at all. The panel is its nodes.
+        // The synthetic document frame retains its panel dimensions and children.
+        // Only producer-bound CSS canvas evidence can add a native background.
+        if (canvas_background && !ir.root.style.background_color)
+            ir.root.style.background_color = *canvas_background;
         ir.root.style.width = static_cast<float>(
             crop_to_surface ? surface_width : logical_width);
         ir.root.style.height = static_cast<float>(
