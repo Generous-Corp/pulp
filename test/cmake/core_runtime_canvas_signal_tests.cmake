@@ -628,6 +628,14 @@ pulp_add_test_suite(pulp-test-gpu-audio-minimum-lead-proxy
     GROUP pulp-test-group-core-gpu-audio-private
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Private G1 contract: width>1 batching and provider-resource residency must
+# be authenticated per receipt; malformed width, identity, and sequence rows
+# are fail-closed on CPU-only builders.
+pulp_add_test_suite(pulp-test-gpu-audio-batch-residency
+    SOURCES test_gpu_audio_batch_residency.cpp
+    GROUP pulp-test-group-core-gpu-audio-private
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 pulp_add_test_suite(pulp-test-streaming-model-contract
     SOURCES test_streaming_model_contract.cpp
             $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
