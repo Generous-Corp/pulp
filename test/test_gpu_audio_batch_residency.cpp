@@ -32,7 +32,10 @@ BatchResidencySample sample(std::uint64_t n) {
             .generation = 7,
             .batched_dispatch = true,
             .resources_resident = true,
-            .gpu_completed = true};
+            .gpu_completed = true,
+            .authenticated = true,
+            .member_count = 4,
+            .member_terminal_count = 4};
 }
 } // namespace
 
@@ -77,4 +80,28 @@ TEST_CASE("G1 receipt rejects residency drift, identity drift, and sequence gaps
     REQUIRE(receipt.width_mismatches > 0);
     REQUIRE(receipt.sequence_gaps > 0);
     REQUIRE_FALSE(receipt.complete);
+}
+
+TEST_CASE("G1 rejects incomplete member terminals, unauthenticated rows, and sentinels") {
+    BatchResidencyEvaluator evaluator(admission());
+    auto bad = sample(0);
+    bad.member_terminal_count = 3;
+    bad.authenticated = false;
+    bad.gpu_completed = false;
+    evaluator.observe(bad);
+    bad = sample(UINT64_MAX);
+    evaluator.observe(bad);
+    const auto receipt = evaluator.finish();
+    REQUIRE(receipt.member_count_mismatches > 0);
+    REQUIRE(receipt.invalid_samples > 0);
+    REQUIRE_FALSE(receipt.complete);
+}
+
+TEST_CASE("G1 receipt rejects duplicate dispatch IDs") {
+    BatchResidencyEvaluator evaluator(admission());
+    evaluator.observe(sample(0));
+    auto duplicate = sample(1);
+    duplicate.dispatch_id = 1;
+    evaluator.observe(duplicate);
+    REQUIRE(evaluator.finish().duplicate_dispatch_ids > 0);
 }

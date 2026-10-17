@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <limits>
 
@@ -38,6 +39,9 @@ struct BatchResidencySample {
     bool batched_dispatch = false;
     bool resources_resident = false;
     bool gpu_completed = false;
+    bool authenticated = false;
+    std::uint32_t member_count = 0;
+    std::uint32_t member_terminal_count = 0;
 };
 
 struct BatchResidencyReceipt {
@@ -53,6 +57,7 @@ struct BatchResidencyReceipt {
     std::uint64_t identity_mismatches = 0;
     std::uint64_t width_mismatches = 0;
     std::uint64_t residency_mismatches = 0;
+    std::uint64_t member_count_mismatches = 0;
     bool admission_valid = false;
     bool complete = false;
     bool diagnostic_only = true;
@@ -70,6 +75,18 @@ class BatchResidencyEvaluator final {
             ++receipt_.gpu_completed;
         if (sample.dispatch_id == 0)
             ++receipt_.missing_dispatch_ids;
+        if (sample.sequence == std::numeric_limits<std::uint64_t>::max())
+            ++receipt_.invalid_samples;
+        if (sample.authenticated == false)
+            ++receipt_.invalid_samples;
+        for (std::size_t i = 0; i < dispatch_ids_.size(); ++i) {
+            if (dispatch_ids_[i] == sample.dispatch_id && sample.dispatch_id != 0)
+                ++receipt_.duplicate_dispatch_ids;
+            if (dispatch_ids_[i] == 0) {
+                dispatch_ids_[i] = sample.dispatch_id;
+                break;
+            }
+        }
         if (seen_sequence_ && sample.sequence != next_sequence_) {
             if (sample.sequence < next_sequence_)
                 ++receipt_.duplicate_dispatch_ids;
@@ -91,6 +108,9 @@ class BatchResidencyEvaluator final {
             ++receipt_.width_mismatches;
         if (sample.resident_bytes != admission_.resident_bytes || !sample.resources_resident)
             ++receipt_.residency_mismatches;
+        if (sample.member_count != admission_.batch_width ||
+            sample.member_terminal_count != admission_.batch_width)
+            ++receipt_.member_count_mismatches;
         if (sample.dispatch_id == 0 || !sample.gpu_completed)
             ++receipt_.invalid_samples;
     }
@@ -111,6 +131,7 @@ class BatchResidencyEvaluator final {
                        out.missing_dispatch_ids == 0 && out.duplicate_dispatch_ids == 0 &&
                        out.sequence_gaps == 0 && out.identity_mismatches == 0 &&
                        out.width_mismatches == 0 && out.residency_mismatches == 0;
+        out.complete = out.complete && out.member_count_mismatches == 0;
         return out;
     }
 
@@ -119,6 +140,7 @@ class BatchResidencyEvaluator final {
     BatchResidencyReceipt receipt_;
     std::uint64_t next_sequence_ = 0;
     bool seen_sequence_ = false;
+    std::array<std::uint64_t, 1024> dispatch_ids_{};
 };
 
 } // namespace pulp::gpu_audio::detail
