@@ -7,8 +7,10 @@ from collections import Counter
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
+import stat
 import statistics
 import subprocess
 import time
@@ -23,6 +25,7 @@ SCHEMA_VERSION = 1
 REPORT_SCHEMA = "pulp-importer-differential-report-v1"
 CORPUS_SCHEMA = "pulp-importer-differential-corpus-v1"
 OBSERVABILITY_SCHEMA = "pulp-importer-observability-v1"
+MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
 TIMING_BUDGET_KEYS = (
     "browser_import_ms", "native_import_ms", "native_render_ms", "native_total_ms",
 )
@@ -212,29 +215,38 @@ def interaction_plan_sha256(path: Path) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def canonical_json_sha256(path: Path) -> str:
-    """Hash JSON evidence after removing documented run-clock fields.
+def canonical_json_sha256(source: Path | bytes) -> str:
+    """Hash JSON evidence after removing documented per-run envelope fields.
 
     Capture and IR receipts retain elapsed/import timestamps for diagnostics.
     Those fields must not make an otherwise identical campaign appear
-    nondeterministic, so the integrity digest covers the semantic document
-    while the raw file hash remains available for chain-of-custody evidence.
+    nondeterministic. Browser-capture envelopes also omit their exact snapshot
+    binding here: CDP frame IDs vary per capture. Each raw binding is verified
+    separately; this digest does not establish semantic DOM determinism.
     """
     volatile_keys = {"elapsed_ms", "imported_at"}
+    document = json.loads(source if isinstance(source, bytes) else source.read_bytes())
+    capture_envelope = isinstance(document, dict) and document.get("schema") == "pulp-browser-capture-v1"
 
-    def scrub(value: Any) -> Any:
+    def scrub(value: Any, path: tuple[str | int, ...] = ()) -> Any:
         if isinstance(value, dict):
+            # Raw DOM bytes contain capture-local CDP frame IDs. This digest
+            # was historically envelope/output determinism, not semantic DOM
+            # equivalence. Retain and verify raw snapshot bindings separately.
+            document_entry = (capture_envelope and len(path) == 2
+                              and path[0] == "documents" and isinstance(path[1], int))
             return {
-                key: scrub(item)
+                key: scrub(item, (*path, key))
                 for key, item in value.items()
                 if key not in volatile_keys
+                and not (document_entry and key == "snapshot_sha256")
             }
         if isinstance(value, list):
-            return [scrub(item) for item in value]
+            return [scrub(item, (*path, index)) for index, item in enumerate(value)]
         return value
 
     canonical = json.dumps(
-        scrub(json.loads(path.read_text(encoding="utf-8"))),
+        scrub(document),
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -1163,6 +1175,71 @@ def verify_capture_image_binding(capture: dict[str, Any], image_path: Path) -> N
         raise LabError("Pillow is required to verify capture PNG dimensions") from exc
 
 
+def verify_capture_snapshot_binding(
+    capture: dict[str, Any], evidence: Path, *, required: bool = False,
+) -> tuple[dict[str, Any], bytes]:
+    """Verify producer-declared snapshot bytes; never upgrade legacy evidence.
+
+    Existing captures can still support diagnostic analysis without a digest.
+    A document-background experiment must request the producer binding. This
+    proves byte identity against the envelope, not a signature or paint parity.
+    Return the verified buffer so the caller parses and retains those bytes.
+    """
+    if not isinstance(capture, dict):
+        raise LabError("capture snapshot envelope is malformed")
+    documents = capture.get("documents", [])
+    if not isinstance(documents, list):
+        raise LabError("capture snapshot documents are malformed")
+    if documents and (len(documents) != 1 or not isinstance(documents[0], dict)
+                      or not isinstance(documents[0].get("snapshot_asset"), str)
+                      or not documents[0]["snapshot_asset"]):
+        raise LabError("capture snapshot requires exactly one document with a snapshot asset")
+    declared = [item for item in documents
+                if isinstance(item, dict) and "snapshot_sha256" in item]
+    snapshot = evidence / "dom-snapshot.json"
+    def read_snapshot() -> bytes:
+        try:
+            if not snapshot.resolve().is_relative_to(evidence.resolve()):
+                raise LabError("capture snapshot sidecar escapes evidence directory")
+            info = snapshot.stat()
+            if not stat.S_ISREG(info.st_mode):
+                raise LabError("capture snapshot sidecar is not a regular file")
+            if info.st_size > MAX_SNAPSHOT_BYTES:
+                raise LabError("capture snapshot sidecar exceeds 256 MiB")
+            with snapshot.open("rb") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode):
+                    raise LabError("capture snapshot sidecar is not a regular file")
+                if info.st_size > MAX_SNAPSHOT_BYTES:
+                    raise LabError("capture snapshot sidecar exceeds 256 MiB")
+                snapshot_bytes = stream.read(info.st_size + 1)
+                if len(snapshot_bytes) != info.st_size:
+                    raise LabError("capture snapshot sidecar changed during bounded read")
+                return snapshot_bytes
+        except OSError as exc:
+            raise LabError("capture snapshot sidecar is unavailable") from exc
+
+    if not declared:
+        if required:
+            raise LabError("capture snapshot has no producer digest")
+        return {"status": "legacy-unbound", "sha256": None}, read_snapshot()
+    # The current capture producer emits one document and one DOM snapshot.
+    # Do not silently choose a document if a different envelope is supplied.
+    if len(documents) != 1 or len(declared) != 1:
+        raise LabError("capture snapshot requires exactly one document")
+    document = declared[0]
+    if document.get("snapshot_asset") != "dom-snapshot.json":
+        raise LabError("capture snapshot requires a dom-snapshot.json document")
+    expected = document["snapshot_sha256"]
+    if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise LabError("capture snapshot producer digest is malformed")
+    snapshot_bytes = read_snapshot()
+    actual = hashlib.sha256(snapshot_bytes).hexdigest()
+    if actual != expected:
+        raise LabError("capture snapshot digest does not match capture envelope")
+    return {"status": "producer-bound", "sha256": actual}, snapshot_bytes
+
+
 def compare_one(
     importer: Path,
     observer: Path,
@@ -1234,9 +1311,11 @@ def compare_one(
     write_json(browser_ir, browser_doc)
     write_json(native_ir, native_doc)
     evidence = find_browser_evidence(browser_ir)
-    capture = json.loads((evidence / "capture.json").read_text(encoding="utf-8"))
+    capture_bytes = (evidence / "capture.json").read_bytes()
+    capture = json.loads(capture_bytes)
     native_evidence = find_browser_evidence(native_ir)
-    native_capture = json.loads((native_evidence / "capture.json").read_text(encoding="utf-8"))
+    native_capture_bytes = (native_evidence / "capture.json").read_bytes()
+    native_capture = json.loads(native_capture_bytes)
     source_sha256 = sha256_file(source)
     expected_interaction_plan_sha256 = None
     if interaction_path:
@@ -1247,6 +1326,8 @@ def compare_one(
     )
     verify_capture_image_binding(capture, evidence / "browser.png")
     verify_capture_image_binding(native_capture, native_evidence / "browser.png")
+    browser_snapshot_binding, browser_snapshot_bytes = verify_capture_snapshot_binding(capture, evidence)
+    native_snapshot_binding, native_snapshot_bytes = verify_capture_snapshot_binding(native_capture, native_evidence)
     viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
     render_args = [
@@ -1282,15 +1363,21 @@ def compare_one(
         raise LabError("viewport/DPR audit failed: " + json.dumps(viewport_dpr["checks"], sort_keys=True))
 
     for name in (
-        ".pulp-browser-capture-v1", "browser.png", "capture.json",
-        "dom-snapshot.json", "semantic-report.json", "tokens.json",
+        ".pulp-browser-capture-v1", "browser.png",
+        "semantic-report.json", "tokens.json",
         "interaction-report.json", "platform-fonts.json",
     ):
         source_evidence = evidence / name
         if source_evidence.exists():
             shutil.copy2(source_evidence, browser_dir / name)
+    # Parse and retain the exact buffer verified above, without reopening a
+    # sidecar that could have changed after verification.
+    (browser_dir / "dom-snapshot.json").write_bytes(browser_snapshot_bytes)
+    (browser_dir / "capture.json").write_bytes(capture_bytes)
+    (native_dir / "dom-snapshot.json").write_bytes(native_snapshot_bytes)
+    (native_dir / "capture.json").write_bytes(native_capture_bytes)
     recognition = source_recognition(source.read_text(encoding="utf-8", errors="replace"))
-    browser_snapshot = json.loads((browser_dir / "dom-snapshot.json").read_text(encoding="utf-8"))
+    browser_snapshot = json.loads(browser_snapshot_bytes)
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
     browser_flat_raw = browser_nodes(browser_snapshot)
     native_flat = native_nodes(native_doc, native_layout_doc)
@@ -1379,12 +1466,14 @@ def compare_one(
         "native_ir_sha256": sha256_file(native_ir),
         # Raw hashes preserve chain of custody. Canonical hashes scrub capture
         # clocks so repeated equivalent runs can actually reach determinism.
-        "browser_capture_sha256": sha256_file(evidence / "capture.json"),
-        "native_capture_sha256": sha256_file(native_evidence / "capture.json"),
+        "browser_capture_sha256": hashlib.sha256(capture_bytes).hexdigest(),
+        "native_capture_sha256": hashlib.sha256(native_capture_bytes).hexdigest(),
+        "browser_snapshot_binding": browser_snapshot_binding,
+        "native_snapshot_binding": native_snapshot_binding,
         "browser_ir_canonical_sha256": canonical_json_sha256(browser_ir),
         "native_ir_canonical_sha256": canonical_json_sha256(native_ir),
-        "browser_capture_canonical_sha256": canonical_json_sha256(evidence / "capture.json"),
-        "native_capture_canonical_sha256": canonical_json_sha256(native_evidence / "capture.json"),
+        "browser_capture_canonical_sha256": canonical_json_sha256(capture_bytes),
+        "native_capture_canonical_sha256": canonical_json_sha256(native_capture_bytes),
         "browser_screenshot_sha256": sha256_file(browser_dir / "browser.png"),
         "native_render_sha256": sha256_file(native_render),
         "native_layout_sha256": sha256_file(native_layout),

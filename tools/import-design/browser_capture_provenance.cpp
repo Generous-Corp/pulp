@@ -120,6 +120,59 @@ std::optional<fs::path> contained_path(const fs::path& envelope, std::string_vie
 }
 } // namespace
 
+std::optional<VerifiedDomSnapshot> read_verified_dom_snapshot(const fs::path& envelope,
+                                                              std::string_view snapshot_asset,
+                                                              std::string_view snapshot_sha256,
+                                                              std::string& error) {
+    const bool lowercase_sha256 =
+        snapshot_sha256.size() == 64 &&
+        std::all_of(snapshot_sha256.begin(), snapshot_sha256.end(), [](unsigned char c) {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+        });
+    if (snapshot_asset.empty() || !lowercase_sha256) {
+        error = "browser DOM snapshot SHA-256 declaration is malformed";
+        return std::nullopt;
+    }
+    const auto path = contained_path(envelope, snapshot_asset, error);
+    if (!path) {
+        error = "browser DOM snapshot sidecar is missing or invalid: " + error;
+        return std::nullopt;
+    }
+
+    std::ifstream input(*path, std::ios::binary);
+    if (!input) {
+        error = "browser DOM snapshot sidecar could not be opened";
+        return std::nullopt;
+    }
+    input.seekg(0, std::ios::end);
+    const auto size = input.tellg();
+    if (size < 0 || static_cast<std::uint64_t>(size) > kMaximumProvenanceFileBytes) {
+        error = "browser DOM snapshot sidecar exceeds the provenance size limit";
+        return std::nullopt;
+    }
+    input.seekg(0, std::ios::beg);
+    const auto measured_size = static_cast<std::size_t>(size);
+    std::string bytes(measured_size, '\0');
+    input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    if (input.gcount() != static_cast<std::streamsize>(bytes.size())) {
+        error = "browser DOM snapshot sidecar changed or could not be read";
+        return std::nullopt;
+    }
+    char extra = '\0';
+    input.read(&extra, 1);
+    if (input.gcount() != 0 || !input.eof()) {
+        error = "browser DOM snapshot sidecar changed during verification";
+        return std::nullopt;
+    }
+    const auto digest = pulp::runtime::sha256_hex(
+        reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
+    if (digest != snapshot_sha256) {
+        error = "browser DOM snapshot SHA-256 does not match its sidecar";
+        return std::nullopt;
+    }
+    return VerifiedDomSnapshot{*path, std::move(bytes)};
+}
+
 CaptureProvenanceResult validate_capture_provenance(const CaptureProvenanceRequest& request) {
     if (request.envelope.empty() || request.source.empty() || request.initial_width <= 0 ||
         request.initial_height <= 0 || request.device_scale_factor != kDefaultDeviceScaleFactor)
@@ -162,6 +215,35 @@ CaptureProvenanceResult validate_capture_provenance(const CaptureProvenanceReque
         return fail("capture provenance is missing a valid source SHA-256");
     if (!equal_hex(*source_sha, *source_hash))
         return fail("capture source SHA-256 does not match the staged input");
+
+    if (envelope.hasObjectMember("documents") &&
+        (!envelope["documents"].isArray() || envelope["documents"].size() == 0))
+        return fail("browser DOM snapshot documents are malformed");
+    if (envelope.hasObjectMember("documents")) {
+        const auto documents = envelope["documents"];
+        std::size_t declared_snapshot_hashes = 0;
+        for (uint32_t i = 0; i < documents.size(); ++i) {
+            const auto document = documents[static_cast<int>(i)];
+            if (!document.isObject())
+                return fail("browser DOM snapshot documents are malformed");
+            if (document.isObject() && document.hasObjectMember("snapshot_sha256"))
+                ++declared_snapshot_hashes;
+        }
+        const auto document = documents[0];
+        if (declared_snapshot_hashes > 0 && (documents.size() != 1 || !document.isObject() ||
+                                             !document.hasObjectMember("snapshot_sha256")))
+            return fail("browser DOM snapshot binding requires exactly one document");
+        if (declared_snapshot_hashes == 1) {
+            const auto snapshot_asset = required_string(document, "snapshot_asset");
+            const auto snapshot_sha256 = required_string(document, "snapshot_sha256");
+            std::string snapshot_error;
+            if (!snapshot_asset || !snapshot_sha256 ||
+                !read_verified_dom_snapshot(request.envelope, *snapshot_asset, *snapshot_sha256,
+                                            snapshot_error))
+                return fail(snapshot_error.empty() ? "browser DOM snapshot provenance is invalid"
+                                                   : snapshot_error);
+        }
+    }
 
     const auto browser = object_member(provenance, "browser");
     const auto browser_product = required_string(browser, "product");

@@ -204,9 +204,14 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
     std::ostringstream bytes;
     bytes << input.rdbuf();
 
+    return load_bytes(bytes.str(), snapshot_path);
+}
+
+std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_view snapshot_bytes,
+                                                                 fs::path snapshot_path) {
     choc::value::Value snapshot;
     try {
-        snapshot = choc::json::parse(bytes.str());
+        snapshot = choc::json::parse(std::string(snapshot_bytes));
     } catch (const std::exception&) {
         return std::nullopt;
     }

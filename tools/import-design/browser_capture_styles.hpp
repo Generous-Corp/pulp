@@ -89,6 +89,12 @@ public:
     static std::optional<CapturedStyleIndex> load(
         const std::filesystem::path& snapshot_path);
 
+    /// Parse bytes that were already integrity-verified by the capture
+    /// consumer. Keeping parsing on the verified buffer avoids a second file
+    /// open after the SHA-256 check.
+    static std::optional<CapturedStyleIndex> load_bytes(std::string_view snapshot_bytes,
+                                                        std::filesystem::path snapshot_path = {});
+
     /// Computed declarations for the element that paints `paint_box`, searched
     /// within the subtree rooted at `backend_node_id`.
     ///
