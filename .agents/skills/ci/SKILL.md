@@ -117,8 +117,9 @@ on a real PR. Do them in order.
 
 ## A `run:` step stops at the first failing command
 
-GitHub's default shell for `run:` is `bash -e` (with pipefail), even when the
-script itself starts with `set -uo pipefail`. A step that runs a checker and
+GitHub's default shell for `run:` is `bash -e {0}` (no pipefail), so a step
+stops at a failing command even when the script itself starts with
+`set -uo pipefail`. A step that runs a checker and
 then prints its report or picks a verdict from the exit code must capture the
 code with `set +e` ... `rc=$?` ... `set -e`, or the step ends at the checker
 with only "exit code 1" in the log. `format-changed-check.yml` hit this.
