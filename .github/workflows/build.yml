@@ -2135,7 +2135,8 @@ jobs:
           fi
           # The wrapper is invoked under bash so this stays valid for the
           # Windows leg as well as the POSIX runners. It owns the worker share
-          # and build-directory lock for every runner shape and event.
+          # on every runner; its POSIX build-directory lock applies where the
+          # runner's path model supports it (Git Bash/MSYS skips that lock).
           tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
           rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
