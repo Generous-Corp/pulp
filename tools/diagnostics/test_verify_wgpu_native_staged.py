@@ -32,9 +32,14 @@ def main() -> int:
             print(f"typed exit disposition control failed: {returncode}", file=sys.stderr)
             return 1
     unavailable = provider_unavailable_receipt(
-        "v24.0.3.1", "a" * 64, "b" * 64, "c" * 64, "d" * 64)
+        "v24.0.3.1", "a" * 64, "b" * 64, "c" * 64, "d" * 64,
+        "callback_unavailable_after_destroy")
     if (unavailable["status"] != "provider_unavailable" or
             unavailable["reason"] != "provider_unavailable" or
+            unavailable["claim"] != "device_loss_callback_unavailable_after_destroy" or
+            unavailable["device_loss_probe_status"] !=
+                "callback_unavailable_after_destroy" or
+            unavailable["device_loss_probe_timeout_ms"] != 8000 or
             unavailable["device_loss_callback"] != "unavailable" or
             unavailable["device_loss_proof"] != "unavailable" or
             unavailable["device_loss_terminal_records"] != 0 or
@@ -42,6 +47,17 @@ def main() -> int:
             unavailable["gpu_receipt_authenticated"] is not False or
             unavailable["product_proof"] is not False):
         print("typed provider-unavailable receipt control failed", file=sys.stderr)
+        return 1
+    try:
+        provider_unavailable_receipt(
+            "v24.0.3.1", "a" * 64, "b" * 64, "c" * 64, "d" * 64,
+            "")
+    except ValueError as error:
+        if str(error) != "provider_unavailable_probe_untyped":
+            print("unexpected untyped provider-unavailable error", file=sys.stderr)
+            return 1
+    else:
+        print("untyped provider-unavailable receipt control failed", file=sys.stderr)
         return 1
     valid = parse_output(
         "device_loss_callback=registered device_loss_scenario=triggered "
@@ -69,6 +85,8 @@ def main() -> int:
         source = ADAPTER_SOURCE.read_text(encoding="utf-8")
         verifier_source = VERIFIER_SOURCE.read_text(encoding="utf-8")
         if ("run_loss_capability_probe()" not in source or
+                "CallbackUnavailableAfterDestroy" not in source or
+                "device_loss_probe_status=callback_unavailable_after_destroy" not in source or
                 "loss_probe_provider.release();" not in source or
                 "kill(child, SIGKILL);" not in source or
                 "poll(&descriptor, 1, 8'000)" not in source or
@@ -81,6 +99,7 @@ def main() -> int:
             print("typed unavailable probe watchdog control failed", file=sys.stderr)
             return 1
         if ("start_new_session=True" not in verifier_source or
+                "provider_unavailable_probe_untyped" not in verifier_source or
                 "os.killpg(process.pid, signal.SIGKILL)" not in verifier_source):
             print("verifier timeout process-group control failed", file=sys.stderr)
             return 1

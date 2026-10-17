@@ -735,7 +735,12 @@ bool WgpuNativeStagedProgram::release() noexcept {
 
 namespace {
 
-enum class LossProbeStatus : std::uint8_t { Unavailable, Failed, Passed };
+enum class LossProbeStatus : std::uint8_t {
+    Unavailable,
+    CallbackUnavailableAfterDestroy,
+    Failed,
+    Passed
+};
 
 struct LossProbeResult {
     LossProbeStatus status = LossProbeStatus::Unavailable;
@@ -810,7 +815,11 @@ LossProbeResult run_loss_capability_probe() noexcept {
         } else if (!loss_probe_provider->force_device_loss_for_diagnostic()) {
             result.status = LossProbeStatus::Failed;
         } else if (!loss_probe_provider->wait_for_device_loss_callback()) {
-            result.status = LossProbeStatus::Unavailable;
+            // The provider was created and destruction was accepted, but the
+            // native callback did not arrive within the bounded eight-second
+            // wait. Keep this distinct from an adapter/provider that could
+            // not be created at all.
+            result.status = LossProbeStatus::CallbackUnavailableAfterDestroy;
         } else {
             result.status = LossProbeStatus::Passed;
             result.callback_registered = loss_probe_provider->device_loss_callback_registered();
@@ -956,6 +965,12 @@ int main() {
     std::printf("loaded_runtime_path=%s\n", loaded.dli_fname);
     std::fputs("wgpu staged diagnostic stage=loss_probe_begin\n", stderr);
     const auto loss_probe_result = run_loss_capability_probe();
+    if (loss_probe_result.status == LossProbeStatus::CallbackUnavailableAfterDestroy) {
+        std::puts("device_loss_probe_status=callback_unavailable_after_destroy");
+        std::fputs("wgpu staged device-loss callback unavailable after destroy within 8s\n",
+                   stderr);
+        return kProviderUnavailableExit;
+    }
     if (loss_probe_result.status == LossProbeStatus::Unavailable) {
         std::fputs("wgpu staged device-loss observation unavailable\n", stderr);
         return kProviderUnavailableExit;

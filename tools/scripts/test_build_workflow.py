@@ -61,6 +61,8 @@ class WgpuNativeDiagnosticWorkflowTest(unittest.TestCase):
     def test_unavailable_runtime_is_a_typed_advisory_skip(self) -> None:
         self.assertIn('"status": "provider_unavailable"', self.text)
         self.assertIn('"reason": "provider_unavailable"', self.text)
+        self.assertIn('"claim": "device_loss_callback_unavailable_after_destroy"', self.text)
+        self.assertIn('"device_loss_probe_status": "callback_unavailable_after_destroy"', self.text)
         self.assertIn("test -s \"$receipt\"", self.text)
 
     def test_receipt_checks_preserve_typed_callback_scope(self) -> None:
