@@ -670,8 +670,15 @@ jobs:
             # of core in seconds (core_pattern also points at /mnt on hosted
             # Linux, for anything that ignores this limit).
             ulimit -c 0
+            # The runner spools a step's output to its own disk before
+            # uploading it, and the suite's output across about 20k tests can
+            # be gigabytes. The full output goes to a file beside the build;
+            # stdout gets the sampler's progress lines and, at the end, the
+            # phase lines, the annotation commands and (on failure) the tail.
+            mkdir -p build-coverage
+            suite_log="build-coverage/coverage-suite.log"
             python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
-              bash scripts/run_coverage.sh "${coverage_args[@]}" & cov=$!
+              bash scripts/run_coverage.sh "${coverage_args[@]}" > "${suite_log}" 2>&1 & cov=$!
           fi
           terminate_coverage_tree() {
             if [ "${RUNNER_OS}" = "Windows" ]; then
@@ -719,7 +726,10 @@ jobs:
                 tick=$((tick + 1))
                 mem_gib=$(awk '/^MemAvailable:/ {printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null)
                 line="root_free=${root_gib}G build_disk_free=${build_gib:-?}G mem_available=${mem_gib:-?}G${sizes}"
-                [ $((tick % 6)) -eq 1 ] && echo "disk-sample: $(date -u +%H:%M:%SZ) ${line}"
+                if [ $((tick % 6)) -eq 1 ]; then
+                  phase=$(grep '^=== ' "${suite_log:-/dev/null}" 2>/dev/null | tail -n 1)
+                  echo "disk-sample: $(date -u +%H:%M:%SZ) ${line} | ${phase}"
+                fi
                 low=$(awk -v a="${root_gib}" -v b="${build_gib:-${root_gib}}" 'BEGIN {print (a < b ? a : b)}')
                 for t in 20 10 5 2; do
                   if awk -v l="${low}" -v t="${t}" 'BEGIN {exit !(l < t)}' && [[ " ${warned} " != *" ${t} "* ]]; then
@@ -761,6 +771,14 @@ jobs:
             wait "${sampler}" 2>/dev/null || true
             echo "disk after suite:"; df -h / build-coverage/
           fi
+          if [ -n "${suite_log:-}" ] && [ -f "${suite_log}" ]; then
+            echo "suite output: ${suite_log} ($(du -h "${suite_log}" | cut -f1)); phases and annotations:"
+            grep -E '^(=== |::)' "${suite_log}" || true
+            if [ "${rc}" -ne 0 ]; then
+              echo "--- last 200 lines of the suite output ---"
+              tail -n 200 "${suite_log}"
+            fi
+          fi
           # Best-effort timeout cleanup. Trigger on EITHER the marker OR a
           # signal-kill exit (143=SIGTERM, 137=SIGKILL — our watchdog's signals),
           # so a marker-write that failed on a Windows RUNNER_TEMP path can't
@@ -785,6 +803,17 @@ jobs:
           fi
           rm -f "${budget_hit}" 2>/dev/null || true
           exit "${rc}"
+
+      - name: Upload coverage suite output
+        # The suite's full output, kept off the runner's log (see the coverage
+        # step). Uploaded even when the suite failed.
+        if: always() && matrix.os != 'windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-suite-log-${{ matrix.os }}-${{ github.sha }}
+          path: build-coverage/coverage-suite.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Install Python coverage tooling
         # tools/scripts/** is a blind spot in the current dashboard:
