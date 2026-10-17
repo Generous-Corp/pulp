@@ -254,6 +254,10 @@ def bind(args: argparse.Namespace) -> dict[str, Any]:
     receipt["prelink_receipt_sha256"] = sha256_file(prelink_path.resolve(strict=True))
     executable = Path(args.executable).resolve(strict=True)
     receipt["executable_sha256"] = sha256_file(executable)
+    # Preserve the exact chain inputs so downstream consumers can re-hash the
+    # receipts rather than trusting caller-supplied digest-shaped metadata.
+    receipt["configured_receipt_path"] = str(configured_path.resolve(strict=True))
+    receipt["prelink_receipt_path"] = str(prelink_path.resolve(strict=True))
     return receipt
 
 
