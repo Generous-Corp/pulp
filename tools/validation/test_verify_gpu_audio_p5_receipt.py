@@ -79,35 +79,30 @@ class P5ReceiptVerifierTests(unittest.TestCase):
     def test_strict_json_rejects_duplicate_and_nonfinite(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bad.json"
-            path.write_text('{"x":1,"x":2}')
+            path.write_text('{"x":1,"x":2}', encoding="utf-8")
             with self.assertRaises(MODULE.ReceiptError):
                 MODULE._load_json(path)
-            path.write_text('{"x":NaN}')
+            path.write_text('{"x":NaN}', encoding="utf-8")
             with self.assertRaises(MODULE.ReceiptError):
                 MODULE._load_json(path)
 
     def test_artifact_fixture_rejects_unflushed_trace(self):
-        raw = Path(tempfile.mktemp())
-        trace = Path(tempfile.mktemp())
-        manifest_path = Path(tempfile.mktemp())
-        try:
-            raw.write_text("raw")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); raw = root / "raw.jsonl"; trace = root / "trace.json"; manifest_path = root / "manifest.json"
+            raw.write_text("raw", encoding="utf-8")
             trace.write_text(json.dumps({"schema": "pulp.gpu-audio.p5.perfetto-sql.v1",
-                                         "flushed": False, "rows": []}))
-            manifest_path.write_text(json.dumps({"schema": "pulp.gpu-audio.p5.run-manifest.v1"}))
+                                         "flushed": False, "rows": []}), encoding="utf-8")
+            manifest_path.write_text(json.dumps({"schema": "pulp.gpu-audio.p5.run-manifest.v1"}), encoding="utf-8")
             fake = mock.Mock(read_jsonl=lambda _: ([{"record_kind": "manifest"}], []),
                              validate_records=lambda _: [])
             with mock.patch.dict(sys.modules, {"gpu_audio_p4_evidence": fake}):
                 with self.assertRaises(MODULE.ReceiptError):
                     MODULE.verify_artifacts(raw, trace, manifest_path)
-        finally:
-            for path in (raw, trace, manifest_path):
-                path.unlink(missing_ok=True)
 
     def test_artifact_fixture_positive_reconciles_raw_and_trace(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); raw = root / "raw.jsonl"; trace = root / "trace.json"; manifest_path = root / "manifest.json"
-            raw.write_text("raw")
+            raw.write_text("raw", encoding="utf-8")
             raw_record = {"record_kind": "block", "engine_id": 7, "generation": 2, "sequence": 0, "gpu_terminal": "completed", "delivery": "gpu"}
             identity = {"source_revision": "a" * 40, "binary_sha256": "b" * 64,
                         "provider_revision": "c" * 40, "provider_asset_sha256": "d" * 64,
@@ -115,10 +110,10 @@ class P5ReceiptVerifierTests(unittest.TestCase):
             row = {"event": "admission", "upid": 1, "session_id": "s", **{k: raw_record[k] for k in ("engine_id", "generation", "sequence")},
                    "model_hash": identity["model_sha256"], "resident_plan_hash": identity["resident_plan_sha256"], "provider_source_hash": identity["provider_asset_sha256"], "provider_executable_hash": identity["binary_sha256"]}
             terminal = dict(row, event="terminal", admission_ns=10, terminal_ns=20, gpu_terminal="completed", outcome="success", delivery="gpu", gpu_elapsed_available=False, gpu_elapsed_ns=None)
-            trace.write_text(json.dumps({"schema": "pulp.gpu-audio.p5.perfetto-sql.v1", "flushed": True, "rows": [row, terminal]}))
+            trace.write_text(json.dumps({"schema": "pulp.gpu-audio.p5.perfetto-sql.v1", "flushed": True, "rows": [row, terminal]}), encoding="utf-8")
             manifest_path.write_text(json.dumps({"schema": "pulp.gpu-audio.p5.run-manifest.v1", **identity,
                 "upid": 1, "session_id": "s",
-                "raw_sha256": hashlib.sha256(raw.read_bytes()).hexdigest(), "trace_sha256": hashlib.sha256(trace.read_bytes()).hexdigest(), "expected_admissions": 1}))
+                "raw_sha256": hashlib.sha256(raw.read_bytes()).hexdigest(), "trace_sha256": hashlib.sha256(trace.read_bytes()).hexdigest(), "expected_admissions": 1}), encoding="utf-8")
             fake = mock.Mock(read_jsonl=lambda _: ([{"record_kind": "manifest", **identity}, raw_record], []), validate_records=lambda _: [])
             with mock.patch.dict(sys.modules, {"gpu_audio_p4_evidence": fake}):
                 self.assertEqual(MODULE.verify_artifacts(raw, trace, manifest_path, expected_source_revision="a" * 40)["verdict"], "PASS")
