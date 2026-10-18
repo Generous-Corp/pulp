@@ -41,6 +41,30 @@ fields.param_count = reaper.TrackFX_GetNumParams(tr,fx)
 if param_index >= fields.param_count then fail('PARAM_INDEX_OUT_OF_RANGE');return end
 fields.fx_inserted=1;fields.phase='FX_INSERTED';status()
 local probe_gate=os.getenv('PULP_DAW_SMOKE_PROBE_GATE')
+local editor_ready=false
+local started=nil
+local previous=nil
+local last_sample=-1
+local function pump()
+  if not editor_ready then reaper.defer(pump);return end
+  local elapsed=reaper.time_precise()-started
+  if elapsed>=duration then
+    reaper.Main_SaveProjectEx(0,project_path,0)
+    fields.state_saved=project_path;fields.phase='AUTOMATION_DONE';status();return
+  end
+  if elapsed-last_sample>=0.05 then
+    last_sample=elapsed
+    local requested=(math.sin(elapsed*2)+1)*0.5
+    reaper.TrackFX_SetParamNormalized(tr,fx,param_index,requested)
+    local observed=reaper.TrackFX_GetParamNormalized(tr,fx,param_index)
+    fields.requested=requested;fields.observed=observed
+    fields.max_error=math.max(fields.max_error,math.abs(requested-observed))
+    fields.observations=fields.observations+1
+    if previous and math.abs(observed-previous)>0.000001 then fields.observed_changes=fields.observed_changes+1 end
+    previous=observed;fields.phase='AUTOMATION_RUNNING';status()
+  end
+  reaper.defer(pump)
+end
 local function show_editor()
 reaper.TrackFX_Show(tr,fx,3)
 local window=reaper.TrackFX_GetFloatingWindow(tr,fx)
@@ -60,29 +84,9 @@ if param_index < 0 then
   reaper.Main_SaveProjectEx(0,project_path,0)
   fields.state_saved=project_path;fields.phase='EDITOR_READY';status();return
 end
-local started=reaper.time_precise()
-local previous=nil
-local last_sample=-1
-local function pump()
-  local elapsed=reaper.time_precise()-started
-  if elapsed>=duration then
-    reaper.Main_SaveProjectEx(0,project_path,0)
-    fields.state_saved=project_path;fields.phase='AUTOMATION_DONE';status();return
-  end
-  if elapsed-last_sample>=0.05 then
-    last_sample=elapsed
-    local requested=(math.sin(elapsed*2)+1)*0.5
-    reaper.TrackFX_SetParamNormalized(tr,fx,param_index,requested)
-    local observed=reaper.TrackFX_GetParamNormalized(tr,fx,param_index)
-    fields.requested=requested;fields.observed=observed
-    fields.max_error=math.max(fields.max_error,math.abs(requested-observed))
-    fields.observations=fields.observations+1
-    if previous and math.abs(observed-previous)>0.000001 then fields.observed_changes=fields.observed_changes+1 end
-    previous=observed;fields.phase='AUTOMATION_RUNNING';status()
-  end
-  reaper.defer(pump)
+started=reaper.time_precise();editor_ready=true
 end
-end
+if param_index >= 0 then reaper.defer(pump) end
 if probe_gate then
   local gate_started=reaper.time_precise()
   local function wait_probe()
