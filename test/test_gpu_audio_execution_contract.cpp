@@ -203,6 +203,16 @@ TEST_CASE("shared IO telemetry validates quiescent admission and delivery bounds
     CHECK(validate_shared_io_telemetry(forged).error ==
           SharedIoTelemetryError::FallbacksExceedDelivered);
 
+    // A wrapped scheduled-to-completion sum must never be accepted as a
+    // healthy timing receipt. This is a deterministic negative control for
+    // providers that report very large nanosecond samples.
+    forged = valid;
+    forged.pre_submit_delay_ns = UINT64_MAX;
+    forged.submit_to_completion_ns = 1;
+    forged.scheduled_to_completion_ns = 0;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::ScheduledCompletionBeforeComponents);
+
     // Controller-only producers from older snapshots use submitted_blocks as
     // their admission boundary and leave the optional admission counter zero.
     auto legacy = valid;
