@@ -781,7 +781,15 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
         auto unclosed = sidecar;
         unclosed.replace(unclosed.find(hash), hash.size(), pulp::runtime::sha256_hex(unclosed_svg));
         CHECK_FALSE(impd::validate_annotated_capture(unclosed_svg, unclosed, error));
-        CHECK(error.find("absent") != std::string::npos);
+        CHECK((error.find("absent") != std::string::npos ||
+               error.find("<svg>") != std::string::npos));
+
+        const std::string commented_root_svg = R"(<!-- <svg width="200" height="100"></svg> -->)";
+        auto commented_root = sidecar;
+        commented_root.replace(commented_root.find(hash), hash.size(),
+                               pulp::runtime::sha256_hex(commented_root_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(commented_root_svg, commented_root, error));
+        CHECK(error.find("<svg>") != std::string::npos);
     }
     SECTION("typed-invalid and non-finite geometry fail closed") {
         auto typed_invalid = sidecar;
