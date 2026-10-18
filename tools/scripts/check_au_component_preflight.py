@@ -180,13 +180,7 @@ def _check_codesign(bundle: Path) -> CheckResult:
     codesign = shutil.which("codesign")
     if codesign is None:
         return CheckResult("codesign", False, "codesign not found")
-    proc = subprocess.run(
-        [codesign, "--verify", "--deep", "--strict", "--verbose=2", str(bundle)],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    proc = _run_probe([codesign, "--verify", "--deep", "--strict", "--verbose=2", str(bundle)])
     output = proc.stdout.strip()
     if proc.returncode != 0:
         return CheckResult("codesign", False, output or "codesign verify failed")
@@ -203,23 +197,10 @@ def _check_signing_identity(bundle: Path, identity: str) -> CheckResult:
             shutil.copytree(bundle, temp_bundle, symlinks=True)
         except OSError as exc:
             return CheckResult("signing identity", False, f"cannot copy bundle: {exc}")
-        proc = subprocess.run(
-            [
-                codesign,
-                "--force",
-                "--deep",
-                "--sign",
-                identity,
-                "--timestamp=none",
-                "--options",
-                "runtime",
-                str(temp_bundle),
-            ],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        proc = _run_probe([
+            codesign, "--force", "--deep", "--sign", identity,
+            "--timestamp=none", "--options", "runtime", str(temp_bundle),
+        ])
     output = proc.stdout.strip()
     if proc.returncode != 0:
         if "errSecInternalComponent" in output:
@@ -235,13 +216,7 @@ def _check_gatekeeper(bundle: Path) -> CheckResult:
     spctl = shutil.which("spctl")
     if spctl is None:
         return CheckResult("gatekeeper", False, "spctl not found")
-    proc = subprocess.run(
-        [spctl, "--assess", "--type", "execute", "--verbose=4", str(bundle)],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    proc = _run_probe([spctl, "--assess", "--type", "execute", "--verbose=4", str(bundle)])
     output = proc.stdout.strip()
     if proc.returncode != 0:
         policy_detail = _check_distribution_policy(bundle)
@@ -255,13 +230,7 @@ def _check_distribution_policy(bundle: Path) -> str:
     syspolicy = shutil.which("syspolicy_check")
     if syspolicy is None:
         return ""
-    proc = subprocess.run(
-        [syspolicy, "distribution", str(bundle)],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    proc = _run_probe([syspolicy, "distribution", str(bundle)])
     return proc.stdout.strip()
 
 
@@ -269,13 +238,7 @@ def _check_symbol(executable: Path, symbol: str) -> CheckResult:
     nm = shutil.which("nm")
     if nm is None:
         return CheckResult("factory symbol", False, "nm not found")
-    proc = subprocess.run(
-        [nm, "-gU", str(executable)],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    proc = _run_probe([nm, "-gU", str(executable)])
     if proc.returncode != 0:
         return CheckResult("factory symbol", False, proc.stdout.strip() or "nm failed")
     needle = symbol if symbol.startswith("_") else f"_{symbol}"
@@ -377,7 +340,7 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
     arch = uname.stdout.strip() or "unknown"
     results.append(CheckResult("host architecture", uname.returncode == 0, arch,
                                "HOST_ARCHITECTURE" if uname.returncode == 0 else "HOST_ARCHITECTURE_UNKNOWN"))
-    plist, plist_error = _read_plist(bundle / "Contents" / "Info.plist")
+    plist, _ = _read_plist(bundle / "Contents" / "Info.plist")
     executable_name = plist.get("CFBundleExecutable") if plist else None
     target = (bundle / "Contents" / "MacOS" / executable_name
               if isinstance(executable_name, str) and executable_name else None)
@@ -386,7 +349,10 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
                                    "BINARY_MISSING", "Fix CFBundleExecutable and rebuild the component."))
     else:
         file_tool = shutil.which("file")
-        if file_tool:
+        if not file_tool:
+            results.append(CheckResult("binary architecture", False, "file not found",
+                                       "TOOL_MISSING", "Install the macOS file tool or provide a complete host toolchain."))
+        else:
             probe = _run_probe([file_tool, str(target)])
             detail = probe.stdout.strip() or "file returned no architecture"
             if probe.returncode == 124:
@@ -395,7 +361,7 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
             else:
                 has_arm64 = "arm64" in detail or "arm64e" in detail
                 has_x86 = "x86_64" in detail or "i386" in detail
-                compatible = probe.returncode == 0 and (arch != "arm64" or has_arm64 or has_x86)
+                compatible = probe.returncode == 0 and arch in ("arm64", "x86_64") and (arch != "arm64" or has_arm64 or has_x86)
                 code = "BINARY_ARCHITECTURE_COMPATIBLE" if compatible else "BINARY_ARCHITECTURE_MISMATCH"
                 remediation = None if compatible else "Build an arm64/universal AU, or install Rosetta for an x86_64-only AU."
                 results.append(CheckResult("binary architecture", compatible, detail, code, remediation))
@@ -407,9 +373,33 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
             results.append(CheckResult("Rosetta", False, rosetta.stdout.strip() or "unavailable",
                                        "HOST_ROSETTA_MISSING",
                                        "Install Rosetta with: softwareupdate --install-rosetta --agree-to-license; restart the registrar before rescanning."))
-    else:
+    elif arch == "x86_64":
         results.append(CheckResult("Rosetta", True, "not required on non-arm64 host", "ROSETTA_NOT_REQUIRED"))
+    else:
+        results.append(CheckResult("Rosetta", False, "host architecture unavailable", "HOST_ARCHITECTURE_UNKNOWN",
+                                   "Retry after uname -m is responsive."))
     return results
+
+
+def _registrar_rosetta_failure(output: str) -> bool:
+    needle = "Rosetta runtime is not available"
+    for line in output.splitlines():
+        if needle not in line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            # Compact output is accepted only when the registrar is the
+            # process prefix; this excludes the `log show` command's argv.
+            if "AudioComponentRegistrar[" in line:
+                return True
+            continue
+        process = str(record.get("process", ""))
+        image = str(record.get("processImagePath", "")).rsplit("/", 1)[-1]
+        message = str(record.get("eventMessage", ""))
+        if (process == "AudioComponentRegistrar" or image == "AudioComponentRegistrar") and needle in message:
+            return True
+    return False
 
 
 def _check_registrar() -> list[CheckResult]:
@@ -456,15 +446,13 @@ def _check_registrar() -> list[CheckResult]:
                                        "Restart the registrar or reboot macOS, then rerun this preflight."))
     log = shutil.which("log")
     if log:
-        logs = _run_probe([log, "show", "--last", "10m", "--style", "compact",
+        logs = _run_probe([log, "show", "--last", "10m", "--style", "json",
                            "--predicate", 'process == "AudioComponentRegistrar" AND eventMessage CONTAINS[c] "Rosetta runtime is not available"'])
         text = logs.stdout.strip()
         if logs.returncode == 124:
             results.append(CheckResult("registrar logs", False, text, "HOST_PROBE_TIMEOUT",
                                        "Retry after the unified log service is responsive."))
-        elif any("process=AudioComponentRegistrar" in line and
-                 "Rosetta runtime is not available" in line
-                 for line in text.splitlines()):
+        elif _registrar_rosetta_failure(text):
             results.append(CheckResult("registrar logs", False, "Rosetta runtime is not available",
                                        "REGISTRAR_ROSETTA_FAILURE",
                                        "Install Rosetta and restart the registrar before rescanning."))
@@ -505,7 +493,9 @@ def _run_auval(args: argparse.Namespace) -> list[CheckResult]:
                 "Inspect registrar logs and isolate unrelated third-party components before retrying.",
             ))
             continue
-        if proc.returncode != 0 or "PASS" not in proc.stdout:
+        passed = any(line.strip() in ("AU VALIDATION SUCCEEDED", "AU VALIDATION PASSED")
+                     for line in proc.stdout.splitlines())
+        if proc.returncode != 0 or not passed:
             tail = "\n".join(proc.stdout.splitlines()[-12:])
             results.append(CheckResult("auval", False, f"{detail} failed\n{tail}",
                                        "AUVAL_FAILED", "Inspect the typed bundle and registrar checks before retrying."))

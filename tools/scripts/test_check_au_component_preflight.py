@@ -331,7 +331,7 @@ class AuComponentPreflightTests(unittest.TestCase):
                 "launchctl domain": "Aqua\n",
                 "launchctl print": "service not found\n",
                 "pgrep": "",
-                "log": "process=AudioComponentRegistrar eventMessage=Rosetta runtime is not available!\n",
+                "log": '{"process":"AudioComponentRegistrar","eventMessage":"Rosetta runtime is not available!"}\n',
             }
             def fake_which(name: str) -> str | None:
                 return "/usr/bin/" + name
@@ -384,8 +384,8 @@ class AuComponentPreflightTests(unittest.TestCase):
                 if command[0] == "/usr/bin/log":
                     return preflight.subprocess.CompletedProcess(
                         command, 0,
-                        'process=log args=--predicate "process == AudioComponentRegistrar OR '
-                        'eventMessage CONTAINS[c] Rosetta runtime is not available"\n',
+                        '{"process":"log","eventMessage":"args=--predicate process == '
+                        'AudioComponentRegistrar eventMessage CONTAINS[c] Rosetta runtime is not available"}\n',
                     )
                 raise AssertionError(command)
             with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
@@ -491,6 +491,21 @@ class AuComponentPreflightTests(unittest.TestCase):
             self.assertEqual(run.call_count, 2)
             self.assertIn("PASS: auval: run 1/2", out)
             self.assertIn("PASS: auval: run 2/2", out)
+
+    def test_auval_requires_exact_success_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.return_value = preflight.subprocess.CompletedProcess(
+                    args=["auval"], returncode=0, stdout="NOT PASS\n"
+                )
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--run-auval", "--auval-repeat", "1",
+                ])
+            self.assertEqual(rc, 1)
+            self.assertIn("FAIL: auval: run 1/1 failed", out)
 
     def test_rejects_invalid_auval_repeat(self) -> None:
         with tempfile.TemporaryDirectory() as d:
