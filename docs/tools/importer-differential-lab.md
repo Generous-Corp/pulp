@@ -286,7 +286,7 @@ provenance, source recognition, and deterministic three-run receipts pass.
 
 | Phase | Purpose | Status | Exit evidence |
 | --- | --- | --- | --- |
-| P0 | Close existing acceptance debt | **BLOCKED** | Replace the landed root-canvas watch event's `pending M1 execution` entries for `[root-canvas]` and `[provenance]` with attributable M1 receipts, or record an explicit owner/date deferral. |
+| P0 | Close existing acceptance debt | **DONE** | Attributable M1 ARM64 PR-head receipt recorded for root-canvas and provenance: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852 and protected artifact https://github.com/Generous-Corp/pulp/actions/runs/38996107653/artifacts/12088036268. The later merge-group run reused the receipt and ran zero suites; it is not claimed as fresh execution. |
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
 | P2 | Validate the evidence contract and instruments | **NEXT** | Authenticated receipts, frozen challenging/held-out manifests, stage checks, planted defects, and blank-render control all pass. |
 | P3 | Prove native correctness | **NOT STARTED** | Same-source Chromium and native PNG receipts pass on the challenging set and then the untouched held-out set; report median and worst fixture. This is the first point at which visual parity may be discussed. |
