@@ -90,14 +90,6 @@ public:
         return false;
     }
 
-    /// Host/UI diagnostic hook. Providers may expose their first latched
-    /// recovery cause without exposing backend handles. Generic nodes return
-    /// None, which means no cause is available or no recovery has been
-    /// observed; it does not claim that GPU work met an audio deadline.
-    virtual GpuAudioRecoveryReason recovery_reason() const noexcept {
-        return GpuAudioRecoveryReason::None;
-    }
-
     /// Non-RT worker context. Process exactly one block (n == block_size).
     virtual void process_block(const audio::BufferView<const float>& input,
                                audio::BufferView<float>& output,
@@ -127,6 +119,16 @@ public:
             float* dst = output.channel_ptr(c);
             for (uint32_t i = 0; i < n; ++i) dst[i] = src[i];
         }
+    }
+
+    /// Host/UI diagnostic hook. Providers may expose their first latched
+    /// recovery cause without exposing backend handles. Keep this optional
+    /// hook at the end of the virtual surface so existing virtual order stays
+    /// append-only. Generic nodes return None, which means no cause is
+    /// available or no recovery has been observed; it does not claim that GPU
+    /// work met an audio deadline.
+    virtual GpuAudioRecoveryReason recovery_reason() const noexcept {
+        return GpuAudioRecoveryReason::None;
     }
 };
 

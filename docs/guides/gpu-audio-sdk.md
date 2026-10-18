@@ -189,6 +189,12 @@ fills the block — `Silence` by default (a bounded, obvious dropout), or
 `latency_blocks * block_size`, and a host that is not told leaves your track
 shifted late against every other track in the session.
 
+`GpuAudioNode::recovery_reason()` is an optional host/UI diagnostic hook. It is
+appended to the experimental C++ virtual surface, so custom nodes are expected
+to rebuild with the SDK; Pulp does not promise a frozen binary ABI for this
+surface. The value identifies a latched recovery cause only. It does not prove
+that a provider loss reached a physical CPU fallback before an audio deadline.
+
 The transport also has an opt-in macOS scheduling experiment for an owned
 worker. Set `Config::join_audio_workgroup` and pass a borrowed
 `Config::audio_workgroup` handle when the host has a valid `os_workgroup_t`.
