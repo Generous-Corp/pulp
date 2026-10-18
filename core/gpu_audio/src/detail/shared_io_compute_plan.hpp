@@ -143,6 +143,7 @@ class SharedIoComputePlan {
         // live vector intact while work is pending prevents partial evidence.
         if (!arena_.quiescent())
             return {};
+        materialize_missing_calibration_observations();
         std::vector<LifecycleReceipt> result(lifecycle_receipts_.begin(),
                                              lifecycle_receipts_.end());
         lifecycle_receipts_.clear();
@@ -151,6 +152,7 @@ class SharedIoComputePlan {
     std::vector<SharedIoCalibrationObservation> take_calibration_observations() {
         if (!arena_.quiescent())
             return {};
+        materialize_missing_calibration_observations();
         return std::exchange(calibration_observations_, {});
     }
     bool lifecycle_receipt_overflow() const noexcept {
@@ -202,6 +204,7 @@ class SharedIoComputePlan {
                          SharedIoArena::CompletionStatus status) noexcept;
     void record_calibration(LifecycleReceipt&) noexcept;
     void append_calibration_observation(const LifecycleReceipt&);
+    void materialize_missing_calibration_observations();
     LifecycleReceipt* receipt_for(const SharedIoSlotLedger::SlotToken&) noexcept;
 
     SharedIoArena arena_;

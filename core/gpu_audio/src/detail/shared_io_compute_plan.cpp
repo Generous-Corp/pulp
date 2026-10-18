@@ -356,6 +356,11 @@ SharedIoComputePlan::receipt_for(const SharedIoSlotLedger::SlotToken& token) noe
 }
 
 void SharedIoComputePlan::append_calibration_observation(const LifecycleReceipt& receipt) {
+    for (const auto& observation : calibration_observations_) {
+        if (observation.generation == receipt.generation &&
+            observation.sequence == receipt.sequence)
+            return;
+    }
     if (calibration_observations_.size() >= kLifecycleReceiptCapacity) {
         calibration_observation_overflow_ = true;
         telemetry_.calibration_invalidated = true;
@@ -388,6 +393,11 @@ void SharedIoComputePlan::append_calibration_observation(const LifecycleReceipt&
     if (!observation.valid())
         ++telemetry_.invalid_calibration_rows;
     calibration_observations_.push_back(observation);
+}
+
+void SharedIoComputePlan::materialize_missing_calibration_observations() {
+    for (const auto& receipt : lifecycle_receipts_)
+        append_calibration_observation(receipt);
 }
 
 std::optional<SharedIoArena::OutputLease>

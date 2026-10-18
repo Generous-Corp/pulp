@@ -1122,6 +1122,11 @@ TEST_CASE("shared IO compute plan bounds saturation and retires refused or faile
     CHECK(receipts[4].gpu_elapsed_ns == -1);
     CHECK(receipts[5].sequence == 35);
     CHECK(receipts[5].discarded);
+    const auto observations = plan.take_calibration_observations();
+    REQUIRE(observations.size() == receipts.size());
+    CHECK(observations[4].sequence == 34);
+    CHECK(observations[4].discarded);
+    CHECK_FALSE(observations[4].terminal_success);
     REQUIRE(plan.release());
 }
 
