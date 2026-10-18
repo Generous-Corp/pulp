@@ -78,6 +78,7 @@ enum class GpuAudioStatusError : std::uint8_t {
     UninitializedStateHasPreparation = 8,
     UnavailableWithSelectedEngine = 9,
     UninitializedStateHasRecovery = 10,
+    InvalidEnumValue = 11,
 };
 
 struct GpuAudioStatusValidation {
@@ -97,6 +98,38 @@ constexpr GpuAudioStatusValidation
 validate_gpu_audio_status(const GpuAudioStatus& status) noexcept {
     if (status.schema_version != GpuAudioStatus::kSchemaVersion)
         return {GpuAudioStatusError::SchemaVersionMismatch};
+
+    const auto valid_engine = [](GpuAudioEngine value) constexpr {
+        return value == GpuAudioEngine::Unknown || value == GpuAudioEngine::Cpu ||
+               value == GpuAudioEngine::Gpu;
+    };
+    const auto valid_provider_state = [](GpuAudioProviderState value) constexpr {
+        return value == GpuAudioProviderState::Uninitialized ||
+               value == GpuAudioProviderState::Ready || value == GpuAudioProviderState::Degraded ||
+               value == GpuAudioProviderState::Unavailable;
+    };
+    const auto valid_provider = [](GpuAudioProvider value) constexpr {
+        return value == GpuAudioProvider::Unknown || value == GpuAudioProvider::Dawn ||
+               value == GpuAudioProvider::Metal;
+    };
+    const auto valid_miss_policy = [](MissPolicy value) constexpr {
+        return value == MissPolicy::Silence || value == MissPolicy::PassthroughDry ||
+               value == MissPolicy::CpuFallback;
+    };
+    const auto valid_recovery_reason = [](GpuAudioRecoveryReason value) constexpr {
+        return value == GpuAudioRecoveryReason::None ||
+               value == GpuAudioRecoveryReason::SequenceGap ||
+               value == GpuAudioRecoveryReason::InputSaturated ||
+               value == GpuAudioRecoveryReason::ProviderFailure ||
+               value == GpuAudioRecoveryReason::ProviderLost ||
+               value == GpuAudioRecoveryReason::OfflineFence ||
+               value == GpuAudioRecoveryReason::InvalidCallback;
+    };
+    if (!valid_engine(status.requested_engine) || !valid_engine(status.selected_engine) ||
+        !valid_provider_state(status.provider_state) || !valid_provider(status.provider) ||
+        !valid_miss_policy(status.fallback_policy) ||
+        !valid_recovery_reason(status.recovery_reason))
+        return {GpuAudioStatusError::InvalidEnumValue};
 
     if (status.provider_state == GpuAudioProviderState::Uninitialized) {
         if (status.selected_engine != GpuAudioEngine::Unknown ||

@@ -137,6 +137,15 @@ TEST_CASE("GpuAudioStatus rejects an uninitialized snapshot that claims preparat
     status = {};
     status.provider_state = GpuAudioProviderState::Ready;
     CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::PreparedShapeMissing);
+
+    status.sample_rate = 48000;
+    status.block_size = 32;
+    status.selected_engine = static_cast<GpuAudioEngine>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.selected_engine = GpuAudioEngine::Unknown;
+    status.provider_state = static_cast<GpuAudioProviderState>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
 }
 
 TEST_CASE("GpuAudioProgramDescriptor rejects incomplete shared preparation",
