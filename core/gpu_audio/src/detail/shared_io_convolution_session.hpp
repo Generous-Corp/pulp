@@ -25,7 +25,6 @@ class SharedIoConvolutionSession {
     using Callback = SharedIoConvolutionPipeline::Callback;
     using Delivery = SharedIoConvolutionPipeline::Delivery;
     using LifecycleReceipt = SharedIoComputePlan::LifecycleReceipt;
-    using CalibrationObservation = SharedIoCalibrationObservation;
 
     struct ProviderDiagnostics {
         std::uint32_t configured_slots = 0;
@@ -151,23 +150,11 @@ class SharedIoConvolutionSession {
     std::vector<LifecycleReceipt> take_lifecycle_receipts() {
         return plan_.take_lifecycle_receipts();
     }
-    std::vector<CalibrationObservation> take_calibration_observations() {
-        return plan_.take_calibration_observations();
-    }
     bool lifecycle_receipt_valid() const noexcept {
         return plan_.lifecycle_receipt_valid();
     }
     bool lifecycle_receipt_overflow() const noexcept {
         return plan_.lifecycle_receipt_overflow();
-    }
-    bool completion_receipt_overflow() const noexcept {
-        return plan_.completion_receipt_overflow();
-    }
-    bool calibration_observation_overflow() const noexcept {
-        return plan_.calibration_observation_overflow();
-    }
-    bool receipt_overflow() const noexcept {
-        return plan_.receipt_overflow();
     }
     ProviderDiagnostics provider_diagnostics() const noexcept {
         const auto& plan = plan_.telemetry();

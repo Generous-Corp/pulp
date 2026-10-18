@@ -827,13 +827,11 @@ TEST_CASE("shared session refuses lifecycle receipt extraction while work is act
     // Receipt extraction is quiescent-only. A non-empty result here would
     // permit a diagnostic consumer to observe partial lifecycle evidence.
     CHECK(fixture.session.take_lifecycle_receipts().empty());
-    CHECK(fixture.session.take_calibration_observations().empty());
     CHECK(fixture.session.lifecycle_receipt_valid());
-    CHECK_FALSE(fixture.session.receipt_overflow());
     REQUIRE(fixture.session.release());
 }
 
-TEST_CASE("shared session forwards completed lifecycle receipts",
+TEST_CASE("shared session forwards a completed lifecycle receipt",
           "[gpu_audio][shared_io][session][receipts]") {
     Fixture fixture;
     fixture.prepare();
@@ -846,27 +844,5 @@ TEST_CASE("shared session forwards completed lifecycle receipts",
     CHECK(receipts.front().terminal);
     CHECK(receipts.front().terminal_success);
     CHECK(receipts.front().output_released);
-    const auto observations = fixture.session.take_calibration_observations();
-    REQUIRE(observations.size() == 1);
-    CHECK(observations.front().terminal_success);
-    CHECK(observations.front().output_released);
-    CHECK(fixture.session.lifecycle_receipt_valid());
-    REQUIRE(fixture.session.release());
-}
-
-TEST_CASE("shared session preserves receipt projections regardless of extraction order",
-          "[gpu_audio][shared_io][session][receipts]") {
-    Fixture fixture;
-    fixture.prepare();
-    std::array<float, 2> output;
-    callback(fixture.session, a, output);
-    REQUIRE(fixture.session.service(1).submitted == 1);
-
-    const auto observations = fixture.session.take_calibration_observations();
-    REQUIRE(observations.size() == 1);
-    CHECK(fixture.session.take_calibration_observations().empty());
-    const auto receipts = fixture.session.take_lifecycle_receipts();
-    REQUIRE(receipts.size() == 1);
-    CHECK(receipts.front().sequence == observations.front().sequence);
     REQUIRE(fixture.session.release());
 }

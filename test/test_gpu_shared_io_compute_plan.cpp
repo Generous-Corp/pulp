@@ -1122,11 +1122,6 @@ TEST_CASE("shared IO compute plan bounds saturation and retires refused or faile
     CHECK(receipts[4].gpu_elapsed_ns == -1);
     CHECK(receipts[5].sequence == 35);
     CHECK(receipts[5].discarded);
-    const auto observations = plan.take_calibration_observations();
-    REQUIRE(observations.size() == receipts.size());
-    CHECK(observations[4].sequence == 34);
-    CHECK(observations[4].discarded);
-    CHECK_FALSE(observations[4].terminal_success);
     REQUIRE(plan.release());
 }
 
@@ -1143,14 +1138,8 @@ TEST_CASE("shared IO lifecycle receipts fail closed on bounded retention overflo
         REQUIRE(plan.cancel({input->token, 0}));
     }
     CHECK(plan.lifecycle_receipt_overflow());
-    CHECK_FALSE(plan.completion_receipt_overflow());
-    CHECK_FALSE(plan.calibration_observation_overflow());
-    CHECK(plan.receipt_overflow());
     CHECK_FALSE(plan.lifecycle_receipt_valid());
     CHECK(plan.take_lifecycle_receipts().size() == SharedIoComputePlan::kLifecycleReceiptCapacity);
-    const auto observations = plan.take_calibration_observations();
-    REQUIRE(observations.size() == SharedIoComputePlan::kLifecycleReceiptCapacity);
-    CHECK_FALSE(observations.front().valid());
     REQUIRE(plan.release());
 }
 

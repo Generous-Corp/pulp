@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace pulp::gpu_audio::detail {
@@ -143,47 +142,49 @@ class SharedIoComputePlan {
         // live vector intact while work is pending prevents partial evidence.
         if (!arena_.quiescent())
             return {};
-        materialize_missing_calibration_observations();
-        if (receipt_overflow())
-            for (auto& observation : calibration_observations_)
-                observation.lifecycle_valid = false;
         std::vector<LifecycleReceipt> result(lifecycle_receipts_.begin(),
                                              lifecycle_receipts_.end());
         lifecycle_receipts_.clear();
-        calibration_emitted_keys_.clear();
-        if (calibration_observations_.empty())
-            calibration_invalid_counted_keys_.clear();
         return result;
     }
     std::vector<SharedIoCalibrationObservation> take_calibration_observations() {
         if (!arena_.quiescent())
             return {};
-        materialize_missing_calibration_observations();
-        if (receipt_overflow())
-            for (auto& observation : calibration_observations_)
-                observation.lifecycle_valid = false;
-        for (const auto& observation : calibration_observations_)
-            calibration_emitted_keys_.emplace_back(observation.generation,
-                                                   observation.sequence);
-        auto result = std::exchange(calibration_observations_, {});
-        if (lifecycle_receipts_.empty()) {
-            calibration_emitted_keys_.clear();
-            calibration_invalid_counted_keys_.clear();
+        std::vector<SharedIoCalibrationObservation> result;
+        result.reserve(lifecycle_receipts_.size());
+        for (const auto& receipt : lifecycle_receipts_) {
+            SharedIoCalibrationObservation observation;
+            observation.identity = receipt.calibration_identity;
+            observation.provenance = receipt.provenance;
+            observation.generation = receipt.generation;
+            observation.sequence = receipt.sequence;
+            observation.worker_ns =
+                receipt.worker_ns > 0 ? static_cast<std::uint64_t>(receipt.worker_ns) : 0;
+            observation.submitted_ns =
+                receipt.submit_ns > 0 ? static_cast<std::uint64_t>(receipt.submit_ns) : 0;
+            observation.terminal_ns =
+                receipt.terminal_ns > 0 ? static_cast<std::uint64_t>(receipt.terminal_ns) : 0;
+            observation.visible_ns =
+                receipt.visible_ns > 0 ? static_cast<std::uint64_t>(receipt.visible_ns) : 0;
+            observation.predicted_ns = receipt.predicted_ns;
+            observation.provider_authenticated = receipt.provider_authenticated;
+            observation.terminal_success = receipt.terminal_success;
+            observation.late = receipt.late;
+            observation.stale = receipt.stale;
+            observation.discarded = receipt.discarded;
+            observation.device_lost = receipt.device_lost;
+            observation.output_acquired = receipt.output_acquired;
+            observation.output_released = receipt.output_released;
+            observation.lifecycle_valid = lifecycle_receipt_valid();
+            if (!observation.valid())
+                ++telemetry_.invalid_calibration_rows;
+            result.push_back(observation);
         }
+        lifecycle_receipts_.clear();
         return result;
     }
     bool lifecycle_receipt_overflow() const noexcept {
         return lifecycle_receipt_overflow_;
-    }
-    bool completion_receipt_overflow() const noexcept {
-        return completion_receipt_overflow_;
-    }
-    bool calibration_observation_overflow() const noexcept {
-        return calibration_observation_overflow_;
-    }
-    bool receipt_overflow() const noexcept {
-        return lifecycle_receipt_overflow_ || completion_receipt_overflow_ ||
-               calibration_observation_overflow_;
     }
     bool lifecycle_receipt_valid() const noexcept {
         return !lifecycle_receipt_overflow_ && !completion_receipt_overflow_;
@@ -220,8 +221,6 @@ class SharedIoComputePlan {
     void record_terminal(const SharedIoSlotLedger::SlotToken& token,
                          SharedIoArena::CompletionStatus status) noexcept;
     void record_calibration(LifecycleReceipt&) noexcept;
-    void append_calibration_observation(const LifecycleReceipt&);
-    void materialize_missing_calibration_observations();
     LifecycleReceipt* receipt_for(const SharedIoSlotLedger::SlotToken&) noexcept;
 
     SharedIoArena arena_;
@@ -237,14 +236,9 @@ class SharedIoComputePlan {
     std::vector<Pending> pending_;
     std::vector<Completion> completions_;
     std::vector<LifecycleReceipt> lifecycle_receipts_;
-    std::vector<SharedIoCalibrationObservation> calibration_observations_;
-    std::vector<std::pair<std::uint64_t, std::uint64_t>> calibration_emitted_keys_;
-    std::vector<std::pair<std::uint64_t, std::uint64_t>> calibration_invalid_counted_keys_;
-    std::uint64_t calibration_skip_before_generation_ = 0;
     std::vector<std::size_t> receipt_index_by_slot_;
     bool lifecycle_receipt_overflow_ = false;
     bool completion_receipt_overflow_ = false;
-    bool calibration_observation_overflow_ = false;
     std::size_t completion_read_ = 0;
     std::size_t completion_write_ = 0;
     Telemetry telemetry_;
