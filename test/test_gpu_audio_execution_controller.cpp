@@ -79,8 +79,8 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto minimum_capacity = contract();
     minimum_capacity.algorithmic_lead_blocks = 1;
-    minimum_capacity.pipeline_depth = 2;
-    minimum_capacity.max_inflight = 1;
+    minimum_capacity.pipeline_depth = 3;
+    minimum_capacity.max_inflight = 2;
 
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
