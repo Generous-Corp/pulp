@@ -151,6 +151,7 @@ TEST_CASE("causal TCN CPU adapter rejects identity, layout, and alias violations
     CHECK_FALSE(mismatched_adapter.prepare(mismatched_context));
     CHECK(mismatched_adapter.last_prepare_error() == TcnCpuPrepareError::InvalidContract);
     CHECK_FALSE(adapter.prepare(c));
+    CHECK(adapter.last_prepare_error() == TcnCpuPrepareError::KernelPrepareFailed);
     CHECK(k.releases == 1);
     REQUIRE(adapter.prepare(c));
     std::array<float, 2> samples{1, 2};

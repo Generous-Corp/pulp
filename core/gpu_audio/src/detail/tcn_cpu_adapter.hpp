@@ -59,7 +59,7 @@ struct TcnCpuKernel {
     bool (*release)(void*) noexcept = nullptr;
 };
 
-enum class TcnCpuPrepareError : std::uint8_t { None, InvalidContract, ArtifactMismatch };
+enum class TcnCpuPrepareError : std::uint8_t { None, InvalidContract, ArtifactMismatch, KernelPrepareFailed };
 
 class TcnCpuAdapter final : public StreamingModel {
   public:
@@ -96,6 +96,7 @@ class TcnCpuAdapter final : public StreamingModel {
             context.artifact_hash != artifact_.artifact_sha256)
             return fail(TcnCpuPrepareError::ArtifactMismatch);
         if (!kernel_.prepare(kernel_.state, context)) {
+            last_error_ = TcnCpuPrepareError::KernelPrepareFailed;
             cleanup_required_ = !kernel_.release(kernel_.state);
             return false;
         }
