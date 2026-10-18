@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <sstream>
 #include <unordered_map>
+#include <vector>
 
 #include <choc/text/choc_JSON.h>
 #include <pulp/runtime/crypto.hpp>
@@ -314,14 +315,76 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
     }
 
     // A matching digest authenticates the bytes, but it does not establish that
-    // they are an SVG document. Check the sanitized markup so fake root tags in
-    // comments, CDATA, or script/style bodies cannot satisfy this envelope.
-    // This intentionally remains a bounded structural check; full XML/SVG
+    // they are an SVG document. Walk the sanitized tags so fake root tags in
+    // attributes, wrappers, comments, or script/style bodies cannot satisfy
+    // this envelope. This remains a bounded structural check; full XML/SVG
     // semantics belong to the rendering backend.
-    static const std::regex svg_root_re(R"(<svg(?:\s|>))");
-    static const std::regex svg_close_re(R"(</svg\s*>)");
-    if (!std::regex_search(svg_markup, svg_root_re) ||
-        !std::regex_search(svg_markup, svg_close_re)) {
+    const std::regex envelope_tag_re(
+        R"(<\s*(/?)\s*([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^<>]*)?/\s*>|<\s*(/?)\s*([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^<>]*)?>)");
+    std::vector<std::string> tag_stack;
+    bool saw_root = false;
+    bool closed_root = false;
+    size_t cursor = 0;
+    bool envelope_valid = true;
+    for (std::sregex_iterator it(svg_markup.begin(), svg_markup.end(), envelope_tag_re), end;
+         it != end; ++it) {
+        const auto position = static_cast<size_t>(it->position());
+        const auto gap = svg_markup.substr(cursor, position - cursor);
+        if (tag_stack.empty() && gap.find_first_not_of(" \t\r\n") != std::string::npos) {
+            envelope_valid = false;
+            break;
+        }
+        const auto tag = it->str();
+        size_t marker = 1;
+        while (marker < tag.size() && std::isspace(static_cast<unsigned char>(tag[marker])))
+            ++marker;
+        const bool closing = marker < tag.size() && tag[marker] == '/';
+        const auto last_content = tag.find_last_not_of(" \t\r\n>");
+        const bool self_closing = last_content != std::string::npos && tag[last_content] == '/';
+        const auto name_start =
+            tag.find_first_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+        if (name_start == std::string::npos) {
+            envelope_valid = false;
+            break;
+        }
+        size_t name_end = name_start;
+        while (name_end < tag.size() &&
+               (std::isalnum(static_cast<unsigned char>(tag[name_end])) || tag[name_end] == ':' ||
+                tag[name_end] == '_' || tag[name_end] == '-'))
+            ++name_end;
+        const auto name = tag.substr(name_start, name_end - name_start);
+        if (closing) {
+            if (tag_stack.empty() || tag_stack.back() != name) {
+                envelope_valid = false;
+                break;
+            }
+            tag_stack.pop_back();
+            if (tag_stack.empty()) {
+                if (!saw_root || name != "svg") {
+                    envelope_valid = false;
+                    break;
+                }
+                closed_root = true;
+            }
+        } else {
+            if (tag_stack.empty()) {
+                if (saw_root || name != "svg" || self_closing) {
+                    envelope_valid = false;
+                    break;
+                }
+                saw_root = true;
+            }
+            if (!self_closing)
+                tag_stack.push_back(name);
+        }
+        cursor = position + tag.size();
+    }
+    if (envelope_valid) {
+        const auto tail = svg_markup.substr(cursor);
+        envelope_valid = tag_stack.empty() && closed_root &&
+                         tail.find_first_not_of(" \t\r\n") == std::string::npos;
+    }
+    if (!envelope_valid) {
         error = "SVG bytes must contain an <svg> root element";
         return false;
     }

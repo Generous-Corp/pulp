@@ -790,6 +790,18 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
                                pulp::runtime::sha256_hex(commented_root_svg));
         CHECK_FALSE(impd::validate_annotated_capture(commented_root_svg, commented_root, error));
         CHECK(error.find("<svg>") != std::string::npos);
+
+        const std::string wrapped_svg = R"(<div><svg width="200" height="100"></svg></div>)";
+        auto wrapped = sidecar;
+        wrapped.replace(wrapped.find(hash), hash.size(), pulp::runtime::sha256_hex(wrapped_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(wrapped_svg, wrapped, error));
+
+        const std::string multiple_roots_svg =
+            R"(<svg width="200" height="100"></svg><svg width="200" height="100"></svg>)";
+        auto multiple_roots = sidecar;
+        multiple_roots.replace(multiple_roots.find(hash), hash.size(),
+                               pulp::runtime::sha256_hex(multiple_roots_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(multiple_roots_svg, multiple_roots, error));
     }
     SECTION("typed-invalid and non-finite geometry fail closed") {
         auto typed_invalid = sidecar;
