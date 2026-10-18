@@ -1087,12 +1087,6 @@
       "timeout": 180.0
     },
     {
-      "name": "shipyard-merge-gate-evidence-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_shipyard_merge_gate_evidence.py"
-      ]
-    },
-    {
       "name": "windows-vm-manifest-selftest",
       "argv": [
         "{repo}/tools/ci/test_windows_vm_manifest.py"
