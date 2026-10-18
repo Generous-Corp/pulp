@@ -16,7 +16,9 @@ struct Kernel {
     int releases = 0;
     int processes = 0;
     int quiesces = 0;
+    int release_failures = 0;
     bool fail_once = false;
+    bool fail_quiesce_once = false;
     bool plant_faults = false;
 };
 void planted_rt_faults() noexcept {
@@ -47,11 +49,21 @@ void reset(void* p) noexcept {
     static_cast<Kernel*>(p)->history = 0.0f;
 }
 bool quiesce(void* p) noexcept {
-    ++static_cast<Kernel*>(p)->quiesces;
+    auto& k = *static_cast<Kernel*>(p);
+    ++k.quiesces;
+    if (k.fail_quiesce_once) {
+        k.fail_quiesce_once = false;
+        return false;
+    }
     return true;
 }
 bool release(void* p) noexcept {
-    ++static_cast<Kernel*>(p)->releases;
+    auto& k = *static_cast<Kernel*>(p);
+    ++k.releases;
+    if (k.release_failures > 0) {
+        --k.release_failures;
+        return false;
+    }
     return true;
 }
 
@@ -194,4 +206,29 @@ TEST_CASE("causal TCN CPU adapter only quiesces a prepared kernel",
     REQUIRE(adapter.release());
     CHECK_FALSE(adapter.quiesce());
     CHECK(k.quiesces == 1);
+}
+
+TEST_CASE("causal TCN CPU adapter retries failed cleanup after prepare failure",
+          "[gpu_audio][neural][tcn][lifecycle]") {
+    auto s = spec();
+    Kernel k{.release_failures = 2, .fail_once = true, .fail_quiesce_once = true};
+    auto adapter = make(k, s);
+    const StreamingPrepareContext c{&adapter.spec(), "fixture.tcn", "sha256:fixture-weights",
+                                    StreamingFallbackStrategy::NoFallback, 32};
+
+    CHECK_FALSE(adapter.prepare(c));
+    CHECK(adapter.last_prepare_error() == TcnCpuPrepareError::KernelPrepareFailed);
+    CHECK(k.releases == 1);
+    CHECK_FALSE(adapter.prepare(c));
+    CHECK(adapter.last_prepare_error() == TcnCpuPrepareError::InvalidContract);
+
+    CHECK_FALSE(adapter.quiesce());
+    CHECK(k.quiesces == 1);
+    CHECK(adapter.quiesce());
+    CHECK(k.quiesces == 2);
+    CHECK_FALSE(adapter.release());
+    CHECK(k.releases == 2);
+    REQUIRE(adapter.release());
+    CHECK(k.releases == 3);
+    CHECK_FALSE(adapter.quiesce());
 }
