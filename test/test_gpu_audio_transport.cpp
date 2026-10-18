@@ -270,6 +270,10 @@ class RealtimeHookNode : public GpuAudioNode {
         return policy_ == MissPolicy::CpuFallback;
     }
 
+    GpuAudioRecoveryReason recovery_reason() const noexcept override {
+        return recovery_reason_value;
+    }
+
     void process_block(const BufferView<const float>& input, BufferView<float>& output,
                        uint32_t n) override {
         ++process_block_calls;
@@ -342,6 +346,7 @@ class RealtimeHookNode : public GpuAudioNode {
     bool callback_shape_valid = true;
     const float* external_output_sample = nullptr;
     bool external_output_silent_on_rejection = true;
+    GpuAudioRecoveryReason recovery_reason_value = GpuAudioRecoveryReason::None;
 
   private:
     static std::uint8_t process_realtime(void* self, const BufferView<const float>& input,
@@ -1442,6 +1447,27 @@ TEST_CASE("GpuAudioTransport status snapshot is stable before and after prepare"
     CHECK(after.fallback_policy == MissPolicy::CpuFallback);
     CHECK(after.recovery_reason == GpuAudioRecoveryReason::None);
     CHECK(validate_gpu_audio_status(after).accepted());
+}
+
+TEST_CASE("GpuAudioTransport status snapshot propagates the latched recovery reason",
+          "[gpu_audio][transport][status][recovery]") {
+    constexpr uint32_t BS = 32;
+    test_detail::RealtimeHookNode node(1, BS, MissPolicy::CpuFallback);
+    REQUIRE(node.prepare());
+
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.ring_blocks = 8}));
+
+    const auto healthy = transport.status_snapshot();
+    CHECK(healthy.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(validate_gpu_audio_status(healthy).accepted());
+
+    node.recovery_reason_value = GpuAudioRecoveryReason::ProviderLost;
+    const auto recovered = transport.status_snapshot();
+    CHECK(recovered.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(recovered.fallback_policy == MissPolicy::CpuFallback);
+    CHECK(recovered.fallback_available);
+    CHECK(validate_gpu_audio_status(recovered).accepted());
 }
 
 TEST_CASE("GpuAudioTransport delivery snapshot supports concurrent diagnostic reads",
