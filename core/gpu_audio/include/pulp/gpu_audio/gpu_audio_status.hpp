@@ -70,4 +70,74 @@ struct GpuAudioStatus {
     double avg_block_us = 0.0;
 };
 
+/// Why a host-visible status snapshot is inconsistent.  The validator is
+/// intentionally backend-neutral: it checks only the relationship between
+/// the projected engine, provider identity, lifecycle state, and prepared
+/// fallback witness.  It does not inspect provider handles or imply that a
+/// ready provider met a real-time deadline.
+enum class GpuAudioStatusError : std::uint8_t {
+    None = 0,
+    SchemaVersionMismatch = 1,
+    PreparedShapeMissing = 2,
+    ReadyWithoutEngine = 3,
+    GpuEngineWithoutProvider = 4,
+    CpuEngineWithProvider = 5,
+    DegradedWithSelectedEngine = 6,
+    FallbackUnavailable = 7,
+    UninitializedStateHasPreparation = 8,
+};
+
+struct GpuAudioStatusValidation {
+    GpuAudioStatusError error = GpuAudioStatusError::None;
+
+    constexpr bool accepted() const noexcept {
+        return error == GpuAudioStatusError::None;
+    }
+};
+
+/// Validate the backend-neutral status projection at a quiescent snapshot.
+/// Status counters may be sampled concurrently and are therefore deliberately
+/// excluded from this structural check.  A provider is only called GPU-ready
+/// when its identity is known; an unknown provider remains a degraded,
+/// prepared state rather than being promoted to a false GPU claim.
+constexpr GpuAudioStatusValidation
+validate_gpu_audio_status(const GpuAudioStatus& status) noexcept {
+    if (status.schema_version != GpuAudioStatus::kSchemaVersion)
+        return {GpuAudioStatusError::SchemaVersionMismatch};
+
+    if (status.provider_state == GpuAudioProviderState::Uninitialized) {
+        if (status.selected_engine != GpuAudioEngine::Unknown ||
+            status.provider != GpuAudioProvider::Unknown || status.sample_rate != 0 ||
+            status.block_size != 0 || status.latency_samples != 0 ||
+            status.prepared_lead_blocks != 0 || status.fallback_available ||
+            status.diagnostics_available)
+            return {GpuAudioStatusError::UninitializedStateHasPreparation};
+        return {};
+    }
+
+    if (status.sample_rate == 0 || status.block_size == 0)
+        return {GpuAudioStatusError::PreparedShapeMissing};
+
+    if (status.provider_state == GpuAudioProviderState::Ready &&
+        status.selected_engine == GpuAudioEngine::Unknown)
+        return {GpuAudioStatusError::ReadyWithoutEngine};
+
+    if (status.selected_engine == GpuAudioEngine::Gpu &&
+        status.provider == GpuAudioProvider::Unknown)
+        return {GpuAudioStatusError::GpuEngineWithoutProvider};
+
+    if (status.selected_engine == GpuAudioEngine::Cpu &&
+        status.provider != GpuAudioProvider::Unknown)
+        return {GpuAudioStatusError::CpuEngineWithProvider};
+
+    if (status.provider_state == GpuAudioProviderState::Degraded &&
+        status.selected_engine != GpuAudioEngine::Unknown)
+        return {GpuAudioStatusError::DegradedWithSelectedEngine};
+
+    if (status.fallback_policy == MissPolicy::CpuFallback && !status.fallback_available)
+        return {GpuAudioStatusError::FallbackUnavailable};
+
+    return {};
+}
+
 } // namespace pulp::gpu_audio
