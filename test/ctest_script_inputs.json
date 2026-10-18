@@ -2462,6 +2462,7 @@
   "pulp-test-cli-validator-discovery",
   "pulp-test-cli-version-diag",
   "pulp-test-commuted-string-excitation",
+  "pulp-test-compact-ssm-cpu-adapter",
   "pulp-test-control-broker-daemon",
   "pulp-test-control-client-connection",
   "pulp-test-control-dspx04-graph-product-e2e",
