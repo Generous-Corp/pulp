@@ -1040,6 +1040,22 @@ TEST_CASE("GpuAudioTransport silences mismatched / too-small views", "[gpu_audio
     REQUIRE(mono_out.storage[0][0] == 0.0f);
 }
 
+TEST_CASE("GpuAudioTransport rejects a prepared node with no sample rate",
+          "[gpu_audio][transport][status]") {
+    struct ZeroRateNode final : GpuAudioNode {
+        GpuAudioNodeDescriptor descriptor() const override {
+            return {.name = "zero-rate", .input_channels = 1, .output_channels = 1,
+                    .block_size = 32, .sample_rate = 0, .latency_blocks = 1};
+        }
+        bool prepare() override { return true; }
+        void process_block(const BufferView<const float>&, BufferView<float>&, uint32_t) override {}
+    } node;
+
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    CHECK_FALSE(transport.prepare(&node, {.ring_blocks = 8}));
+}
+
 // A node that declares nothing about its miss behavior must not pass audio
 // through on a miss. Passing through is the WORST default here: the transport's
 // output is delayed by latency_blocks, so a dry sample for the CURRENT time jumps

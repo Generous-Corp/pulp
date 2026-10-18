@@ -55,6 +55,7 @@ struct TonePlugin {
     std::atomic<bool> process_entered{false};
     std::atomic<bool> editor_operation_active{false};
     std::atomic<bool> overlap_acknowledged{false};
+    std::atomic<bool> overlap_process_completed{false};
     std::atomic<bool> overlap_cancelled{false};
 };
 
@@ -149,7 +150,7 @@ clap_process_status CLAP_ABI tone_process(const clap_plugin_t* p, const clap_pro
         }
     }
     if (overlapped_editor)
-        t->overlap_acknowledged.store(true, std::memory_order_release);
+        t->overlap_process_completed.store(true, std::memory_order_release);
     t->blocks_rendered.fetch_add(1, std::memory_order_release);
     return CLAP_PROCESS_CONTINUE;
 }
@@ -353,7 +354,7 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
     std::atomic<int> audio_blocks{0};
     std::atomic<bool> audio_output_valid{true};
 
-    std::jthread audio([&slot, &audio_blocks, &audio_output_valid](std::stop_token stop_token) {
+    std::jthread audio([&slot, &tone, &audio_blocks, &audio_output_valid](std::stop_token stop_token) {
         std::vector<std::vector<float>> out(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<std::vector<float>> in(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<float*> out_ptrs, in_ptrs;
@@ -367,6 +368,11 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
             pulp::audio::BufferView<const float> iv(
                 const_cast<const float**>(in_ptrs.data()), kChannels, kBlockSize);
             slot->process(ov, iv, midi_in, midi_out, params, kBlockSize);
+            // The plugin marks the overlap only after its DSP loop. Publish the
+            // acknowledgement after the host process call returns, fencing the
+            // complete callback before editor teardown can continue.
+            if (tone.overlap_process_completed.exchange(false, std::memory_order_acq_rel))
+                tone.overlap_acknowledged.store(true, std::memory_order_release);
 
             bool block_is_valid = true;
             bool every_channel_has_signal = true;
@@ -400,6 +406,7 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
             tone.overlap_cancelled.store(true, std::memory_order_release);
             tone.overlap_enabled.store(false, std::memory_order_release);
             tone.editor_operation_active.store(false, std::memory_order_release);
+            tone.overlap_process_completed.store(false, std::memory_order_release);
             tone.overlap_acknowledged.store(true, std::memory_order_release);
         }
     } overlap_cleanup{tone};
@@ -407,6 +414,7 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
     const auto arm_editor_overlap = [&] {
         tone.overlap_cancelled.store(false, std::memory_order_release);
         tone.overlap_acknowledged.store(false, std::memory_order_release);
+        tone.overlap_process_completed.store(false, std::memory_order_release);
         tone.process_entered.store(false, std::memory_order_release);
         tone.overlap_enabled.store(true, std::memory_order_release);
     };
