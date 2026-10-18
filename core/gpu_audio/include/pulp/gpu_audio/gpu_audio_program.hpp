@@ -67,6 +67,8 @@ enum class GpuAudioProgramError : std::uint8_t {
     // Reject values that are not part of the versioned backend-neutral enum
     // domains before any path/provider relationship is evaluated.
     InvalidEnumValue = 22,
+    // The capability report itself was not a valid prepared snapshot.
+    CapabilityInvalid = 23,
 };
 
 /// Backend-neutral metadata for a typed program prepared for a fixed audio
@@ -180,6 +182,12 @@ validate_gpu_audio_program(const GpuAudioProgramDescriptor& program,
     const auto descriptor = validate_gpu_audio_program(program);
     if (!descriptor.accepted())
         return descriptor;
+    const auto capability_validation = validate_gpu_audio_capability(capability);
+    if (!capability_validation.accepted()) {
+        if (capability_validation.error == GpuAudioCapabilityError::FallbackUnavailable)
+            return {GpuAudioProgramError::CapabilityFallbackUnavailable};
+        return {GpuAudioProgramError::CapabilityInvalid};
+    }
     if (!capability.prepared)
         return {GpuAudioProgramError::CapabilityNotPrepared};
     if (capability.eligibility != GpuAudioEligibility::Eligible)

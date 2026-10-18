@@ -40,6 +40,42 @@ GpuAudioProgramDescriptor valid_shared_program() {
             .cpu_fallback_prepared = true};
 }
 
+GpuAudioCapabilityReport valid_shared_capability() {
+    return {.path = GpuAudioExecutionPath::SharedMemory,
+            .provider = GpuAudioProvider::Dawn,
+            .eligibility = GpuAudioEligibility::Eligible,
+            .fallback_policy = MissPolicy::CpuFallback,
+            .prepared_lead_blocks = 2,
+            .prepared = true,
+            .fallback_available = true,
+            .diagnostics_available = true,
+            .prepared_latency_blocks = 2};
+}
+
+GpuAudioCapabilityReport valid_staged_capability() {
+    return {.path = GpuAudioExecutionPath::Staged,
+            .provider = GpuAudioProvider::Unknown,
+            .eligibility = GpuAudioEligibility::Eligible,
+            .fallback_policy = MissPolicy::CpuFallback,
+            .prepared_lead_blocks = 0,
+            .prepared = true,
+            .fallback_available = true,
+            .diagnostics_available = true,
+            .prepared_latency_blocks = 3};
+}
+
+GpuAudioCapabilityReport valid_cpu_capability() {
+    return {.path = GpuAudioExecutionPath::Cpu,
+            .provider = GpuAudioProvider::Unknown,
+            .eligibility = GpuAudioEligibility::Eligible,
+            .fallback_policy = MissPolicy::Silence,
+            .prepared_lead_blocks = 0,
+            .prepared = true,
+            .fallback_available = false,
+            .diagnostics_available = true,
+            .prepared_latency_blocks = 0};
+}
+
 } // namespace
 
 TEST_CASE("GpuAudioProgramDescriptor validates a prepared shared program", "[gpu_audio][program]") {
@@ -227,40 +263,108 @@ TEST_CASE("GpuAudioProgramDescriptor rejects unsafe provider and fallback claims
     CHECK(validate_gpu_audio_program(program).accepted());
 }
 
+TEST_CASE("GpuAudioCapabilityReport validates backend-neutral prepared snapshots",
+          "[gpu_audio][capability]") {
+    constexpr GpuAudioCapabilityReport inactive{};
+    STATIC_REQUIRE(validate_gpu_audio_capability(inactive).accepted());
+
+    CHECK(validate_gpu_audio_capability(valid_cpu_capability()).accepted());
+    CHECK(validate_gpu_audio_capability(valid_staged_capability()).accepted());
+    CHECK(validate_gpu_audio_capability(valid_shared_capability()).accepted());
+}
+
+TEST_CASE("GpuAudioCapabilityReport rejects forged enum and shape relationships",
+          "[gpu_audio][capability]") {
+    auto capability = valid_shared_capability();
+
+    capability.path = static_cast<GpuAudioExecutionPath>(0xfe);
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::InvalidEnumValue);
+    capability = valid_shared_capability();
+    capability.provider = static_cast<GpuAudioProvider>(0xfe);
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::InvalidEnumValue);
+    capability = valid_shared_capability();
+    capability.eligibility = static_cast<GpuAudioEligibility>(0xfe);
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::InvalidEnumValue);
+    capability = valid_shared_capability();
+    capability.fallback_policy = static_cast<MissPolicy>(0xfe);
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::InvalidEnumValue);
+
+    capability = {};
+    capability.path = GpuAudioExecutionPath::Staged;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::UnpreparedStateHasPreparation);
+
+    capability = valid_shared_capability();
+    capability.path = GpuAudioExecutionPath::Unavailable;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::PreparedPathUnavailable);
+    capability = valid_shared_capability();
+    capability.eligibility = GpuAudioEligibility::Unavailable;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::PreparedPathIneligible);
+    capability = valid_shared_capability();
+    capability.provider = GpuAudioProvider::Unknown;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::SharedProviderMissing);
+    capability = valid_shared_capability();
+    capability.prepared_lead_blocks = 0;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::SharedLeadMissing);
+
+    capability = valid_shared_capability();
+    capability.path = GpuAudioExecutionPath::Cpu;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::CpuProviderPresent);
+    capability = valid_cpu_capability();
+    capability.prepared_lead_blocks = 1;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::CpuLeadPresent);
+    capability = valid_shared_capability();
+    capability.fallback_available = false;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::FallbackUnavailable);
+}
+
 TEST_CASE("GpuAudioProgramDescriptor binds only to an authenticated capability",
           "[gpu_audio][program]") {
     const auto program = valid_shared_program();
-    GpuAudioCapabilityReport capability;
-    capability.path = GpuAudioExecutionPath::SharedMemory;
-    capability.provider = GpuAudioProvider::Dawn;
-    capability.eligibility = GpuAudioEligibility::Eligible;
-    capability.fallback_policy = MissPolicy::CpuFallback;
-    capability.prepared_lead_blocks = 2;
-    capability.prepared = true;
-    capability.fallback_available = true;
+    auto capability = valid_shared_capability();
 
     CHECK(validate_gpu_audio_program(program, capability).accepted());
 
     capability.provider = GpuAudioProvider::Unknown;
     CHECK(validate_gpu_audio_program(program, capability).error ==
-          GpuAudioProgramError::CapabilityProviderMismatch);
+          GpuAudioProgramError::CapabilityInvalid);
 
     capability = {};
     CHECK(validate_gpu_audio_program(program, capability).error ==
           GpuAudioProgramError::CapabilityNotPrepared);
 }
 
+TEST_CASE("GpuAudioProgramDescriptor rejects forged capability enums for generic staged paths",
+          "[gpu_audio][program][capability]") {
+    auto program = valid_shared_program();
+    program.path = GpuAudioExecutionPath::Staged;
+    program.provider = GpuAudioProvider::Unknown;
+    program.provider_owned_resources = false;
+    program.algorithmic_lead_blocks = 1;
+    program.pipeline_depth = 3;
+    program.provider_slots = 2;
+
+    auto capability = valid_staged_capability();
+    capability.provider = static_cast<GpuAudioProvider>(0xfe);
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityInvalid);
+}
+
 TEST_CASE("GpuAudioProgramDescriptor rejects capability drift before execution",
           "[gpu_audio][program]") {
     const auto program = valid_shared_program();
-    GpuAudioCapabilityReport capability;
-    capability.path = GpuAudioExecutionPath::SharedMemory;
-    capability.provider = GpuAudioProvider::Dawn;
-    capability.eligibility = GpuAudioEligibility::Eligible;
-    capability.fallback_policy = MissPolicy::CpuFallback;
-    capability.prepared_lead_blocks = 2;
-    capability.prepared = true;
-    capability.fallback_available = true;
+    auto capability = valid_shared_capability();
 
     capability.path = GpuAudioExecutionPath::Staged;
     CHECK(validate_gpu_audio_program(program, capability).error ==
