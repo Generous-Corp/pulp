@@ -85,8 +85,8 @@ if param_index < 0 then
   fields.state_saved=project_path;fields.phase='EDITOR_READY';status();return
 end
 started=reaper.time_precise();editor_ready=true
+reaper.defer(pump)
 end
-if param_index >= 0 then reaper.defer(pump) end
 if probe_gate then
   local gate_started=reaper.time_precise()
   local function wait_probe()
