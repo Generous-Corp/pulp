@@ -712,3 +712,21 @@ TEST_CASE("serialized NAM adapter rejects each runtime shape mismatch",
                                 .max_frames = 128};
     CHECK_FALSE(state_bytes_model.prepare(state_bytes_context));
 }
+
+TEST_CASE("serialized NAM adapter rejects an artifact hash mismatch before loading",
+          "[gpu_audio][neural][nam][validation]") {
+    const auto spec_value = artifact_spec();
+    NamTcnArtifactAdapter model(spec_value, fixture_path());
+    auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                           .artifact_id = "example.nam",
+                                           .artifact_hash = "sha256:wrong",
+                                           .max_frames = 128};
+    CHECK_FALSE(model.prepare(context));
+
+    // A rejected metadata transaction must leave the adapter retryable. The
+    // matching hash is accepted and the live model can then be released.
+    context.artifact_hash = spec_value.weights_hash;
+    REQUIRE(model.prepare(context));
+    REQUIRE(model.quiesce());
+    REQUIRE(model.release());
+}
