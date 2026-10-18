@@ -186,18 +186,6 @@
    ],
    "undeclared_sources": []
   },
-  "pulp-gpu-wgpu-native-staged-diagnostic": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
-    "tools/diagnostics/pulp_wgpu_native_staged_adapter.cpp"
-   ],
-   "spawns": "undeclared",
-   "undeclared_sources": []
-  },
   "pulp-test-au-v2-param-display": {
    "data": "none",
    "inputs": [],
@@ -2332,7 +2320,6 @@
   "pulp-generate-control-protocol-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
-  "pulp-gpu-wgpu-native-staged-diagnostic",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -5041,6 +5028,13 @@
    ],
    "kind": "python"
   },
+  "gpu-audio-p5-unified-receipt-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_p5_receipt.py",
+   "inputs": [
+    "tools/validation/test_verify_gpu_audio_p5_receipt.py"
+   ],
+   "kind": "python"
+  },
   "gpu-audio-provider-identity-selftest": {
    "entry": "tools/scripts/test_gpu_audio_provider_identity.py",
    "inputs": [
@@ -7346,23 +7340,6 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-wgpu-native-staged-diagnostic": {
-   "entry": "tools/diagnostics/verify_wgpu_native_staged.py",
-   "inputs": [
-    "tools/deps/manifest.json",
-    "tools/diagnostics/verify_wgpu_native_staged.py"
-   ],
-   "kind": "python"
-  },
-  "pulp-gpu-wgpu-native-staged-identity-negative-control": {
-   "entry": "tools/diagnostics/test_verify_wgpu_native_staged.py",
-   "inputs": [
-    "tools/deps/manifest.json",
-    "tools/diagnostics/test_verify_wgpu_native_staged.py",
-    "tools/diagnostics/verify_wgpu_native_staged.py"
    ],
    "kind": "python"
   },
@@ -12151,12 +12128,12 @@
    "kind": "python"
   },
   "vst3-bundle-layout-selftest": {
-   "kind": "python",
    "entry": "tools/cmake/scripts/test_check_vst3_bundle_layout.py",
    "inputs": [
     "tools/cmake/scripts/check_vst3_bundle_layout.py",
     "tools/cmake/scripts/test_check_vst3_bundle_layout.py"
-   ]
+   ],
+   "kind": "python"
   },
   "wasm-skia-fetch-mapping": {
    "entry": "tools/scripts/verify_wasm_skia_slice.py",
