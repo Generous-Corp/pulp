@@ -105,8 +105,7 @@ struct GpuAudioProgramValidation {
 constexpr GpuAudioProgramValidation
 validate_gpu_audio_program(const GpuAudioProgramDescriptor& program) noexcept {
     const auto valid_kind = [](GpuAudioProgramKind value) constexpr {
-        return value == GpuAudioProgramKind::Unknown ||
-               value == GpuAudioProgramKind::Convolution ||
+        return value == GpuAudioProgramKind::Unknown || value == GpuAudioProgramKind::Convolution ||
                value == GpuAudioProgramKind::Spectral || value == GpuAudioProgramKind::Neural ||
                value == GpuAudioProgramKind::Custom;
     };

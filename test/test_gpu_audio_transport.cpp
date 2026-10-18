@@ -89,8 +89,7 @@ TEST_CASE("GpuAudioStatus preserves provider, delivery, and fallback meanings",
     CHECK(status.missed_blocks != status.fallback_blocks);
 }
 
-TEST_CASE("GpuAudioStatus validates backend-neutral lifecycle projections",
-          "[gpu_audio][status]") {
+TEST_CASE("GpuAudioStatus validates backend-neutral lifecycle projections", "[gpu_audio][status]") {
     constexpr auto constexpr_status = [] {
         GpuAudioStatus value;
         value.selected_engine = GpuAudioEngine::Gpu;
@@ -113,8 +112,7 @@ TEST_CASE("GpuAudioStatus validates backend-neutral lifecycle projections",
     CHECK(validate_gpu_audio_status(status).accepted());
 
     status.provider = GpuAudioProvider::Unknown;
-    CHECK(validate_gpu_audio_status(status).error ==
-          GpuAudioStatusError::GpuEngineWithoutProvider);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::GpuEngineWithoutProvider);
 
     status.provider = GpuAudioProvider::Dawn;
     status.selected_engine = GpuAudioEngine::Unknown;
@@ -153,8 +151,7 @@ TEST_CASE("GpuAudioStatus rejects an uninitialized snapshot that claims preparat
 
     status = {};
     status.schema_version = GpuAudioStatus::kSchemaVersion + 1;
-    CHECK(validate_gpu_audio_status(status).error ==
-          GpuAudioStatusError::SchemaVersionMismatch);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::SchemaVersionMismatch);
 
     status = {};
     status.provider_state = GpuAudioProviderState::Ready;
@@ -1066,10 +1063,16 @@ TEST_CASE("GpuAudioTransport rejects a prepared node with no sample rate",
           "[gpu_audio][transport][status]") {
     struct ZeroRateNode final : GpuAudioNode {
         GpuAudioNodeDescriptor descriptor() const override {
-            return {.name = "zero-rate", .input_channels = 1, .output_channels = 1,
-                    .block_size = 32, .sample_rate = 0, .latency_blocks = 1};
+            return {.name = "zero-rate",
+                    .input_channels = 1,
+                    .output_channels = 1,
+                    .block_size = 32,
+                    .sample_rate = 0,
+                    .latency_blocks = 1};
         }
-        bool prepare() override { return true; }
+        bool prepare() override {
+            return true;
+        }
         void process_block(const BufferView<const float>&, BufferView<float>&, uint32_t) override {}
     } node;
 

@@ -197,10 +197,9 @@ struct SharedIoTelemetryValidation {
 // producers may expose telemetry before attaching a scheduling policy.
 constexpr SharedIoTelemetryValidation
 validate_shared_io_telemetry(const SharedIoTelemetrySnapshot& snapshot) noexcept {
-    const bool depth_unconfigured = snapshot.configured_lead_blocks == 0 &&
-                                    snapshot.configured_pipeline_depth == 0 &&
-                                    snapshot.configured_max_inflight == 0 &&
-                                    snapshot.configured_available_inflight == 0;
+    const bool depth_unconfigured =
+        snapshot.configured_lead_blocks == 0 && snapshot.configured_pipeline_depth == 0 &&
+        snapshot.configured_max_inflight == 0 && snapshot.configured_available_inflight == 0;
     if (!depth_unconfigured) {
         if (snapshot.configured_lead_blocks == 0 || snapshot.configured_pipeline_depth == 0 ||
             snapshot.configured_max_inflight == 0 ||
