@@ -2890,6 +2890,7 @@
   "pulp-test-svg-path-range-orientation-1899",
   "pulp-test-svg-primitives-1926",
   "pulp-test-synthesiser",
+  "pulp-test-tcn-cpu-adapter",
   "pulp-test-template-ui-scripts",
   "pulp-test-texture-atlas",
   "pulp-test-threejs-bridge",

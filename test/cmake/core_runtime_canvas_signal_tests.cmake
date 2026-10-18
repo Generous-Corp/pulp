@@ -684,6 +684,17 @@ pulp_add_test_suite(pulp-test-compact-ssm-cpu-adapter
                  ${CMAKE_SOURCE_DIR}/core/audio/include
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
+# Private scalar causal-TCN CPU contract. Synthetic only: no provider, model
+# catalog, or product support is implied by this target.
+pulp_add_test_suite(pulp-test-tcn-cpu-adapter
+    SOURCES test_tcn_cpu_adapter.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+
 # CPU-only receipt for the model-neutral callback lane. The executable owns
 # all model/audio storage before entering the allocation probe and reports a
 # reproducible channel/kernel matrix without requiring Dawn or a GPU device.
