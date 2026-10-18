@@ -59,7 +59,12 @@ struct TcnCpuKernel {
     bool (*release)(void*) noexcept = nullptr;
 };
 
-enum class TcnCpuPrepareError : std::uint8_t { None, InvalidContract, ArtifactMismatch, KernelPrepareFailed };
+enum class TcnCpuPrepareError : std::uint8_t {
+    None,
+    InvalidContract,
+    ArtifactMismatch,
+    KernelPrepareFailed
+};
 
 class TcnCpuAdapter final : public StreamingModel {
   public:

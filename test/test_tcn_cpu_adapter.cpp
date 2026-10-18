@@ -145,9 +145,9 @@ TEST_CASE("causal TCN CPU adapter rejects identity, layout, and alias violations
     auto mismatched_spec = spec();
     mismatched_spec.receptive_field_samples = 0;
     auto mismatched_adapter = make(k, mismatched_spec);
-    const StreamingPrepareContext mismatched_context{
-        &mismatched_adapter.spec(), "fixture.tcn", "sha256:fixture-weights",
-        StreamingFallbackStrategy::NoFallback, 32};
+    const StreamingPrepareContext mismatched_context{&mismatched_adapter.spec(), "fixture.tcn",
+                                                     "sha256:fixture-weights",
+                                                     StreamingFallbackStrategy::NoFallback, 32};
     CHECK_FALSE(mismatched_adapter.prepare(mismatched_context));
     CHECK(mismatched_adapter.last_prepare_error() == TcnCpuPrepareError::InvalidContract);
     CHECK_FALSE(adapter.prepare(c));
