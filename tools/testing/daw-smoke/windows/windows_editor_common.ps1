@@ -330,6 +330,14 @@ function Write-ReaperIni([string]$Path,[string[]]$Lines) {
   # no-BOM INI form read by the seeded REAPER profile on the actual guest.
   [IO.File]::WriteAllLines($Path,$Lines,(New-Object Text.UTF8Encoding($false)))
 }
+function Assert-ReaperSeedProfile([string]$SeedProfile) {
+  $ini=Join-Path $SeedProfile 'reaper.ini'
+  if(-not(Test-Path -LiteralPath $ini -PathType Leaf)){throw 'REAPER_SEED_PROFILE_INCOMPLETE: reaper.ini is missing'}
+  $text=[IO.File]::ReadAllText($ini)
+  if(-not($text -match '(?m)^\[REAPER\]\s*$' -and $text -match '(?m)^\[audioconfig\]\s*$')){
+    throw 'REAPER_SEED_PROFILE_INCOMPLETE: initialized reaper.ini must contain [REAPER] and [audioconfig] sections'
+  }
+}
 function Write-Utf8NoBom([string]$Path,[string]$Text) {
   [IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))
 }

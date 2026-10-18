@@ -197,6 +197,9 @@ try {
   $seed=Join-Path $root 'source profile';$private=Join-Path $root 'private profile';$export=Join-Path $root 'export'
   New-Item -ItemType Directory -Path $seed,$export | Out-Null
   '[REAPER]'|Set-Content -LiteralPath (Join-Path $seed 'reaper.ini')
+  Reject {Assert-ReaperSeedProfile $seed} 'minimal REAPER seed profile is rejected before launch'
+  Add-Content -LiteralPath (Join-Path $seed 'reaper.ini') -Value '[audioconfig]'
+  Assert-ReaperSeedProfile $seed;Check $true 'initialized REAPER seed profile is accepted'
   'fixture private registration'|Set-Content -LiteralPath (Join-Path $seed 'reaper-license.rk')
   $sourceHash=(Get-FileHash -LiteralPath (Join-Path $seed 'reaper-license.rk')).Hash
   Copy-PrivateProfile $seed $private $export
