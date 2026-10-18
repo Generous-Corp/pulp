@@ -76,6 +76,9 @@ bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config&
     calibration_observations_.reserve(kLifecycleReceiptCapacity);
     calibration_emitted_keys_.clear();
     calibration_emitted_keys_.reserve(kLifecycleReceiptCapacity);
+    calibration_invalid_counted_keys_.clear();
+    calibration_invalid_counted_keys_.reserve(kLifecycleReceiptCapacity);
+    calibration_skip_before_generation_ = 0;
     receipt_index_by_slot_.assign(config.slots, kLifecycleReceiptCapacity);
     lifecycle_receipt_overflow_ = false;
     completion_receipt_overflow_ = false;
@@ -230,6 +233,11 @@ bool SharedIoComputePlan::reprime_when_quiescent() noexcept {
         return false;
     std::fill(pending_.begin(), pending_.end(), Pending{});
     completion_read_ = completion_write_ = 0;
+    if (!calibration_emitted_keys_.empty())
+        calibration_skip_before_generation_ = std::max(
+            calibration_skip_before_generation_, preparation_epoch());
+    calibration_emitted_keys_.clear();
+    calibration_invalid_counted_keys_.clear();
     predictor_.reset();
     last_calibration_ns_ = 0;
     telemetry_ = {};
@@ -358,6 +366,8 @@ SharedIoComputePlan::receipt_for(const SharedIoSlotLedger::SlotToken& token) noe
 }
 
 void SharedIoComputePlan::append_calibration_observation(const LifecycleReceipt& receipt) {
+    if (receipt.generation < calibration_skip_before_generation_)
+        return;
     for (const auto& key : calibration_emitted_keys_) {
         if (key.first == receipt.generation && key.second == receipt.sequence)
             return;
@@ -396,8 +406,16 @@ void SharedIoComputePlan::append_calibration_observation(const LifecycleReceipt&
     observation.output_acquired = receipt.output_acquired;
     observation.output_released = receipt.output_released;
     observation.lifecycle_valid = lifecycle_receipt_valid();
-    if (!observation.valid())
-        ++telemetry_.invalid_calibration_rows;
+    if (!observation.valid()) {
+        const auto counted = std::find(
+            calibration_invalid_counted_keys_.begin(), calibration_invalid_counted_keys_.end(),
+            std::pair{observation.generation, observation.sequence});
+        if (counted == calibration_invalid_counted_keys_.end()) {
+            ++telemetry_.invalid_calibration_rows;
+            calibration_invalid_counted_keys_.emplace_back(observation.generation,
+                                                            observation.sequence);
+        }
+    }
     calibration_observations_.push_back(observation);
 }
 
@@ -497,6 +515,7 @@ void SharedIoComputePlan::record_calibration(LifecycleReceipt& receipt) noexcept
     }
     if (!predictor_.observe(observation)) {
         ++telemetry_.invalid_calibration_rows;
+        calibration_invalid_counted_keys_.emplace_back(receipt.generation, receipt.sequence);
         telemetry_.rejected_calibration_rows = predictor_.estimate().rejected_observations;
         return;
     }

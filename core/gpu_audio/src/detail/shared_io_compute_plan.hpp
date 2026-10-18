@@ -234,6 +234,8 @@ class SharedIoComputePlan {
     std::vector<LifecycleReceipt> lifecycle_receipts_;
     std::vector<SharedIoCalibrationObservation> calibration_observations_;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> calibration_emitted_keys_;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> calibration_invalid_counted_keys_;
+    std::uint64_t calibration_skip_before_generation_ = 0;
     std::vector<std::size_t> receipt_index_by_slot_;
     bool lifecycle_receipt_overflow_ = false;
     bool completion_receipt_overflow_ = false;
