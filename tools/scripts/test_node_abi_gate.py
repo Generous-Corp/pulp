@@ -282,7 +282,9 @@ class NodeAbiGateTests(unittest.TestCase):
         self.gpu_audio_node.parent.mkdir(parents=True, exist_ok=True)
         self.processor.write_text(self.header("Processor", processor_methods))
         self.plugin_slot.write_text(self.header("PluginSlot", slot_methods))
-        self.gpu_audio_node.write_text(self.header("GpuAudioNode", gpu_audio_node_methods))
+        self.gpu_audio_node.write_text(
+            self.header("GpuAudioNode", gpu_audio_node_methods), encoding="utf-8"
+        )
 
     @staticmethod
     def header(class_name: str, methods: list[str]) -> str:
