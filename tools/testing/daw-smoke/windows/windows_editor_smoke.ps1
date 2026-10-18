@@ -16,7 +16,8 @@ param(
   [ValidateRange(1,60)][int]$AutomationSec = 8,
   [ValidateRange(5,300)][int]$TimeoutSec = 60,
   [int]$ContextX = -1,
-  [int]$ContextY = -1
+  [int]$ContextY = -1,
+  [switch]$ProbeBeforeEditor
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows_editor_common.ps1')
@@ -27,7 +28,7 @@ New-Item -ItemType Directory -Path $run | Out-Null
 $receipt = [ordered]@{schema=2;token=$token;verdict='INCONCLUSIVE';scope='host insertion/editor/optional host parameter readback';started_utc=[DateTime]::UtcNow.ToString('o');error=$null;cleanup_errors=@()}
 $owned = New-Object 'System.Collections.Generic.List[object]'
 $priorEnv = @{}
-$envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}
+$envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION','PROBE_GATE') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}
 foreach($name in $envNames){$priorEnv[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 $exitCode=3
 $privateProfile=$null
@@ -92,6 +93,12 @@ try {
   $env:PULP_DAW_SMOKE_STATUS=$status;$env:PULP_DAW_SMOKE_TOKEN=$token
   $env:PULP_DAW_SMOKE_PROJECT=Join-Path $run 'host-state.rpp'
   $env:PULP_DAW_SMOKE_PARAM_INDEX="$ParamIndex";$env:PULP_DAW_SMOKE_DURATION="$AutomationSec"
+  $probeGate=Join-Path $run 'module-probe-release'
+  if($ProbeBeforeEditor){
+    $env:PULP_DAW_SMOKE_PROBE_GATE=$probeGate
+  } else {
+    Remove-Item Env:PULP_DAW_SMOKE_PROBE_GATE -ErrorAction SilentlyContinue
+  }
   $warm=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash') 'warm'
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$cacheMatch=$false
   while([DateTime]::UtcNow -lt $deadline){
@@ -112,14 +119,15 @@ try {
   while([DateTime]::UtcNow -lt $deadline){
     Assert-OwnedIdentity $proc.process $proc.started
     $hostStatus=Read-HostStatus $status $token
-    if($hostStatus -and ($hostStatus.fx_shown -eq '1' -or $hostStatus.error)){break}
+    $inserted = $ProbeBeforeEditor -and $hostStatus -and $hostStatus.fx_inserted -eq '1'
+    if($hostStatus -and (($ProbeBeforeEditor -and $inserted) -or (-not $ProbeBeforeEditor -and $hostStatus.fx_shown -eq '1') -or $hostStatus.error)){break}
     Start-Sleep -Milliseconds 100
   }
   if(-not $hostStatus -or $hostStatus.error){throw "Missing/failed insertion handshake: $($hostStatus.error)"}
   # Bind the loaded PE as soon as insertion is observed. The editor can enter
   # a GPU startup path after this handshake; do not postpone identity proof
   # until the terminal status wait has completed.
-  $modulePaths=@(Get-BoundModulePaths $proc.process.Id)
+  $modulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
   $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
     Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
   $bound=@()
@@ -132,6 +140,17 @@ try {
   }
   if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
   $receipt.loaded_plugin=$bound[0]
+  if($ProbeBeforeEditor){
+    Write-Utf8NoBom $probeGate 'verified'
+    $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    do {
+      Assert-OwnedIdentity $proc.process $proc.started
+      $hostStatus=Read-HostStatus $status $token
+      if($hostStatus -and ($hostStatus.fx_shown -eq '1' -or $hostStatus.error)){break}
+      Start-Sleep -Milliseconds 100
+    } while([DateTime]::UtcNow -lt $deadline)
+    if(-not $hostStatus -or $hostStatus.error -or $hostStatus.fx_shown -ne '1'){throw 'Editor did not appear after exact module binding'}
+  }
   # Start the action deadline after observing insertion, independently of launch.
   $deadline=[DateTime]::UtcNow.AddSeconds($AutomationSec+$TimeoutSec)
   $terminal=if($ParamIndex -ge 0){'AUTOMATION_DONE'}else{'EDITOR_READY'}
@@ -229,7 +248,7 @@ public static class OwnedWindow {
     Guard-Editor
     [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
   }
-  $secondModulePaths=@(Get-BoundModulePaths $proc.process.Id)
+  $secondModulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
   $secondMatches=@($secondModulePaths | Where-Object { $_ -ieq $receipt.loaded_plugin.path })
   if($secondMatches.Count -ne 1){throw 'Bound plugin module disappeared or duplicated'}
   Assert-ModuleBinding $receipt.loaded_plugin.path (Get-FileHash -LiteralPath $receipt.loaded_plugin.path -Algorithm SHA256).Hash $manifest

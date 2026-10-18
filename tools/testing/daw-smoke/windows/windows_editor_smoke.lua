@@ -23,6 +23,9 @@ local fx = reaper.TrackFX_AddByName(tr,fx_name,false,-1)
 if fx < 0 then fail('FX_NOT_FOUND');return end
 fields.param_count = reaper.TrackFX_GetNumParams(tr,fx)
 if param_index >= fields.param_count then fail('PARAM_INDEX_OUT_OF_RANGE');return end
+fields.fx_inserted=1;fields.phase='FX_INSERTED';status()
+local probe_gate=os.getenv('PULP_DAW_SMOKE_PROBE_GATE')
+local function show_editor()
 reaper.TrackFX_Show(tr,fx,3)
 local window=reaper.TrackFX_GetFloatingWindow(tr,fx)
 -- Lua/REAPER pointer formatting differs by CRT: Windows commonly omits 0x.
@@ -63,4 +66,16 @@ local function pump()
   end
   reaper.defer(pump)
 end
-reaper.defer(pump)
+end
+if probe_gate then
+  local gate_started=reaper.time_precise()
+  local function wait_probe()
+    local f=io.open(probe_gate,'r')
+    if f then f:close();show_editor();return end
+    if reaper.time_precise()-gate_started>60 then fail('MODULE_PROBE_GATE_TIMEOUT');return end
+    reaper.defer(wait_probe)
+  end
+  reaper.defer(wait_probe)
+else
+  show_editor()
+end
