@@ -27,6 +27,7 @@
 #include <atomic>
 #include <cmath>
 #include <numbers>
+#include <stop_token>
 #include <thread>
 #include <vector>
 
@@ -96,7 +97,7 @@ clap_process_status CLAP_ABI tone_process(const clap_plugin_t* p, const clap_pro
             if (out.data32 && out.data32[c]) out.data32[c][f] = s;
         }
     }
-    t->blocks_rendered.fetch_add(1, std::memory_order_relaxed);
+    t->blocks_rendered.fetch_add(1, std::memory_order_release);
     return CLAP_PROCESS_CONTINUE;
 }
 
@@ -293,10 +294,12 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
     REQUIRE(slot->prepare(kSampleRate, kBlockSize));
 
     ParentView parent;
-    std::atomic<bool> stop{false};
+    // A jthread joins during stack unwinding as well as on the successful path,
+    // so an editor assertion cannot leave the slot alive beside a running audio
+    // callback.
     std::atomic<int> audio_blocks{0};
 
-    std::thread audio([&] {
+    std::jthread audio([&slot, &audio_blocks](std::stop_token stop_token) {
         std::vector<std::vector<float>> out(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<std::vector<float>> in(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<float*> out_ptrs, in_ptrs;
@@ -304,36 +307,42 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
         for (auto& c : in) in_ptrs.push_back(c.data());
         pulp::midi::MidiBuffer midi_in, midi_out;
         ParameterEventQueue params;
-        while (!stop.load(std::memory_order_relaxed)) {
+        while (!stop_token.stop_requested()) {
             pulp::audio::BufferView<float> ov(out_ptrs.data(), kChannels, kBlockSize);
             pulp::audio::BufferView<const float> iv(
                 const_cast<const float**>(in_ptrs.data()), kChannels, kBlockSize);
             slot->process(ov, iv, midi_in, midi_out, params, kBlockSize);
-            audio_blocks.fetch_add(1, std::memory_order_relaxed);
+            // Publish only after process() returns. An acquire observation of
+            // this count proves the callback's slot accesses are complete
+            // before the editor is allowed to be torn down.
+            audio_blocks.fetch_add(1, std::memory_order_release);
         }
     });
 
+    REQUIRE(pulp::test::wait_for_progress(audio_blocks));
+
     // Churn the editor while audio runs.
     for (int i = 0; i < 8; ++i) {
+        const auto blocks_before = audio_blocks.load(std::memory_order_acquire);
         auto ed = slot->create_hosted_editor(parent.handle());
         REQUIRE(ed != nullptr);
         uint32_t w = 400u + static_cast<uint32_t>(i) * 10u;
         uint32_t h = 300u + static_cast<uint32_t>(i) * 10u;
-        slot->set_hosted_editor_size(w, h);
+        REQUIRE(slot->set_hosted_editor_size(w, h));
+
+        // Keep the editor alive until a fresh callback has completed. This is
+        // the teardown boundary: the counter is not merely a post-hoc total.
+        REQUIRE(pulp::test::wait_for_condition([&audio_blocks, blocks_before] {
+            return audio_blocks.load(std::memory_order_acquire) > blocks_before;
+        }));
         slot->destroy_hosted_editor(std::move(ed));
     }
 
-    // Eight editor churns are a work budget, not an ordering guarantee: nothing
-    // puts the audio thread's first block inside them, so a loaded host can
-    // finish the churn before that thread is ever scheduled and leave
-    // audio_blocks at zero — which reads as "the editor wedged audio" when audio
-    // never started. Wait for a block; the deadline turns a slot that genuinely
-    // never renders into a failed REQUIRE rather than a hang.
-    (void)pulp::test::wait_for_progress(audio_blocks);
-    stop.store(true);
+    audio.request_stop();
     audio.join();
 
     // Audio kept running throughout — the editor never blocked or wedged it.
-    REQUIRE(audio_blocks.load() > 0);
-    REQUIRE(tone.blocks_rendered.load() == audio_blocks.load());
+    const auto completed = audio_blocks.load(std::memory_order_acquire);
+    REQUIRE(completed > 8);
+    REQUIRE(tone.blocks_rendered.load(std::memory_order_acquire) == completed);
 }
