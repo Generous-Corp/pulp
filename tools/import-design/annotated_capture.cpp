@@ -278,12 +278,11 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
     // nested `<rect id="x">` inside a comment, CDATA block, or script/style
     // string could be mistaken for a real SVG element.
     std::string svg_markup = svg;
-    for (const auto& pattern : {std::regex(R"(<!--[\s\S]*?-->)"),
-                                std::regex(R"(<!\[CDATA\[[\s\S]*?\]\]>)"),
-                                std::regex(R"(<\s*script\b[^>]*>[\s\S]*?<\s*/\s*script\s*>)",
-                                            std::regex_constants::icase),
-                                std::regex(R"(<\s*style\b[^>]*>[\s\S]*?<\s*/\s*style\s*>)",
-                                            std::regex_constants::icase)})
+    for (const auto& pattern :
+         {std::regex(R"(<!--[\s\S]*?-->)"), std::regex(R"(<!\[CDATA\[[\s\S]*?\]\]>)"),
+          std::regex(R"(<\s*script\b[^>]*>[\s\S]*?<\s*/\s*script\s*>)",
+                     std::regex_constants::icase),
+          std::regex(R"(<\s*style\b[^>]*>[\s\S]*?<\s*/\s*style\s*>)", std::regex_constants::icase)})
         svg_markup = std::regex_replace(svg_markup, pattern, "");
 
     std::unordered_set<std::string> svg_ids;
