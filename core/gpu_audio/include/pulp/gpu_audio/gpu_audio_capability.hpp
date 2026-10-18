@@ -99,7 +99,8 @@ validate_gpu_audio_capability(const GpuAudioCapabilityReport& capability) noexce
                value == MissPolicy::CpuFallback;
     };
     if (!valid_path(capability.path) || !valid_provider(capability.provider) ||
-        !valid_eligibility(capability.eligibility) || !valid_miss_policy(capability.fallback_policy))
+        !valid_eligibility(capability.eligibility) ||
+        !valid_miss_policy(capability.fallback_policy))
         return {GpuAudioCapabilityError::InvalidEnumValue};
 
     if (!capability.prepared) {
