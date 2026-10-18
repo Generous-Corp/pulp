@@ -48,6 +48,13 @@ struct TonePlugin {
     const clap_host_t* host = nullptr;
     double phase = 0.0;
     std::atomic<int> blocks_rendered{0};
+    // The concurrent lifecycle test arms these fields before each editor call.
+    // The plugin callback then waits for the editor callback to enter, making
+    // the overlap deterministic instead of relying on scheduler timing.
+    std::atomic<bool> overlap_enabled{false};
+    std::atomic<bool> process_entered{false};
+    std::atomic<bool> editor_operation_active{false};
+    std::atomic<bool> overlap_acknowledged{false};
 };
 
 TonePlugin* g_tone = nullptr;
@@ -57,8 +64,13 @@ TonePlugin* g_tone = nullptr;
 bool CLAP_ABI tone_gui_is_api_supported(const clap_plugin_t*, const char*, bool floating) {
     return !floating;
 }
-bool CLAP_ABI tone_gui_create(const clap_plugin_t*, const char*, bool) { return true; }
-void CLAP_ABI tone_gui_destroy(const clap_plugin_t*) {}
+void hold_editor_operation(const clap_plugin_t* p);
+
+bool CLAP_ABI tone_gui_create(const clap_plugin_t* p, const char*, bool) {
+    hold_editor_operation(p);
+    return true;
+}
+void CLAP_ABI tone_gui_destroy(const clap_plugin_t* p) { hold_editor_operation(p); }
 bool CLAP_ABI tone_gui_set_scale(const clap_plugin_t*, double) { return true; }
 bool CLAP_ABI tone_gui_get_size(const clap_plugin_t*, uint32_t* w, uint32_t* h) {
     *w = 400;
@@ -67,7 +79,10 @@ bool CLAP_ABI tone_gui_get_size(const clap_plugin_t*, uint32_t* w, uint32_t* h) 
 }
 bool CLAP_ABI tone_gui_can_resize(const clap_plugin_t*) { return true; }
 bool CLAP_ABI tone_gui_adjust_size(const clap_plugin_t*, uint32_t*, uint32_t*) { return true; }
-bool CLAP_ABI tone_gui_set_size(const clap_plugin_t*, uint32_t, uint32_t) { return true; }
+bool CLAP_ABI tone_gui_set_size(const clap_plugin_t* p, uint32_t, uint32_t) {
+    hold_editor_operation(p);
+    return true;
+}
 bool CLAP_ABI tone_gui_set_parent(const clap_plugin_t*, const clap_window_t*) { return true; }
 bool CLAP_ABI tone_gui_show(const clap_plugin_t*) { return true; }
 bool CLAP_ABI tone_gui_hide(const clap_plugin_t*) { return true; }
@@ -82,9 +97,37 @@ bool CLAP_ABI tone_start_processing(const clap_plugin_t*) { return true; }
 void CLAP_ABI tone_stop_processing(const clap_plugin_t*) {}
 void CLAP_ABI tone_reset(const clap_plugin_t*) {}
 
+void wait_for_editor_overlap(const clap_plugin_t* p) {
+    auto* t = static_cast<TonePlugin*>(p->plugin_data);
+    if (!t->overlap_enabled.load(std::memory_order_acquire)) return;
+
+    bool expected = false;
+    if (!t->process_entered.compare_exchange_strong(expected, true,
+                                                    std::memory_order_acq_rel))
+        return;
+
+    while (!t->editor_operation_active.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    t->overlap_acknowledged.store(true, std::memory_order_release);
+    while (t->editor_operation_active.load(std::memory_order_acquire))
+        std::this_thread::yield();
+}
+
+void hold_editor_operation(const clap_plugin_t* p) {
+    auto* t = static_cast<TonePlugin*>(p->plugin_data);
+    if (!t->overlap_enabled.load(std::memory_order_acquire)) return;
+
+    t->editor_operation_active.store(true, std::memory_order_release);
+    while (!t->overlap_acknowledged.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    t->editor_operation_active.store(false, std::memory_order_release);
+}
+
 clap_process_status CLAP_ABI tone_process(const clap_plugin_t* p, const clap_process_t* proc) {
     auto* t = static_cast<TonePlugin*>(p->plugin_data);
     if (!proc || proc->audio_outputs_count == 0) return CLAP_PROCESS_CONTINUE;
+
+    wait_for_editor_overlap(p);
 
     const double step = 2.0 * std::numbers::pi * 440.0 / kSampleRate;
     auto& out = proc->audio_outputs[0];
@@ -341,12 +384,24 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
 
     REQUIRE(pulp::test::wait_for_progress(audio_blocks));
 
+    const auto arm_editor_overlap = [&] {
+        tone.overlap_acknowledged.store(false, std::memory_order_release);
+        tone.process_entered.store(false, std::memory_order_release);
+        tone.overlap_enabled.store(true, std::memory_order_release);
+        REQUIRE(pulp::test::wait_for_condition([&tone] {
+            return tone.process_entered.load(std::memory_order_acquire);
+        }));
+    };
+
     // Churn the editor while audio runs.
     for (int i = 0; i < 8; ++i) {
+        arm_editor_overlap();
         auto ed = slot->create_hosted_editor(parent.handle());
         REQUIRE(ed != nullptr);
         uint32_t w = 400u + static_cast<uint32_t>(i) * 10u;
         uint32_t h = 300u + static_cast<uint32_t>(i) * 10u;
+
+        arm_editor_overlap();
         REQUIRE(slot->set_hosted_editor_size(w, h));
 
         // Take the baseline only after the editor is open and resized, so the
@@ -358,9 +413,12 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
         REQUIRE(pulp::test::wait_for_condition([&audio_blocks, blocks_before] {
             return audio_blocks.load(std::memory_order_acquire) > blocks_before;
         }));
+
+        arm_editor_overlap();
         slot->destroy_hosted_editor(std::move(ed));
     }
 
+    tone.overlap_enabled.store(false, std::memory_order_release);
     audio.request_stop();
     audio.join();
 
