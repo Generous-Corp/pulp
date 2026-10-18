@@ -641,6 +641,8 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
     status.prepared_lead_blocks = capability.prepared_lead_blocks;
     status.fallback_available = capability.fallback_available;
     status.diagnostics_available = capability.diagnostics_available;
+    status.recovery_reason = node_ != nullptr ? node_->recovery_reason()
+                                               : GpuAudioRecoveryReason::None;
     status.produced_blocks = timing.produced_blocks;
     status.missed_blocks = timing.miss_blocks;
     status.fallback_blocks = delivery.cpu_fallback_blocks;

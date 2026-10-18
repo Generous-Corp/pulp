@@ -125,6 +125,11 @@ TEST_CASE("GpuAudioStatus rejects an uninitialized snapshot that claims preparat
           GpuAudioStatusError::UninitializedStateHasPreparation);
 
     status = {};
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+    CHECK(validate_gpu_audio_status(status).error ==
+          GpuAudioStatusError::UninitializedStateHasRecovery);
+
+    status = {};
     status.schema_version = GpuAudioStatus::kSchemaVersion + 1;
     CHECK(validate_gpu_audio_status(status).error ==
           GpuAudioStatusError::SchemaVersionMismatch);
@@ -1419,6 +1424,8 @@ TEST_CASE("GpuAudioTransport status snapshot is stable before and after prepare"
     CHECK(before.schema_version == GpuAudioStatus::kSchemaVersion);
     CHECK(before.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK(before.selected_engine == GpuAudioEngine::Unknown);
+    CHECK(before.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(validate_gpu_audio_status(before).accepted());
 
     REQUIRE(node.prepare());
     REQUIRE(t.prepare(&node, {8}));
@@ -1433,6 +1440,8 @@ TEST_CASE("GpuAudioTransport status snapshot is stable before and after prepare"
     CHECK(after.latency_samples == 64);
     CHECK(after.fallback_available);
     CHECK(after.fallback_policy == MissPolicy::CpuFallback);
+    CHECK(after.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(validate_gpu_audio_status(after).accepted());
 }
 
 TEST_CASE("GpuAudioTransport delivery snapshot supports concurrent diagnostic reads",

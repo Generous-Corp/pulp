@@ -64,7 +64,7 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
     /// This is not a completion count or a guarantee about the next callback.
     bool fenced() const noexcept;
     /// First latched recovery cause, if the shared-I/O path has fenced.
-    GpuAudioRecoveryReason recovery_reason() const noexcept;
+    GpuAudioRecoveryReason recovery_reason() const noexcept override;
     /// Sequence associated with the first latched recovery cause, or UINT64_MAX.
     std::uint64_t recovery_sequence() const noexcept;
     /// Not a legacy FIFO node. GpuAudioTransport rejects an unprepared instance.

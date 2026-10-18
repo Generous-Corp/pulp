@@ -4,6 +4,7 @@
 #include <string>
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/gpu_audio/gpu_audio_recovery.hpp>
 
 namespace pulp::gpu_audio {
 
@@ -87,6 +88,14 @@ public:
     /// miss.
     virtual bool cpu_fallback_prepared() const noexcept {
         return false;
+    }
+
+    /// Host/UI diagnostic hook. Providers may expose their first latched
+    /// recovery cause without exposing backend handles. Generic nodes return
+    /// None, which means no cause is available or no recovery has been
+    /// observed; it does not claim that GPU work met an audio deadline.
+    virtual GpuAudioRecoveryReason recovery_reason() const noexcept {
+        return GpuAudioRecoveryReason::None;
     }
 
     /// Non-RT worker context. Process exactly one block (n == block_size).

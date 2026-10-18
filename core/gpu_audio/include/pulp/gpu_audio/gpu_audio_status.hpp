@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
+#include <pulp/gpu_audio/gpu_audio_recovery.hpp>
 
 namespace pulp::gpu_audio {
 
@@ -27,18 +28,6 @@ enum class GpuAudioProviderState : std::uint8_t {
     Unavailable = 3,
 };
 
-/// First latched reason that a stamped shared-I/O node entered recovery.
-/// `None` means that no recovery has been requested. This is diagnostic state;
-/// it does not itself promise that the next callback will use the GPU.
-enum class GpuAudioRecoveryReason : std::uint8_t {
-    None = 0,
-    SequenceGap = 1,
-    InputSaturated = 2,
-    ProviderFailure = 3,
-    ProviderLost = 4,
-    OfflineFence = 5,
-    InvalidCallback = 6,
-};
 
 /// Versioned, allocation-free status shared by native hosts and UI adapters.
 /// A web or plugin-specific status object may project this into JSON, but must
@@ -60,6 +49,7 @@ struct GpuAudioStatus {
     std::uint32_t prepared_lead_blocks = 0;
     bool fallback_available = false;
     bool diagnostics_available = false;
+    GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
 
     std::uint64_t produced_blocks = 0;
     std::uint64_t missed_blocks = 0;
@@ -86,6 +76,7 @@ enum class GpuAudioStatusError : std::uint8_t {
     FallbackUnavailable = 7,
     UninitializedStateHasPreparation = 8,
     UnavailableWithSelectedEngine = 9,
+    UninitializedStateHasRecovery = 10,
 };
 
 struct GpuAudioStatusValidation {
@@ -111,8 +102,11 @@ validate_gpu_audio_status(const GpuAudioStatus& status) noexcept {
             status.provider != GpuAudioProvider::Unknown || status.sample_rate != 0 ||
             status.block_size != 0 || status.latency_samples != 0 ||
             status.prepared_lead_blocks != 0 || status.fallback_available ||
-            status.diagnostics_available)
-            return {GpuAudioStatusError::UninitializedStateHasPreparation};
+            status.diagnostics_available ||
+            status.recovery_reason != GpuAudioRecoveryReason::None)
+            return {status.recovery_reason != GpuAudioRecoveryReason::None
+                        ? GpuAudioStatusError::UninitializedStateHasRecovery
+                        : GpuAudioStatusError::UninitializedStateHasPreparation};
         return {};
     }
 
