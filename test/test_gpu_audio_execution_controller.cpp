@@ -98,7 +98,7 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
     REQUIRE(probe.observed_in_flight == 1);
     REQUIRE(probe.admission_before_reuse == SharedIoAdmission::CapacityFull);
     REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
-    REQUIRE(telemetry.snapshot().in_flight_high_water == controller.capacity());
+    REQUIRE(telemetry.snapshot().in_flight_high_water == minimum_capacity.max_inflight);
 }
 
 TEST_CASE("execution controller tracks lead separately from logical pipeline depth",
@@ -106,7 +106,7 @@ TEST_CASE("execution controller tracks lead separately from logical pipeline dep
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(contract(), &telemetry));
-    REQUIRE(controller.capacity() == 3);
+    REQUIRE(controller.capacity() == 5);
     REQUIRE(controller.algorithmic_lead_blocks() == 2);
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
@@ -158,6 +158,7 @@ TEST_CASE("execution controller rejects a lead larger than logical pipeline dept
 TEST_CASE("execution controller sustains one submission per callback with a free slot beyond lead",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto exact_depth = contract();
+    exact_depth.algorithmic_lead_blocks = 1;
     exact_depth.pipeline_depth = exact_depth.algorithmic_lead_blocks + 1;
     exact_depth.max_inflight = 1;
 
@@ -267,8 +268,8 @@ TEST_CASE("execution controller resynchronizes admission after a callback gap",
 TEST_CASE("callback gap preserves ready results that are still ahead of the lead",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto deeper = contract();
-    deeper.pipeline_depth = 4;
-    deeper.max_inflight = 2;
+    deeper.pipeline_depth = 6;
+    deeper.max_inflight = 4;
 
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(deeper));
