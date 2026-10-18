@@ -230,6 +230,66 @@ TEST_CASE("execution controller maps provider failure to the declared CPU fallba
     REQUIRE_FALSE(controller.record_completion(0, SharedIoCompletion::Success));
 }
 
+TEST_CASE("device-loss fallback preserves callback continuity and receipt accounting",
+          "[gpu_audio][shared_io][controller][continuity][fault-injection]") {
+    auto failure_contract = contract();
+    failure_contract.algorithmic_lead_blocks = 1;
+    failure_contract.pipeline_depth = 4;
+    failure_contract.max_inflight = 3;
+
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(failure_contract, &telemetry));
+
+    // Prime one successful block, then inject a deterministic provider loss
+    // for the next three blocks. Every callback must still produce either the
+    // GPU result or the declared CPU replacement; no callback may silently
+    // fall through to silence.
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(1, SharedIoCompletion::Failed,
+                                         SharedIoFallbackReason::DeviceLost));
+    const auto gpu = controller.deliver(1);
+    REQUIRE(gpu.path == SharedIoDeliveryPath::Gpu);
+    REQUIRE(gpu.expected_sequence == 0);
+
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(2, SharedIoCompletion::Failed,
+                                         SharedIoFallbackReason::DeviceLost));
+    const auto first_fallback = controller.deliver(2);
+    REQUIRE(first_fallback.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(first_fallback.fallback_reason == SharedIoFallbackReason::DeviceLost);
+
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(3, SharedIoCompletion::Failed,
+                                         SharedIoFallbackReason::DeviceLost));
+    const auto second_fallback = controller.deliver(3);
+    REQUIRE(second_fallback.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(second_fallback.fallback_reason == SharedIoFallbackReason::DeviceLost);
+
+    const auto receipt = telemetry.snapshot();
+    REQUIRE(receipt.callback_blocks == 4);
+    REQUIRE(receipt.submitted_blocks == 4);
+    REQUIRE(receipt.retired_success == 1);
+    REQUIRE(receipt.retired_failure == 3);
+    REQUIRE(receipt.delivered_blocks == 4);
+    REQUIRE(receipt.fallback_blocks == 2);
+    REQUIRE(receipt.deadline_misses == 0);
+    REQUIRE(receipt.resync_drops == 0);
+}
+
+TEST_CASE("device-loss continuity refuses a missing CPU fallback",
+          "[gpu_audio][shared_io][controller][continuity][fault-injection][negative]") {
+    auto invalid = contract();
+    invalid.cpu_fallback_prepared = false;
+
+    SharedIoExecutionController controller;
+    REQUIRE_FALSE(controller.prepare(invalid));
+}
+
 TEST_CASE("execution controller bounds admission and rejects stale completion identities",
           "[gpu_audio][shared_io][controller][adversarial]") {
     SharedIoTelemetry telemetry;
