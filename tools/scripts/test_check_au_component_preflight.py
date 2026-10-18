@@ -331,7 +331,8 @@ class AuComponentPreflightTests(unittest.TestCase):
                 "launchctl domain": "Aqua\n",
                 "launchctl print": "service not found\n",
                 "pgrep": "",
-                "log": '{"process":"AudioComponentRegistrar","eventMessage":"Rosetta runtime is not available!"}\n',
+                "log": '[{"process":"AudioComponentRegistrar","processImagePath":"/usr/libexec/AudioComponentRegistrar",'
+                        '"eventMessage":"Rosetta runtime is not available!"}]\n',
             }
             def fake_which(name: str) -> str | None:
                 return "/usr/bin/" + name
@@ -401,6 +402,28 @@ class AuComponentPreflightTests(unittest.TestCase):
             result = preflight._run_probe(["log", "show"])
         self.assertEqual(result.returncode, 124)
         self.assertIn("timed out after 10s", result.stdout)
+
+    def test_binary_architecture_rejects_non_macho_file(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                if command[:2] == ["uname", "-m"]:
+                    return preflight.subprocess.CompletedProcess(command, 0, "x86_64\n")
+                if command[0] == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "ASCII text\n")
+                if command[0] == "/usr/bin/launchctl":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Background\n")
+                if command[0] == "/usr/bin/log":
+                    return preflight.subprocess.CompletedProcess(command, 0, "")
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                checks = preflight._check_host_architecture(bundle)
+            binary = next(check for check in checks if check.label == "binary architecture")
+            self.assertFalse(binary.ok)
+            self.assertEqual(binary.code, "BINARY_ARCHITECTURE_MISMATCH")
 
     def test_diagnosis_reports_non_arm64_without_rosetta_failure(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -506,6 +529,20 @@ class AuComponentPreflightTests(unittest.TestCase):
                 ])
             self.assertEqual(rc, 1)
             self.assertIn("FAIL: auval: run 1/1 failed", out)
+
+    def test_auval_accepts_real_success_marker_period(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.return_value = preflight.subprocess.CompletedProcess(
+                    args=["auval"], returncode=0, stdout="AU VALIDATION SUCCEEDED.\n"
+                )
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--run-auval", "--auval-repeat", "1",
+                ])
+            self.assertEqual(rc, 0, out)
 
     def test_rejects_invalid_auval_repeat(self) -> None:
         with tempfile.TemporaryDirectory() as d:

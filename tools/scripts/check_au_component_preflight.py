@@ -182,6 +182,9 @@ def _check_codesign(bundle: Path) -> CheckResult:
         return CheckResult("codesign", False, "codesign not found")
     proc = _run_probe([codesign, "--verify", "--deep", "--strict", "--verbose=2", str(bundle)])
     output = proc.stdout.strip()
+    if proc.returncode == 124:
+        return CheckResult("codesign", False, output, "HOST_PROBE_TIMEOUT",
+                           "Retry after codesign is responsive.")
     if proc.returncode != 0:
         return CheckResult("codesign", False, output or "codesign verify failed")
     return CheckResult("codesign", True, output or "valid")
@@ -202,6 +205,9 @@ def _check_signing_identity(bundle: Path, identity: str) -> CheckResult:
             "--timestamp=none", "--options", "runtime", str(temp_bundle),
         ])
     output = proc.stdout.strip()
+    if proc.returncode == 124:
+        return CheckResult("signing identity", False, output, "HOST_PROBE_TIMEOUT",
+                           "Retry after codesign is responsive.")
     if proc.returncode != 0:
         if "errSecInternalComponent" in output:
             output += (
@@ -218,6 +224,9 @@ def _check_gatekeeper(bundle: Path) -> CheckResult:
         return CheckResult("gatekeeper", False, "spctl not found")
     proc = _run_probe([spctl, "--assess", "--type", "execute", "--verbose=4", str(bundle)])
     output = proc.stdout.strip()
+    if proc.returncode == 124:
+        return CheckResult("gatekeeper", False, output, "HOST_PROBE_TIMEOUT",
+                           "Retry after spctl is responsive.")
     if proc.returncode != 0:
         policy_detail = _check_distribution_policy(bundle)
         if policy_detail:
@@ -240,6 +249,9 @@ def _check_symbol(executable: Path, symbol: str) -> CheckResult:
         return CheckResult("factory symbol", False, "nm not found")
     proc = _run_probe([nm, "-gU", str(executable)])
     if proc.returncode != 0:
+        if proc.returncode == 124:
+            return CheckResult("factory symbol", False, proc.stdout.strip(), "HOST_PROBE_TIMEOUT",
+                               "Retry after nm is responsive.")
         return CheckResult("factory symbol", False, proc.stdout.strip() or "nm failed")
     needle = symbol if symbol.startswith("_") else f"_{symbol}"
     if needle not in proc.stdout:
@@ -361,7 +373,9 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
             else:
                 has_arm64 = "arm64" in detail or "arm64e" in detail
                 has_x86 = "x86_64" in detail or "i386" in detail
-                compatible = probe.returncode == 0 and arch in ("arm64", "x86_64") and (arch != "arm64" or has_arm64 or has_x86)
+                compatible = (probe.returncode == 0 and "Mach-O" in detail and
+                              arch in ("arm64", "x86_64") and
+                              (arch != "arm64" or has_arm64 or has_x86))
                 code = "BINARY_ARCHITECTURE_COMPATIBLE" if compatible else "BINARY_ARCHITECTURE_MISMATCH"
                 remediation = None if compatible else "Build an arm64/universal AU, or install Rosetta for an x86_64-only AU."
                 results.append(CheckResult("binary architecture", compatible, detail, code, remediation))
@@ -383,21 +397,25 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
 
 def _registrar_rosetta_failure(output: str) -> bool:
     needle = "Rosetta runtime is not available"
-    for line in output.splitlines():
-        if needle not in line:
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            # Compact output is accepted only when the registrar is the
-            # process prefix; this excludes the `log show` command's argv.
-            if "AudioComponentRegistrar[" in line:
-                return True
+    try:
+        decoded = json.loads(output)
+    except json.JSONDecodeError:
+        decoded = []
+    records = decoded if isinstance(decoded, list) else [decoded]
+    for record in records:
+        if not isinstance(record, dict):
             continue
         process = str(record.get("process", ""))
         image = str(record.get("processImagePath", "")).rsplit("/", 1)[-1]
         message = str(record.get("eventMessage", ""))
         if (process == "AudioComponentRegistrar" or image == "AudioComponentRegistrar") and needle in message:
+            return True
+    for line in output.splitlines():
+        if needle not in line:
+            continue
+        # Compact output is accepted only when the registrar is the process
+        # prefix; this excludes the `log show` command's argv.
+        if "AudioComponentRegistrar[" in line:
             return True
     return False
 
@@ -493,7 +511,7 @@ def _run_auval(args: argparse.Namespace) -> list[CheckResult]:
                 "Inspect registrar logs and isolate unrelated third-party components before retrying.",
             ))
             continue
-        passed = any(line.strip() in ("AU VALIDATION SUCCEEDED", "AU VALIDATION PASSED")
+        passed = any(line.strip().rstrip(".") in ("AU VALIDATION SUCCEEDED", "AU VALIDATION PASSED")
                      for line in proc.stdout.splitlines())
         if proc.returncode != 0 or not passed:
             tail = "\n".join(proc.stdout.splitlines()[-12:])
