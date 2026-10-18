@@ -127,7 +127,9 @@ try {
   }
   Assert-TerminalStatus $hostStatus $ParamIndex
   $receipt.host_status=$hostStatus
-  $modules=@($proc.process.Modules | Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
+  $modulePaths=@(Get-BoundModulePaths $proc.process.Id)
+  $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
+    Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
   $bound=@()
   foreach($module in $modules){
     $hash=(Get-FileHash -LiteralPath $module.FileName -Algorithm SHA256).Hash
@@ -170,9 +172,8 @@ public static class OwnedWindow {
     Assert-OwnedIdentity $proc.process $proc.started
     if ($proc.process.SessionId -ne [int]$receipt.session.session_id) { throw 'Bound REAPER process left the interactive session' }
     if($Hwnd -ne $editor.ToInt64() -or $proc.process.Path -ine $reaper){throw 'Bound editor/host identity changed'}
-    $current=@($proc.process.Modules | Where-Object {$_.FileName -ieq $receipt.loaded_plugin.path})
-    if($current.Count -ne 1){throw 'Bound plugin module disappeared'}
-    Assert-ModuleBinding $current[0].FileName (Get-FileHash -LiteralPath $current[0].FileName -Algorithm SHA256).Hash $manifest
+    if(-not(Test-Path -LiteralPath $receipt.loaded_plugin.path -PathType Leaf)){throw 'Bound plugin module disappeared'}
+    Assert-ModuleBinding $receipt.loaded_plugin.path (Get-FileHash -LiteralPath $receipt.loaded_plugin.path -Algorithm SHA256).Hash $manifest
     Assert-EditorWindow $Hwnd ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id))
   }
   $receipt.editor_activation=[ordered]@{editor_hwnd=$editor.ToInt64()}

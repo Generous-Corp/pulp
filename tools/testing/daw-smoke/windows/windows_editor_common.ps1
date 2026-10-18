@@ -71,6 +71,27 @@ function Assert-ModuleBinding([string]$LoadedPath, [string]$LoadedHash, $Manifes
   if ($entries.Count -ne 1 -or $entries[0].sha256 -ine $LoadedHash) { throw 'Loaded module does not match exact staged manifest' }
   if ([IO.Path]::GetExtension($LoadedPath) -notin @('.vst3','.clap')) { throw 'Loaded module is not a plugin PE' }
 }
+function Get-BoundModulePaths([int]$TargetPid, [ValidateRange(1,60)][int]$TimeoutSec = 15) {
+  # Process.Modules can block indefinitely while a GPU plugin is inside its
+  # editor startup path. Query it in a disposable child and fail closed when
+  # the host does not answer within the bounded proof window.
+  $job = Start-Job -ScriptBlock {
+    param([int]$PidToInspect)
+    $target = [Diagnostics.Process]::GetProcessById($PidToInspect)
+    @($target.Modules | ForEach-Object { $_.FileName })
+  } -ArgumentList $TargetPid
+  try {
+    if ($null -eq (Wait-Job -Job $job -Timeout $TimeoutSec)) {
+      Stop-Job -Job $job -ErrorAction SilentlyContinue
+      throw 'MODULE_ENUMERATION_TIMEOUT'
+    }
+    $errors = @($job.ChildJobs | ForEach-Object { $_.JobStateInfo.Reason } | Where-Object { $_ })
+    if ($errors.Count -gt 0) { throw ('MODULE_ENUMERATION_FAILED: ' + $errors[0].Exception.Message) }
+    return @((Receive-Job -Job $job -ErrorAction Stop) | Where-Object { $_ })
+  } finally {
+    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+  }
+}
 function Assert-OwnedIdentity($Process, [string]$StartedUtc) {
   $Process.Refresh()
   if ($Process.HasExited -or $Process.StartTime.ToUniversalTime().ToString('o') -ne $StartedUtc) { throw 'Owned process identity changed' }
