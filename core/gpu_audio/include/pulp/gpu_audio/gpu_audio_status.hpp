@@ -85,6 +85,7 @@ enum class GpuAudioStatusError : std::uint8_t {
     DegradedWithSelectedEngine = 6,
     FallbackUnavailable = 7,
     UninitializedStateHasPreparation = 8,
+    UnavailableWithSelectedEngine = 9,
 };
 
 struct GpuAudioStatusValidation {
@@ -133,6 +134,10 @@ validate_gpu_audio_status(const GpuAudioStatus& status) noexcept {
     if (status.provider_state == GpuAudioProviderState::Degraded &&
         status.selected_engine != GpuAudioEngine::Unknown)
         return {GpuAudioStatusError::DegradedWithSelectedEngine};
+
+    if (status.provider_state == GpuAudioProviderState::Unavailable &&
+        status.selected_engine != GpuAudioEngine::Unknown)
+        return {GpuAudioStatusError::UnavailableWithSelectedEngine};
 
     if (status.fallback_policy == MissPolicy::CpuFallback && !status.fallback_available)
         return {GpuAudioStatusError::FallbackUnavailable};

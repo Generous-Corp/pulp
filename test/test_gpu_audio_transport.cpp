@@ -103,6 +103,10 @@ TEST_CASE("GpuAudioStatus validates backend-neutral lifecycle projections",
     CHECK(validate_gpu_audio_status(status).error ==
           GpuAudioStatusError::DegradedWithSelectedEngine);
 
+    status.provider_state = GpuAudioProviderState::Unavailable;
+    CHECK(validate_gpu_audio_status(status).error ==
+          GpuAudioStatusError::UnavailableWithSelectedEngine);
+
     status.provider_state = GpuAudioProviderState::Ready;
     status.selected_engine = GpuAudioEngine::Cpu;
     CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::CpuEngineWithProvider);
