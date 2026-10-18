@@ -195,8 +195,9 @@ int run_baseline() {
         if (!service_batch(*created.session, count, now_ns, submissions))
             return 8;
     }
-    // The physical fence stops the real provider. Reopening requires a new
-    // preparation transaction; keep the existing session CPU-only.
+    // The offline fence suspends delivery. An explicit reprime is the
+    // quiescent recovery boundary for a healthy provider; release then proves
+    // the session can close without retaining GPU-backed state.
     const auto high_water_in_flight = created.session->telemetry().high_water_in_flight;
     if (submissions != callbacks || high_water_in_flight < slots ||
         !created.session->fence_for_offline())
@@ -205,8 +206,8 @@ int run_baseline() {
     if (!fenced_callback.valid() || fenced_callback.stamp.epoch != 0 ||
         created.session->consume_output(fenced_callback, callback_output) !=
             SharedIoConvolutionSession::Delivery::EpochChanged ||
-        created.session->service(++now_ns).submitted != 0 || created.session->fence_and_reprime() ||
-        !created.session->release())
+        created.session->service(++now_ns).submitted != 0 ||
+        !created.session->fence_and_reprime() || !created.session->release())
         return 9;
     created.session.reset();
     const auto transfer = counter.snapshot();
