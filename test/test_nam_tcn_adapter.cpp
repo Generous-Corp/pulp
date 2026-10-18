@@ -23,6 +23,7 @@ struct TestKernel {
     bool fail_once = false;
     bool fail_release_once = false;
     std::size_t prepare_calls = 0;
+    std::size_t quiesce_calls = 0;
     std::size_t release_calls = 0;
 };
 
@@ -49,7 +50,8 @@ void process(void* opaque, const float* input, float* output, std::uint32_t fram
 void reset(void* opaque) noexcept {
     static_cast<TestKernel*>(opaque)->previous = 0.0f;
 }
-bool quiesce(void*) noexcept {
+bool quiesce(void* opaque) noexcept {
+    ++static_cast<TestKernel*>(opaque)->quiesce_calls;
     return true;
 }
 bool release(void* opaque) noexcept {
@@ -255,6 +257,53 @@ TEST_CASE("NAM/TCN adapter keeps live state when release fails and retries",
     CHECK_FALSE(state.prepared);
     CHECK(model.release());
     CHECK(state.release_calls == 2);
+}
+
+TEST_CASE("NAM/TCN adapter only quiesces a prepared kernel",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    TestKernel state;
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
+    CHECK_FALSE(model.quiesce());
+    CHECK(state.quiesce_calls == 0);
+
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "fixture.nam",
+                                                 .artifact_hash = "fixture-hash",
+                                                 .max_frames = 2};
+    REQUIRE(model.prepare(context));
+    REQUIRE(model.quiesce());
+    CHECK(state.quiesce_calls == 1);
+    REQUIRE(model.release());
+    CHECK_FALSE(model.quiesce());
+    CHECK(state.quiesce_calls == 1);
+}
+
+TEST_CASE("NAM/TCN adapter quiesces pending cleanup after failed release",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    TestKernel state{.fail_once = true, .fail_release_once = true};
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "fixture.nam",
+                                                 .artifact_hash = "fixture-hash",
+                                                 .max_frames = 2};
+    CHECK_FALSE(model.prepare(context));
+    CHECK(state.release_calls == 1);
+    REQUIRE(model.quiesce());
+    CHECK(state.quiesce_calls == 1);
+    REQUIRE(model.release());
+    CHECK(state.release_calls == 2);
+    CHECK_FALSE(model.quiesce());
+    CHECK(state.quiesce_calls == 1);
 }
 
 TEST_CASE("NAM/TCN adapter rejects aliasing and partial overlap without advancing state",
