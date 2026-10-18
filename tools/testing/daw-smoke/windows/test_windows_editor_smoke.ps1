@@ -37,6 +37,16 @@ try {
   Check ($written -match [regex]::Escape($expected)) 'written INI preserves literal default scan roots before staged root'
   $scanRoots=$scanPath.Split(';')
   Check ($scanRoots.Count -eq 3 -and $scanRoots[-1] -eq $staged) 'staged scan root remains last without duplicated defaults'
+  $receiptPath=Join-Path $root 'receipt.json'
+  Write-Utf8NoBom $receiptPath '{"ok":true,"text":"receipt"}'
+  $receiptBytes=[IO.File]::ReadAllBytes($receiptPath)
+  Check ($receiptBytes.Length -gt 0 -and -not ($receiptBytes[0] -eq 0xef -and $receiptBytes[1] -eq 0xbb -and $receiptBytes[2] -eq 0xbf)) 'receipt writer emits UTF8 without BOM'
+  $receiptFixture=Get-Content -LiteralPath $receiptPath -Raw|ConvertFrom-Json
+  Check ($receiptFixture.ok -eq $true -and $receiptFixture.text -eq 'receipt') 'receipt writer emits parseable JSON'
+  $editorRect=@(100,200,500,600)
+  Check (Test-HalfOpenWindowRectContainsPoint $editorRect 300 400) 'interior editor point is accepted'
+  Check (-not (Test-HalfOpenWindowRectContainsPoint $editorRect 500 600)) 'bottom-right editor edge is rejected'
+  Check (-not (Test-HalfOpenWindowRectContainsPoint $editorRect 99 400)) 'outside editor point is rejected'
   foreach($fixture in @(@(0x8664,'x64','vstpath64'),@(0xaa64,'arm64','vstpath_winarm64'),@(0xa641,'arm64ec','vstpath_winarm64'),@(0xa64e,'arm64x','vstpath_winarm64'))){
     $path=Join-Path $root ($fixture[1]+'.exe')
     $bytes=New-Object byte[] 128
