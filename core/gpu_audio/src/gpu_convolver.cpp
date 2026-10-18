@@ -635,6 +635,30 @@ bool GpuConvolver::has_realtime_shared_io() const noexcept {
 #endif
 }
 
+GpuAudioRecoveryReason GpuConvolver::recovery_reason() const noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (shared_io_ == nullptr || shared_io_->session == nullptr)
+        return GpuAudioRecoveryReason::None;
+    switch (shared_io_->session->recovery_reason()) {
+    case detail::SharedIoRecoveryReason::None:
+        return GpuAudioRecoveryReason::None;
+    case detail::SharedIoRecoveryReason::SequenceGap:
+        return GpuAudioRecoveryReason::SequenceGap;
+    case detail::SharedIoRecoveryReason::InputSaturated:
+        return GpuAudioRecoveryReason::InputSaturated;
+    case detail::SharedIoRecoveryReason::ProviderFailure:
+        return GpuAudioRecoveryReason::ProviderFailure;
+    case detail::SharedIoRecoveryReason::ProviderLost:
+        return GpuAudioRecoveryReason::ProviderLost;
+    case detail::SharedIoRecoveryReason::OfflineFence:
+        return GpuAudioRecoveryReason::OfflineFence;
+    case detail::SharedIoRecoveryReason::InvalidCallback:
+        return GpuAudioRecoveryReason::InvalidCallback;
+    }
+#endif
+    return GpuAudioRecoveryReason::None;
+}
+
 detail::SharedIoProviderIdentity GpuConvolver::provider_identity_for_diagnostics() const noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (shared_io_ != nullptr && shared_io_->session != nullptr)
