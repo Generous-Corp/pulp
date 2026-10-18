@@ -75,6 +75,16 @@ function Assert-OwnedIdentity($Process, [string]$StartedUtc) {
   $Process.Refresh()
   if ($Process.HasExited -or $Process.StartTime.ToUniversalTime().ToString('o') -ne $StartedUtc) { throw 'Owned process identity changed' }
 }
+function Get-InteractiveDesktopContext {
+  $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+  $explorer = @(Get-Process -Name explorer -ErrorAction SilentlyContinue |
+    Where-Object { $_.SessionId -eq $sessionId })
+  if ($explorer.Count -eq 0) { throw 'INTERACTIVE_SESSION_ABSENT' }
+  [ordered]@{
+    session_id = $sessionId
+    explorer_pids = @($explorer | ForEach-Object { [int]$_.Id })
+  }
+}
 
 function Copy-PrivateProfile([string]$Source, [string]$Destination, [string]$EvidenceRoot) {
   $private = [IO.Path]::GetFullPath($Destination)
