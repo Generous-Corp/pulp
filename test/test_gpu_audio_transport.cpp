@@ -1513,6 +1513,55 @@ TEST_CASE("GpuAudioTransport status snapshot propagates the latched recovery rea
     CHECK(validate_gpu_audio_status(recovered).accepted());
 }
 
+TEST_CASE("GpuAudioTransport keeps the bounded CPU fallback timeline after provider loss",
+          "[gpu_audio][transport][recovery][fallback-continuity]") {
+    constexpr uint32_t BS = 32;
+    constexpr uint32_t LATENCY = 2;
+    test_detail::RealtimeHookNode node(1, BS, MissPolicy::CpuFallback, LATENCY);
+    node.stateful_fallback = true;
+    node.realtime_status = detail::kRealtimeGpuReady;
+    REQUIRE(node.prepare());
+
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.ring_blocks = 8}));
+
+    Block input(1, BS), output(1, BS);
+    auto process_block = [&](float value) {
+        input.fill(value);
+        auto output_view = output.view();
+        transport.process(input.cview(), output_view, BS);
+        return output.storage[0][0];
+    };
+
+    // Before loss, the authenticated shared hook supplies its GPU result.
+    CHECK(process_block(1.0f) == 1001.0f);
+    CHECK(process_block(2.0f) == 1002.0f);
+
+    // A latched loss closes GPU delivery. The prepared fallback is continuously
+    // primed on every callback, so its first post-loss block is the input from
+    // exactly LATENCY blocks earlier and subsequent blocks remain contiguous.
+    node.recovery_reason_value = GpuAudioRecoveryReason::ProviderLost;
+    node.realtime_status = detail::kRealtimeGpuMissed;
+    CHECK(process_block(3.0f) == 1.0f);
+    CHECK(process_block(4.0f) == 2.0f);
+    CHECK(process_block(5.0f) == 3.0f);
+
+    const auto delivery = transport.delivery_snapshot();
+    CHECK(delivery.gpu_blocks == 2);
+    CHECK(delivery.cpu_fallback_blocks == 3);
+    CHECK(delivery.silence_blocks == 0);
+    CHECK(transport.stats().miss_blocks == 3);
+
+    const auto status = transport.status_snapshot();
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(status.selected_engine == GpuAudioEngine::Unknown);
+    CHECK(status.fallback_policy == MissPolicy::CpuFallback);
+    CHECK(status.fallback_available);
+    CHECK(status.fallback_blocks == 3);
+    CHECK(validate_gpu_audio_status(status).accepted());
+}
+
 TEST_CASE("GpuAudioTransport delivery snapshot supports concurrent diagnostic reads",
           "[gpu_audio][transport][delivery-snapshot]") {
     RealtimeHookNode node(1, 32, MissPolicy::CpuFallback);
