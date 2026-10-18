@@ -185,6 +185,9 @@ enum class SharedIoTelemetryError : std::uint8_t {
     ScheduledCompletionBeforeComponents,
     // Appended to preserve the numeric values of existing diagnostic errors.
     RetirementsExceedSubmissions,
+    // A live snapshot is assembled from independently updated counters and
+    // cannot be validated as one coherent receipt until producers quiesce.
+    TelemetryValidationDeferred,
 };
 
 struct SharedIoTelemetryValidation {

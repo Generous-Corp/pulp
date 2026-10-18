@@ -104,10 +104,12 @@ bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     return true;
 }
 
-SharedIoTraceDrainResult SharedIoConvolutionSession::drain_trace(std::uint32_t budget) noexcept {
+SharedIoTraceDrainResult
+SharedIoConvolutionSession::drain_trace(std::uint32_t budget, bool telemetry_quiescent) noexcept {
     if (!trace_recorder_)
         return {};
-    return drain_shared_io_trace(*trace_recorder_, trace_telemetry_.snapshot(), budget);
+    return drain_shared_io_trace(*trace_recorder_, trace_telemetry_.snapshot(), budget, nullptr,
+                                 telemetry_quiescent);
 }
 
 void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
@@ -115,7 +117,7 @@ void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
         return;
     for (std::uint32_t attempt = 0; attempt < 4; ++attempt) {
         const auto before = trace_recorder_->stats();
-        (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity));
+        (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity), true);
         const auto after = trace_recorder_->stats();
         if (after.enqueued == after.drained &&
             after.admissions_enqueued == after.admissions_drained)
