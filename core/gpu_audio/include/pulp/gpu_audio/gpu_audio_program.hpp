@@ -64,6 +64,9 @@ enum class GpuAudioProgramError : std::uint8_t {
     CapabilityLeadMismatch = 19,
     CapabilityFallbackPolicyMismatch = 20,
     CapabilityFallbackUnavailable = 21,
+    // Reject values that are not part of the versioned backend-neutral enum
+    // domains before any path/provider relationship is evaluated.
+    InvalidEnumValue = 22,
 };
 
 /// Backend-neutral metadata for a typed program prepared for a fixed audio
@@ -101,6 +104,28 @@ struct GpuAudioProgramValidation {
 /// Validate the backend-neutral prepared-program contract.
 constexpr GpuAudioProgramValidation
 validate_gpu_audio_program(const GpuAudioProgramDescriptor& program) noexcept {
+    const auto valid_kind = [](GpuAudioProgramKind value) constexpr {
+        return value == GpuAudioProgramKind::Unknown ||
+               value == GpuAudioProgramKind::Convolution ||
+               value == GpuAudioProgramKind::Spectral || value == GpuAudioProgramKind::Neural ||
+               value == GpuAudioProgramKind::Custom;
+    };
+    const auto valid_path = [](GpuAudioExecutionPath value) constexpr {
+        return value == GpuAudioExecutionPath::Unavailable ||
+               value == GpuAudioExecutionPath::Staged ||
+               value == GpuAudioExecutionPath::SharedMemory || value == GpuAudioExecutionPath::Cpu;
+    };
+    const auto valid_provider = [](GpuAudioProvider value) constexpr {
+        return value == GpuAudioProvider::Unknown || value == GpuAudioProvider::Dawn ||
+               value == GpuAudioProvider::Metal;
+    };
+    const auto valid_miss_policy = [](MissPolicy value) constexpr {
+        return value == MissPolicy::Silence || value == MissPolicy::PassthroughDry ||
+               value == MissPolicy::CpuFallback;
+    };
+    if (!valid_kind(program.kind) || !valid_path(program.path) ||
+        !valid_provider(program.provider) || !valid_miss_policy(program.miss_policy))
+        return {GpuAudioProgramError::InvalidEnumValue};
     if (program.kind == GpuAudioProgramKind::Unknown)
         return {GpuAudioProgramError::MissingKind};
     if (program.channels == 0 || program.block_size == 0 || program.sample_rate == 0)

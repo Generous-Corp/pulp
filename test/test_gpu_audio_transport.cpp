@@ -50,6 +50,28 @@ TEST_CASE("GpuAudioProgramDescriptor validates a prepared shared program", "[gpu
     CHECK(program.provider_owned_resources);
 }
 
+TEST_CASE("GpuAudioProgramDescriptor rejects unknown enum values", "[gpu_audio][program]") {
+    auto program = valid_shared_program();
+
+    // Each mutation is a planted negative for a future provider or SDK
+    // consumer that decodes a value outside the versioned contract.  It must
+    // fail before the normal path/provider checks can accidentally accept it.
+    program.kind = static_cast<GpuAudioProgramKind>(0xfe);
+    CHECK(validate_gpu_audio_program(program).error == GpuAudioProgramError::InvalidEnumValue);
+
+    program = valid_shared_program();
+    program.path = static_cast<GpuAudioExecutionPath>(0xfe);
+    CHECK(validate_gpu_audio_program(program).error == GpuAudioProgramError::InvalidEnumValue);
+
+    program = valid_shared_program();
+    program.provider = static_cast<GpuAudioProvider>(0xfe);
+    CHECK(validate_gpu_audio_program(program).error == GpuAudioProgramError::InvalidEnumValue);
+
+    program = valid_shared_program();
+    program.miss_policy = static_cast<MissPolicy>(0xfe);
+    CHECK(validate_gpu_audio_program(program).error == GpuAudioProgramError::InvalidEnumValue);
+}
+
 TEST_CASE("GpuAudioStatus preserves provider, delivery, and fallback meanings",
           "[gpu_audio][status]") {
     GpuAudioStatus status;
