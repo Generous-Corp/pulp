@@ -179,6 +179,8 @@ enum class SharedIoTelemetryError : std::uint8_t {
     SuccessfulRetirementsExceedSubmissions,
     RetirementsExceedAdmissions,
     DeliveredExceedsCallbacks,
+    DeadlineMissesExceedCallbacks,
+    LateCompletionsExceedRetirements,
     FallbacksExceedDelivered,
 };
 
@@ -228,6 +230,11 @@ validate_shared_io_telemetry(const SharedIoTelemetrySnapshot& snapshot) noexcept
         return {SharedIoTelemetryError::RetirementsExceedAdmissions};
     if (snapshot.delivered_blocks > snapshot.callback_blocks)
         return {SharedIoTelemetryError::DeliveredExceedsCallbacks};
+    if (snapshot.deadline_misses > snapshot.callback_blocks)
+        return {SharedIoTelemetryError::DeadlineMissesExceedCallbacks};
+    if (snapshot.retired_success > UINT64_MAX - snapshot.retired_failure ||
+        snapshot.late_completions > snapshot.retired_success + snapshot.retired_failure)
+        return {SharedIoTelemetryError::LateCompletionsExceedRetirements};
     if (snapshot.fallback_blocks > snapshot.delivered_blocks)
         return {SharedIoTelemetryError::FallbacksExceedDelivered};
     return {};
