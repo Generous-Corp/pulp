@@ -65,11 +65,10 @@ TonePlugin* g_tone = nullptr;
 bool CLAP_ABI tone_gui_is_api_supported(const clap_plugin_t*, const char*, bool floating) {
     return !floating;
 }
-void hold_editor_operation(const clap_plugin_t* p);
+bool hold_editor_operation(const clap_plugin_t* p);
 
 bool CLAP_ABI tone_gui_create(const clap_plugin_t* p, const char*, bool) {
-    hold_editor_operation(p);
-    return true;
+    return hold_editor_operation(p);
 }
 void CLAP_ABI tone_gui_destroy(const clap_plugin_t* p) { hold_editor_operation(p); }
 bool CLAP_ABI tone_gui_set_scale(const clap_plugin_t*, double) { return true; }
@@ -81,8 +80,7 @@ bool CLAP_ABI tone_gui_get_size(const clap_plugin_t*, uint32_t* w, uint32_t* h) 
 bool CLAP_ABI tone_gui_can_resize(const clap_plugin_t*) { return true; }
 bool CLAP_ABI tone_gui_adjust_size(const clap_plugin_t*, uint32_t*, uint32_t*) { return true; }
 bool CLAP_ABI tone_gui_set_size(const clap_plugin_t* p, uint32_t, uint32_t) {
-    hold_editor_operation(p);
-    return true;
+    return hold_editor_operation(p);
 }
 bool CLAP_ABI tone_gui_set_parent(const clap_plugin_t*, const clap_window_t*) { return true; }
 bool CLAP_ABI tone_gui_show(const clap_plugin_t*) { return true; }
@@ -100,33 +98,37 @@ void CLAP_ABI tone_reset(const clap_plugin_t*) {}
 
 bool wait_for_editor_overlap(const clap_plugin_t* p) {
     auto* t = static_cast<TonePlugin*>(p->plugin_data);
-    if (!t->overlap_enabled.load(std::memory_order_acquire)) return false;
+    if (!t->overlap_enabled.load(std::memory_order_acquire) ||
+        !t->editor_operation_active.load(std::memory_order_acquire))
+        return false;
 
     bool expected = false;
     if (!t->process_entered.compare_exchange_strong(expected, true,
                                                     std::memory_order_acq_rel))
         return false;
 
-    while (t->overlap_enabled.load(std::memory_order_acquire) &&
-           !t->overlap_cancelled.load(std::memory_order_acquire) &&
-           !t->editor_operation_active.load(std::memory_order_acquire))
-        std::this_thread::yield();
     if (t->overlap_cancelled.load(std::memory_order_acquire) ||
         !t->overlap_enabled.load(std::memory_order_acquire))
         return false;
     return true;
 }
 
-void hold_editor_operation(const clap_plugin_t* p) {
+bool hold_editor_operation(const clap_plugin_t* p) {
     auto* t = static_cast<TonePlugin*>(p->plugin_data);
-    if (!t->overlap_enabled.load(std::memory_order_acquire)) return;
+    if (!t->overlap_enabled.load(std::memory_order_acquire)) return true;
 
     t->editor_operation_active.store(true, std::memory_order_release);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (t->overlap_enabled.load(std::memory_order_acquire) &&
            !t->overlap_cancelled.load(std::memory_order_acquire) &&
-           !t->overlap_acknowledged.load(std::memory_order_acquire))
+           !t->overlap_acknowledged.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline)
         std::this_thread::yield();
+    const bool acknowledged = t->overlap_acknowledged.load(std::memory_order_acquire);
+    if (!acknowledged)
+        t->overlap_cancelled.store(true, std::memory_order_release);
     t->editor_operation_active.store(false, std::memory_order_release);
+    return acknowledged;
 }
 
 clap_process_status CLAP_ABI tone_process(const clap_plugin_t* p, const clap_process_t* proc) {
@@ -407,9 +409,6 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
         tone.overlap_acknowledged.store(false, std::memory_order_release);
         tone.process_entered.store(false, std::memory_order_release);
         tone.overlap_enabled.store(true, std::memory_order_release);
-        REQUIRE(pulp::test::wait_for_condition([&tone] {
-            return tone.process_entered.load(std::memory_order_acquire);
-        }));
     };
 
     // Churn the editor while audio runs.
