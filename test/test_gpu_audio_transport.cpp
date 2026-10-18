@@ -1506,6 +1506,8 @@ TEST_CASE("GpuAudioTransport status snapshot propagates the latched recovery rea
     node.recovery_reason_value = GpuAudioRecoveryReason::ProviderLost;
     const auto recovered = transport.status_snapshot();
     CHECK(recovered.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(recovered.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(recovered.selected_engine == GpuAudioEngine::Unknown);
     CHECK(recovered.fallback_policy == MissPolicy::CpuFallback);
     CHECK(recovered.fallback_available);
     CHECK(validate_gpu_audio_status(recovered).accepted());
