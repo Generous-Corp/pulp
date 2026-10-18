@@ -94,7 +94,8 @@ struct GpuWaveNetRealtimeNode::Impl {
         pending.trace_record.callback_ingress_ns = input.callback_ingress_ns();
         pending.trace_record.set(detail::SharedIoTraceStage::WorkerEntry, now_ns());
         pending.trace_pending = true;
-        (void)trace->publish_admission(epoch, input.stamp().sequence);
+        pending.trace_record.admission_identity_matched =
+            trace->publish_admission(epoch, input.stamp().sequence);
     }
     void trace_stage(Pending& pending, detail::SharedIoTraceStage stage) noexcept {
         if (pending.trace_pending && trace)

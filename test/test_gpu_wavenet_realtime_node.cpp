@@ -783,6 +783,23 @@ TEST_CASE("WaveNet rejects malformed trace observers before draining",
     CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(h.node).drained > 0);
 }
 
+TEST_CASE("WaveNet observer marks admitted terminal identity",
+          "[gpu_audio][wavenet][trace][observer]") {
+    Harness h(1, 1, 0, true);
+    TraceCapture capture;
+    capture.attach(h.node);
+    h.callback(1);
+    h.service();
+    h.service();
+    REQUIRE(h.node.release());
+    capture.require_closed();
+    for (std::size_t i = 0; i < capture.record_count; ++i) {
+        const auto& record = capture.records[i].value;
+        if (record.gpu_terminal != detail::SharedIoGpuTerminalDisposition::None)
+            CHECK(record.admission_identity_matched);
+    }
+}
+
 TEST_CASE("Stamped ingress timestamps survive reuse without changing stream identity",
           "[gpu_audio][wavenet][trace]") {
     using Bridge = detail::SharedIoStampedBridge;
