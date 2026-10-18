@@ -206,6 +206,16 @@ bool validate_annotated_capture(const std::string& svg,
     static const std::regex hex64("^[0-9a-fA-F]{64}$");
     if (!std::regex_match(hash, hex64)) { error = "svg_sha256 must be a 64-character hex digest"; return false; }
     if (runtime::sha256_hex(svg) != hash) { error = "svg_sha256 does not match SVG bytes"; return false; }
+    // A matching digest authenticates the bytes, but it does not establish that
+    // they are an SVG document. Keep this lane fail-closed before any future
+    // generator consumes the capture: require one SVG root envelope even when
+    // the sidecar declares no controls. This intentionally remains a bounded
+    // structural check; full XML/SVG semantics belong to the rendering backend.
+    static const std::regex svg_root_re(R"(<svg(?:\s|>))");
+    static const std::regex svg_close_re(R"(</svg\s*>)");
+    if (!std::regex_search(svg, svg_root_re) || !std::regex_search(svg, svg_close_re)) {
+        error = "SVG bytes must contain an <svg> root element"; return false;
+    }
     if (!root.hasObjectMember("canvas") || !root["canvas"].isObject()) {
         error = "sidecar requires canvas object"; return false;
     }

@@ -741,6 +741,14 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
         CHECK_FALSE(impd::validate_annotated_capture(svg, bad, error));
         CHECK(error.find("outside") != std::string::npos);
     }
+    SECTION("non-SVG bytes fail closed even with a matching digest") {
+        const std::string not_svg = "this is not an SVG document";
+        auto bad = sidecar;
+        const auto old_hash = pulp::runtime::sha256_hex(svg);
+        bad.replace(bad.find(old_hash), old_hash.size(), pulp::runtime::sha256_hex(not_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(not_svg, bad, error));
+        CHECK(error.find("<svg>") != std::string::npos);
+    }
 }
 
 TEST_CASE("snake_case matches the generated-file convention",
