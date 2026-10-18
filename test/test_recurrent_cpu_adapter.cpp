@@ -33,7 +33,9 @@ struct SyntheticKernel {
     std::array<float, 4 * kHidden> scratch{};
     bool prepared = false;
     bool fail_once = false;
+    bool fail_quiesce_once = false;
     bool fail_release_once = false;
+    std::size_t fail_release_count = 0;
     FaultCallback fault_callback = nullptr;
     std::size_t prepare_calls = 0;
     std::size_t reset_calls = 0;
@@ -105,12 +107,20 @@ void reset_kernel(void* opaque) noexcept {
 bool quiesce_kernel(void* opaque) noexcept {
     auto& kernel = *static_cast<SyntheticKernel*>(opaque);
     ++kernel.quiesce_calls;
+    if (kernel.fail_quiesce_once) {
+        kernel.fail_quiesce_once = false;
+        return false;
+    }
     return true;
 }
 
 bool release_kernel(void* opaque) noexcept {
     auto& kernel = *static_cast<SyntheticKernel*>(opaque);
     ++kernel.release_calls;
+    if (kernel.fail_release_count != 0) {
+        --kernel.fail_release_count;
+        return false;
+    }
     if (kernel.fail_release_once) {
         kernel.fail_release_once = false;
         return false;
@@ -405,6 +415,32 @@ TEST_CASE("NeuralProcessor retries failed recurrent cleanup through quiesce",
     REQUIRE(processor.release());
     CHECK(kernel.release_calls == 2);
     CHECK_FALSE(kernel.prepared);
+}
+
+TEST_CASE("NeuralProcessor retains cleanup debt after quiesce failure",
+          "[gpu_audio][neural][recurrent][lifecycle][negative]") {
+    const auto spec = make_spec(RecurrentFamily::Gru);
+    SyntheticKernel kernel{.family = RecurrentFamily::Gru,
+                           .fail_once = true,
+                           .fail_quiesce_once = true,
+                           .fail_release_count = 2};
+    RecurrentCpuAdapter adapter(spec, make_shape(RecurrentFamily::Gru), make_kernel(kernel));
+    NeuralProcessor processor(adapter);
+    const auto context = StreamingPrepareContext{.spec = &adapter.spec(),
+                                                 .artifact_id = "synthetic-recurrent",
+                                                 .artifact_hash = "synthetic-weights",
+                                                 .max_frames = 64};
+
+    CHECK_FALSE(processor.prepare(context));
+    CHECK(kernel.quiesce_calls == 1);
+    CHECK(kernel.release_calls == 2);
+    CHECK_FALSE(processor.snapshot().prepared);
+    CHECK_FALSE(processor.prepare(context));
+    CHECK(kernel.prepare_calls == 1);
+
+    REQUIRE(processor.release());
+    CHECK(kernel.quiesce_calls == 2);
+    CHECK(kernel.release_calls == 3);
 }
 
 TEST_CASE("recurrent CPU preparation is the fail-closed fallback admission proof",
