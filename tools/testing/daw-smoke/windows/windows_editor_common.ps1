@@ -262,3 +262,10 @@ function Write-ReaperIni([string]$Path,[string[]]$Lines) {
   # no-BOM INI form read by the seeded REAPER profile on the actual guest.
   [IO.File]::WriteAllLines($Path,$Lines,(New-Object Text.UTF8Encoding($false)))
 }
+function Write-Utf8NoBom([string]$Path,[string]$Text) {
+  [IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))
+}
+function Test-HalfOpenWindowRectContainsPoint([int[]]$Rect,[int]$X,[int]$Y) {
+  if($null -eq $Rect -or $Rect.Count -ne 4){return $false}
+  return $X -ge $Rect[0] -and $X -lt $Rect[2] -and $Y -ge $Rect[1] -and $Y -lt $Rect[3]
+}
