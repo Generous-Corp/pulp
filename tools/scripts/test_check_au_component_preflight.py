@@ -321,6 +321,21 @@ class AuComponentPreflightTests(unittest.TestCase):
             self.assertIn("FAIL: auval list: aumf PHBn Pulp not listed", out)
             self.assertIn("listed 2 Apple component(s) and no non-Apple components", out)
 
+    def test_auval_list_requires_exact_manufacturer_token(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.return_value = preflight.subprocess.CompletedProcess(
+                    args=["auval"], returncode=0, stdout="aumf PHBn PulpFake  -  Fake\n"
+                )
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--check-auval-list",
+                ])
+            self.assertEqual(rc, 1)
+            self.assertIn("not listed", out)
+
     def test_apple_only_inventory_gets_typed_registrar_diagnosis(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             bundle = _make_bundle(pathlib.Path(d))
@@ -417,6 +432,24 @@ class AuComponentPreflightTests(unittest.TestCase):
                     return preflight.subprocess.CompletedProcess(command, 0, "Background\n")
                 if command[0] == "/usr/bin/log":
                     return preflight.subprocess.CompletedProcess(command, 0, "")
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                checks = preflight._check_host_architecture(bundle)
+            binary = next(check for check in checks if check.label == "binary architecture")
+            self.assertFalse(binary.ok)
+            self.assertEqual(binary.code, "BINARY_ARCHITECTURE_MISMATCH")
+
+    def test_intel_host_rejects_arm_only_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                if command[:2] == ["uname", "-m"]:
+                    return preflight.subprocess.CompletedProcess(command, 0, "x86_64\n")
+                if command[0] == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Mach-O 64-bit executable arm64\n")
                 raise AssertionError(command)
             with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
                  mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):

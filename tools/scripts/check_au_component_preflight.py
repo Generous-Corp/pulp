@@ -308,7 +308,7 @@ def _check_auval_list(args: argparse.Namespace) -> CheckResult:
         return CheckResult("auval list", False, tail or "auval -a failed", "AUVAL_LIST_FAILED",
                            "Run the host diagnosis and inspect AudioComponentRegistrar logs.")
     for line in proc.stdout.splitlines():
-        if line.strip().startswith(needle):
+        if line.strip().split()[:3] == [args.expect_type, args.expect_subtype, args.expect_manufacturer]:
             return CheckResult("auval list", True, line.strip(), "COMPONENT_VISIBLE")
     components, non_apple = _auval_inventory(proc.stdout)
     summary = _summarize_auval_list(proc.stdout)
@@ -374,8 +374,8 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
                 has_arm64 = "arm64" in detail or "arm64e" in detail
                 has_x86 = "x86_64" in detail or "i386" in detail
                 compatible = (probe.returncode == 0 and "Mach-O" in detail and
-                              arch in ("arm64", "x86_64") and
-                              (arch != "arm64" or has_arm64 or has_x86))
+                              ((arch == "arm64" and (has_arm64 or has_x86)) or
+                               (arch == "x86_64" and has_x86)))
                 code = "BINARY_ARCHITECTURE_COMPATIBLE" if compatible else "BINARY_ARCHITECTURE_MISMATCH"
                 remediation = None if compatible else "Build an arm64/universal AU, or install Rosetta for an x86_64-only AU."
                 results.append(CheckResult("binary architecture", compatible, detail, code, remediation))
@@ -433,6 +433,10 @@ def _check_registrar() -> list[CheckResult]:
     elif domain.returncode == 124:
         results.append(CheckResult("registrar domain", False, domain.stdout.strip(), "HOST_PROBE_TIMEOUT",
                                    "Retry after launchctl is responsive."))
+    else:
+        results.append(CheckResult("registrar domain", False, domain.stdout.strip() or "launchctl managername failed",
+                                   "REGISTRAR_DOMAIN_UNKNOWN",
+                                   "Run this check from the same Aqua or user launchd domain as the DAW."))
 
     uid = str(os.getuid())
     manager = domain.stdout.strip() if domain.returncode == 0 else ""
@@ -463,7 +467,10 @@ def _check_registrar() -> list[CheckResult]:
                                        "SYSTEM_REGISTRAR_UNAVAILABLE",
                                        "Restart the registrar or reboot macOS, then rerun this preflight."))
     log = shutil.which("log")
-    if log:
+    if not log:
+        results.append(CheckResult("registrar logs", False, "log tool not found", "REGISTRAR_LOG_TOOL_MISSING",
+                                   "Run this check on macOS with the unified log tool available."))
+    else:
         logs = _run_probe([log, "show", "--last", "10m", "--style", "json",
                            "--predicate", 'process == "AudioComponentRegistrar" AND eventMessage CONTAINS[c] "Rosetta runtime is not available"'])
         text = logs.stdout.strip()
