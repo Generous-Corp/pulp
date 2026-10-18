@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace pulp::gpu_audio::detail {
 
@@ -22,6 +23,8 @@ class SharedIoProgramSession {
     using Config = SharedIoComputePlan::Config;
     using SubmitToken = SharedIoComputePlan::SubmitToken;
     using Completion = SharedIoComputePlan::Completion;
+    using LifecycleReceipt = SharedIoComputePlan::LifecycleReceipt;
+    using CalibrationObservation = SharedIoCalibrationObservation;
     using InputLease = SharedIoArena::WriteLease;
     using OutputLease = SharedIoArena::OutputLease;
 
@@ -69,6 +72,20 @@ class SharedIoProgramSession {
     std::unique_ptr<SharedIoArenaProvider> release_to_owner() noexcept;
     const SharedIoComputePlan::Telemetry& telemetry() const noexcept {
         return plan_.telemetry();
+    }
+    // Quiescent diagnostic extraction. An empty result while work is active is
+    // an intentional fail-closed result, not proof that no receipt exists.
+    std::vector<LifecycleReceipt> take_lifecycle_receipts() {
+        return plan_.take_lifecycle_receipts();
+    }
+    std::vector<CalibrationObservation> take_calibration_observations() {
+        return plan_.take_calibration_observations();
+    }
+    bool lifecycle_receipt_valid() const noexcept {
+        return plan_.lifecycle_receipt_valid();
+    }
+    bool lifecycle_receipt_overflow() const noexcept {
+        return plan_.lifecycle_receipt_overflow();
     }
 
   private:

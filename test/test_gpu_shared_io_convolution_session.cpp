@@ -814,3 +814,20 @@ TEST_CASE("shared session requires affirmative provider resume proof before reop
     CHECK(fixture.session.service(1).submitted == 0);
     REQUIRE(fixture.session.release());
 }
+
+TEST_CASE("shared session refuses lifecycle receipt extraction while work is active",
+          "[gpu_audio][shared_io][session][receipts][negative]") {
+    Fixture fixture;
+    fixture.prepare();
+    fixture.provider->auto_complete = false;
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+
+    // Receipt extraction is quiescent-only. A non-empty result here would
+    // permit a diagnostic consumer to observe partial lifecycle evidence.
+    CHECK(fixture.session.take_lifecycle_receipts().empty());
+    CHECK(fixture.session.take_calibration_observations().empty());
+    CHECK(fixture.session.lifecycle_receipt_valid());
+    REQUIRE(fixture.session.release());
+}
