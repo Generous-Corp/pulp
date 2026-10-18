@@ -32,6 +32,7 @@ target_link_libraries(pulp-import-design-cli-policy PUBLIC
 
 add_executable(pulp-import-design
     pulp_import_design.cpp
+    annotated_capture.cpp
     import_design_cli_help.cpp
     browser_import_cli.cpp
     browser_import_session.cpp

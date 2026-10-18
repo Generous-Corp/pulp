@@ -14,6 +14,7 @@
 #include <pulp/platform/child_process.hpp>
 #include <pulp/state/store.hpp>
 #include "import_detect.hpp"
+#include "annotated_capture.hpp"
 #include "import_timing.hpp"
 #include "fig_lane.hpp"
 #include "envelope_merge.hpp"
@@ -1584,6 +1585,8 @@ static bool emit_materialized_runtime_source(pulp::import_design::BrowserImportS
 struct CliOptions {
     std::string source_str;
     std::string input_file;
+    std::string sidecar_manifest;
+    bool validate_only = false;
     // --file: repeatable. Two or more paths capture a MULTI-STATE design from
     // already-exported envelopes — one per state, in the order given — which is
     // how a lane that exports a faithful frame at a time (the Figma REST
@@ -1713,6 +1716,10 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             opt.source_str = argv[++i];
         } else if (std::strcmp(argv[i], "--file") == 0 && i + 1 < argc) {
             opt.input_files.push_back(argv[++i]);
+        } else if (std::strcmp(argv[i], "--manifest") == 0 && i + 1 < argc) {
+            opt.sidecar_manifest = argv[++i];
+        } else if (std::strcmp(argv[i], "--validate-only") == 0) {
+            opt.validate_only = true;
         } else if (std::strcmp(argv[i], "--url") == 0 && i + 1 < argc) {
             opt.input_url = argv[++i];
         } else if (std::strcmp(argv[i], "--frame") == 0 && i + 1 < argc) {
@@ -2132,6 +2139,8 @@ int main(int argc, char* argv[]) {
     auto& source_str = cli.source_str;
     auto& input_file = cli.input_file;
     auto& input_files = cli.input_files;
+    auto& sidecar_manifest = cli.sidecar_manifest;
+    auto& validate_only = cli.validate_only;
     auto& input_url = cli.input_url;
     auto& frame_names = cli.frame_names;
     auto& screen_name = cli.screen_name;
@@ -2298,6 +2307,49 @@ int main(int argc, char* argv[]) {
     // Every path below reads the first --file; a second one only means
     // multi-state capture, handled once the source is known.
     if (!input_files.empty()) input_file = input_files.front();
+
+    // Source-neutral, already-converted SVG lane. This is intentionally a
+    // validation-only integration point: conversion from Illustrator/PDF is
+    // outside Pulp, while the sidecar contract proves the bytes and controls
+    // before a future generator consumes them.
+    if (source_str == "illustrator" || source_str == "ai" || source_str == "pdf") {
+        std::cerr << "Error: source '" << source_str
+                  << "' is unsupported; convert to preconverted-svg with a validated "
+                     "control-map sidecar\n";
+        return 2;
+    }
+    if (source_str == "preconverted-svg") {
+        if (!validate_only) {
+            std::cerr << "Error: --from preconverted-svg requires --validate-only\n";
+            return 2;
+        }
+        if (input_file.empty() || sidecar_manifest.empty()) {
+            std::cerr << "Error: --from preconverted-svg requires --file <svg> and "
+                         "--manifest <control-map.json>\n";
+            return 2;
+        }
+        const auto svg = read_file(input_file);
+        const auto manifest = read_file(sidecar_manifest);
+        if (svg.empty()) {
+            std::cerr << "Error: cannot read SVG: " << input_file << "\n";
+            return 1;
+        }
+        if (manifest.empty()) {
+            std::cerr << "Error: cannot read control-map sidecar: " << sidecar_manifest << "\n";
+            return 1;
+        }
+        std::string validation_error;
+        if (!pulp::import_design::validate_annotated_capture(svg, manifest, validation_error)) {
+            std::cerr << "Error: preconverted-svg validation failed: " << validation_error << "\n";
+            return 1;
+        }
+        if (outline_json) {
+            std::cout << "{\"source\":\"preconverted-svg\",\"validated\":true}\n";
+        } else {
+            std::cout << "validated preconverted SVG + control-map sidecar (no files generated)\n";
+        }
+        return 0;
+    }
 
     // Export-tokens mode: read a Pulp theme JSON and export in --format.
     if (export_tokens_mode) {
@@ -2804,6 +2856,9 @@ int main(int argc, char* argv[]) {
                     }
                     break;
                 case DesignSource::figma_plugin: ir = parse_figma_plugin_json(content); break;
+                case DesignSource::preconverted_svg:
+                    std::cerr << "Error: preconverted-svg is validation-only; use --validate-only\n";
+                    return 2;
                 case DesignSource::stitch: ir = parse_stitch_html(content); break;
                 case DesignSource::v0:     ir = parse_v0_tsx(content); break;
                 case DesignSource::pencil: ir = parse_pencil_json(content); break;

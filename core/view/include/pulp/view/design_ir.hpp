@@ -41,7 +41,8 @@ enum class DesignSource {
     designmd, // Google DESIGN.md (Apache-2.0) — YAML frontmatter + Markdown body
     jsx,           // Single-file React JSX instrument — compiled via esbuild + bundled React/ReactDOM
     figma_plugin,  // Pulp's "Design for Pulp" Figma plugin export envelope
-    html           // Generic runnable HTML evaluated by the isolated browser lane
+    html,          // Generic runnable HTML evaluated by the isolated browser lane
+    preconverted_svg // Validated SVG + control-map sidecar; no source conversion
 };
 
 // ── Normalized Intermediate Representation ──────────────────────────────

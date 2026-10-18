@@ -15,6 +15,7 @@ TEST_CASE("parse_design_source recognizes valid sources", "[view][import]") {
     REQUIRE(parse_design_source("html") == DesignSource::html);
     REQUIRE(parse_design_source("designmd") == DesignSource::designmd);
     REQUIRE(parse_design_source("jsx") == DesignSource::jsx);
+    REQUIRE(parse_design_source("preconverted-svg") == DesignSource::preconverted_svg);
     REQUIRE_FALSE(parse_design_source("unknown").has_value());
 }
 
@@ -144,6 +145,16 @@ TEST_CASE("design_source_name returns display names", "[view][import]") {
     REQUIRE(std::string(design_source_name(DesignSource::html)) == "HTML");
     REQUIRE(std::string(design_source_name(DesignSource::designmd)) == "DESIGN.md");
     REQUIRE(std::string(design_source_name(DesignSource::jsx)) == "JSX instrument");
+    REQUIRE(std::string(design_source_name(DesignSource::preconverted_svg)) == "Preconverted SVG");
+}
+
+TEST_CASE("preconverted-svg source survives DesignIR JSON round-trip", "[view][import]") {
+    DesignIR ir;
+    ir.source = DesignSource::preconverted_svg;
+    ir.root.type = "frame";
+    const auto json = serialize_design_ir(ir);
+    REQUIRE(json.find("\"source\":\"preconverted-svg\"") != std::string::npos);
+    CHECK(parse_design_ir_json(json).source == DesignSource::preconverted_svg);
 }
 
 TEST_CASE("generic HTML source identity survives canonical IR serialization",
