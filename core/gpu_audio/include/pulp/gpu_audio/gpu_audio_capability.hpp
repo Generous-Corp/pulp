@@ -64,6 +64,8 @@ enum class GpuAudioCapabilityError : std::uint8_t {
     CpuProviderPresent = 7,
     CpuLeadPresent = 8,
     FallbackUnavailable = 9,
+    StagedProviderPresent = 10,
+    StagedLeadPresent = 11,
 };
 
 struct GpuAudioCapabilityValidation {
@@ -124,6 +126,11 @@ validate_gpu_audio_capability(const GpuAudioCapabilityReport& capability) noexce
             return {GpuAudioCapabilityError::SharedProviderMissing};
         if (capability.prepared_lead_blocks == 0)
             return {GpuAudioCapabilityError::SharedLeadMissing};
+    } else if (capability.path == GpuAudioExecutionPath::Staged) {
+        if (capability.provider != GpuAudioProvider::Unknown)
+            return {GpuAudioCapabilityError::StagedProviderPresent};
+        if (capability.prepared_lead_blocks != 0)
+            return {GpuAudioCapabilityError::StagedLeadPresent};
     } else if (capability.path == GpuAudioExecutionPath::Cpu) {
         if (capability.provider != GpuAudioProvider::Unknown)
             return {GpuAudioCapabilityError::CpuProviderPresent};

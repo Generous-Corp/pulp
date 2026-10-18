@@ -327,6 +327,15 @@ TEST_CASE("GpuAudioCapabilityReport rejects forged enum and shape relationships"
     capability.fallback_available = false;
     CHECK(validate_gpu_audio_capability(capability).error ==
           GpuAudioCapabilityError::FallbackUnavailable);
+
+    capability = valid_staged_capability();
+    capability.provider = GpuAudioProvider::Dawn;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::StagedProviderPresent);
+    capability = valid_staged_capability();
+    capability.prepared_lead_blocks = 1;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::StagedLeadPresent);
 }
 
 TEST_CASE("GpuAudioProgramDescriptor binds only to an authenticated capability",
