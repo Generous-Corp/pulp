@@ -150,6 +150,9 @@ class SharedIoComputePlan {
         std::vector<LifecycleReceipt> result(lifecycle_receipts_.begin(),
                                              lifecycle_receipts_.end());
         lifecycle_receipts_.clear();
+        calibration_emitted_keys_.clear();
+        if (calibration_observations_.empty())
+            calibration_invalid_counted_keys_.clear();
         return result;
     }
     std::vector<SharedIoCalibrationObservation> take_calibration_observations() {
@@ -163,8 +166,10 @@ class SharedIoComputePlan {
             calibration_emitted_keys_.emplace_back(observation.generation,
                                                    observation.sequence);
         auto result = std::exchange(calibration_observations_, {});
-        if (lifecycle_receipts_.empty())
+        if (lifecycle_receipts_.empty()) {
             calibration_emitted_keys_.clear();
+            calibration_invalid_counted_keys_.clear();
+        }
         return result;
     }
     bool lifecycle_receipt_overflow() const noexcept {
