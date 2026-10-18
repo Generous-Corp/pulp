@@ -69,6 +69,7 @@ StreamingModelSpec spec() {
             .sample_rate = 48000,
             .block_size = 32,
             .feature_rate = 48000,
+            .receptive_field_samples = 5,
             .state_bytes = tcn_cpu_state_bytes(shape()),
             .state_schema = "causal-tcn-v1",
             .state_schema_version = 1};
@@ -141,6 +142,14 @@ TEST_CASE("causal TCN CPU adapter rejects identity, layout, and alias violations
     oversized.max_frames = 4097;
     CHECK_FALSE(adapter.prepare(oversized));
     CHECK(adapter.last_prepare_error() == TcnCpuPrepareError::InvalidContract);
+    auto mismatched_spec = spec();
+    mismatched_spec.receptive_field_samples = 0;
+    auto mismatched_adapter = make(k, mismatched_spec);
+    const StreamingPrepareContext mismatched_context{
+        &mismatched_adapter.spec(), "fixture.tcn", "sha256:fixture-weights",
+        StreamingFallbackStrategy::NoFallback, 32};
+    CHECK_FALSE(mismatched_adapter.prepare(mismatched_context));
+    CHECK(mismatched_adapter.last_prepare_error() == TcnCpuPrepareError::InvalidContract);
     CHECK_FALSE(adapter.prepare(c));
     CHECK(k.releases == 1);
     REQUIRE(adapter.prepare(c));

@@ -30,6 +30,12 @@ constexpr std::size_t tcn_cpu_state_bytes(const TcnCpuShape& shape) noexcept {
     return static_cast<std::size_t>(shape.channels) * receptive_field * sizeof(float);
 }
 
+constexpr std::uint32_t tcn_cpu_receptive_field(const TcnCpuShape& shape) noexcept {
+    if (!valid_tcn_cpu_shape(shape))
+        return 0;
+    return 1u + (shape.kernel_size - 1u) * shape.dilation;
+}
+
 struct TcnCpuArtifact {
     std::string_view artifact_id{};
     std::string_view artifact_sha256{};
@@ -80,6 +86,7 @@ class TcnCpuAdapter final : public StreamingModel {
             !valid_tcn_cpu_artifact(artifact_) || !valid_streaming_prepare_context(context) ||
             context.spec != &spec_ || context.max_frames > kMaxSupportedFrames ||
             spec_.input_channels != 1 || spec_.output_channels != 1 ||
+            spec_.receptive_field_samples != tcn_cpu_receptive_field(shape_) ||
             spec_.state_bytes != tcn_cpu_state_bytes(shape_) ||
             spec_.state_schema != "causal-tcn-v1" || spec_.state_schema_version != 1 ||
             kernel_.state == nullptr || kernel_.prepare == nullptr || kernel_.process == nullptr ||
