@@ -32,6 +32,16 @@ def configured_hooks(config_path: Path) -> list[dict[str, object]]:
     return configured
 
 
+def configured_event_hooks(config_path: Path, event: str) -> list[dict[str, object]]:
+    document = json.loads(config_path.read_text(encoding="utf-8"))
+    configured: list[dict[str, object]] = []
+    for group in document.get("hooks", {}).get(event, []):
+        for hook in group.get("hooks", []):
+            if isinstance(hook, dict) and isinstance(hook.get("command"), str):
+                configured.append(hook)
+    return configured
+
+
 def run_git(cwd: Path, *arguments: str) -> None:
     subprocess.run(
         ("git", *arguments),
@@ -180,10 +190,61 @@ def check_plugin_hooks_without_plugin_root() -> None:
                 )
 
 
+def check_build_guard_status_routing() -> None:
+    """Claude must propagate the guard refusal; Codex remains advisory."""
+    claude_commands = [
+        str(hook["command"])
+        for hook in configured_event_hooks(ROOT / ".claude/settings.json", "PreToolUse")
+        if "shell-portability-hint.sh" in str(hook["command"])
+    ]
+    codex_commands = [
+        str(hook["command"])
+        for hook in configured_event_hooks(ROOT / ".codex/hooks.json", "PreToolUse")
+        if "shell-portability-hint.sh" in str(hook["command"])
+    ]
+    if len(claude_commands) != 1 or len(codex_commands) != 1:
+        raise RuntimeError(
+            "expected one shell-portability PreToolUse hook in Claude and Codex"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-build-guard-") as temp:
+        tartci = Path(temp) / "tartci"
+        tartci.write_text(
+            "#!/bin/sh\nprintf '%s\\n' '{\"reserved_gate_cores\": 1}'\n",
+            encoding="utf-8",
+        )
+        tartci.chmod(0o755)
+        environment = os.environ.copy()
+        environment["PULP_TARTCI_BIN"] = str(tartci)
+        environment["TOOL_INPUT"] = json.dumps({"command": "cmake --build build"})
+        for label, command, expected in (
+            ("Claude", claude_commands[0], 2),
+            ("Codex", codex_commands[0], 0),
+        ):
+            result = subprocess.run(
+                command,
+                cwd=ROOT,
+                env=environment,
+                shell=True,
+                text=True,
+                capture_output=True,
+                timeout=15,
+                check=False,
+                encoding="utf-8",
+            )
+            if result.returncode != expected:
+                raise RuntimeError(
+                    f"{label} shell-portability hook returned {result.returncode}, "
+                    f"expected {expected}; stdout={result.stdout!r}, "
+                    f"stderr={result.stderr!r}"
+                )
+
+
 def main() -> int:
     try:
         check_post_tool_input_channels()
         check_plugin_hooks_without_plugin_root()
+        check_build_guard_status_routing()
     except RuntimeError as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
