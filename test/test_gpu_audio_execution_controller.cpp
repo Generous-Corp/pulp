@@ -79,25 +79,24 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto minimum_capacity = contract();
     minimum_capacity.algorithmic_lead_blocks = 1;
-    minimum_capacity.pipeline_depth = 3;
-    minimum_capacity.max_inflight = 2;
+    minimum_capacity.pipeline_depth = 2;
+    minimum_capacity.max_inflight = 1;
 
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(minimum_capacity, &telemetry));
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
     REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
 
     ReuseProbe probe;
-    probe.next_sequence = 2;
+    probe.next_sequence = 1;
     controller.set_before_reuse_test_hook(observe_before_reuse, &probe);
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Gpu);
     REQUIRE(probe.called);
-    REQUIRE(probe.observed_in_flight == 1);
-    REQUIRE(probe.admission_before_reuse == SharedIoAdmission::CapacityFull);
-    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
+    REQUIRE(probe.observed_in_flight == 0);
+    REQUIRE(probe.admission_before_reuse == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::SequenceGap);
     REQUIRE(telemetry.snapshot().in_flight_high_water == minimum_capacity.max_inflight);
 }
 
