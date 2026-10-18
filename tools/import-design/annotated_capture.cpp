@@ -274,13 +274,26 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
         return false;
     }
 
+    // Remove non-markup regions before looking for start tags. Otherwise a
+    // nested `<rect id="x">` inside a comment, CDATA block, or script/style
+    // string could be mistaken for a real SVG element.
+    std::string svg_markup = svg;
+    for (const auto& pattern : {std::regex(R"(<!--[\s\S]*?-->)"),
+                                std::regex(R"(<!\[CDATA\[[\s\S]*?\]\]>)"),
+                                std::regex(R"(<\s*script\b[^>]*>[\s\S]*?<\s*/\s*script\s*>)",
+                                            std::regex_constants::icase),
+                                std::regex(R"(<\s*style\b[^>]*>[\s\S]*?<\s*/\s*style\s*>)",
+                                            std::regex_constants::icase)})
+        svg_markup = std::regex_replace(svg_markup, pattern, "");
+
     std::unordered_set<std::string> svg_ids;
     // Restrict attribute matching to actual start tags. A word-boundary match
     // over the whole source would accept `data-id`, `aria-id`, or comments as
     // if they were real SVG id attributes.
     const std::regex tag_re(R"(<\s*[A-Za-z][^<>]*>)");
     const std::regex id_re(R"((?:^|\s)id\s*=\s*["']([^"']+)["'])");
-    for (std::sregex_iterator tag(svg.begin(), svg.end(), tag_re), end; tag != end; ++tag) {
+    for (std::sregex_iterator tag(svg_markup.begin(), svg_markup.end(), tag_re), end; tag != end;
+         ++tag) {
         const auto tag_text = tag->str();
         for (std::sregex_iterator id(tag_text.begin(), tag_text.end(), id_re), id_end; id != id_end;
              ++id)
