@@ -751,6 +751,46 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
         CHECK_FALSE(impd::validate_annotated_capture(not_svg, bad, error));
         CHECK(error.find("<svg>") != std::string::npos);
     }
+    SECTION("selectors bind real id attributes, not data-id or comments") {
+        const std::string deceptive_svg =
+            R"(<svg width="200" height="100"><rect data-id="mix" x="10" y="20" width="40" height="30"/></svg>)";
+        auto deceptive = sidecar;
+        deceptive.replace(deceptive.find(hash), hash.size(),
+                          pulp::runtime::sha256_hex(deceptive_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(deceptive_svg, deceptive, error));
+        CHECK(error.find("absent") != std::string::npos);
+
+        const std::string commented_svg =
+            R"(<svg width="200" height="100"><!-- id="mix" --></svg>)";
+        auto commented = sidecar;
+        commented.replace(commented.find(hash), hash.size(),
+                          pulp::runtime::sha256_hex(commented_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(commented_svg, commented, error));
+        CHECK(error.find("absent") != std::string::npos);
+    }
+    SECTION("typed-invalid and non-finite geometry fail closed") {
+        auto typed_invalid = sidecar;
+        typed_invalid.replace(typed_invalid.find("\"cx\":30"),
+                              std::string("\"cx\":30").size(), "\"cx\":\"oops\"");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, typed_invalid, error));
+        CHECK(error.find("must be numeric") != std::string::npos);
+
+        auto non_finite = sidecar;
+        non_finite.replace(non_finite.find("\"cx\":30"),
+                           std::string("\"cx\":30").size(), "\"cx\":1e999");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, non_finite, error));
+        CHECK((error.find("non-finite") != std::string::npos ||
+               error.find("invalid") != std::string::npos));
+    }
+    SECTION("required geometry cannot be omitted") {
+        auto missing_geometry = sidecar;
+        const auto geometry = std::string(
+            R"JSON("geometry":{"cx":30,"cy":35,"hit_radius":10})JSON");
+        missing_geometry.replace(missing_geometry.find(geometry), geometry.size(),
+                                 R"JSON("param_key":"mix")JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, missing_geometry, error));
+        CHECK(error.find("requires a geometry object") != std::string::npos);
+    }
 }
 
 TEST_CASE("snake_case matches the generated-file convention",
