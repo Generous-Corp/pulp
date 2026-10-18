@@ -141,8 +141,8 @@ class SharedIoExecutionController {
             auto occupancy = in_flight_.load(std::memory_order_acquire);
             while (occupancy < contract_.max_inflight &&
                    !in_flight_.compare_exchange_weak(occupancy, occupancy + 1,
-                                                      std::memory_order_acq_rel,
-                                                      std::memory_order_acquire)) {
+                                                     std::memory_order_acq_rel,
+                                                     std::memory_order_acquire)) {
             }
             if (occupancy >= contract_.max_inflight) {
                 entry.state.store(static_cast<std::uint8_t>(EntryState::Empty),
