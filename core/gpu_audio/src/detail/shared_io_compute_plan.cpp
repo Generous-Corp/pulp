@@ -356,6 +356,10 @@ SharedIoComputePlan::receipt_for(const SharedIoSlotLedger::SlotToken& token) noe
 }
 
 void SharedIoComputePlan::append_calibration_observation(const LifecycleReceipt& receipt) {
+    for (const auto& key : calibration_emitted_keys_) {
+        if (key.first == receipt.generation && key.second == receipt.sequence)
+            return;
+    }
     for (const auto& observation : calibration_observations_) {
         if (observation.generation == receipt.generation &&
             observation.sequence == receipt.sequence)
@@ -443,7 +447,6 @@ void SharedIoComputePlan::record_calibration(LifecycleReceipt& receipt) noexcept
     if (provider_ != nullptr && provider_->device_lost())
         receipt.device_lost = true;
     if (lifecycle_receipt_overflow_ || completion_receipt_overflow_) {
-        append_calibration_observation(receipt);
         telemetry_.calibration_invalidated = true;
         return;
     }
@@ -456,7 +459,6 @@ void SharedIoComputePlan::record_calibration(LifecycleReceipt& receipt) noexcept
         }
         last_calibration_ns_ = terminal;
     }
-    append_calibration_observation(receipt);
     SharedIoCalibrationObservation observation;
     observation.identity = receipt.calibration_identity;
     observation.provenance = receipt.provenance;

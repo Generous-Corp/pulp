@@ -864,6 +864,7 @@ TEST_CASE("shared session preserves receipt projections regardless of extraction
 
     const auto observations = fixture.session.take_calibration_observations();
     REQUIRE(observations.size() == 1);
+    CHECK(fixture.session.take_calibration_observations().empty());
     const auto receipts = fixture.session.take_lifecycle_receipts();
     REQUIRE(receipts.size() == 1);
     CHECK(receipts.front().sequence == observations.front().sequence);

@@ -1148,6 +1148,9 @@ TEST_CASE("shared IO lifecycle receipts fail closed on bounded retention overflo
     CHECK(plan.receipt_overflow());
     CHECK_FALSE(plan.lifecycle_receipt_valid());
     CHECK(plan.take_lifecycle_receipts().size() == SharedIoComputePlan::kLifecycleReceiptCapacity);
+    const auto observations = plan.take_calibration_observations();
+    REQUIRE(observations.size() == SharedIoComputePlan::kLifecycleReceiptCapacity);
+    CHECK_FALSE(observations.front().valid());
     REQUIRE(plan.release());
 }
 

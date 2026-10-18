@@ -144,6 +144,9 @@ class SharedIoComputePlan {
         if (!arena_.quiescent())
             return {};
         materialize_missing_calibration_observations();
+        if (receipt_overflow())
+            for (auto& observation : calibration_observations_)
+                observation.lifecycle_valid = false;
         std::vector<LifecycleReceipt> result(lifecycle_receipts_.begin(),
                                              lifecycle_receipts_.end());
         lifecycle_receipts_.clear();
@@ -153,7 +156,16 @@ class SharedIoComputePlan {
         if (!arena_.quiescent())
             return {};
         materialize_missing_calibration_observations();
-        return std::exchange(calibration_observations_, {});
+        if (receipt_overflow())
+            for (auto& observation : calibration_observations_)
+                observation.lifecycle_valid = false;
+        for (const auto& observation : calibration_observations_)
+            calibration_emitted_keys_.emplace_back(observation.generation,
+                                                   observation.sequence);
+        auto result = std::exchange(calibration_observations_, {});
+        if (lifecycle_receipts_.empty())
+            calibration_emitted_keys_.clear();
+        return result;
     }
     bool lifecycle_receipt_overflow() const noexcept {
         return lifecycle_receipt_overflow_;
@@ -221,6 +233,7 @@ class SharedIoComputePlan {
     std::vector<Completion> completions_;
     std::vector<LifecycleReceipt> lifecycle_receipts_;
     std::vector<SharedIoCalibrationObservation> calibration_observations_;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> calibration_emitted_keys_;
     std::vector<std::size_t> receipt_index_by_slot_;
     bool lifecycle_receipt_overflow_ = false;
     bool completion_receipt_overflow_ = false;
