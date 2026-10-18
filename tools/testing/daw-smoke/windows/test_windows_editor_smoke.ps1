@@ -12,6 +12,20 @@ try {
     [System.Management.Automation.Language.Parser]::ParseFile($f.FullName,[ref]$tokens,[ref]$errors)|Out-Null
     Check ($errors.Count -eq 0) ('PowerShell parser '+$f.Name)
   }
+  $commonText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_common.ps1') -Raw
+  Check ($commonText -match 'CreateToolhelp32Snapshot' -and $commonText -match 'Module32FirstW') 'Toolhelp module probe uses snapshot enumeration'
+  Check ($commonText -match 'ErrorBadLength' -and $commonText -match 'MaxModules') 'Toolhelp probe retries bounded BAD_LENGTH and caps module count'
+  $probeCommand=@(Get-Command powershell.exe,pwsh -ErrorAction SilentlyContinue|Select-Object -First 1)
+  if($probeCommand.Count -ne 1){throw 'No PowerShell executable for bounded-probe fixture'}
+  $sleepProbe=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Start-Sleep -Seconds 4'))
+  $timeoutRejected=$false
+  try { Invoke-BoundedExternal $probeCommand[0].Source @('-NoProfile','-NonInteractive','-EncodedCommand',$sleepProbe) 1 'EXTERNAL_PROBE_TIMEOUT'|Out-Null }
+  catch { $timeoutRejected=$_.Exception.Message -eq 'EXTERNAL_PROBE_TIMEOUT' }
+  Check $timeoutRejected 'bounded external probe timeout is fail-closed'
+  if([Environment]::OSVersion.Platform -eq 'Win32NT'){
+    $modulePaths=@(Get-BoundModulePaths $PID 5)
+    Check ($modulePaths.Count -gt 0) 'Toolhelp module probe returns current process paths'
+  } else { Write-Output 'SKIP: Toolhelp runtime fixture requires Windows' }
   $profile=Join-Path $root 'scan-profile.ini'
   $staged='C:\isolated staged plugins'
   $scanPath=Get-ReaperVstScanPath $staged
