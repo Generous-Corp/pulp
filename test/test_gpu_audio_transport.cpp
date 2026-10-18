@@ -140,6 +140,10 @@ TEST_CASE("GpuAudioStatus rejects an uninitialized snapshot that claims preparat
 
     status.sample_rate = 48000;
     status.block_size = 32;
+    status.requested_engine = static_cast<GpuAudioEngine>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.requested_engine = GpuAudioEngine::Unknown;
     status.selected_engine = static_cast<GpuAudioEngine>(255);
     CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
 
