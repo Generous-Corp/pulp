@@ -775,6 +775,13 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
                               pulp::runtime::sha256_hex(nested_markup_svg));
         CHECK_FALSE(impd::validate_annotated_capture(nested_markup_svg, nested_markup, error));
         CHECK(error.find("absent") != std::string::npos);
+
+        const std::string unclosed_svg =
+            R"(<svg width="200" height="100"><!-- <rect id="mix"> </svg>)";
+        auto unclosed = sidecar;
+        unclosed.replace(unclosed.find(hash), hash.size(), pulp::runtime::sha256_hex(unclosed_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(unclosed_svg, unclosed, error));
+        CHECK(error.find("absent") != std::string::npos);
     }
     SECTION("typed-invalid and non-finite geometry fail closed") {
         auto typed_invalid = sidecar;

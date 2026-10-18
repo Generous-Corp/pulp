@@ -3,10 +3,12 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 #include <limits>
 #include <optional>
 #include <regex>
+#include <string_view>
 #include <unordered_set>
 #include <sstream>
 #include <unordered_map>
@@ -276,14 +278,43 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
 
     // Remove non-markup regions before looking for start tags. Otherwise a
     // nested `<rect id="x">` inside a comment, CDATA block, or script/style
-    // string could be mistaken for a real SVG element.
-    std::string svg_markup = svg;
-    for (const auto& pattern :
-         {std::regex(R"(<!--[\s\S]*?-->)"), std::regex(R"(<!\[CDATA\[[\s\S]*?\]\]>)"),
-          std::regex(R"(<\s*script\b[^>]*>[\s\S]*?<\s*/\s*script\s*>)",
-                     std::regex_constants::icase),
-          std::regex(R"(<\s*style\b[^>]*>[\s\S]*?<\s*/\s*style\s*>)", std::regex_constants::icase)})
-        svg_markup = std::regex_replace(svg_markup, pattern, "");
+    // string could be mistaken for a real SVG element. Unclosed regions consume
+    // the rest of the source so malformed envelopes fail closed.
+    std::string svg_markup;
+    const auto starts_ci = [&](size_t pos, std::string_view token) {
+        if (pos + token.size() > svg.size()) return false;
+        for (size_t j = 0; j < token.size(); ++j)
+            if (std::tolower(static_cast<unsigned char>(svg[pos + j])) !=
+                std::tolower(static_cast<unsigned char>(token[j])))
+                return false;
+        return true;
+    };
+    for (size_t i = 0; i < svg.size();) {
+        if (svg.compare(i, 4, "<!--") == 0) {
+            const auto end = svg.find("-->", i + 4);
+            if (end == std::string::npos) break;
+            i = end + 3;
+        } else if (svg.compare(i, 9, "<![CDATA[") == 0) {
+            const auto end = svg.find("]]>", i + 9);
+            if (end == std::string::npos) break;
+            i = end + 3;
+        } else if (starts_ci(i, "<script") || starts_ci(i, "<style")) {
+            const auto name_end = svg.find('>', i + 1);
+            if (name_end == std::string::npos) break;
+            const auto name = starts_ci(i, "<script") ? "script" : "style";
+            const auto close = svg.find(std::string("</") + name, name_end + 1);
+            if (close == std::string::npos) break;
+            const auto close_end = svg.find('>', close + 2 + std::strlen(name));
+            if (close_end == std::string::npos) break;
+            i = close_end + 1;
+        } else if (svg.compare(i, 2, "<?") == 0 || svg.compare(i, 2, "<!") == 0) {
+            const auto end = svg.find('>', i + 2);
+            if (end == std::string::npos) break;
+            i = end + 1;
+        } else {
+            svg_markup.push_back(svg[i++]);
+        }
+    }
 
     std::unordered_set<std::string> svg_ids;
     // Restrict attribute matching to actual start tags. A word-boundary match
