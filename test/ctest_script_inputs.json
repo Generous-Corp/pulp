@@ -12207,6 +12207,14 @@
    ],
    "kind": "python"
   },
+  "windows-vm-manifest-selftest": {
+   "entry": "tools/ci/test_windows_vm_manifest.py",
+   "inputs": [
+    "tools/ci/test_windows_vm_manifest.py",
+    "tools/ci/validate_windows_vm_manifest.py"
+   ],
+   "kind": "python"
+  },
   "windows-posix-shims-selftest": {
    "entry": "tools/scripts/test_windows_posix_shims.py",
    "inputs": [
