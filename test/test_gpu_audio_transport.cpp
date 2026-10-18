@@ -373,13 +373,13 @@ TEST_CASE("GpuAudioProgramDescriptor rejects forged capability enums for generic
 TEST_CASE("GpuAudioProgramDescriptor rejects capability drift before execution",
           "[gpu_audio][program]") {
     const auto program = valid_shared_program();
-    auto capability = valid_shared_capability();
+    auto capability = valid_staged_capability();
 
-    capability.path = GpuAudioExecutionPath::Staged;
     CHECK(validate_gpu_audio_program(program, capability).error ==
           GpuAudioProgramError::CapabilityPathMismatch);
 
     capability.path = GpuAudioExecutionPath::SharedMemory;
+    capability.provider = GpuAudioProvider::Dawn;
     capability.prepared_lead_blocks = 4;
     CHECK(validate_gpu_audio_program(program, capability).error ==
           GpuAudioProgramError::CapabilityLeadMismatch);
