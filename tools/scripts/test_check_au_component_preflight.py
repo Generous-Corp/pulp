@@ -321,6 +321,74 @@ class AuComponentPreflightTests(unittest.TestCase):
             self.assertIn("FAIL: auval list: aumf PHBn Pulp not listed", out)
             self.assertIn("listed 2 Apple component(s) and no non-Apple components", out)
 
+    def test_apple_only_inventory_gets_typed_registrar_diagnosis(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            outputs = {
+                "auval": "aufx bpas appl  -  Apple: AUBandpass\n",
+                "uname": "arm64\n",
+                "arch": "Rosetta 2 is not installed\n",
+                "launchctl domain": "Aqua\n",
+                "launchctl print": "service not found\n",
+                "pgrep": "",
+                "log": "Rosetta runtime is not available!\n",
+            }
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                tool = command[0]
+                if tool == "/usr/bin/auval":
+                    return preflight.subprocess.CompletedProcess(command, 0, outputs["auval"])
+                if tool == "uname":
+                    return preflight.subprocess.CompletedProcess(command, 0, outputs["uname"])
+                if tool == "arch":
+                    return preflight.subprocess.CompletedProcess(command, 1, outputs["arch"])
+                if tool == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Mach-O 64-bit executable arm64\n")
+                if tool == "/usr/bin/launchctl" and command[1] == "managername":
+                    return preflight.subprocess.CompletedProcess(command, 0, outputs["launchctl domain"])
+                if tool == "/usr/bin/launchctl":
+                    return preflight.subprocess.CompletedProcess(command, 1, outputs["launchctl print"])
+                if tool == "/usr/bin/pgrep":
+                    return preflight.subprocess.CompletedProcess(command, 1, outputs["pgrep"])
+                if tool == "/usr/bin/log":
+                    return preflight.subprocess.CompletedProcess(command, 0, outputs["log"])
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--check-auval-list", "--format", "json",
+                ])
+            data = json.loads(out)
+            self.assertEqual(rc, 1)
+            checks = {item["label"]: item for item in data["checks"]}
+            self.assertEqual(checks["auval list"]["code"], "SYSTEM_REGISTRAR_APPLE_ONLY")
+            self.assertEqual(checks["Rosetta"]["code"], "HOST_ROSETTA_MISSING")
+            self.assertEqual(checks["registrar logs"]["code"], "REGISTRAR_ROSETTA_FAILURE")
+
+    def test_diagnosis_reports_non_arm64_without_rosetta_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                if command[:2] == ["uname", "-m"]:
+                    return preflight.subprocess.CompletedProcess(command, 0, "x86_64\n")
+                if command[0] == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Mach-O 64-bit executable x86_64\n")
+                if command[0] == "/usr/bin/launchctl":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Background\n")
+                if command[0] == "/usr/bin/log":
+                    return preflight.subprocess.CompletedProcess(command, 0, "")
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                checks = preflight._diagnose_host(type("Args", (), {"bundle": bundle})())
+            rosetta = next(check for check in checks if check.label == "Rosetta")
+            self.assertTrue(rosetta.ok)
+            self.assertEqual(rosetta.code, "ROSETTA_NOT_REQUIRED")
+
     def test_json_output_is_machine_readable(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             bundle = _make_bundle(pathlib.Path(d))

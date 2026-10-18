@@ -20,6 +20,8 @@ class CheckResult:
     label: str
     ok: bool
     detail: str
+    code: str | None = None
+    remediation: str | None = None
 
 
 def _read_plist(path: Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -271,12 +273,31 @@ def _check_symbol(executable: Path, symbol: str) -> CheckResult:
     return CheckResult("factory symbol", True, needle)
 
 
+def _auval_inventory(output: str) -> tuple[list[str], list[str]]:
+    """Return all component rows and rows whose manufacturer is not Apple."""
+    component_lines: list[str] = []
+    non_apple_lines: list[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        if len(parts[0]) != 4 or not (1 <= len(parts[1]) <= 4) or len(parts[2]) != 4:
+            continue
+        component_lines.append(line)
+        if parts[2] != "appl":
+            non_apple_lines.append(line)
+    return component_lines, non_apple_lines
+
+
 def _check_auval_list(args: argparse.Namespace) -> CheckResult:
     auval = shutil.which("auval")
     if auval is None:
-        return CheckResult("auval list", False, "auval not found")
+        return CheckResult("auval list", False, "auval not found", "TOOL_MISSING",
+                           "Install the macOS AudioUnit validation tools.")
     if not (args.expect_type and args.expect_subtype and args.expect_manufacturer):
-        return CheckResult("auval list", False, "type, subtype, and manufacturer are required")
+        return CheckResult("auval list", False, "type, subtype, and manufacturer are required",
+                           "EXPECTATION_MISSING", "Pass --expect-type, --expect-subtype, and --expect-manufacturer.")
 
     proc = subprocess.run(
         [auval, "-a"],
@@ -288,28 +309,28 @@ def _check_auval_list(args: argparse.Namespace) -> CheckResult:
     needle = f"{args.expect_type} {args.expect_subtype} {args.expect_manufacturer}"
     if proc.returncode != 0:
         tail = "\n".join(proc.stdout.splitlines()[-12:])
-        return CheckResult("auval list", False, tail or "auval -a failed")
+        return CheckResult("auval list", False, tail or "auval -a failed", "AUVAL_LIST_FAILED",
+                           "Run the host diagnosis and inspect AudioComponentRegistrar logs.")
     for line in proc.stdout.splitlines():
         if line.strip().startswith(needle):
-            return CheckResult("auval list", True, line.strip())
-    return CheckResult("auval list", False,
-                       f"{needle} not listed; {_summarize_auval_list(proc.stdout)}")
+            return CheckResult("auval list", True, line.strip(), "COMPONENT_VISIBLE")
+    components, non_apple = _auval_inventory(proc.stdout)
+    summary = _summarize_auval_list(proc.stdout)
+    if components and not non_apple:
+        return CheckResult(
+            "auval list", False, f"{needle} not listed; {summary}",
+            "SYSTEM_REGISTRAR_APPLE_ONLY",
+            "Run again with --diagnose-host; restart the AudioComponentRegistrar or reboot after Rosetta is installed, then rescan.",
+        )
+    return CheckResult(
+        "auval list", False, f"{needle} not listed; {summary}",
+        "COMPONENT_NOT_REGISTERED",
+        "Run again with --diagnose-host; verify installation path, metadata, architecture, signing, and registrar state.",
+    )
 
 
 def _summarize_auval_list(output: str) -> str:
-    component_lines = []
-    non_apple_lines = []
-    for raw_line in output.splitlines():
-        line = raw_line.strip()
-        parts = line.split()
-        if len(parts) < 3:
-            continue
-        if len(parts[0]) != 4 or not (1 <= len(parts[1]) <= 4) or len(parts[2]) != 4:
-            continue
-        component_lines.append(line)
-        if parts[2] != "appl":
-            non_apple_lines.append(line)
-
+    component_lines, non_apple_lines = _auval_inventory(output)
     if not component_lines:
         return "auval -a listed no components"
     if not non_apple_lines:
@@ -317,6 +338,89 @@ def _summarize_auval_list(output: str) -> str:
     sample = "; ".join(non_apple_lines[:3])
     suffix = "" if len(non_apple_lines) <= 3 else f"; +{len(non_apple_lines) - 3} more"
     return f"auval -a listed {len(component_lines)} component(s), including non-Apple: {sample}{suffix}"
+
+
+def _run_probe(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, text=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, check=False)
+
+
+def _check_host_architecture(bundle: Path) -> list[CheckResult]:
+    results: list[CheckResult] = []
+    uname = _run_probe(["uname", "-m"])
+    arch = uname.stdout.strip() or "unknown"
+    results.append(CheckResult("host architecture", uname.returncode == 0, arch,
+                               "HOST_ARCHITECTURE" if uname.returncode == 0 else "HOST_ARCHITECTURE_UNKNOWN"))
+    executable = bundle / "Contents" / "MacOS"
+    names = list(executable.iterdir()) if executable.is_dir() else []
+    target = names[0] if names else None
+    if target is None:
+        results.append(CheckResult("binary architecture", False, "executable not found",
+                                   "BINARY_MISSING", "Fix CFBundleExecutable and rebuild the component."))
+    else:
+        file_tool = shutil.which("file")
+        if file_tool:
+            probe = _run_probe([file_tool, str(target)])
+            detail = probe.stdout.strip() or "file returned no architecture"
+            results.append(CheckResult("binary architecture", probe.returncode == 0, detail,
+                                       "BINARY_ARCHITECTURE" if probe.returncode == 0 else "BINARY_ARCHITECTURE_UNKNOWN"))
+    if arch == "arm64":
+        rosetta = _run_probe(["arch", "-x86_64", "true"])
+        if rosetta.returncode == 0:
+            results.append(CheckResult("Rosetta", True, "available", "ROSETTA_AVAILABLE"))
+        else:
+            results.append(CheckResult("Rosetta", False, rosetta.stdout.strip() or "unavailable",
+                                       "HOST_ROSETTA_MISSING",
+                                       "Install Rosetta with: softwareupdate --install-rosetta --agree-to-license; restart the registrar before rescanning."))
+    else:
+        results.append(CheckResult("Rosetta", True, "not required on non-arm64 host", "ROSETTA_NOT_REQUIRED"))
+    return results
+
+
+def _check_registrar() -> list[CheckResult]:
+    results: list[CheckResult] = []
+    launchctl = shutil.which("launchctl")
+    if not launchctl:
+        return [CheckResult("AudioComponentRegistrar", False, "launchctl not found", "REGISTRAR_TOOL_MISSING",
+                            "Run this check on macOS with launchctl available." )]
+    domain = _run_probe([launchctl, "managername"])
+    if domain.returncode == 0:
+        results.append(CheckResult("registrar domain", True, domain.stdout.strip() or "unknown",
+                                   "REGISTRAR_DOMAIN"))
+    probe = _run_probe([launchctl, "print", "system/com.apple.audio.AudioComponentRegistrar"])
+    if probe.returncode == 0:
+        results.append(CheckResult("AudioComponentRegistrar", True, "system service present", "REGISTRAR_PRESENT"))
+    else:
+        # The registrar can be a short-lived on-demand process rather than a
+        # continuously printed launchd service. Use a process probe before
+        # diagnosing the host as unavailable.
+        pgrep = shutil.which("pgrep")
+        running = _run_probe([pgrep, "-x", "AudioComponentRegistrar"]) if pgrep else None
+        if running is not None and running.returncode == 0:
+            results.append(CheckResult("AudioComponentRegistrar", True, "process present (on-demand)",
+                                       "REGISTRAR_PRESENT"))
+        else:
+            results.append(CheckResult("AudioComponentRegistrar", False, probe.stdout.strip() or "service not found",
+                                       "SYSTEM_REGISTRAR_UNAVAILABLE",
+                                       "Restart the registrar or reboot macOS, then rerun this preflight."))
+    log = shutil.which("log")
+    if log:
+        logs = _run_probe([log, "show", "--last", "10m", "--style", "compact",
+                           "--predicate", 'process == "AudioComponentRegistrar" OR eventMessage CONTAINS[c] "Rosetta runtime is not available"'])
+        text = logs.stdout.strip()
+        if "Rosetta runtime is not available" in text:
+            results.append(CheckResult("registrar logs", False, "Rosetta runtime is not available",
+                                       "REGISTRAR_ROSETTA_FAILURE",
+                                       "Install Rosetta and restart the registrar before rescanning."))
+        else:
+            results.append(CheckResult("registrar logs", True, "no recent Rosetta failure observed", "REGISTRAR_LOGS_CLEAR"))
+    return results
+
+
+def _diagnose_host(args: argparse.Namespace) -> list[CheckResult]:
+    results = _check_host_architecture(args.bundle)
+    results.extend(_check_registrar())
+    return results
 
 
 def _run_auval(args: argparse.Namespace) -> list[CheckResult]:
@@ -361,6 +465,8 @@ def _render_json(results: list[CheckResult]) -> str:
                 "label": result.label,
                 "ok": result.ok,
                 "detail": result.detail,
+                **({"code": result.code} if result.code else {}),
+                **({"remediation": result.remediation} if result.remediation else {}),
             }
             for result in results
         ],
@@ -394,6 +500,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="also require spctl --assess --type execute to accept the bundle")
     parser.add_argument("--check-auval-list", action="store_true",
                         help="also require auval -a to list the expected type/subtype/manufacturer")
+    parser.add_argument("--diagnose-host", action="store_true",
+                        help="inspect Apple Silicon/Rosetta and AudioComponentRegistrar when diagnosing AU discovery")
     parser.add_argument("--run-auval", action="store_true",
                         help="also run auval -v using the expected type/subtype/manufacturer")
     parser.add_argument("--auval-repeat", type=int, default=2,
@@ -411,7 +519,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_gatekeeper:
         results.append(_check_gatekeeper(args.bundle))
     if args.check_auval_list:
-        results.append(_check_auval_list(args))
+        auval_result = _check_auval_list(args)
+        results.append(auval_result)
+        if args.diagnose_host or (not auval_result.ok and auval_result.code == "SYSTEM_REGISTRAR_APPLE_ONLY"):
+            results.extend(_diagnose_host(args))
     if args.run_auval:
         results.extend(_run_auval(args))
 

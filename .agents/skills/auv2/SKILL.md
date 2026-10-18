@@ -567,6 +567,22 @@ directly—the shared helpers contain exceptions.
 
 Logic, MainStage, GarageBand, Studio One, Live, and every other AU host maintain a **host-side cache** of AU descriptors, keyed on subtype + manufacturer. When you change a plug-in from `aufx` to `aumf` (or vice versa) *without* also changing the subtype, hosts will keep the cached-old-type descriptor and behave as if the fix never shipped — you'll install a fresh `.component` and the host will still treat it as `aufx`. Symptoms: rebuilt plug-in appears in the correct MIDI-effect slot of the host UI only after a restart, or never appears at all.
 
+Before interpreting a missing row as a bundle failure, run the shared Pulp
+preflight. It checks metadata, binary architecture, Rosetta, registrar state,
+and the `auval -a` inventory, with stable reason codes and remediation:
+
+```bash
+python3 tools/scripts/check_au_component_preflight.py path/to/Plugin.component \
+  --expect-type aumu --expect-subtype MySy --expect-manufacturer Plup \
+  --check-auval-list --diagnose-host --run-auval --auval-repeat 2 --format json
+```
+
+`SYSTEM_REGISTRAR_APPLE_ONLY` means that the invoking launchd domain exposes no
+third-party AUs; it does not prove malformed metadata. Background/SSH and Aqua
+GUI domains can differ. Record `registrar domain` and require two stable passes
+in the same GUI domain as the DAW. `HOST_ROSETTA_MISSING` and
+`REGISTRAR_ROSETTA_FAILURE` identify the Apple Silicon Rosetta remediation.
+
 Mitigation when you test a type change locally:
 
 ```bash

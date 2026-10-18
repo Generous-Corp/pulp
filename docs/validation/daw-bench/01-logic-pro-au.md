@@ -49,15 +49,23 @@ python3 tools/scripts/check_au_component_preflight.py \
     --check-codesign \
     --check-gatekeeper \
     --check-auval-list \
+    --diagnose-host \
     --run-auval \
     --auval-repeat 2
 ```
 
 If `auval` cannot discover the component, stop here. Do not use a Logic session
-as evidence until AU discovery is stable. If the preflight says `auval -a`
-listed Apple components and no non-Apple components, fix the local AU registrar
-environment first; that means this Mac is not exposing third-party AU
-components to `auval`. If Gatekeeper reports `Adhoc Signed App` or
+as evidence until AU discovery is stable. Always include `--diagnose-host` when
+investigating discovery. The JSON result has stable reason codes such as
+`COMPONENT_METADATA_INVALID`, `HOST_ROSETTA_MISSING`,
+`SYSTEM_REGISTRAR_APPLE_ONLY`, and `REGISTRAR_ROSETTA_FAILURE`, with a
+remediation string for each. If the preflight says `auval -a` listed Apple
+components and no non-Apple components, that is a registrar-domain problem,
+not proof that the bundle is malformed: `auval` may be running in a background
+or SSH launchd domain while Logic/REAPER runs in the Aqua GUI domain. Capture a
+GUI-session result before declaring the plugin undiscoverable. Conversely, a
+GUI result does not prove a background `auval` invocation; keep the domain in
+the receipt and require two stable runs. If Gatekeeper reports `Adhoc Signed App` or
 `Notary Ticket Missing`, verify the shell can use the Developer ID private key
 before attempting a new notarized install:
 
