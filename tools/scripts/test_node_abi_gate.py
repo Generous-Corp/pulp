@@ -216,13 +216,13 @@ class NodeAbiMainUnitTests(unittest.TestCase):
     def test_main_reports_findings_and_hint_mode_stays_green(self) -> None:
         stderr = io.StringIO()
         with mock.patch.object(nag, "repo_root", return_value=Path("/repo")), \
-             mock.patch.object(nag, "check_surface", side_effect=["Processor: bad", None]), \
+             mock.patch.object(nag, "check_surface", side_effect=["Processor: bad", None, None]), \
              contextlib.redirect_stderr(stderr):
             self.assertEqual(nag.main(["--mode", "report"]), 1)
         self.assertIn("Processor: bad", stderr.getvalue())
 
         with mock.patch.object(nag, "repo_root", return_value=Path("/repo")), \
-             mock.patch.object(nag, "check_surface", side_effect=["Processor: bad", None]), \
+             mock.patch.object(nag, "check_surface", side_effect=["Processor: bad", None, None]), \
              contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(nag.main(["--mode", "hint"]), 0)
 
@@ -252,8 +252,18 @@ class NodeAbiGateTests(unittest.TestCase):
         self.plugin_slot = (
             self.tmp / "core" / "host" / "include" / "pulp" / "host" / "plugin_slot.hpp"
         )
+        self.gpu_audio_node = (
+            self.tmp
+            / "core"
+            / "gpu_audio"
+            / "include"
+            / "pulp"
+            / "gpu_audio"
+            / "gpu_audio_node.hpp"
+        )
         self.write_headers(["~Processor", "descriptor", "prepare"],
-                           ["~PluginSlot", "info", "process"])
+                           ["~PluginSlot", "info", "process"],
+                           ["~GpuAudioNode", "descriptor", "prepare"])
         git(self.tmp, "add", ".")
         git(self.tmp, "commit", "-q", "-m", "initial")
         git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -261,11 +271,18 @@ class NodeAbiGateTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def write_headers(self, processor_methods: list[str], slot_methods: list[str]) -> None:
+    def write_headers(
+        self,
+        processor_methods: list[str],
+        slot_methods: list[str],
+        gpu_audio_node_methods: list[str],
+    ) -> None:
         self.processor.parent.mkdir(parents=True, exist_ok=True)
         self.plugin_slot.parent.mkdir(parents=True, exist_ok=True)
+        self.gpu_audio_node.parent.mkdir(parents=True, exist_ok=True)
         self.processor.write_text(self.header("Processor", processor_methods))
         self.plugin_slot.write_text(self.header("PluginSlot", slot_methods))
+        self.gpu_audio_node.write_text(self.header("GpuAudioNode", gpu_audio_node_methods))
 
     @staticmethod
     def header(class_name: str, methods: list[str]) -> str:
@@ -289,21 +306,40 @@ class NodeAbiGateTests(unittest.TestCase):
         return run(["python3", str(GATE), "--base", "origin/main"], self.tmp)
 
     def test_appended_virtuals_pass(self) -> None:
-        self.write_headers(["~Processor", "descriptor", "prepare", "release"],
-                           ["~PluginSlot", "info", "process", "parameters"])
+        self.write_headers(
+            ["~Processor", "descriptor", "prepare", "release"],
+            ["~PluginSlot", "info", "process", "parameters"],
+            ["~GpuAudioNode", "descriptor", "prepare", "release"],
+        )
         code, out = self.gate()
         self.assertEqual(code, 0, out)
 
     def test_inserted_virtual_fails(self) -> None:
-        self.write_headers(["~Processor", "descriptor", "inserted", "prepare"],
-                           ["~PluginSlot", "info", "process"])
+        self.write_headers(
+            ["~Processor", "descriptor", "inserted", "prepare"],
+            ["~PluginSlot", "info", "process"],
+            ["~GpuAudioNode", "descriptor", "prepare"],
+        )
         code, out = self.gate()
         self.assertEqual(code, 1)
         self.assertIn("Processor: virtual order is not additive-only", out)
 
+    def test_gpu_audio_node_inserted_virtual_fails(self) -> None:
+        self.write_headers(
+            ["~Processor", "descriptor", "prepare"],
+            ["~PluginSlot", "info", "process"],
+            ["~GpuAudioNode", "descriptor", "inserted", "prepare"],
+        )
+        code, out = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("GpuAudioNode: virtual order is not additive-only", out)
+
     def test_removed_virtual_fails(self) -> None:
-        self.write_headers(["~Processor", "descriptor"],
-                           ["~PluginSlot", "info", "process"])
+        self.write_headers(
+            ["~Processor", "descriptor"],
+            ["~PluginSlot", "info", "process"],
+            ["~GpuAudioNode", "descriptor"],
+        )
         code, out = self.gate()
         self.assertEqual(code, 1)
         self.assertIn("current order removed virtual method", out)
@@ -312,6 +348,7 @@ class NodeAbiGateTests(unittest.TestCase):
         self.write_headers(
             ["~Processor", "descriptor", "virtual void prepare(double samples) {}"],
             ["~PluginSlot", "info", "process"],
+            ["~GpuAudioNode", "descriptor", "prepare"],
         )
         code, out = self.gate()
         self.assertEqual(code, 1)
@@ -323,6 +360,7 @@ class NodeAbiGateTests(unittest.TestCase):
         self.write_headers(
             ["~Processor", "descriptor", "virtual void prepare(int samples) {}"],
             ["~PluginSlot", "info", "process"],
+            ["~GpuAudioNode", "descriptor", "prepare"],
         )
         git(self.tmp, "add", ".")
         git(self.tmp, "commit", "-q", "-m", "named parameter baseline")
@@ -331,6 +369,7 @@ class NodeAbiGateTests(unittest.TestCase):
         self.write_headers(
             ["~Processor", "descriptor", "virtual void prepare(int block_size) {}"],
             ["~PluginSlot", "info", "process"],
+            ["~GpuAudioNode", "descriptor", "prepare"],
         )
         code, out = self.gate()
         self.assertEqual(code, 0, out)
@@ -343,8 +382,11 @@ class NodeAbiGateTests(unittest.TestCase):
         git(self.tmp, "add", "notes.txt")
         git(self.tmp, "commit", "-q", "-m", "unrelated change")
         git(self.tmp, "checkout", "-q", "main")
-        self.write_headers(["~Processor", "descriptor", "prepare"],
-                           ["~PluginSlot", "info", "process", "newer_on_main"])
+        self.write_headers(
+            ["~Processor", "descriptor", "prepare"],
+            ["~PluginSlot", "info", "process", "newer_on_main"],
+            ["~GpuAudioNode", "descriptor", "prepare"],
+        )
         git(self.tmp, "commit", "-q", "-am", "append a virtual on main")
         git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
         git(self.tmp, "checkout", "-q", "feature")
@@ -356,8 +398,11 @@ class NodeAbiGateTests(unittest.TestCase):
 
     def test_branch_behind_main_still_fails_its_own_removal(self) -> None:
         self.branch_behind_main()
-        self.write_headers(["~Processor", "descriptor", "prepare"],
-                           ["~PluginSlot", "process"])
+        self.write_headers(
+            ["~Processor", "descriptor", "prepare"],
+            ["~PluginSlot", "process"],
+            ["~GpuAudioNode", "descriptor", "prepare"],
+        )
         code, out = self.gate()
         self.assertEqual(code, 1, out)
         self.assertIn("PluginSlot: virtual order is not additive-only", out)
