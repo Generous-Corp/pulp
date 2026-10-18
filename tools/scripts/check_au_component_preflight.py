@@ -299,13 +299,23 @@ def _check_auval_list(args: argparse.Namespace) -> CheckResult:
         return CheckResult("auval list", False, "type, subtype, and manufacturer are required",
                            "EXPECTATION_MISSING", "Pass --expect-type, --expect-subtype, and --expect-manufacturer.")
 
-    proc = subprocess.run(
-        [auval, "-a"],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [auval, "-a"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=args.auval_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.output.decode(errors="replace") if isinstance(exc.output, bytes) else (exc.output or "")
+        return CheckResult(
+            "auval list", False,
+            f"timed out after {args.auval_timeout:g}s" + (f"\n{partial}" if partial else ""),
+            "AUVAL_TIMEOUT",
+            "Do not retry an unbounded scan; isolate the target with --run-auval and inspect the registrar domain/logs.",
+        )
     needle = f"{args.expect_type} {args.expect_subtype} {args.expect_manufacturer}"
     if proc.returncode != 0:
         tail = "\n".join(proc.stdout.splitlines()[-12:])
@@ -340,9 +350,9 @@ def _summarize_auval_list(output: str) -> str:
     return f"auval -a listed {len(component_lines)} component(s), including non-Apple: {sample}{suffix}"
 
 
-def _run_probe(command: list[str]) -> subprocess.CompletedProcess[str]:
+def _run_probe(command: list[str], *, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, check=False)
+                          stderr=subprocess.STDOUT, check=False, timeout=timeout)
 
 
 def _check_host_architecture(bundle: Path) -> list[CheckResult]:
@@ -432,14 +442,23 @@ def _run_auval(args: argparse.Namespace) -> list[CheckResult]:
 
     results: list[CheckResult] = []
     for index in range(args.auval_repeat):
-        proc = subprocess.run(
-            [auval, "-v", args.expect_type, args.expect_subtype, args.expect_manufacturer],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
         detail = f"run {index + 1}/{args.auval_repeat}"
+        try:
+            proc = subprocess.run(
+                [auval, "-v", args.expect_type, args.expect_subtype, args.expect_manufacturer],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+                timeout=args.auval_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            results.append(CheckResult(
+                "auval", False, f"{detail} timed out after {args.auval_timeout:g}s",
+                "AUVAL_TIMEOUT",
+                "Inspect registrar logs and isolate unrelated third-party components before retrying.",
+            ))
+            continue
         if proc.returncode != 0 or "PASS" not in proc.stdout:
             tail = "\n".join(proc.stdout.splitlines()[-12:])
             results.append(CheckResult("auval", False, f"{detail} failed\n{tail}"))
@@ -506,10 +525,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="also run auval -v using the expected type/subtype/manufacturer")
     parser.add_argument("--auval-repeat", type=int, default=2,
                         help="number of auval runs required when --run-auval is set")
+    parser.add_argument("--auval-timeout", type=float, default=30.0,
+                        help="maximum seconds allowed for each auval invocation (default: 30)")
     args = parser.parse_args(argv)
 
     if args.auval_repeat < 1:
         parser.error("--auval-repeat must be at least 1")
+    if args.auval_timeout <= 0:
+        parser.error("--auval-timeout must be greater than 0")
 
     results = _check_bundle(args)
     if args.check_codesign:

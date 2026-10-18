@@ -408,6 +408,34 @@ class AuComponentPreflightTests(unittest.TestCase):
                 "detail": "aumf",
             }, data["checks"])
 
+    def test_auval_list_timeout_is_typed_and_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=preflight.subprocess.TimeoutExpired(["auval", "-a"], 0.1)):
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--check-auval-list", "--auval-timeout", "0.1",
+                    "--format", "json",
+                ])
+            data = json.loads(out)
+            self.assertEqual(rc, 1)
+            check = next(item for item in data["checks"] if item["label"] == "auval list")
+            self.assertEqual(check["code"], "AUVAL_TIMEOUT")
+            self.assertIn("timed out", check["detail"])
+
+    def test_auval_validation_timeout_is_typed(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            with mock.patch.object(preflight.shutil, "which", return_value="/usr/bin/auval"), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=preflight.subprocess.TimeoutExpired(["auval", "-v"], 0.1)):
+                rc, out = self._run([
+                    str(bundle), "--expect-type", "aumf", "--expect-subtype", "PHBn",
+                    "--expect-manufacturer", "Pulp", "--run-auval", "--auval-timeout", "0.1",
+                ])
+            self.assertEqual(rc, 1)
+            self.assertIn("FAIL: auval: run 1/2 timed out", out)
+
     def test_auval_repeat_runs_requested_number_of_times(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             bundle = _make_bundle(pathlib.Path(d))
