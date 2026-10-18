@@ -24,7 +24,10 @@ boundary is checked before the host starts so an ACL failure cannot be
 misreported as a plugin or status-publication failure.
 
 Use an initialized, registered profile whose first-run dialogs have already
-been dismissed. The harness copies the non-secret profile into a private
+been dismissed. The seed `reaper.ini` must contain both `[REAPER]` and
+`[audioconfig]`; a first-run/minimal profile is rejected immediately as
+`REAPER_SEED_PROFILE_INCOMPLETE` instead of being allowed to hang before
+startup-script dispatch. The harness copies the non-secret profile into a private
 temporary profile outside the evidence directory, preserves the license only in
 that private profile, and removes old VST/CLAP scan caches before the exact
 staged plugin is scanned. Windows REAPER's `-cfgfile` resource directory

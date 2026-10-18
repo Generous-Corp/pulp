@@ -50,7 +50,7 @@ try {
   $receipt.session=Get-InteractiveDesktopContext
   $hostPe=Get-PeIdentity $reaper; $keys=Get-ReaperScanKeys $hostPe.execution_abi
   $receipt.host=@{path=$reaper;pe=$hostPe;sha256=(Get-FileHash -LiteralPath $reaper -Algorithm SHA256).Hash}
-  if(-not(Test-Path -LiteralPath (Join-Path $SeedProfile 'reaper.ini') -PathType Leaf)){throw 'SeedProfile must contain an initialized reaper.ini'}
+  Assert-ReaperSeedProfile $SeedProfile
   if(-not(Test-Path -LiteralPath $PluginPath)){throw "Plugin missing: $PluginPath"}
   $plugin=(Resolve-Path -LiteralPath $PluginPath).Path
   if([IO.Path]::GetExtension($plugin) -ine ('.'+$Format)){throw 'Plugin format/path mismatch'}
