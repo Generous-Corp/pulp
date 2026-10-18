@@ -309,6 +309,7 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
         pulp::midi::MidiBuffer midi_in, midi_out;
         ParameterEventQueue params;
         while (!stop_token.stop_requested()) {
+            for (auto& channel : out) std::fill(channel.begin(), channel.end(), 0.0f);
             pulp::audio::BufferView<float> ov(out_ptrs.data(), kChannels, kBlockSize);
             pulp::audio::BufferView<const float> iv(
                 const_cast<const float**>(in_ptrs.data()), kChannels, kBlockSize);
