@@ -74,6 +74,8 @@ bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config&
     lifecycle_receipts_.reserve(kLifecycleReceiptCapacity);
     calibration_observations_.clear();
     calibration_observations_.reserve(kLifecycleReceiptCapacity);
+    calibration_emitted_keys_.clear();
+    calibration_emitted_keys_.reserve(kLifecycleReceiptCapacity);
     receipt_index_by_slot_.assign(config.slots, kLifecycleReceiptCapacity);
     lifecycle_receipt_overflow_ = false;
     completion_receipt_overflow_ = false;
