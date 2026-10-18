@@ -50,7 +50,8 @@ class WindowsVmManifestTests(unittest.TestCase):
                     'mode = "guest-local"',
                 )
             )
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         return manifest
 
