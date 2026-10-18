@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <climits>
 #include <limits>
 #include <optional>
 #include <regex>
@@ -351,6 +352,15 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
                 error = "element " + std::to_string(i) + " field '" + key + "' must be numeric";
                 return false;
             }
+        for (const char* key : {"selected_index", "note", "view_group", "target_frame"})
+            if (element.hasObjectMember(key)) {
+                const auto value = element[key].getWithDefault(0.0);
+                if (!std::isfinite(value) || value < INT_MIN || value > INT_MAX) {
+                    error = "element " + std::to_string(i) + " field '" + key +
+                            "' is outside integer range";
+                    return false;
+                }
+            }
         if (!element.hasObjectMember("geometry") || !element["geometry"].isObject()) {
             error = "element " + std::to_string(i) + " requires a geometry object";
             return false;
@@ -411,13 +421,14 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
             error = "control selector '" + e.source_node_id + "' is absent from SVG";
             return false;
         }
-        if (e.w < 0 || e.h < 0 || e.x < 0 || e.y < 0 || e.x + e.w > cw || e.y + e.h > ch) {
+        if ((e.kind != DesignFrameElement::Kind::knob && (e.w <= 0 || e.h <= 0)) ||
+            e.x < 0 || e.y < 0 || e.x + e.w > cw || e.y + e.h > ch) {
             error = "element " + std::to_string(i) + " geometry is outside canvas";
             return false;
         }
         if ((e.kind == DesignFrameElement::Kind::knob ||
              e.kind == DesignFrameElement::Kind::xy_pad) &&
-            (e.cx < 0 || e.cy < 0 || e.cx > cw || e.cy > ch || e.hit_radius < 0 ||
+            (e.cx < 0 || e.cy < 0 || e.cx > cw || e.cy > ch || e.hit_radius <= 0 ||
              e.cx + e.hit_radius > cw || e.cy + e.hit_radius > ch || e.cx - e.hit_radius < 0 ||
              e.cy - e.hit_radius < 0)) {
             error = "element " + std::to_string(i) + " control center is outside canvas";

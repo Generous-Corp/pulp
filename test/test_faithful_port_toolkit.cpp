@@ -806,6 +806,13 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
         CHECK_FALSE(impd::validate_annotated_capture(svg, missing_geometry, error));
         CHECK(error.find("requires a geometry object") != std::string::npos);
     }
+    SECTION("zero-sized geometry fails closed") {
+        auto zero = sidecar;
+        zero.replace(zero.find("\"hit_radius\":10"), std::string("\"hit_radius\":10").size(),
+                     "\"hit_radius\":0");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, zero, error));
+        CHECK(error.find("outside canvas") != std::string::npos);
+    }
 }
 
 TEST_CASE("snake_case matches the generated-file convention",
