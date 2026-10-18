@@ -14,6 +14,8 @@ namespace {
 struct Kernel {
     float history = 0.0f;
     int releases = 0;
+    int processes = 0;
+    int quiesces = 0;
     bool fail_once = false;
     bool plant_faults = false;
 };
@@ -33,6 +35,7 @@ bool prepare(void* p, const StreamingPrepareContext&) noexcept {
 }
 void process(void* p, const float* in, float* out, std::uint32_t frames) noexcept {
     auto& k = *static_cast<Kernel*>(p);
+    ++k.processes;
     if (k.plant_faults)
         planted_rt_faults();
     for (std::uint32_t i = 0; i < frames; ++i) {
@@ -43,7 +46,8 @@ void process(void* p, const float* in, float* out, std::uint32_t frames) noexcep
 void reset(void* p) noexcept {
     static_cast<Kernel*>(p)->history = 0.0f;
 }
-bool quiesce(void*) noexcept {
+bool quiesce(void* p) noexcept {
+    ++static_cast<Kernel*>(p)->quiesces;
     return true;
 }
 bool release(void* p) noexcept {
@@ -147,9 +151,37 @@ TEST_CASE("causal TCN CPU adapter rejects identity, layout, and alias violations
     auto ov = pulp::audio::BufferView<float>(op, 1, 2);
     adapter.process_cpu(iv, ov, 2, {});
     CHECK(samples == std::array<float, 2>{0, 0});
+    std::array<float, 3> partial_samples{1, 2, 3};
+    const float* partial_ip[] = {partial_samples.data()};
+    float* partial_op[] = {partial_samples.data() + 1};
+    auto partial_iv = pulp::audio::BufferView<const float>(partial_ip, 1, 2);
+    auto partial_ov = pulp::audio::BufferView<float>(partial_op, 1, 2);
+    adapter.process_cpu(partial_iv, partial_ov, 2, {});
+    CHECK(partial_samples == std::array<float, 3>{1, 0, 0});
+    CHECK(k.processes == 0);
     REQUIRE(adapter.release());
+    CHECK_FALSE(adapter.quiesce());
+    CHECK(k.quiesces == 0);
     auto malformed = shape();
     malformed.dilation = 0;
     CHECK_FALSE(valid_tcn_cpu_shape(malformed));
     CHECK(tcn_cpu_state_bytes(malformed) == 0);
+}
+
+TEST_CASE("causal TCN CPU adapter only quiesces a prepared kernel",
+          "[gpu_audio][neural][tcn][lifecycle]") {
+    auto s = spec();
+    Kernel k;
+    auto adapter = make(k, s);
+    CHECK_FALSE(adapter.quiesce());
+    CHECK(k.quiesces == 0);
+
+    const StreamingPrepareContext c{&adapter.spec(), "fixture.tcn", "sha256:fixture-weights",
+                                    StreamingFallbackStrategy::NoFallback, 32};
+    REQUIRE(adapter.prepare(c));
+    REQUIRE(adapter.quiesce());
+    CHECK(k.quiesces == 1);
+    REQUIRE(adapter.release());
+    CHECK_FALSE(adapter.quiesce());
+    CHECK(k.quiesces == 1);
 }
