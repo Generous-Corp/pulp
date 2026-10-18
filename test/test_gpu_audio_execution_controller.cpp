@@ -270,13 +270,19 @@ TEST_CASE("device-loss fallback preserves callback continuity and receipt accoun
     REQUIRE(second_fallback.path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(second_fallback.fallback_reason == SharedIoFallbackReason::DeviceLost);
 
+    // With one lead block, callback 4 consumes the failed sequence 3 entry.
+    const auto third_fallback = controller.deliver(4);
+    REQUIRE(third_fallback.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(third_fallback.expected_sequence == 3);
+    REQUIRE(third_fallback.fallback_reason == SharedIoFallbackReason::DeviceLost);
+
     const auto receipt = telemetry.snapshot();
-    REQUIRE(receipt.callback_blocks == 4);
+    REQUIRE(receipt.callback_blocks == 5);
     REQUIRE(receipt.submitted_blocks == 4);
     REQUIRE(receipt.retired_success == 1);
     REQUIRE(receipt.retired_failure == 3);
-    REQUIRE(receipt.delivered_blocks == 4);
-    REQUIRE(receipt.fallback_blocks == 2);
+    REQUIRE(receipt.delivered_blocks == 5);
+    REQUIRE(receipt.fallback_blocks == 3);
     REQUIRE(receipt.deadline_misses == 0);
     REQUIRE(receipt.resync_drops == 0);
 }
