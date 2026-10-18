@@ -298,8 +298,9 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
     // so an editor assertion cannot leave the slot alive beside a running audio
     // callback.
     std::atomic<int> audio_blocks{0};
+    std::atomic<bool> audio_output_valid{true};
 
-    std::jthread audio([&slot, &audio_blocks](std::stop_token stop_token) {
+    std::jthread audio([&slot, &audio_blocks, &audio_output_valid](std::stop_token stop_token) {
         std::vector<std::vector<float>> out(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<std::vector<float>> in(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<float*> out_ptrs, in_ptrs;
@@ -312,6 +313,22 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
             pulp::audio::BufferView<const float> iv(
                 const_cast<const float**>(in_ptrs.data()), kChannels, kBlockSize);
             slot->process(ov, iv, midi_in, midi_out, params, kBlockSize);
+
+            bool block_is_valid = true;
+            bool block_has_signal = false;
+            for (const auto& channel : out) {
+                for (const auto sample : channel) {
+                    if (!std::isfinite(sample)) {
+                        block_is_valid = false;
+                        break;
+                    }
+                    block_has_signal = block_has_signal || std::fabs(sample) > 1.0e-6f;
+                }
+                if (!block_is_valid) break;
+            }
+            if (!block_is_valid || !block_has_signal)
+                audio_output_valid.store(false, std::memory_order_release);
+
             // Publish only after process() returns. An acquire observation of
             // this count proves the callback's slot accesses are complete
             // before the editor is allowed to be torn down.
@@ -323,15 +340,18 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
 
     // Churn the editor while audio runs.
     for (int i = 0; i < 8; ++i) {
-        const auto blocks_before = audio_blocks.load(std::memory_order_acquire);
         auto ed = slot->create_hosted_editor(parent.handle());
         REQUIRE(ed != nullptr);
         uint32_t w = 400u + static_cast<uint32_t>(i) * 10u;
         uint32_t h = 300u + static_cast<uint32_t>(i) * 10u;
         REQUIRE(slot->set_hosted_editor_size(w, h));
 
-        // Keep the editor alive until a fresh callback has completed. This is
-        // the teardown boundary: the counter is not merely a post-hoc total.
+        // Take the baseline only after the editor is open and resized, so the
+        // wait below cannot be satisfied by a callback from the setup gap.
+        const auto blocks_before = audio_blocks.load(std::memory_order_acquire);
+
+        // Keep the editor alive until a callback completes while it is open.
+        // This proves overlap; the audio loop remains concurrent by design.
         REQUIRE(pulp::test::wait_for_condition([&audio_blocks, blocks_before] {
             return audio_blocks.load(std::memory_order_acquire) > blocks_before;
         }));
@@ -344,5 +364,6 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
     // Audio kept running throughout — the editor never blocked or wedged it.
     const auto completed = audio_blocks.load(std::memory_order_acquire);
     REQUIRE(completed > 8);
+    REQUIRE(audio_output_valid.load(std::memory_order_acquire));
     REQUIRE(tone.blocks_rendered.load(std::memory_order_acquire) == completed);
 }
