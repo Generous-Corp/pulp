@@ -15,8 +15,9 @@ SharedIoExecutionContract contract(MissPolicy policy = MissPolicy::CpuFallback) 
         .block_size = 64,
         .sample_rate = 48000,
         .algorithmic_lead_blocks = 2,
-        .pipeline_depth = 3,
+        .pipeline_depth = 5,
         .provider_slots = 1,
+        .max_inflight = 3,
         .requested_path = SharedIoRequest::Auto,
         .active_path = SharedIoPath::StagedAsync,
         .miss_policy = policy,
@@ -98,7 +99,10 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto minimum_capacity = contract();
     minimum_capacity.algorithmic_lead_blocks = 1;
-    minimum_capacity.pipeline_depth = 2;
+    // The lead consumes one pipeline slot, so two in-flight submissions
+    // require three logical slots under the controller's capacity contract.
+    minimum_capacity.pipeline_depth = 3;
+    minimum_capacity.max_inflight = 2;
 
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
@@ -106,6 +110,7 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
     REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
 
     ReuseProbe probe;
@@ -114,9 +119,15 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Gpu);
     REQUIRE(probe.called);
     REQUIRE(probe.observed_in_flight == 1);
-    REQUIRE(probe.admission_before_reuse == SharedIoAdmission::CapacityFull);
-    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
-    REQUIRE(telemetry.snapshot().in_flight_high_water == controller.capacity());
+    // A valid lead contract reserves one logical slot for delivery, leaving
+    // the spare slot available while the retired slot is still unpublished.
+    // The admission made by the hook therefore succeeds and consumes the
+    // next sequence; the following admission observes the full in-flight
+    // budget until that slot is retired.
+    REQUIRE(probe.admission_before_reuse == SharedIoAdmission::Accepted);
+    REQUIRE(controller.in_flight_for_testing() == minimum_capacity.max_inflight);
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::CapacityFull);
+    REQUIRE(telemetry.snapshot().in_flight_high_water == minimum_capacity.max_inflight);
 }
 
 TEST_CASE("execution controller tracks lead separately from logical pipeline depth",
@@ -124,7 +135,7 @@ TEST_CASE("execution controller tracks lead separately from logical pipeline dep
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(contract(), &telemetry));
-    REQUIRE(controller.capacity() == 3);
+    REQUIRE(controller.capacity() == 5);
     REQUIRE(controller.algorithmic_lead_blocks() == 2);
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
@@ -136,6 +147,31 @@ TEST_CASE("execution controller tracks lead separately from logical pipeline dep
     const auto wet = controller.deliver(2);
     REQUIRE(wet.path == SharedIoDeliveryPath::Gpu);
     REQUIRE(wet.expected_sequence == 0);
+}
+
+TEST_CASE("execution controller enforces max-inflight before publishing admission",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    auto bounded = contract();
+    bounded.pipeline_depth = 4;
+    bounded.max_inflight = 2;
+
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(bounded));
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::CapacityFull);
+}
+
+TEST_CASE("execution controller rejects an impossible max-inflight budget",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    auto invalid = contract();
+    invalid.max_inflight = 0;
+    SharedIoExecutionController controller;
+    REQUIRE_FALSE(controller.prepare(invalid));
+
+    invalid.max_inflight = 2;
+    invalid.pipeline_depth = invalid.algorithmic_lead_blocks + 1;
+    REQUIRE_FALSE(controller.prepare(invalid));
 }
 
 TEST_CASE("execution controller rejects a lead larger than logical pipeline depth",
@@ -151,7 +187,9 @@ TEST_CASE("execution controller rejects a lead larger than logical pipeline dept
 TEST_CASE("execution controller sustains one submission per callback with a free slot beyond lead",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto exact_depth = contract();
+    exact_depth.algorithmic_lead_blocks = 1;
     exact_depth.pipeline_depth = exact_depth.algorithmic_lead_blocks + 1;
+    exact_depth.max_inflight = 1;
 
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(exact_depth));
@@ -259,7 +297,8 @@ TEST_CASE("execution controller resynchronizes admission after a callback gap",
 TEST_CASE("callback gap preserves ready results that are still ahead of the lead",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto deeper = contract();
-    deeper.pipeline_depth = 4;
+    deeper.pipeline_depth = 6;
+    deeper.max_inflight = 4;
 
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(deeper));

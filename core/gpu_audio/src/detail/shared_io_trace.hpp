@@ -285,6 +285,9 @@ struct SharedIoTraceDrainResult {
     // as authoritative when its snapshot violates the shared-I/O contract.
     bool telemetry_valid = false;
     SharedIoTelemetryError telemetry_error = SharedIoTelemetryError::TelemetryValidationDeferred;
+    // False means a non-null observer was malformed; no queue rows were
+    // consumed. A lossless observer must own both identity streams.
+    bool observer_valid = true;
     std::uint32_t records_drained = 0;
     // Emission attempts do not prove an active session or enabled category.
     // The flushed trace and its session marker are the positive control.
@@ -305,6 +308,14 @@ struct SharedIoTraceDrainObserver {
     void (*admission)(void*, std::uint64_t, const SharedIoTraceAdmission&) noexcept = nullptr;
     void (*ownership)(void*, const SharedIoTraceOwnership&) noexcept = nullptr;
 };
+
+// Lossless campaign sinks must receive both identity streams. An observer
+// with only one callback would silently discard the other stream, so callers
+// reject it before switching the session away from bounded retention.
+inline bool
+valid_shared_io_trace_drain_observer(const SharedIoTraceDrainObserver* observer) noexcept {
+    return observer == nullptr || (observer->record != nullptr && observer->admission != nullptr);
+}
 
 // Final failed-release disclosure. No per-sequence terminal or retirement is
 // implied. Call after quiescent draining, before destroying the recorder.

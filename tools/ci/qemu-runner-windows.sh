@@ -23,14 +23,16 @@
 #   qemu-runner-windows.sh --labels self-hosted,Windows,ARM64,pulp-build-windows,pulp-host-m5
 set -euo pipefail
 
-GOLDEN="${TARTCI_WIN_GOLDEN:-${TARTCI_GOLDENS:-$HOME/VMs/goldens}/pulp-windows-build-24h2-arm64-2026-06-02.qcow2}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MANIFEST="${TARTCI_WIN_MANIFEST:-$SCRIPT_DIR/../../.shipyard/vm-image.windows.toml}"
+GOLDEN="${TARTCI_WIN_GOLDEN:-}"
 KEY="${TARTCI_WIN_SSH_KEY:-$HOME/.ssh/id_ed25519}"
 WUSER="${TARTCI_WIN_SSH_USER:-admin}"
 REPO="${PULP_RUNNER_REPO:-Generous-Corp/pulp}"
 LABELS="${PULP_RUNNER_LABELS:-self-hosted,Windows,ARM64,pulp-build-windows}"
 RUNNER_GROUP_ID="${PULP_RUNNER_GROUP_ID:-1}"
 RUNNER_VERSION="${PULP_RUNNER_VERSION:-2.335.1}"
-WORKROOT="${TARTCI_WIN_WORK:-${TMPDIR:-/tmp}/tartci-win}"
+WORKROOT="${TARTCI_WIN_WORK:-}"
 LOOP=0; POLL="${PULP_VM_POLL:-20}"
 BACKOFF_MAX="${PULP_VM_BACKOFF_MAX:-300}"  # ceiling for the post-failure backoff
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o IdentitiesOnly=yes -o BatchMode=yes)
@@ -45,6 +47,7 @@ die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 soft_fail(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; return 1; }
 command -v qemu-system-aarch64 >/dev/null 2>&1 || die "qemu not installed"
 command -v gh >/dev/null 2>&1 || die "gh not installed / authed (need admin to mint JIT)"
+command -v python3 >/dev/null 2>&1 || die "python3 not installed (required for the Windows VM manifest)"
 
 HOST_TAG="${PULP_RUNNER_HOST_TAG:-}"
 
@@ -67,11 +70,16 @@ LABELS="$("$(dirname "${BASH_SOURCE[0]}")/../scripts/runner_labels.py" \
   --platform windows --labels "$LABELS" ${HOST_TAG:+--host-tag "$HOST_TAG"})" \
   || die "refusing to register an unselectable runner (see above)"
 
-[ -f "$GOLDEN" ] || die "golden not found: $GOLDEN (set TARTCI_WIN_GOLDEN)"
-FW=""; for c in /opt/homebrew/share/qemu/edk2-aarch64-code.fd /Applications/UTM.app/Contents/Resources/qemu/edk2-aarch64-code.fd; do [ -f "$c" ] && FW="$c" && break; done
-[ -n "$FW" ] || die "no edk2-aarch64-code.fd"
-VARS_TPL=""; for v in /opt/homebrew/share/qemu/edk2-aarch64-vars.fd /opt/homebrew/share/qemu/edk2-arm-vars.fd; do [ -f "$v" ] && VARS_TPL="$v" && break; done
-[ -n "$VARS_TPL" ] || die "no edk2 vars template"
+manifest_args=(--manifest "$MANIFEST")
+[ -n "$GOLDEN" ] && manifest_args+=(--base "$GOLDEN")
+manifest_paths="$(python3 "$SCRIPT_DIR/validate_windows_vm_manifest.py" "${manifest_args[@]}" --print all)" \
+  || die "Windows VM manifest validation failed"
+manifest_line_count="$(printf '%s\n' "$manifest_paths" | wc -l | tr -d ' ')"
+[ "$manifest_line_count" -eq 4 ] || die "Windows VM manifest returned incomplete paths"
+GOLDEN="$(printf '%s\n' "$manifest_paths" | sed -n '1p')"
+FW="$(printf '%s\n' "$manifest_paths" | sed -n '2p')"
+VARS_TPL="$(printf '%s\n' "$manifest_paths" | sed -n '3p')"
+[ -n "$WORKROOT" ] || WORKROOT="$(printf '%s\n' "$manifest_paths" | sed -n '4p')"
 
 queued_bat_work(){
   gh api "repos/$REPO/actions/runs?status=queued&per_page=30" \
