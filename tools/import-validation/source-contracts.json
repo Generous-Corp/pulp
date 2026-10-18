@@ -606,15 +606,15 @@
     },
     {
       "source": "preconverted-svg",
-      "display_name": "Validated preconverted SVG",
-      "kind": "screen-export",
+      "display_name": "Preconverted SVG + control-map sidecar",
+      "kind": "static-only",
       "trust": "observed",
       "last_verified": "2026-10-18",
       "recheck_interval": "manual",
       "compat": {
         "mode": "not-applicable",
         "source": null,
-        "parser_version_owner": "tools/import-design/annotated_capture.hpp"
+        "parser_version_owner": "annotated-capture-sidecar"
       },
       "dispatch": {
         "kind": "design-source-label",
@@ -624,25 +624,32 @@
         "provider_server": null,
         "available": false,
         "runtime_parser_accepts_raw_mcp": false,
-        "lane_owner": "validated-sidecar-intake",
-        "notes": "Validation-only lane for rights-cleared SVG bytes and an exact control-map sidecar; it does not convert Illustrator, PDF, or other artwork."
+        "lane_owner": "validated-svg-sidecar",
+        "notes": "Accepts only preconverted SVG bytes paired with a provenance and control-map sidecar; validation is fail-closed and does not claim conversion from Illustrator, PDF, or other source formats."
       },
       "upstream": [
         {
           "url": "tools/import-design/annotated_capture.hpp",
-          "kind": "schema",
-          "proves": "Strict annotated-capture validation contract for SVG bytes and control-map sidecars.",
+          "kind": "local-contract",
+          "proves": "The typed control-map sidecar fields and generated DesignFrameView boundary consumed by the annotated-capture lane.",
+          "last_verified": "2026-10-18",
+          "recheck_interval_days": null
+        },
+        {
+          "url": "tools/import-design/annotated_capture.cpp",
+          "kind": "local-implementation",
+          "proves": "SVG digest, root-envelope, selector uniqueness, canvas bounds, and control geometry validation.",
           "last_verified": "2026-10-18",
           "recheck_interval_days": null
         }
       ],
-      "detected_artifact_shape": "SVG document plus a validated JSON control-map sidecar.",
-      "runtime_export_shape": "No generated runtime import; validation-only preconverted SVG intake.",
+      "detected_artifact_shape": "SVG document plus JSON control-map sidecar with provenance, svg_sha256, positive canvas dimensions, and #id selectors.",
+      "runtime_export_shape": "Validation-only preconverted SVG lane; no source conversion or generated runtime export is accepted until the sidecar contract passes.",
       "runtime_requirements": {
-        "sdk_min": "v0.991.2",
+        "sdk_min": "v0.991.3",
         "surface_refs": [
-          "core/view",
-          "compat.json:imports"
+          "compat.json:imports",
+          "core/view"
         ]
       },
       "parser": {
@@ -655,16 +662,19 @@
         "fixtures": [],
         "roundtrip_script": null,
         "test_targets": [
-          "pulp-test-import-design-tool",
-          "pulp-test-faithful-port-toolkit"
+          "pulp-test-design-import",
+          "pulp-test-faithful-port-toolkit",
+          "pulp-test-import-design-tool"
         ],
         "test_files": [
-          "test/test_import_design_tool.cpp",
-          "test/test_faithful_port_toolkit.cpp"
+          "test/test_design_import_ir.cpp",
+          "test/test_faithful_port_toolkit.cpp",
+          "test/test_import_design_tool.cpp"
         ],
         "test_tags": [
-          "[cli][import-design][tool][preconverted-svg][fail-closed]",
-          "[view][annotated-capture]"
+          "[view][import]",
+          "[view][annotated-capture][issue-port-fidelity]",
+          "[cli][import-design][tool][preconverted-svg][fail-closed]"
         ],
         "pulp_render_reference": {
           "status": "not-applicable",

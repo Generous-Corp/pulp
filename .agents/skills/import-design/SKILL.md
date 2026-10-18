@@ -7686,6 +7686,14 @@ second, unrelated owner is what makes such a case falsifiable.
 
 ## Governed build invocation
 
+## Preconverted SVG source-contract metadata
+
+The `preconverted-svg` lane is validation-only: its source-contract row must
+describe the exact SVG and control-map sidecar boundary, name the local
+annotated-capture contract as its parser owner, and keep Illustrator/PDF
+conversion explicitly out of scope. When that metadata changes, update this
+skill note and the append-only Vellum watch event in the same review.
+
 Import-validation round-trip harnesses must route Pulp target builds through
 `tools/ci/governed-build.sh`. Do not pass `--parallel`, `-j`, or a caller-owned
 `PULP_BUILD_JOBS` value; the governor owns fair-share parallelism and records the
