@@ -49,7 +49,6 @@ struct GpuAudioStatus {
     std::uint32_t prepared_lead_blocks = 0;
     bool fallback_available = false;
     bool diagnostics_available = false;
-    GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
 
     std::uint64_t produced_blocks = 0;
     std::uint64_t missed_blocks = 0;
@@ -58,6 +57,8 @@ struct GpuAudioStatus {
     std::uint64_t input_dropped_frames = 0;
     double last_block_us = 0.0;
     double avg_block_us = 0.0;
+    // Appended to preserve positional aggregate initialization of the v1 fields.
+    GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
 };
 
 /// Why a host-visible status snapshot is inconsistent.  The validator is
