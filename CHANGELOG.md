@@ -9,6 +9,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09912"></a>
+## [0.991.2] - 2026-10-18
+
+- release/version bump ([#10532](https://github.com/Generous-Corp/pulp/pull/10532))
+
+<a id="v09911"></a>
+## [0.991.1] - 2026-10-18
+
+- release/version bump ([#10531](https://github.com/Generous-Corp/pulp/pull/10531))
+- codex/fix gpu wavenet audio link 20261017 ([#10522](https://github.com/Generous-Corp/pulp/pull/10522))
+- codex/g3 exception safety 20261017 ([#10525](https://github.com/Generous-Corp/pulp/pull/10525))
+
 <a id="v09910"></a>
 ## [0.991.0] - 2026-10-18
 
@@ -11043,6 +11055,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.991.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.991.2
+[0.991.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.991.1
 [0.991.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.991.0
 [0.990.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.990.1
 [0.990.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.990.0
