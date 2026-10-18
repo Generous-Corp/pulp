@@ -8,11 +8,27 @@ local param_index = tonumber(os.getenv('PULP_DAW_SMOKE_PARAM_INDEX') or '-1')
 local duration = tonumber(os.getenv('PULP_DAW_SMOKE_DURATION') or '8')
 local fields = {token=token, fx_shown=0, phase='STARTING', observations=0,
                 observed_changes=0, max_error=0, param_index=param_index}
+local function publish(payload)
+  local temporary=status_path..'.tmp'
+  local f=io.open(temporary,'w')
+  if not f then return false end
+  f:write(payload);f:close()
+  -- Get-Content can briefly retain the previous receipt on Windows. Retry the
+  -- replacement, then fall back to a direct write; a failed publication must
+  -- not terminate the deferred automation pump.
+  if os.rename(temporary,status_path) then return true end
+  os.remove(status_path)
+  if os.rename(temporary,status_path) then return true end
+  local direct=io.open(status_path,'w')
+  if direct then direct:write(payload);direct:close();os.remove(temporary);return true end
+  os.remove(temporary)
+  return false
+end
 local function status()
   fields.host_time = reaper.time_precise()
-  local f = assert(io.open(status_path..'.tmp','w'))
-  for k,v in pairs(fields) do f:write(k..'='..tostring(v)..'\n') end
-  f:close(); os.remove(status_path); assert(os.rename(status_path..'.tmp',status_path))
+  local lines={}
+  for k,v in pairs(fields) do lines[#lines+1]=k..'='..tostring(v)..'\n' end
+  publish(table.concat(lines))
 end
 local function fail(reason) fields.error=reason;fields.phase='FAILED';status() end
 if reaper.CountTracks(0) ~= 0 then fail('NONEMPTY_PROJECT');return end
