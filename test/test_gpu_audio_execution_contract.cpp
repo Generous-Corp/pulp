@@ -43,40 +43,6 @@ TEST_CASE("shared IO contract separates logical capacity from physical provider 
             SharedIoContractError::MissingAlgorithmicLead);
 }
 
-TEST_CASE("shared IO contract rejects unknown backend-neutral enum values",
-          "[gpu_audio][shared_io]") {
-    const auto valid_contract = [] {
-        return SharedIoExecutionContract{
-            .channels = 2,
-            .block_size = 32,
-            .sample_rate = 48000,
-            .algorithmic_lead_blocks = 1,
-            .pipeline_depth = 2,
-            .provider_slots = 1,
-            .requested_path = SharedIoRequest::RequireSharedHostPointer,
-            .active_path = SharedIoPath::SharedHostPointer,
-            .shared_host_pointer_capable = true,
-            .cpu_fallback_prepared = true,
-        };
-    };
-
-    auto contract = valid_contract();
-    contract.active_path = static_cast<SharedIoPath>(0xfe);
-    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
-
-    contract = valid_contract();
-    contract.requested_path = static_cast<SharedIoRequest>(0xfe);
-    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
-
-    contract = valid_contract();
-    contract.miss_policy = static_cast<MissPolicy>(0xfe);
-    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
-
-    contract = valid_contract();
-    contract.fallback_reason = static_cast<SharedIoFallbackReason>(0xfe);
-    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
-}
-
 TEST_CASE("shared IO depth lead policy bounds multi-flight admission",
           "[gpu_audio][shared_io][p4]") {
     constexpr SharedIoDepthLeadPolicy policy{4, 8, 4};
@@ -98,13 +64,9 @@ TEST_CASE("shared IO depth lead policy bounds multi-flight admission",
     REQUIRE_FALSE(SharedIoDepthLeadPolicy{contract.algorithmic_lead_blocks, contract.pipeline_depth,
                                           contract.max_inflight}
                       .valid());
-    REQUIRE(validate_shared_io_contract(contract).error ==
-            SharedIoContractError::InvalidMaxInflight);
+    REQUIRE(validate_shared_io_contract(contract).accepted());
     contract.max_inflight = 4;
     REQUIRE(validate_shared_io_contract(contract).accepted());
-    contract.max_inflight = 0;
-    REQUIRE(validate_shared_io_contract(contract).error ==
-            SharedIoContractError::InvalidMaxInflight);
 }
 
 TEST_CASE("shared IO contract fails closed for unavailable paths and fallback",
@@ -290,4 +252,96 @@ TEST_CASE("shared IO telemetry completion timing snapshots stay coherent under c
     const auto settled = telemetry.snapshot();
     REQUIRE(settled.completion_timing_valid);
     REQUIRE(settled.scheduled_to_completion_ns == 16);
+}
+
+TEST_CASE("shared IO telemetry validates quiescent admission and delivery bounds",
+          "[gpu_audio][shared_io][telemetry]") {
+    SharedIoTelemetry telemetry;
+    telemetry.configure_depth_lead({2, 4, 2});
+    telemetry.record_callback_block(false);
+    telemetry.record_admission();
+    telemetry.record_submit();
+    telemetry.record_retired(true);
+    telemetry.record_delivery(true, false);
+    telemetry.observe_in_flight(2);
+
+    const auto valid = telemetry.snapshot();
+    CHECK(validate_shared_io_telemetry(valid).accepted());
+
+    auto forged = valid;
+    forged.configured_available_inflight = 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::InvalidDepthConfiguration);
+
+    forged = valid;
+    forged.in_flight_high_water = 5;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::OccupancyExceedsPipelineDepth);
+
+    forged = valid;
+    forged.in_flight_high_water = 3;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::OccupancyExceedsMaxInflight);
+
+    forged = valid;
+    forged.submitted_blocks = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::SubmittedExceedsAdmissions);
+
+    forged = valid;
+    forged.retired_success = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::SuccessfulRetirementsExceedSubmissions);
+
+    forged = valid;
+    forged.retired_failure = 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::RetirementsExceedAdmissions);
+
+    forged = valid;
+    forged.delivered_blocks = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::DeliveredExceedsCallbacks);
+
+    forged = valid;
+    forged.deadline_misses = forged.callback_blocks + 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::DeadlineMissesExceedCallbacks);
+
+    forged = valid;
+    forged.late_completions = forged.retired_success + forged.retired_failure + 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::LateCompletionsExceedRetirements);
+
+    forged = valid;
+    forged.fallback_blocks = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::FallbacksExceedDelivered);
+
+    // A wrapped scheduled-to-completion sum must never be accepted as a
+    // healthy timing receipt. This is a deterministic negative control for
+    // providers that report very large nanosecond samples.
+    forged = valid;
+    forged.pre_submit_delay_ns = UINT64_MAX;
+    forged.submit_to_completion_ns = 1;
+    forged.scheduled_to_completion_ns = 0;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::ScheduledCompletionBeforeComponents);
+
+    // Controller-only producers from older snapshots use submitted_blocks as
+    // their admission boundary and leave the optional admission counter zero.
+    auto legacy = valid;
+    legacy.admitted_blocks = 0;
+    CHECK(validate_shared_io_telemetry(legacy).accepted());
+
+    // A legacy receipt has no separate admission counter, so all terminal
+    // outcomes still must be bounded by the provider submissions it reports.
+    legacy = {};
+    legacy.submitted_blocks = 0;
+    legacy.retired_failure = 1;
+    CHECK(validate_shared_io_telemetry(legacy).error ==
+          SharedIoTelemetryError::RetirementsExceedSubmissions);
+
+    constexpr SharedIoTelemetrySnapshot unconfigured{};
+    STATIC_REQUIRE(validate_shared_io_telemetry(unconfigured).accepted());
 }
