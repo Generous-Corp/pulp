@@ -20,7 +20,7 @@ try {
   $smokeText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.ps1') -Raw
   Check ($smokeText -match 'ProbeBeforeEditor' -and $smokeText -match 'module-probe-release') 'native editor probe can bind before GPU editor startup'
   Check ($smokeText -match 'Get-BoundModulePaths[\s\S]+?Assert-OwnedIdentity') 'module binding rechecks owned PID/start identity after probe'
-  Check ($smokeText -match 'PLUGIN_ABI_MISMATCH' -and $smokeText -match 'receipt\.plugin_pe') 'plugin ABI mismatch is recorded and rejected before DAW insertion'
+  Check ($commonText -match 'PLUGIN_ABI_MISMATCH' -and $smokeText -match 'receipt\.plugin_pe') 'plugin ABI mismatch is recorded and rejected before DAW insertion'
   $luaText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.lua') -Raw
   Check ($luaText -match 'fx_inserted' -and $luaText -match 'PULP_DAW_SMOKE_PROBE_GATE') 'Lua exposes bounded pre-editor module probe gate'
   $probeCommand=@(Get-Command powershell.exe,pwsh -ErrorAction SilentlyContinue|Select-Object -First 1)
@@ -105,6 +105,28 @@ try {
     $identity=Get-PeIdentity $hybrid
     Check ($identity.coff_machine_hex -eq '0x8664' -and $identity.execution_abi -eq 'arm64ec' -and $identity.metadata_status -eq 'validated_chpe' -and $identity.code_map_bytes -eq 24 -and (Get-ReaperScanKeys $identity.execution_abi)[0] -eq 'vstpath_winarm64') ('AMD64 CHPE v'+$version+' maps ARM64EC scan ABI')
   }
+  $exampleBundle=Join-Path $root 'Example.vst3'
+  $examplePayload=Join-Path $exampleBundle 'Contents\x86_64-win\Example.vst3'
+  New-Item -ItemType Directory -Force -Path (Split-Path $examplePayload) | Out-Null
+  New-HybridFixture $examplePayload 0
+  $exampleCandidate=Select-PluginPeCandidate $exampleBundle 'vst3' 'x64'
+  Check ($exampleCandidate.path -ieq $examplePayload -and $exampleCandidate.pe.execution_abi -eq 'x64') 'generic Example.vst3 bundle selects its named x64 payload'
+  $multiBundle=Join-Path $root 'ExampleMulti.vst3'
+  $multiX64=Join-Path $multiBundle 'Contents\x86_64-win\ExampleMulti.vst3'
+  $multiArm=Join-Path $multiBundle 'Contents\arm64ec-win\ExampleMulti.vst3'
+  New-Item -ItemType Directory -Force -Path (Split-Path $multiX64),(Split-Path $multiArm) | Out-Null
+  New-HybridFixture $multiX64 0
+  New-HybridFixture $multiArm 1
+  $multiArmCandidate=Select-PluginPeCandidate $multiBundle 'vst3' 'arm64ec'
+  $multiX64Candidate=Select-PluginPeCandidate $multiBundle 'vst3' 'x64'
+  Check ($multiArmCandidate.path -ieq $multiArm -and $multiArmCandidate.pe.execution_abi -eq 'arm64ec') 'multiarch bundle selects the compatible ARM64EC payload'
+  Check ($multiX64Candidate.path -ieq $multiX64 -and $multiX64Candidate.pe.execution_abi -eq 'x64') 'multiarch bundle selects the compatible x64 payload'
+  Reject {Select-PluginPeCandidate $multiBundle 'vst3' 'arm64'} 'multiarch bundle rejects unsupported native ARM64 selection'
+  $mismatchBundle=Join-Path $root 'OnlyX64.vst3'
+  $mismatchPayload=Join-Path $mismatchBundle 'Contents\x86_64-win\OnlyX64.vst3'
+  New-Item -ItemType Directory -Force -Path (Split-Path $mismatchPayload) | Out-Null
+  New-HybridFixture $mismatchPayload 0
+  Reject {Select-PluginPeCandidate $mismatchBundle 'vst3' 'arm64ec'} 'single-architecture bundle rejects a mismatched host ABI'
   $invalid=Join-Path $root 'amd64-invalid-chpe.exe';New-HybridFixture $invalid 1 $true
   $identity=Get-PeIdentity $invalid
   Check ($identity.coff_machine_hex -eq '0x8664' -and $identity.execution_abi -eq 'unknown' -and $identity.metadata_status -eq 'unavailable') 'unmapped CHPE pointer preserves raw machine and unknown ABI'
