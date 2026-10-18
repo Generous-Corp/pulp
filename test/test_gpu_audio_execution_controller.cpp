@@ -15,8 +15,9 @@ SharedIoExecutionContract contract(MissPolicy policy = MissPolicy::CpuFallback) 
         .block_size = 64,
         .sample_rate = 48000,
         .algorithmic_lead_blocks = 2,
-        .pipeline_depth = 3,
+        .pipeline_depth = 5,
         .provider_slots = 1,
+        .max_inflight = 3,
         .requested_path = SharedIoRequest::Auto,
         .active_path = SharedIoPath::StagedAsync,
         .miss_policy = policy,
@@ -79,6 +80,7 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
     auto minimum_capacity = contract();
     minimum_capacity.algorithmic_lead_blocks = 1;
     minimum_capacity.pipeline_depth = 2;
+    minimum_capacity.max_inflight = 1;
 
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
@@ -118,6 +120,31 @@ TEST_CASE("execution controller tracks lead separately from logical pipeline dep
     REQUIRE(wet.expected_sequence == 0);
 }
 
+TEST_CASE("execution controller enforces max-inflight before publishing admission",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    auto bounded = contract();
+    bounded.pipeline_depth = 4;
+    bounded.max_inflight = 2;
+
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(bounded));
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::CapacityFull);
+}
+
+TEST_CASE("execution controller rejects an impossible max-inflight budget",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    auto invalid = contract();
+    invalid.max_inflight = 0;
+    SharedIoExecutionController controller;
+    REQUIRE_FALSE(controller.prepare(invalid));
+
+    invalid.max_inflight = 2;
+    invalid.pipeline_depth = invalid.algorithmic_lead_blocks + 1;
+    REQUIRE_FALSE(controller.prepare(invalid));
+}
+
 TEST_CASE("execution controller rejects a lead larger than logical pipeline depth",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto delayed_contract = contract();
@@ -132,6 +159,7 @@ TEST_CASE("execution controller sustains one submission per callback with a free
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto exact_depth = contract();
     exact_depth.pipeline_depth = exact_depth.algorithmic_lead_blocks + 1;
+    exact_depth.max_inflight = 1;
 
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(exact_depth));
@@ -240,6 +268,7 @@ TEST_CASE("callback gap preserves ready results that are still ahead of the lead
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto deeper = contract();
     deeper.pipeline_depth = 4;
+    deeper.max_inflight = 2;
 
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(deeper));
