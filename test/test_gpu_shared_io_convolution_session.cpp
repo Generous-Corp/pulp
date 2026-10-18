@@ -775,6 +775,12 @@ TEST_CASE("shared session loss retires exact work but never reprimes the lost pr
     fixture.provider->complete_all();
     CHECK(fixture.session.service(2).terminal_records == 1);
     CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::ProviderLost);
+    const auto receipts = fixture.session.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 1);
+    CHECK(receipts.front().device_lost);
+    CHECK(receipts.front().terminal);
+    CHECK_FALSE(receipts.front().terminal_success);
+    CHECK(receipts.front().discarded);
     CHECK_FALSE(fixture.session.fence_and_reprime());
     CHECK(fixture.session.epoch() == 1);
     CHECK(callback(fixture.session, b, output).stamp.epoch == 0);
