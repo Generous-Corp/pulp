@@ -330,7 +330,8 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
          it != end; ++it) {
         const auto position = static_cast<size_t>(it->position());
         const auto gap = svg_markup.substr(cursor, position - cursor);
-        if (tag_stack.empty() && gap.find_first_not_of(" \t\r\n") != std::string::npos) {
+        if (gap.find('<') != std::string::npos ||
+            (tag_stack.empty() && gap.find_first_not_of(" \t\r\n") != std::string::npos)) {
             envelope_valid = false;
             break;
         }
@@ -381,7 +382,7 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
     }
     if (envelope_valid) {
         const auto tail = svg_markup.substr(cursor);
-        envelope_valid = tag_stack.empty() && closed_root &&
+        envelope_valid = tag_stack.empty() && closed_root && tail.find('<') == std::string::npos &&
                          tail.find_first_not_of(" \t\r\n") == std::string::npos;
     }
     if (!envelope_valid) {
@@ -427,9 +428,10 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
         for (const char* key : {"selected_index", "note", "view_group", "target_frame"})
             if (element.hasObjectMember(key)) {
                 const auto value = element[key].getWithDefault(0.0);
-                if (!std::isfinite(value) || value < INT_MIN || value > INT_MAX) {
+                if (!std::isfinite(value) || std::trunc(value) != value || value < INT_MIN ||
+                    value > INT_MAX) {
                     error = "element " + std::to_string(i) + " field '" + key +
-                            "' is outside integer range";
+                            "' must be an integer in range";
                     return false;
                 }
             }

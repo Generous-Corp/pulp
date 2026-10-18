@@ -802,6 +802,12 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
         multiple_roots.replace(multiple_roots.find(hash), hash.size(),
                                pulp::runtime::sha256_hex(multiple_roots_svg));
         CHECK_FALSE(impd::validate_annotated_capture(multiple_roots_svg, multiple_roots, error));
+
+        const std::string malformed_child_svg = R"(<svg width="200" height="100"><path</svg>)";
+        auto malformed_child = sidecar;
+        malformed_child.replace(malformed_child.find(hash), hash.size(),
+                                pulp::runtime::sha256_hex(malformed_child_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(malformed_child_svg, malformed_child, error));
     }
     SECTION("typed-invalid and non-finite geometry fail closed") {
         auto typed_invalid = sidecar;
@@ -816,6 +822,14 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
         CHECK_FALSE(impd::validate_annotated_capture(svg, non_finite, error));
         CHECK((error.find("non-finite") != std::string::npos ||
                error.find("invalid") != std::string::npos));
+    }
+    SECTION("integer metadata rejects fractional values before narrowing") {
+        auto fractional = sidecar;
+        fractional.replace(fractional.find("\"kind\":\"knob\""),
+                           std::string("\"kind\":\"knob\"").size(),
+                           "\"kind\":\"knob\",\"selected_index\":1.5");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, fractional, error));
+        CHECK(error.find("integer") != std::string::npos);
     }
     SECTION("required geometry cannot be omitted") {
         auto missing_geometry = sidecar;
