@@ -25,9 +25,9 @@
 #import <AppKit/AppKit.h>
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <numbers>
-#include <stop_token>
 #include <thread>
 #include <vector>
 
@@ -350,14 +350,14 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
     REQUIRE(slot->prepare(kSampleRate, kBlockSize));
 
     ParentView parent;
-    // A jthread joins during stack unwinding as well as on the successful path,
-    // so an editor assertion cannot leave the slot alive beside a running audio
-    // callback.
+    // Keep an explicit stop flag and an RAII join guard: this test target must
+    // also compile with Apple's sanitizer toolchain, whose ObjC++ standard
+    // library does not provide std::jthread/stop_token on every supported SDK.
     std::atomic<int> audio_blocks{0};
     std::atomic<bool> audio_output_valid{true};
+    std::atomic<bool> audio_stop_requested{false};
 
-    std::jthread audio([&slot, &tone, &audio_blocks,
-                        &audio_output_valid](std::stop_token stop_token) {
+    std::thread audio([&slot, &tone, &audio_blocks, &audio_output_valid, &audio_stop_requested] {
         std::vector<std::vector<float>> out(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<std::vector<float>> in(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<float*> out_ptrs, in_ptrs;
@@ -367,7 +367,7 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
             in_ptrs.push_back(c.data());
         pulp::midi::MidiBuffer midi_in, midi_out;
         ParameterEventQueue params;
-        while (!stop_token.stop_requested()) {
+        while (!audio_stop_requested.load(std::memory_order_acquire)) {
             for (auto& channel : out)
                 std::fill(channel.begin(), channel.end(), 0.0f);
             pulp::audio::BufferView<float> ov(out_ptrs.data(), kChannels, kBlockSize);
@@ -404,6 +404,17 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
             audio_blocks.fetch_add(1, std::memory_order_release);
         }
     });
+
+    struct AudioThreadCleanup {
+        std::atomic<bool>& stop_requested;
+        std::thread& thread;
+
+        ~AudioThreadCleanup() {
+            stop_requested.store(true, std::memory_order_release);
+            if (thread.joinable())
+                thread.join();
+        }
+    } audio_cleanup{audio_stop_requested, audio};
 
     REQUIRE(pulp::test::wait_for_progress(audio_blocks));
 
@@ -454,7 +465,7 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
         REQUIRE(tone.overlap_acknowledged.load(std::memory_order_acquire));
     }
 
-    audio.request_stop();
+    audio_stop_requested.store(true, std::memory_order_release);
     audio.join();
 
     // Audio kept running throughout — the editor never blocked or wedged it.
