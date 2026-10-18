@@ -15,6 +15,12 @@ try {
   $commonText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_common.ps1') -Raw
   Check ($commonText -match 'CreateToolhelp32Snapshot' -and $commonText -match 'Module32FirstW') 'Toolhelp module probe uses snapshot enumeration'
   Check ($commonText -match 'ErrorBadLength' -and $commonText -match 'MaxModules') 'Toolhelp probe retries bounded BAD_LENGTH and caps module count'
+  Check ($commonText -match 'TargetAbi -in @\(''x64'',''arm64ec'',''arm64x''\)' -and $commonText -match '\$snapshotFlags') 'ARM64EC module probe omits SNAPMODULE32'
+  Check ($commonText -match 'ReadToEndAsync' -and $commonText -match 'stdoutTask') 'bounded probe drains redirected pipes before waiting'
+  $smokeText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.ps1') -Raw
+  Check ($smokeText -match 'ProbeBeforeEditor' -and $smokeText -match 'module-probe-release') 'native editor probe can bind before GPU editor startup'
+  $luaText=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows_editor_smoke.lua') -Raw
+  Check ($luaText -match 'fx_inserted' -and $luaText -match 'PULP_DAW_SMOKE_PROBE_GATE') 'Lua exposes bounded pre-editor module probe gate'
   $probeCommand=@(Get-Command powershell.exe,pwsh -ErrorAction SilentlyContinue|Select-Object -First 1)
   if($probeCommand.Count -ne 1){throw 'No PowerShell executable for bounded-probe fixture'}
   $sleepProbe=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Start-Sleep -Seconds 4'))
@@ -22,6 +28,13 @@ try {
   try { Invoke-BoundedExternal $probeCommand[0].Source @('-NoProfile','-NonInteractive','-EncodedCommand',$sleepProbe) 1 'EXTERNAL_PROBE_TIMEOUT'|Out-Null }
   catch { $timeoutRejected=$_.Exception.Message -eq 'EXTERNAL_PROBE_TIMEOUT' }
   Check $timeoutRejected 'bounded external probe timeout is fail-closed'
+  # A Toolhelp module list can exceed an anonymous pipe buffer. Exercise both
+  # redirected streams with one successful child so the wrapper must drain
+  # while waiting instead of waiting for an exit that the child cannot reach.
+  $largeOutputScript='[Console]::Out.Write((''o'' * 262144));[Console]::Error.Write((''e'' * 131072))'
+  $largeOutputProbe=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($largeOutputScript))
+  $largeOutput=Invoke-BoundedExternal $probeCommand[0].Source @('-NoProfile','-NonInteractive','-EncodedCommand',$largeOutputProbe) 10 'EXTERNAL_PROBE_TIMEOUT'
+  Check ($largeOutput.exit_code -eq 0 -and $largeOutput.stdout.Length -eq 262144 -and $largeOutput.stderr.Length -eq 131072) 'bounded probe drains stdout/stderr beyond pipe buffers'
   if([Environment]::OSVersion.Platform -eq 'Win32NT'){
     $modulePaths=@(Get-BoundModulePaths $PID 5)
     Check ($modulePaths.Count -gt 0) 'Toolhelp module probe returns current process paths'
