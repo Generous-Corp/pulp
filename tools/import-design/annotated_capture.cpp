@@ -336,6 +336,18 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
             break;
         }
         const auto tag = it->str();
+        bool single_quoted = false;
+        bool double_quoted = false;
+        for (const auto character : tag) {
+            if (character == '\'' && !double_quoted)
+                single_quoted = !single_quoted;
+            if (character == '"' && !single_quoted)
+                double_quoted = !double_quoted;
+        }
+        if (single_quoted || double_quoted) {
+            envelope_valid = false;
+            break;
+        }
         size_t marker = 1;
         while (marker < tag.size() && std::isspace(static_cast<unsigned char>(tag[marker])))
             ++marker;

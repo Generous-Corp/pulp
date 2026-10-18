@@ -808,6 +808,12 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
         malformed_child.replace(malformed_child.find(hash), hash.size(),
                                 pulp::runtime::sha256_hex(malformed_child_svg));
         CHECK_FALSE(impd::validate_annotated_capture(malformed_child_svg, malformed_child, error));
+
+        const std::string unclosed_quote_svg = R"(<svg width="200 height="100"></svg>)";
+        auto unclosed_quote = sidecar;
+        unclosed_quote.replace(unclosed_quote.find(hash), hash.size(),
+                               pulp::runtime::sha256_hex(unclosed_quote_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(unclosed_quote_svg, unclosed_quote, error));
     }
     SECTION("typed-invalid and non-finite geometry fail closed") {
         auto typed_invalid = sidecar;
