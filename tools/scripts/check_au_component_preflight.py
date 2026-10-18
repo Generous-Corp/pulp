@@ -427,9 +427,9 @@ def _check_registrar() -> list[CheckResult]:
         return [CheckResult("AudioComponentRegistrar", False, "launchctl not found", "REGISTRAR_TOOL_MISSING",
                             "Run this check on macOS with launchctl available." )]
     domain = _run_probe([launchctl, "managername"])
-    if domain.returncode == 0:
-        results.append(CheckResult("registrar domain", True, domain.stdout.strip() or "unknown",
-                                   "REGISTRAR_DOMAIN"))
+    manager = domain.stdout.strip()
+    if domain.returncode == 0 and manager:
+        results.append(CheckResult("registrar domain", True, manager, "REGISTRAR_DOMAIN"))
     elif domain.returncode == 124:
         results.append(CheckResult("registrar domain", False, domain.stdout.strip(), "HOST_PROBE_TIMEOUT",
                                    "Retry after launchctl is responsive."))
@@ -439,7 +439,12 @@ def _check_registrar() -> list[CheckResult]:
                                    "Run this check from the same Aqua or user launchd domain as the DAW."))
 
     uid = str(os.getuid())
-    manager = domain.stdout.strip() if domain.returncode == 0 else ""
+    if domain.returncode == 0 and not manager:
+        results.append(CheckResult("registrar domain", False, "launchctl managername returned no domain",
+                                   "REGISTRAR_DOMAIN_UNKNOWN",
+                                   "Run this check from the same Aqua or user launchd domain as the DAW."))
+    if domain.returncode != 0:
+        manager = ""
     targets = [f"system/com.apple.audio.AudioComponentRegistrar"]
     if manager == "Aqua":
         targets.insert(0, f"gui/{uid}/com.apple.audio.AudioComponentRegistrar")
