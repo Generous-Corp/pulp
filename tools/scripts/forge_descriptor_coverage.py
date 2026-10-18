@@ -45,7 +45,7 @@ CATALOG = (
      ("analog_vcf",)),
     ("forge_character_delay_catalog.hpp", "forge_character_delay_catalog.hpp",
      ("character_delay",)),
-    ("forge_distortion_catalog.hpp", "forge_distortion_catalog.hpp",
+    ("forge_distortion_catalog.hpp", "core/host/src/forge_distortion_catalog.cpp",
      ("distortion",)),
     ("forge_drum_catalog.hpp", "detail/forge_drum_catalog_descriptor.hpp",
      ("drum_kick_oscillator", "drum_kick_resonant", "drum_kick_circuit",
