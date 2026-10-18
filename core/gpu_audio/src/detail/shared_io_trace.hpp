@@ -281,6 +281,9 @@ class SharedIoTraceRecorder {
 struct SharedIoTraceDrainResult {
     bool tracing_compiled = false;
     bool recording_enabled = false;
+    // False means a non-null observer was malformed; no queue rows were
+    // consumed. A lossless observer must own both identity streams.
+    bool observer_valid = true;
     std::uint32_t records_drained = 0;
     // Emission attempts do not prove an active session or enabled category.
     // The flushed trace and its session marker are the positive control.

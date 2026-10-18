@@ -74,11 +74,15 @@ struct GpuWaveNetRealtimeNode::Impl {
     detail::SharedIoTraceRecord trace_record;
 
     void drain_trace() noexcept {
-        if (trace)
+        if (trace) {
+            const auto* observer =
+                (trace_observer.record || trace_observer.admission || trace_observer.ownership)
+                    ? &trace_observer
+                    : nullptr;
             (void)detail::drain_shared_io_trace(
                 *trace, telemetry.snapshot(),
-                static_cast<std::uint32_t>(detail::SharedIoTraceRecorder::capacity),
-                &trace_observer);
+                static_cast<std::uint32_t>(detail::SharedIoTraceRecorder::capacity), observer);
+        }
     }
     void trace_admit(Pending& pending, const Bridge::Lease& input) noexcept {
         if (!trace)
@@ -637,7 +641,8 @@ detail::WaveNetRealtimeTestAccess::recovery_sequence(const GpuWaveNetRealtimeNod
 }
 void detail::WaveNetRealtimeTestAccess::observe_trace(
     GpuWaveNetRealtimeNode& node, SharedIoTraceDrainObserver observer) noexcept {
-    node.impl_->trace_observer = observer;
+    node.impl_->trace_observer =
+        valid_shared_io_trace_drain_observer(&observer) ? observer : SharedIoTraceDrainObserver{};
 }
 detail::SharedIoTraceStats
 detail::WaveNetRealtimeTestAccess::trace_stats(const GpuWaveNetRealtimeNode& node) noexcept {
