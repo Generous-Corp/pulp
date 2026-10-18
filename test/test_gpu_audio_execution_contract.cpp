@@ -58,9 +58,13 @@ TEST_CASE("shared IO depth lead policy bounds multi-flight admission",
     REQUIRE_FALSE(SharedIoDepthLeadPolicy{contract.algorithmic_lead_blocks, contract.pipeline_depth,
                                           contract.max_inflight}
                       .valid());
-    REQUIRE(validate_shared_io_contract(contract).accepted());
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::InvalidMaxInflight);
     contract.max_inflight = 4;
     REQUIRE(validate_shared_io_contract(contract).accepted());
+    contract.max_inflight = 0;
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::InvalidMaxInflight);
 }
 
 TEST_CASE("shared IO contract fails closed for unavailable paths and fallback",
