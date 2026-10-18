@@ -57,11 +57,7 @@ struct RecurrentCpuKernel {
     bool (*release)(void*) noexcept = nullptr;
 };
 
-enum class RecurrentCpuPrepareError : std::uint8_t {
-    None,
-    InvalidContract,
-    KernelPrepareFailed
-};
+enum class RecurrentCpuPrepareError : std::uint8_t { None, InvalidContract, KernelPrepareFailed };
 
 /// Private model-neutral adapter for synthetic recurrent CPU kernels. It does
 /// not parse artifacts or publish provider capabilities; those remain outside

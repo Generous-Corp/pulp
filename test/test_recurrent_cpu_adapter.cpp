@@ -389,9 +389,8 @@ TEST_CASE("recurrent CPU adapter reset and NeuralProcessor reprepare lifecycle",
 TEST_CASE("NeuralProcessor retries failed recurrent cleanup through quiesce",
           "[gpu_audio][neural][recurrent][lifecycle]") {
     const auto spec = make_spec(RecurrentFamily::Gru);
-    SyntheticKernel kernel{.family = RecurrentFamily::Gru,
-                           .fail_once = true,
-                           .fail_release_once = true};
+    SyntheticKernel kernel{
+        .family = RecurrentFamily::Gru, .fail_once = true, .fail_release_once = true};
     RecurrentCpuAdapter adapter(spec, make_shape(RecurrentFamily::Gru), make_kernel(kernel));
     NeuralProcessor processor(adapter);
     const auto context = StreamingPrepareContext{.spec = &adapter.spec(),
