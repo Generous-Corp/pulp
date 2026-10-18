@@ -237,3 +237,92 @@ pulp import-design analyze-corpus --input fixtures --output analysis
 That integration should remain an orchestration layer over isolated importer
 transactions. It must never insert comparison side effects into
 `browser_import_session` or canonical publication.
+
+## Reset workstream plan and status (2026-10-18)
+
+This section is the authoritative status for the importer optimization
+investigation. Work in older branches is reference material only. New work
+starts from the current `origin/main` head and must regenerate evidence rather
+than carry forward old scores.
+
+### Objective
+
+Establish whether Pulp can import a bounded, responsive HTML/CSS interface into
+its existing native DesignIR and Skia/Dawn renderer with evidence that is
+correct, repeatable, and useful for later optimization. The investigation has
+two independent outcomes:
+
+1. prove Chromium-to-native correctness on challenging and held-out fixtures;
+2. determine whether an incremental retained typed plan improves the existing
+   baked-native path on the same workload.
+
+The retained plan is an optimization inside the existing renderer. It is not a
+second production UI architecture. Chromium remains the sole browser oracle;
+WebKit and other browser engines are out of scope. Pulp and Vellum ownership
+routing is checked for every implementation slice.
+
+### Evidence contract
+
+Before collecting promotion evidence, write down and freeze:
+
+- an authenticated PNG receipt binding source hash, Chromium build, Pulp head,
+  renderer/backend, viewport, DPR, font receipt, image dimensions, and PNG
+  hashes for both sides;
+- parity thresholds for structure, geometry, typography, and full-frame visual
+  comparison, with registered-region and worst-fixture results reported
+  separately;
+- the held-out fixture manifest and hashes before tuning begins;
+- an equivalence oracle covering DesignIR, declared image tolerance, and the
+  same scripted state and interaction trace;
+- a pre-registered performance win: median and p95 update or frame time,
+  allocation/bridge/draw counters, and peak resource ceilings on one host
+  class. A lower work counter alone is not a wall-clock win.
+
+Every claimed metric must have a planted-defect negative control and a
+blank-render control. A fixture is not eligible for a claim until stage
+provenance, source recognition, and deterministic three-run receipts pass.
+
+### Phase status
+
+| Phase | Purpose | Status | Exit evidence |
+| --- | --- | --- | --- |
+| P0 | Close existing acceptance debt | **BLOCKED** | Replace the landed root-canvas watch event's `pending M1 execution` entries for `[root-canvas]` and `[provenance]` with attributable M1 receipts, or record an explicit owner/date deferral. |
+| P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
+| P2 | Validate the evidence contract and instruments | **NEXT** | Authenticated receipts, frozen challenging/held-out manifests, stage checks, planted defects, and blank-render control all pass. |
+| P3 | Prove native correctness | **NOT STARTED** | Same-source Chromium and native PNG receipts pass on the challenging set and then the untouched held-out set; report median and worst fixture. This is the first point at which visual parity may be discussed. |
+| P4 | Compare baked-native and retained typed-plan paths | **NOT STARTED** | Interleaved Release runs with identical inputs, proxy counters, wall time, p95, peak RSS/GPU resource measurements, and direct benchmark peak assertion. |
+| P5 | Decide promotion or deferment | **NOT STARTED** | Promote only if behavior is equivalent and the pre-registered performance threshold wins without violating resource ceilings; otherwise retain the infrastructure as experimental and keep baked-native authoritative. |
+| P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |
+
+Phase 0 residual decomposition, the 29/29 focused Python tests, the merged
+root-canvas lowering change, and the merged benchmark peak-preservation change
+are useful infrastructure. They do not prove pixel parity or a retained-plan
+performance win.
+
+### Landed context
+
+- [PR 10475](https://github.com/Generous-Corp/pulp/pull/10475) merged as
+  [8fd4babdf18a84546e077213f7d68c8de4b9ea2c](https://github.com/Generous-Corp/pulp/commit/8fd4babdf18a84546e077213f7d68c8de4b9ea2c): conservative root-canvas
+  capture/lowering and evidence validation.
+- [PR 10479](https://github.com/Generous-Corp/pulp/pull/10479) merged as
+  [3fa4520607216084cfdaa36d101327d74ea87a9c](https://github.com/Generous-Corp/pulp/commit/3fa4520607216084cfdaa36d101327d74ea87a9c): benchmark rebuild control
+  preserving meter `peak` state.
+- [PR 10474](https://github.com/Generous-Corp/pulp/pull/10474) is closed as
+  superseded and has no remaining work to merge.
+
+### Review decisions
+
+Fable agreed that a fresh workstream is sound and called out the required tightening: close the M1 acceptance debt first,
+define authenticated parity and performance thresholds before measuring, freeze
+the held-out split, and require negative controls. They also confirmed that the
+existing renderer and Chromium-only oracle should remain unchanged while the
+retained-plan hypothesis is tested.
+
+### Stop and continuation rules
+
+Do not expand compiler or retained-plan production work when an instrument
+fails its controls, a receipt is unauthenticated, a held-out fixture regresses,
+or the baked-vs-retained comparison lacks a meaningful wall-clock/resource win.
+Those outcomes are valid results: record the evidence and keep the current
+baked-native path. Continue through the next phase when its exit evidence is
+complete and the preceding phase remains green.
