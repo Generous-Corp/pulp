@@ -146,6 +146,18 @@ TEST_CASE("GpuAudioStatus rejects an uninitialized snapshot that claims preparat
     status.selected_engine = GpuAudioEngine::Unknown;
     status.provider_state = static_cast<GpuAudioProviderState>(255);
     CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.provider_state = GpuAudioProviderState::Ready;
+    status.provider = static_cast<GpuAudioProvider>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.provider = GpuAudioProvider::Unknown;
+    status.fallback_policy = static_cast<MissPolicy>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.fallback_policy = MissPolicy::Silence;
+    status.recovery_reason = static_cast<GpuAudioRecoveryReason>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
 }
 
 TEST_CASE("GpuAudioProgramDescriptor rejects incomplete shared preparation",
