@@ -136,8 +136,7 @@ validate_gpu_audio_status(const GpuAudioStatus& status) noexcept {
             status.provider != GpuAudioProvider::Unknown || status.sample_rate != 0 ||
             status.block_size != 0 || status.latency_samples != 0 ||
             status.prepared_lead_blocks != 0 || status.fallback_available ||
-            status.diagnostics_available ||
-            status.recovery_reason != GpuAudioRecoveryReason::None)
+            status.diagnostics_available || status.recovery_reason != GpuAudioRecoveryReason::None)
             return {status.recovery_reason != GpuAudioRecoveryReason::None
                         ? GpuAudioStatusError::UninitializedStateHasRecovery
                         : GpuAudioStatusError::UninitializedStateHasPreparation};

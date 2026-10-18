@@ -71,7 +71,9 @@ bool hold_editor_operation(const clap_plugin_t* p);
 bool CLAP_ABI tone_gui_create(const clap_plugin_t* p, const char*, bool) {
     return hold_editor_operation(p);
 }
-void CLAP_ABI tone_gui_destroy(const clap_plugin_t* p) { hold_editor_operation(p); }
+void CLAP_ABI tone_gui_destroy(const clap_plugin_t* p) {
+    hold_editor_operation(p);
+}
 bool CLAP_ABI tone_gui_set_scale(const clap_plugin_t*, double) { return true; }
 bool CLAP_ABI tone_gui_get_size(const clap_plugin_t*, uint32_t* w, uint32_t* h) {
     *w = 400;
@@ -104,8 +106,7 @@ bool wait_for_editor_overlap(const clap_plugin_t* p) {
         return false;
 
     bool expected = false;
-    if (!t->process_entered.compare_exchange_strong(expected, true,
-                                                    std::memory_order_acq_rel))
+    if (!t->process_entered.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
         return false;
 
     if (t->overlap_cancelled.load(std::memory_order_acquire) ||
@@ -116,7 +117,8 @@ bool wait_for_editor_overlap(const clap_plugin_t* p) {
 
 bool hold_editor_operation(const clap_plugin_t* p) {
     auto* t = static_cast<TonePlugin*>(p->plugin_data);
-    if (!t->overlap_enabled.load(std::memory_order_acquire)) return true;
+    if (!t->overlap_enabled.load(std::memory_order_acquire))
+        return true;
 
     t->editor_operation_active.store(true, std::memory_order_release);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -354,16 +356,20 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
     std::atomic<int> audio_blocks{0};
     std::atomic<bool> audio_output_valid{true};
 
-    std::jthread audio([&slot, &tone, &audio_blocks, &audio_output_valid](std::stop_token stop_token) {
+    std::jthread audio([&slot, &tone, &audio_blocks,
+                        &audio_output_valid](std::stop_token stop_token) {
         std::vector<std::vector<float>> out(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<std::vector<float>> in(kChannels, std::vector<float>(kBlockSize, 0.0f));
         std::vector<float*> out_ptrs, in_ptrs;
-        for (auto& c : out) out_ptrs.push_back(c.data());
-        for (auto& c : in) in_ptrs.push_back(c.data());
+        for (auto& c : out)
+            out_ptrs.push_back(c.data());
+        for (auto& c : in)
+            in_ptrs.push_back(c.data());
         pulp::midi::MidiBuffer midi_in, midi_out;
         ParameterEventQueue params;
         while (!stop_token.stop_requested()) {
-            for (auto& channel : out) std::fill(channel.begin(), channel.end(), 0.0f);
+            for (auto& channel : out)
+                std::fill(channel.begin(), channel.end(), 0.0f);
             pulp::audio::BufferView<float> ov(out_ptrs.data(), kChannels, kBlockSize);
             pulp::audio::BufferView<const float> iv(
                 const_cast<const float**>(in_ptrs.data()), kChannels, kBlockSize);
@@ -386,7 +392,8 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
                     channel_has_signal = channel_has_signal || std::fabs(sample) > 1.0e-6f;
                 }
                 every_channel_has_signal = every_channel_has_signal && channel_has_signal;
-                if (!block_is_valid) break;
+                if (!block_is_valid)
+                    break;
             }
             if (!block_is_valid || !every_channel_has_signal)
                 audio_output_valid.store(false, std::memory_order_release);
