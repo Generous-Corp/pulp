@@ -189,6 +189,16 @@ TEST_CASE("shared IO telemetry validates quiescent admission and delivery bounds
           SharedIoTelemetryError::DeliveredExceedsCallbacks);
 
     forged = valid;
+    forged.deadline_misses = forged.callback_blocks + 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::DeadlineMissesExceedCallbacks);
+
+    forged = valid;
+    forged.late_completions = forged.retired_success + forged.retired_failure + 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::LateCompletionsExceedRetirements);
+
+    forged = valid;
     forged.fallback_blocks = 2;
     CHECK(validate_shared_io_telemetry(forged).error ==
           SharedIoTelemetryError::FallbacksExceedDelivered);
