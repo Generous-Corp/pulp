@@ -302,6 +302,14 @@ struct SharedIoTraceDrainObserver {
     void (*ownership)(void*, const SharedIoTraceOwnership&) noexcept = nullptr;
 };
 
+// Lossless campaign sinks must receive both identity streams. An observer
+// with only one callback would silently discard the other stream, so callers
+// reject it before switching the session away from bounded retention.
+inline bool
+valid_shared_io_trace_drain_observer(const SharedIoTraceDrainObserver* observer) noexcept {
+    return observer == nullptr || (observer->record != nullptr && observer->admission != nullptr);
+}
+
 // Final failed-release disclosure. No per-sequence terminal or retirement is
 // implied. Call after quiescent draining, before destroying the recorder.
 void emit_shared_io_unresolved_ownership(
