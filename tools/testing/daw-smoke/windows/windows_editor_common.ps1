@@ -77,26 +77,60 @@ function Assert-ModuleBinding([string]$LoadedPath, [string]$LoadedHash, $Manifes
   if ($entries.Count -ne 1 -or $entries[0].sha256 -ine $LoadedHash) { throw 'Loaded module does not match exact staged manifest' }
   if ([IO.Path]::GetExtension($LoadedPath) -notin @('.vst3','.clap')) { throw 'Loaded module is not a plugin PE' }
 }
+function Invoke-BoundedExternal([string]$FilePath, [string[]]$ArgumentList = @(), [ValidateRange(1,60)][int]$TimeoutSec = 15, [string]$TimeoutError = 'EXTERNAL_PROBE_TIMEOUT') {
+  $psi = New-Object Diagnostics.ProcessStartInfo
+  $psi.FileName = $FilePath
+  $psi.Arguments = Join-WindowsArguments $ArgumentList
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $child = New-Object Diagnostics.Process
+  $child.StartInfo = $psi
+  $started = $false
+  try {
+    $started = $child.Start()
+    if (-not $started) { throw 'EXTERNAL_PROBE_START_FAILED' }
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    while (-not $child.WaitForExit(100)) {
+      if ([DateTime]::UtcNow -ge $deadline) {
+        try { $child.Kill() } catch {}
+        try { $child.WaitForExit(1000) } catch {}
+        throw $TimeoutError
+      }
+    }
+    $stdout = $child.StandardOutput.ReadToEnd()
+    $stderr = $child.StandardError.ReadToEnd()
+    [pscustomobject]@{exit_code=$child.ExitCode;stdout=$stdout;stderr=$stderr}
+  } finally {
+    if ($started) {
+      try {
+        if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit(1000) | Out-Null }
+      } catch {}
+    }
+    $child.Dispose()
+  }
+}
 function Get-BoundModulePaths([int]$TargetPid, [ValidateRange(1,60)][int]$TimeoutSec = 15) {
   # Process.Modules can block indefinitely while a GPU plugin is inside its
-  # editor startup path. Query it in a disposable child and fail closed when
-  # the host does not answer within the bounded proof window.
-  $job = Start-Job -ScriptBlock {
-    param([int]$PidToInspect)
-    $target = [Diagnostics.Process]::GetProcessById($PidToInspect)
-    @($target.Modules | ForEach-Object { $_.FileName })
-  } -ArgumentList $TargetPid
-  try {
-    if ($null -eq (Wait-Job -Job $job -Timeout $TimeoutSec)) {
-      Stop-Job -Job $job -ErrorAction SilentlyContinue
-      throw 'MODULE_ENUMERATION_TIMEOUT'
-    }
-    $errors = @($job.ChildJobs | ForEach-Object { $_.JobStateInfo.Reason } | Where-Object { $_ })
-    if ($errors.Count -gt 0) { throw ('MODULE_ENUMERATION_FAILED: ' + $errors[0].Exception.Message) }
-    return @((Receive-Job -Job $job -ErrorAction Stop) | Where-Object { $_ })
-  } finally {
-    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+  # editor startup path. Keep the potentially blocked call in an independently
+  # killable process; PowerShell jobs can hang during Stop-Job/Remove-Job and
+  # leave the REAPER owner orphaned before its receipt is written.
+  $probe = '$ErrorActionPreference="Stop";$target=[Diagnostics.Process]::GetProcessById(' + $TargetPid + ');$target.Modules | ForEach-Object { $_.FileName }'
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
+  $powershell = Join-Path $PSHOME 'powershell.exe'
+  if (-not (Test-Path -LiteralPath $powershell -PathType Leaf)) {
+    $command = @(Get-Command pwsh.exe,pwsh -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($command.Count -ne 1) { throw 'POWERSHELL_PROBE_UNAVAILABLE' }
+    $powershell = if ($command[0].Source) { $command[0].Source } else { $command[0].Path }
   }
+  $result = Invoke-BoundedExternal $powershell @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded) $TimeoutSec 'MODULE_ENUMERATION_TIMEOUT'
+  if ($result.exit_code -ne 0) {
+    $detail = $result.stderr.Trim()
+    if ($detail.Length -gt 512) { $detail = $detail.Substring(0,512) }
+    throw ('MODULE_ENUMERATION_FAILED: ' + $detail)
+  }
+  return @($result.stdout -split "`r?`n" | Where-Object { $_ })
 }
 function Assert-OwnedIdentity($Process, [string]$StartedUtc) {
   $Process.Refresh()
