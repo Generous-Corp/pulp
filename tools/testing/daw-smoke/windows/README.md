@@ -26,6 +26,14 @@ copied profile. It never edits the source profile or prints license contents.
 Exported evidence contains no profile or license. Keep user REAPER processes
 and projects untouched.
 
+Run this from the logged-in Windows desktop session that owns the RDP or UTM
+display. The harness refuses Session 0 or another non-interactive context by
+requiring an Explorer process in the current Windows session. Its receipt
+records the session ID and Explorer PIDs, binds every owned REAPER process to
+that session, and records the foreground window session during editor
+activation. This prevents a successful host handshake from being mistaken for
+a visible editor when the runner is detached from the desktop.
+
 For CLAP, pass required adjacent files explicitly, for example
 `-SidecarPath 'C:\build\icudtl.dat'`. VST3 bundles are copied recursively.
 The receipt contains a named SHA256/size manifest for staged files, the actual
