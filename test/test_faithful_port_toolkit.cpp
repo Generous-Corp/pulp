@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/view/callout_box.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/svg_fragment.hpp>
@@ -710,6 +711,35 @@ TEST_CASE("parse_annotated_manifest reports errors",
         CHECK_FALSE(impd::parse_annotated_manifest(
             R"({"elements":[{"kind":"frobnicator"}]})", m, err));
         CHECK(err.find("frobnicator") != std::string::npos);
+    }
+}
+
+TEST_CASE("strict annotated capture validation binds provenance and geometry",
+          "[view][annotated-capture][issue-port-fidelity]") {
+    const std::string svg = R"(<svg width="200" height="100"><rect id="mix" x="10" y="20" width="40" height="30"/></svg>)";
+    const auto hash = pulp::runtime::sha256_hex(svg);
+    const std::string sidecar = std::string(R"JSON({"provenance":{"source":"capture-tool-v1"},"svg_sha256":")JSON") +
+        hash + R"JSON(","canvas":{"width":200,"height":100},"elements":[{"selector":"#mix","kind":"knob","geometry":{"cx":30,"cy":35,"hit_radius":10}}]})JSON";
+    std::string error;
+    CHECK(impd::validate_annotated_capture(svg, sidecar, error));
+    CHECK(error.empty());
+    SECTION("hash mismatch") {
+        auto bad = sidecar;
+        bad.replace(bad.find(hash), hash.size(), std::string(64, '0'));
+        CHECK_FALSE(impd::validate_annotated_capture(svg, bad, error));
+        CHECK(error.find("sha256") != std::string::npos);
+    }
+    SECTION("unknown or duplicate control ids fail closed") {
+        auto bad = sidecar;
+        bad.replace(bad.find("#mix"), 4, "#missing");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, bad, error));
+        CHECK(error.find("absent") != std::string::npos);
+    }
+    SECTION("out of bounds geometry fails closed") {
+        auto bad = sidecar;
+        bad.replace(bad.find("\"cx\":30"), std::string("\"cx\":30").size(), "\"cx\":195");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, bad, error));
+        CHECK(error.find("outside") != std::string::npos);
     }
 }
 

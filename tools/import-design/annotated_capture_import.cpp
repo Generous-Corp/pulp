@@ -42,6 +42,11 @@ std::string arg_value(int argc, char** argv, const std::string& flag) {
     return {};
 }
 
+bool has_flag(int argc, char** argv, const std::string& flag) {
+    for (int i = 1; i < argc; ++i) if (flag == argv[i]) return true;
+    return false;
+}
+
 // Chunked base64 accessor source, mirroring make_catalog_component.py's
 // <snake>_svg.cpp so a >64K SVG literal never trips the compiler.
 std::string emit_svg_accessor(const std::string& snake, const std::string& svg) {
@@ -82,6 +87,16 @@ int main(int argc, char** argv) {
     if (!ok) { std::fprintf(stderr, "cannot read SVG: %s\n", svg_path.c_str()); return 1; }
     const std::string manifest_json = read_file(manifest_path, ok);
     if (!ok) { std::fprintf(stderr, "cannot read manifest: %s\n", manifest_path.c_str()); return 1; }
+
+    if (has_flag(argc, argv, "--validate-only")) {
+        std::string error;
+        if (!validate_annotated_capture(svg, manifest_json, error)) {
+            std::fprintf(stderr, "validation error: %s\n", error.c_str());
+            return 1;
+        }
+        std::printf("validated preconverted SVG + control-map sidecar (no files generated)\n");
+        return 0;
+    }
 
     AnnotatedCaptureManifest m;
     std::string error;

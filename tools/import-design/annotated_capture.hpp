@@ -71,6 +71,13 @@ struct AnnotatedCaptureManifest {
 bool parse_annotated_manifest(const std::string& json,
                               AnnotatedCaptureManifest& out, std::string& error);
 
+/// Strictly validate a preconverted SVG and its control-map sidecar without
+/// generating files. The sidecar must carry provenance, an exact svg_sha256,
+/// a positive canvas, and selectors that name unique in-bounds SVG elements.
+bool validate_annotated_capture(const std::string& svg,
+                                const std::string& sidecar_json,
+                                std::string& error);
+
 /// snake_case a ClassName (ReverbPanelView -> reverb_panel_view). Matches the
 /// convention make_catalog_component.py uses for generated file names.
 std::string snake_case(const std::string& class_name);

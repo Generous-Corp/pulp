@@ -3,10 +3,13 @@
 #include <cctype>
 #include <cstdio>
 #include <optional>
+#include <regex>
+#include <unordered_set>
 #include <sstream>
 #include <unordered_map>
 
 #include <choc/text/choc_JSON.h>
+#include <pulp/runtime/crypto.hpp>
 
 namespace pulp::import_design {
 
@@ -181,6 +184,60 @@ bool parse_annotated_manifest(const std::string& json,
                                               static_cast<float>(e.target_frame)));
 
         out.elements.push_back(std::move(e));
+    }
+    return true;
+}
+
+bool validate_annotated_capture(const std::string& svg,
+                                const std::string& sidecar_json,
+                                std::string& error) {
+    error.clear();
+    choc::value::Value root;
+    try { root = choc::json::parse(sidecar_json); }
+    catch (const std::exception& e) { error = std::string("invalid sidecar JSON: ") + e.what(); return false; }
+    if (!root.isObject()) { error = "sidecar root must be an object"; return false; }
+    if (!root.hasObjectMember("provenance") || !root["provenance"].isObject()) {
+        error = "sidecar requires provenance object"; return false;
+    }
+    const auto provenance = root["provenance"];
+    const auto source = str(provenance, "source");
+    if (source.empty()) { error = "provenance.source is required"; return false; }
+    const auto hash = str(root, "svg_sha256");
+    static const std::regex hex64("^[0-9a-fA-F]{64}$");
+    if (!std::regex_match(hash, hex64)) { error = "svg_sha256 must be a 64-character hex digest"; return false; }
+    if (runtime::sha256_hex(svg) != hash) { error = "svg_sha256 does not match SVG bytes"; return false; }
+    if (!root.hasObjectMember("canvas") || !root["canvas"].isObject()) {
+        error = "sidecar requires canvas object"; return false;
+    }
+    const auto canvas = root["canvas"];
+    const float cw = num(canvas, "width", 0), ch = num(canvas, "height", 0);
+    if (!(cw > 0 && ch > 0)) { error = "canvas width and height must be positive"; return false; }
+
+    std::unordered_set<std::string> svg_ids;
+    const std::regex id_re(R"(\bid\s*=\s*["']([^"']+)["'])");
+    for (std::sregex_iterator it(svg.begin(), svg.end(), id_re), end; it != end; ++it)
+        if (!svg_ids.insert((*it)[1].str()).second) { error = "SVG contains duplicate id '" + (*it)[1].str() + "'"; return false; }
+
+    AnnotatedCaptureManifest manifest;
+    if (!parse_annotated_manifest(sidecar_json, manifest, error)) return false;
+    std::unordered_set<std::string> selectors;
+    for (size_t i = 0; i < manifest.elements.size(); ++i) {
+        const auto& e = manifest.elements[i];
+        if (e.source_node_id.size() < 2 || e.source_node_id[0] != '#') {
+            error = "element " + std::to_string(i) + " selector must be an SVG #id"; return false;
+        }
+        const auto id = e.source_node_id.substr(1);
+        if (!selectors.insert(id).second) { error = "duplicate control selector '" + e.source_node_id + "'"; return false; }
+        if (!svg_ids.count(id)) { error = "control selector '" + e.source_node_id + "' is absent from SVG"; return false; }
+        if (e.w < 0 || e.h < 0 || e.x < 0 || e.y < 0 || e.x + e.w > cw || e.y + e.h > ch) {
+            error = "element " + std::to_string(i) + " geometry is outside canvas"; return false;
+        }
+        if ((e.kind == DesignFrameElement::Kind::knob || e.kind == DesignFrameElement::Kind::xy_pad) &&
+            (e.cx < 0 || e.cy < 0 || e.cx > cw || e.cy > ch || e.hit_radius < 0 ||
+             e.cx + e.hit_radius > cw || e.cy + e.hit_radius > ch ||
+             e.cx - e.hit_radius < 0 || e.cy - e.hit_radius < 0)) {
+            error = "element " + std::to_string(i) + " control center is outside canvas"; return false;
+        }
     }
     return true;
 }
