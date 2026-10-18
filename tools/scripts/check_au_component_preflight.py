@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import plistlib
 import shutil
@@ -13,6 +14,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+
+HOST_PROBE_TIMEOUT = 10.0
 
 
 @dataclass(frozen=True)
@@ -50,23 +54,27 @@ def _first_audio_component(data: dict[str, Any]) -> tuple[dict[str, Any] | None,
 def _check_field(component: dict[str, Any], name: str, expected: str | None) -> CheckResult:
     value = component.get(name)
     if not isinstance(value, str) or not value:
-        return CheckResult(name, False, f"missing or non-string {name}")
+        return CheckResult(name, False, f"missing or non-string {name}",
+                           "COMPONENT_METADATA_INVALID", "Fix the AudioComponents metadata and rebuild.")
     if expected is not None and value != expected:
-        return CheckResult(name, False, f"expected {expected!r}, found {value!r}")
+        return CheckResult(name, False, f"expected {expected!r}, found {value!r}",
+                           "COMPONENT_METADATA_INVALID", "Use the expected AU type, subtype, or manufacturer.")
     return CheckResult(name, True, value)
 
 
 def _check_string_field(data: dict[str, Any], name: str) -> CheckResult:
     value = data.get(name)
     if not isinstance(value, str) or not value:
-        return CheckResult(name, False, f"missing or non-string {name}")
+        return CheckResult(name, False, f"missing or non-string {name}",
+                           "COMPONENT_METADATA_INVALID", "Fix the bundle's required Info.plist field.")
     return CheckResult(name, True, value)
 
 
 def _check_component_version(component: dict[str, Any]) -> CheckResult:
     value = component.get("version")
     if not isinstance(value, int) or value < 0:
-        return CheckResult("version", False, "missing or non-negative integer version")
+        return CheckResult("version", False, "missing or non-negative integer version",
+                           "COMPONENT_METADATA_INVALID", "Fix AudioComponents[0].version in the bundle metadata.")
     return CheckResult("version", True, str(value))
 
 
@@ -121,7 +129,8 @@ def _check_bundle(args: argparse.Namespace) -> list[CheckResult]:
 
     data, error = _read_plist(plist_path)
     if error or data is None:
-        results.append(CheckResult("Info.plist", False, error or "unknown plist error"))
+        results.append(CheckResult("Info.plist", False, error or "unknown plist error",
+                                   "COMPONENT_METADATA_INVALID", "Fix or restore Contents/Info.plist."))
         return results
     results.append(CheckResult("Info.plist", True, str(plist_path)))
     for name in ("CFBundleIdentifier", "CFBundleName", "CFBundleShortVersionString"):
@@ -129,7 +138,8 @@ def _check_bundle(args: argparse.Namespace) -> list[CheckResult]:
 
     component, error = _first_audio_component(data)
     if error or component is None:
-        results.append(CheckResult("AudioComponents[0]", False, error or "unknown component error"))
+        results.append(CheckResult("AudioComponents[0]", False, error or "unknown component error",
+                                   "COMPONENT_METADATA_INVALID", "Add a valid AudioComponents entry to Info.plist."))
         return results
     results.append(CheckResult("AudioComponents[0]", True, "present"))
     results.append(_check_field(component, "name", None))
@@ -150,7 +160,8 @@ def _check_bundle(args: argparse.Namespace) -> list[CheckResult]:
         executable = bundle / "Contents" / "MacOS" / cf_executable
         results.append(CheckResult("CFBundleExecutable", executable.is_file(), str(executable)))
     else:
-        results.append(CheckResult("CFBundleExecutable", False, "missing or non-string"))
+        results.append(CheckResult("CFBundleExecutable", False, "missing or non-string",
+                                   "COMPONENT_METADATA_INVALID", "Set CFBundleExecutable to the AU binary name."))
 
     if args.expect_symbol:
         if executable_name is None:
@@ -351,8 +362,13 @@ def _summarize_auval_list(output: str) -> str:
 
 
 def _run_probe(command: list[str], *, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, text=True, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, check=False, timeout=timeout)
+    limit = HOST_PROBE_TIMEOUT if timeout is None else timeout
+    try:
+        return subprocess.run(command, text=True, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, check=False, timeout=limit)
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.output.decode(errors="replace") if isinstance(exc.output, bytes) else (exc.output or "")
+        return subprocess.CompletedProcess(command, 124, f"timed out after {limit:g}s\n{partial}")
 
 
 def _check_host_architecture(bundle: Path) -> list[CheckResult]:
@@ -361,9 +377,10 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
     arch = uname.stdout.strip() or "unknown"
     results.append(CheckResult("host architecture", uname.returncode == 0, arch,
                                "HOST_ARCHITECTURE" if uname.returncode == 0 else "HOST_ARCHITECTURE_UNKNOWN"))
-    executable = bundle / "Contents" / "MacOS"
-    names = list(executable.iterdir()) if executable.is_dir() else []
-    target = names[0] if names else None
+    plist, plist_error = _read_plist(bundle / "Contents" / "Info.plist")
+    executable_name = plist.get("CFBundleExecutable") if plist else None
+    target = (bundle / "Contents" / "MacOS" / executable_name
+              if isinstance(executable_name, str) and executable_name else None)
     if target is None:
         results.append(CheckResult("binary architecture", False, "executable not found",
                                    "BINARY_MISSING", "Fix CFBundleExecutable and rebuild the component."))
@@ -372,8 +389,16 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
         if file_tool:
             probe = _run_probe([file_tool, str(target)])
             detail = probe.stdout.strip() or "file returned no architecture"
-            results.append(CheckResult("binary architecture", probe.returncode == 0, detail,
-                                       "BINARY_ARCHITECTURE" if probe.returncode == 0 else "BINARY_ARCHITECTURE_UNKNOWN"))
+            if probe.returncode == 124:
+                results.append(CheckResult("binary architecture", False, detail,
+                                           "HOST_PROBE_TIMEOUT", "Retry after checking the host tools are responsive."))
+            else:
+                has_arm64 = "arm64" in detail or "arm64e" in detail
+                has_x86 = "x86_64" in detail or "i386" in detail
+                compatible = probe.returncode == 0 and (arch != "arm64" or has_arm64 or has_x86)
+                code = "BINARY_ARCHITECTURE_COMPATIBLE" if compatible else "BINARY_ARCHITECTURE_MISMATCH"
+                remediation = None if compatible else "Build an arm64/universal AU, or install Rosetta for an x86_64-only AU."
+                results.append(CheckResult("binary architecture", compatible, detail, code, remediation))
     if arch == "arm64":
         rosetta = _run_probe(["arch", "-x86_64", "true"])
         if rosetta.returncode == 0:
@@ -397,9 +422,25 @@ def _check_registrar() -> list[CheckResult]:
     if domain.returncode == 0:
         results.append(CheckResult("registrar domain", True, domain.stdout.strip() or "unknown",
                                    "REGISTRAR_DOMAIN"))
-    probe = _run_probe([launchctl, "print", "system/com.apple.audio.AudioComponentRegistrar"])
-    if probe.returncode == 0:
-        results.append(CheckResult("AudioComponentRegistrar", True, "system service present", "REGISTRAR_PRESENT"))
+    elif domain.returncode == 124:
+        results.append(CheckResult("registrar domain", False, domain.stdout.strip(), "HOST_PROBE_TIMEOUT",
+                                   "Retry after launchctl is responsive."))
+
+    uid = str(os.getuid())
+    manager = domain.stdout.strip() if domain.returncode == 0 else ""
+    targets = [f"system/com.apple.audio.AudioComponentRegistrar"]
+    if manager == "Aqua":
+        targets.insert(0, f"gui/{uid}/com.apple.audio.AudioComponentRegistrar")
+    elif manager:
+        targets.insert(0, f"user/{uid}/com.apple.audio.AudioComponentRegistrar")
+    probes = [(target, _run_probe([launchctl, "print", target])) for target in targets]
+    present = next(((target, probe) for target, probe in probes if probe.returncode == 0), None)
+    if present is not None:
+        target, _ = present
+        results.append(CheckResult("AudioComponentRegistrar", True, f"{target} present", "REGISTRAR_PRESENT"))
+    elif any(probe.returncode == 124 for _, probe in probes):
+        results.append(CheckResult("AudioComponentRegistrar", False, "launchctl probe timed out",
+                                   "HOST_PROBE_TIMEOUT", "Retry after launchctl is responsive."))
     else:
         # The registrar can be a short-lived on-demand process rather than a
         # continuously printed launchd service. Use a process probe before
@@ -410,15 +451,20 @@ def _check_registrar() -> list[CheckResult]:
             results.append(CheckResult("AudioComponentRegistrar", True, "process present (on-demand)",
                                        "REGISTRAR_PRESENT"))
         else:
-            results.append(CheckResult("AudioComponentRegistrar", False, probe.stdout.strip() or "service not found",
+            results.append(CheckResult("AudioComponentRegistrar", False, probes[-1][1].stdout.strip() or "service not found",
                                        "SYSTEM_REGISTRAR_UNAVAILABLE",
                                        "Restart the registrar or reboot macOS, then rerun this preflight."))
     log = shutil.which("log")
     if log:
         logs = _run_probe([log, "show", "--last", "10m", "--style", "compact",
-                           "--predicate", 'process == "AudioComponentRegistrar" OR eventMessage CONTAINS[c] "Rosetta runtime is not available"'])
+                           "--predicate", 'process == "AudioComponentRegistrar" AND eventMessage CONTAINS[c] "Rosetta runtime is not available"'])
         text = logs.stdout.strip()
-        if "Rosetta runtime is not available" in text:
+        if logs.returncode == 124:
+            results.append(CheckResult("registrar logs", False, text, "HOST_PROBE_TIMEOUT",
+                                       "Retry after the unified log service is responsive."))
+        elif any("process=AudioComponentRegistrar" in line and
+                 "Rosetta runtime is not available" in line
+                 for line in text.splitlines()):
             results.append(CheckResult("registrar logs", False, "Rosetta runtime is not available",
                                        "REGISTRAR_ROSETTA_FAILURE",
                                        "Install Rosetta and restart the registrar before rescanning."))
@@ -461,7 +507,8 @@ def _run_auval(args: argparse.Namespace) -> list[CheckResult]:
             continue
         if proc.returncode != 0 or "PASS" not in proc.stdout:
             tail = "\n".join(proc.stdout.splitlines()[-12:])
-            results.append(CheckResult("auval", False, f"{detail} failed\n{tail}"))
+            results.append(CheckResult("auval", False, f"{detail} failed\n{tail}",
+                                       "AUVAL_FAILED", "Inspect the typed bundle and registrar checks before retrying."))
         else:
             results.append(CheckResult("auval", True, detail))
     return results
@@ -531,7 +578,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.auval_repeat < 1:
         parser.error("--auval-repeat must be at least 1")
-    if args.auval_timeout <= 0:
+    if not math.isfinite(args.auval_timeout) or args.auval_timeout <= 0:
         parser.error("--auval-timeout must be greater than 0")
 
     results = _check_bundle(args)
@@ -546,6 +593,8 @@ def main(argv: list[str] | None = None) -> int:
         results.append(auval_result)
         if args.diagnose_host or (not auval_result.ok and auval_result.code == "SYSTEM_REGISTRAR_APPLE_ONLY"):
             results.extend(_diagnose_host(args))
+    elif args.diagnose_host:
+        results.extend(_diagnose_host(args))
     if args.run_auval:
         results.extend(_run_auval(args))
 

@@ -331,7 +331,7 @@ class AuComponentPreflightTests(unittest.TestCase):
                 "launchctl domain": "Aqua\n",
                 "launchctl print": "service not found\n",
                 "pgrep": "",
-                "log": "Rosetta runtime is not available!\n",
+                "log": "process=AudioComponentRegistrar eventMessage=Rosetta runtime is not available!\n",
             }
             def fake_which(name: str) -> str | None:
                 return "/usr/bin/" + name
@@ -366,6 +366,41 @@ class AuComponentPreflightTests(unittest.TestCase):
             self.assertEqual(checks["auval list"]["code"], "SYSTEM_REGISTRAR_APPLE_ONLY")
             self.assertEqual(checks["Rosetta"]["code"], "HOST_ROSETTA_MISSING")
             self.assertEqual(checks["registrar logs"]["code"], "REGISTRAR_ROSETTA_FAILURE")
+
+    def test_log_command_cannot_self_trigger_rosetta_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/" + name
+            def fake_run(command, **kwargs):
+                if command[:2] == ["uname", "-m"]:
+                    return preflight.subprocess.CompletedProcess(command, 0, "arm64\n")
+                if command[0] == "/usr/bin/file":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Mach-O universal binary arm64 x86_64\n")
+                if command[0] in ("arch", "/usr/bin/arch"):
+                    return preflight.subprocess.CompletedProcess(command, 0, "")
+                if command[0] == "/usr/bin/launchctl":
+                    return preflight.subprocess.CompletedProcess(command, 0, "Aqua\n")
+                if command[0] == "/usr/bin/log":
+                    return preflight.subprocess.CompletedProcess(
+                        command, 0,
+                        'process=log args=--predicate "process == AudioComponentRegistrar OR '
+                        'eventMessage CONTAINS[c] Rosetta runtime is not available"\n',
+                    )
+                raise AssertionError(command)
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run", side_effect=fake_run):
+                checks = preflight._diagnose_host(type("Args", (), {"bundle": bundle})())
+            logs = next(check for check in checks if check.label == "registrar logs")
+            self.assertTrue(logs.ok)
+            self.assertEqual(logs.code, "REGISTRAR_LOGS_CLEAR")
+
+    def test_host_probe_timeout_is_bounded(self) -> None:
+        with mock.patch.object(preflight.subprocess, "run",
+                               side_effect=preflight.subprocess.TimeoutExpired(["log"], 10.0)):
+            result = preflight._run_probe(["log", "show"])
+        self.assertEqual(result.returncode, 124)
+        self.assertIn("timed out after 10s", result.stdout)
 
     def test_diagnosis_reports_non_arm64_without_rosetta_failure(self) -> None:
         with tempfile.TemporaryDirectory() as d:

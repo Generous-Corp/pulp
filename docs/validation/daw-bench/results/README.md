@@ -103,6 +103,7 @@ python3 tools/scripts/check_au_component_preflight.py \
     --check-codesign \
     --check-gatekeeper \
     --check-auval-list \
+    --diagnose-host \
     --run-auval \
     --auval-repeat 2 \
     --format json
@@ -117,9 +118,12 @@ expected `check_au_component_preflight.py --format json` shape. The reported
 preflight may pass or fail because both outcomes are useful diagnostics.
 When `check-auval-list` fails, the diagnostic also summarizes whether `auval -a`
 listed any non-Apple components. A result that lists only Apple components means
-the local AU registrar is not exposing third-party components, so a missing
-Logic AU lane should stay open until that machine-level condition is fixed and
-stable repeated `auval` passes are captured.
+the invoking launchd domain is not exposing third-party components; Aqua and
+background/SSH domains can legitimately differ. Keep the domain and registrar
+target in the receipt, and capture stable repeated passes in the same GUI
+domain as the DAW before calling the AU unavailable. All host probes and
+`auval` calls are bounded; `HOST_PROBE_TIMEOUT` and `AUVAL_TIMEOUT` are typed
+diagnostics rather than permission to retry indefinitely.
 When Gatekeeper reports `Adhoc Signed App` or `Notary Ticket Missing`, rerun the
 preflight with `--check-signing-identity "Developer ID Application: ..."` before
 attempting a notarized replacement install; that check signs a temporary copy
