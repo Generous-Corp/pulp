@@ -1,0 +1,31 @@
+# Pulp Windows ARM64 QEMU image manifest.
+#
+# This is a host-side provenance and preflight contract for the advisory local
+# Windows runner. It does not route a workflow or create a VM. The runner must
+# clone this image as a copy-on-write overlay and discard the overlay after one
+# job. Keep the image stopped and immutable while overlays are active.
+schema = 1
+name = "pulp-windows-build-24h2-arm64"
+strategy = "ephemeral-overlay"
+provisioning = "ephemeral"
+architecture = "arm64"
+
+[base_image]
+path = "/Volumes/Atelier/VMs/bench/pulp-windows-build-24h2-arm64-utm-fresh-20261007.qcow2"
+sha256 = "3456ad9852734da11ae479586ee623f402a4870861a9a0bfd26fd003c614423d"
+
+[firmware]
+code_path = "/opt/homebrew/share/qemu/edk2-aarch64-code.fd"
+code_sha256 = "47765fe344818cbc464b1c14ae658fb4b854f5c2ceffa982411731eb4865594d"
+vars_template_path = "/opt/homebrew/share/qemu/edk2-arm-vars.fd"
+vars_template_sha256 = "b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f"
+
+[overlay]
+state_dir = "$HOME/VMs/sessions/pulp-windows"
+cleanup = "on-exit"
+copy_on_write = true
+
+[cache]
+# Mutable compiler/build caches are guest-local. A future shared cache mount
+# needs its own reviewed contract and must not turn this into a warm build dir.
+mode = "guest-local"
