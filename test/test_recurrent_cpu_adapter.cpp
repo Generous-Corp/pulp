@@ -386,6 +386,28 @@ TEST_CASE("recurrent CPU adapter reset and NeuralProcessor reprepare lifecycle",
     REQUIRE(processor.release());
 }
 
+TEST_CASE("NeuralProcessor retries failed recurrent cleanup through quiesce",
+          "[gpu_audio][neural][recurrent][lifecycle]") {
+    const auto spec = make_spec(RecurrentFamily::Gru);
+    SyntheticKernel kernel{.family = RecurrentFamily::Gru,
+                           .fail_once = true,
+                           .fail_release_once = true};
+    RecurrentCpuAdapter adapter(spec, make_shape(RecurrentFamily::Gru), make_kernel(kernel));
+    NeuralProcessor processor(adapter);
+    const auto context = StreamingPrepareContext{.spec = &adapter.spec(),
+                                                 .artifact_id = "synthetic-recurrent",
+                                                 .artifact_hash = "synthetic-weights",
+                                                 .max_frames = 64};
+
+    CHECK_FALSE(processor.prepare(context));
+    CHECK(kernel.release_calls == 2);
+    CHECK(kernel.quiesce_calls == 1);
+    CHECK_FALSE(processor.snapshot().prepared);
+    REQUIRE(processor.release());
+    CHECK(kernel.release_calls == 2);
+    CHECK_FALSE(kernel.prepared);
+}
+
 TEST_CASE("recurrent CPU preparation is the fail-closed fallback admission proof",
           "[gpu_audio][neural][recurrent][fallback][lifecycle]") {
     const auto spec = make_spec(RecurrentFamily::Gru);

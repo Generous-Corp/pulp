@@ -125,7 +125,10 @@ class RecurrentCpuAdapter final : public StreamingModel {
     }
 
     bool quiesce() noexcept override {
-        if (!prepared_ || cleanup_required_ || kernel_.quiesce == nullptr)
+        // A failed prepare can leave resources that require a quiesce before
+        // release retries.  The cleanup transaction owns the kernel state
+        // even though it is not publishable for processing.
+        if ((!prepared_ && !cleanup_required_) || kernel_.quiesce == nullptr)
             return false;
         return kernel_.quiesce(kernel_.state);
     }
