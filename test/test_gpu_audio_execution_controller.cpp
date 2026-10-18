@@ -79,7 +79,9 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto minimum_capacity = contract();
     minimum_capacity.algorithmic_lead_blocks = 1;
-    minimum_capacity.pipeline_depth = 2;
+    // The lead consumes one pipeline slot, so two in-flight submissions
+    // require three logical slots under the controller's capacity contract.
+    minimum_capacity.pipeline_depth = 3;
     minimum_capacity.max_inflight = 2;
 
     SharedIoTelemetry telemetry;
@@ -97,8 +99,14 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Gpu);
     REQUIRE(probe.called);
     REQUIRE(probe.observed_in_flight == 1);
-    REQUIRE(probe.admission_before_reuse == SharedIoAdmission::CapacityFull);
-    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
+    // A valid lead contract reserves one logical slot for delivery, leaving
+    // the spare slot available while the retired slot is still unpublished.
+    // The admission made by the hook therefore succeeds and consumes the
+    // next sequence; the following admission observes the full in-flight
+    // budget until that slot is retired.
+    REQUIRE(probe.admission_before_reuse == SharedIoAdmission::Accepted);
+    REQUIRE(controller.in_flight_for_testing() == minimum_capacity.max_inflight);
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::CapacityFull);
     REQUIRE(telemetry.snapshot().in_flight_high_water == minimum_capacity.max_inflight);
 }
 
