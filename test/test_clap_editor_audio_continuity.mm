@@ -126,6 +126,7 @@ void hold_editor_operation(const clap_plugin_t* p) {
            !t->overlap_cancelled.load(std::memory_order_acquire) &&
            !t->overlap_acknowledged.load(std::memory_order_acquire))
         std::this_thread::yield();
+    t->editor_operation_active.store(false, std::memory_order_release);
 }
 
 clap_process_status CLAP_ABI tone_process(const clap_plugin_t* p, const clap_process_t* proc) {
