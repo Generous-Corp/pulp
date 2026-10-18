@@ -160,6 +160,12 @@ class SharedIoConvolutionSession {
     bool lifecycle_receipt_overflow() const noexcept {
         return plan_.lifecycle_receipt_overflow();
     }
+    bool completion_receipt_overflow() const noexcept {
+        return plan_.completion_receipt_overflow();
+    }
+    bool receipt_overflow() const noexcept {
+        return plan_.receipt_overflow();
+    }
     ProviderDiagnostics provider_diagnostics() const noexcept {
         const auto& plan = plan_.telemetry();
         const auto trace =

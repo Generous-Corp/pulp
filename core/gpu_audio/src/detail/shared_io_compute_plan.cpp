@@ -72,6 +72,8 @@ bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config&
     telemetry_ = {};
     lifecycle_receipts_.clear();
     lifecycle_receipts_.reserve(kLifecycleReceiptCapacity);
+    calibration_observations_.clear();
+    calibration_observations_.reserve(kLifecycleReceiptCapacity);
     receipt_index_by_slot_.assign(config.slots, kLifecycleReceiptCapacity);
     lifecycle_receipt_overflow_ = false;
     completion_receipt_overflow_ = false;
@@ -352,6 +354,40 @@ SharedIoComputePlan::receipt_for(const SharedIoSlotLedger::SlotToken& token) noe
                : nullptr;
 }
 
+void SharedIoComputePlan::append_calibration_observation(const LifecycleReceipt& receipt) {
+    if (calibration_observations_.size() >= kLifecycleReceiptCapacity) {
+        lifecycle_receipt_overflow_ = true;
+        telemetry_.calibration_invalidated = true;
+        return;
+    }
+    SharedIoCalibrationObservation observation;
+    observation.identity = receipt.calibration_identity;
+    observation.provenance = receipt.provenance;
+    observation.generation = receipt.generation;
+    observation.sequence = receipt.sequence;
+    observation.worker_ns =
+        receipt.worker_ns > 0 ? static_cast<std::uint64_t>(receipt.worker_ns) : 0;
+    observation.submitted_ns =
+        receipt.submit_ns > 0 ? static_cast<std::uint64_t>(receipt.submit_ns) : 0;
+    observation.terminal_ns =
+        receipt.terminal_ns > 0 ? static_cast<std::uint64_t>(receipt.terminal_ns) : 0;
+    observation.visible_ns =
+        receipt.visible_ns > 0 ? static_cast<std::uint64_t>(receipt.visible_ns) : 0;
+    observation.predicted_ns = receipt.predicted_ns;
+    observation.provider_authenticated = receipt.provider_authenticated;
+    observation.terminal_success = receipt.terminal_success;
+    observation.late = receipt.late;
+    observation.stale = receipt.stale;
+    observation.discarded = receipt.discarded;
+    observation.device_lost = receipt.device_lost;
+    observation.output_acquired = receipt.output_acquired;
+    observation.output_released = receipt.output_released;
+    observation.lifecycle_valid = lifecycle_receipt_valid();
+    if (!observation.valid())
+        ++telemetry_.invalid_calibration_rows;
+    calibration_observations_.push_back(observation);
+}
+
 std::optional<SharedIoArena::OutputLease>
 SharedIoComputePlan::acquire_output(const Completion& completion) noexcept {
     if (completion.status != SharedIoArena::CompletionStatus::RetiredSuccess)
@@ -395,6 +431,7 @@ void SharedIoComputePlan::record_calibration(LifecycleReceipt& receipt) noexcept
     if (provider_ != nullptr && provider_->device_lost())
         receipt.device_lost = true;
     if (lifecycle_receipt_overflow_ || completion_receipt_overflow_) {
+        append_calibration_observation(receipt);
         telemetry_.calibration_invalidated = true;
         ++telemetry_.invalid_calibration_rows;
         return;
@@ -408,6 +445,7 @@ void SharedIoComputePlan::record_calibration(LifecycleReceipt& receipt) noexcept
         }
         last_calibration_ns_ = terminal;
     }
+    append_calibration_observation(receipt);
     SharedIoCalibrationObservation observation;
     observation.identity = receipt.calibration_identity;
     observation.provenance = receipt.provenance;

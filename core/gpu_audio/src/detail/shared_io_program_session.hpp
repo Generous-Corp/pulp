@@ -87,6 +87,12 @@ class SharedIoProgramSession {
     bool lifecycle_receipt_overflow() const noexcept {
         return plan_.lifecycle_receipt_overflow();
     }
+    bool completion_receipt_overflow() const noexcept {
+        return plan_.completion_receipt_overflow();
+    }
+    bool receipt_overflow() const noexcept {
+        return plan_.receipt_overflow();
+    }
 
   private:
     std::unique_ptr<SharedIoArenaProvider> provider_;
