@@ -770,22 +770,22 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
     }
     SECTION("typed-invalid and non-finite geometry fail closed") {
         auto typed_invalid = sidecar;
-        typed_invalid.replace(typed_invalid.find("\"cx\":30"),
-                              std::string("\"cx\":30").size(), "\"cx\":\"oops\"");
+        typed_invalid.replace(typed_invalid.find("\"cx\":30"), std::string("\"cx\":30").size(),
+                              "\"cx\":\"oops\"");
         CHECK_FALSE(impd::validate_annotated_capture(svg, typed_invalid, error));
         CHECK(error.find("must be numeric") != std::string::npos);
 
         auto non_finite = sidecar;
-        non_finite.replace(non_finite.find("\"cx\":30"),
-                           std::string("\"cx\":30").size(), "\"cx\":1e999");
+        non_finite.replace(non_finite.find("\"cx\":30"), std::string("\"cx\":30").size(),
+                           "\"cx\":1e999");
         CHECK_FALSE(impd::validate_annotated_capture(svg, non_finite, error));
         CHECK((error.find("non-finite") != std::string::npos ||
                error.find("invalid") != std::string::npos));
     }
     SECTION("required geometry cannot be omitted") {
         auto missing_geometry = sidecar;
-        const auto geometry = std::string(
-            R"JSON("geometry":{"cx":30,"cy":35,"hit_radius":10})JSON");
+        const auto geometry =
+            std::string(R"JSON("geometry":{"cx":30,"cy":35,"hit_radius":10})JSON");
         missing_geometry.replace(missing_geometry.find(geometry), geometry.size(),
                                  R"JSON("param_key":"mix")JSON");
         CHECK_FALSE(impd::validate_annotated_capture(svg, missing_geometry, error));

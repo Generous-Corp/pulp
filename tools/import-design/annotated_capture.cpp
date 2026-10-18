@@ -64,7 +64,8 @@ const char* kind_to_enum(DesignFrameElement::Kind k) {
 float num(const choc::value::ValueView& v, const char* key, float dflt) {
     if (!v.isObject() || !v.hasObjectMember(key)) return dflt;
     const auto m = v[key];
-    if (!m.isInt() && !m.isFloat()) return dflt;
+    if (!m.isInt() && !m.isFloat())
+        return dflt;
     const auto value = static_cast<float>(m.getWithDefault(0.0));
     return std::isfinite(value) ? value : std::numeric_limits<float>::quiet_NaN();
 }
@@ -74,10 +75,12 @@ bool contains_non_finite_number(const choc::value::ValueView& value) {
         return !std::isfinite(value.getWithDefault(0.0));
     if (value.isArray()) {
         for (uint32_t i = 0; i < value.size(); ++i)
-            if (contains_non_finite_number(value[i])) return true;
+            if (contains_non_finite_number(value[i]))
+                return true;
     } else if (value.isObject()) {
         for (uint32_t i = 0; i < value.size(); ++i)
-            if (contains_non_finite_number(value.getObjectMemberAt(i).value)) return true;
+            if (contains_non_finite_number(value.getObjectMemberAt(i).value))
+                return true;
     }
     return false;
 }
@@ -260,8 +263,7 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
     }
     const auto canvas = root["canvas"];
     for (const char* key : {"width", "height"}) {
-        if (!canvas.hasObjectMember(key) ||
-            !(canvas[key].isInt() || canvas[key].isFloat())) {
+        if (!canvas.hasObjectMember(key) || !(canvas[key].isInt() || canvas[key].isFloat())) {
             error = std::string("canvas ") + key + " must be numeric";
             return false;
         }
@@ -280,8 +282,8 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
     const std::regex id_re(R"((?:^|\s)id\s*=\s*["']([^"']+)["'])");
     for (std::sregex_iterator tag(svg.begin(), svg.end(), tag_re), end; tag != end; ++tag) {
         const auto tag_text = tag->str();
-        for (std::sregex_iterator id(tag_text.begin(), tag_text.end(), id_re), id_end;
-             id != id_end; ++id)
+        for (std::sregex_iterator id(tag_text.begin(), tag_text.end(), id_re), id_end; id != id_end;
+             ++id)
             if (!svg_ids.insert((*id)[1].str()).second) {
                 error = "SVG contains duplicate id '" + (*id)[1].str() + "'";
                 return false;
@@ -296,16 +298,14 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
     const auto elements = root["elements"];
     for (uint32_t i = 0; i < elements.size(); ++i) {
         const auto element = elements[i];
-        if (!element.isObject()) continue;
-        const auto check_numeric = [&](const choc::value::ValueView& object,
-                                       const char* key) {
-            return !object.hasObjectMember(key) ||
-                   object[key].isInt() || object[key].isFloat();
+        if (!element.isObject())
+            continue;
+        const auto check_numeric = [&](const choc::value::ValueView& object, const char* key) {
+            return !object.hasObjectMember(key) || object[key].isInt() || object[key].isFloat();
         };
         for (const char* key : {"selected_index", "note", "view_group", "target_frame"})
             if (!check_numeric(element, key)) {
-                error = "element " + std::to_string(i) + " field '" + key +
-                        "' must be numeric";
+                error = "element " + std::to_string(i) + " field '" + key + "' must be numeric";
                 return false;
             }
         if (!element.hasObjectMember("geometry") || !element["geometry"].isObject()) {
@@ -313,8 +313,7 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
             return false;
         }
         const auto geometry = element["geometry"];
-        for (const char* key : {"cx", "cy", "hit_radius", "x", "y", "w", "h",
-                                "value", "value_y"})
+        for (const char* key : {"cx", "cy", "hit_radius", "x", "y", "w", "h", "value", "value_y"})
             if (!check_numeric(geometry, key)) {
                 error = "element " + std::to_string(i) + " geometry field '" + key +
                         "' must be numeric";
@@ -335,11 +334,14 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
             return true;
         };
         if (circular) {
-            if (!require_geometry({"cx", "cy", "hit_radius"})) return false;
+            if (!require_geometry({"cx", "cy", "hit_radius"}))
+                return false;
         } else if (xy) {
-            if (!require_geometry({"x", "y", "w", "h", "cx", "cy"})) return false;
+            if (!require_geometry({"x", "y", "w", "h", "cx", "cy"}))
+                return false;
         } else {
-            if (!require_geometry({"x", "y", "w", "h"})) return false;
+            if (!require_geometry({"x", "y", "w", "h"}))
+                return false;
         }
     }
     if (!parse_annotated_manifest(sidecar_json, manifest, error))
@@ -347,10 +349,9 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
     std::unordered_set<std::string> selectors;
     for (size_t i = 0; i < manifest.elements.size(); ++i) {
         const auto& e = manifest.elements[i];
-        if (!std::isfinite(e.cx) || !std::isfinite(e.cy) ||
-            !std::isfinite(e.hit_radius) || !std::isfinite(e.x) ||
-            !std::isfinite(e.y) || !std::isfinite(e.w) || !std::isfinite(e.h) ||
-            !std::isfinite(e.value) || !std::isfinite(e.value_y)) {
+        if (!std::isfinite(e.cx) || !std::isfinite(e.cy) || !std::isfinite(e.hit_radius) ||
+            !std::isfinite(e.x) || !std::isfinite(e.y) || !std::isfinite(e.w) ||
+            !std::isfinite(e.h) || !std::isfinite(e.value) || !std::isfinite(e.value_y)) {
             error = "element " + std::to_string(i) + " contains a non-finite numeric value";
             return false;
         }
