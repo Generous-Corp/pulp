@@ -462,9 +462,14 @@ def _check_registrar() -> list[CheckResult]:
         # diagnosing the host as unavailable.
         pgrep = shutil.which("pgrep")
         running = _run_probe([pgrep, "-x", "AudioComponentRegistrar"]) if pgrep else None
-        if running is not None and running.returncode == 0:
+        if not manager and running is not None and running.returncode == 0:
             results.append(CheckResult("AudioComponentRegistrar", True, "process present (on-demand)",
                                        "REGISTRAR_PRESENT"))
+        elif manager:
+            results.append(CheckResult("AudioComponentRegistrar", False,
+                                       f"{targets[0]} unavailable in registrar domain {manager}",
+                                       "REGISTRAR_DOMAIN_UNAVAILABLE",
+                                       "Rescan or restart the registrar in the same Aqua/user domain as the DAW."))
         else:
             results.append(CheckResult("AudioComponentRegistrar", False, probes[-1][1].stdout.strip() or "service not found",
                                        "SYSTEM_REGISTRAR_UNAVAILABLE",
