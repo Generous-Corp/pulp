@@ -138,3 +138,67 @@ TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing expl
     REQUIRE(telemetry.snapshot().configured_available_inflight == 0);
     REQUIRE_FALSE(telemetry.snapshot().gpu_elapsed_available);
 }
+
+TEST_CASE("shared IO telemetry validates quiescent admission and delivery bounds",
+          "[gpu_audio][shared_io][telemetry]") {
+    SharedIoTelemetry telemetry;
+    telemetry.configure_depth_lead({2, 4, 2});
+    telemetry.record_callback_block(false);
+    telemetry.record_admission();
+    telemetry.record_submit();
+    telemetry.record_retired(true);
+    telemetry.record_delivery(true, false);
+    telemetry.observe_in_flight(2);
+
+    const auto valid = telemetry.snapshot();
+    CHECK(validate_shared_io_telemetry(valid).accepted());
+
+    auto forged = valid;
+    forged.configured_available_inflight = 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::InvalidDepthConfiguration);
+
+    forged = valid;
+    forged.in_flight_high_water = 5;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::OccupancyExceedsPipelineDepth);
+
+    forged = valid;
+    forged.in_flight_high_water = 3;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::OccupancyExceedsMaxInflight);
+
+    forged = valid;
+    forged.submitted_blocks = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::SubmittedExceedsAdmissions);
+
+    forged = valid;
+    forged.retired_success = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::SuccessfulRetirementsExceedSubmissions);
+
+    forged = valid;
+    forged.retired_failure = 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::RetirementsExceedAdmissions);
+
+    forged = valid;
+    forged.delivered_blocks = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::DeliveredExceedsCallbacks);
+
+    forged = valid;
+    forged.fallback_blocks = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::FallbacksExceedDelivered);
+
+    // Controller-only producers from older snapshots use submitted_blocks as
+    // their admission boundary and leave the optional admission counter zero.
+    auto legacy = valid;
+    legacy.admitted_blocks = 0;
+    CHECK(validate_shared_io_telemetry(legacy).accepted());
+
+    constexpr SharedIoTelemetrySnapshot unconfigured{};
+    STATIC_REQUIRE(validate_shared_io_telemetry(unconfigured).accepted());
+}

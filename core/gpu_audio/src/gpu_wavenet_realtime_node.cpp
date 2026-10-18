@@ -83,6 +83,7 @@ struct GpuWaveNetRealtimeNode::Impl {
     void trace_admit(Pending& pending, const Bridge::Lease& input) noexcept {
         if (!trace)
             return;
+        telemetry.record_admission();
         pending.trace_record = {};
         pending.trace_record.generation = epoch;
         pending.trace_record.sequence = input.stamp().sequence;
