@@ -628,6 +628,14 @@ pulp_add_test_suite(pulp-test-gpu-audio-minimum-lead-proxy
     GROUP pulp-test-group-core-gpu-audio-private
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Private G1 contract: width>1 batching and provider-resource residency must
+# be authenticated per receipt; malformed width, identity, and sequence rows
+# are fail-closed on CPU-only builders.
+pulp_add_test_suite(pulp-test-gpu-audio-batch-residency
+    SOURCES test_gpu_audio_batch_residency.cpp
+    GROUP pulp-test-group-core-gpu-audio-private
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 pulp_add_test_suite(pulp-test-streaming-model-contract
     SOURCES test_streaming_model_contract.cpp
             $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -658,6 +666,17 @@ pulp_test_data(pulp-test-nam-tcn-adapter
 # from provider capability and product-model registration.
 pulp_add_test_suite(pulp-test-recurrent-cpu-adapter
     SOURCES test_recurrent_cpu_adapter.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+
+# Private G7 compact state-space CPU contract. Synthetic only: no provider,
+# model catalog, or product support is implied by this target.
+pulp_add_test_suite(pulp-test-compact-ssm-cpu-adapter
+    SOURCES test_compact_ssm_cpu_adapter.cpp
             $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
             $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::gpu-audio pulp::audio
@@ -717,8 +736,8 @@ pulp_add_test_suite(pulp-test-gpu-shared-io-wavenet-spec
     INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
         ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+target_link_libraries(pulp-test-gpu-shared-io-wavenet-spec PRIVATE pulp::gpu-audio pulp::audio)
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    target_link_libraries(pulp-test-gpu-shared-io-wavenet-spec PRIVATE pulp::gpu-audio)
     target_compile_definitions(pulp-test-gpu-shared-io-wavenet-spec
         PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
 endif()

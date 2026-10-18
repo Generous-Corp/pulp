@@ -31,19 +31,34 @@
 
 using namespace pulp::state;
 
-// The audio thread reads a value with ONE relaxed load of a single atomic
-// member, so the lock-free guarantee belongs to that member and is already
-// asserted beside it (parameter.hpp: is_always_lock_free on
-// std::atomic<VersionedValue>) — not to this enclosing class, which holds four
-// separate 64-bit atomics (value, generation, mod offset, mod generation) plus
-// the display-only modulated value a plugin publishes (written by the audio
-// thread, read only by the editor, padded to a word).
+// The audio thread reads a value with ONE atomic load of the packed value and
+// per-parameter revision. The other words are independent modulation and
+// diagnostic state; they do not participate in base-value publication.
 // What is worth guarding here is that the class does not silently GROW another
 // atomic word, since each one added is another load some reader has to make.
 static_assert(sizeof(ParamValue) == 5 * sizeof(std::uint64_t),
               "ParamValue changed atomic-word count; re-check that every audio-thread "
               "read still needs only one relaxed load per value");
 using Catch::Matchers::WithinAbs;
+
+namespace pulp::state {
+class ParamValueTest {
+  public:
+    static void seed_revision(ParamValue& value, std::uint32_t revision) {
+        value.value_.store(ParamValue::make_versioned_value(0.0f, revision),
+                           std::memory_order_relaxed);
+    }
+    static bool claim_generation(ParamValue& value, std::uint64_t generation,
+                                 std::uint32_t max_attempts) {
+        return value.claim_generation(generation, max_attempts);
+    }
+    static bool publish_after_generation_claim(ParamValue& value, float next,
+                                               std::uint64_t generation,
+                                               std::uint32_t max_attempts) {
+        return value.publish_after_generation_claim(next, generation, max_attempts);
+    }
+};
+} // namespace pulp::state
 
 namespace {
 
@@ -1302,7 +1317,7 @@ TEST_CASE("generation-bound gesture rejects stale ownership before begin and rol
     CHECK(store.open_gesture_count() == 0);
 }
 
-TEST_CASE("versioned parameter writes preserve newer reservations across delay and stamp wrap",
+TEST_CASE("versioned parameter writes use a monotonic packed revision",
           "[state][store][generation][race]") {
     ParamValue value(0.0f);
     REQUIRE(value.set_versioned_if_newer(0.25f, 1, 1));
@@ -1310,12 +1325,154 @@ TEST_CASE("versioned parameter writes preserve newer reservations across delay a
     CHECK_FALSE(value.set_versioned_if_newer(0.5f, 1, 2));
     CHECK_THAT(value.get(), WithinAbs(0.75f, 0.001f));
 
+    ParamValue packed(0.0f);
+    REQUIRE(packed.set_packed_revisioned(0.25f, 1, 1));
+    REQUIRE(packed.set_packed_revisioned(0.25f, 2, 1));
+    CHECK(ParamValue::revision_from_versioned(packed.versioned_value()) == 2);
+
+    ParamValue ordered(0.0f);
+    REQUIRE(ordered.set_packed_revisioned(0.75f, 2, 1));
+    CHECK_FALSE(ordered.set_packed_revisioned(0.25f, 1, 2));
+    CHECK_THAT(ordered.get(), WithinAbs(0.75f, 0.001f));
+
+    ParamValue paused(0.0f);
+    REQUIRE(ParamValueTest::claim_generation(paused, 1, 1));
+    REQUIRE(paused.set_packed_revisioned(0.75f, 2, 1));
+    CHECK_FALSE(ParamValueTest::publish_after_generation_claim(paused, 0.25f, 1, 2));
+    CHECK_THAT(paused.get(), WithinAbs(0.75f, 0.001f));
+
     ParamValue long_lived(0.0f);
     constexpr auto wrap = std::uint64_t{std::numeric_limits<std::uint32_t>::max()};
     REQUIRE(long_lived.set_versioned_if_newer(0.25f, wrap, 1));
     REQUIRE(long_lived.set_versioned_if_newer(0.75f, wrap + 1, 1));
     CHECK_THAT(long_lived.get(), WithinAbs(0.75f, 0.001f));
     CHECK(long_lived.committed_generation() == wrap + 1);
+}
+
+TEST_CASE("packed feedback revision exhaustion never wraps", "[state][store][feedback][negative]") {
+    ParamValue exhausted(0.0f);
+    ParamValueTest::seed_revision(exhausted, std::numeric_limits<std::uint32_t>::max());
+    const auto identity = exhausted.versioned_value();
+
+    auto expected = identity;
+    CHECK_FALSE(exhausted.compare_exchange_packed(expected, 0.5f, 1));
+    CHECK_FALSE(exhausted.set_versioned_if_newer(0.5f, 1, 4));
+    CHECK(exhausted.versioned_value() == identity);
+    CHECK(ParamValue::revision_from_versioned(exhausted.versioned_value()) ==
+          std::numeric_limits<std::uint32_t>::max());
+}
+
+TEST_CASE("conditional RT feedback rejects a stale recall without notification",
+          "[state][store][feedback][rt]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    int audio_notifications = 0;
+    auto token = store.add_audio_listener([&](ParamID, float) { ++audio_notifications; });
+    float main_value = -1.0f;
+    auto main_token =
+        store.add_listener([&](ParamID, float value) { main_value = value; }, ListenerThread::Main);
+
+    const auto baseline = store.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+    store.set_value_rt(1, 0.8f);
+    const auto result = store.set_value_rt_if_baseline(*baseline, 0.2f);
+
+    CHECK(result.status == ConditionalParameterApplyStatus::Conflict);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.8f, 0.001f));
+    CHECK(audio_notifications == 1);
+    CHECK(store.pump_listeners() == 1);
+    CHECK_THAT(main_value, WithinAbs(0.8f, 0.001f));
+}
+
+TEST_CASE("conditional RT feedback distinguishes same-value and ABA edits",
+          "[state][store][feedback][aba]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+
+    const auto same_value = store.capture_feedback_baseline(1);
+    REQUIRE(same_value);
+    store.set_value_rt(1, 0.0f);
+    auto result = store.set_value_rt_if_baseline(*same_value, 0.5f);
+    CHECK(result.status == ConditionalParameterApplyStatus::Conflict);
+
+    const auto aba = store.capture_feedback_baseline(1);
+    REQUIRE(aba);
+    store.set_value_rt(1, 0.25f);
+    store.set_value_rt(1, 0.0f);
+    result = store.set_value_rt_if_baseline(*aba, 0.75f);
+    CHECK(result.status == ConditionalParameterApplyStatus::Conflict);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("conditional RT feedback applies and notifies only after exact CAS",
+          "[state][store][feedback][rt-safety]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    int audio_notifications = 0;
+    float notified = -1.0f;
+    auto token = store.add_audio_listener([&](ParamID, float value) {
+        ++audio_notifications;
+        notified = value;
+    });
+    pulp::test::RtAllocationProbe probe;
+
+    const auto baseline = store.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+    const auto result = store.set_value_rt_if_baseline(*baseline, 0.75f);
+
+    REQUIRE(result.status == ConditionalParameterApplyStatus::Applied);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.75f, 0.001f));
+    CHECK(audio_notifications == 1);
+    CHECK_THAT(notified, WithinAbs(0.75f, 0.001f));
+    CHECK_FALSE(probe.saw_allocation());
+}
+
+TEST_CASE("restore advances feedback identity while remaining listener-silent",
+          "[state][store][feedback][restore]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    int notifications = 0;
+    auto token = store.add_audio_listener([&](ParamID, float) { ++notifications; });
+    const auto baseline = store.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+
+    StateStore source;
+    source.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.9f}));
+    const auto payload = source.serialize();
+    REQUIRE(store.deserialize(payload));
+    CHECK(notifications == 0);
+
+    const auto result = store.set_value_rt_if_baseline(*baseline, 0.2f);
+    CHECK(result.status == ConditionalParameterApplyStatus::Conflict);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.9f, 0.001f));
+}
+
+TEST_CASE("conditional RT feedback rejects unknown parameter and mismatched token",
+          "[state][store][feedback][negative]") {
+    StateStore store;
+    store.add_parameter(make_param_info(0, "Zero", "", {0.0f, 1.0f, 0.0f}));
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    const auto baseline = store.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+    const auto unknown = store.set_value_rt_if_baseline(ParameterFeedbackBaseline{}, 0.2f);
+    CHECK(unknown.status == ConditionalParameterApplyStatus::InvalidParameter);
+    const auto wrong_id = store.set_value_rt_if_baseline(ParameterFeedbackBaseline{}, 0.2f);
+    CHECK(wrong_id.status == ConditionalParameterApplyStatus::InvalidParameter);
+}
+
+TEST_CASE("conditional RT feedback rejects a token from another store",
+          "[state][store][feedback][negative]") {
+    StateStore store_a;
+    store_a.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    StateStore store_b;
+    store_b.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+
+    const auto baseline = store_a.capture_feedback_baseline(1);
+    REQUIRE(baseline);
+    const auto result = store_b.set_value_rt_if_baseline(*baseline, 0.75f);
+
+    CHECK(result.status == ConditionalParameterApplyStatus::InvalidParameter);
+    CHECK_THAT(store_b.get_value(1), WithinAbs(0.0f, 0.001f));
 }
 
 TEST_CASE("StateStore preserves parameter display conversion callbacks",

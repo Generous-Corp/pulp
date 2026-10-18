@@ -130,6 +130,12 @@ binary stays installed as the rollback. A source build at a new path is a new
 program to LuLu on every host; flipping the pin needs no network (the tools are
 already installed), so pre-seed rather than asking for firewall rules.
 
+New mise releases surface in the weekly "Dependency drift: weekly audit"
+issue (`deps-drift-check.yml`): `tools/deps/manifest.json` tracks mise as a
+`git-tag` upstream, and a test refuses it unless its version and tag match
+`[mise].version`. A newer release there starts the evidence path above; it
+never moves a host by itself.
+
 ## Windows VM recipe
 
 For an ephemeral ARM64 or x64 Windows guest, copy only the locked config and

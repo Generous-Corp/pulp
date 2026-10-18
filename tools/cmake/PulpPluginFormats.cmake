@@ -49,7 +49,9 @@ endfunction()
 # staging assertion is satisfied explicitly so a missing call on an ordinary
 # plug-in still fails.
 function(_pulp_mark_editorless_runtime target)
-    set_target_properties(${target} PROPERTIES PULP_RUNTIME_DEPENDENCIES_STAGED TRUE)
+    set_target_properties(${target} PROPERTIES
+        PULP_RUNTIME_DEPENDENCIES_STAGED TRUE
+        PULP_EDITORLESS_RUNTIME TRUE)
 endfunction()
 
 function(_pulp_add_vst3 target name bundle_id version manufacturer category)
@@ -136,10 +138,11 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # the portable bundle shape VST3/<name>.vst3/Contents/<arch>-win/<name>.vst3.
     # Keep the linker output in the existing staging directory (the control
     # shipping scanner and runtime staging use TARGET_FILE_DIR), then mirror
-    # the completed module into the real bundle after all post-build sidecars
-    # have been generated.  The copy is deliberately post-build and
-    # copy_if_different so direct target builds and multi-config generators
-    # remain deterministic.
+    # the completed module and the canonical runtime sidecars into the real
+    # bundle.  The assembly command is registered after runtime staging below
+    # so direct target builds cannot leave a bundle with sidecars only beside
+    # the linker output.  copy_if_different keeps multi-config generators
+    # deterministic.
     if(WIN32)
         include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpWindowsTargetArch.cmake")
         pulp_windows_target_arch(_pulp_vst3_windows_arch)
@@ -147,14 +150,6 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
             "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
         set(_pulp_vst3_windows_contents
             "${_pulp_vst3_windows_bundle}/Contents/${_pulp_vst3_windows_arch}")
-        add_custom_command(TARGET ${target}_VST3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${_pulp_vst3_windows_contents}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<TARGET_FILE:${target}_VST3>"
-                "${_pulp_vst3_windows_contents}/${name}.vst3"
-            COMMENT "Assembling Windows VST3 bundle ${name}.vst3"
-            VERBATIM)
     endif()
 
     # Info.plist: use custom if available, otherwise generate from template
@@ -220,6 +215,45 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         _pulp_mark_editorless_runtime(${target}_VST3)
     else()
         pulp_stage_runtime_dependencies(${target}_VST3)
+    endif()
+
+    if(WIN32)
+        # Copy exactly the files declared by the shared staging helper.  Do
+        # not mirror the whole linker directory: it also contains imports and
+        # diagnostic outputs that are not part of a portable VST3 bundle.
+        add_custom_command(TARGET ${target}_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "${_pulp_vst3_windows_contents}"
+            # A reused build directory can contain sidecars from a previous
+            # editor/provider configuration.  Remove the managed runtime set
+            # before assembling the new bundle so build-info and contents
+            # cannot disagree after switching to NO_EDITOR or another GPU
+            # provider.
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "${_pulp_vst3_windows_contents}/wgpu_native.dll"
+                "${_pulp_vst3_windows_contents}/libwgpu_native.dll"
+                "${_pulp_vst3_windows_contents}/icudtl.dat"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:${target}_VST3>"
+                "${_pulp_vst3_windows_contents}/${name}.vst3"
+            COMMENT "Assembling Windows VST3 bundle ${name}.vst3"
+            VERBATIM)
+        # NO_EDITOR targets intentionally skip runtime staging because they
+        # link only the format core.  Their bundle still needs the module,
+        # but it must not copy the editor-only sidecars (for example
+        # icudtl.dat), which do not exist beside the target.
+        if(NOT PULP_${target}_NO_EDITOR)
+            pulp_expected_runtime_dependencies(_pulp_vst3_runtime_files)
+            foreach(_pulp_vst3_runtime_file IN LISTS _pulp_vst3_runtime_files)
+                add_custom_command(TARGET ${target}_VST3 POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "$<TARGET_FILE_DIR:${target}_VST3>/${_pulp_vst3_runtime_file}"
+                        "${_pulp_vst3_windows_contents}/${_pulp_vst3_runtime_file}"
+                    COMMENT "Copying ${_pulp_vst3_runtime_file} into ${name}.vst3"
+                    VERBATIM)
+            endforeach()
+            unset(_pulp_vst3_runtime_file)
+        endif()
     endif()
     pulp_assert_runtime_dependencies_staged(${target}_VST3)
     _pulp_attach_control_shipping(${target} ${target}_VST3 VST3)

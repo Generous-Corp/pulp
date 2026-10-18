@@ -323,7 +323,11 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
                        {.slots = config.slots,
                         .input_bytes_per_slot = *bytes,
                         .output_bytes_per_slot = *bytes,
-                        .storage_kind = config.storage_kind},
+                        .storage_kind = config.storage_kind,
+                        .calibration_identity = config.calibration_identity,
+                        .authenticated_calibration = config.authenticated_calibration,
+                        .calibration_max_age_ns = config.calibration_max_age_ns,
+                        .calibration_source_revision = config.calibration_source_revision},
                        std::move(pair.program))) {
         // A failed arena transaction may still be physically live. Retain the
         // provider and let explicit release()/destruction retry its barrier.

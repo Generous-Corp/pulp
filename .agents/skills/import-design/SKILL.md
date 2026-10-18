@@ -22,6 +22,16 @@ rendered workload and invalidates retained-versus-rebuild comparisons.
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+### Preconverted vector artwork is validation-only
+
+The import-design CLI accepts a preconverted SVG only when its sidecar binds
+the exact SVG SHA-256, source/provenance metadata, canvas dimensions, control
+selectors, and bounds. Illustrator `.ai`, PDF, and other unconverted artwork
+inputs fail closed with a diagnostic directing callers to a preconverted SVG;
+this path does not implement Illustrator/PDF conversion or grant rights to
+third-party artwork. Keep the sidecar and SVG together and retain both in the
+import receipt.
+
 ### Materialized browser source emission
 
 For a browser capture that publishes `materialized-document.json`, use

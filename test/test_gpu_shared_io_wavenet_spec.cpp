@@ -69,6 +69,45 @@ struct TinyReference {
 };
 } // namespace
 
+TEST_CASE("WaveNet causal pad is the per-layer history span", "[gpu_audio][shared_io][wavenet]") {
+    CHECK(wavenet_causal_pad(0, 17) == 0);
+    CHECK(wavenet_causal_pad(1, 17) == 0);
+    CHECK(wavenet_causal_pad(3, 1) == 2);
+    CHECK(wavenet_causal_pad(3, 8) == 16);
+}
+
+#if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
+TEST_CASE("WaveNet program history sums each activation's causal pad",
+          "[gpu_audio][shared_io][wavenet]") {
+    const std::array<std::uint32_t, 2> dilations{1, 2};
+    const WavenetLayerSpec layer{
+        .input_size = 1,
+        .condition_size = 1,
+        .channels = 3,
+        .kernel = 3,
+        .head_size = 1,
+        .gated = 0,
+        .head_bias = 0,
+        .dilations = dilations,
+    };
+    // Per-layer pads are 2 and 4. The final pointwise activation has no
+    // history: (2 + 4) * 3 channels * 2 streams * sizeof(float).
+    std::vector<float> weights(3 + 2 * (3 * 3 * 3 + 3 + 3 + 3 * 3 + 3) + 3 + 1, 0.0f);
+    weights.back() = 1.0f;
+    const WavenetProgramSpec spec{
+        .block_size = 32,
+        .head_scale = 1.0f,
+        .stream_instances = 2,
+        .arrays = std::span<const WavenetLayerSpec>(&layer, 1),
+        .weights = weights,
+    };
+    REQUIRE(validate_wavenet_spec(spec).accepted());
+    const auto program = DawnSharedIoWavenetProgram::create(spec);
+    REQUIRE(program);
+    CHECK(program->history_bytes() == static_cast<std::size_t>((2 + 4) * 3 * 2 * sizeof(float)));
+}
+#endif
+
 TEST_CASE("WaveNet shared spec accepts the authenticated flat-weight shape",
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;

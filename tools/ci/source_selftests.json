@@ -369,6 +369,12 @@
       "timeout": 120.0
     },
     {
+      "name": "gpu-audio-p5-unified-receipt-verifier-selftest",
+      "argv": [
+        "{repo}/tools/validation/test_verify_gpu_audio_p5_receipt.py"
+      ]
+    },
+    {
       "name": "gpu-audio-trace-validator-selftest",
       "argv": [
         "{repo}/tools/scripts/test_validate_gpu_audio_trace_captures.py"
@@ -893,6 +899,12 @@
       "timeout": 120.0
     },
     {
+      "name": "shipyard-merge-gate-evidence-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_shipyard_merge_gate_evidence.py"
+      ]
+    },
+    {
       "name": "shipyard-target-defaults-selftest",
       "argv": [
         "{repo}/tools/ci/test_shipyard_target_defaults.py"
@@ -1075,17 +1087,18 @@
       "timeout": 180.0
     },
     {
-      "name": "shipyard-merge-gate-evidence-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_shipyard_merge_gate_evidence.py"
-      ]
-    },
-    {
       "name": "visual-python-deps-selftest",
       "argv": [
         "{repo}/tools/scripts/test_check_visual_python_deps.py"
       ],
       "timeout": 60.0
+    },
+    {
+      "name": "vst3-bundle-layout-selftest",
+      "argv": [
+        "{repo}/tools/cmake/scripts/test_check_vst3_bundle_layout.py"
+      ],
+      "timeout": 120.0
     },
     {
       "name": "web-timeline-source-closure-selftest",
