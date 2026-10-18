@@ -1087,6 +1087,12 @@
       "timeout": 180.0
     },
     {
+      "name": "windows-vm-manifest-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_windows_vm_manifest.py"
+      ]
+    },
+    {
       "name": "visual-python-deps-selftest",
       "argv": [
         "{repo}/tools/scripts/test_check_visual_python_deps.py"
