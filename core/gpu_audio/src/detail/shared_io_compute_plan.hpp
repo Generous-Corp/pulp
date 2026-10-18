@@ -159,8 +159,12 @@ class SharedIoComputePlan {
     bool completion_receipt_overflow() const noexcept {
         return completion_receipt_overflow_;
     }
+    bool calibration_observation_overflow() const noexcept {
+        return calibration_observation_overflow_;
+    }
     bool receipt_overflow() const noexcept {
-        return lifecycle_receipt_overflow_ || completion_receipt_overflow_;
+        return lifecycle_receipt_overflow_ || completion_receipt_overflow_ ||
+               calibration_observation_overflow_;
     }
     bool lifecycle_receipt_valid() const noexcept {
         return !lifecycle_receipt_overflow_ && !completion_receipt_overflow_;
@@ -217,6 +221,7 @@ class SharedIoComputePlan {
     std::vector<std::size_t> receipt_index_by_slot_;
     bool lifecycle_receipt_overflow_ = false;
     bool completion_receipt_overflow_ = false;
+    bool calibration_observation_overflow_ = false;
     std::size_t completion_read_ = 0;
     std::size_t completion_write_ = 0;
     Telemetry telemetry_;

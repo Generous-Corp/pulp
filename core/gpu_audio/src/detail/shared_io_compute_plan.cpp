@@ -77,6 +77,7 @@ bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config&
     receipt_index_by_slot_.assign(config.slots, kLifecycleReceiptCapacity);
     lifecycle_receipt_overflow_ = false;
     completion_receipt_overflow_ = false;
+    calibration_observation_overflow_ = false;
     telemetry_.prediction_enabled = predictor_.config().enabled;
     telemetry_.calibration_invalidated =
         authenticated_calibration_ && !calibration_provenance_.valid();
@@ -356,8 +357,9 @@ SharedIoComputePlan::receipt_for(const SharedIoSlotLedger::SlotToken& token) noe
 
 void SharedIoComputePlan::append_calibration_observation(const LifecycleReceipt& receipt) {
     if (calibration_observations_.size() >= kLifecycleReceiptCapacity) {
-        lifecycle_receipt_overflow_ = true;
+        calibration_observation_overflow_ = true;
         telemetry_.calibration_invalidated = true;
+        ++telemetry_.invalid_calibration_rows;
         return;
     }
     SharedIoCalibrationObservation observation;
@@ -433,7 +435,6 @@ void SharedIoComputePlan::record_calibration(LifecycleReceipt& receipt) noexcept
     if (lifecycle_receipt_overflow_ || completion_receipt_overflow_) {
         append_calibration_observation(receipt);
         telemetry_.calibration_invalidated = true;
-        ++telemetry_.invalid_calibration_rows;
         return;
     }
     if (calibration_max_age_ns_ != 0 && receipt.terminal_ns > 0) {

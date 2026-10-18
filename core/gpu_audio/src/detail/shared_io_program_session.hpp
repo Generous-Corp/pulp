@@ -90,6 +90,9 @@ class SharedIoProgramSession {
     bool completion_receipt_overflow() const noexcept {
         return plan_.completion_receipt_overflow();
     }
+    bool calibration_observation_overflow() const noexcept {
+        return plan_.calibration_observation_overflow();
+    }
     bool receipt_overflow() const noexcept {
         return plan_.receipt_overflow();
     }
