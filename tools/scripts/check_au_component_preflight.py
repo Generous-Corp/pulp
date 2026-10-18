@@ -372,7 +372,7 @@ def _check_host_architecture(bundle: Path) -> list[CheckResult]:
                                            "HOST_PROBE_TIMEOUT", "Retry after checking the host tools are responsive."))
             else:
                 has_arm64 = "arm64" in detail or "arm64e" in detail
-                has_x86 = "x86_64" in detail or "i386" in detail
+                has_x86 = "x86_64" in detail
                 compatible = (probe.returncode == 0 and "Mach-O" in detail and
                               ((arch == "arm64" and (has_arm64 or has_x86)) or
                                (arch == "x86_64" and has_x86)))
@@ -439,17 +439,15 @@ def _check_registrar() -> list[CheckResult]:
                                    "Run this check from the same Aqua or user launchd domain as the DAW."))
 
     uid = str(os.getuid())
-    if domain.returncode == 0 and not manager:
-        results.append(CheckResult("registrar domain", False, "launchctl managername returned no domain",
-                                   "REGISTRAR_DOMAIN_UNKNOWN",
-                                   "Run this check from the same Aqua or user launchd domain as the DAW."))
     if domain.returncode != 0:
         manager = ""
-    targets = [f"system/com.apple.audio.AudioComponentRegistrar"]
+    targets: list[str] = []
     if manager == "Aqua":
-        targets.insert(0, f"gui/{uid}/com.apple.audio.AudioComponentRegistrar")
+        targets.append(f"gui/{uid}/com.apple.audio.AudioComponentRegistrar")
     elif manager:
-        targets.insert(0, f"user/{uid}/com.apple.audio.AudioComponentRegistrar")
+        targets.append(f"user/{uid}/com.apple.audio.AudioComponentRegistrar")
+    else:
+        targets.append("system/com.apple.audio.AudioComponentRegistrar")
     probes = [(target, _run_probe([launchctl, "print", target])) for target in targets]
     present = next(((target, probe) for target, probe in probes if probe.returncode == 0), None)
     if present is not None:
