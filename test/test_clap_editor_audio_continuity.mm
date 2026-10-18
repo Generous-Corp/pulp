@@ -55,6 +55,7 @@ struct TonePlugin {
     std::atomic<bool> process_entered{false};
     std::atomic<bool> editor_operation_active{false};
     std::atomic<bool> overlap_acknowledged{false};
+    std::atomic<bool> overlap_cancelled{false};
 };
 
 TonePlugin* g_tone = nullptr;
@@ -106,10 +107,17 @@ void wait_for_editor_overlap(const clap_plugin_t* p) {
                                                     std::memory_order_acq_rel))
         return;
 
-    while (!t->editor_operation_active.load(std::memory_order_acquire))
+    while (t->overlap_enabled.load(std::memory_order_acquire) &&
+           !t->overlap_cancelled.load(std::memory_order_acquire) &&
+           !t->editor_operation_active.load(std::memory_order_acquire))
         std::this_thread::yield();
+    if (t->overlap_cancelled.load(std::memory_order_acquire) ||
+        !t->overlap_enabled.load(std::memory_order_acquire))
+        return;
     t->overlap_acknowledged.store(true, std::memory_order_release);
-    while (t->editor_operation_active.load(std::memory_order_acquire))
+    while (t->overlap_enabled.load(std::memory_order_acquire) &&
+           !t->overlap_cancelled.load(std::memory_order_acquire) &&
+           t->editor_operation_active.load(std::memory_order_acquire))
         std::this_thread::yield();
 }
 
@@ -118,7 +126,9 @@ void hold_editor_operation(const clap_plugin_t* p) {
     if (!t->overlap_enabled.load(std::memory_order_acquire)) return;
 
     t->editor_operation_active.store(true, std::memory_order_release);
-    while (!t->overlap_acknowledged.load(std::memory_order_acquire))
+    while (t->overlap_enabled.load(std::memory_order_acquire) &&
+           !t->overlap_cancelled.load(std::memory_order_acquire) &&
+           !t->overlap_acknowledged.load(std::memory_order_acquire))
         std::this_thread::yield();
     t->editor_operation_active.store(false, std::memory_order_release);
 }
@@ -384,7 +394,18 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
 
     REQUIRE(pulp::test::wait_for_progress(audio_blocks));
 
+    struct OverlapCleanup {
+        TonePlugin& tone;
+        ~OverlapCleanup() {
+            tone.overlap_cancelled.store(true, std::memory_order_release);
+            tone.overlap_enabled.store(false, std::memory_order_release);
+            tone.editor_operation_active.store(false, std::memory_order_release);
+            tone.overlap_acknowledged.store(true, std::memory_order_release);
+        }
+    } overlap_cleanup{tone};
+
     const auto arm_editor_overlap = [&] {
+        tone.overlap_cancelled.store(false, std::memory_order_release);
         tone.overlap_acknowledged.store(false, std::memory_order_release);
         tone.process_entered.store(false, std::memory_order_release);
         tone.overlap_enabled.store(true, std::memory_order_release);
@@ -418,7 +439,6 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
         slot->destroy_hosted_editor(std::move(ed));
     }
 
-    tone.overlap_enabled.store(false, std::memory_order_release);
     audio.request_stop();
     audio.join();
 
