@@ -1342,6 +1342,22 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
     }
 }
 
+TEST_CASE("trace drain marks impossible telemetry receipts invalid",
+          "[gpu_audio][trace][telemetry][negative]") {
+    SharedIoTraceRecorder recorder(config());
+    SharedIoTelemetrySnapshot forged;
+    forged.submitted_blocks = 0;
+    forged.retired_failure = 1;
+
+    const auto result = drain_shared_io_trace(recorder, forged, 0, nullptr, true);
+    CHECK_FALSE(result.telemetry_valid);
+    CHECK(result.telemetry_error == SharedIoTelemetryError::RetirementsExceedSubmissions);
+
+    const auto live = drain_shared_io_trace(recorder, forged, 0);
+    CHECK_FALSE(live.telemetry_valid);
+    CHECK(live.telemetry_error == SharedIoTelemetryError::TelemetryValidationDeferred);
+}
+
 TEST_CASE("session trace producers preserve identities across callback and service threads",
           "[gpu_audio][trace][concurrency]") {
     ProductTraceFixture fixture;

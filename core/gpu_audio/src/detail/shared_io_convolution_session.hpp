@@ -179,7 +179,8 @@ class SharedIoConvolutionSession {
         return trace_recorder_ != nullptr && trace_recorder_->enabled();
     }
     // Exactly one serialized diagnostic consumer, stopped before any lifetime/epoch operation.
-    SharedIoTraceDrainResult drain_trace(std::uint32_t budget = 256) noexcept;
+    SharedIoTraceDrainResult drain_trace(std::uint32_t budget = 256,
+                                         bool telemetry_quiescent = false) noexcept;
     // Private campaign sink. The observer is called only by the serialized
     // non-RT drain consumer and must outlive the session's final release.
     bool set_trace_observer(const SharedIoTraceDrainObserver* observer) noexcept {
