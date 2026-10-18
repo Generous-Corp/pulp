@@ -316,18 +316,20 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
             slot->process(ov, iv, midi_in, midi_out, params, kBlockSize);
 
             bool block_is_valid = true;
-            bool block_has_signal = false;
+            bool every_channel_has_signal = true;
             for (const auto& channel : out) {
+                bool channel_has_signal = false;
                 for (const auto sample : channel) {
                     if (!std::isfinite(sample)) {
                         block_is_valid = false;
                         break;
                     }
-                    block_has_signal = block_has_signal || std::fabs(sample) > 1.0e-6f;
+                    channel_has_signal = channel_has_signal || std::fabs(sample) > 1.0e-6f;
                 }
+                every_channel_has_signal = every_channel_has_signal && channel_has_signal;
                 if (!block_is_valid) break;
             }
-            if (!block_is_valid || !block_has_signal)
+            if (!block_is_valid || !every_channel_has_signal)
                 audio_output_valid.store(false, std::memory_order_release);
 
             // Publish only after process() returns. An acquire observation of
