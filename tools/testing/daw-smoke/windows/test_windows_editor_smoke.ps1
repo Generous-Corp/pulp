@@ -136,6 +136,7 @@ try {
   [IO.File]::WriteAllBytes((Join-Path $root 'bad.exe'),[byte[]]@(0,0))
   Reject {Get-PeMachine (Join-Path $root 'bad.exe')} 'invalid PE refused'
   Check ((Join-WindowsArguments @('-cfgfile','C:\Space Folder\reaper.ini','C:\script path\start.lua')) -eq '"-cfgfile" "C:\Space Folder\reaper.ini" "C:\script path\start.lua"') 'paths with spaces preserve argument boundaries'
+  Check ((Join-WindowsArguments @('-newinst','-cfgfile','C:\Space Folder\reaper.ini','-new','-nosplash','-runlua','C:\script path\start.lua')) -match '"-runlua" "C:\\script path\\start.lua"') 'Windows REAPER Lua launch uses explicit -runlua'
   Reject {Join-WindowsArguments @("bad`nargument")} 'newline argument refused'
   $state=Join-Path $root 'state.rpp';'fixture'|Set-Content -LiteralPath $state
   $good=@{phase='AUTOMATION_DONE';fx_shown='1';param_index='0';param_count='1';observations='20';observed_changes='19';max_error='0';state_saved=$state}
