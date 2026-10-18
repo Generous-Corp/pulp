@@ -54,24 +54,10 @@ try {
   if(-not(Test-Path -LiteralPath $PluginPath)){throw "Plugin missing: $PluginPath"}
   $plugin=(Resolve-Path -LiteralPath $PluginPath).Path
   if([IO.Path]::GetExtension($plugin) -ine ('.'+$Format)){throw 'Plugin format/path mismatch'}
-  $pluginBinary = if(Test-Path -LiteralPath $plugin -PathType Leaf) {
-    $plugin
-  } else {
-    @(Get-ChildItem -LiteralPath $plugin -File -Recurse |
-      Where-Object { $_.Name -eq 'Spectr.vst3' -or $_.Extension -ieq '.clap' -or $_.Extension -ieq '.dll' } |
-      Sort-Object FullName | Select-Object -First 1 | ForEach-Object FullName)
-  }
-  if($pluginBinary -is [array]) { $pluginBinary=@($pluginBinary) | Select-Object -First 1 }
-  if([string]::IsNullOrWhiteSpace([string]$pluginBinary) -or -not(Test-Path -LiteralPath $pluginBinary -PathType Leaf)) { throw 'Plugin PE payload is missing' }
-  $pluginPe=Get-PeIdentity $pluginBinary
+  $pluginCandidate=Select-PluginPeCandidate $plugin $Format $hostPe.execution_abi
+  $pluginBinary=$pluginCandidate.path
+  $pluginPe=$pluginCandidate.pe
   $receipt.plugin_pe=@{path=$pluginBinary;pe=$pluginPe;sha256=(Get-FileHash -LiteralPath $pluginBinary -Algorithm SHA256).Hash}
-  $compatible = switch($hostPe.execution_abi) {
-    'x64' { $pluginPe.execution_abi -eq 'x64' }
-    'arm64' { $pluginPe.execution_abi -eq 'arm64' }
-    'arm64ec' { $pluginPe.execution_abi -in @('arm64ec','arm64x') }
-    default { $false }
-  }
-  if(-not $compatible) { throw "PLUGIN_ABI_MISMATCH: host=$($hostPe.execution_abi) plugin=$($pluginPe.execution_abi)" }
   $privateProfile=Join-Path ([IO.Path]::GetTempPath()) ('pulp-reaper-profile-'+$token)
   $portable=$privateProfile;$scan=Join-Path $run 'scan'
   New-Item -ItemType Directory -Path $scan | Out-Null

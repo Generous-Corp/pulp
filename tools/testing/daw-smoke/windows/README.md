@@ -59,8 +59,11 @@ The host executable determines the VST scan key: `vstpath64` for the x64 ABI and
 header; validated CHPE load-config metadata distinguishes that hybrid from an
 AMD64 image without CHPE metadata. Receipts preserve raw COFF fields, metadata
 status and derived ABI separately. Unavailable/unsupported metadata refuses scan
-routing. These fields do not assert every instruction's ISA or native ARM64
-execution. CLAP uses `clap_path`.
+routing. For a VST3 bundle, the harness first selects the inner payload whose
+name matches the bundle, then filters multi-architecture payloads by the host
+ABI; an ambiguous or mismatched set is rejected before REAPER launches. These
+fields do not assert every instruction's ISA or native ARM64 execution. CLAP
+uses `clap_path`.
 Startup, scan and parameter action have separate bounded budgets. A unique run
 token prevents stale host status from satisfying the handshake. Terminal
 status retains insertion evidence, actual normalized parameter observations,

@@ -279,6 +279,53 @@ function Get-PeIdentity([string]$Path) {
   } finally {$b.Dispose();$f.Dispose()}
 }
 
+function Test-WindowsPluginAbiCompatible([string]$HostAbi, [string]$PluginAbi) {
+  switch ($HostAbi) {
+    'x64' { return $PluginAbi -eq 'x64' }
+    'arm64' { return $PluginAbi -eq 'arm64' }
+    'arm64ec' { return $PluginAbi -in @('arm64ec','arm64x') }
+    default { return $false }
+  }
+}
+
+function Select-PluginPeCandidate([string]$PluginPath, [string]$Format, [string]$HostAbi) {
+  $plugin = (Resolve-Path -LiteralPath $PluginPath -ErrorAction Stop).Path
+  if (Test-Path -LiteralPath $plugin -PathType Leaf) {
+    $candidates = @([pscustomobject]@{FullName=$plugin;Name=[IO.Path]::GetFileName($plugin)})
+  } else {
+    $bundleName = [IO.Path]::GetFileNameWithoutExtension($plugin)
+    $expectedName = $bundleName + '.' + $Format
+    $all = @(Get-ChildItem -LiteralPath $plugin -File -Recurse |
+      Where-Object {
+        $_.Extension -ieq ('.' + $Format) -or
+        ($Format -eq 'vst3' -and $_.Extension -ieq '.dll')
+      } | Sort-Object FullName)
+    # A VST3 bundle normally contains <bundle-name>.vst3. Prefer that exact
+    # payload name, but keep a generic extension fallback for valid bundles
+    # whose producer chose a different inner filename. Dependencies are only
+    # considered when no format-named payload exists.
+    $named = @($all | Where-Object { $_.Name -ieq $expectedName })
+    $candidates = if ($named.Count -gt 0) { $named } else { $all }
+  }
+  $compatible = @()
+  foreach ($candidate in $candidates) {
+    try {
+      $pe = Get-PeIdentity $candidate.FullName
+      if (Test-WindowsPluginAbiCompatible $HostAbi $pe.execution_abi) {
+        $compatible += [pscustomobject]@{path=$candidate.FullName;pe=$pe}
+      }
+    } catch {
+      # A sidecar/dependency that is not a PE is not a plugin payload candidate.
+    }
+  }
+  if ($compatible.Count -eq 1) { return $compatible[0] }
+  if ($compatible.Count -eq 0) {
+    if ($candidates.Count -eq 0) { throw "PLUGIN_PE_PAYLOAD_MISSING: bundle=$plugin" }
+    throw "PLUGIN_ABI_MISMATCH: host=$HostAbi bundle=$plugin"
+  }
+  throw "Ambiguous plugin PE payload: host=$HostAbi bundle=$plugin candidates=$($compatible.Count)"
+}
+
 # REAPER recognizes these literal default roots. Expanded absolute equivalents
 # make it append the defaults again, after the staged root, changing precedence.
 function Get-ReaperVstScanPath([string]$StagedRoot) {
