@@ -122,7 +122,7 @@ class TcnCpuAdapter final : public StreamingModel {
     }
 
     bool quiesce() noexcept override {
-        if (!prepared_ || cleanup_required_ || kernel_.quiesce == nullptr)
+        if ((!prepared_ && !cleanup_required_) || kernel_.quiesce == nullptr)
             return false;
         return kernel_.quiesce(kernel_.state);
     }
