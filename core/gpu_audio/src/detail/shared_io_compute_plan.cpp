@@ -235,7 +235,8 @@ bool SharedIoComputePlan::reprime_when_quiescent() noexcept {
     completion_read_ = completion_write_ = 0;
     calibration_skip_before_generation_ = std::max(calibration_skip_before_generation_,
                                                    preparation_epoch());
-    calibration_observations_.clear();
+    for (auto& observation : calibration_observations_)
+        observation.lifecycle_valid = false;
     calibration_emitted_keys_.clear();
     calibration_invalid_counted_keys_.clear();
     predictor_.reset();
