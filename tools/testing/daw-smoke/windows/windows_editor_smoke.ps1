@@ -128,6 +128,7 @@ try {
   # a GPU startup path after this handshake; do not postpone identity proof
   # until the terminal status wait has completed.
   $modulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
+  Assert-OwnedIdentity $proc.process $proc.started
   $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
     Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
   $bound=@()
@@ -249,6 +250,7 @@ public static class OwnedWindow {
     [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
   }
   $secondModulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
+  Assert-OwnedIdentity $proc.process $proc.started
   $secondMatches=@($secondModulePaths | Where-Object { $_ -ieq $receipt.loaded_plugin.path })
   if($secondMatches.Count -ne 1){throw 'Bound plugin module disappeared or duplicated'}
   Assert-ModuleBinding $receipt.loaded_plugin.path (Get-FileHash -LiteralPath $receipt.loaded_plugin.path -Algorithm SHA256).Hash $manifest
