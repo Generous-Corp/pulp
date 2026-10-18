@@ -283,7 +283,8 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
     // the rest of the source so malformed envelopes fail closed.
     std::string svg_markup;
     const auto starts_ci = [&](size_t pos, std::string_view token) {
-        if (pos + token.size() > svg.size()) return false;
+        if (pos + token.size() > svg.size())
+            return false;
         for (size_t j = 0; j < token.size(); ++j)
             if (std::tolower(static_cast<unsigned char>(svg[pos + j])) !=
                 std::tolower(static_cast<unsigned char>(token[j])))
@@ -293,24 +294,30 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
     for (size_t i = 0; i < svg.size();) {
         if (svg.compare(i, 4, "<!--") == 0) {
             const auto end = svg.find("-->", i + 4);
-            if (end == std::string::npos) break;
+            if (end == std::string::npos)
+                break;
             i = end + 3;
         } else if (svg.compare(i, 9, "<![CDATA[") == 0) {
             const auto end = svg.find("]]>", i + 9);
-            if (end == std::string::npos) break;
+            if (end == std::string::npos)
+                break;
             i = end + 3;
         } else if (starts_ci(i, "<script") || starts_ci(i, "<style")) {
             const auto name_end = svg.find('>', i + 1);
-            if (name_end == std::string::npos) break;
+            if (name_end == std::string::npos)
+                break;
             const auto name = starts_ci(i, "<script") ? "script" : "style";
             const auto close = svg.find(std::string("</") + name, name_end + 1);
-            if (close == std::string::npos) break;
+            if (close == std::string::npos)
+                break;
             const auto close_end = svg.find('>', close + 2 + std::strlen(name));
-            if (close_end == std::string::npos) break;
+            if (close_end == std::string::npos)
+                break;
             i = close_end + 1;
         } else if (svg.compare(i, 2, "<?") == 0 || svg.compare(i, 2, "<!") == 0) {
             const auto end = svg.find('>', i + 2);
-            if (end == std::string::npos) break;
+            if (end == std::string::npos)
+                break;
             i = end + 1;
         } else {
             svg_markup.push_back(svg[i++]);
@@ -421,8 +428,8 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
             error = "control selector '" + e.source_node_id + "' is absent from SVG";
             return false;
         }
-        if ((e.kind != DesignFrameElement::Kind::knob && (e.w <= 0 || e.h <= 0)) ||
-            e.x < 0 || e.y < 0 || e.x + e.w > cw || e.y + e.h > ch) {
+        if ((e.kind != DesignFrameElement::Kind::knob && (e.w <= 0 || e.h <= 0)) || e.x < 0 ||
+            e.y < 0 || e.x + e.w > cw || e.y + e.h > ch) {
             error = "element " + std::to_string(i) + " geometry is outside canvas";
             return false;
         }
