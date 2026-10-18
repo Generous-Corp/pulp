@@ -185,6 +185,13 @@ class SharedIoConvolutionSession {
     bool set_trace_observer(const SharedIoTraceDrainObserver* observer) noexcept {
         if (!valid_shared_io_trace_drain_observer(observer))
             return false;
+        // Rows already moved into the bounded legacy retention vectors cannot
+        // be replayed through the observer without changing their delivery
+        // order or proving that the observer owns them. Reject a late install
+        // instead of silently discarding that prefix at generation close.
+        if (observer && (trace_retention_overflow_ || !retained_trace_records_.empty() ||
+                         !retained_trace_admissions_.empty()))
+            return false;
         trace_observer_ = observer;
         return true;
     }

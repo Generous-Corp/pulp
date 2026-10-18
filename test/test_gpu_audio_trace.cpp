@@ -968,6 +968,34 @@ TEST_CASE("session observer streams a complete census through release and reprim
     }));
 }
 
+TEST_CASE("late session observer install rejects retained rows without loss",
+          "[gpu_audio][trace][observer][negative]") {
+    ProductTraceFixture fixture;
+    fixture.prepare(8);
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output{};
+    const auto callback = fixture.session.begin_callback(input);
+    REQUIRE(fixture.session.consume_output(callback, output) == Delivery::Priming);
+    REQUIRE(fixture.session.service(0).submitted == 1);
+    fixture.provider->complete_sequence(callback.stamp.sequence);
+    REQUIRE(fixture.session.service(0).completions == 1);
+
+    SessionObserverSink sink;
+    const SharedIoTraceDrainObserver observer{.context = &sink,
+                                              .record = &SessionObserverSink::record,
+                                              .admission = &SessionObserverSink::admission};
+    REQUIRE_FALSE(fixture.session.set_trace_observer(&observer));
+    REQUIRE_FALSE(fixture.session.trace_observer_enabled());
+    REQUIRE(fixture.session.release());
+    REQUIRE(sink.records.empty());
+    REQUIRE(sink.admissions.empty());
+    REQUIRE(fixture.session.last_closed_trace_stats().dropped == 0);
+    REQUIRE(fixture.session.last_closed_trace_stats().admissions_dropped == 0);
+    REQUIRE_FALSE(fixture.session.last_closed_trace_retention_overflow());
+    REQUIRE_FALSE(fixture.session.take_last_closed_trace_records().empty());
+    REQUIRE_FALSE(fixture.session.take_last_closed_trace_admissions().empty());
+}
+
 TEST_CASE("session observer closes failed on admission drops and orphan terminals",
           "[gpu_audio][trace][observer][negative]") {
     ProductTraceFixture fixture;
