@@ -98,14 +98,14 @@ bool CLAP_ABI tone_start_processing(const clap_plugin_t*) { return true; }
 void CLAP_ABI tone_stop_processing(const clap_plugin_t*) {}
 void CLAP_ABI tone_reset(const clap_plugin_t*) {}
 
-void wait_for_editor_overlap(const clap_plugin_t* p) {
+bool wait_for_editor_overlap(const clap_plugin_t* p) {
     auto* t = static_cast<TonePlugin*>(p->plugin_data);
-    if (!t->overlap_enabled.load(std::memory_order_acquire)) return;
+    if (!t->overlap_enabled.load(std::memory_order_acquire)) return false;
 
     bool expected = false;
     if (!t->process_entered.compare_exchange_strong(expected, true,
                                                     std::memory_order_acq_rel))
-        return;
+        return false;
 
     while (t->overlap_enabled.load(std::memory_order_acquire) &&
            !t->overlap_cancelled.load(std::memory_order_acquire) &&
@@ -113,12 +113,8 @@ void wait_for_editor_overlap(const clap_plugin_t* p) {
         std::this_thread::yield();
     if (t->overlap_cancelled.load(std::memory_order_acquire) ||
         !t->overlap_enabled.load(std::memory_order_acquire))
-        return;
-    t->overlap_acknowledged.store(true, std::memory_order_release);
-    while (t->overlap_enabled.load(std::memory_order_acquire) &&
-           !t->overlap_cancelled.load(std::memory_order_acquire) &&
-           t->editor_operation_active.load(std::memory_order_acquire))
-        std::this_thread::yield();
+        return false;
+    return true;
 }
 
 void hold_editor_operation(const clap_plugin_t* p) {
@@ -130,14 +126,13 @@ void hold_editor_operation(const clap_plugin_t* p) {
            !t->overlap_cancelled.load(std::memory_order_acquire) &&
            !t->overlap_acknowledged.load(std::memory_order_acquire))
         std::this_thread::yield();
-    t->editor_operation_active.store(false, std::memory_order_release);
 }
 
 clap_process_status CLAP_ABI tone_process(const clap_plugin_t* p, const clap_process_t* proc) {
     auto* t = static_cast<TonePlugin*>(p->plugin_data);
     if (!proc || proc->audio_outputs_count == 0) return CLAP_PROCESS_CONTINUE;
 
-    wait_for_editor_overlap(p);
+    const bool overlapped_editor = wait_for_editor_overlap(p);
 
     const double step = 2.0 * std::numbers::pi * 440.0 / kSampleRate;
     auto& out = proc->audio_outputs[0];
@@ -150,6 +145,8 @@ clap_process_status CLAP_ABI tone_process(const clap_plugin_t* p, const clap_pro
             if (out.data32 && out.data32[c]) out.data32[c][f] = s;
         }
     }
+    if (overlapped_editor)
+        t->overlap_acknowledged.store(true, std::memory_order_release);
     t->blocks_rendered.fetch_add(1, std::memory_order_release);
     return CLAP_PROCESS_CONTINUE;
 }
