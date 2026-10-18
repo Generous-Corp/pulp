@@ -40,7 +40,7 @@ function Start-Owned([string[]]$Arguments,[string]$Label) {
   $command=Join-WindowsArguments $Arguments
   $p=Start-Process -FilePath $script:reaper -ArgumentList $command -WorkingDirectory $run -RedirectStandardOutput (Join-Path $run ($Label+'.stdout.txt')) -RedirectStandardError (Join-Path $run ($Label+'.stderr.txt')) -PassThru
   if ($p.SessionId -ne [int]$receipt.session.session_id) { throw 'Owned REAPER process entered a different Windows session' }
-  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command;session_id=[int]$p.SessionId}
+  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command;session_id=[int]$p.SessionId;path=$script:reaper}
   $owned.Add($entry); return $entry
 }
 try {
@@ -116,17 +116,9 @@ try {
     Start-Sleep -Milliseconds 100
   }
   if(-not $hostStatus -or $hostStatus.error){throw "Missing/failed insertion handshake: $($hostStatus.error)"}
-  # Start the action deadline after observing insertion, independently of launch.
-  $deadline=[DateTime]::UtcNow.AddSeconds($AutomationSec+$TimeoutSec)
-  $terminal=if($ParamIndex -ge 0){'AUTOMATION_DONE'}else{'EDITOR_READY'}
-  while([DateTime]::UtcNow -lt $deadline){
-    Assert-OwnedIdentity $proc.process $proc.started
-    $hostStatus=Read-HostStatus $status $token
-    if($hostStatus -and ($hostStatus.phase -eq $terminal -or $hostStatus.error)){break}
-    Start-Sleep -Milliseconds 100
-  }
-  Assert-TerminalStatus $hostStatus $ParamIndex
-  $receipt.host_status=$hostStatus
+  # Bind the loaded PE as soon as insertion is observed. The editor can enter
+  # a GPU startup path after this handshake; do not postpone identity proof
+  # until the terminal status wait has completed.
   $modulePaths=@(Get-BoundModulePaths $proc.process.Id)
   $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
     Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
@@ -140,6 +132,17 @@ try {
   }
   if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
   $receipt.loaded_plugin=$bound[0]
+  # Start the action deadline after observing insertion, independently of launch.
+  $deadline=[DateTime]::UtcNow.AddSeconds($AutomationSec+$TimeoutSec)
+  $terminal=if($ParamIndex -ge 0){'AUTOMATION_DONE'}else{'EDITOR_READY'}
+  while([DateTime]::UtcNow -lt $deadline){
+    Assert-OwnedIdentity $proc.process $proc.started
+    $hostStatus=Read-HostStatus $status $token
+    if($hostStatus -and ($hostStatus.phase -eq $terminal -or $hostStatus.error)){break}
+    Start-Sleep -Milliseconds 100
+  }
+  Assert-TerminalStatus $hostStatus $ParamIndex
+  $receipt.host_status=$hostStatus
   Add-Type -AssemblyName System.Drawing
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type @'
@@ -171,7 +174,7 @@ public static class OwnedWindow {
   function Guard-EditorOwner([long]$Hwnd) {
     Assert-OwnedIdentity $proc.process $proc.started
     if ($proc.process.SessionId -ne [int]$receipt.session.session_id) { throw 'Bound REAPER process left the interactive session' }
-    if($Hwnd -ne $editor.ToInt64() -or $proc.process.Path -ine $reaper){throw 'Bound editor/host identity changed'}
+    if($Hwnd -ne $editor.ToInt64() -or $proc.path -ine $reaper){throw 'Bound editor/host identity changed'}
     if(-not(Test-Path -LiteralPath $receipt.loaded_plugin.path -PathType Leaf)){throw 'Bound plugin module disappeared'}
     Assert-ModuleBinding $receipt.loaded_plugin.path (Get-FileHash -LiteralPath $receipt.loaded_plugin.path -Algorithm SHA256).Hash $manifest
     Assert-EditorWindow $Hwnd ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id))
@@ -218,6 +221,10 @@ public static class OwnedWindow {
     Guard-Editor
     [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
   }
+  $secondModulePaths=@(Get-BoundModulePaths $proc.process.Id)
+  $secondMatches=@($secondModulePaths | Where-Object { $_ -ieq $receipt.loaded_plugin.path })
+  if($secondMatches.Count -ne 1){throw 'Bound plugin module disappeared or duplicated'}
+  Assert-ModuleBinding $receipt.loaded_plugin.path (Get-FileHash -LiteralPath $receipt.loaded_plugin.path -Algorithm SHA256).Hash $manifest
   $receipt.verdict='PASS';$receipt.product_ui_acceptance='NOT_EVALUATED';$receipt.live_audio='NOT_EVALUATED';$exitCode=0
 } catch {$receipt.error=$_.Exception.Message;Write-Warning $receipt.error} finally {
   foreach($entry in $owned){try{Stop-Owned $entry}catch{$receipt.cleanup_errors+= $_.Exception.Message;$exitCode=3;$receipt.verdict='INCONCLUSIVE'}}
