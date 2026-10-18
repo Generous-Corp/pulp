@@ -434,6 +434,9 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
 
         arm_editor_overlap();
         slot->destroy_hosted_editor(std::move(ed));
+        // CLAP's destroy callback has no return value; its acknowledgement is
+        // the failure-visible witness that the close overlapped a rendered block.
+        REQUIRE(tone.overlap_acknowledged.load(std::memory_order_acquire));
     }
 
     audio.request_stop();
