@@ -16,6 +16,12 @@ exposure checker before pushing. This keeps focused-header refactors visible
 to installed-SDK consumers without turning an include-only change into a new
 capability contract.
 
+For implementation-only DSP refactors, review the primary and support header
+fingerprints separately. The installed manifest can remain unchanged while the
+surface inventory advances and the append-only history gains a full snapshot.
+Keep that generated history transaction; its size does not make it unrelated
+to the header change.
+
 Maintain three related artifacts:
 
 - `agent-capabilities.json` is the installed consumer contract: curated keys,
