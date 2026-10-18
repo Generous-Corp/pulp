@@ -120,7 +120,7 @@ only bounded host-engine behavior, not physical speaker/hardware continuity.
 
 For UI/GPU timing use a separate development trace build from the same source.
 On Windows, start the complete private profile with
-`-newinst -cfgfile <ini> -new -nosplash <startup.lua>`. A minimal profile can
+`-newinst -cfgfile <ini> -new -nosplash -runlua <startup.lua>`. A minimal profile can
 stall before startup-script dispatch; the harness copies the non-secret profile
 and removes stale scan caches before launching. Neither `-portable` nor
 `-script` is supported.
