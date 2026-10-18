@@ -2857,7 +2857,8 @@ int main(int argc, char* argv[]) {
                     break;
                 case DesignSource::figma_plugin: ir = parse_figma_plugin_json(content); break;
                 case DesignSource::preconverted_svg:
-                    std::cerr << "Error: preconverted-svg is validation-only; use --validate-only\n";
+                    std::cerr
+                        << "Error: preconverted-svg is validation-only; use --validate-only\n";
                     return 2;
                 case DesignSource::stitch: ir = parse_stitch_html(content); break;
                 case DesignSource::v0:     ir = parse_v0_tsx(content); break;

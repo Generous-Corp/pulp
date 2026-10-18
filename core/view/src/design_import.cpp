@@ -47,7 +47,8 @@ std::optional<DesignSource> parse_design_source(const std::string& name) {
     if (name == "designmd") return DesignSource::designmd;
     if (name == "jsx")      return DesignSource::jsx;
     if (name == "figma-plugin") return DesignSource::figma_plugin;
-    if (name == "preconverted-svg") return DesignSource::preconverted_svg;
+    if (name == "preconverted-svg")
+        return DesignSource::preconverted_svg;
     return std::nullopt;
 }
 
@@ -62,8 +63,9 @@ const char* design_source_name(DesignSource source) {
         case DesignSource::designmd: return "DESIGN.md";
         case DesignSource::jsx:          return "JSX instrument";
         case DesignSource::figma_plugin: return "Figma plugin export";
-        case DesignSource::preconverted_svg: return "Preconverted SVG";
-    }
+        case DesignSource::preconverted_svg:
+            return "Preconverted SVG";
+        }
     return "unknown";
 }
 
@@ -82,8 +84,9 @@ const char* design_source_vendor_key(DesignSource source) {
         case DesignSource::designmd: return "designmd";
         case DesignSource::jsx:      return "jsx";
         case DesignSource::figma_plugin: return "figma-plugin";
-        case DesignSource::preconverted_svg: return "preconverted-svg";
-    }
+        case DesignSource::preconverted_svg:
+            return "preconverted-svg";
+        }
     return "unknown";
 }
 

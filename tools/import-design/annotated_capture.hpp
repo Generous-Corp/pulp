@@ -74,8 +74,7 @@ bool parse_annotated_manifest(const std::string& json,
 /// Strictly validate a preconverted SVG and its control-map sidecar without
 /// generating files. The sidecar must carry provenance, an exact svg_sha256,
 /// a positive canvas, and selectors that name unique in-bounds SVG elements.
-bool validate_annotated_capture(const std::string& svg,
-                                const std::string& sidecar_json,
+bool validate_annotated_capture(const std::string& svg, const std::string& sidecar_json,
                                 std::string& error);
 
 /// snake_case a ClassName (ReverbPanelView -> reverb_panel_view). Matches the

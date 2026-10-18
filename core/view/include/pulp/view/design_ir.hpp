@@ -39,9 +39,9 @@ enum class DesignSource {
     pencil,
     claude,   // Anthropic Claude Design — manual HTML/zip export, no Anthropic API
     designmd, // Google DESIGN.md (Apache-2.0) — YAML frontmatter + Markdown body
-    jsx,           // Single-file React JSX instrument — compiled via esbuild + bundled React/ReactDOM
-    figma_plugin,  // Pulp's "Design for Pulp" Figma plugin export envelope
-    html,          // Generic runnable HTML evaluated by the isolated browser lane
+    jsx,      // Single-file React JSX instrument — compiled via esbuild + bundled React/ReactDOM
+    figma_plugin,    // Pulp's "Design for Pulp" Figma plugin export envelope
+    html,            // Generic runnable HTML evaluated by the isolated browser lane
     preconverted_svg // Validated SVG + control-map sidecar; no source conversion
 };
 

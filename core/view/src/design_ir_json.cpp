@@ -1630,8 +1630,9 @@ static const char* design_source_id(DesignSource source) {
         case DesignSource::designmd: return "designmd";
         case DesignSource::jsx:      return "jsx";
         case DesignSource::figma_plugin: return "figma-plugin";
-        case DesignSource::preconverted_svg: return "preconverted-svg";
-    }
+        case DesignSource::preconverted_svg:
+            return "preconverted-svg";
+        }
     return "figma";
 }
 

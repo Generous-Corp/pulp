@@ -43,7 +43,9 @@ std::string arg_value(int argc, char** argv, const std::string& flag) {
 }
 
 bool has_flag(int argc, char** argv, const std::string& flag) {
-    for (int i = 1; i < argc; ++i) if (flag == argv[i]) return true;
+    for (int i = 1; i < argc; ++i)
+        if (flag == argv[i])
+            return true;
     return false;
 }
 

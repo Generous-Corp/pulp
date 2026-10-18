@@ -455,8 +455,8 @@ TEST_CASE("pulp-import-design refuses unconverted Illustrator and PDF sources",
         const auto result = run_import_design({"--from", source});
         REQUIRE_FALSE(result.timed_out);
         REQUIRE(result.exit_code == 2);
-        CHECK(result.stderr_output.find("Error: source '" + source +
-                                       "' is unsupported") != std::string::npos);
+        CHECK(result.stderr_output.find("Error: source '" + source + "' is unsupported") !=
+              std::string::npos);
         CHECK(result.stderr_output.find(
                   "convert to preconverted-svg with a validated control-map sidecar") !=
               std::string::npos);
@@ -465,8 +465,8 @@ TEST_CASE("pulp-import-design refuses unconverted Illustrator and PDF sources",
     const auto generation = run_import_design({"--from", "preconverted-svg"});
     REQUIRE_FALSE(generation.timed_out);
     REQUIRE(generation.exit_code == 2);
-    CHECK(generation.stderr_output.find(
-              "--from preconverted-svg requires --validate-only") != std::string::npos);
+    CHECK(generation.stderr_output.find("--from preconverted-svg requires --validate-only") !=
+          std::string::npos);
 }
 
 TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",

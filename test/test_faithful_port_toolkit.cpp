@@ -716,10 +716,12 @@ TEST_CASE("parse_annotated_manifest reports errors",
 
 TEST_CASE("strict annotated capture validation binds provenance and geometry",
           "[view][annotated-capture][issue-port-fidelity]") {
-    const std::string svg = R"(<svg width="200" height="100"><rect id="mix" x="10" y="20" width="40" height="30"/></svg>)";
+    const std::string svg =
+        R"(<svg width="200" height="100"><rect id="mix" x="10" y="20" width="40" height="30"/></svg>)";
     const auto hash = pulp::runtime::sha256_hex(svg);
-    const std::string sidecar = std::string(R"JSON({"provenance":{"source":"capture-tool-v1"},"svg_sha256":")JSON") +
-        hash + R"JSON(","canvas":{"width":200,"height":100},"elements":[{"selector":"#mix","kind":"knob","geometry":{"cx":30,"cy":35,"hit_radius":10}}]})JSON";
+    const std::string sidecar =
+        std::string(R"JSON({"provenance":{"source":"capture-tool-v1"},"svg_sha256":")JSON") + hash +
+        R"JSON(","canvas":{"width":200,"height":100},"elements":[{"selector":"#mix","kind":"knob","geometry":{"cx":30,"cy":35,"hit_radius":10}}]})JSON";
     std::string error;
     CHECK(impd::validate_annotated_capture(svg, sidecar, error));
     CHECK(error.empty());
