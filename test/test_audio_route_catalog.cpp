@@ -82,4 +82,3 @@ TEST_CASE("MutableAudioRouteCatalog provides checkmarked host selection state") 
     REQUIRE_FALSE(catalog.connect("missing", 1));
     REQUIRE(changes == 2);
 }
-
