@@ -614,7 +614,7 @@
       "compat": {
         "mode": "not-applicable",
         "source": null,
-        "parser_version_owner": "annotated-capture-sidecar"
+      "parser_version_owner": "tools/import-design/annotated_capture.hpp"
       },
       "dispatch": {
         "kind": "design-source-label",
