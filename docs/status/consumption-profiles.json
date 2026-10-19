@@ -247,6 +247,7 @@
       "pulp/format/au_v2_midi_effect_entry.hpp",
       "pulp/format/au_v2_midi_processor.hpp",
       "pulp/format/au_v3_entry.hpp",
+      "pulp/format/audio_input_provider.hpp",
       "pulp/format/audio_workgroup_client.hpp",
       "pulp/format/background_task_lane.hpp",
       "pulp/format/bus_role.hpp",
