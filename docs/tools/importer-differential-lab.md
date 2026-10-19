@@ -291,8 +291,8 @@ provenance, source recognition, and deterministic three-run receipts pass.
 | P0 | Close existing acceptance debt | **DONE** | Attributable M1 ARM64 PR-head receipt recorded for root-canvas and provenance: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852 and protected artifact https://github.com/Generous-Corp/pulp/actions/runs/38996107653/artifacts/12088036268. The later merge-group run reused the receipt and ran zero suites; it is not claimed as fresh execution. |
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
 | P2 | Validate the evidence contract and instruments | **DONE** | 214 Python controls pass; three-run cold benchmark determinism is `pass`; authenticated Skia render receipts, DPR 2 checks, blank-render and planted-defect controls pass; frozen baseline manifest is `test/fixtures/import-differential/reset-manifest-20261018.json`. |
-| P3 | Prove native correctness | **IN PROGRESS — GATE NOT MET** | Baseline corpus run completed 16/18 fixtures; mean full-frame visual 0.821 and worst full-frame visual 0.355. The three-run `02-flex-controls.html` receipt is deterministic with structure/geometry/typography 1.0 but full-frame visual 0.978, below 0.995. The registered authored-frame score is now reported beside the canonical full-frame score; held-out results still need a clean gate run after challenging-set fixes. |
-| P4 | Compare baked-native and retained typed-plan paths | **NOT STARTED** | Interleaved Release runs with identical inputs, proxy counters, wall time, p95, peak RSS/GPU resource measurements, and direct benchmark peak assertion. |
+| P3 | Prove native correctness | **IN PROGRESS — GATE NOT MEETABLE UNTIL P3a/P3b/P3c** | The latest cold corpus completed 16/18 fixtures: mean full-frame visual 0.799, mean registered authored-frame visual 0.846, and gate coverage of 13/16 structure, 8/16 geometry, 14/16 typography, and 6/16 registered visual. Only `02-flex-controls.html` has a three-run receipt. Before importer tuning resumes, P3a must prove candidate-stage provenance and reconcile the unexpectedly long native timing, P3b must measure the real Chromium/native disagreement floor, and P3c must replace the now-contaminated held-out split. |
+| P4 | Compare baked-native and retained typed-plan paths | **DEFERRED UNTIL P3a/P3b AND A PASSING P3 SUBSET** | Interleaved Release runs with identical inputs, proxy counters, wall time, p95, peak RSS/GPU resource measurements, and direct benchmark peak assertion. P4 is a native-to-native equivalence/performance check and may use only fixtures that pass the corrected P3 evidence gates; it must not become a second production UI architecture. |
 | P5 | Decide promotion or deferment | **NOT STARTED** | Promote only if behavior is equivalent and the pre-registered performance threshold wins without violating resource ceilings; otherwise retain the infrastructure as experimental and keep baked-native authoritative. |
 | P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |
 
@@ -333,10 +333,10 @@ kept both visual surfaces visible:
 
 | Fixture | Full-frame visual | Registered visual | Outside-frame differing fraction |
 | --- | ---: | ---: | ---: |
-| `01-basic-card` | 0.967 | 0.918 | 0.914 |
-| `04-css-variables` | 0.935 | 0.888 | 0.872 |
-| `06-absolute-overlay` | 0.980 | 1.000 | 0.806 |
-| `07-inline-svg` | 0.936 | 0.999 | 0.873 |
+| `01-basic-card` | 0.904 | 0.918 | 0.000 |
+| `04-css-variables` | 0.889 | 0.888 | 0.000 |
+| `06-absolute-overlay` | 0.976 | 1.000 | 0.000 |
+| `07-inline-svg` | 0.890 | 0.999 | 0.000 |
 | `11-typography` (held-out) | 0.596 | 0.596 | 0.000 |
 | `18-keyed-list-panel` (held-out) | 0.545 | 0.706 | 0.000 |
 
@@ -349,21 +349,29 @@ still an unresolved correctness issue. Registration removes a viewport
 placement penalty for some fixtures while leaving typography and content
 differences visible; it is not a reason to lower the threshold.
 
-The first full corpus rerun after that importer correction completed 16 of 18
-fixtures and retained the two explicit failure controls. Mean full-frame visual
-was 0.812 and mean registered authored-frame visual was 0.846 across the 16
-completed fixtures. The held-out `18-keyed-list-panel` registered score was
-0.706 and remained classified browser-required; held-out `11-typography` was
-0.596. P3 therefore remains open. The aggregate receipt is
-`/tmp/pulp-importer-p3-corpus-20261019/report.json`.
+The full corpus rerun after the comparator and importer hardening completed 16
+of 18 fixtures and retained the two explicit failure controls. Mean full-frame
+visual was 0.799 and mean registered authored-frame visual was 0.846 across the
+16 completed fixtures. Gate coverage was 13/16 structure, 8/16 geometry,
+14/16 typography, and 6/16 registered visual. The held-out
+`18-keyed-list-panel` registered score was 0.706 and remained classified
+browser-required; held-out `11-typography` was 0.596. P3 therefore remains
+open. The aggregate receipt is
+`/tmp/pulp-importer-p3-corpus-20261019b/report.json`.
 
 The follow-up typography run now carries the browser's opaque body background
 through a transparent html canvas. Its full-frame and registered scores are
 both 0.596 with zero outside-frame residual; the remaining error is text edge
 rendering. The visual residual diagnostic places 84.6% of differing cropped
 pixels in the edge band, with matching foreground masks and layout metrics.
-This is a raster-floor investigation, not evidence for changing layout or font
-selection.
+Fable's adversarial review classifies the consistent approximately +3.65
+device-pixel vertical ink-centroid displacement as a likely baseline/leading
+placement defect rather than generic anti-aliasing noise. Box geometry and
+computed typography scores are blind to this defect; the visual receipt is the
+instrument that currently exposes it. Before more importer tuning, the plan
+must complete the instrument-integrity, real disagreement-floor, and replacement
+held-out gates recorded in
+`docs/reports/importer-reset-20261019-handoff.md`.
 
 ### P3 denominator and registration contract
 
