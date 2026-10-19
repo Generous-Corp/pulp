@@ -136,7 +136,7 @@ try {
   [IO.File]::WriteAllBytes((Join-Path $root 'bad.exe'),[byte[]]@(0,0))
   Reject {Get-PeMachine (Join-Path $root 'bad.exe')} 'invalid PE refused'
   Check ((Join-WindowsArguments @('-cfgfile','C:\Space Folder\reaper.ini','C:\script path\start.lua')) -eq '"-cfgfile" "C:\Space Folder\reaper.ini" "C:\script path\start.lua"') 'paths with spaces preserve argument boundaries'
-  Check ((Join-WindowsArguments @('-newinst','-cfgfile','C:\Space Folder\reaper.ini','-new','-nosplash','-runlua','C:\script path\start.lua')) -match '"-runlua" "C:\\script path\\start.lua"') 'Windows REAPER Lua launch uses explicit -runlua'
+  Check ((Join-WindowsArguments @('-newinst','-cfgfile','C:\Space Folder\reaper.ini','-new','-nosplash','C:\script path\start.lua')) -match '"C:\\script path\\start.lua"') 'Windows REAPER Lua launch preserves positional script argument'
   Reject {Join-WindowsArguments @("bad`nargument")} 'newline argument refused'
   $traceBefore=Get-ProcessTracePath
   Set-ProcessTracePath 'C:\trace\fixture.pftrace'
