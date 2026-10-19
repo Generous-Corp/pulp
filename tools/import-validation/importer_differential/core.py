@@ -1647,6 +1647,25 @@ def aggregate_reports(
         })
     ranked.sort(key=lambda row: (-row["priority_score"], row["cause"]))
 
+    # Keep the tail visible alongside means. An aggregate can look healthy
+    # while one fixture is materially broken, so corpus consumers need a
+    # stable worst-fixture view for every run.
+    worst_fixtures = sorted(
+        (
+            {
+                "fixture": report.get("source", {}).get("path", "unknown"),
+                "classification": report["promotion"]["classification"],
+                "threshold_eligible": report["promotion"]["threshold_eligible"],
+                "scores": {
+                    name: report["comparison"][name]["score"]
+                    for name in ("structural", "geometry", "typography", "visual")
+                },
+            }
+            for report in reports
+        ),
+        key=lambda row: (row["scores"]["visual"], row["fixture"]),
+    )[:5]
+
     def mean(path: tuple[str, ...]) -> float:
         values = []
         for report in reports:
@@ -1689,6 +1708,7 @@ def aggregate_reports(
         },
         "mean_import_only_speedup": mean(
             ("timings", "browser_to_native_import_speedup")),
+        "worst_fixtures": worst_fixtures,
         "false_promotions": false_promotions,
         "false_promotion_status": (
             "not-evaluable-production-promotion-disabled"

@@ -288,8 +288,8 @@ provenance, source recognition, and deterministic three-run receipts pass.
 | --- | --- | --- | --- |
 | P0 | Close existing acceptance debt | **DONE** | Attributable M1 ARM64 PR-head receipt recorded for root-canvas and provenance: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852 and protected artifact https://github.com/Generous-Corp/pulp/actions/runs/38996107653/artifacts/12088036268. The later merge-group run reused the receipt and ran zero suites; it is not claimed as fresh execution. |
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
-| P2 | Validate the evidence contract and instruments | **NEXT** | Authenticated receipts, frozen challenging/held-out manifests, stage checks, planted defects, and blank-render control all pass. |
-| P3 | Prove native correctness | **NOT STARTED** | Same-source Chromium and native PNG receipts pass on the challenging set and then the untouched held-out set; report median and worst fixture. This is the first point at which visual parity may be discussed. |
+| P2 | Validate the evidence contract and instruments | **DONE** | 214 Python controls pass; three-run cold benchmark determinism is `pass`; authenticated Skia render receipts, DPR 2 checks, blank-render and planted-defect controls pass; frozen baseline manifest is `test/fixtures/import-differential/reset-manifest-20261018.json`. |
+| P3 | Prove native correctness | **IN PROGRESS — GATE NOT MET** | Baseline corpus run completed 16/18 fixtures; mean visual 0.821 and worst visual 0.355. The three-run `02-flex-controls.html` receipt is deterministic with structure/geometry/typography 1.0 but visual 0.978, below 0.995. Held-out results still need a clean gate run after any challenging-set fixes. |
 | P4 | Compare baked-native and retained typed-plan paths | **NOT STARTED** | Interleaved Release runs with identical inputs, proxy counters, wall time, p95, peak RSS/GPU resource measurements, and direct benchmark peak assertion. |
 | P5 | Decide promotion or deferment | **NOT STARTED** | Promote only if behavior is equivalent and the pre-registered performance threshold wins without violating resource ceilings; otherwise retain the infrastructure as experimental and keep baked-native authoritative. |
 | P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |
@@ -298,6 +298,33 @@ Phase 0 residual decomposition, the 29/29 focused Python tests, the merged
 root-canvas lowering change, and the merged benchmark peak-preservation change
 are useful infrastructure. They do not prove pixel parity or a retained-plan
 performance win.
+
+### Fresh baseline evidence
+
+The fresh worktree built `pulp-import-design` and `pulp-design-ir-observe` through
+the governed Release build. The 18-fixture cold corpus produced 16 completed
+reports and two explicit failures (`15-svg-shapes.html` native painter refusal
+and `16-svg-invalid.html` Chromium source rejection). The aggregate report
+tracks the worst fixtures instead of hiding them behind a mean:
+
+- `18-keyed-list-panel.html`: visual 0.355, geometry 0.722
+- `14-canvas-state.html`: visual 0.370, geometry 0.500
+- `13-canvas-primitives.html`: visual 0.370, geometry 0.500
+- `11-typography.html`: visual 0.510, geometry 1.000
+- `04-css-variables.html`: visual 0.935, geometry 0.721
+
+The three-run cold benchmark for `02-flex-controls.html` has determinism `pass`
+with identical source, importer, observer, browser capture, browser PNG, native
+PNG, native layout, font, and Skia render-receipt digests. Its visual score is
+0.978, while structure, geometry, and typography are each 1.0. The benchmark
+measured only an 8.5 ms repeat-run median difference; it is not a production
+performance claim. Receipts and overlays are retained at:
+
+- `/tmp/pulp-importer-p2-corpus-20261018-run1/report.json`
+- `/tmp/pulp-importer-p2-flex-benchmark-20261018/benchmark.json`
+- `/tmp/pulp-importer-p2-flex-20261018-run1/candidate/render.png`
+
+These are development artifacts, not checked-in goldens.
 
 ### Landed context
 

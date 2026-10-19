@@ -75,6 +75,13 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
         f"- {name.title()}: {scores[name]:.3f}"
         for name in ("structural", "geometry", "typography", "visual")
     ]
+    lines += ["", "## Worst fixtures by visual score", ""]
+    for row in aggregate.get("worst_fixtures", []):
+        lines.append(
+            f"- `{row['fixture']}` — visual {row['scores']['visual']:.3f}, "
+            f"geometry {row['scores']['geometry']:.3f}, "
+            f"typography {row['scores']['typography']:.3f}, "
+            f"classification `{row['classification']}`")
     lines += ["", "## Ranked gaps", ""]
     for index, gap in enumerate(aggregate["ranked_gaps"], 1):
         lines.append(
