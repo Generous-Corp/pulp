@@ -337,7 +337,7 @@ kept both visual surfaces visible:
 | `04-css-variables` | 0.935 | 0.888 | 0.872 |
 | `06-absolute-overlay` | 0.980 | 1.000 | 0.806 |
 | `07-inline-svg` | 0.936 | 0.999 | 0.873 |
-| `11-typography` (held-out) | 0.510 | 0.596 | 0.846 |
+| `11-typography` (held-out) | 0.596 | 0.596 | 0.000 |
 | `18-keyed-list-panel` (held-out) | 0.545 | 0.706 | 0.000 |
 
 These are diagnostic spot runs, not a closed P3 corpus gate. The follow-up
@@ -356,6 +356,14 @@ completed fixtures. The held-out `18-keyed-list-panel` registered score was
 0.706 and remained classified browser-required; held-out `11-typography` was
 0.596. P3 therefore remains open. The aggregate receipt is
 `/tmp/pulp-importer-p3-corpus-20261019/report.json`.
+
+The follow-up typography run now carries the browser's opaque body background
+through a transparent html canvas. Its full-frame and registered scores are
+both 0.596 with zero outside-frame residual; the remaining error is text edge
+rendering. The visual residual diagnostic places 84.6% of differing cropped
+pixels in the edge band, with matching foreground masks and layout metrics.
+This is a raster-floor investigation, not evidence for changing layout or font
+selection.
 
 ### P3 denominator and registration contract
 

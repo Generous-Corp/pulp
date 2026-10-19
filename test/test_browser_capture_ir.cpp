@@ -611,6 +611,7 @@ TEST_CASE("producer-bound native document canvas changes only root background",
         "paint_bounds":{"left":10,"top":10,"width":64,"height":64},
         "data_pulp":{"param":"gain"}}]})");
     auto snapshot = root_canvas_snapshot();
+    std::string expected_background = "rgb(16, 21, 34)";
     SECTION("opaque matching body") {}
     SECTION("transparent body") {
         change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
@@ -618,6 +619,12 @@ TEST_CASE("producer-bound native document canvas changes only root background",
     SECTION("transparent document canvas defaults to Chromium white") {
         change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
         change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        expected_background = "rgb(255, 255, 255)";
+    }
+    SECTION("opaque body paints a transparent HTML canvas") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgb(1, 2, 3)");
+        expected_background = "rgb(1, 2, 3)";
     }
     SECTION("omitted optional sparse metadata means no entries") {
         snapshot = choc::json::toString(choc::json::parse(snapshot), false);
@@ -625,6 +632,7 @@ TEST_CASE("producer-bound native document canvas changes only root background",
     }
     SECTION("renderer clear color remains a computed color") {
         replace_canvas_fact(snapshot, "rgb(16, 21, 34)", "rgb(30, 30, 46)");
+        expected_background = "rgb(30, 30, 46)";
     }
     const auto capture = root_canvas_envelope(pulp::runtime::sha256_hex(png));
     auto baseline = lower_root_canvas(temp, snapshot, capture, false);
@@ -634,20 +642,6 @@ TEST_CASE("producer-bound native document canvas changes only root background",
     REQUIRE(result);
     REQUIRE_FALSE(baseline.design_ir->root.style.background_color);
     REQUIRE(result.design_ir->root.style.background_color);
-    const auto transparent_count = [&] {
-        std::size_t count = 0;
-        std::size_t offset = 0;
-        while ((offset = snapshot.find("rgba(0, 0, 0, 0)", offset)) != std::string::npos) {
-            ++count;
-            offset += 1;
-        }
-        return count;
-    }();
-    const auto expected_background = transparent_count >= 2
-                                     ? "rgb(255, 255, 255)"
-                                     : (snapshot.find("rgb(30, 30, 46)") != std::string::npos
-                                            ? "rgb(30, 30, 46)"
-                                            : "rgb(16, 21, 34)");
     CHECK(*result.design_ir->root.style.background_color == expected_background);
     CHECK(result.design_ir->root.children.size() > 1);
     CHECK(result.design_ir->root.style.width == 1280);
@@ -668,9 +662,6 @@ TEST_CASE("unsupported document canvas facts preserve complete legacy lowering",
     bool native = true;
     SECTION("faithful capture is unchanged") {
         native = false;
-    }
-    SECTION("body-only color") {
-        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
     }
     SECTION("nonfinite color") {
         replace_canvas_fact(snapshot, "rgb(16, 21, 34)", "rgb(nan, 21, 34)");

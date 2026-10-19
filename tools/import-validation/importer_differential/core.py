@@ -914,13 +914,15 @@ def visual_metrics(
         scale = float(device_scale_factor)
         if not math.isfinite(scale) or scale <= 0.0:
             raise LabError("device scale factor is invalid for visual registration")
-        crop_width = round(frame_width * scale)
-        crop_height = round(frame_height * scale)
         ref_left = round(frame_x * scale)
         ref_top = round(frame_y * scale)
+        ref_right = round((frame_x + frame_width) * scale)
+        ref_bottom = round((frame_y + frame_height) * scale)
+        crop_width = ref_right - ref_left
+        crop_height = ref_bottom - ref_top
         if crop_width <= 0 or crop_height <= 0:
             raise LabError("authored frame visual registration crop is empty")
-        ref_box = (ref_left, ref_top, ref_left + crop_width, ref_top + crop_height)
+        ref_box = (ref_left, ref_top, ref_right, ref_bottom)
         candidate_box = (0, 0, crop_width, crop_height)
         if ref_box[2] > reference.width or ref_box[3] > reference.height:
             raise LabError("authored frame visual registration exceeds browser PNG")
@@ -1015,32 +1017,39 @@ def visual_metrics(
         # the panel-local score. This is diagnostic only: the panel-local crop
         # must never erase pixels outside the authored frame.
         frame_box = registration["browser_crop_px"]
-        outside_total = 0
-        outside_differing = 0
-        outside_distance = 0.0
-        for y in range(reference.height):
-            for x in range(reference.width):
-                inside = (frame_box[0] <= x < frame_box[2]
-                          and frame_box[1] <= y < frame_box[3])
-                if inside:
-                    continue
-                outside_total += 1
-                ref_pixel = reference.getpixel((x, y))
-                candidate_pixel = candidate.getpixel((x, y))
-                delta = sum(abs(a - b) for a, b in zip(ref_pixel[:3], candidate_pixel[:3]))
-                alpha_delta = abs(ref_pixel[3] - candidate_pixel[3])
-                outside_distance += delta + alpha_delta
-                if delta > 2 or alpha_delta > 2:
-                    outside_differing += 1
+        def outside_ink(image: Any, own_frame: tuple[int, int, int, int]) -> dict[str, Any]:
+            background = Counter(image.get_flattened_data()).most_common(1)[0][0]
+            total = 0
+            differing = 0
+            distance = 0.0
+            for y in range(image.height):
+                for x in range(image.width):
+                    if (own_frame[0] <= x < own_frame[2]
+                            and own_frame[1] <= y < own_frame[3]):
+                        continue
+                    total += 1
+                    pixel = image.getpixel((x, y))
+                    delta = sum(abs(a - b) for a, b in zip(pixel[:3], background[:3]))
+                    alpha_delta = abs(pixel[3] - background[3])
+                    distance += delta + alpha_delta
+                    if delta > 2 or alpha_delta > 2:
+                        differing += 1
+            return {
+                "pixel_count": total,
+                "differing_pixel_count": differing,
+                "differing_pixel_fraction": round(differing / max(1, total), 6),
+                "mean_channel_alpha_error": round(distance / max(1, total * 4.0), 6),
+                "background": list(background),
+                "frame_px": list(own_frame),
+            }
+        browser_outside = outside_ink(reference, tuple(frame_box))
+        native_outside = outside_ink(candidate, tuple(registration["native_crop_px"]))
         full["outside_frame_residual"] = {
-            "pixel_count": outside_total,
-            "differing_pixel_count": outside_differing,
-            "differing_pixel_fraction": round(
-                outside_differing / max(1, outside_total), 6),
-            "mean_channel_alpha_error": round(
-                outside_distance / max(1, outside_total * 4.0), 6),
-            "browser_frame_px": frame_box,
-            "native_frame_px": registration["native_crop_px"],
+            "browser": browser_outside,
+            "native": native_outside,
+            "differing_pixel_fraction": round(abs(
+                browser_outside["differing_pixel_fraction"]
+                - native_outside["differing_pixel_fraction"]), 6),
         }
     else:
         full["outside_frame_residual"] = None
@@ -1148,11 +1157,14 @@ def promotion_recommendation(
     typography: dict[str, Any],
     visual: dict[str, Any],
 ) -> dict[str, Any]:
+    registered_visual = visual.get("registered_visual")
+    visual_gate_score = (
+        registered_visual["score"] if registered_visual else visual["score"])
     scores = {
         "structural": structural["score"],
         "geometry": geometry["score"],
         "typography": typography["score"],
-        "visual": visual["score"],
+        "visual": visual_gate_score,
     }
     failed = [
         name for name, threshold in PROMOTION_THRESHOLDS.items()
@@ -1176,6 +1188,10 @@ def promotion_recommendation(
         "production_promotion_enabled": False,
         "threshold_eligible": threshold_eligible,
         "thresholds": PROMOTION_THRESHOLDS,
+        "visual_gate_score": visual_gate_score,
+        "visual_full_frame_score": visual["score"],
+        "visual_registered_score": (
+            registered_visual["score"] if registered_visual else None),
         "reasons": reasons,
     }
 
@@ -1803,24 +1819,29 @@ def aggregate_reports(
     # Keep the tail visible alongside means. An aggregate can look healthy
     # while one fixture is materially broken, so corpus consumers need a
     # stable worst-fixture view for every run.
+    fixture_rows = [
+        {
+            "fixture": report.get("source", {}).get("path", "unknown"),
+            "classification": report["promotion"]["classification"],
+            "threshold_eligible": report["promotion"]["threshold_eligible"],
+            "scores": {
+                name: report["comparison"][name]["score"]
+                for name in ("structural", "geometry", "typography", "visual")
+            },
+            "registered_visual": (
+                report["comparison"]["visual"].get("registered_visual", {})
+                or {}).get("score"),
+        }
+        for report in reports
+    ]
     worst_fixtures = sorted(
-        (
-            {
-                "fixture": report.get("source", {}).get("path", "unknown"),
-                "classification": report["promotion"]["classification"],
-                "threshold_eligible": report["promotion"]["threshold_eligible"],
-                "scores": {
-                    name: report["comparison"][name]["score"]
-                    for name in ("structural", "geometry", "typography", "visual")
-                },
-                "registered_visual": (
-                    report["comparison"]["visual"].get("registered_visual", {})
-                    or {}).get("score"),
-            }
-            for report in reports
-        ),
+        fixture_rows,
         key=lambda row: (row["scores"]["visual"], row["fixture"]),
     )[:5]
+    worst_registered_visual = sorted(
+        (row for row in fixture_rows if row["registered_visual"] is not None),
+        key=lambda row: (row["registered_visual"], row["fixture"]),
+    )
 
     def mean(path: tuple[str, ...]) -> float:
         values = []
@@ -1836,6 +1857,18 @@ def aggregate_reports(
         for report in reports
         if report["comparison"]["visual"].get("registered_visual")
     ]
+    gate_values: dict[str, list[float]] = {
+        "structural": [float(r["comparison"]["structural"]["score"]) for r in reports],
+        "geometry": [float(r["comparison"]["geometry"]["score"]) for r in reports],
+        "typography": [float(r["comparison"]["typography"]["score"]) for r in reports],
+        "registered_visual": registered_visual_values,
+    }
+    gate_thresholds = {
+        "structural": PROMOTION_THRESHOLDS["structural"],
+        "geometry": PROMOTION_THRESHOLDS["geometry"],
+        "typography": PROMOTION_THRESHOLDS["typography"],
+        "registered_visual": PROMOTION_THRESHOLDS["visual"],
+    }
 
     total = len(reports) + failure_count
     classifications["unsupported"] = failure_count
@@ -1867,6 +1900,15 @@ def aggregate_reports(
             "mean_score": round(statistics.fmean(registered_visual_values), 6)
             if registered_visual_values else None,
         },
+        "gate_summary": {
+            name: {
+                "fixture_count": len(values),
+                "pass_count": sum(value >= gate_thresholds[name] for value in values),
+                "min_score": round(min(values), 6) if values else None,
+                "threshold": gate_thresholds[name],
+            }
+            for name, values in gate_values.items()
+        },
         "mean_timings_ms": {
             "browser_import": mean(("timings", "browser_import_ms")),
             "native_import": mean(("timings", "native_import_ms")),
@@ -1876,6 +1918,7 @@ def aggregate_reports(
         "mean_import_only_speedup": mean(
             ("timings", "browser_to_native_import_speedup")),
         "worst_fixtures": worst_fixtures,
+        "worst_registered_visual": worst_registered_visual[:5],
         "false_promotions": false_promotions,
         "false_promotion_status": (
             "not-evaluable-production-promotion-disabled"

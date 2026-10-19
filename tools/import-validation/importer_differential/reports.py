@@ -84,6 +84,14 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
         lines.append(
             f"- Registered authored-frame visual: {registered['mean_score']:.3f} "
             f"({registered['fixture_count']} fixtures)")
+    gate_summary = aggregate.get("gate_summary", {})
+    if gate_summary:
+        lines += ["", "## Gate coverage", ""]
+        for name, row in gate_summary.items():
+            lines.append(
+                f"- {name}: {row['pass_count']}/{row['fixture_count']} pass, "
+                f"minimum {row['min_score'] if row['min_score'] is not None else 'n/a'}, "
+                f"threshold {row['threshold']:.3f}")
     lines += ["", "## Worst fixtures by visual score", ""]
     for row in aggregate.get("worst_fixtures", []):
         registered_score = (f"{row['registered_visual']:.3f}"
@@ -94,6 +102,13 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
             f"geometry {row['scores']['geometry']:.3f}, "
             f"typography {row['scores']['typography']:.3f}, "
             f"classification `{row['classification']}`")
+    if aggregate.get("worst_registered_visual"):
+        lines += ["", "## Worst fixtures by registered visual score", ""]
+        for row in aggregate["worst_registered_visual"]:
+            lines.append(
+                f"- `{row['fixture']}` — registered visual "
+                f"{row['registered_visual']:.3f}, classification "
+                f"`{row['classification']}`")
     lines += ["", "## Ranked gaps", ""]
     for index, gap in enumerate(aggregate["ranked_gaps"], 1):
         lines.append(

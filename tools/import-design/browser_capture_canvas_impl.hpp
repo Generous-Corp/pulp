@@ -137,6 +137,7 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
             return std::nullopt;
         std::map<std::string, std::string> html_style, body_style;
         std::unordered_set<int> laid_out;
+        std::map<int, int> marker_rows;
         int html_row = -1;
         for (uint32_t i = 0; i < rows.size(); ++i) {
             const int at = static_cast<int>(i);
@@ -172,6 +173,8 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
             }
             if (node == html)
                 html_row = at;
+            if (repeated_marker && ++marker_rows[node] > 2)
+                return std::nullopt;
         }
         if (html_row < 0 || body_style.empty())
             return std::nullopt;
@@ -215,7 +218,9 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
         const auto body_color = color(body_style["background-color"]);
         if (!html_color || !body_color ||
             ((*html_color)[3] != 1 && (*html_color)[3] != 0) ||
-            ((*body_color)[3] != 0 && *body_color != *html_color))
+            ((*body_color)[3] != 0 && (*body_color)[3] != 1) ||
+            ((*html_color)[3] == 1 && (*body_color)[3] != 0 &&
+             *body_color != *html_color))
             return std::nullopt;
         const double width = number(member(doc, "contentWidth"));
         const double height = number(member(doc, "contentHeight"));
@@ -226,13 +231,16 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
         if (number(box[0]) != 0 || number(box[1]) != 0 || number(box[2]) <= 0 ||
             number(box[3]) <= 0 || number(box[2]) > width || number(box[3]) > height)
             return std::nullopt;
-        // CSS leaves the document canvas transparent when both html and body
-        // are transparent, but Chromium composites that default canvas onto
-        // opaque white. Preserve that browser-visible result for native
-        // lowering instead of exposing Pulp's host dark clear color.
-        const auto& canvas_color = (*html_color)[3] == 0
-                                       ? std::array<double, 4>{255, 255, 255, 1}
-                                       : *html_color;
+        // CSS leaves the document canvas transparent when html and body are
+        // transparent, but Chromium composites that default canvas onto
+        // opaque white. A solid body background also paints the document
+        // canvas. Preserve either browser-visible result for native lowering
+        // instead of exposing Pulp's host dark clear color.
+        const auto& canvas_color = (*html_color)[3] == 1
+                                       ? *html_color
+                                       : ((*body_color)[3] == 1
+                                              ? *body_color
+                                              : std::array<double, 4>{255, 255, 255, 1});
         return DocumentCanvasPaint{"rgb(" + std::to_string(static_cast<int>(canvas_color[0])) +
                                        ", " + std::to_string(static_cast<int>(canvas_color[1])) +
                                        ", " + std::to_string(static_cast<int>(canvas_color[2])) +
