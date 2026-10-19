@@ -58,6 +58,19 @@ PulpSpectrX64Smoke
 C:\Users\pulp-rdp\Desktop\codex-intel-audio-current-x64-20261018
 ```
 
+From a visible macOS Terminal, the file-backed credential can be passed to
+the installed FreeRDP client without putting the password in process
+arguments:
+
+```sh
+cat ~/.config/pulp/secrets/spectr-windows-proxmox-rdp | \
+  xfreerdp /v:192.168.86.21 /u:pulp-rdp /from-stdin:force \
+  /cert:ignore +dynamic-resolution /smart-sizing:off
+```
+
+Run this from a GUI Terminal with a display. A headless SSH shell has no
+display and cannot create the RDP window even when the guest is reachable.
+
 After reconnecting the desktop, run that task from an elevated Windows prompt
 or the existing launcher. Evidence is written under:
 
