@@ -7693,6 +7693,14 @@ build receipt. This applies to the seven Pulp harnesses (`v0`, `figma`, `pencil`
 `stitch`, `rn`, `designmd`, and `jsx`). Leave a separate external-project build
 (such as Spectr) on its own toolchain boundary.
 
+## Preconverted SVG source-contract metadata
+
+The `preconverted-svg` lane is validation-only: its source-contract row must
+describe the exact SVG and control-map sidecar boundary, name the local
+annotated-capture contract as its parser owner, and keep Illustrator/PDF
+conversion explicitly out of scope. When that metadata changes, update this
+skill note and the append-only Vellum watch event in the same review.
+
 ## Captured canvas authority
 
 Reference-paint state atlases must opt into `--canvas-authority` when a captured
