@@ -67,3 +67,19 @@ TEST_CASE("AudioRouteCatalog exposes host-owned source identity and selection") 
     REQUIRE(changed);
 }
 
+TEST_CASE("MutableAudioRouteCatalog provides checkmarked host selection state") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    int changes = 0;
+    catalog.set_change_callback([&] { ++changes; });
+    catalog.set_routes({
+        {"input:1", "Mic 1", pulp::host::AudioRouteKind::PhysicalInput, 1, true},
+        {"track:piano", "Piano", pulp::host::AudioRouteKind::Track, 2, true},
+        {"track:offline", "Offline", pulp::host::AudioRouteKind::Track, 2, false},
+    });
+    REQUIRE(catalog.connect("track:piano", 1));
+    REQUIRE(catalog.connected_route(1) == "track:piano");
+    REQUIRE_FALSE(catalog.connect("track:offline", 1));
+    REQUIRE_FALSE(catalog.connect("missing", 1));
+    REQUIRE(changes == 2);
+}
+

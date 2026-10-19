@@ -10,6 +10,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <algorithm>
+#include <utility>
 
 namespace pulp::host {
 
@@ -57,6 +59,50 @@ public:
         (void)bus_index;
         return {};
     }
+};
+
+/// Small host-side implementation for standalone/Forge hosts. It owns only
+/// control-thread catalog state; audio adapters consume the resulting bus
+/// connection and never enumerate or mutate this object from realtime code.
+class MutableAudioRouteCatalog final : public AudioRouteCatalog {
+public:
+    std::vector<AudioRouteInfo> enumerate() const override { return routes_; }
+
+    void set_routes(std::vector<AudioRouteInfo> routes) {
+        routes_ = std::move(routes);
+        selected_.clear();
+        notify();
+    }
+
+    void set_change_callback(ChangeCallback callback) override {
+        callback_ = std::move(callback);
+    }
+
+    bool connect(std::string_view stable_id, std::size_t bus_index) override {
+        const auto it = std::find_if(routes_.begin(), routes_.end(),
+            [stable_id](const AudioRouteInfo& route) {
+                return route.stable_id == stable_id && route.available &&
+                       route.channels > 0;
+            });
+        if (it == routes_.end()) return false;
+        if (selected_.size() <= bus_index) selected_.resize(bus_index + 1);
+        selected_[bus_index] = it->stable_id;
+        notify();
+        return true;
+    }
+
+    std::string connected_route(std::size_t bus_index) const override {
+        return bus_index < selected_.size() ? selected_[bus_index] : std::string{};
+    }
+
+private:
+    void notify() {
+        if (callback_) callback_();
+    }
+
+    std::vector<AudioRouteInfo> routes_;
+    std::vector<std::string> selected_;
+    ChangeCallback callback_;
 };
 
 }  // namespace pulp::host
