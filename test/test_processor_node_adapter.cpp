@@ -110,6 +110,67 @@ private:
     float z_ = 0.0f;
 };
 
+class SidechainProbe final : public Processor {
+public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "SidechainProbe";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.sidechainprobe";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Effect;
+        d.input_buses = {
+            {"Main In", 1, false, pulp::format::BusRole::Main},
+            {"Sidechain", 1, true, pulp::format::BusRole::Sidechain},
+        };
+        d.output_buses = {{"Main Out", 1, false}};
+        return d;
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ProcessContext&) override {}
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        auto* main = audio.main_input();
+        auto* sidechain = audio.sidechain_input();
+        auto* output = audio.main_output();
+        if (!output) return;
+        for (std::size_t frame = 0; frame < output->num_samples(); ++frame) {
+            const float main_sample = main ? main->channel_ptr(0)[frame] : 0.0f;
+            const float side_sample =
+                sidechain ? sidechain->channel_ptr(0)[frame] : 0.0f;
+            output->channel_ptr(0)[frame] = main_sample + side_sample;
+        }
+    }
+};
+
+struct RouteProviderFixture {
+    pulp::audio::BufferView<const float> route;
+    std::size_t calls = 0;
+
+    static bool read(void* context,
+                     std::size_t bus_index,
+                     std::size_t frame_count,
+                     pulp::audio::BufferView<const float>& output) noexcept {
+        auto& fixture = *static_cast<RouteProviderFixture*>(context);
+        ++fixture.calls;
+        if (bus_index != 1 || fixture.route.num_samples() != frame_count ||
+            fixture.route.num_channels() != 1)
+            return false;
+        output = fixture.route;
+        return true;
+    }
+};
+
 class DenseGainMono final : public Processor {
   public:
     PluginDescriptor descriptor() const override {
@@ -326,6 +387,48 @@ TEST_CASE("ProcessorNode in a routed graph matches the standalone processor",
             }
         }
     }
+}
+
+TEST_CASE("ProcessorNode routes a pre-bound host bus into a sidechain") {
+    constexpr int frames = 8;
+    SidechainProbe processor;
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 1;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<float, frames> main{};
+    std::array<float, frames> route{};
+    std::array<float, frames> output{};
+    std::array<const float*, 1> main_channels{main.data()};
+    std::array<const float*, 1> route_channels{route.data()};
+    std::array<float*, 1> output_channels{output.data()};
+    for (int frame = 0; frame < frames; ++frame) {
+        main[frame] = static_cast<float>(frame + 1);
+        route[frame] = static_cast<float>(10 + frame);
+    }
+    RouteProviderFixture provider;
+    provider.route = pulp::audio::BufferView<const float>(
+        route_channels.data(), 1, frames);
+    node.set_audio_input_provider(
+        {&provider, &RouteProviderFixture::read});
+
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {main_channels.data(), 1, frames};
+    context.node_outputs = {output_channels.data(), 1, frames};
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    REQUIRE(provider.calls == 1);
+    for (int frame = 0; frame < frames; ++frame)
+        REQUIRE(output[frame] == main[frame] + route[frame]);
 }
 
 TEST_CASE("ProcessorNode binding processes audio without the routed view it requires",

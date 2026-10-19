@@ -1,6 +1,8 @@
 #include <pulp/format/processor_block_adapter.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include <array>
+
 namespace pulp::format {
 namespace {
 
@@ -15,17 +17,6 @@ BusBuffer* active_main_output(ProcessBlock& block) noexcept {
     for (auto& bus : block.buses->buses()) {
         if (bus.active && bus.direction == BusDirection::Output &&
             bus.role == BusRole::Main && !bus.empty()) {
-            return &bus;
-        }
-    }
-    return nullptr;
-}
-
-const BusBuffer* active_input(ProcessBlock& block, BusRole role) noexcept {
-    if (!block.buses) return nullptr;
-    for (const auto& bus : block.buses->buses()) {
-        if (bus.active && bus.direction == BusDirection::Input &&
-            bus.role == role && !bus.empty()) {
             return &bus;
         }
     }
@@ -79,14 +70,6 @@ bool process_processor_block(Processor& processor,
     auto* output_bus = active_main_output(block);
     if (!output_bus) return false;
 
-    const auto* input_bus = active_input(block, BusRole::Main);
-    const auto* sidechain_bus = active_input(block, BusRole::Sidechain);
-
-    audio::BufferView<float> output = output_bus->output;
-    audio::BufferView<const float> empty_input;
-    const audio::BufferView<const float> input =
-        input_bus ? input_bus->input : empty_input;
-
     auto* events = block.events;
     midi::MidiBuffer* midi_in = events && events->midi_in
         ? events->midi_in
@@ -108,20 +91,50 @@ bool process_processor_block(Processor& processor,
         }
     }
 
-    const audio::BufferView<const float>* sidechain =
-        sidechain_bus ? &sidechain_bus->input : nullptr;
     const midi::MpeBuffer* mpe = events ? events->mpe_input : nullptr;
     const midi::UmpBuffer* ump = events ? events->ump_input : nullptr;
     const auto context = context_for_block(block);
 
     try {
         ScopedProcessorSidecars sidecars(processor);
-        processor.set_sidechain(sidechain);
         processor.set_mpe_input(mpe);
         processor.set_ump_input(ump);
         processor.set_param_events(params);
         runtime::ScopedNoAlloc no_alloc_guard;
-        processor.process(output, input, *midi_in, *midi_out, context);
+        std::array<ProcessBusBufferView<const float>, BusBufferSet::kMaxBuses>
+            input_views{};
+        std::array<ProcessBusBufferView<float>, BusBufferSet::kMaxBuses>
+            output_views{};
+        std::size_t input_count = 0;
+        std::size_t output_count = 0;
+        for (const auto& bus : block.buses->buses()) {
+            if (bus.direction == BusDirection::Input) {
+                if (input_count >= input_views.size()) return false;
+                const auto index = input_count++;
+                input_views[index] = {
+                    .info = {bus.name, index, BusDirection::Input, bus.role,
+                             static_cast<int>(bus.input.num_channels()), false,
+                             bus.active},
+                    .buffer = bus.input,
+                };
+            } else {
+                if (output_count >= output_views.size()) return false;
+                const auto index = output_count++;
+                output_views[index] = {
+                    .info = {bus.name, index, BusDirection::Output, bus.role,
+                             static_cast<int>(bus.output.num_channels()), false,
+                             bus.active},
+                    .buffer = bus.output,
+                };
+            }
+        }
+        ProcessBuffers rich{
+            .inputs = ProcessBusBufferSet<const float>(
+                std::span(input_views.data(), input_count)),
+            .outputs = ProcessBusBufferSet<float>(
+                std::span(output_views.data(), output_count)),
+        };
+        processor.process(rich, *midi_in, *midi_out, context);
     } catch (...) {
         return false;
     }

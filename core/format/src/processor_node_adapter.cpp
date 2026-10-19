@@ -13,7 +13,15 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
         return false;
     prepared_ = false;
     PULP_TRY {
-        capabilities_ = processor_->descriptor().effective_capabilities();
+        const auto descriptor = processor_->descriptor();
+        capabilities_ = descriptor.effective_capabilities();
+        input_bus_count_ = std::min(descriptor.input_buses.size(),
+                                    input_roles_.size());
+        for (std::size_t index = 0; index < input_bus_count_; ++index) {
+            input_roles_[index] = descriptor.input_buses[index].role;
+            input_channels_[index] = descriptor.input_buses[index].default_channels;
+            input_optional_[index] = descriptor.input_buses[index].optional;
+        }
         processor_->prepare(context);
         // Pre-size the discard MIDI sinks so the per-block clear() the bridge runs
         // on the unused fallback buffers never reallocates on the RT thread.
@@ -24,6 +32,7 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
     }
     PULP_CATCH_ALL {
         capabilities_ = {};
+        input_bus_count_ = 0;
         return false;
     }
     prepared_ = true;
@@ -33,6 +42,7 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
 bool ProcessorNode::release() noexcept {
     prepared_ = false;
     capabilities_ = {};
+    input_bus_count_ = 0;
     if (processor_ == nullptr)
         return false;
     PULP_TRY {
@@ -73,13 +83,33 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     if (!ctx.routed)
         return false;
 
-    // Stack-local single-bus set aliasing the executor's routed mono views.
-    // BusBufferSet stores its buses inline (no heap), and BufferView only holds
-    // the executor-owned channel-pointer array, so this aliases without copying
-    // samples and stays allocation-free.
+    // Stack-local bus set aliases the executor's routed main view and any
+    // host-provided optional input views. BusBufferSet stores its buses inline
+    // and BufferView only holds host-owned channel pointers, so this aliases
+    // without copying samples and stays allocation-free.
     BusBufferSet local_buses;
-    if (!local_buses.add_input("main", ctx.node_inputs, BusRole::Main))
+    const auto main_role = self->input_bus_count_ > 0
+                               ? self->input_roles_[0]
+                               : BusRole::Main;
+    if (!local_buses.add_input("main", ctx.node_inputs, main_role, true))
         return false;
+    for (std::size_t bus = 1; bus < self->input_bus_count_; ++bus) {
+        audio::BufferView<const float> route_view;
+        bool active = false;
+        if (self->input_provider_ &&
+            self->input_provider_.read(self->input_provider_.context, bus,
+                                       block.frame_count, route_view) &&
+            route_view.num_samples() == block.frame_count &&
+            route_view.num_channels() ==
+                static_cast<std::size_t>(std::max(0, self->input_channels_[bus]))) {
+            active = true;
+        } else {
+            route_view = {};
+        }
+        if (!local_buses.add_input("aux", route_view, self->input_roles_[bus],
+                                  active))
+            return false;
+    }
     if (!local_buses.add_output("main", ctx.node_outputs, BusRole::Main))
         return false;
 
