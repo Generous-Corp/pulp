@@ -268,9 +268,11 @@ Before collecting promotion evidence, write down and freeze:
 - an authenticated PNG receipt binding source hash, Chromium build, Pulp head,
   renderer/backend, viewport, DPR, font receipt, image dimensions, and PNG
   hashes for both sides;
-- parity thresholds for structure, geometry, typography, and full-frame visual
-  comparison, with registered-region and worst-fixture results reported
-  separately;
+- parity thresholds for structure (>=0.99), page-space geometry (>=0.98),
+  typography (>=0.98), and authenticated authored-frame visual similarity
+  (>=0.995). Full-frame visual similarity remains separately reported, with
+  outside-frame residuals recorded rather than cropped away; worst-fixture
+  results are always reported separately;
 - the held-out fixture manifest and hashes before tuning begins;
 - an equivalence oracle covering DesignIR, declared image tolerance, and the
   same scripted state and interaction trace;
@@ -289,7 +291,7 @@ provenance, source recognition, and deterministic three-run receipts pass.
 | P0 | Close existing acceptance debt | **DONE** | Attributable M1 ARM64 PR-head receipt recorded for root-canvas and provenance: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852 and protected artifact https://github.com/Generous-Corp/pulp/actions/runs/38996107653/artifacts/12088036268. The later merge-group run reused the receipt and ran zero suites; it is not claimed as fresh execution. |
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
 | P2 | Validate the evidence contract and instruments | **DONE** | 214 Python controls pass; three-run cold benchmark determinism is `pass`; authenticated Skia render receipts, DPR 2 checks, blank-render and planted-defect controls pass; frozen baseline manifest is `test/fixtures/import-differential/reset-manifest-20261018.json`. |
-| P3 | Prove native correctness | **IN PROGRESS — GATE NOT MET** | Baseline corpus run completed 16/18 fixtures; mean visual 0.821 and worst visual 0.355. The three-run `02-flex-controls.html` receipt is deterministic with structure/geometry/typography 1.0 but visual 0.978, below 0.995. Held-out results still need a clean gate run after any challenging-set fixes. |
+| P3 | Prove native correctness | **IN PROGRESS — GATE NOT MET** | Baseline corpus run completed 16/18 fixtures; mean full-frame visual 0.821 and worst full-frame visual 0.355. The three-run `02-flex-controls.html` receipt is deterministic with structure/geometry/typography 1.0 but full-frame visual 0.978, below 0.995. The registered authored-frame score is now reported beside the canonical full-frame score; held-out results still need a clean gate run after challenging-set fixes. |
 | P4 | Compare baked-native and retained typed-plan paths | **NOT STARTED** | Interleaved Release runs with identical inputs, proxy counters, wall time, p95, peak RSS/GPU resource measurements, and direct benchmark peak assertion. |
 | P5 | Decide promotion or deferment | **NOT STARTED** | Promote only if behavior is equivalent and the pre-registered performance threshold wins without violating resource ceilings; otherwise retain the infrastructure as experimental and keep baked-native authoritative. |
 | P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |
@@ -325,6 +327,54 @@ performance claim. Receipts and overlays are retained at:
 - `/tmp/pulp-importer-p2-flex-20261018-run1/candidate/render.png`
 
 These are development artifacts, not checked-in goldens.
+
+A post-correction spot run on five challenging fixtures plus the basic card
+kept both visual surfaces visible:
+
+| Fixture | Full-frame visual | Registered visual | Outside-frame differing fraction |
+| --- | ---: | ---: | ---: |
+| `01-basic-card` | 0.967 | 0.918 | 0.914 |
+| `04-css-variables` | 0.935 | 0.888 | 0.872 |
+| `06-absolute-overlay` | 0.980 | 1.000 | 0.806 |
+| `07-inline-svg` | 0.936 | 0.999 | 0.873 |
+| `11-typography` (held-out) | 0.510 | 0.596 | 0.846 |
+| `18-keyed-list-panel` (held-out) | 0.355 | 0.362 | 1.000 |
+
+These are diagnostic spot runs, not a closed P3 corpus gate. They show that
+registration removes a viewport-placement penalty for some fixtures while
+leaving typography, background, and keyed-list differences visible. The
+outside-frame residual is intentionally high for panel-local captures and is
+an unresolved correctness signal, not a reason to lower the threshold.
+
+### P3 denominator and registration contract
+
+The P3 denominator is frozen before tuning. In-scope fixtures are every valid
+fixture except the two imperative Canvas2D controls
+(`13-canvas-primitives`, `14-canvas-state`) and the two explicit failure
+controls (`15-svg-shapes`, native painter refusal, and `16-svg-invalid`,
+malformed source). That leaves 14 fixtures, including held-out
+`11-typography` and `18-keyed-list-panel`. The excluded controls remain in
+every corpus run with their explicit reason; they cannot be removed to improve
+an aggregate.
+
+The canonical visual score remains the full PNG comparison. When the capture
+contains an authored frame, the lab also emits a registered authored-frame
+score and overlays. The frame metadata is hash-bound through the capture
+receipt; it is evidence metadata, not an independent attestation. Registration
+requires the native layout snapshot to prove that the imported DesignIR root
+has the declared size and the observer viewport root is at origin. The
+registered score is eligible for the P3 visual threshold;
+the full-frame score and outside-frame residual are always reported so panel
+placement, background, overflow, and shadow defects remain visible. Missing or
+disagreeing frame metadata fails closed rather than silently mixing registered
+and unregistered metrics.
+
+P3 passes only when every in-scope fixture has authenticated three-run receipts,
+structure >=0.99, raw page-space geometry >=0.98, typography >=0.98, and
+registered authored-frame visual >=0.995, with no held-out regression and a
+worst-fixture report. A registered score cannot erase a full-frame or
+outside-frame defect; those defects must be fixed or explicitly classified in
+the fixture report before P3 can close.
 
 ### Landed context
 

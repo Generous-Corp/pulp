@@ -436,6 +436,50 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
     return result
 
 
+def verify_native_authored_frame(
+    ir: dict[str, Any], layout: dict[str, Any], authored_frame: dict[str, Any],
+    tolerance: float = 1e-3,
+) -> dict[str, Any]:
+    """Prove that the native authored panel is panel-local before cropping."""
+    root = ir.get("root")
+    if not isinstance(root, dict):
+        raise LabError("native DesignIR has no authored panel root")
+    style = root.get("style")
+    if not isinstance(style, dict):
+        raise LabError("native authored panel root has no style bounds")
+    try:
+        actual = (0.0, 0.0, float(style["width"]), float(style["height"]))
+        expected = (0.0, 0.0, float(authored_frame["width"]),
+                    float(authored_frame["height"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LabError("native authored panel root has invalid style bounds") from exc
+    # The native observer lays the imported DesignIR root at panel origin. Its
+    # layout snapshot still provides the viewport root, which we require as a
+    # provenance check before accepting that panel-local contract.
+    viewport_root = next((node for node in layout.get("nodes", [])
+                          if node.get("id") == "browser:root"), None)
+    if not isinstance(viewport_root, dict) or not isinstance(viewport_root.get("rect"), dict):
+        raise LabError("native layout has no viewport root for registration proof")
+    if any(abs(actual[index] - expected[index]) > tolerance for index in range(4)):
+        raise LabError(
+            "native authored panel bounds differ from authenticated frame: "
+            f"expected {expected}, got {actual}")
+    viewport_rect = viewport_root["rect"]
+    try:
+        viewport = tuple(float(viewport_rect[key]) for key in ("x", "y", "w", "h"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LabError("native viewport root has invalid bounds") from exc
+    if abs(viewport[0]) > tolerance or abs(viewport[1]) > tolerance:
+        raise LabError("native viewport root is not at origin")
+    return {
+        "anchor": str(root.get("stable_anchor_id") or "browser:root"),
+        "rect": list(actual),
+        "viewport_rect": list(viewport),
+        "tolerance": tolerance,
+        "origin_contract": "design-ir-root-at-panel-origin",
+    }
+
+
 def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
     score = 0.0
     if (browser.backend_node_id is not None
@@ -829,6 +873,8 @@ def visual_metrics(
     candidate_path: Path,
     artifacts_dir: Path,
     expected_size: tuple[int, int] | None = None,
+    authored_frame: dict[str, Any] | None = None,
+    device_scale_factor: float = 1.0,
 ) -> dict[str, Any]:
     try:
         from PIL import Image, ImageChops
@@ -848,75 +894,171 @@ def visual_metrics(
         raise LabError(
             "browser and candidate render dimensions differ: "
             f"{reference.size} vs {candidate.size}")
-    logical_size = candidate.size
-    ref_pixels = list(reference.get_flattened_data())
-    candidate_pixels = list(candidate.get_flattened_data())
-    total_distance = 0.0
-    alpha_distance = 0.0
-    foreground_distance = 0.0
-    foreground_samples = 0
-    differing = 0
-    threshold = 2
-    reference_background = Counter(ref_pixels).most_common(1)[0][0]
-    candidate_background = Counter(candidate_pixels).most_common(1)[0][0]
-    for ref_pixel, candidate_pixel in zip(ref_pixels, candidate_pixels):
-        delta = sum(abs(a - b) for a, b in zip(ref_pixel[:3], candidate_pixel[:3]))
-        alpha_delta = abs(ref_pixel[3] - candidate_pixel[3])
-        alpha_distance += alpha_delta
-        total_distance += delta
-        if delta > threshold or alpha_delta > threshold:
-            differing += 1
-        ref_foreground = sum(
-            abs(a - b) for a, b in zip(ref_pixel[:3], reference_background[:3])) > 18
-        candidate_foreground = sum(
-            abs(a - b) for a, b in zip(
-                candidate_pixel[:3], candidate_background[:3])) > 18
-        if ref_foreground or candidate_foreground:
-            foreground_distance += delta
-            foreground_samples += 1
-    samples = max(1, len(ref_pixels))
-    mean_channel_error = total_distance / (samples * 3.0)
-    mean_alpha_error = alpha_distance / samples
-    combined_mean_error = (total_distance + alpha_distance) / (samples * 4.0)
-    global_similarity = max(0.0, 1.0 - combined_mean_error / 255.0)
-    foreground_mean_error = (
-        foreground_distance / (foreground_samples * 3.0)
-        if foreground_samples else mean_channel_error)
-    foreground_similarity = max(0.0, 1.0 - foreground_mean_error / 255.0)
-    similarity = min(global_similarity, foreground_similarity)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    side_by_side = Image.new(
-        "RGBA", (logical_size[0] * 2, logical_size[1]))
-    side_by_side.paste(reference, (0, 0))
-    side_by_side.paste(candidate, (logical_size[0], 0))
-    side_path = artifacts_dir / "side-by-side.png"
-    side_by_side.save(side_path)
-    diff = ImageChops.difference(reference, candidate).convert("RGB")
-    heatmap = diff.point(lambda value: min(255, value * 4))
-    heatmap_path = artifacts_dir / "visual-diff.png"
-    heatmap.save(heatmap_path)
-    overlay = Image.blend(reference, candidate, 0.5)
-    overlay_path = artifacts_dir / "overlay.png"
-    overlay.save(overlay_path)
-    return {
-        "score": round(similarity, 6),
-        "global_score": round(global_similarity, 6),
-        "foreground_score": round(foreground_similarity, 6),
-        "mean_channel_error": round(mean_channel_error, 6),
-        "mean_alpha_error": round(mean_alpha_error, 6),
-        "combined_mean_channel_error": round(combined_mean_error, 6),
-        "foreground_mean_channel_error": round(foreground_mean_error, 6),
-        "foreground_pixel_count": foreground_samples,
-        "differing_pixel_count": differing,
-        "differing_pixel_fraction": round(differing / samples, 6),
-        "width": logical_size[0],
-        "height": logical_size[1],
-        "artifacts": {
-            "side_by_side": "overlays/side-by-side.png",
-            "heatmap": "overlays/visual-diff.png",
-            "overlay": "overlays/overlay.png",
-        },
+    registration: dict[str, Any] = {
+        "source": "full-frame",
+        "device_scale_factor": device_scale_factor,
     }
+    registered_reference = None
+    registered_candidate = None
+    if authored_frame is not None:
+        try:
+            frame_x = float(authored_frame["x"])
+            frame_y = float(authored_frame["y"])
+            frame_width = float(authored_frame["width"])
+            frame_height = float(authored_frame["height"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LabError("authored frame is missing visual registration bounds") from exc
+        if not all(math.isfinite(value) and value >= 0.0 for value in
+                   (frame_x, frame_y, frame_width, frame_height)):
+            raise LabError("authored frame visual registration bounds are invalid")
+        scale = float(device_scale_factor)
+        if not math.isfinite(scale) or scale <= 0.0:
+            raise LabError("device scale factor is invalid for visual registration")
+        crop_width = round(frame_width * scale)
+        crop_height = round(frame_height * scale)
+        ref_left = round(frame_x * scale)
+        ref_top = round(frame_y * scale)
+        if crop_width <= 0 or crop_height <= 0:
+            raise LabError("authored frame visual registration crop is empty")
+        ref_box = (ref_left, ref_top, ref_left + crop_width, ref_top + crop_height)
+        candidate_box = (0, 0, crop_width, crop_height)
+        if ref_box[2] > reference.width or ref_box[3] > reference.height:
+            raise LabError("authored frame visual registration exceeds browser PNG")
+        if candidate_box[2] > candidate.width or candidate_box[3] > candidate.height:
+            raise LabError("authored frame visual registration exceeds native PNG")
+        registered_reference = reference.crop(ref_box)
+        registered_candidate = candidate.crop(candidate_box)
+        registration = {
+            "source": "authenticated-authored-frame",
+            "device_scale_factor": scale,
+            "browser_crop_px": list(ref_box),
+            "native_crop_px": list(candidate_box),
+            "logical_frame": {
+                "x": frame_x, "y": frame_y,
+                "width": frame_width, "height": frame_height,
+            },
+        }
+    def score_images(ref_image: Any, candidate_image: Any, output_dir: Path,
+                     score_registration: dict[str, Any]) -> dict[str, Any]:
+        logical_size = candidate_image.size
+        ref_pixels = list(ref_image.get_flattened_data())
+        candidate_pixels = list(candidate_image.get_flattened_data())
+        total_distance = 0.0
+        alpha_distance = 0.0
+        foreground_distance = 0.0
+        foreground_samples = 0
+        differing = 0
+        threshold = 2
+        reference_background = Counter(ref_pixels).most_common(1)[0][0]
+        candidate_background = Counter(candidate_pixels).most_common(1)[0][0]
+        for ref_pixel, candidate_pixel in zip(ref_pixels, candidate_pixels):
+            delta = sum(abs(a - b) for a, b in zip(ref_pixel[:3], candidate_pixel[:3]))
+            alpha_delta = abs(ref_pixel[3] - candidate_pixel[3])
+            alpha_distance += alpha_delta
+            total_distance += delta
+            if delta > threshold or alpha_delta > threshold:
+                differing += 1
+            ref_foreground = sum(
+                abs(a - b) for a, b in zip(ref_pixel[:3], reference_background[:3])) > 18
+            candidate_foreground = sum(
+                abs(a - b) for a, b in zip(
+                    candidate_pixel[:3], candidate_background[:3])) > 18
+            if ref_foreground or candidate_foreground:
+                foreground_distance += delta
+                foreground_samples += 1
+        samples = max(1, len(ref_pixels))
+        mean_channel_error = total_distance / (samples * 3.0)
+        mean_alpha_error = alpha_distance / samples
+        combined_mean_error = (total_distance + alpha_distance) / (samples * 4.0)
+        global_similarity = max(0.0, 1.0 - combined_mean_error / 255.0)
+        foreground_mean_error = (
+            foreground_distance / (foreground_samples * 3.0)
+            if foreground_samples else mean_channel_error)
+        foreground_similarity = max(0.0, 1.0 - foreground_mean_error / 255.0)
+        similarity = min(global_similarity, foreground_similarity)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        side_by_side = Image.new("RGBA", (logical_size[0] * 2, logical_size[1]))
+        side_by_side.paste(ref_image, (0, 0))
+        side_by_side.paste(candidate_image, (logical_size[0], 0))
+        side_by_side.save(output_dir / "side-by-side.png")
+        diff = ImageChops.difference(ref_image, candidate_image).convert("RGB")
+        diff.point(lambda value: min(255, value * 4)).save(output_dir / "visual-diff.png")
+        Image.blend(ref_image, candidate_image, 0.5).save(output_dir / "overlay.png")
+        return {
+            "score": round(similarity, 6),
+            "global_score": round(global_similarity, 6),
+            "foreground_score": round(foreground_similarity, 6),
+            "mean_channel_error": round(mean_channel_error, 6),
+            "mean_alpha_error": round(mean_alpha_error, 6),
+            "combined_mean_channel_error": round(combined_mean_error, 6),
+            "foreground_mean_channel_error": round(foreground_mean_error, 6),
+            "foreground_pixel_count": foreground_samples,
+            "differing_pixel_count": differing,
+            "differing_pixel_fraction": round(differing / samples, 6),
+            "width": logical_size[0],
+            "height": logical_size[1],
+            "registration": score_registration,
+        }
+
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    full = score_images(reference, candidate, artifacts_dir, {
+        "source": "full-frame",
+        "device_scale_factor": device_scale_factor,
+    })
+    full["artifacts"] = {
+        "side_by_side": "overlays/side-by-side.png",
+        "heatmap": "overlays/visual-diff.png",
+        "overlay": "overlays/overlay.png",
+    }
+    if registered_reference is not None and registered_candidate is not None:
+        # Keep the viewport-level background/overflow signal visible alongside
+        # the panel-local score. This is diagnostic only: the panel-local crop
+        # must never erase pixels outside the authored frame.
+        frame_box = registration["browser_crop_px"]
+        outside_total = 0
+        outside_differing = 0
+        outside_distance = 0.0
+        for y in range(reference.height):
+            for x in range(reference.width):
+                inside = (frame_box[0] <= x < frame_box[2]
+                          and frame_box[1] <= y < frame_box[3])
+                if inside:
+                    continue
+                outside_total += 1
+                ref_pixel = reference.getpixel((x, y))
+                candidate_pixel = candidate.getpixel((x, y))
+                delta = sum(abs(a - b) for a, b in zip(ref_pixel[:3], candidate_pixel[:3]))
+                alpha_delta = abs(ref_pixel[3] - candidate_pixel[3])
+                outside_distance += delta + alpha_delta
+                if delta > 2 or alpha_delta > 2:
+                    outside_differing += 1
+        full["outside_frame_residual"] = {
+            "pixel_count": outside_total,
+            "differing_pixel_count": outside_differing,
+            "differing_pixel_fraction": round(
+                outside_differing / max(1, outside_total), 6),
+            "mean_channel_alpha_error": round(
+                outside_distance / max(1, outside_total * 4.0), 6),
+            "browser_frame_px": frame_box,
+            "native_frame_px": registration["native_crop_px"],
+        }
+    else:
+        full["outside_frame_residual"] = None
+    if registered_reference is not None and registered_candidate is not None:
+        registered = score_images(
+            registered_reference, registered_candidate,
+            artifacts_dir / "registered", registration)
+        registered["artifacts"] = {
+            "side_by_side": "overlays/registered/side-by-side.png",
+            "heatmap": "overlays/registered/visual-diff.png",
+            "overlay": "overlays/registered/overlay.png",
+        }
+        full["registered_visual"] = registered
+        full["registration"] = registration
+    else:
+        full["registered_visual"] = None
+        full["registration"] = registration
+    return full
 
 
 def classify_gaps(
@@ -1434,6 +1576,12 @@ def compare_one(
     geometry = geometry_metrics_with_registration(
         raw_comparison["matches"], matches, geometry_registration)
     typography = typography_metrics(matches)
+    authored_frame = capture.get("reference", {}).get("authored_frame")
+    native_authored_frame = native_capture.get("reference", {}).get("authored_frame")
+    if authored_frame != native_authored_frame:
+        raise LabError("browser/native authored-frame metadata disagrees for visual comparison")
+    native_frame_registration = verify_native_authored_frame(
+        native_doc, native_layout_doc, authored_frame)
     visual = visual_metrics(
         browser_dir / "browser.png",
         native_render,
@@ -1442,7 +1590,12 @@ def compare_one(
             round(capture_width * capture["reference"]["device_scale_factor"]),
             round(capture_height * capture["reference"]["device_scale_factor"]),
         ),
+        authored_frame,
+        capture["reference"]["device_scale_factor"],
     )
+    visual["registration"]["native_layout"] = native_frame_registration
+    if visual.get("registered_visual"):
+        visual["registered_visual"]["registration"]["native_layout"] = native_frame_registration
     blockers = unsupported_features(recognition)
     classifications = classify_gaps(
         recognition, structural, geometry, typography, visual)
