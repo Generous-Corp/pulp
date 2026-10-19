@@ -349,6 +349,14 @@ still an unresolved correctness issue. Registration removes a viewport
 placement penalty for some fixtures while leaving typography and content
 differences visible; it is not a reason to lower the threshold.
 
+The first full corpus rerun after that importer correction completed 16 of 18
+fixtures and retained the two explicit failure controls. Mean full-frame visual
+was 0.812 and mean registered authored-frame visual was 0.846 across the 16
+completed fixtures. The held-out `18-keyed-list-panel` registered score was
+0.706 and remained classified browser-required; held-out `11-typography` was
+0.596. P3 therefore remains open. The aggregate receipt is
+`/tmp/pulp-importer-p3-corpus-20261019/report.json`.
+
 ### P3 denominator and registration contract
 
 The P3 denominator is frozen before tuning. In-scope fixtures are every valid

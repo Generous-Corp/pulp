@@ -1813,6 +1813,9 @@ def aggregate_reports(
                     name: report["comparison"][name]["score"]
                     for name in ("structural", "geometry", "typography", "visual")
                 },
+                "registered_visual": (
+                    report["comparison"]["visual"].get("registered_visual", {})
+                    or {}).get("score"),
             }
             for report in reports
         ),
@@ -1827,6 +1830,12 @@ def aggregate_reports(
                 value = value[key]
             values.append(float(value))
         return round(statistics.fmean(values), 6) if values else 0.0
+
+    registered_visual_values = [
+        float(report["comparison"]["visual"]["registered_visual"]["score"])
+        for report in reports
+        if report["comparison"]["visual"].get("registered_visual")
+    ]
 
     total = len(reports) + failure_count
     classifications["unsupported"] = failure_count
@@ -1852,6 +1861,11 @@ def aggregate_reports(
         "mean_scores": {
             name: mean(("comparison", name, "score"))
             for name in ("structural", "geometry", "typography", "visual")
+        },
+        "registered_visual": {
+            "fixture_count": len(registered_visual_values),
+            "mean_score": round(statistics.fmean(registered_visual_values), 6)
+            if registered_visual_values else None,
         },
         "mean_timings_ms": {
             "browser_import": mean(("timings", "browser_import_ms")),

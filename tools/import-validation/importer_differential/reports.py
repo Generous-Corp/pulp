@@ -28,6 +28,10 @@ def format_summary(report: dict[str, Any]) -> str:
         f"- {name.title()} score: {comparison[name]['score']:.3f}"
         for name in ("structural", "geometry", "typography", "visual")
     ]
+    if comparison["visual"].get("registered_visual"):
+        lines.append(
+            f"- Registered authored-frame visual score: "
+            f"{comparison['visual']['registered_visual']['score']:.3f}")
     lines += [
         "",
         "Chromium remains authoritative. This report never substitutes or "
@@ -75,10 +79,18 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
         f"- {name.title()}: {scores[name]:.3f}"
         for name in ("structural", "geometry", "typography", "visual")
     ]
+    registered = aggregate.get("registered_visual", {})
+    if registered.get("fixture_count"):
+        lines.append(
+            f"- Registered authored-frame visual: {registered['mean_score']:.3f} "
+            f"({registered['fixture_count']} fixtures)")
     lines += ["", "## Worst fixtures by visual score", ""]
     for row in aggregate.get("worst_fixtures", []):
+        registered_score = (f"{row['registered_visual']:.3f}"
+                            if row["registered_visual"] is not None else "n/a")
         lines.append(
             f"- `{row['fixture']}` — visual {row['scores']['visual']:.3f}, "
+            f"registered {registered_score}, "
             f"geometry {row['scores']['geometry']:.3f}, "
             f"typography {row['scores']['typography']:.3f}, "
             f"classification `{row['classification']}`")
