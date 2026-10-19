@@ -585,11 +585,19 @@ echo "== no-submodules priming never initializes submodules"
     # setup's submodule update ultimately performs (clone plus the recorded
     # gitlink checkout) for this positive control. The production no-submodules
     # path below still goes through ensure_shared_git_source unchanged.
+    control_url="$(git -C "$tmp/upstream" config --file .gitmodules --get submodule.nested.url)"
+    control_gitlink="$(git -C "$tmp/upstream" ls-tree HEAD -- nested | awk '{print $1 ":" $3 ":" $4}')"
+    check "$control_url" "file://$tmp/sub" \
+        "control: parent records the expected submodule URL"
+    check "$control_gitlink" "160000:$sub_sha:nested" \
+        "control: parent records the expected submodule gitlink"
     mkdir -p "$FETCHCONTENT_CACHE_ROOT/control"
-    git clone -q "file://$tmp/sub" "$FETCHCONTENT_CACHE_ROOT/control/nested"
+    git clone -q "$control_url" "$FETCHCONTENT_CACHE_ROOT/control/nested"
     git -C "$FETCHCONTENT_CACHE_ROOT/control/nested" checkout -q "$sub_sha"
     check "$([ -e "$FETCHCONTENT_CACHE_ROOT/control/nested/.git" ] && echo yes || echo no)" "yes" \
         "control: the fixture submodule materializes at its gitlink"
+    check "$(git -C "$FETCHCONTENT_CACHE_ROOT/control/nested" rev-parse HEAD)" "$sub_sha" \
+        "control: parent gitlink materializes at its recorded commit"
 
     ensure_shared_git_source "Bare" "file://$tmp/upstream" "$sha" "bare" "no-submodules" >/dev/null 2>&1
     check "$?" "0" "no-submodules priming succeeds"
