@@ -338,13 +338,16 @@ kept both visual surfaces visible:
 | `06-absolute-overlay` | 0.980 | 1.000 | 0.806 |
 | `07-inline-svg` | 0.936 | 0.999 | 0.873 |
 | `11-typography` (held-out) | 0.510 | 0.596 | 0.846 |
-| `18-keyed-list-panel` (held-out) | 0.355 | 0.362 | 1.000 |
+| `18-keyed-list-panel` (held-out) | 0.545 | 0.706 | 0.000 |
 
-These are diagnostic spot runs, not a closed P3 corpus gate. They show that
-registration removes a viewport-placement penalty for some fixtures while
-leaving typography, background, and keyed-list differences visible. The
-outside-frame residual is intentionally high for panel-local captures and is
-an unresolved correctness signal, not a reason to lower the threshold.
+These are diagnostic spot runs, not a closed P3 corpus gate. The follow-up
+18-keyed-list run includes the importer fix that maps Chromium's transparent
+html/body document canvas to its default opaque white composite and accepts
+valid repeated `::marker` layout rows. It removed the outside-frame background
+residual, but the registered score remains 0.706, so keyed-list rendering is
+still an unresolved correctness issue. Registration removes a viewport
+placement penalty for some fixtures while leaving typography and content
+differences visible; it is not a reason to lower the threshold.
 
 ### P3 denominator and registration contract
 

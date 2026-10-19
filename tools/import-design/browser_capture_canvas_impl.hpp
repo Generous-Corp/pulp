@@ -143,7 +143,18 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
             const int node = index(layout_nodes[at], count);
             const auto row = rows[at];
             const auto box = bounds[at];
-            if (node < 0 || !laid_out.insert(node).second || !row.isArray() ||
+            const auto tag_index = node >= 0 && node < static_cast<int>(count)
+                                       ? tags[node].getWithDefault<int>(-1)
+                                       : -1;
+            // Chromium emits two layout rows for a list marker: one for its
+            // generated marker box and one for the marker paint record. They
+            // share a DOM node identity, so this repetition is valid evidence
+            // and must not invalidate otherwise trustworthy document-canvas
+            // metadata.
+            const bool repeated_marker = tag_index >= 0 &&
+                                         tag_index < static_cast<int>(strings.size()) &&
+                                         strings[tag_index].toString() == "::marker";
+            if (node < 0 || (!laid_out.insert(node).second && !repeated_marker) || !row.isArray() ||
                 (row.size() != names.size() && !(number(types[node]) == 9 && row.size() == 0)) ||
                 !box.isArray() || box.size() != 4)
                 return std::nullopt;
@@ -202,7 +213,8 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
         };
         const auto html_color = color(html_style["background-color"]);
         const auto body_color = color(body_style["background-color"]);
-        if (!html_color || !body_color || (*html_color)[3] != 1 ||
+        if (!html_color || !body_color ||
+            ((*html_color)[3] != 1 && (*html_color)[3] != 0) ||
             ((*body_color)[3] != 0 && *body_color != *html_color))
             return std::nullopt;
         const double width = number(member(doc, "contentWidth"));
@@ -214,9 +226,16 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
         if (number(box[0]) != 0 || number(box[1]) != 0 || number(box[2]) <= 0 ||
             number(box[3]) <= 0 || number(box[2]) > width || number(box[3]) > height)
             return std::nullopt;
-        return DocumentCanvasPaint{"rgb(" + std::to_string(static_cast<int>((*html_color)[0])) +
-                                       ", " + std::to_string(static_cast<int>((*html_color)[1])) +
-                                       ", " + std::to_string(static_cast<int>((*html_color)[2])) +
+        // CSS leaves the document canvas transparent when both html and body
+        // are transparent, but Chromium composites that default canvas onto
+        // opaque white. Preserve that browser-visible result for native
+        // lowering instead of exposing Pulp's host dark clear color.
+        const auto& canvas_color = (*html_color)[3] == 0
+                                       ? std::array<double, 4>{255, 255, 255, 1}
+                                       : *html_color;
+        return DocumentCanvasPaint{"rgb(" + std::to_string(static_cast<int>(canvas_color[0])) +
+                                       ", " + std::to_string(static_cast<int>(canvas_color[1])) +
+                                       ", " + std::to_string(static_cast<int>(canvas_color[2])) +
                                        ")",
                                    width, height};
     } catch (const std::exception&) {

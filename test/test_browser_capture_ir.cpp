@@ -615,6 +615,10 @@ TEST_CASE("producer-bound native document canvas changes only root background",
     SECTION("transparent body") {
         change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
     }
+    SECTION("transparent document canvas defaults to Chromium white") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+    }
     SECTION("omitted optional sparse metadata means no entries") {
         snapshot = choc::json::toString(choc::json::parse(snapshot), false);
         replace_canvas_fact(snapshot, "\"pseudoType\": {\"index\": [], \"value\": []}, ", "");
@@ -630,9 +634,21 @@ TEST_CASE("producer-bound native document canvas changes only root background",
     REQUIRE(result);
     REQUIRE_FALSE(baseline.design_ir->root.style.background_color);
     REQUIRE(result.design_ir->root.style.background_color);
-    CHECK(*result.design_ir->root.style.background_color ==
-          (snapshot.find("rgb(30, 30, 46)") != std::string::npos ? "rgb(30, 30, 46)"
-                                                                 : "rgb(16, 21, 34)"));
+    const auto transparent_count = [&] {
+        std::size_t count = 0;
+        std::size_t offset = 0;
+        while ((offset = snapshot.find("rgba(0, 0, 0, 0)", offset)) != std::string::npos) {
+            ++count;
+            offset += 1;
+        }
+        return count;
+    }();
+    const auto expected_background = transparent_count >= 2
+                                     ? "rgb(255, 255, 255)"
+                                     : (snapshot.find("rgb(30, 30, 46)") != std::string::npos
+                                            ? "rgb(30, 30, 46)"
+                                            : "rgb(16, 21, 34)");
+    CHECK(*result.design_ir->root.style.background_color == expected_background);
     CHECK(result.design_ir->root.children.size() > 1);
     CHECK(result.design_ir->root.style.width == 1280);
     CHECK(result.design_ir->root.style.height == 200);

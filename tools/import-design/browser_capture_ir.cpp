@@ -98,13 +98,21 @@ bool document_canvas_registration(const detail::DocumentCanvasPaint& paint,
     if (!std::isfinite(dpr) || dpr <= 0 || n(viewport, "device_scale_factor") != dpr ||
         n(reference, "logical_width") != width || n(reference, "logical_height") != height ||
         n(resolved, "width") != width || n(resolved, "height") != height ||
-        n(extent, "width") != width || n(extent, "height") != height || n(surface, "left") != 0 ||
-        n(surface, "top") != 0 || n(authored, "x") != 0 || n(authored, "y") != 0)
+        n(extent, "width") != width || n(extent, "height") != height)
         return false;
+    const double surface_left = n(surface, "left"), surface_top = n(surface, "top");
     const double panel_width = n(surface, "width"), panel_height = n(surface, "height");
-    return std::isfinite(panel_width) && std::isfinite(panel_height) && panel_width > 0 &&
-           panel_height > 0 && panel_width <= width && panel_height <= height &&
-           n(authored, "width") == panel_width && n(authored, "height") == panel_height;
+    const double authored_x = n(authored, "x"), authored_y = n(authored, "y");
+    const double authored_width = n(authored, "width"), authored_height = n(authored, "height");
+    return std::isfinite(surface_left) && std::isfinite(surface_top) &&
+           std::isfinite(panel_width) && std::isfinite(panel_height) &&
+           std::isfinite(authored_x) && std::isfinite(authored_y) &&
+           std::isfinite(authored_width) && std::isfinite(authored_height) &&
+           panel_width > 0 && panel_height > 0 && panel_width <= width &&
+           panel_height <= height && surface_left >= 0 && surface_top >= 0 &&
+           surface_left + panel_width <= width && surface_top + panel_height <= height &&
+           authored_x == surface_left && authored_y == surface_top &&
+           authored_width == panel_width && authored_height == panel_height;
 }
 
 bool bool_member(const choc::value::ValueView& object,
