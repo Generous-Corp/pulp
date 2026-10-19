@@ -73,12 +73,21 @@ TEST_CASE("MutableAudioRouteCatalog provides checkmarked host selection state") 
     pulp::host::MutableAudioRouteCatalog catalog;
     int changes = 0;
     catalog.set_change_callback([&] { ++changes; });
+    std::vector<std::string> connected;
+    catalog.set_connect_callback(
+        [&](const pulp::host::AudioRouteInfo& route, std::size_t bus_index) {
+            connected.push_back(route.stable_id + ":" + std::to_string(bus_index));
+            return route.stable_id != "input:1";
+        });
     catalog.set_routes({
         {"input:1", "Mic 1", pulp::host::AudioRouteKind::PhysicalInput, 1, true},
         {"track:piano", "Piano", pulp::host::AudioRouteKind::Track, 2, true},
         {"track:offline", "Offline", pulp::host::AudioRouteKind::Track, 2, false},
     });
     REQUIRE(catalog.connect("track:piano", 1));
+    REQUIRE(catalog.connected_route(1) == "track:piano");
+    REQUIRE(connected == std::vector<std::string>{"track:piano:1"});
+    REQUIRE_FALSE(catalog.connect("input:1", 1));
     REQUIRE(catalog.connected_route(1) == "track:piano");
     REQUIRE_FALSE(catalog.connect("track:offline", 1));
     REQUIRE_FALSE(catalog.connect("missing", 1));

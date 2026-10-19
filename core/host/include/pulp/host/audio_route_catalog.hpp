@@ -39,10 +39,19 @@ struct AudioRouteInfo {
 class AudioRouteCatalog {
   public:
     using ChangeCallback = std::function<void()>;
+    using ConnectCallback = std::function<bool(const AudioRouteInfo&, std::size_t bus_index)>;
 
     virtual ~AudioRouteCatalog() = default;
     virtual std::vector<AudioRouteInfo> enumerate() const = 0;
     virtual void set_change_callback(ChangeCallback callback) = 0;
+
+    /// Install the host graph/bus binding invoked by connect(). This runs on
+    /// the control thread; the callback owns the actual graph mutation and
+    /// publishes the resulting audio buffers to the realtime processor.
+    /// Format adapters that cannot retarget project routes leave it unset.
+    virtual void set_connect_callback(ConnectCallback callback) {
+        (void)callback;
+    }
 
     /// Connect a host-owned source to a declared processor input bus. Hosts
     /// that cannot retarget routes from the plug-in UI keep the default false
@@ -92,12 +101,18 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
         callback_ = std::move(callback);
     }
 
+    void set_connect_callback(ConnectCallback callback) override {
+        connect_callback_ = std::move(callback);
+    }
+
     bool connect(std::string_view stable_id, std::size_t bus_index) override {
         const auto it =
             std::find_if(routes_.begin(), routes_.end(), [stable_id](const AudioRouteInfo& route) {
                 return route.stable_id == stable_id && route.available && route.channels > 0;
             });
         if (it == routes_.end())
+            return false;
+        if (connect_callback_ && !connect_callback_(*it, bus_index))
             return false;
         if (selected_.size() <= bus_index)
             selected_.resize(bus_index + 1);
@@ -119,6 +134,7 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
     std::vector<AudioRouteInfo> routes_;
     std::vector<std::string> selected_;
     ChangeCallback callback_;
+    ConnectCallback connect_callback_;
 };
 
 } // namespace pulp::host
