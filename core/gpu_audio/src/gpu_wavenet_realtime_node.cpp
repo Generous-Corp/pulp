@@ -499,6 +499,10 @@ std::uint64_t GpuWaveNetRealtimeNode::recovery_sequence() const noexcept {
 }
 GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     GpuAudioStatus status;
+    if (!impl_->prepared) {
+        status.provider_state = GpuAudioProviderState::Uninitialized;
+        return status;
+    }
     status.provider = authenticated_provider() ? GpuAudioProvider::Dawn
                                                : GpuAudioProvider::Unknown;
     status.recovery_reason = recovery_reason();

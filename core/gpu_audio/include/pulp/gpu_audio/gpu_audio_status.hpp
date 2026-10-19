@@ -45,7 +45,7 @@ enum class GpuAudioRecoveryReason : std::uint8_t {
 /// preserve the distinction between GPU production and CPU fallback.  In
 /// particular, `missed_blocks` is not a synonym for `fallback_blocks`.
 struct GpuAudioStatus {
-    static constexpr std::uint32_t kSchemaVersion = 1;
+    static constexpr std::uint32_t kSchemaVersion = 2;
 
     std::uint32_t schema_version = kSchemaVersion;
     GpuAudioEngine requested_engine = GpuAudioEngine::Unknown;

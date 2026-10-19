@@ -991,6 +991,27 @@ TEST_CASE("WaveNet recovery diagnostics latch the first reason and sequence",
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
     CHECK(status.recovery_sequence == 37);
     CHECK(status.diagnostics_available);
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.selected_engine == GpuAudioEngine::Unknown);
+}
+
+TEST_CASE("WaveNet status projection is truthful across prepare and release",
+          "[gpu_audio][wavenet][diagnostic]") {
+    GpuWaveNetRealtimeNode::Config config;
+    config.session.descriptor.block_size = 2;
+    config.session.descriptor.sample_rate = 48'000;
+    config.channels = 1;
+    config.lead_blocks = 1;
+    GpuWaveNetRealtimeNode node(config);
+    auto initial = node.status_snapshot();
+    CHECK(initial.schema_version == GpuAudioStatus::kSchemaVersion);
+    CHECK(initial.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK_FALSE(initial.diagnostics_available);
+    CHECK(initial.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(node.release());
+    auto released = node.status_snapshot();
+    CHECK(released.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK_FALSE(released.diagnostics_available);
 }
 
 TEST_CASE("WaveNet public recovery diagnostics preserve every recovery reason",
