@@ -45,6 +45,38 @@ that session, and records the foreground window session during editor
 activation. This prevents a successful host handshake from being mistaken for
 a visible editor when the runner is detached from the desktop.
 
+### Reconnect the Proxmox x64 demo session
+
+The retained Intel proof VM is VM 300 (`pulp-win-ci`). A disconnected RDP
+session is suitable for headless checks but cannot produce foreground-editor
+evidence. Reconnect the existing Windows desktop through the saved RDP/UTM
+launcher using the registered `pulp-rdp` account, then verify that the account
+is `Active` before launching a capture. From the macOS host, the read-only
+check is:
+
+```sh
+ssh -o IdentityAgent=none -o IdentitiesOnly=yes ci@192.168.86.21 qwinsta
+```
+
+The interactive smoke task is already installed in the guest and uses the
+complete registered seed profile:
+
+```text
+PulpSpectrX64Smoke
+C:\Users\pulp-rdp\Desktop\codex-intel-audio-current-x64-20261018
+```
+
+After reconnecting the desktop, run that task from an elevated Windows prompt
+or the existing launcher. Evidence is written under:
+
+```text
+C:\Users\pulp-rdp\Desktop\codex-x64-editor-20261019
+```
+
+Do not accept a screenshot from a disconnected session: the receipt must show
+the same session ID for REAPER, Explorer, the editor HWND and the foreground
+window.
+
 For CLAP, pass required adjacent files explicitly, for example
 `-SidecarPath 'C:\build\icudtl.dat'`. VST3 bundles are copied recursively.
 The receipt contains a named SHA256/size manifest for staged files, the actual
