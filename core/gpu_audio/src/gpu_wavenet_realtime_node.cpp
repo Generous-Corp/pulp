@@ -523,11 +523,10 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     status.recovery_reason = recovery_reason();
     status.recovery_sequence = recovery_sequence();
     status.diagnostics_available = true;
-    status.selected_engine = authenticated_provider() ? GpuAudioEngine::Gpu
-                                                      : GpuAudioEngine::Unknown;
-    status.provider_state = authenticated_provider() && !fenced()
-                                ? GpuAudioProviderState::Ready
-                                : GpuAudioProviderState::Degraded;
+    status.selected_engine =
+        authenticated_provider() ? GpuAudioEngine::Gpu : GpuAudioEngine::Unknown;
+    status.provider_state = authenticated_provider() && !fenced() ? GpuAudioProviderState::Ready
+                                                                  : GpuAudioProviderState::Degraded;
     return status;
 }
 bool GpuWaveNetRealtimeNode::ready() const noexcept {
