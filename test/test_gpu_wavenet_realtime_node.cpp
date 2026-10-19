@@ -1020,6 +1020,18 @@ TEST_CASE("WaveNet status projection is truthful across prepare and release",
     CHECK_FALSE(released.diagnostics_available);
 }
 
+TEST_CASE("WaveNet status telemetry remains available without trace recording",
+          "[gpu_audio][wavenet][diagnostic]") {
+    Harness h;
+    for (std::uint32_t block = 0; block < 4; ++block) {
+        (void)h.callback(static_cast<float>(block + 1));
+        (void)h.service();
+    }
+    const auto status = h.node.status_snapshot();
+    CHECK(status.diagnostics_available);
+    CHECK(status.produced_blocks + status.missed_blocks > 0);
+}
+
 TEST_CASE("WaveNet public recovery diagnostics preserve every recovery reason",
           "[gpu_audio][wavenet][diagnostic]") {
     using Recovery = detail::SharedIoRecoveryReason;
