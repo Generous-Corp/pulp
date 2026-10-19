@@ -86,6 +86,7 @@ TEST_CASE("MutableAudioRouteCatalog provides checkmarked host selection state") 
     });
     REQUIRE(catalog.connect("track:piano", 1));
     REQUIRE(catalog.connected_route(1) == "track:piano");
+    REQUIRE(catalog.selected_route_ids() == std::vector<std::string>{"", "track:piano"});
     REQUIRE(connected == std::vector<std::string>{"track:piano:1"});
     REQUIRE_FALSE(catalog.connect("input:1", 1));
     REQUIRE(catalog.connected_route(1) == "track:piano");
@@ -103,4 +104,24 @@ TEST_CASE("MutableAudioRouteCatalog provides checkmarked host selection state") 
         {"track:drums", "Drums", pulp::host::AudioRouteKind::Track, 2, true},
     });
     REQUIRE(catalog.connected_route(1).empty());
+}
+
+TEST_CASE("MutableAudioRouteCatalog restores only available stable route IDs") {
+    pulp::host::MutableAudioRouteCatalog catalog;
+    catalog.set_routes({
+        {"input:1", "Mic 1", pulp::host::AudioRouteKind::PhysicalInput, 1, true},
+        {"track:piano", "Piano", pulp::host::AudioRouteKind::Track, 2, true},
+        {"track:offline", "Offline", pulp::host::AudioRouteKind::Track, 2, false},
+    });
+
+    std::vector<std::string> connected;
+    catalog.set_connect_callback(
+        [&](const pulp::host::AudioRouteInfo& route, std::size_t bus_index) {
+            connected.push_back(route.stable_id + ":" + std::to_string(bus_index));
+            return true;
+        });
+    const std::vector<std::string> saved{"input:1", "track:piano", "track:offline", "missing"};
+    catalog.restore_selected_route_ids(saved);
+    REQUIRE(catalog.selected_route_ids() == std::vector<std::string>{"input:1", "track:piano"});
+    REQUIRE(connected == std::vector<std::string>{"input:1:0", "track:piano:1"});
 }

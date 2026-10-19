@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -68,6 +69,21 @@ class AudioRouteCatalog {
         (void)bus_index;
         return {};
     }
+
+    /// Return the stable IDs selected for each declared input bus. Hosts may
+    /// store these IDs in their project/plugin state and restore them after a
+    /// catalog is rebuilt. The vector index is the bus index; an empty string
+    /// means that bus has no selected route.
+    virtual std::vector<std::string> selected_route_ids() const {
+        return {};
+    }
+
+    /// Restore previously saved stable IDs on the control thread. Invalid,
+    /// unavailable, or rejected routes are ignored and do not disturb the
+    /// existing selection. Hosts should call this after set_routes().
+    virtual void restore_selected_route_ids(std::span<const std::string> ids) {
+        (void)ids;
+    }
 };
 
 /// Small host-side implementation for standalone/Forge hosts. It owns only
@@ -123,6 +139,17 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
 
     std::string connected_route(std::size_t bus_index) const override {
         return bus_index < selected_.size() ? selected_[bus_index] : std::string{};
+    }
+
+    std::vector<std::string> selected_route_ids() const override {
+        return selected_;
+    }
+
+    void restore_selected_route_ids(std::span<const std::string> ids) override {
+        for (std::size_t bus_index = 0; bus_index < ids.size(); ++bus_index) {
+            if (!ids[bus_index].empty())
+                (void)connect(ids[bus_index], bus_index);
+        }
     }
 
   private:
