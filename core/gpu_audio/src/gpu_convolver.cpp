@@ -454,6 +454,13 @@ bool GpuConvolver::prepare() {
                     if (created.session) {
                         state->session = std::move(created.session);
                         shared_io_ = std::move(state);
+                        if (shared_io_->trial_config && shared_io_->trial_config->observer &&
+                            !shared_io_->session->set_trace_observer(
+                                shared_io_->trial_config->observer)) {
+                            (void)shared_io_->session->release();
+                            shared_io_.reset();
+                            return false;
+                        }
                     }
                 }
             }
@@ -574,9 +581,11 @@ std::uint32_t GpuConvolver::service_realtime_shared_io(void* self, std::uint64_t
         return detail::kRealtimeGpuServiceInactive;
     const auto result = convolver->shared_io_->session->service(now_ns);
     // A configured private trial owns the authenticated trace queue until its
-    // quiescent accessor drains it. The ordinary runtime path drains here;
-    // never race a second diagnostic consumer against this SPSC queue.
-    if (!convolver->trial_configured_ && !convolver->trial_enable_trace_)
+    // quiescent accessor drains it. The ordinary runtime path, or an installed
+    // complete observer, drains here; never race a second diagnostic consumer
+    // against this SPSC queue.
+    if ((!convolver->trial_configured_ && !convolver->trial_enable_trace_) ||
+        convolver->shared_io_->session->trace_observer_enabled())
         (void)convolver->shared_io_->session->drain_trace();
     return static_cast<std::uint32_t>(
         std::min<std::size_t>(result.terminal_records,

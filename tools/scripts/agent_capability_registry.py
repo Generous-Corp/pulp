@@ -821,6 +821,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/scoped_flush_denormals.hpp",
+        "fingerprint": "sha256:c394e664d37399ccc736a32dda40b6bae5b2883c8fc5a76f45f8b6d6361c1482",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "ScopedFlushDenormals is numeric-mode infrastructure for processor "
+            "audio boundaries. It does not expose a standalone generator capability; "
+            "the Windows MSVC include ordering is part of that shared implementation "
+            "contract."
+        ),
+    },
+    {
         "include": "pulp/signal/detail/schroeder_allpass.hpp",
         "fingerprint": "sha256:64f8f2857c873c37bc94102544459d528459dd2c422eb0bf812a3d1d4b411760",
         "disposition": "infrastructure",
