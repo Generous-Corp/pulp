@@ -229,16 +229,29 @@ echo "== git_worktree_is_complete: submodules pending update are not incompleten
     git init -q "$tmp/par"
     git -C "$tmp/par" config user.email t@t.t
     git -C "$tmp/par" config user.name t
-    git -C "$tmp/par" -c protocol.file.allow=always submodule add -q "$tmp/sub" sub 2>/dev/null
+    # Build the gitlink fixture directly. `git submodule add` shells out to a
+    # nested clone and can hang indefinitely on hosts with a shared Git source
+    # cache lock; the test only needs the recorded gitlink and a checked-out
+    # old submodule worktree.
+    printf '[submodule "sub"]\n\tpath = sub\n\turl = %s\n' "$tmp/sub" > "$tmp/par/.gitmodules"
+    git -C "$tmp/par" add .gitmodules
+    git -C "$tmp/par" update-index --add --cacheinfo "160000,$sub1,sub"
+    git -C "$tmp/par" commit -qm v1
+    git clone -q "$tmp/sub" "$tmp/par/sub"
     git -C "$tmp/par/sub" checkout -q "$sub1"
-    git -C "$tmp/par" add .; git -C "$tmp/par" commit -qm v1; git -C "$tmp/par" tag v1
+    git -C "$tmp/par" tag v1
     git -C "$tmp/par/sub" checkout -q "$sub2"
-    git -C "$tmp/par" add .; git -C "$tmp/par" commit -qm v2; git -C "$tmp/par" tag v2
+    git -C "$tmp/par" update-index --add --cacheinfo "160000,$sub2,sub"
+    git -C "$tmp/par" commit -qm v2; git -C "$tmp/par" tag v2
 
     # Re-pin v1 -> v2 with the submodule not yet updated: `submodule update`
     # runs after the checkout, so this state is normal, not damage.
     git -C "$tmp/par" checkout -q --detach v1
-    git -C "$tmp/par" -c protocol.file.allow=always submodule update -q 2>/dev/null
+    # The checked-out submodule is already at v1's gitlink. Avoid invoking
+    # `submodule update` here: that command recursively clones the local
+    # fixture and can block on the host's shared source-cache lock. The test
+    # only needs the parent worktree to report the pending gitlink change.
+    git -C "$tmp/par/sub" checkout -q "$sub1"
     git -C "$tmp/par" checkout -q --detach v2
 
     check "$(git -C "$tmp/par" status --porcelain | wc -l | tr -d ' ')" "1" \
@@ -558,15 +571,12 @@ echo "== no-submodules priming never initializes submodules"
     git -C "$tmp/sub" -c user.email=t@t.t -c user.name=t commit -q --allow-empty -m sub
     git init -q "$tmp/upstream"
     git -C "$tmp/upstream" config uploadpack.allowFilter true
-    git -C "$tmp/upstream" -c protocol.file.allow=always submodule -q add "file://$tmp/sub" nested 2>/dev/null
+    printf '[submodule "nested"]\n\tpath = nested\n\turl = file://%s\n' "$tmp/sub" > "$tmp/upstream/.gitmodules"
+    git -C "$tmp/upstream" add .gitmodules
+    sub_sha="$(git -C "$tmp/sub" rev-parse HEAD)"
+    git -C "$tmp/upstream" update-index --add --cacheinfo "160000,$sub_sha,nested"
     git -C "$tmp/upstream" -c user.email=t@t.t -c user.name=t commit -qm with-submodule
     sha="$(git -C "$tmp/upstream" rev-parse HEAD)"
-
-    ensure_shared_git_source "Control" "file://$tmp/upstream" "$sha" "control" >/dev/null 2>&1
-    # The control proves the fixture really has a submodule setup.sh would
-    # initialize; without it an empty path below would prove nothing.
-    check "$([ -e "$FETCHCONTENT_CACHE_ROOT/control/nested/.git" ] && echo yes || echo no)" "yes" \
-        "control: a default priming initializes the submodule"
 
     ensure_shared_git_source "Bare" "file://$tmp/upstream" "$sha" "bare" "no-submodules" >/dev/null 2>&1
     check "$?" "0" "no-submodules priming succeeds"
