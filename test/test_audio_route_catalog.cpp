@@ -8,7 +8,7 @@
 namespace {
 
 class FixtureCatalog final : public pulp::host::AudioRouteCatalog {
-public:
+  public:
     std::vector<pulp::host::AudioRouteInfo> enumerate() const override {
         return routes;
     }
@@ -18,7 +18,8 @@ public:
     }
 
     bool connect(std::string_view stable_id, std::size_t bus_index) override {
-        if (bus_index > 1) return false;
+        if (bus_index > 1)
+            return false;
         for (const auto& route : routes) {
             if (route.stable_id == stable_id && route.available) {
                 selected[bus_index] = route.stable_id;
@@ -33,7 +34,8 @@ public:
     }
 
     void notify() {
-        if (callback_) callback_();
+        if (callback_)
+            callback_();
     }
 
     std::vector<pulp::host::AudioRouteInfo> routes{
@@ -42,12 +44,12 @@ public:
         {"bus:side", "Side Bus", pulp::host::AudioRouteKind::Bus, 2, false},
     };
 
-private:
+  private:
     ChangeCallback callback_;
     std::array<std::string, 2> selected{};
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("AudioRouteCatalog exposes host-owned source identity and selection") {
     FixtureCatalog catalog;

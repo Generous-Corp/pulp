@@ -12,4 +12,4 @@ enum class BusRole : std::uint8_t {
     Sidechain,
 };
 
-}  // namespace pulp::format
+} // namespace pulp::format
