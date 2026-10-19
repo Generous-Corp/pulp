@@ -987,6 +987,49 @@ TEST_CASE("WaveNet recovery diagnostics latch the first reason and sequence",
     CHECK(detail::WaveNetRealtimeTestAccess::recovery_sequence(h.node) == 37);
     CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderFailure);
     CHECK(h.node.recovery_sequence() == 37);
+    const auto status = h.node.status_snapshot();
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+    CHECK(status.recovery_sequence == 37);
+    CHECK(status.diagnostics_available);
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.selected_engine == GpuAudioEngine::Unknown);
+    CHECK(status.sample_rate == 48000);
+    CHECK(status.block_size == 2);
+    CHECK(status.latency_samples == 2);
+    CHECK(status.prepared_lead_blocks == 1);
+    CHECK(status.fallback_policy == MissPolicy::Silence);
+    CHECK_FALSE(status.fallback_available);
+}
+
+TEST_CASE("WaveNet status projection is truthful across prepare and release",
+          "[gpu_audio][wavenet][diagnostic]") {
+    GpuWaveNetRealtimeNode::Config config;
+    config.session.descriptor.block_size = 2;
+    config.session.descriptor.sample_rate = 48'000;
+    config.channels = 1;
+    config.lead_blocks = 1;
+    GpuWaveNetRealtimeNode node(config);
+    auto initial = node.status_snapshot();
+    CHECK(initial.schema_version == GpuAudioStatus::kSchemaVersion);
+    CHECK(initial.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK_FALSE(initial.diagnostics_available);
+    CHECK(initial.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(node.release());
+    auto released = node.status_snapshot();
+    CHECK(released.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK_FALSE(released.diagnostics_available);
+}
+
+TEST_CASE("WaveNet status telemetry remains available without trace recording",
+          "[gpu_audio][wavenet][diagnostic]") {
+    Harness h;
+    for (std::uint32_t block = 0; block < 4; ++block) {
+        (void)h.callback(static_cast<float>(block + 1));
+        (void)h.service();
+    }
+    const auto status = h.node.status_snapshot();
+    CHECK(status.diagnostics_available);
+    CHECK(status.produced_blocks + status.missed_blocks > 0);
 }
 
 TEST_CASE("WaveNet public recovery diagnostics preserve every recovery reason",
