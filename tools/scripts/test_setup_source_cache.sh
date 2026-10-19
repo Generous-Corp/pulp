@@ -571,12 +571,25 @@ echo "== no-submodules priming never initializes submodules"
     git -C "$tmp/sub" -c user.email=t@t.t -c user.name=t commit -q --allow-empty -m sub
     git init -q "$tmp/upstream"
     git -C "$tmp/upstream" config uploadpack.allowFilter true
+    git -C "$tmp/upstream" config uploadpack.allowAnySHA1InWant true
     printf '[submodule "nested"]\n\tpath = nested\n\turl = file://%s\n' "$tmp/sub" > "$tmp/upstream/.gitmodules"
     git -C "$tmp/upstream" add .gitmodules
     sub_sha="$(git -C "$tmp/sub" rev-parse HEAD)"
     git -C "$tmp/upstream" update-index --add --cacheinfo "160000,$sub_sha,nested"
     git -C "$tmp/upstream" -c user.email=t@t.t -c user.name=t commit -qm with-submodule
     sha="$(git -C "$tmp/upstream" rev-parse HEAD)"
+
+    # Prove the fixture has a materializable submodule before exercising the
+    # no-submodules branch. Apple Git 2.54's `git submodule init` hangs even on
+    # an empty repository on this host, so use the equivalent plumbing that
+    # setup's submodule update ultimately performs (clone plus the recorded
+    # gitlink checkout) for this positive control. The production no-submodules
+    # path below still goes through ensure_shared_git_source unchanged.
+    mkdir -p "$FETCHCONTENT_CACHE_ROOT/control"
+    git clone -q "file://$tmp/sub" "$FETCHCONTENT_CACHE_ROOT/control/nested"
+    git -C "$FETCHCONTENT_CACHE_ROOT/control/nested" checkout -q "$sub_sha"
+    check "$([ -e "$FETCHCONTENT_CACHE_ROOT/control/nested/.git" ] && echo yes || echo no)" "yes" \
+        "control: the fixture submodule materializes at its gitlink"
 
     ensure_shared_git_source "Bare" "file://$tmp/upstream" "$sha" "bare" "no-submodules" >/dev/null 2>&1
     check "$?" "0" "no-submodules priming succeeds"
