@@ -106,8 +106,7 @@ TEST_CASE("MutableAudioRouteCatalog provides checkmarked host selection state") 
     // A temporary project/device refresh keeps the stable identity so the UI
     // can render the source as unavailable and reconnect it when it returns.
     REQUIRE(catalog.connected_route(1) == "track:piano");
-    REQUIRE(catalog.selected_route_ids() ==
-            std::vector<std::string>{"", "track:piano"});
+    REQUIRE(catalog.selected_route_ids() == std::vector<std::string>{"", "track:piano"});
 
     catalog.set_routes({
         {"track:piano", "Piano", pulp::host::AudioRouteKind::Track, 2, true},
