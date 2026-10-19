@@ -60,6 +60,8 @@ struct GpuAudioStatus {
     std::uint32_t prepared_lead_blocks = 0;
     bool fallback_available = false;
     bool diagnostics_available = false;
+    GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
+    std::uint64_t recovery_sequence = UINT64_MAX;
 
     std::uint64_t produced_blocks = 0;
     std::uint64_t missed_blocks = 0;

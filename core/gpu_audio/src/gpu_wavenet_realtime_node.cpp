@@ -497,6 +497,19 @@ std::uint64_t GpuWaveNetRealtimeNode::recovery_sequence() const noexcept {
     return impl_->bridge ? impl_->bridge->recovery_sequence()
                          : std::numeric_limits<std::uint64_t>::max();
 }
+GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
+    GpuAudioStatus status;
+    status.provider = authenticated_provider() ? GpuAudioProvider::Dawn
+                                               : GpuAudioProvider::Unknown;
+    status.recovery_reason = recovery_reason();
+    status.recovery_sequence = recovery_sequence();
+    status.diagnostics_available = true;
+    status.provider_state = fenced() ? GpuAudioProviderState::Degraded
+                                     : GpuAudioProviderState::Ready;
+    status.selected_engine = authenticated_provider() ? GpuAudioEngine::Gpu
+                                                      : GpuAudioEngine::Unknown;
+    return status;
+}
 bool GpuWaveNetRealtimeNode::ready() const noexcept {
     return impl_->prepared;
 }

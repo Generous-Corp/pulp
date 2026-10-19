@@ -987,6 +987,10 @@ TEST_CASE("WaveNet recovery diagnostics latch the first reason and sequence",
     CHECK(detail::WaveNetRealtimeTestAccess::recovery_sequence(h.node) == 37);
     CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderFailure);
     CHECK(h.node.recovery_sequence() == 37);
+    const auto status = h.node.status_snapshot();
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+    CHECK(status.recovery_sequence == 37);
+    CHECK(status.diagnostics_available);
 }
 
 TEST_CASE("WaveNet public recovery diagnostics preserve every recovery reason",
