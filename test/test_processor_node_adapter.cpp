@@ -60,7 +60,7 @@ using pulp::test::graph_routing::routing_gain;
 using pulp::test::graph_routing::test_signal;
 
 constexpr double kSr = 48000.0;
-constexpr float kPole = 0.3f;  // fixed coefficient -> sample-rate independent
+constexpr float kPole = 0.3f; // fixed coefficient -> sample-rate independent
 
 // Deterministic, stateful, parameter-free mono processor. A one-pole low-pass
 // with a fixed coefficient: output depends on input history but NOT on transport
@@ -68,7 +68,7 @@ constexpr float kPole = 0.3f;  // fixed coefficient -> sample-rate independent
 // agree bit-for-bit as long as each starts from a freshly prepared (zeroed)
 // state and sees the same input block.
 class OnePoleMono : public Processor {
-public:
+  public:
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
         d.name = "OnePoleMono";
@@ -83,18 +83,18 @@ public:
 
     void define_parameters(pulp::state::StateStore&) override {}
 
-    void prepare(const PrepareContext&) override { z_ = 0.0f; }
+    void prepare(const PrepareContext&) override {
+        z_ = 0.0f;
+    }
 
     void process(pulp::audio::BufferView<float>& output,
-                 const pulp::audio::BufferView<const float>& input,
-                 pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&,
-                 const ProcessContext&) override {
-        if (output.num_channels() == 0) return;
+                 const pulp::audio::BufferView<const float>& input, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const ProcessContext&) override {
+        if (output.num_channels() == 0)
+            return;
         const std::size_t frames = output.num_samples();
         float* out = output.channel_ptr(0);
-        const float* in =
-            input.num_channels() > 0 ? input.channel_ptr(0) : nullptr;
+        const float* in = input.num_channels() > 0 ? input.channel_ptr(0) : nullptr;
         for (std::size_t i = 0; i < frames; ++i) {
             const float x = in ? in[i] : 0.0f;
             z_ = kPole * x + (1.0f - kPole) * z_;
@@ -106,12 +106,12 @@ public:
         return std::make_unique<OnePoleMono>();
     }
 
-private:
+  private:
     float z_ = 0.0f;
 };
 
 class SidechainProbe final : public Processor {
-public:
+  public:
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
         d.name = "SidechainProbe";
@@ -130,24 +130,20 @@ public:
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const PrepareContext&) override {}
 
-    void process(pulp::audio::BufferView<float>&,
-                 const pulp::audio::BufferView<const float>&,
-                 pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&,
-                 const ProcessContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&, const ProcessContext&) override {
+    }
 
-    void process(pulp::format::ProcessBuffers& audio,
-                 pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&,
-                 const ProcessContext&) override {
+    void process(pulp::format::ProcessBuffers& audio, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const ProcessContext&) override {
         auto* main = audio.main_input();
         auto* sidechain = audio.sidechain_input();
         auto* output = audio.main_output();
-        if (!output) return;
+        if (!output)
+            return;
         for (std::size_t frame = 0; frame < output->num_samples(); ++frame) {
             const float main_sample = main ? main->channel_ptr(0)[frame] : 0.0f;
-            const float side_sample =
-                sidechain ? sidechain->channel_ptr(0)[frame] : 0.0f;
+            const float side_sample = sidechain ? sidechain->channel_ptr(0)[frame] : 0.0f;
             output->channel_ptr(0)[frame] = main_sample + side_sample;
         }
     }
@@ -157,9 +153,7 @@ struct RouteProviderFixture {
     pulp::audio::BufferView<const float> route;
     std::size_t calls = 0;
 
-    static bool read(void* context,
-                     std::size_t bus_index,
-                     std::size_t frame_count,
+    static bool read(void* context, std::size_t bus_index, std::size_t frame_count,
                      pulp::audio::BufferView<const float>& output) noexcept {
         auto& fixture = *static_cast<RouteProviderFixture*>(context);
         ++fixture.calls;
@@ -317,10 +311,9 @@ std::vector<float> oracle_block(const std::vector<float>& x, int frames) {
     std::vector<float> out(static_cast<std::size_t>(frames), 0.0f);
     std::array<const float*, 1> in_ch{in.data()};
     std::array<float*, 1> out_ch{out.data()};
-    pulp::audio::BufferView<const float> in_view(
-        in_ch.data(), 1, static_cast<std::uint32_t>(frames));
-    pulp::audio::BufferView<float> out_view(
-        out_ch.data(), 1, static_cast<std::uint32_t>(frames));
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 1,
+                                                 static_cast<std::uint32_t>(frames));
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 1, static_cast<std::uint32_t>(frames));
     host.process(out_view, in_view);
     return out;
 }
@@ -413,10 +406,8 @@ TEST_CASE("ProcessorNode routes a pre-bound host bus into a sidechain") {
         route[frame] = static_cast<float>(10 + frame);
     }
     RouteProviderFixture provider;
-    provider.route = pulp::audio::BufferView<const float>(
-        route_channels.data(), 1, frames);
-    node.set_audio_input_provider(
-        {&provider, &RouteProviderFixture::read});
+    provider.route = pulp::audio::BufferView<const float>(route_channels.data(), 1, frames);
+    node.set_audio_input_provider({&provider, &RouteProviderFixture::read});
 
     pulp::format::ProcessBlock block;
     block.sample_rate = kSr;
@@ -554,7 +545,7 @@ TEST_CASE("ProcessorNode routed binding is allocation-free after warm-up",
 
     const std::vector<std::vector<float>> in{test_signal(kFrames, 0.8f)};
     RoutedHarness h(kSr, kFrames, in, 1);
-    REQUIRE(h.run(exec, snapshot, pool).ok());  // warm-up outside the probe
+    REQUIRE(h.run(exec, snapshot, pool).ok()); // warm-up outside the probe
     {
         pulp::test::RtAllocationProbe probe;
         const auto result = h.run(exec, snapshot, pool);

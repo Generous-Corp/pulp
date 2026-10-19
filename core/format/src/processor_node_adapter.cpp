@@ -15,8 +15,7 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
     PULP_TRY {
         const auto descriptor = processor_->descriptor();
         capabilities_ = descriptor.effective_capabilities();
-        input_bus_count_ = std::min(descriptor.input_buses.size(),
-                                    input_roles_.size());
+        input_bus_count_ = std::min(descriptor.input_buses.size(), input_roles_.size());
         for (std::size_t index = 0; index < input_bus_count_; ++index) {
             input_roles_[index] = descriptor.input_buses[index].role;
             input_channels_[index] = descriptor.input_buses[index].default_channels;
@@ -88,17 +87,15 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     // and BufferView only holds host-owned channel pointers, so this aliases
     // without copying samples and stays allocation-free.
     BusBufferSet local_buses;
-    const auto main_role = self->input_bus_count_ > 0
-                               ? self->input_roles_[0]
-                               : BusRole::Main;
+    const auto main_role = self->input_bus_count_ > 0 ? self->input_roles_[0] : BusRole::Main;
     if (!local_buses.add_input("main", ctx.node_inputs, main_role, true))
         return false;
     for (std::size_t bus = 1; bus < self->input_bus_count_; ++bus) {
         audio::BufferView<const float> route_view;
         bool active = false;
         if (self->input_provider_ &&
-            self->input_provider_.read(self->input_provider_.context, bus,
-                                       block.frame_count, route_view) &&
+            self->input_provider_.read(self->input_provider_.context, bus, block.frame_count,
+                                       route_view) &&
             route_view.num_samples() == block.frame_count &&
             route_view.num_channels() ==
                 static_cast<std::size_t>(std::max(0, self->input_channels_[bus]))) {
@@ -106,8 +103,7 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
         } else {
             route_view = {};
         }
-        if (!local_buses.add_input("aux", route_view, self->input_roles_[bus],
-                                  active))
+        if (!local_buses.add_input("aux", route_view, self->input_roles_[bus], active))
             return false;
     }
     if (!local_buses.add_output("main", ctx.node_outputs, BusRole::Main))

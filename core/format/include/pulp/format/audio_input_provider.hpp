@@ -15,9 +15,7 @@ namespace pulp::format {
 /// callback receives only this pre-bound POD handle, so it never enumerates
 /// tracks, allocates, locks, or resolves stable IDs.
 struct AudioInputBusProvider {
-    using ReadFn = bool (*)(void* context,
-                            std::size_t bus_index,
-                            std::size_t frame_count,
+    using ReadFn = bool (*)(void* context, std::size_t bus_index, std::size_t frame_count,
                             audio::BufferView<const float>& output) noexcept;
 
     void* context = nullptr;
