@@ -993,6 +993,12 @@ TEST_CASE("WaveNet recovery diagnostics latch the first reason and sequence",
     CHECK(status.diagnostics_available);
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.selected_engine == GpuAudioEngine::Unknown);
+    CHECK(status.sample_rate == 48000);
+    CHECK(status.block_size == 2);
+    CHECK(status.latency_samples == 2);
+    CHECK(status.prepared_lead_blocks == 1);
+    CHECK(status.fallback_policy == MissPolicy::Silence);
+    CHECK_FALSE(status.fallback_available);
 }
 
 TEST_CASE("WaveNet status projection is truthful across prepare and release",

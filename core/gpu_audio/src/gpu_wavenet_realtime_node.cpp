@@ -503,14 +503,31 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
         status.provider_state = GpuAudioProviderState::Uninitialized;
         return status;
     }
+    const auto telemetry = impl_->telemetry.snapshot();
+    const auto& descriptor = impl_->config.session.descriptor;
+    status.requested_engine = GpuAudioEngine::Gpu;
+    status.fallback_policy = impl_->config.miss_policy;
+    status.sample_rate = descriptor.sample_rate;
+    status.block_size = descriptor.block_size;
+    status.latency_samples = impl_->config.lead_blocks * descriptor.block_size;
+    status.prepared_lead_blocks = impl_->config.lead_blocks;
+    status.fallback_available = impl_->fallback_prepared;
+    status.produced_blocks = telemetry.delivered_blocks;
+    status.missed_blocks = telemetry.deadline_misses;
+    status.fallback_blocks = telemetry.fallback_blocks;
+    status.resynced_blocks = telemetry.resync_drops;
+    status.input_dropped_frames = telemetry.input_drops;
+    status.last_block_us = static_cast<double>(telemetry.submit_to_completion_ns) / 1000.0;
+    status.avg_block_us = static_cast<double>(telemetry.gpu_elapsed_ns) / 1000.0;
     status.provider = authenticated_provider() ? GpuAudioProvider::Dawn : GpuAudioProvider::Unknown;
     status.recovery_reason = recovery_reason();
     status.recovery_sequence = recovery_sequence();
     status.diagnostics_available = true;
-    status.provider_state =
-        fenced() ? GpuAudioProviderState::Degraded : GpuAudioProviderState::Ready;
-    status.selected_engine =
-        authenticated_provider() ? GpuAudioEngine::Gpu : GpuAudioEngine::Unknown;
+    status.selected_engine = authenticated_provider() ? GpuAudioEngine::Gpu
+                                                      : GpuAudioEngine::Unknown;
+    status.provider_state = authenticated_provider() && !fenced()
+                                ? GpuAudioProviderState::Ready
+                                : GpuAudioProviderState::Degraded;
     return status;
 }
 bool GpuWaveNetRealtimeNode::ready() const noexcept {

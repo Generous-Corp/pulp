@@ -60,9 +60,6 @@ struct GpuAudioStatus {
     std::uint32_t prepared_lead_blocks = 0;
     bool fallback_available = false;
     bool diagnostics_available = false;
-    GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
-    std::uint64_t recovery_sequence = UINT64_MAX;
-
     std::uint64_t produced_blocks = 0;
     std::uint64_t missed_blocks = 0;
     std::uint64_t fallback_blocks = 0;
@@ -70,6 +67,10 @@ struct GpuAudioStatus {
     std::uint64_t input_dropped_frames = 0;
     double last_block_us = 0.0;
     double avg_block_us = 0.0;
+    // Appended after the v1 fields so positional aggregate initialization of
+    // the installed status prefix remains source-compatible.
+    GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
+    std::uint64_t recovery_sequence = UINT64_MAX;
 };
 
 } // namespace pulp::gpu_audio
