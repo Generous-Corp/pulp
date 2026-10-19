@@ -171,7 +171,8 @@ TEST_CASE("SignalGraph forwards an input provider to a Processor node",
     graph.set_canonical_executor_routing_enabled(true);
     REQUIRE(graph.prepare(48000.0, frames));
     const auto& const_main = main;
-    graph.process(rendered.view(), const_main.view(), frames);
+    auto rendered_view = rendered.view();
+    graph.process(rendered_view, const_main.view(), frames);
     REQUIRE(provider.calls == 1);
     for (int frame = 0; frame < frames; ++frame) {
         REQUIRE(rendered.channel(0)[static_cast<std::size_t>(frame)] ==

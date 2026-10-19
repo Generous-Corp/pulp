@@ -181,6 +181,8 @@ bool SignalGraph::is_processor_node(NodeId id) const {
 bool SignalGraph::set_processor_audio_input_provider(
     NodeId id, format::AudioInputBusProvider provider) noexcept {
     GraphMutationLock mutation_lock(*this);
+    if (!provider)
+        return false;
     // ProcessorNode copies the handle before prepare() and reads it from the
     // realtime callback thereafter. Refuse a live graph mutation rather than
     // racing a published snapshot or silently changing a running processor.
