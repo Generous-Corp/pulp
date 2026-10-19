@@ -2003,6 +2003,9 @@ comes back `unsupported` rather than being falsely certified as zero-latency.
 ## A `CustomNodeType` pack is one header, and its consumer needs to be told
 
 Bake-layer DSP packs live as header-only `CustomNodeType` factories under
+`forge_distortion_catalog.hpp` keeps its public IDs, descriptors, and factory declarations in the installed host header; its implementation bodies live in `core/host/src/forge_distortion_catalog.cpp`.
+This out-of-line ownership is a compile-surface refactor only: preserve catalog export bytes, registration order, and Forge compatibility mappings.
+
 `core/host/include/pulp/host/forge_*_catalog.hpp` — one header per pack
 (`forge_lofi_catalog.hpp`, `forge_character_delay_catalog.hpp`,
 `forge_modulation_catalog.hpp`). Each node declares its stable `k…TypeId`, its

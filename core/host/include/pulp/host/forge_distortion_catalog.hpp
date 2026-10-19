@@ -112,8 +112,7 @@ const char* distortion_default_name(Topology topology);
 float distortion_worst_case_gain();
 
 /// One factory, eight registered realizations (2 topologies x 4 tiers).
-CustomNodeType make_distortion_node(Topology topology,
-                                    OversampleTier tier = OversampleTier::x4);
+CustomNodeType make_distortion_node(Topology topology, OversampleTier tier = OversampleTier::x4);
 
 /// Descriptor for the distortion family and its registered realizations.
 ForgeNodeDescriptor distortion_descriptor();

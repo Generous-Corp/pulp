@@ -4,30 +4,42 @@ namespace pulp::host::distortion {
 
 int oversample_factor(OversampleTier tier) {
     switch (tier) {
-        case OversampleTier::x2: return 2;
-        case OversampleTier::x4: return 4;
-        case OversampleTier::x8: return 8;
-        case OversampleTier::x1:
-        default: return 1;
+    case OversampleTier::x2:
+        return 2;
+    case OversampleTier::x4:
+        return 4;
+    case OversampleTier::x8:
+        return 8;
+    case OversampleTier::x1:
+    default:
+        return 1;
     }
 }
 
 const char* distortion_type_id(Topology topology, OversampleTier tier) {
     if (topology == Topology::to_ground) {
         switch (tier) {
-            case OversampleTier::x2: return kToGroundX2TypeId;
-            case OversampleTier::x4: return kToGroundX4TypeId;
-            case OversampleTier::x8: return kToGroundX8TypeId;
-            case OversampleTier::x1:
-            default: return kToGroundX1TypeId;
+        case OversampleTier::x2:
+            return kToGroundX2TypeId;
+        case OversampleTier::x4:
+            return kToGroundX4TypeId;
+        case OversampleTier::x8:
+            return kToGroundX8TypeId;
+        case OversampleTier::x1:
+        default:
+            return kToGroundX1TypeId;
         }
     }
     switch (tier) {
-        case OversampleTier::x2: return kInLoopX2TypeId;
-        case OversampleTier::x4: return kInLoopX4TypeId;
-        case OversampleTier::x8: return kInLoopX8TypeId;
-        case OversampleTier::x1:
-        default: return kInLoopX1TypeId;
+    case OversampleTier::x2:
+        return kInLoopX2TypeId;
+    case OversampleTier::x4:
+        return kInLoopX4TypeId;
+    case OversampleTier::x8:
+        return kInLoopX8TypeId;
+    case OversampleTier::x1:
+    default:
+        return kInLoopX1TypeId;
     }
 }
 
@@ -55,8 +67,7 @@ float distortion_worst_case_gain() {
 }
 
 /// One factory, eight registered realizations (2 topologies × 4 tiers).
-CustomNodeType make_distortion_node(Topology topology,
-                                    OversampleTier tier) {
+CustomNodeType make_distortion_node(Topology topology, OversampleTier tier) {
     CustomNodeType t;
     t.type_id = distortion_type_id(topology, tier);
     t.version = 1;
@@ -65,13 +76,14 @@ CustomNodeType make_distortion_node(Topology topology,
     t.default_name = distortion_default_name(topology);
     t.lowerable = true;
     t.latency_samples = [tier](double sample_rate) {
-        if (tier == OversampleTier::x1) return 0;
+        if (tier == OversampleTier::x1)
+            return 0;
         using Os = signal::OversamplerT<float>;
         Os probe;
         probe.set_kind(Os::Kind::linear_phase_fir);
         probe.set_quality(Os::Quality::standard);
         const int factor = oversample_factor(tier);
-        probe.set_factor(factor == 2 ? Os::Factor::x2
+        probe.set_factor(factor == 2   ? Os::Factor::x2
                          : factor == 4 ? Os::Factor::x4
                                        : Os::Factor::x8);
         probe.set_sample_rate(static_cast<float>(sample_rate));
@@ -122,16 +134,15 @@ CustomNodeType make_distortion_node(Topology topology,
     t.baked_params.push_back({kSymmetry, -1.0f, 1.0f, 0.0f});
     t.baked_params.push_back({kDiodeModel, 0.0f, 2.0f, 0.0f});
     t.baked_params.push_back({kPreToneHz, 200.0f, 8000.0f, 720.0f});
-    t.baked_params.push_back({kPreGainDb,
-                              static_cast<float>(-signal::ToneStack::kPreGainDbMax),
+    t.baked_params.push_back({kPreGainDb, static_cast<float>(-signal::ToneStack::kPreGainDbMax),
                               static_cast<float>(signal::ToneStack::kPreGainDbMax), 0.0f});
     t.baked_params.push_back({kPostToneHz, 500.0f, 12000.0f, 4000.0f});
     t.baked_params.push_back({kToneMix, 0.0f, 1.0f, 0.5f});
     t.baked_params.push_back({kOutputDb, kOutputDbMin, kOutputDbMax, 0.0f});
 
     t.process_instance_baked_param = [tier, topology](void* p, audio::BufferView<float>& out,
-                                            const audio::BufferView<const float>& in, int n,
-                                            const BakedParamView& params) {
+                                                      const audio::BufferView<const float>& in,
+                                                      int n, const BakedParamView& params) {
         auto* s = static_cast<DistortionInstance*>(p);
         const float* input = in.channel_ptr(0);
         float* output = out.channel_ptr(0);
@@ -139,10 +150,10 @@ CustomNodeType make_distortion_node(Topology topology,
 
         for (int k = 0; k < n; ++k) {
             const auto offset = static_cast<std::int32_t>(k);
-            s->drive = static_cast<float>(
-                signal::units::db_to_linear(params.value_at(kDriveDb, offset)));
-            s->output = static_cast<float>(
-                signal::units::db_to_linear(params.value_at(kOutputDb, offset)));
+            s->drive =
+                static_cast<float>(signal::units::db_to_linear(params.value_at(kDriveDb, offset)));
+            s->output =
+                static_cast<float>(signal::units::db_to_linear(params.value_at(kOutputDb, offset)));
             const auto model = static_cast<DiodeModel>(
                 static_cast<int>(params.value_at(kDiodeModel, offset) + 0.5f));
             const float symmetry = params.value_at(kSymmetry, offset);
@@ -190,22 +201,14 @@ ForgeNodeDescriptor distortion_descriptor() {
          {{"x1", "1x", 1.0f}, {"x2", "2x", 2.0f}, {"x4", "4x", 4.0f}, {"x8", "8x", 8.0f}}},
     };
     d.realizations = {
-        {"to_ground_x1", kToGroundX1TypeId,
-         {{"topology", "to_ground"}, {"oversampling", "x1"}}},
-        {"to_ground_x2", kToGroundX2TypeId,
-         {{"topology", "to_ground"}, {"oversampling", "x2"}}},
-        {"to_ground_x4", kToGroundX4TypeId,
-         {{"topology", "to_ground"}, {"oversampling", "x4"}}},
-        {"to_ground_x8", kToGroundX8TypeId,
-         {{"topology", "to_ground"}, {"oversampling", "x8"}}},
-        {"in_loop_x1", kInLoopX1TypeId,
-         {{"topology", "in_loop"}, {"oversampling", "x1"}}},
-        {"in_loop_x2", kInLoopX2TypeId,
-         {{"topology", "in_loop"}, {"oversampling", "x2"}}},
-        {"in_loop_x4", kInLoopX4TypeId,
-         {{"topology", "in_loop"}, {"oversampling", "x4"}}},
-        {"in_loop_x8", kInLoopX8TypeId,
-         {{"topology", "in_loop"}, {"oversampling", "x8"}}},
+        {"to_ground_x1", kToGroundX1TypeId, {{"topology", "to_ground"}, {"oversampling", "x1"}}},
+        {"to_ground_x2", kToGroundX2TypeId, {{"topology", "to_ground"}, {"oversampling", "x2"}}},
+        {"to_ground_x4", kToGroundX4TypeId, {{"topology", "to_ground"}, {"oversampling", "x4"}}},
+        {"to_ground_x8", kToGroundX8TypeId, {{"topology", "to_ground"}, {"oversampling", "x8"}}},
+        {"in_loop_x1", kInLoopX1TypeId, {{"topology", "in_loop"}, {"oversampling", "x1"}}},
+        {"in_loop_x2", kInLoopX2TypeId, {{"topology", "in_loop"}, {"oversampling", "x2"}}},
+        {"in_loop_x4", kInLoopX4TypeId, {{"topology", "in_loop"}, {"oversampling", "x4"}}},
+        {"in_loop_x8", kInLoopX8TypeId, {{"topology", "in_loop"}, {"oversampling", "x8"}}},
     };
     d.params = {
         {"drive_db", kDriveDb, "Drive", "dB", "Gain driving the diode clipper.",
@@ -244,7 +247,8 @@ ForgeNodeDescriptor distortion_descriptor() {
 /// delay of the cascaded half-band pairs above that. Reported, never estimated
 /// (series law 5).
 int distortion_latency_samples(OversampleTier tier, double sample_rate) {
-    if (tier == OversampleTier::x1) return 0;
+    if (tier == OversampleTier::x1)
+        return 0;
     using Os = signal::OversamplerT<float>;
     Os probe;
     probe.set_kind(Os::Kind::linear_phase_fir);
@@ -255,4 +259,4 @@ int distortion_latency_samples(OversampleTier tier, double sample_rate) {
     return probe.latency_samples();
 }
 
-}  // namespace pulp::host::distortion
+} // namespace pulp::host::distortion
