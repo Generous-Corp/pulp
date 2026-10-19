@@ -71,8 +71,20 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
     }
 
     void set_routes(std::vector<AudioRouteInfo> routes) {
+        // Preserve selections whose stable IDs still exist. Hosts commonly
+        // rebuild the catalog for hot-plug/project edits; clearing every
+        // selection would make a harmless refresh audible as a source drop.
+        std::vector<std::string> retained;
+        retained.reserve(selected_.size());
+        for (const auto& selected : selected_) {
+            const auto it = std::find_if(
+                routes.begin(), routes.end(), [&selected](const AudioRouteInfo& route) {
+                    return route.stable_id == selected && route.available && route.channels > 0;
+                });
+            retained.push_back(it == routes.end() ? std::string{} : selected);
+        }
         routes_ = std::move(routes);
-        selected_.clear();
+        selected_ = std::move(retained);
         notify();
     }
 

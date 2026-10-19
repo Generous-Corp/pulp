@@ -83,4 +83,15 @@ TEST_CASE("MutableAudioRouteCatalog provides checkmarked host selection state") 
     REQUIRE_FALSE(catalog.connect("track:offline", 1));
     REQUIRE_FALSE(catalog.connect("missing", 1));
     REQUIRE(changes == 2);
+
+    catalog.set_routes({
+        {"track:piano", "Piano", pulp::host::AudioRouteKind::Track, 2, true},
+        {"input:1", "Mic 1", pulp::host::AudioRouteKind::PhysicalInput, 1, true},
+    });
+    REQUIRE(catalog.connected_route(1) == "track:piano");
+
+    catalog.set_routes({
+        {"track:drums", "Drums", pulp::host::AudioRouteKind::Track, 2, true},
+    });
+    REQUIRE(catalog.connected_route(1).empty());
 }
