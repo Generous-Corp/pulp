@@ -1,0 +1,234 @@
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include "detail/tcn_cpu_adapter.hpp"
+#include "harness/rt_contract_probe.hpp"
+#include "harness/scoped_rt_process_probe.hpp"
+
+#include <array>
+#include <cmath>
+
+using namespace pulp::gpu_audio::detail;
+
+namespace {
+struct Kernel {
+    float history = 0.0f;
+    int releases = 0;
+    int processes = 0;
+    int quiesces = 0;
+    int release_failures = 0;
+    bool fail_once = false;
+    bool fail_quiesce_once = false;
+    bool plant_faults = false;
+};
+void planted_rt_faults() noexcept {
+    pulp::test::rt_contract_probe_record_allocation(7);
+    pulp::test::rt_contract_probe_record_lock();
+    pulp::test::rt_contract_probe_record_blocking();
+}
+bool prepare(void* p, const StreamingPrepareContext&) noexcept {
+    auto& k = *static_cast<Kernel*>(p);
+    if (k.fail_once) {
+        k.fail_once = false;
+        return false;
+    }
+    k.history = 0.0f;
+    return true;
+}
+void process(void* p, const float* in, float* out, std::uint32_t frames) noexcept {
+    auto& k = *static_cast<Kernel*>(p);
+    ++k.processes;
+    if (k.plant_faults)
+        planted_rt_faults();
+    for (std::uint32_t i = 0; i < frames; ++i) {
+        out[i] = in[i] + 0.5f * k.history;
+        k.history = in[i];
+    }
+}
+void reset(void* p) noexcept {
+    static_cast<Kernel*>(p)->history = 0.0f;
+}
+bool quiesce(void* p) noexcept {
+    auto& k = *static_cast<Kernel*>(p);
+    ++k.quiesces;
+    if (k.fail_quiesce_once) {
+        k.fail_quiesce_once = false;
+        return false;
+    }
+    return true;
+}
+bool release(void* p) noexcept {
+    auto& k = *static_cast<Kernel*>(p);
+    ++k.releases;
+    if (k.release_failures > 0) {
+        --k.release_failures;
+        return false;
+    }
+    return true;
+}
+
+TcnCpuShape shape() {
+    return {.channels = 1, .kernel_size = 3, .dilation = 2, .layers = 1};
+}
+StreamingModelSpec spec() {
+    return {.model_id = "fixture.tcn",
+            .architecture = "causal-tcn",
+            .model_version = "fixture-v1",
+            .weights_hash = "sha256:fixture-weights",
+            .runtime_hash = "sha256:private-tcn-runtime",
+            .input_channels = 1,
+            .output_channels = 1,
+            .sample_rate = 48000,
+            .block_size = 32,
+            .feature_rate = 48000,
+            .receptive_field_samples = 5,
+            .state_bytes = tcn_cpu_state_bytes(shape()),
+            .state_schema = "causal-tcn-v1",
+            .state_schema_version = 1};
+}
+TcnCpuAdapter make(Kernel& k, StreamingModelSpec& s) {
+    return {s,
+            shape(),
+            {"fixture.tcn", "sha256:fixture-weights", "MIT", "causal-tcn-v1", 1},
+            {&k, prepare, process, reset, quiesce, release}};
+}
+} // namespace
+
+TEST_CASE("causal TCN CPU adapter preserves state across blocks and reset replay",
+          "[gpu_audio][neural][tcn][realtime]") {
+    auto s = spec();
+    Kernel k;
+    auto adapter = make(k, s);
+    const StreamingPrepareContext c{&adapter.spec(), "fixture.tcn", "sha256:fixture-weights",
+                                    StreamingFallbackStrategy::NoFallback, 32};
+    REQUIRE(adapter.prepare(c));
+    std::array<float, 3> in{1, 2, 3};
+    std::array<float, 2> first_out{}, first_expected{1, 2.5f};
+    std::array<float, 1> second_out{}, second_expected{4};
+    const float* first_ip[] = {in.data()};
+    float* first_op[] = {first_out.data()};
+    auto first_iv = pulp::audio::BufferView<const float>(first_ip, 1, 2);
+    auto first_ov = pulp::audio::BufferView<float>(first_op, 1, 2);
+    const float* second_ip[] = {in.data() + 2};
+    float* second_op[] = {second_out.data()};
+    auto second_iv = pulp::audio::BufferView<const float>(second_ip, 1, 1);
+    auto second_ov = pulp::audio::BufferView<float>(second_op, 1, 1);
+    pulp::test::RtContractProbe planted;
+    k.plant_faults = true;
+    {
+        pulp::test::ScopedRtProcessProbe rt_probe;
+        adapter.process_cpu(first_iv, first_ov, 2, {});
+        adapter.process_cpu(second_iv, second_ov, 1, {});
+        CHECK(rt_probe.allocation_count() == 0);
+    }
+    k.plant_faults = false;
+    CHECK(planted.allocation_count() == 2);
+    CHECK(planted.lock_events() == 2);
+    CHECK(planted.blocking_events() == 2);
+    CHECK(first_out == first_expected);
+    CHECK(second_out == second_expected);
+    adapter.reset(2, StreamingResetReason::TransportRestart);
+    first_out.fill(0);
+    second_out.fill(0);
+    adapter.process_cpu(first_iv, first_ov, 2, {});
+    adapter.process_cpu(second_iv, second_ov, 1, {});
+    CHECK(first_out == first_expected);
+    CHECK(second_out == second_expected);
+    REQUIRE(adapter.quiesce());
+    REQUIRE(adapter.release());
+    CHECK(adapter.release());
+}
+
+TEST_CASE("causal TCN CPU adapter rejects identity, layout, and alias violations",
+          "[gpu_audio][neural][tcn][lifecycle]") {
+    auto s = spec();
+    Kernel k{.fail_once = true};
+    auto adapter = make(k, s);
+    const StreamingPrepareContext c{&adapter.spec(), "fixture.tcn", "sha256:fixture-weights",
+                                    StreamingFallbackStrategy::NoFallback, 32};
+    auto wrong = c;
+    wrong.artifact_id = "other";
+    CHECK_FALSE(adapter.prepare(wrong));
+    CHECK(adapter.last_prepare_error() == TcnCpuPrepareError::ArtifactMismatch);
+    auto oversized = c;
+    oversized.max_frames = 4097;
+    CHECK_FALSE(adapter.prepare(oversized));
+    CHECK(adapter.last_prepare_error() == TcnCpuPrepareError::InvalidContract);
+    auto mismatched_spec = spec();
+    mismatched_spec.receptive_field_samples = 0;
+    auto mismatched_adapter = make(k, mismatched_spec);
+    const StreamingPrepareContext mismatched_context{&mismatched_adapter.spec(), "fixture.tcn",
+                                                     "sha256:fixture-weights",
+                                                     StreamingFallbackStrategy::NoFallback, 32};
+    CHECK_FALSE(mismatched_adapter.prepare(mismatched_context));
+    CHECK(mismatched_adapter.last_prepare_error() == TcnCpuPrepareError::InvalidContract);
+    CHECK_FALSE(adapter.prepare(c));
+    CHECK(adapter.last_prepare_error() == TcnCpuPrepareError::KernelPrepareFailed);
+    CHECK(k.releases == 1);
+    REQUIRE(adapter.prepare(c));
+    std::array<float, 2> samples{1, 2};
+    const float* ip[] = {samples.data()};
+    float* op[] = {samples.data()};
+    auto iv = pulp::audio::BufferView<const float>(ip, 1, 2);
+    auto ov = pulp::audio::BufferView<float>(op, 1, 2);
+    adapter.process_cpu(iv, ov, 2, {});
+    CHECK(samples == std::array<float, 2>{0, 0});
+    std::array<float, 3> partial_samples{1, 2, 3};
+    const float* partial_ip[] = {partial_samples.data()};
+    float* partial_op[] = {partial_samples.data() + 1};
+    auto partial_iv = pulp::audio::BufferView<const float>(partial_ip, 1, 2);
+    auto partial_ov = pulp::audio::BufferView<float>(partial_op, 1, 2);
+    adapter.process_cpu(partial_iv, partial_ov, 2, {});
+    CHECK(partial_samples == std::array<float, 3>{1, 0, 0});
+    CHECK(k.processes == 0);
+    REQUIRE(adapter.release());
+    CHECK_FALSE(adapter.quiesce());
+    CHECK(k.quiesces == 0);
+    auto malformed = shape();
+    malformed.dilation = 0;
+    CHECK_FALSE(valid_tcn_cpu_shape(malformed));
+    CHECK(tcn_cpu_state_bytes(malformed) == 0);
+}
+
+TEST_CASE("causal TCN CPU adapter only quiesces a prepared kernel",
+          "[gpu_audio][neural][tcn][lifecycle]") {
+    auto s = spec();
+    Kernel k;
+    auto adapter = make(k, s);
+    CHECK_FALSE(adapter.quiesce());
+    CHECK(k.quiesces == 0);
+
+    const StreamingPrepareContext c{&adapter.spec(), "fixture.tcn", "sha256:fixture-weights",
+                                    StreamingFallbackStrategy::NoFallback, 32};
+    REQUIRE(adapter.prepare(c));
+    REQUIRE(adapter.quiesce());
+    CHECK(k.quiesces == 1);
+    REQUIRE(adapter.release());
+    CHECK_FALSE(adapter.quiesce());
+    CHECK(k.quiesces == 1);
+}
+
+TEST_CASE("causal TCN CPU adapter retries failed cleanup after prepare failure",
+          "[gpu_audio][neural][tcn][lifecycle]") {
+    auto s = spec();
+    Kernel k{.release_failures = 2, .fail_once = true, .fail_quiesce_once = true};
+    auto adapter = make(k, s);
+    const StreamingPrepareContext c{&adapter.spec(), "fixture.tcn", "sha256:fixture-weights",
+                                    StreamingFallbackStrategy::NoFallback, 32};
+
+    CHECK_FALSE(adapter.prepare(c));
+    CHECK(adapter.last_prepare_error() == TcnCpuPrepareError::KernelPrepareFailed);
+    CHECK(k.releases == 1);
+    CHECK_FALSE(adapter.prepare(c));
+    CHECK(adapter.last_prepare_error() == TcnCpuPrepareError::InvalidContract);
+
+    CHECK_FALSE(adapter.quiesce());
+    CHECK(k.quiesces == 1);
+    CHECK(adapter.quiesce());
+    CHECK(k.quiesces == 2);
+    CHECK_FALSE(adapter.release());
+    CHECK(k.releases == 2);
+    REQUIRE(adapter.release());
+    CHECK(k.releases == 3);
+    CHECK_FALSE(adapter.quiesce());
+}
