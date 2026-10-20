@@ -1075,8 +1075,8 @@ find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 #
 # Keep `%m` in the pool. A pool shared ACROSS binaries drops profiles silently
 # (different counter layouts cannot merge into one file), and plain `%m` is a
-# one-file pool whose parallel exits corrupted it. Eight slots is the runtime's
-# maximum and covers the eight-way CTest cap above. scripts/run_coverage.sh uses
+# one-file pool whose parallel exits corrupted it. Eight slots match the
+# eight-way CTest cap above. scripts/run_coverage.sh uses
 # the same pattern and fails closed when a full run's pools cover far fewer
 # modules than it has test binaries.
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%8m.profraw"

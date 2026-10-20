@@ -236,7 +236,7 @@ coverage_free_kib() {
 # so the merge step below fails closed when the pools cover far fewer modules
 # than the suite has test binaries. Plain `%m` (a one-file pool per module) is
 # also wrong: parallel exits of one binary corrupted that single file. Eight
-# slots is the runtime's maximum and covers the eight-way CTest cap below.
+# slots match the eight-way CTest cap below.
 COVERAGE_PROFILE_PATTERN="pulp-%8m.profraw"
 
 # Regression guard for #317: track the test-suite outcome without aborting the
