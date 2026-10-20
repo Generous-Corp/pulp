@@ -784,12 +784,12 @@ jobs:
             proof_api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/check-runs"
             proof_check=$(curl -sS -X POST -H "Authorization: Bearer ${PROOF_TOKEN}" \
               -H "Accept: application/vnd.github+json" "${proof_api}" \
-              -d "$(python3 -c 'import json,sys; print(json.dumps({"name":"coverage-disk-proof-10","head_sha":sys.argv[1],"status":"in_progress","output":{"title":"disk proof 10","summary":"starting"}}))' "${GITHUB_SHA}")" \
+              -d "$(python3 -c 'import json,sys; print(json.dumps({"name":"coverage-disk-proof-pool","head_sha":sys.argv[1],"status":"in_progress","output":{"title":"disk proof pool","summary":"starting"}}))' "${GITHUB_SHA}")" \
               | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null) || proof_check=""
             echo "disk-proof: check run id=${proof_check:-none}"
             proof_publish() {
               [ -n "${proof_check}" ] || return 0
-              python3 -c 'import json,sys; h,d,n=(open(p,errors="replace").read() for p in sys.argv[1:4]); head="latest:\n"+n+("\nDUMP:\n"+d if d else "")+"\nhistory (UTC, root avail GiB / ifree%, mnt avail GiB / ifree%, phase):\n"; print(json.dumps({"output":{"title":"disk proof 10","summary":"```\n"+head+h[-max(60000-len(head),0):]+"\n```"}}))' \
+              python3 -c 'import json,sys; h,d,n=(open(p,errors="replace").read() for p in sys.argv[1:4]); head="latest:\n"+n+("\nDUMP:\n"+d if d else "")+"\nhistory (UTC, root avail GiB / ifree%, mnt avail GiB / ifree%, phase):\n"; print(json.dumps({"output":{"title":"disk proof pool","summary":"```\n"+head+h[-max(60000-len(head),0):]+"\n```"}}))' \
                 "${proof_hist}" "${proof_dump}" "${proof_dir}/now.txt" > "${proof_dir}/payload.json"
               curl -sS -o /dev/null -X PATCH -H "Authorization: Bearer ${PROOF_TOKEN}" \
                 -H "Accept: application/vnd.github+json" "${proof_api}/${proof_check}" \
