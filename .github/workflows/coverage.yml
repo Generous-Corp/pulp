@@ -770,58 +770,86 @@ jobs:
                 fi
                 sleep 10
               done ) & sampler=$!
-            # Disk proof: root and /mnt bytes and inodes every 30 s, printed to
-            # the live job log and mirrored to a check run, which survives a
-            # lost runner (the job log blob does not). Below 2% free root
-            # inodes the suite is stopped so this step's log survives too.
-            proof_log="${RUNNER_TEMP}/disk-proof.log"
-            : > "${proof_log}"
+            # Disk proof 10: every 5 s, root and /mnt bytes and inodes plus the
+            # current run_coverage.sh phase go into a check-run SUMMARY, which
+            # survives a lost runner (the job log, annotations and check-run
+            # text do not). The payload is written under /mnt, never root.
+            # Below 6 GiB free on root, a du / lsof listing is added to the
+            # summary and the suite is stopped so the step ends normally.
+            proof_dir=/mnt/disk-proof
+            sudo mkdir -p "${proof_dir}" && sudo chown "$(id -u):$(id -g)" "${proof_dir}"
+            proof_hist="${proof_dir}/history.txt"
+            proof_dump="${proof_dir}/dump.txt"
+            : > "${proof_hist}"; : > "${proof_dump}"
             proof_api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/check-runs"
             proof_check=$(curl -sS -X POST -H "Authorization: Bearer ${PROOF_TOKEN}" \
               -H "Accept: application/vnd.github+json" "${proof_api}" \
-              -d "$(python3 -c 'import json,sys; print(json.dumps({"name":"coverage-disk-proof-9","head_sha":sys.argv[1],"status":"in_progress","output":{"title":"disk proof","summary":"starting"}}))' "${GITHUB_SHA}")" \
+              -d "$(python3 -c 'import json,sys; print(json.dumps({"name":"coverage-disk-proof-10","head_sha":sys.argv[1],"status":"in_progress","output":{"title":"disk proof 10","summary":"starting"}}))' "${GITHUB_SHA}")" \
               | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null) || proof_check=""
             echo "disk-proof: check run id=${proof_check:-none}"
+            proof_publish() {
+              [ -n "${proof_check}" ] || return 0
+              python3 -c 'import json,sys; h,d,n=(open(p,errors="replace").read() for p in sys.argv[1:4]); head="latest:\n"+n+("\nDUMP:\n"+d if d else "")+"\nhistory (UTC, root avail GiB / ifree%, mnt avail GiB / ifree%, phase):\n"; print(json.dumps({"output":{"title":"disk proof 10","summary":"```\n"+head+h[-max(60000-len(head),0):]+"\n```"}}))' \
+                "${proof_hist}" "${proof_dump}" "${proof_dir}/now.txt" > "${proof_dir}/payload.json"
+              curl -sS -o /dev/null -X PATCH -H "Authorization: Bearer ${PROOF_TOKEN}" \
+                -H "Accept: application/vnd.github+json" "${proof_api}/${proof_check}" \
+                --data-binary "@${proof_dir}/payload.json"
+            }
             ( set +e +o pipefail
               dumped=""
               tick=0
+              last_pub=0
               while kill -0 "${cov}" 2>/dev/null; do
                 ts=$(date -u +%H:%M:%SZ)
-                ipct=$(df -Pi / | awk 'NR==2 {if ($2>0) printf "%d", ($4*100)/$2; else print 100}')
-                if [ $((tick % 6)) -eq 0 ] || { [ -z "${dumped}" ] && [ "${ipct:-100}" -lt 20 ]; }; then
-                  { echo "=== ${ts} root_free_inodes=${ipct}%"
-                    df -P /; df -Pi /; df -P /mnt; df -Pi /mnt; } > "${proof_log}.cur" 2>&1
-                  if [ -z "${dumped}" ] && [ "${ipct:-100}" -lt 20 ]; then
-                    dumped=1
-                    { echo "=== ${ts} ROOT FREE INODES ${ipct}% (<20%): top 10 dirs by inodes"
-                      for d in / /home/runner /tmp /var; do
-                        echo "--- du --inodes -x --max-depth=3 ${d}"
-                        sudo -n du --inodes -x --max-depth=3 "${d}" 2>/dev/null | sort -rn | head -n 10
-                      done; } >> "${proof_log}.cur" 2>&1
-                    echo "::warning title=disk-proof root inodes below 20%::$(sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g' "${proof_log}.cur" | tail -c 3500)"
-                  fi
-                  sed 's/^/disk-proof: /' "${proof_log}.cur"
-                  cat "${proof_log}.cur" >> "${proof_log}"
-                  if [ $((tick % 120)) -eq 0 ]; then
-                    echo "::notice title=disk-proof ${ts}::$(df -P / | awk 'NR==2 {printf "root avail %.2f GiB", $4/1048576}') $(df -Pi / | awk 'NR==2 {printf "root ifree %d of %d", $4, $2}') $(df -P /mnt | awk 'NR==2 {printf "mnt avail %.2f GiB", $4/1048576}')"
-                  fi
-                  if [ -n "${proof_check}" ]; then
-                    python3 -c 'import json,sys; t=open(sys.argv[1]).read()[-60000:]; print(json.dumps({"output":{"title":"disk proof","summary":sys.argv[2],"text":"```\n"+t+"\n```"}}))' \
-                      "${proof_log}" "${ts} root free inodes ${ipct}%" > "${proof_log}.json"
-                    curl -sS -o /dev/null -X PATCH -H "Authorization: Bearer ${PROOF_TOKEN}" \
-                      -H "Accept: application/vnd.github+json" "${proof_api}/${proof_check}" --data-binary "@${proof_log}.json"
+                r=$(df -Pk / | awk 'NR==2 {printf "%.2f", $4/1048576}')
+                ri=$(df -Pi / | awk 'NR==2 {if ($2>0) printf "%d", ($4*100)/$2; else print 100}')
+                m=$(df -Pk /mnt | awk 'NR==2 {printf "%.2f", $4/1048576}')
+                mi=$(df -Pi /mnt | awk 'NR==2 {if ($2>0) printf "%d", ($4*100)/$2; else print 100}')
+                phase=$(grep '^=== ' "${suite_log:-/dev/null}" 2>/dev/null | tail -n 1 | cut -c1-90)
+                { echo "${ts}"; df -P / /mnt; df -Pi / /mnt; echo "phase: ${phase}"; } > "${proof_dir}/now.txt" 2>&1
+                low=$(awk -v r="${r}" 'BEGIN {print (r < 6) ? 1 : 0}')
+                tight=$(awk -v r="${r}" 'BEGIN {print (r < 12) ? 1 : 0}')
+                if [ $((tick % 6)) -eq 0 ] || [ "${tight}" = 1 ]; then
+                  echo "${ts} r=${r} ri=${ri}% m=${m} mi=${mi}% | ${phase}" >> "${proof_hist}"
+                  echo "disk-proof: ${ts} r=${r} ri=${ri}% m=${m} mi=${mi}% | ${phase}"
+                fi
+                if [ -z "${dumped}" ] && { [ "${low}" = 1 ] || [ "${ri}" -lt 20 ]; }; then
+                  dumped=1
+                  { echo "${ts} root avail ${r} GiB, root ifree ${ri}%"
+                    for d in / /home/runner /tmp /var; do
+                      echo "--- du -xk --max-depth=3 ${d} (top 12, KiB)"
+                      sudo -n du -xk --max-depth=3 "${d}" 2>/dev/null | sort -rn | head -n 12
+                    done
+                    echo "--- files on / > 200 MB modified in the last 15 min"
+                    sudo -n find / -xdev -type f -mmin -15 -size +200M -printf '%s %p\n' 2>/dev/null | sort -rn | head -n 15
+                    echo "--- open regular files > 200 MB (incl. deleted), by process"
+                    sudo -n lsof -nP 2>/dev/null | awk '$5=="REG" && $7>200000000 {print $1, $2, $7, $9, $10}' | sort -u -k4 | head -n 20
+                    echo "--- top processes by RSS"
+                    ps -eo pid,rss,etimes,args --sort=-rss 2>/dev/null | head -n 8 | cut -c1-160
+                  } > "${proof_dump}" 2>&1
+                  proof_publish; last_pub=${tick}
+                  if [ "${low}" = 1 ]; then
+                    echo "::error title=disk-proof root below 6 GiB::${ts}; stopping the suite so this log survives"
+                    cat "${proof_dump}"
+                    : > "${RUNNER_TEMP:-/tmp}/coverage-disk-guard" 2>/dev/null || true
+                    kill -TERM -- "-${cov}" 2>/dev/null || true
+                    break
                   fi
                 fi
-                if [ "${ipct:-100}" -lt 2 ]; then
-                  echo "::error title=disk-proof root inodes below 2%::${ts}; stopping the suite so this log survives"
-                  df -Pi / /mnt
+                if [ "${ri}" -lt 2 ]; then
+                  echo "::error title=disk-proof root inodes below 2%::${ts}; stopping the suite"
                   : > "${RUNNER_TEMP:-/tmp}/coverage-disk-guard" 2>/dev/null || true
                   kill -TERM -- "-${cov}" 2>/dev/null || true
                   break
                 fi
+                # Publish every 30 s, every 5 s once root is under 12 GiB.
+                if [ "${tight}" = 1 ] || [ $((tick - last_pub)) -ge 6 ]; then
+                  proof_publish; last_pub=${tick}
+                fi
                 tick=$((tick + 1))
                 sleep 5
-              done ) & proof=$!
+              done
+              proof_publish ) & proof=$!
           fi
           ( sleep "${budget}"
             echo "::warning::coverage suite hit the ${budget}s best-effort budget; terminating the coverage process tree."
