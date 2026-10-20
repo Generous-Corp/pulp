@@ -66,7 +66,12 @@ class NamTcnStreamingAdapter final : public StreamingModel {
     }
 
     bool quiesce() noexcept override {
-        return kernel_.quiesce != nullptr && kernel_.quiesce(kernel_.state);
+        // A consumer callback may only observe state acquired by prepare().
+        // Keep quiesce symmetric with reset/process and avoid touching a
+        // failed or already released kernel instance.
+        if ((!prepared_ && !cleanup_required_) || kernel_.quiesce == nullptr)
+            return false;
+        return kernel_.quiesce(kernel_.state);
     }
 
     void reset(std::uint64_t, StreamingResetReason) noexcept override {
