@@ -106,6 +106,41 @@ class BuildGovernancePathTests(unittest.TestCase):
             build_lines[0], r"(?:^|\s)(?:-j\S*|--parallel(?:=|\s))"
         )
 
+    def test_build_workflow_windows_emitters_use_governor(self) -> None:
+        source = read_source(".github/workflows/build.yml")
+        build_lines = [
+            line.strip()
+            for line in source.splitlines()
+            if "cmake --build" in line and not line.lstrip().startswith("#")
+        ]
+        # Every build in this workflow must use the governor so a new matrix
+        # or advisory Windows gate cannot silently bypass the shared policy.
+        self.assertEqual([], [line for line in build_lines if "governed-build.sh" not in line])
+        # A dispatch may supply a custom runner selector. There must be no
+        # selector-dependent direct build branch for that path to reach.
+        self.assertNotIn("--parallel 4", source)
+        governed = [line for line in build_lines if "governed-build.sh" in line]
+        self.assertGreaterEqual(len(governed), 5)
+        self.assertIn(
+            "bash tools/ci/governed-build.sh cmake --build build --config Release",
+            source,
+        )
+        self.assertIn(
+            "bash tools/ci/governed-build.sh cmake --build build-midi2 --config Release --target pulp-midi",
+            source,
+        )
+        self.assertIn(
+            "bash tools/ci/governed-build.sh cmake --build build-ble --config Release --target pulp-midi",
+            source,
+        )
+
+    def test_installed_sdk_validation_caps_governor_without_parallel_flag(self) -> None:
+        source = read_source("tools/validation/sample_region_installed_sdk.py")
+        wrapper_calls = '["bash", str(args.build_wrapper.resolve()), args.cmake, "--build"'
+        self.assertEqual(source.count(wrapper_calls), 2)
+        self.assertNotIn('"--parallel"', source)
+        self.assertEqual(source.count("PULP_BUILD_JOBS=str(args.build_jobs)"), 2)
+
     def test_android_fixture_build_uses_governor(self) -> None:
         source = read_source(".github/workflows/android.yml")
         build_lines = [

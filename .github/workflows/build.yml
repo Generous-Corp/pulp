@@ -2128,26 +2128,16 @@ jobs:
           # -j itself — CMAKE_BUILD_PARALLEL_LEVEL from the wrapper governs,
           # which is why no --parallel flag belongs on the governed command.
           #
-          # Windows keeps a literal, and that is not an oversight. The governor
-          # exists to divide a SHARED host; the Windows leg is a GitHub-hosted
-          # ephemeral 4-core runner that shares with nobody, so a literal that
-          # matches a fixed runner shape is already correct there. It is also
-          # the one leg this PR cannot prove: `windows` is excluded from the
-          # `pull_request` and `merge_group` matrices (see the matrix builder
-          # above), so it runs only on push/nightly/dispatch — and no workflow
-          # runs this wrapper under MSYS bash today, where a checked-out .sh
-          # does not carry a filesystem exec bit. Do not fold these branches
-          # together without first proving that path on a dispatch run.
-          if [ "${RUNNER_OS}" = "Windows" ]; then
-            cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4
-          else
-            # Bound rebuilt-test selection to this PR head's build. Warm
-            # self-hosted Ninja logs retain previous branches' outputs.
-            if [ -n "${PULP_BUILD_DIR:-}" ]; then
-              date +%s.%N > "$PULP_BUILD_DIR/.pulp-build-start"
-            fi
-            tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
+          # Bound rebuilt-test selection to this PR head's build. Warm
+          # self-hosted Ninja logs retain previous branches' outputs.
+          if [ -n "${PULP_BUILD_DIR:-}" ]; then
+            date +%s.%N > "$PULP_BUILD_DIR/.pulp-build-start"
           fi
+          # The wrapper is invoked under bash so this stays valid for the
+          # Windows leg as well as the POSIX runners. It owns the worker share
+          # on every runner; its POSIX build-directory lock applies where the
+          # runner's path model supports it (Git Bash/MSYS skips that lock).
+          tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
           rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
 
@@ -3102,7 +3092,7 @@ jobs:
         shell: pwsh
 
       - name: Build
-        run: cmake --build build --config Release
+        run: bash tools/ci/governed-build.sh cmake --build build --config Release
         shell: pwsh
 
       - name: Verify installed SDK keeps WebView symbols
@@ -3193,7 +3183,7 @@ jobs:
       # is the whole point of this gate. Avoids paying for the full tree.
       - name: Build pulp-midi (compile-verify the WinRT MIDI 2.0 backend)
         shell: pwsh
-        run: cmake --build build-midi2 --config Release --target pulp-midi
+        run: bash tools/ci/governed-build.sh cmake --build build-midi2 --config Release --target pulp-midi
 
   # ── Windows BLE MIDI compile-gate (advisory) ─────────────────────────────
   #
@@ -3248,7 +3238,7 @@ jobs:
       # point of this gate. Avoids paying for the full tree.
       - name: Build pulp-midi (compile-verify the WinRT BLE backend)
         shell: pwsh
-        run: cmake --build build-ble --config Release --target pulp-midi
+        run: bash tools/ci/governed-build.sh cmake --build build-ble --config Release --target pulp-midi
 
   # ── Stable-name status aliases for advisory platforms ─────────────────────
   # Stable required `macos` context. Native PR and merge-group builds publish
