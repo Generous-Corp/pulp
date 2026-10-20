@@ -1066,23 +1066,20 @@ fi
 PROFRAW_DIR="${BUILD_DIR}/profraw"
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
-# One profile per PROCESS, with a merge pool inside it.
+# One online-merge pool per BINARY: `%m` is the instrumented module's
+# signature, so each test binary (and each instrumented child it spawns) gets
+# eight pool files, `pulp-<signature>_<pid % 8>.profraw`, and every exiting
+# process locks one and merges into it. The shard count is bounded by
+# binaries x 8, where one file per process (`%p-%m`) grows with every process
+# the suite starts and has filled a coverage runner's disk mid-suite.
 #
-# `%m` alone is a ONE-file pool, and parallel exits corrupted that sole file on
-# Linux — which is why it was abandoned. `%Nm` was the replacement, but an
-# N-file pool is shared by every binary that writes into the directory, and
-# profiles with different counter layouts cannot merge into one file. ctest runs
-# hundreds of DIFFERENT test binaries, so all but a handful of their profiles
-# were silently discarded: a full run left SEVEN profraw files, and the gate
-# reported 71% where the same tests run serially measured 91%. Nothing failed —
-# the number was simply wrong, and it went DOWN when coverage was added, which
-# is how it was noticed.
-#
-# `%p-%m` gives each process its own file and keeps online merging inside it, so
-# the original one-shared-file corruption cannot recur and cross-binary
-# collision is gone. The file count is the ordinary LLVM workflow; the merge
-# step below already handles thousands of shards and says so.
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
+# Keep `%m` in the pool. A pool shared ACROSS binaries drops profiles silently
+# (different counter layouts cannot merge into one file), and plain `%m` is a
+# one-file pool whose parallel exits corrupted it. Eight slots is the runtime's
+# maximum and covers the eight-way CTest cap above. scripts/run_coverage.sh uses
+# the same pattern and fails closed when a full run's pools cover far fewer
+# modules than it has test binaries.
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%8m.profraw"
 
 if [ -n "${SELECTED_TESTS_FILE}" ] && [ -z "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
     if selected_count="$(python3 "${DIFF_COVER_TARGETS_PY}" tests --build-dir "${BUILD_DIR}" \

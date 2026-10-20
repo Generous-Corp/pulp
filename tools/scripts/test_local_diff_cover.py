@@ -504,38 +504,23 @@ class TargetedCtestTests(unittest.TestCase):
             "large full-suite coverage runs.",
         )
 
-    def test_profraw_pattern_is_per_process(self) -> None:
-        """One profile per process, with a merge pool inside it.
+    def test_profraw_pattern_is_a_per_module_pool_not_per_process(self) -> None:
+        """One online-merge pool per binary, never one file per process.
 
-        The earlier `%{DIFF_COVER_TEST_JOBS}m` pool was chosen to stop parallel exits
-        corrupting a single shared `%m` file, and it did — but an N-file pool is
-        shared by every binary writing into the directory, and profiles with
-        different counter layouts cannot merge into one file. ctest runs
-        hundreds of different test binaries, so all but a handful were silently
-        discarded: a full run left seven profraw files, and the gate reported
-        71% where the same tests measured 91% serially. The number moved DOWN
-        when coverage was added, which is how it surfaced.
-
-        `%p-%m` keeps each process isolated, so the original corruption cannot
-        recur, and removes the cross-binary collision entirely.
+        `%p` grows the shard count with every test process and has filled a
+        coverage runner's disk mid-suite. `%Nm` keys the pool by module
+        signature, so binaries never share a pool, and N > 1 keeps parallel
+        exits of one binary from corrupting a single `%m` file.
         """
         text = SCRIPT.read_text()
-        self.assertIn(
-            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"',
-            text,
-            "local_diff_cover.sh should give each test process its own merge-enabled "
-            "profile; a pool shared across binaries discards most of them.",
-        )
-        self.assertNotIn(
-            'pulp-%m.profraw"',
-            text,
-            "a single shared profile is corrupted by parallel exits.",
-        )
-        self.assertNotIn(
-            "m.profraw" if False else 'pulp-%${DIFF_COVER_TEST_JOBS}m.profraw',
-            text,
-            "an N-file pool is shared across binaries, so profiles with "
-            "different counter layouts cannot merge and are dropped.",
+        match = re.search(r'^export LLVM_PROFILE_FILE="\$\{PROFRAW_DIR\}/([^"]+)"$', text, re.M)
+        self.assertIsNotNone(match, "local_diff_cover.sh must export LLVM_PROFILE_FILE under PROFRAW_DIR")
+        pattern = match.group(1)
+        self.assertNotIn("%p", pattern, "a per-process profile grows with every test process")
+        self.assertRegex(pattern, r"%[1-9]m", "the pool must be `%Nm`, keyed by module")
+        self.assertTrue(
+            pattern.startswith("pulp-"),
+            "the merge step only collects pulp-*.profraw",
         )
 
     def test_merge_tolerates_isolated_bad_shards_but_has_a_mass_guard(self) -> None:
