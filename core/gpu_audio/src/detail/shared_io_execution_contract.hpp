@@ -40,6 +40,9 @@ enum class SharedIoFallbackReason : std::uint8_t {
     Teardown,
     CompletionFailed,
     InvalidCallback,
+    PredictionRefused,
+    CalibrationMissing,
+    CalibrationStale,
 };
 
 enum class SharedIoContractError : std::uint8_t {
@@ -52,6 +55,10 @@ enum class SharedIoContractError : std::uint8_t {
     ProviderUnavailable,
     RequestedPathUnavailable,
     MissingProviderSlots,
+    InvalidMaxInflight,
+    // Values outside the versioned backend-neutral enum domains are rejected
+    // before path, fallback, or capacity relationships are evaluated.
+    InvalidEnumValue,
 };
 
 // The callback lead consumes completion-table entries before a submitted
@@ -98,6 +105,43 @@ struct SharedIoContractValidation {
 
 constexpr SharedIoContractValidation
 validate_shared_io_contract(const SharedIoExecutionContract& contract) noexcept {
+    const auto valid_path = [](SharedIoPath value) constexpr {
+        return value == SharedIoPath::Cpu || value == SharedIoPath::StagedAsync ||
+               value == SharedIoPath::SharedHostPointer;
+    };
+    const auto valid_request = [](SharedIoRequest value) constexpr {
+        return value == SharedIoRequest::Auto ||
+               value == SharedIoRequest::RequireSharedHostPointer ||
+               value == SharedIoRequest::RequireStaged || value == SharedIoRequest::RequireCpu;
+    };
+    const auto valid_miss_policy = [](MissPolicy value) constexpr {
+        return value == MissPolicy::Silence || value == MissPolicy::PassthroughDry ||
+               value == MissPolicy::CpuFallback;
+    };
+    const auto valid_fallback_reason = [](SharedIoFallbackReason value) constexpr {
+        return value == SharedIoFallbackReason::None ||
+               value == SharedIoFallbackReason::UnsupportedProvider ||
+               value == SharedIoFallbackReason::UnsupportedFeature ||
+               value == SharedIoFallbackReason::ProviderMismatch ||
+               value == SharedIoFallbackReason::AllocationFailed ||
+               value == SharedIoFallbackReason::DeviceLost ||
+               value == SharedIoFallbackReason::Timeout ||
+               value == SharedIoFallbackReason::SubmissionRejected ||
+               value == SharedIoFallbackReason::DeadlineExceeded ||
+               value == SharedIoFallbackReason::InputSaturated ||
+               value == SharedIoFallbackReason::SequenceGap ||
+               value == SharedIoFallbackReason::Teardown ||
+               value == SharedIoFallbackReason::CompletionFailed ||
+               value == SharedIoFallbackReason::InvalidCallback ||
+               value == SharedIoFallbackReason::PredictionRefused ||
+               value == SharedIoFallbackReason::CalibrationMissing ||
+               value == SharedIoFallbackReason::CalibrationStale;
+    };
+    if (!valid_path(contract.active_path) || !valid_request(contract.requested_path) ||
+        !valid_miss_policy(contract.miss_policy) ||
+        !valid_fallback_reason(contract.fallback_reason))
+        return {SharedIoContractError::InvalidEnumValue};
+
     if (contract.channels == 0 || contract.block_size == 0 || contract.sample_rate == 0)
         return {SharedIoContractError::InvalidShape};
 
@@ -108,6 +152,10 @@ validate_shared_io_contract(const SharedIoExecutionContract& contract) noexcept 
         return {SharedIoContractError::MissingPipelineDepth};
     if (gpu_path && contract.pipeline_depth <= contract.algorithmic_lead_blocks)
         return {SharedIoContractError::InsufficientPipelineDepth};
+    if (gpu_path &&
+        (contract.max_inflight == 0 ||
+         contract.max_inflight > contract.pipeline_depth - contract.algorithmic_lead_blocks))
+        return {SharedIoContractError::InvalidMaxInflight};
     if (gpu_path && contract.provider_slots == 0)
         return {SharedIoContractError::MissingProviderSlots};
     if (contract.active_path == SharedIoPath::SharedHostPointer &&

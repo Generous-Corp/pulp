@@ -494,8 +494,8 @@ void StateStore::set_value(ParamID id, float value) {
     const auto older_writers =
         active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
     const auto generation = advance_state_generation();
-    const bool applied = values_[it->second].set_versioned_if_newer(
-        clamped, generation, older_writers + 1);
+    const bool applied =
+        values_[it->second].set_packed_revisioned(clamped, generation, older_writers + 1);
     active_state_writers_.fetch_sub(1, std::memory_order_release);
 
     // Wait-free fan-out: notify() does a single atomic pointer load and
@@ -513,8 +513,8 @@ void StateStore::set_value_rt(ParamID id, float value) {
     const auto older_writers =
         active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
     const auto generation = advance_state_generation();
-    const bool applied = values_[it->second].set_versioned_if_newer(
-        clamped, generation, older_writers + 1);
+    const bool applied =
+        values_[it->second].set_packed_revisioned(clamped, generation, older_writers + 1);
     active_state_writers_.fetch_sub(1, std::memory_order_release);
     if (applied && registry_) registry_->notify_rt(id, clamped);
 }
@@ -524,6 +524,37 @@ void StateStore::set_normalized_rt(ParamID id, float normalized) {
     if (it == id_to_index_.end()) return;
     auto value = params_[it->second].range.denormalize(normalized);
     set_value_rt(id, value);
+}
+
+std::optional<ParameterFeedbackBaseline>
+StateStore::capture_feedback_baseline(ParamID id) const noexcept {
+    const auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end())
+        return std::nullopt;
+    return ParameterFeedbackBaseline{this, id, values_[it->second].versioned_value()};
+}
+
+ConditionalParameterApplyResult
+StateStore::set_value_rt_if_baseline(const ParameterFeedbackBaseline& baseline, float value) {
+    if (!baseline.valid() || baseline.owner_ != this)
+        return {ConditionalParameterApplyStatus::InvalidParameter, 0};
+    const auto it = id_to_index_.find(baseline.id());
+    if (it == id_to_index_.end())
+        return {ConditionalParameterApplyStatus::InvalidParameter, 0};
+
+    const auto index = it->second;
+    const auto clamped = constrain_stored_value(params_[index], value);
+    auto expected = baseline.packed_identity();
+    active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+    const auto generation = advance_state_generation();
+    const bool applied = values_[index].compare_exchange_packed(expected, clamped, generation);
+    active_state_writers_.fetch_sub(1, std::memory_order_release);
+    if (!applied)
+        return {ConditionalParameterApplyStatus::Conflict, values_[index].versioned_value()};
+
+    if (registry_)
+        registry_->notify_rt(baseline.id(), clamped);
+    return {ConditionalParameterApplyStatus::Applied, expected};
 }
 
 std::size_t StateStore::pump_listeners() {
@@ -644,8 +675,6 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
 
     const auto index = found->second;
     auto expected_value = values_[index].versioned_value();
-    const auto expected_parameter_generation =
-        values_[index].committed_generation();
     const float previous = ParamValue::value_from_versioned(expected_value);
     const float desired = constrain_stored_value(
         params_[index], params_[index].range.denormalize(normalized));
@@ -666,8 +695,8 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
         acquire_gesture(id);
         gesture_acquired = true;
         if (state_generation() == reserved) {
-            value_written = values_[index].compare_exchange_versioned(
-                expected_value, expected_parameter_generation, desired, reserved);
+            value_written =
+                values_[index].compare_exchange_packed(expected_value, desired, reserved);
             if (value_written && registry_) registry_->notify(id, desired);
         }
         release_gesture(id);
@@ -683,10 +712,8 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
     }
 
     const bool concurrent = state_generation() != reserved;
-    const auto applied_value = ParamValue::make_versioned_value(desired, reserved);
-    const bool control_value_current =
-        values_[index].committed_generation() == reserved &&
-        values_[index].versioned_value() == applied_value;
+    const auto applied_value = expected_value;
+    const bool control_value_current = values_[index].versioned_value() == applied_value;
     const bool sole_writer =
         active_state_writers_.load(std::memory_order_acquire) == 1;
     if (!callback_failed && value_written && !concurrent &&
@@ -705,8 +732,8 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
             rollback_observed, rollback_generation, std::memory_order_acq_rel,
             std::memory_order_acquire);
         if (rollback_reserved) {
-            rolled_back = values_[index].compare_exchange_versioned(
-                rollback_expected, reserved, previous, rollback_generation);
+            rolled_back = values_[index].compare_exchange_packed(rollback_expected, previous,
+                                                                 rollback_generation);
         }
         if (rolled_back) {
             PULP_TRY {
@@ -761,7 +788,7 @@ bool StateStore::reset_triggers_rt() {
                 active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
             }
             const auto generation = advance_state_generation();
-            values_[index].set_versioned_if_newer(
+            values_[index].set_packed_revisioned(
                 default_value, generation,
                 active_state_writers_.load(std::memory_order_acquire) + 1);
             any = true;
@@ -1169,6 +1196,25 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         payload_size != header_size + static_cast<std::size_t>(count) * param_size)
         return false;
 
+    // Count every payload occurrence per addressed slot before writing. A
+    // duplicate ID consumes one packed revision per occurrence, so checking
+    // only the first occurrence would allow a later write to exhaust and be
+    // silently ignored while deserialize() reports success.
+    std::unordered_map<ParamID, std::uint32_t> payload_occurrences;
+    payload_occurrences.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto offset = header_size + static_cast<std::size_t>(i) * param_size;
+        const ParamID id = choc::memory::readLittleEndian<uint32_t>(data.data() + offset);
+        const auto it = id_to_index_.find(id);
+        if (it != id_to_index_.end())
+            ++payload_occurrences[id];
+    }
+    for (const auto& [id, occurrences] : payload_occurrences) {
+        const auto it = id_to_index_.find(id);
+        if (it != id_to_index_.end() && !values_[it->second].revisions_available(occurrences))
+            return false;
+    }
+
     // Claim the restore generation before exposing any restored value so an
     // optimistic control writer cannot commit against the pre-restore state.
     active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
@@ -1186,7 +1232,7 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         if (it != id_to_index_.end()) {
             const auto index = it->second;
             const auto restore_generation = advance_state_generation();
-            values_[index].set_versioned_if_newer(
+            values_[index].set_packed_revisioned(
                 constrain_stored_value(params_[index], value), restore_generation,
                 active_state_writers_.load(std::memory_order_acquire) + 1);
             wrote_parameter = true;

@@ -16,11 +16,11 @@ bool SharedIoTraceRecord::valid() const noexcept {
         generation == 0 || valid_stages >> kSharedIoTraceStageCount != 0 ||
         static_cast<unsigned>(outcome) > static_cast<unsigned>(SharedIoTraceOutcome::Cancelled) ||
         static_cast<unsigned>(reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::InvalidCallback) ||
+            static_cast<unsigned>(SharedIoFallbackReason::CalibrationStale) ||
         static_cast<unsigned>(gpu_reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::InvalidCallback) ||
+            static_cast<unsigned>(SharedIoFallbackReason::CalibrationStale) ||
         static_cast<unsigned>(delivery_reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::InvalidCallback) ||
+            static_cast<unsigned>(SharedIoFallbackReason::CalibrationStale) ||
         static_cast<unsigned>(gpu_terminal) >
             static_cast<unsigned>(SharedIoGpuTerminalDisposition::CancelledTeardown) ||
         static_cast<unsigned>(delivery) >
@@ -167,6 +167,12 @@ const char* shared_io_fallback_reason_name(SharedIoFallbackReason value) noexcep
         return "completion_failed";
     case SharedIoFallbackReason::InvalidCallback:
         return "invalid_callback";
+    case SharedIoFallbackReason::PredictionRefused:
+        return "prediction_refused";
+    case SharedIoFallbackReason::CalibrationMissing:
+        return "calibration_missing";
+    case SharedIoFallbackReason::CalibrationStale:
+        return "calibration_stale";
     case SharedIoFallbackReason::Teardown:
         return "teardown";
     }
@@ -353,6 +359,10 @@ drain_shared_io_trace(SharedIoTraceRecorder& recorder,
     SharedIoTraceDrainResult result;
     result.tracing_compiled = runtime::kTracingEnabled;
     result.recording_enabled = recorder.enabled();
+    if (!valid_shared_io_trace_drain_observer(observer)) {
+        result.observer_valid = false;
+        return result;
+    }
     if (!result.recording_enabled)
         return result;
     [[maybe_unused]] const auto& config = recorder.config();

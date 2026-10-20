@@ -295,9 +295,10 @@ def prove_selected_bindings(args: argparse.Namespace, sdk: Path, output: Path,
          "-DFETCHCONTENT_FULLY_DISCONNECTED=ON", "-DFETCHCONTENT_UPDATES_DISCONNECTED=ON", f"-DPulp_DIR={config.parent}"],
         evidence / "configure.log", cwd=external, env=env)
     isolation = [inspect_strict_inputs(sdk, source, proof.name, [source_root]) for proof in proofs]
-    run([str(args.build_wrapper.resolve()), args.cmake, "--build", str(build),
-         "--config", "Release", "--parallel", str(args.build_jobs)],
-        evidence / "build.log", cwd=external, env=env)
+    build_env = dict(env, PULP_BUILD_JOBS=str(args.build_jobs))
+    run(["bash", str(args.build_wrapper.resolve()), args.cmake, "--build", str(build),
+         "--config", "Release"],
+        evidence / "build.log", cwd=external, env=build_env)
     compile_commands = build / "compile_commands.json"
     commands = json.loads(compile_commands.read_text())
     require(len(commands) == len(proofs), "binding proof compile-command coverage differs")
@@ -380,9 +381,10 @@ def main() -> int:
         shutil.copytree(build / ".cmake/api/v1/reply", output / "file-api-reply")
         isolation_negative_controls(sdk, source, "sample-region-allpass-consumer",
                                     external, output, [checkout])
-        run([str(args.build_wrapper.resolve()), args.cmake, "--build", str(build), "--config", "Release", "--target",
-             "sample-region-allpass-consumer", "--parallel", str(args.build_jobs)],
-            output / "build.log", cwd=external, env=env)
+        build_env = dict(env, PULP_BUILD_JOBS=str(args.build_jobs))
+        run(["bash", str(args.build_wrapper.resolve()), args.cmake, "--build", str(build), "--config", "Release", "--target",
+             "sample-region-allpass-consumer"],
+            output / "build.log", cwd=external, env=build_env)
         compile_commands = build / "compile_commands.json"
         require(compile_commands.is_file(), "consumer compile-command evidence unavailable")
         commands = json.loads(compile_commands.read_text())

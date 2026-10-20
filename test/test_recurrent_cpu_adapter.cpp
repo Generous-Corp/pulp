@@ -33,10 +33,13 @@ struct SyntheticKernel {
     std::array<float, 4 * kHidden> scratch{};
     bool prepared = false;
     bool fail_once = false;
+    bool fail_quiesce_once = false;
     bool fail_release_once = false;
+    std::size_t fail_release_count = 0;
     FaultCallback fault_callback = nullptr;
     std::size_t prepare_calls = 0;
     std::size_t reset_calls = 0;
+    std::size_t quiesce_calls = 0;
     std::size_t release_calls = 0;
 
     void reset_state() noexcept {
@@ -101,13 +104,23 @@ void reset_kernel(void* opaque) noexcept {
     kernel.reset_state();
 }
 
-bool quiesce_kernel(void*) noexcept {
+bool quiesce_kernel(void* opaque) noexcept {
+    auto& kernel = *static_cast<SyntheticKernel*>(opaque);
+    ++kernel.quiesce_calls;
+    if (kernel.fail_quiesce_once) {
+        kernel.fail_quiesce_once = false;
+        return false;
+    }
     return true;
 }
 
 bool release_kernel(void* opaque) noexcept {
     auto& kernel = *static_cast<SyntheticKernel*>(opaque);
     ++kernel.release_calls;
+    if (kernel.fail_release_count != 0) {
+        --kernel.fail_release_count;
+        return false;
+    }
     if (kernel.fail_release_once) {
         kernel.fail_release_once = false;
         return false;
@@ -245,6 +258,8 @@ void require_oracle(RecurrentFamily family) {
         CHECK(actual[i] == Catch::Approx(expected[i]).margin(1.0e-6f));
     REQUIRE(adapter.quiesce());
     REQUIRE(adapter.release());
+    CHECK(kernel.quiesce_calls == 1);
+    CHECK_FALSE(adapter.quiesce());
 }
 
 } // namespace
@@ -268,12 +283,17 @@ TEST_CASE("recurrent CPU adapter retries failed preparation and releases idempot
                                                  .artifact_id = "synthetic-recurrent",
                                                  .artifact_hash = "synthetic-weights",
                                                  .max_frames = 64};
+    CHECK_FALSE(adapter.quiesce());
+    CHECK(kernel.quiesce_calls == 0);
     CHECK_FALSE(adapter.prepare(context));
+    CHECK(adapter.last_prepare_error() == RecurrentCpuPrepareError::KernelPrepareFailed);
     CHECK(kernel.release_calls == 1);
+    CHECK_FALSE(adapter.quiesce());
     REQUIRE(adapter.prepare(context));
     REQUIRE(adapter.quiesce());
     REQUIRE(adapter.release());
     CHECK(adapter.release());
+    CHECK_FALSE(adapter.quiesce());
 }
 
 TEST_CASE(
@@ -334,6 +354,8 @@ TEST_CASE("recurrent CPU adapter release preserves state for a retry",
                                                  .artifact_hash = "synthetic-weights",
                                                  .max_frames = 32};
     REQUIRE(adapter.prepare(context));
+    CHECK_FALSE(adapter.prepare(context));
+    CHECK(adapter.last_prepare_error() == RecurrentCpuPrepareError::InvalidContract);
     CHECK_FALSE(adapter.release());
     CHECK(kernel.prepared);
 
@@ -347,6 +369,7 @@ TEST_CASE("recurrent CPU adapter release preserves state for a retry",
     CHECK(kernel.hidden != std::array<float, kHidden>{});
     REQUIRE(adapter.release());
     CHECK_FALSE(kernel.prepared);
+    CHECK_FALSE(adapter.quiesce());
     CHECK(adapter.release());
 }
 
@@ -371,6 +394,53 @@ TEST_CASE("recurrent CPU adapter reset and NeuralProcessor reprepare lifecycle",
     REQUIRE(processor.publish());
     CHECK(processor.snapshot().generation == 3);
     REQUIRE(processor.release());
+}
+
+TEST_CASE("NeuralProcessor retries failed recurrent cleanup through quiesce",
+          "[gpu_audio][neural][recurrent][lifecycle]") {
+    const auto spec = make_spec(RecurrentFamily::Gru);
+    SyntheticKernel kernel{
+        .family = RecurrentFamily::Gru, .fail_once = true, .fail_release_once = true};
+    RecurrentCpuAdapter adapter(spec, make_shape(RecurrentFamily::Gru), make_kernel(kernel));
+    NeuralProcessor processor(adapter);
+    const auto context = StreamingPrepareContext{.spec = &adapter.spec(),
+                                                 .artifact_id = "synthetic-recurrent",
+                                                 .artifact_hash = "synthetic-weights",
+                                                 .max_frames = 64};
+
+    CHECK_FALSE(processor.prepare(context));
+    CHECK(kernel.release_calls == 2);
+    CHECK(kernel.quiesce_calls == 1);
+    CHECK_FALSE(processor.snapshot().prepared);
+    REQUIRE(processor.release());
+    CHECK(kernel.release_calls == 2);
+    CHECK_FALSE(kernel.prepared);
+}
+
+TEST_CASE("NeuralProcessor retains cleanup debt after quiesce failure",
+          "[gpu_audio][neural][recurrent][lifecycle][negative]") {
+    const auto spec = make_spec(RecurrentFamily::Gru);
+    SyntheticKernel kernel{.family = RecurrentFamily::Gru,
+                           .fail_once = true,
+                           .fail_quiesce_once = true,
+                           .fail_release_count = 2};
+    RecurrentCpuAdapter adapter(spec, make_shape(RecurrentFamily::Gru), make_kernel(kernel));
+    NeuralProcessor processor(adapter);
+    const auto context = StreamingPrepareContext{.spec = &adapter.spec(),
+                                                 .artifact_id = "synthetic-recurrent",
+                                                 .artifact_hash = "synthetic-weights",
+                                                 .max_frames = 64};
+
+    CHECK_FALSE(processor.prepare(context));
+    CHECK(kernel.quiesce_calls == 1);
+    CHECK(kernel.release_calls == 2);
+    CHECK_FALSE(processor.snapshot().prepared);
+    CHECK_FALSE(processor.prepare(context));
+    CHECK(kernel.prepare_calls == 1);
+
+    REQUIRE(processor.release());
+    CHECK(kernel.quiesce_calls == 2);
+    CHECK(kernel.release_calls == 3);
 }
 
 TEST_CASE("recurrent CPU preparation is the fail-closed fallback admission proof",
@@ -425,17 +495,20 @@ TEST_CASE("recurrent CPU adapter rejects noncausal and malformed shapes",
     bidirectional.directions = 2;
     RecurrentCpuAdapter noncausal(spec, bidirectional, make_kernel(kernel));
     CHECK_FALSE(noncausal.prepare(context_for(noncausal)));
+    CHECK(noncausal.last_prepare_error() == RecurrentCpuPrepareError::InvalidContract);
 
     auto too_large = make_shape(RecurrentFamily::Lstm);
     too_large.hidden_size = 257;
     RecurrentCpuAdapter oversized(spec, too_large, make_kernel(kernel));
     CHECK_FALSE(oversized.prepare(context_for(oversized)));
+    CHECK(oversized.last_prepare_error() == RecurrentCpuPrepareError::InvalidContract);
 
     auto wrong_state = spec;
     wrong_state.state_bytes -= sizeof(float);
     RecurrentCpuAdapter malformed(wrong_state, make_shape(RecurrentFamily::Lstm),
                                   make_kernel(kernel));
     CHECK_FALSE(malformed.prepare(context_for(malformed)));
+    CHECK(malformed.last_prepare_error() == RecurrentCpuPrepareError::InvalidContract);
 }
 
 TEST_CASE("recurrent CPU adapter rejects alias, partial overlap, and oversized buffers without "

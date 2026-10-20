@@ -22,6 +22,16 @@ rendered workload and invalidates retained-versus-rebuild comparisons.
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+### Preconverted vector artwork is validation-only
+
+The import-design CLI accepts a preconverted SVG only when its sidecar binds
+the exact SVG SHA-256, source/provenance metadata, canvas dimensions, control
+selectors, and bounds. Illustrator `.ai`, PDF, and other unconverted artwork
+inputs fail closed with a diagnostic directing callers to a preconverted SVG;
+this path does not implement Illustrator/PDF conversion or grant rights to
+third-party artwork. Keep the sidecar and SVG together and retain both in the
+import receipt.
+
 ### Materialized browser source emission
 
 For a browser capture that publishes `materialized-document.json`, use
@@ -7682,6 +7692,14 @@ Import-validation round-trip harnesses must route Pulp target builds through
 build receipt. This applies to the seven Pulp harnesses (`v0`, `figma`, `pencil`,
 `stitch`, `rn`, `designmd`, and `jsx`). Leave a separate external-project build
 (such as Spectr) on its own toolchain boundary.
+
+## Preconverted SVG source-contract metadata
+
+The `preconverted-svg` lane is validation-only: its source-contract row must
+describe the exact SVG and control-map sidecar boundary, name the local
+annotated-capture contract as its parser owner, and keep Illustrator/PDF
+conversion explicitly out of scope. When that metadata changes, update this
+skill note and the append-only Vellum watch event in the same review.
 
 ## Captured canvas authority
 

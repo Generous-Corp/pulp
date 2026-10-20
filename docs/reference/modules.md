@@ -1185,12 +1185,15 @@ store.end_gesture(kGainId);
 
 Every live parameter writer advances `StateStore::state_generation()`: normal
 and real-time base writes, modulation changes, trigger resets, restore, and
-generation-bound gestures share that one monotonic source. Control-style
-optimistic writers use `apply_normalized_gesture_if_generation()`; a stale
-generation fails before the host gesture begins, while callback failure rolls
-back only when doing so cannot overwrite a newer writer. The base float and its
-generation stamp share one lock-free atomic word; snapshot readers reject an
-overlapping writer rather than publishing two states under one generation.
+generation-bound gestures share that one monotonic source. Ordinary base
+writers claim that generation before publishing, so a paused older writer
+cannot overwrite a newer writer. Control-style optimistic writers use
+`apply_normalized_gesture_if_generation()`; a stale generation fails before the
+host gesture begins, while callback failure rolls back only when doing so
+cannot overwrite a newer writer. Each base value also carries a lock-free
+per-parameter revision in its packed identity. Conditional feedback compares
+that exact identity, which rejects stale and ABA recalls without using a
+split generation/value check.
 
 ### StateTree — reactive hierarchical state
 

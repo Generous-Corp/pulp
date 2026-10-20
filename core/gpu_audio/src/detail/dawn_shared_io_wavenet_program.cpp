@@ -1,7 +1,6 @@
 #include "dawn_shared_io_wavenet_program.hpp"
 #include "dawn_shared_io_provider.hpp"
 
-#include <algorithm>
 #include <limits>
 #include <new>
 #include <optional>
@@ -13,17 +12,12 @@ namespace {
 std::optional<std::size_t> history_size(const WavenetProgramSpec& spec) noexcept {
     std::uint64_t samples = 0;
     for (const auto& layer : spec.arrays) {
-        std::uint32_t max_history = 0;
-        for (const auto dilation : layer.dilations) {
-            const auto span = static_cast<std::uint64_t>(layer.kernel - 1u) * dilation + 1u;
-            if (span > std::numeric_limits<std::uint32_t>::max())
-                return std::nullopt;
-            max_history = std::max(max_history, static_cast<std::uint32_t>(span));
-        }
-        // Every layer input carries its own causal window. There is one input
-        // activation plus one output activation per dilated layer.
-        samples += static_cast<std::uint64_t>(max_history) * layer.channels *
-                   (layer.dilations.size() + 1u);
+        for (const auto dilation : layer.dilations)
+            samples += static_cast<std::uint64_t>(wavenet_causal_pad(layer.kernel, dilation)) *
+                       layer.channels;
+        if (samples > std::numeric_limits<std::size_t>::max())
+            return std::nullopt;
+        // The final pointwise output has no causal history.
     }
     samples *= spec.stream_instances;
     if (samples > std::numeric_limits<std::size_t>::max() / sizeof(float))

@@ -52,6 +52,48 @@ struct ParameterGestureApplyResult {
     std::uint64_t generation = 0;
 };
 
+class StateStore;
+
+/// Opaque exact identity captured when asynchronous work is ordered against a
+/// parameter. The identity includes the value bits and a monotonic per-slot
+/// revision, so equal values written at different times remain distinct.
+class ParameterFeedbackBaseline {
+  public:
+    ParameterFeedbackBaseline() = default;
+
+    bool valid() const noexcept {
+        return valid_;
+    }
+
+    ParamID id() const noexcept {
+        return id_;
+    }
+    std::uint64_t packed_identity() const noexcept {
+        return packed_identity_;
+    }
+
+  private:
+    friend class StateStore;
+    ParameterFeedbackBaseline(const StateStore* owner, ParamID id, std::uint64_t packed_identity)
+        : owner_(owner), id_(id), packed_identity_(packed_identity), valid_(true) {}
+
+    const StateStore* owner_ = nullptr;
+    ParamID id_ = 0;
+    std::uint64_t packed_identity_ = 0;
+    bool valid_ = false;
+};
+
+enum class ConditionalParameterApplyStatus {
+    Applied,
+    Conflict,
+    InvalidParameter,
+};
+
+struct ConditionalParameterApplyResult {
+    ConditionalParameterApplyStatus status = ConditionalParameterApplyStatus::InvalidParameter;
+    std::uint64_t current_identity = 0;
+};
+
 /// Centralized parameter storage with lock-free value access.
 ///
 /// StateStore is the single source of truth for all plugin parameters.
@@ -125,6 +167,19 @@ public:
     /// @c set_value_rt(). Used by the VST3 adapter where the host
     /// reports parameter changes in normalized [0, 1] form.
     void set_normalized_rt(ParamID id, float normalized);
+
+    /// Capture an exact per-parameter identity at the caller's ordering point.
+    /// This is a single lock-free load and performs no allocation.
+    std::optional<ParameterFeedbackBaseline> capture_feedback_baseline(ParamID id) const noexcept;
+
+    /// Publish asynchronous feedback only if the captured identity is still
+    /// current. The packed identity CAS is the linearization point. A
+    /// conflict leaves the newer value untouched and emits no notification.
+    /// @c current_identity is diagnostic only; callers recapture a fresh
+    /// baseline before retrying and must not treat it as an authority token.
+    /// Revision exhaustion is reported as Conflict and never wraps.
+    ConditionalParameterApplyResult
+    set_value_rt_if_baseline(const ParameterFeedbackBaseline& baseline, float value);
 
     /// Set the absolute modulation offset for a parameter.
     void set_mod_offset(ParamID id, float offset);

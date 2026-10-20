@@ -59,6 +59,7 @@ struct Result {
     bool unavailable = false;
     bool identity = false;
     bool resident_state = false;
+    bool history_transfer_contract = false;
     bool zero_audio_slot_transfers = false;
     bool cpu_parity = false;
     bool cpu_fallback_parity = false;
@@ -87,6 +88,8 @@ void emit(const Result& result, std::string_view status) {
     std::cout << R"({"schema":"pulp.gpu-audio.wavenet.qualification.v1","status":")" << status
               << R"(","identity":)" << (result.identity ? "true" : "false")
               << R"(,"resident_state":)" << (result.resident_state ? "true" : "false")
+              << R"(,"history_transfer_contract":)"
+              << (result.history_transfer_contract ? "true" : "false")
               << R"(,"zero_audio_slot_transfers":)"
               << (result.zero_audio_slot_transfers ? "true" : "false") << R"(,"cpu_parity":)"
               << (result.cpu_parity ? "true" : "false") << R"(,"cpu_fallback_parity":)"
@@ -290,6 +293,17 @@ Result run() {
     }
     result.generation = plan.preparation_epoch();
 
+    // This one-layer fixture has one causal pad of one sample. Preparation
+    // must allocate and zero exactly one four-byte resident history buffer.
+    // The target-size histogram distinguishes that allocation from the slot
+    // activation buffers and uniforms initialized in the same transaction.
+    const auto prepared_transfer = transfer_counter.snapshot();
+    constexpr std::size_t expected_history_bytes = sizeof(float);
+    result.history_transfer_contract =
+        resident_history_bytes == expected_history_bytes &&
+        prepared_transfer.queue_write_buffer_target_size_histogram[expected_history_bytes] == 1 &&
+        prepared_transfer.queue_write_buffer_size_histogram[expected_history_bytes] == 1;
+
     transfer_counter.reset();
     float previous = 0.0f;
     std::uint64_t sequence = 1;
@@ -414,11 +428,18 @@ Result run() {
 
     const auto transfer = transfer_counter.snapshot();
     result.resident_state_copies = transfer.copy_buffer_to_buffer_calls;
+    const auto expected_history_copies = (result.submissions + 1u) * 2u;
+    result.history_transfer_contract =
+        result.history_transfer_contract &&
+        transfer.copy_buffer_to_buffer_calls == expected_history_copies &&
+        transfer.copy_buffer_to_buffer_bytes == expected_history_copies * expected_history_bytes &&
+        transfer.copy_buffer_to_buffer_size_histogram[expected_history_bytes] ==
+            expected_history_copies &&
+        transfer.copy_buffer_to_buffer_size_histogram[8] == 0;
     result.zero_audio_slot_transfers =
         transfer.queue_write_buffer_calls == 0 && transfer.buffer_map_async_calls == 0 &&
         transfer.buffer_get_mapped_range_calls == 0 && transfer.buffer_unmap_calls == 0 &&
-        transfer.copy_buffer_to_buffer_calls ==
-            (result.submissions + 1u) * (resident_history_bytes != 0 ? 4 : 0);
+        result.history_transfer_contract;
     result.retired = result.retired && plan.release();
     run_device_loss_negative(result, fixture, transfer_counter.deferred_proc_table());
     if (result.device_loss_negative)
