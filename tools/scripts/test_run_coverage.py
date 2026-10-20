@@ -69,7 +69,7 @@ def _read_ignore_regex() -> str:
 
 def _profile_pattern() -> str:
     """The LLVM_PROFILE_FILE basename pattern run_coverage.sh exports."""
-    match = re.search(r'^COVERAGE_PROFILE_PATTERN="([^"]+)"$', SCRIPT.read_text(), re.M)
+    match = re.search(r'^COVERAGE_PROFILE_PATTERN="([^"]+)"$', SCRIPT.read_text(encoding="utf-8"), re.M)
     assert match, "COVERAGE_PROFILE_PATTERN not found in run_coverage.sh"
     return match.group(1)
 
@@ -384,7 +384,7 @@ class ObjectDiscoveryTests(unittest.TestCase):
         )
         self.assertIn(
             'export LLVM_PROFILE_FILE="${PROFRAW_DIR}/${COVERAGE_PROFILE_PATTERN}"',
-            SCRIPT.read_text(),
+            SCRIPT.read_text(encoding="utf-8"),
         )
 
     def test_full_run_fails_closed_when_pools_cover_too_few_modules(self) -> None:
@@ -393,7 +393,7 @@ class ObjectDiscoveryTests(unittest.TestCase):
         The guard compares distinct pool signatures with the test-binary count,
         after TEST_BINARIES exists, and only for an unfiltered run.
         """
-        text = SCRIPT.read_text()
+        text = SCRIPT.read_text(encoding="utf-8")
         guard = text.index("PROFILE_MODULES * 2 < ${#TEST_BINARIES[@]}")
         self.assertLess(text.index("TEST_BINARIES+=("), guard)
         self.assertIn('[[ -z "${TESTS_REGEX}" ]]', text[guard - 200:guard])
@@ -460,7 +460,8 @@ class ProfilePoolBehaviourTests(unittest.TestCase):
                 src = work / f"{name}.c"
                 src.write_text(
                     f"int {name}(int x){{return {body};}}\n"
-                    f"int main(void){{return {name}(1) == 0;}}\n"
+                    f"int main(void){{return {name}(1) == 0;}}\n",
+                    encoding="utf-8",
                 )
                 binary = work / name
                 subprocess.run(
@@ -486,12 +487,12 @@ class ProfilePoolBehaviourTests(unittest.TestCase):
             )
             # The script's own signature extraction must see one pool per binary.
             inputs = work / "inputs.txt"
-            inputs.write_text("".join(f"{profraw / s}\n" for s in shards))
-            extract = re.search(r"PROFILE_MODULES=\$\((sed -n '[^']+')", SCRIPT.read_text())
+            inputs.write_text("".join(f"{profraw / s}\n" for s in shards), encoding="utf-8")
+            extract = re.search(r"PROFILE_MODULES=\$\((sed -n '[^']+')", SCRIPT.read_text(encoding="utf-8"))
             self.assertIsNotNone(extract, "PROFILE_MODULES extraction not found")
             modules = subprocess.run(
                 ["bash", "-c", f'{extract.group(1)} "$1" | sort -u | wc -l', "_", str(inputs)],
-                capture_output=True, text=True, check=True,
+                capture_output=True, text=True, encoding="utf-8", check=True,
             ).stdout.strip()
             self.assertEqual(modules, "2", f"expected one pool per binary, got {modules}: {shards}")
 
@@ -503,7 +504,7 @@ class ProfilePoolBehaviourTests(unittest.TestCase):
             )
             shown = subprocess.run(
                 [profdata, "show", "--all-functions", str(merged)],
-                capture_output=True, text=True, check=True,
+                capture_output=True, text=True, encoding="utf-8", check=True,
             ).stdout
             # Every run of each binary must survive the pool merge: a dropped
             # profile shows up as a function count below runs_per_binary.
