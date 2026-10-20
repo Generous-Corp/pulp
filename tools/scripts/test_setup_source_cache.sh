@@ -589,7 +589,7 @@ echo "== no-submodules priming never initializes submodules"
     control_gitlink="$(git -C "$tmp/upstream" ls-tree HEAD -- nested | awk '{print $1 ":" $3 ":" $4}')"
     check "$control_url" "file://$tmp/sub" \
         "control: parent records the expected submodule URL"
-    check "$control_gitlink" "160000:$sub_sha:nested" \
+    check "$control_gitlink" "160000:${sub_sha}:nested" \
         "control: parent records the expected submodule gitlink"
     mkdir -p "$FETCHCONTENT_CACHE_ROOT/control"
     git clone -q "$control_url" "$FETCHCONTENT_CACHE_ROOT/control/nested"
