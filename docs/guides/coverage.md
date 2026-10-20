@@ -561,10 +561,15 @@ Source → Gradle `testDebugUnitTest`
   enabled when Clang is the compiler — gcov/gcc output shapes are
   incompatible with our llvm-cov pipeline.
 - **Collection**: `scripts/run_coverage.sh` runs the test suite with
-  `LLVM_PROFILE_FILE` pointing at an LLVM `%Nm` merge pool per instrumented
-  binary, sized to the bounded CTest concurrency. The pool prevents parallel
-  exits from corrupting a single `%m` profile without creating one file per
-  process.
+  `LLVM_PROFILE_FILE=.../pulp-%8m.profraw`: an LLVM online-merge pool of eight
+  files per instrumented binary (`%m` is the module signature), matching the
+  eight-way CTest cap. The pool prevents parallel exits from corrupting a
+  single `%m` profile, and bounds the raw-profile count at binaries x 8. Do not
+  add `%p`: one file per test process kept the whole suite's profiles on disk
+  at once and filled the hosted Linux runner's root volume mid-suite. A full
+  run fails closed when the pools cover fewer than half its test binaries,
+  which is what profiles from different binaries colliding in one pool looks
+  like.
 - **Merge**: `llvm-profdata merge -sparse` unions them into a single
   profdata. Isolated corrupt shards from a killed test are ignored; more than
   25 invalid shards and more than 5% of the pool fails closed rather than
