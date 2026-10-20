@@ -139,18 +139,26 @@ coverage_phase "Configuring coverage build in ${BUILD_DIR}"
 # `clang-cl` is Clang's MSVC-compatible driver: it accepts MSVC flags
 # AND the GCC-style `-fprofile-instr-generate -fcoverage-mapping` that
 # PulpInstrumentation.cmake emits for source-based coverage.
+#
+# Windows builds RelWithDebInfo rather than Debug. Pulp links the static
+# MSVC runtime, so Debug means /MTd and _ITERATOR_DEBUG_LEVEL=2, while the
+# prebuilt Skia is release (/MT, level 0); lld-link's /failifmismatch then
+# rejects every target that links Skia. PulpInstrumentation.cmake adds
+# /Od /Ob0 on clang-cl, so the build stays unoptimized.
 if [ "${OS:-}" = "Windows_NT" ] || [ -n "${MSYSTEM:-}" ]; then
     CLANG_C=clang-cl
     CLANG_CXX=clang-cl
+    COVERAGE_BUILD_TYPE=RelWithDebInfo
 else
     CLANG_C=clang
     CLANG_CXX=clang++
+    COVERAGE_BUILD_TYPE=Debug
 fi
 
 cmake_args=(
     -S "${REPO_ROOT}"
     -B "${BUILD_DIR}"
-    -DCMAKE_BUILD_TYPE=Debug
+    -DCMAKE_BUILD_TYPE="${COVERAGE_BUILD_TYPE}"
     -DPULP_ENABLE_COVERAGE=ON
     -DCMAKE_C_COMPILER="${CLANG_C}"
     -DCMAKE_CXX_COMPILER="${CLANG_CXX}"
@@ -201,6 +209,13 @@ if ! PULP_BUILD_JOBS="${JOBS}" bash "${REPO_ROOT}/tools/ci/governed-build.sh" \
         grep -n -H -E "error:|Error [0-9]+|\*\*\*|undefined reference|FAILED|fatal|CMake Error" \
             "${log}" 2>/dev/null | head -n 100 >&2 || true
     done
+    # lld-link names the two objects that disagree on the lines after a
+    # /failifmismatch (or any other) error; print them too.
+    if grep -q "lld-link: error:" "${BUILD_LOG}" "${BUILD_STDOUT_LOG}" 2>/dev/null; then
+        echo "=== lld-link errors with context ===" >&2
+        grep -h -A3 "lld-link: error:" "${BUILD_LOG}" "${BUILD_STDOUT_LOG}" 2>/dev/null \
+            | head -n 60 >&2 || true
+    fi
     echo "=== last 200 stderr lines ===" >&2
     tail -n 200 "${BUILD_LOG}" >&2 || true
     exit 1

@@ -694,6 +694,7 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
             stub_cmake = stub_bin / "cmake"
             stub_cmake.write_text(
                 "#!/usr/bin/env bash\n"
+                'if [[ -n "${STUB_CMAKE_ARGS_LOG:-}" ]]; then printf \'%s\\n\' "$@" >> "$STUB_CMAKE_ARGS_LOG"; fi\n'
                 'if [[ "$1" == "--build" ]]; then\n'
                 f"{build_body}\n"
                 "    exit 2\n"
@@ -732,6 +733,8 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
             env = os.environ.copy()
             env["PATH"] = f"{stub_bin}:{env['PATH']}"
             env.pop("GITHUB_ACTIONS", None)
+            env.pop("MSYSTEM", None)
+            env.pop("OS", None)
             env.update(extra_env or {})
             return subprocess.run(
                 ["bash", str(repo / "scripts" / "run_coverage.sh")],
@@ -775,6 +778,38 @@ class BuildFailureDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("flood 1", result.stderr)
         self.assertIn("stdout-only-step", result.stderr)
+
+    def test_lld_link_errors_print_the_mismatching_objects(self) -> None:
+        # lld-link puts the two disagreeing objects on the lines after the
+        # error; without them a /failifmismatch does not say which library.
+        result = self._run_failing_build(
+            '    echo "FAILED: CLAP/PulpGain.clap"\n'
+            '    echo "lld-link: error: /failifmismatch: mismatch detected for \'_ITERATOR_DEBUG_LEVEL\':"\n'
+            '    echo ">>> gain.obj has value 2"\n'
+            '    echo ">>> skia.lib(SkFoo.obj) has value 0"'
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("lld-link errors with context", result.stderr)
+        self.assertIn(">>> skia.lib(SkFoo.obj) has value 0", result.stderr)
+
+    def _configured_build_type(self, extra_env: dict[str, str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "cmake-args.txt"
+            self._run_failing_build('    echo "x.cpp:1:1: error: stop" >&2',
+                                    {**extra_env, "STUB_CMAKE_ARGS_LOG": str(log)})
+            return [a for a in log.read_text(encoding="utf-8").splitlines()
+                    if a.startswith("-DCMAKE_BUILD_TYPE=")]
+
+    def test_windows_configures_relwithdebinfo_not_debug(self) -> None:
+        # A Debug Windows build links the /MTd runtime, which the prebuilt
+        # release Skia rejects at link time (_ITERATOR_DEBUG_LEVEL 2 vs 0).
+        self.assertEqual(self._configured_build_type({"MSYSTEM": "MINGW64"}),
+                         ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"])
+        self.assertEqual(self._configured_build_type({"OS": "Windows_NT"}),
+                         ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"])
+
+    def test_posix_configures_debug(self) -> None:
+        self.assertEqual(self._configured_build_type({}), ["-DCMAKE_BUILD_TYPE=Debug"])
 
 
 class LcovCoberturaTests(unittest.TestCase):
