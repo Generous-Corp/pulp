@@ -494,22 +494,28 @@ normal proof that a tranche is ready.
 
 ## How the collection works
 
-Raw profiles are **reclaimed incrementally while the suite runs**, not only at
-the end. `%p-%m` gives every test process its own `.profraw`, which is what
-makes this lane's numbers correct (a shared `%Nm` pool discarded most binaries'
-profiles and under-reported coverage), but it also means raw profiles accumulate
-for the whole run — roughly 20k shards / ~17 GiB at peak on a full suite. Under
-disk pressure `run_coverage.sh` merges finished shards into a running profdata
-and deletes them, then feeds that profdata back in as an input to the final
-merge. Counter merging is additive and associative, so the result is identical
-to one merge over every shard.
+Raw profiles are written to **one online-merge pool per test binary**:
+`run_coverage.sh` sets `LLVM_PROFILE_FILE=<build>/profraw/pulp-%8m.profraw`.
+`%m` expands to the instrumented module's signature, so each binary (and each
+instrumented child it spawns) gets eight files, `pulp-<signature>_<pid % 8>.profraw`,
+and every exiting process locks one of them and merges its counters in. The
+raw-profile count is bounded by binaries x 8 for the whole run, and the final
+`llvm-profdata merge` reads every pool file once.
 
-The safety rule is the interesting part: a shard is absorbed **iff no live
-process owns it**, decided by `kill -0` on the PID in the filename. A recycled
-PID only makes the check more conservative (the shard is skipped and collected
-by the final merge). An mtime-based gate would look equivalent and is not — a
-slow test's shard looks stale while its process is still writing, and reclaiming
-it would drop that test's coverage with no error.
+Two neighbouring patterns are wrong, and both have broken this lane. `%p-%m`
+(one file per test process) is correct but keeps the whole suite's profiles on
+disk at once, and it filled the hosted Linux runner's root volume mid-suite.
+Plain `%m` is a one-file pool per module, and parallel exits of one binary
+corrupted that single file.
+
+The pool must stay keyed by `%m`. A pool shared across binaries cannot merge
+profiles with different counter layouts, and the runtime drops the loser
+without an error; that once left a handful of files for hundreds of binaries
+and under-reported coverage by about twenty points. So on a full run (no
+`--tests` filter) the merge step counts the distinct module signatures among
+the pool files and **fails closed when they cover fewer than half the test
+binaries**. The merge log line `Merged N raw profile shard(s) from M module
+pool(s)` shows the count on every run.
 
 
 ```
