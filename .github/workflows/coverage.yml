@@ -386,6 +386,9 @@ jobs:
     # Letting Windows fail non-fatally therefore preserves the required fresh
     # upload set. If Windows fits the cap, it still uploads its own current flag.
     continue-on-error: ${{ matrix.os == 'windows' }}
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -617,6 +620,7 @@ jobs:
           # binary built. Skipping avoids macOS-runner ring-crate build
           # failure (#785) without losing C++ coverage data.
           PULP_SKIP_RUST_CLI: '1'
+          PROOF_TOKEN: ${{ github.token }}
         # Bound the native suite with an INTERNAL budget that reserves 30
         # minutes inside the job's `timeout-minutes: 300` for post-suite
         # report verification, Python/Swift coverage, artifacts, and uploads.
@@ -701,6 +705,8 @@ jobs:
           # log, so the sampler below tracks free space, memory and the largest
           # writers while the suite runs.
           sampler=""
+          proof=""
+          proof_check=""
           # Hosted Linux only: the 3 GiB guard stops the suite, and the macOS leg
           # already runs close to full.
           if [ "${RUNNER_OS}" = "Linux" ]; then
@@ -764,6 +770,58 @@ jobs:
                 fi
                 sleep 10
               done ) & sampler=$!
+            # Disk proof: root and /mnt bytes and inodes every 30 s, printed to
+            # the live job log and mirrored to a check run, which survives a
+            # lost runner (the job log blob does not). Below 2% free root
+            # inodes the suite is stopped so this step's log survives too.
+            proof_log="${RUNNER_TEMP}/disk-proof.log"
+            : > "${proof_log}"
+            proof_api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/check-runs"
+            proof_check=$(curl -sS -X POST -H "Authorization: Bearer ${PROOF_TOKEN}" \
+              -H "Accept: application/vnd.github+json" "${proof_api}" \
+              -d "$(python3 -c 'import json,sys; print(json.dumps({"name":"coverage-disk-proof-9","head_sha":sys.argv[1],"status":"in_progress","output":{"title":"disk proof","summary":"starting"}}))' "${GITHUB_SHA}")" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null) || proof_check=""
+            echo "disk-proof: check run id=${proof_check:-none}"
+            ( set +e +o pipefail
+              dumped=""
+              tick=0
+              while kill -0 "${cov}" 2>/dev/null; do
+                ts=$(date -u +%H:%M:%SZ)
+                ipct=$(df -Pi / | awk 'NR==2 {if ($2>0) printf "%d", ($4*100)/$2; else print 100}')
+                if [ $((tick % 6)) -eq 0 ] || { [ -z "${dumped}" ] && [ "${ipct:-100}" -lt 20 ]; }; then
+                  { echo "=== ${ts} root_free_inodes=${ipct}%"
+                    df -P /; df -Pi /; df -P /mnt; df -Pi /mnt; } > "${proof_log}.cur" 2>&1
+                  if [ -z "${dumped}" ] && [ "${ipct:-100}" -lt 20 ]; then
+                    dumped=1
+                    { echo "=== ${ts} ROOT FREE INODES ${ipct}% (<20%): top 10 dirs by inodes"
+                      for d in / /home/runner /tmp /var; do
+                        echo "--- du --inodes -x --max-depth=3 ${d}"
+                        sudo -n du --inodes -x --max-depth=3 "${d}" 2>/dev/null | sort -rn | head -n 10
+                      done; } >> "${proof_log}.cur" 2>&1
+                    echo "::warning title=disk-proof root inodes below 20%::$(sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g' "${proof_log}.cur" | tail -c 3500)"
+                  fi
+                  sed 's/^/disk-proof: /' "${proof_log}.cur"
+                  cat "${proof_log}.cur" >> "${proof_log}"
+                  if [ $((tick % 120)) -eq 0 ]; then
+                    echo "::notice title=disk-proof ${ts}::$(df -P / | awk 'NR==2 {printf "root avail %.2f GiB", $4/1048576}') $(df -Pi / | awk 'NR==2 {printf "root ifree %d of %d", $4, $2}') $(df -P /mnt | awk 'NR==2 {printf "mnt avail %.2f GiB", $4/1048576}')"
+                  fi
+                  if [ -n "${proof_check}" ]; then
+                    python3 -c 'import json,sys; t=open(sys.argv[1]).read()[-60000:]; print(json.dumps({"output":{"title":"disk proof","summary":sys.argv[2],"text":"```\n"+t+"\n```"}}))' \
+                      "${proof_log}" "${ts} root free inodes ${ipct}%" > "${proof_log}.json"
+                    curl -sS -o /dev/null -X PATCH -H "Authorization: Bearer ${PROOF_TOKEN}" \
+                      -H "Accept: application/vnd.github+json" "${proof_api}/${proof_check}" --data-binary "@${proof_log}.json"
+                  fi
+                fi
+                if [ "${ipct:-100}" -lt 2 ]; then
+                  echo "::error title=disk-proof root inodes below 2%::${ts}; stopping the suite so this log survives"
+                  df -Pi / /mnt
+                  : > "${RUNNER_TEMP:-/tmp}/coverage-disk-guard" 2>/dev/null || true
+                  kill -TERM -- "-${cov}" 2>/dev/null || true
+                  break
+                fi
+                tick=$((tick + 1))
+                sleep 5
+              done ) & proof=$!
           fi
           ( sleep "${budget}"
             echo "::warning::coverage suite hit the ${budget}s best-effort budget; terminating the coverage process tree."
@@ -775,6 +833,14 @@ jobs:
           if [ -n "${sampler}" ]; then
             kill -TERM "${sampler}" 2>/dev/null || true
             wait "${sampler}" 2>/dev/null || true
+            kill -TERM "${proof}" 2>/dev/null || true
+            wait "${proof}" 2>/dev/null || true
+            echo "disk-proof final:"; df -P / /mnt; df -Pi / /mnt
+            if [ -n "${proof_check}" ]; then
+              curl -sS -o /dev/null -X PATCH -H "Authorization: Bearer ${PROOF_TOKEN}" \
+                -H "Accept: application/vnd.github+json" "${proof_api}/${proof_check}" \
+                -d '{"status":"completed","conclusion":"neutral"}' || true
+            fi
             echo "disk after suite:"; df -h / build-coverage/
           fi
           if [ -n "${suite_log:-}" ] && [ -f "${suite_log}" ]; then
