@@ -15,9 +15,18 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
     PULP_TRY {
         const auto descriptor = processor_->descriptor();
         capabilities_ = descriptor.effective_capabilities();
-        input_bus_count_ = std::min(descriptor.input_buses.size(), input_roles_.size());
+        // Reserve one inline bus slot for the required output.  The routed
+        // adapter cannot represent all kMaxBuses inputs and an output in the
+        // same ProcessBlock otherwise.
+        input_bus_count_ = std::min(descriptor.input_buses.size(), input_roles_.size() - 1);
         for (std::size_t index = 0; index < input_bus_count_; ++index) {
-            input_roles_[index] = descriptor.input_buses[index].role;
+            auto role = descriptor.input_buses[index].role;
+            // Preserve compatibility with the legacy three-field descriptor:
+            // an optional secondary input was historically a sidechain and
+            // had no explicit role field.
+            if (index > 0 && descriptor.input_buses[index].optional && role == BusRole::Main)
+                role = BusRole::Sidechain;
+            input_roles_[index] = role;
             input_channels_[index] = descriptor.input_buses[index].default_channels;
             input_optional_[index] = descriptor.input_buses[index].optional;
         }

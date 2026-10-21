@@ -121,7 +121,9 @@ class SidechainProbe final : public Processor {
         d.category = PluginCategory::Effect;
         d.input_buses = {
             {"Main In", 1, false, pulp::format::BusRole::Main},
-            {"Sidechain", 1, true, pulp::format::BusRole::Sidechain},
+            // Deliberately use the legacy three-field form.  Optional
+            // secondary inputs must retain their historical sidechain role.
+            {"Sidechain", 1, true},
         };
         d.output_buses = {{"Main Out", 1, false}};
         return d;

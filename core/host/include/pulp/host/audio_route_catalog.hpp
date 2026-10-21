@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -59,6 +60,11 @@ class AudioRouteCatalog {
     /// and expose their own routing menu instead.
     virtual bool connect(std::string_view stable_id, std::size_t bus_index) {
         (void)stable_id;
+        (void)bus_index;
+        return false;
+    }
+
+    virtual bool disconnect(std::size_t bus_index) {
         (void)bus_index;
         return false;
     }
@@ -115,6 +121,17 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
         }
         routes_ = std::move(routes);
         selected_ = std::move(retained);
+        if (connect_callback_) {
+            for (std::size_t bus_index = 0; bus_index < selected_.size(); ++bus_index) {
+                const auto it =
+                    std::find_if(routes_.begin(), routes_.end(), [&](const AudioRouteInfo& route) {
+                        return route.stable_id == selected_[bus_index] && route.available &&
+                               route.channels > 0;
+                    });
+                if (it != routes_.end())
+                    (void)connect_callback_(*it, bus_index);
+            }
+        }
         notify();
     }
 
@@ -127,6 +144,9 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
     }
 
     bool connect(std::string_view stable_id, std::size_t bus_index) override {
+        if (bus_index == std::numeric_limits<std::size_t>::max() ||
+            bus_index >= selected_.max_size())
+            return false;
         const auto it =
             std::find_if(routes_.begin(), routes_.end(), [stable_id](const AudioRouteInfo& route) {
                 return route.stable_id == stable_id && route.available && route.channels > 0;
@@ -138,6 +158,14 @@ class MutableAudioRouteCatalog final : public AudioRouteCatalog {
         if (selected_.size() <= bus_index)
             selected_.resize(bus_index + 1);
         selected_[bus_index] = it->stable_id;
+        notify();
+        return true;
+    }
+
+    bool disconnect(std::size_t bus_index) override {
+        if (bus_index >= selected_.size() || selected_[bus_index].empty())
+            return false;
+        selected_[bus_index].clear();
         notify();
         return true;
     }

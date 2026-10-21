@@ -132,6 +132,9 @@ bool process_processor_block(Processor& processor, ProcessBlock& block,
             .inputs = ProcessBusBufferSet<const float>(std::span(input_views.data(), input_count)),
             .outputs = ProcessBusBufferSet<float>(std::span(output_views.data(), output_count)),
         };
+        const auto* sidechain_bus = block.buses->first(BusDirection::Input, BusRole::Sidechain);
+        processor.set_sidechain(sidechain_bus && sidechain_bus->active ? &sidechain_bus->input
+                                                                       : nullptr);
         processor.process(rich, *midi_in, *midi_out, context);
     } catch (...) {
         return false;
