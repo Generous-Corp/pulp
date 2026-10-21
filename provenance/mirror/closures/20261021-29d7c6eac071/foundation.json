@@ -1,0 +1,1459 @@
+{
+  "build_dir": null,
+  "compile_definitions": [
+    "CPPHTTPLIB_MBEDTLS_SUPPORT",
+    "HWY_STATIC_DEFINE",
+    "PULP_RT_WORK_COUNTERS=1",
+    "PULP_SIMD_DEFAULT_BACKEND_ACCELERATE=1",
+    "PULP_SIMD_HAS_ACCELERATE=1",
+    "PULP_SIMD_HAS_HIGHWAY=1",
+    "TOOLCHAIN_MISS_ASM_HWCAP_H",
+    "TOOLCHAIN_MISS_SYS_AUXV_H"
+  ],
+  "configuration": "Release",
+  "configure": {
+    "identity": {
+      "build_type": "Release",
+      "gpu": true,
+      "processor": "arm64",
+      "skia": true,
+      "system": "Darwin",
+      "text_shaping": true
+    },
+    "options": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "CMAKE_SYSTEM_NAME": "Darwin",
+      "CMAKE_SYSTEM_PROCESSOR": "arm64",
+      "PULP_AUDIO_QUALITY_LAB_GATE": "OFF",
+      "PULP_BENCHMARK": "OFF",
+      "PULP_BUILD_EXAMPLES": "OFF",
+      "PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS": "OFF",
+      "PULP_BUILD_NODEJS": "OFF",
+      "PULP_BUILD_PYTHON": "OFF",
+      "PULP_BUILD_RUST_CLI": "ON",
+      "PULP_BUILD_TESTS": "ON",
+      "PULP_BUILD_WASM_TESTS": "OFF",
+      "PULP_BUILD_WEBVIEW": "OFF",
+      "PULP_BUNDLE_NOTO_COLOR_EMOJI": "OFF",
+      "PULP_CHANGED_SURFACE_INVENTORY_TARGET": "OFF",
+      "PULP_CONFIGURE_CHECK_CACHE": "ON",
+      "PULP_D3D_AVAILABLE": "OFF",
+      "PULP_ENABLE_AAX": "OFF",
+      "PULP_ENABLE_ABLETON_LINK": "OFF",
+      "PULP_ENABLE_ARA": "OFF",
+      "PULP_ENABLE_AUDIO_PROBES": "ON",
+      "PULP_ENABLE_AUTHORING_CAPSULE": "ON",
+      "PULP_ENABLE_COVERAGE": "OFF",
+      "PULP_ENABLE_DESIGN_IMPORT": "ON",
+      "PULP_ENABLE_DRACO": "OFF",
+      "PULP_ENABLE_FUZZING": "OFF",
+      "PULP_ENABLE_GPU": "ON",
+      "PULP_ENABLE_INSPECTOR": "ON",
+      "PULP_ENABLE_JS": "ON",
+      "PULP_ENABLE_MTS_ESP": "OFF",
+      "PULP_ENABLE_PROJECT_PACKAGE": "ON",
+      "PULP_ENABLE_RACK": "OFF",
+      "PULP_ENABLE_SCALA_TUNING": "OFF",
+      "PULP_ENABLE_SCENE3D": "OFF",
+      "PULP_ENABLE_SWIFT": "OFF",
+      "PULP_ENABLE_THREEJS_RUNTIME": "ON",
+      "PULP_FETCHCONTENT_UPDATES_DISCONNECTED": "ON",
+      "PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER": "OFF",
+      "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF": "OFF",
+      "PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC": "OFF",
+      "PULP_HAS_AUSDK": "TRUE",
+      "PULP_HAS_CLAP": "TRUE",
+      "PULP_HAS_JSC_ACTUAL": "OFF",
+      "PULP_HAS_LV2": "TRUE",
+      "PULP_HAS_MTS_ESP": "FALSE",
+      "PULP_HAS_SCALA_TUNING": "FALSE",
+      "PULP_HAS_SKIA": "TRUE",
+      "PULP_HAS_VST3": "TRUE",
+      "PULP_HAS_WEBGPU": "TRUE",
+      "PULP_HOST_ENABLE_GPU_CONVOLUTION": "OFF",
+      "PULP_HOST_QUIRKS_DEFAULT_POLICY": "validated_only",
+      "PULP_INTEL_CANARY": "OFF",
+      "PULP_JS_ENGINE": "auto",
+      "PULP_LINK_JOBS": "",
+      "PULP_LOTTIE": "OFF",
+      "PULP_MACOS_ARCH": "host",
+      "PULP_PLUGIN_PACKAGING": "single",
+      "PULP_REAL_PLUGIN_TESTS": "OFF",
+      "PULP_RECORD_LINK_MAPS": "OFF",
+      "PULP_REQUIRE_CHECKOUT_DEPENDENCIES": "ON",
+      "PULP_REQUIRE_GPU_FOR_SDK": "OFF",
+      "PULP_RT_WORK_COUNTERS": "ON",
+      "PULP_RUST_CLI_PROFILE": "release",
+      "PULP_RUST_CLI_TARGET": "",
+      "PULP_SANITIZER": "",
+      "PULP_SIMD_BACKEND": "auto",
+      "PULP_SKIA_AUTOFETCH": "ON",
+      "PULP_TEST_PCH": "ON",
+      "PULP_TEST_PCH_HEADERS": "<catch2/catch_test_macros.hpp>;<catch2/catch_approx.hpp>;<catch2/matchers/catch_matchers_floating_point.hpp>;<catch2/matchers/catch_matchers_string.hpp>;<algorithm>;<array>;<atomic>;<chrono>;<cmath>;<cstddef>;<cstdint>;<cstdio>;<cstdlib>;<cstring>;<filesystem>;<fstream>;<functional>;<limits>;<memory>;<numbers>;<optional>;<span>;<sstream>;<string>;<string_view>;<thread>;<type_traits>;<utility>;<vector>",
+      "PULP_TEST_TIMEOUT_CEILING": "3600",
+      "PULP_TEST_TIMEOUT_COVERAGE_SCALE": "4",
+      "PULP_TEST_TIMEOUT_SANITIZER_SCALE": "8",
+      "PULP_TEST_TIMEOUT_SCALE": "",
+      "PULP_TEXT_SHAPING": "ON",
+      "PULP_TRACING": "OFF",
+      "PULP_USE_CCACHE": "ON",
+      "PULP_USE_SHARED_FETCHCONTENT_SOURCES": "ON",
+      "PULP_VALIDATE_V8_PROVIDER_STRICT": "OFF",
+      "PULP_VULKAN_AVAILABLE": "OFF"
+    },
+    "options_sha256": "baadeb2e38625f4ea79414123f15a28db4e516cbe79fcffeb0ea424256d90f00"
+  },
+  "external_inputs": [
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/base.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "fc909799e316141e9c7ab7c4ae51803234c3d31fd313be42608401bba8e416de",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/detect_compiler_arch.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "a0be644a54ea89f2339812e20a505b62dec5200f19649efdafb29be6836436f2",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/detect_targets.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "d767ac96eefda66444c99cb76feccaf5cc7a8a2ad166cc4da000821c6158759e",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/foreach_target.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "f767db469ba6d6a1f82c283c2d6417f242799a0254de2eb117a8714df500e074",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/highway.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "fa0e7980a77fd0b91efa2187a70edf26d66c5c4f410fce661484ff54a9f44034",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/highway_export.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "8a883413b083c721f879163780630aa3ec741b386b3db6d05ac042292b904d45",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/arm_neon-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "863115fbaf286c4e24692d246beda5887c9b3710616511f1f9dab1b3de0a911c",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/arm_sve-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "40fb0a7fe032a9957600860dfc2f8d40be1d34d4adea71bbf028fc112c4f083e",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/emu128-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "7c4317e48626afedfcd133d2a78a07dc133d15a2a26e7a5a89f70497db33e4bb",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/generic_ops-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "d64b89d36fdeaac416d55ab56ea862e487414a4b0955ab739003095b65a95042",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/inside-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "c22abcaafe741459fc5c9456230af24f198e0bd24c3372540cf0248d62dd554e",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/ppc_vsx-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "a6219005754143096f3664b98cd2dd6c121e520b7a973c0866b47dbc43cc28ae",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/rvv-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "5fe1afa9124f9728285da0a54b09ccf38cd37d30c76fb40a528f865f05b6b424",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/scalar-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "fa89dce8960dd63eaea258b3aa1aeafadeb243a65cd78d79ad7455ccf27c56ec",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/set_macros-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "432b607a9732c4add3dd715542e997b3a773741e4617a9f553d92d5cf9b195e5",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/shared-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "b334ffa038fa5f3c743659b664daeff533d44715a425bb9b3c31f223b407a5a0",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/wasm_128-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "838aeadcaebda2dc2935e4629e0c470129adffadaa9c32fe19ed07b600d2f06d",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/wasm_256-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "0fa0192aa2d2f5b0c9d76fbb0667131c524d3a993d35a1b73be49af1ca756d2c",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/x86_128-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "a99335fb682f3d9994fdd09c2c0f16d8494fcd0c9bf1a208104a3205fbb14ac5",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/x86_256-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "793fe813ed2408742e9dda3baa60fa2efc816085d73d5f82ee33f7717989102b",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/ops/x86_512-inl.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "a7188bfdedf4b42ef013e17e479e5030ca86b55eb29b057dd47561e2e1ad474e",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48/hwy/targets.h",
+      "pin": "457c891775a7397bdb0376bb1031e6e027af1c48",
+      "sha256": "d9d5a867f89eb2c470fa7cd35e1fc1fbf7b396faef1cfd590537acd32b16f8bf",
+      "source": "https://github.com/google/highway.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/3rdparty/everest/include/everest/everest.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "ddc6c96ec9598fe10c389c155467d4a2cdedf488da8d2186303442ede7a4db08",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/3rdparty/everest/include/everest/x25519.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "da28aebd8413ebfbe7b0d8069d40ab7cebf24725b5c41c83a3dbd316622c8f2c",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/aes.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "ce71f35d91cf1609bddff21d613863c1177bccc97327f7994c39965ebf044b56",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/aria.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "71fadc4b862611c8a75de841ccf4a346f756cec7345d34d2ed58398ebf79c72a",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/asn1.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "bff209b57c95feb92edf78194f77bcc139172ff2c78b5aa0ad25a9739ce570bc",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/bignum.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "4f382b62a81ec95be4362988684fe157629f0eb80b678f093175c5ef3a37bc44",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/block_cipher.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "edddbf6b03a54e04b2ae3ee3da00a7e243a7ef3f81db5747c69884b222980898",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/build_info.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "71dcc5a8eb89cfed67796581c879c76da427549504067a4e529084a92a302ad1",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/camellia.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "32e959e91fd7cce4f9b6fa204afaf6a713e34c7940a35e716fa5e3681aadf6bd",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/ccm.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "7a71ba5bba1af8cb6d79474ae9130d9a88319bb15034f331acaab755b1c6764c",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/chacha20.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "519b2d029195ca218e435ffea9d36ca1f0e295312859561c8139459a44b11fab",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/chachapoly.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "8a883b6963bc05815e1eff7f3a50ac41080f43420fb4000bc24187298a3d3628",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/check_config.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "daa746fb30be94fd426e8d7e1281d5d04ccd5f3f1c5b42c8b1f20e7e71787482",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/cipher.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "b3750f0272fc51a956f9b42cee123119d4d292befc4194c4ce404c83d841695a",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/cmac.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "181015eae9af1a0e3ed94f54d42c806ee7897f623968eeece045d7c46cc347e9",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/config_adjust_legacy_crypto.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "163cfbc7007d24c8ff5c17ebd084840f11c5e35fa11219232663c4a5287a3908",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/config_adjust_legacy_from_psa.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "346f0f2314bf8790a0d1208d27cdca1d1b3c13aee762cb0fc6065c1e50d3b6c9",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/config_adjust_psa_from_legacy.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "4311a3e3a393677fd329006d7c88941311e7bceb94e81763a300754f721db78d",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/config_adjust_psa_superset_legacy.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "4bde6d7206bf55adb126f2a5f2ac21167054663a74e183fac98b9b6efeea235d",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/config_adjust_ssl.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "2d37a7552566e9fbd8a5a8b3e6cf6d4e21125a5e48a7e24ca30f3c683d141871",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/config_adjust_x509.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "92909d91c59340f13eb2b447cf44e0075a0ee742a18f22fb7843f6a18c5af5dc",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/config_psa.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "1c65cb4b836aeefa764bf7ddf69090347d4d4021379b0cef6201c6ed0f3dc7f8",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/ctr_drbg.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "13ec5b11efb86bf284e9e5e1b5f92bf1ad28e137173fab0ff6e7e966b416f61d",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/dhm.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "dac935c68b8aa5a1e9cac166020ee3b0b45b9faa57ecac62b33675eaba74200c",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/ecdh.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "2557086f125ea9147ba6645bf7d36fa5654b367cbb9b2ab60af7c00135b2bd9f",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/ecdsa.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "356145528bb9e85478ae0b604dd6d7551f2c15d245d6cfdbbfb10ef373ce62c8",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/ecjpake.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "5eaa84603b98eee915c8d56ae0d3036e9e4a89e5a38459826f368bf92f9d41a0",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/ecp.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "d0bad94653ef2676bd320880ffaf9f728ab9fdbe182d85c03ba1b0759e20e037",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/entropy.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "6f5d40492705d9d5345b0d1c3b5ea53fa3fff1c37fa55a5cce1cef6d35e8f880",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/error.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "3bb2c801f8839bf95f706b088c7db7607651002d2d3f9de59e6586932a961e35",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/gcm.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "d74d793f55ccc8320b477dbcd987b06672e56556484a8cfc5de5cff2f3092a8e",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/mbedtls_config.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "bbf20b2fb4f002da77743de7b364065a4366a9091a879c497360c3ce226bfbdd",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/md.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "89c41b36251ab26facdedc7b379ad5236af8f941cae58941be7f6de690fecd4e",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/md5.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "21893a1ffcb6d65057178a45977774ed249387ace6d733f32434d8546dd827f7",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/net_sockets.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "338e2924c327c8f3135e9857ba555d1d8bc68e85573539303203f5c74cb4fe78",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/oid.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "43b033ffcf575a549267f5a561c40ebd33d6ff6dea12981dd186b9edc2ffe9de",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/pk.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "e1e7d0d988c1c6ae0eab158e3ece1c826471dfd374ae79077bb427f26cb3d5d6",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/platform_time.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "5baf1588bccb5ef634e765012e4e1d680f1ded4d62e2a6573b5c238546f71327",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/platform_util.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "e598b7d7f2906ba37b00a81abd09aefaf2403865e3787ca2a4b2d2a702f94415",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/poly1305.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "393389d0f437930fae11e0cc1f325bbd82282723dffd57f080a08f82453d1e6e",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/private_access.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "c897213b3e534e8d5db83629177f9c01d90461ed6fea57906836262dba87056d",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/ripemd160.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "138b3cd792a3301fb869e5303fe0dd317743b2009b7a8f8423a51511444e23dc",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/rsa.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "b0daad0ebc319cfe76428bf56109057cf7352e68bb203f444de943d798b2f506",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/sha1.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "e644d96d46d44da66e160eb69ad637f13caef1d192e3361616833b342c6a859b",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/sha256.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "a2ee050ca15b7598a8d227cac0e0ec9fd6c38615b817737a8007e90b3feab0d9",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/sha3.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "8cc0b3928976871e2a4847d0f6bf02da4663a94cc0779afdec3438a0c76a5499",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/sha512.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "0f77abf1b4dfc18b865725e8a221d5d9279899c274e993005359be182b7574a2",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/ssl.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "a4c407252fa8dc01c2c204ff3d59b319a0de8c2fdcca1c081d636fad04ade631",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/ssl_ciphersuites.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "f7c3136ebd9ab933aa94544880a20c1fb97ff71d320dc47f97ae70023df8270c",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/threading.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "98d443b8ca6e708d0da6b389a70db34b19b68884c640f9cc19ab110569c18b2a",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/x509.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "b18f9f1bc3c00f0d1437f8eb8bf92b0c53d9f92323d5020819a45e7cbe3af37a",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/x509_crl.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "f5fa1c1bfeac75548fd9b68903e05c5a4435634c1f1457d0ffdd2becd0cd72f1",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/mbedtls/x509_crt.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "c30b15fd426fc0f42579e9fb0718a15fd54f428f41ceb4466a724954ee6d41d2",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/build_info.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "9eb0dbed47ac851acee62bd0829ce177aac6fe8515a4ce7e904ecf71829cb3d0",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "b8b131c4d75169be434aed2463f576e04cbc7b96cf3ecb8264c17cef6e7adc30",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_adjust_auto_enabled.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "34ea7513c9ed3467b5d185ec350f207caf31160ad1d24369b86593050449edae",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_adjust_config_dependencies.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "7dae42efb18e0f3d428fd0e4b4223534b66b650a56b7cf7302b4e179e81e2f56",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_adjust_config_key_pair_types.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "9cb1fba3c26ab4feada289813242545670f9703c5ebe9f5ab336f3dbdea4a1b5",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_adjust_config_synonyms.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "039eb983eb52a46bc273d513e0e17817bd77015004efdb3f9cd8b65eac02de77",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_builtin_composites.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "1e2eec329b2b4ec3b5da3f9d5761bc5645833445401a43cbff812fdb76b0ae9e",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_builtin_key_derivation.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "8b3d5d3174dbd33e5e332f51e5f00d2734716f3e744656631bccb4d355e92bdc",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_builtin_primitives.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "a3078c5637a4ef2a40ef022f89881b8ca5d3321bcab31f6f550c6154c58543c5",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_compat.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "0c0396d7f339f9207af3a003e98e9921516367c71d53724cb42e32f0f66142f7",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_config.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "6e07e7b4189b133e62bde0ee5612792c9a77ac188123f50b64a2b391995bba7d",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_driver_common.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "25207d12a91fc8c0670370596c3306c256ec054b4d6a6d1dd9b5bbb7d5bbe35b",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_driver_contexts_composites.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "9f6bc40047a2d0d48361d82e5a5b05c477d946518b0091a3d4cb8c2cd0c877fd",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_driver_contexts_key_derivation.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "77c8ef9b7a8fac177a53472c7a39a9835da61bf864df951979cd15f71143796f",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_driver_contexts_primitives.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "829aaa3fbf90beeb20bf989a9db20829469d4875d514d0cc18591f8748a0ba0c",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_extra.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "5e139ce51c35e5aa8fcd67fa28cb99c5972eb914c3535e63c4ef36bcddcc92cd",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_legacy.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "51c4415dcae97a01f1f0f3901e3e7d91b623cbc30d02e8d9496542545966aae4",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_platform.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "26db28657e60ff6c3198b83e10ba86b25ced721cdda1d67e1c0ec679f1f7d041",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_sizes.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "12fb8dc3cdeecc8ee2176b3918ecd528442f4640ec600a8961063ba4602472cf",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_struct.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "0f5b72d1c0f7ff64a4823998d4641c80f29091a372bce8385261bf7419c81655",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_types.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "219ac995d8c48ee0a70a35f1bb70c92215151862c2a1c22385c7018c9ccb7aa6",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "path": "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include/psa/crypto_values.h",
+      "pin": "107ea89daaefb9867ea9121002fbbdf926780e98",
+      "sha256": "e686e6ecc395c4ab06d4dbd9d9aff4b16d26611e41756e3daf046811f5a92355",
+      "source": "https://github.com/Mbed-TLS/mbedtls.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/containers/choc_FIFOReadWritePosition.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "c60f40d9c15cd022dda874d036d0370fa5603272ffffd8e445a6de5fc1e3af54",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/containers/choc_SingleReaderSingleWriterFIFO.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "038bbd0a84c7459bd7c0dbfe7eead53a1bffca356c1c0a0483e722ea8c497c4d",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/containers/choc_Value.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "bc627e86c0ae21dd0f6bfa0116777ccc7741b007d7f88a790642305ce9cc8672",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/math/choc_MathHelpers.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "b5f92c6f9bc448a018c8992fe43361d2af001fb4bd90f31694d69ae296cf7051",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/platform/choc_Assert.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "3d26633e425cd35f74f740bcbae146a75078d8ffa71b94cc5157078d737fb01e",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/text/choc_FloatToString.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "d599b596301c8863c2b270607f14ae239ff1af3c89de995e7202ec691f05e723",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/text/choc_JSON.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "7ce92baeaa781dac7498036ac12e8e6d04b556313b08c3d8474fbfb009f379dc",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/text/choc_StringUtilities.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "e848fa942feee81cc8f441211a8d8aef50bc7265592cc5a644ae1231a825c063",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/text/choc_UTF8.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "ff7cf70c90873bfbae08041e37fbb86eb9f072bbb477ae709d7ff36814368a33",
+      "source": "https://github.com/danielraffel/choc.git"
+    }
+  ],
+  "files": [
+    "core/events/include/pulp/events/child_process_manager.hpp",
+    "core/events/include/pulp/events/coalesced_updater.hpp",
+    "core/events/include/pulp/events/event_loop.hpp",
+    "core/events/include/pulp/events/events.hpp",
+    "core/events/include/pulp/events/in_app_purchase.hpp",
+    "core/events/include/pulp/events/interprocess_connection.hpp",
+    "core/events/include/pulp/events/main_thread_dispatcher.hpp",
+    "core/events/include/pulp/events/message_loop_integration.hpp",
+    "core/events/include/pulp/events/plugin_main_thread.hpp",
+    "core/events/include/pulp/events/push_notifications.hpp",
+    "core/events/include/pulp/events/service_discovery.hpp",
+    "core/events/include/pulp/events/timer.hpp",
+    "core/events/include/pulp/events/volume_detector.hpp",
+    "core/events/platform/mac/bonjour_backend.cpp",
+    "core/events/platform/mac/user_notifications_backend.mm",
+    "core/events/src/child_process_manager.cpp",
+    "core/events/src/coalesced_updater.cpp",
+    "core/events/src/event_loop.cpp",
+    "core/events/src/in_app_purchase.cpp",
+    "core/events/src/interprocess_connection.cpp",
+    "core/events/src/main_thread_dispatcher.cpp",
+    "core/events/src/message_loop_integration.cpp",
+    "core/events/src/message_loop_pump_mac.mm",
+    "core/events/src/plugin_main_thread_mac.mm",
+    "core/events/src/push_notifications.cpp",
+    "core/events/src/service_discovery.cpp",
+    "core/events/src/timer.cpp",
+    "core/events/src/volume_detector.cpp",
+    "core/platform/include/pulp/platform/android/jni.hpp",
+    "core/platform/include/pulp/platform/android/motion_bridge.h",
+    "core/platform/include/pulp/platform/child_process.hpp",
+    "core/platform/include/pulp/platform/clipboard.hpp",
+    "core/platform/include/pulp/platform/dbus.hpp",
+    "core/platform/include/pulp/platform/detect.hpp",
+    "core/platform/include/pulp/platform/device_capability.hpp",
+    "core/platform/include/pulp/platform/environment.hpp",
+    "core/platform/include/pulp/platform/file_dialog.hpp",
+    "core/platform/include/pulp/platform/native_handle.hpp",
+    "core/platform/include/pulp/platform/permissions.hpp",
+    "core/platform/include/pulp/platform/platform.hpp",
+    "core/platform/include/pulp/platform/popup_menu.hpp",
+    "core/platform/include/pulp/platform/progress_parser.hpp",
+    "core/platform/include/pulp/platform/win/registry.hpp",
+    "core/platform/include/pulp/platform/win32_sane.hpp",
+    "core/platform/platform/mac/clipboard_mac.mm",
+    "core/platform/platform/mac/environment_mac.mm",
+    "core/platform/platform/mac/file_dialog_mac.mm",
+    "core/platform/platform/mac/popup_menu_mac.mm",
+    "core/platform/platform/posix/child_process_posix.cpp",
+    "core/platform/src/clipboard_common.cpp",
+    "core/platform/src/dbus.cpp",
+    "core/platform/src/environment.cpp",
+    "core/platform/src/file_dialog_stub.cpp",
+    "core/platform/src/permissions.cpp",
+    "core/platform/src/platform.cpp",
+    "core/platform/src/popup_menu_stub.cpp",
+    "core/platform/src/registry.cpp",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/activity_channel.hpp",
+    "core/runtime/include/pulp/runtime/alive_token.hpp",
+    "core/runtime/include/pulp/runtime/analytics.hpp",
+    "core/runtime/include/pulp/runtime/assert.hpp",
+    "core/runtime/include/pulp/runtime/async_stream.hpp",
+    "core/runtime/include/pulp/runtime/background_job.hpp",
+    "core/runtime/include/pulp/runtime/base64.hpp",
+    "core/runtime/include/pulp/runtime/big_integer.hpp",
+    "core/runtime/include/pulp/runtime/budget_policy.hpp",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/runtime/include/pulp/runtime/child_process.hpp",
+    "core/runtime/include/pulp/runtime/crypto.hpp",
+    "core/runtime/include/pulp/runtime/detail/durable_file_replacement.hpp",
+    "core/runtime/include/pulp/runtime/dynamic_library.hpp",
+    "core/runtime/include/pulp/runtime/exceptions.hpp",
+    "core/runtime/include/pulp/runtime/expression.hpp",
+    "core/runtime/include/pulp/runtime/file_search_path.hpp",
+    "core/runtime/include/pulp/runtime/high_resolution_timer.hpp",
+    "core/runtime/include/pulp/runtime/http.hpp",
+    "core/runtime/include/pulp/runtime/i18n.hpp",
+    "core/runtime/include/pulp/runtime/identity.hpp",
+    "core/runtime/include/pulp/runtime/inter_process_lock.hpp",
+    "core/runtime/include/pulp/runtime/ip_address.hpp",
+    "core/runtime/include/pulp/runtime/json_rpc.hpp",
+    "core/runtime/include/pulp/runtime/license.hpp",
+    "core/runtime/include/pulp/runtime/log.hpp",
+    "core/runtime/include/pulp/runtime/mac_address.hpp",
+    "core/runtime/include/pulp/runtime/memory_mapped_file.hpp",
+    "core/runtime/include/pulp/runtime/memory_message_channel.hpp",
+    "core/runtime/include/pulp/runtime/message_channel.hpp",
+    "core/runtime/include/pulp/runtime/model_download.hpp",
+    "core/runtime/include/pulp/runtime/model_registry.hpp",
+    "core/runtime/include/pulp/runtime/model_store.hpp",
+    "core/runtime/include/pulp/runtime/named_pipe.hpp",
+    "core/runtime/include/pulp/runtime/network_stream.hpp",
+    "core/runtime/include/pulp/runtime/node_abi.hpp",
+    "core/runtime/include/pulp/runtime/primes.hpp",
+    "core/runtime/include/pulp/runtime/range.hpp",
+    "core/runtime/include/pulp/runtime/result.hpp",
+    "core/runtime/include/pulp/runtime/runtime.hpp",
+    "core/runtime/include/pulp/runtime/safe_relative_path.hpp",
+    "core/runtime/include/pulp/runtime/scope_guard.hpp",
+    "core/runtime/include/pulp/runtime/scoped_no_alloc.hpp",
+    "core/runtime/include/pulp/runtime/search_index.hpp",
+    "core/runtime/include/pulp/runtime/seqlock.hpp",
+    "core/runtime/include/pulp/runtime/simd.hpp",
+    "core/runtime/include/pulp/runtime/slot.hpp",
+    "core/runtime/include/pulp/runtime/socket.hpp",
+    "core/runtime/include/pulp/runtime/spsc_queue.hpp",
+    "core/runtime/include/pulp/runtime/spsc_ring_index.hpp",
+    "core/runtime/include/pulp/runtime/stream.hpp",
+    "core/runtime/include/pulp/runtime/system.hpp",
+    "core/runtime/include/pulp/runtime/temporary_file.hpp",
+    "core/runtime/include/pulp/runtime/text_diff.hpp",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "core/runtime/include/pulp/runtime/trace_session.hpp",
+    "core/runtime/include/pulp/runtime/trace_timeout.hpp",
+    "core/runtime/include/pulp/runtime/triple_buffer.hpp",
+    "core/runtime/include/pulp/runtime/udev_monitor.hpp",
+    "core/runtime/include/pulp/runtime/url.hpp",
+    "core/runtime/include/pulp/runtime/websocket_channel.hpp",
+    "core/runtime/include/pulp/runtime/xml.hpp",
+    "core/runtime/include/pulp/runtime/zip.hpp",
+    "core/runtime/src/analytics.cpp",
+    "core/runtime/src/async_stream.cpp",
+    "core/runtime/src/background_job.cpp",
+    "core/runtime/src/base64.cpp",
+    "core/runtime/src/big_integer.cpp",
+    "core/runtime/src/child_process.cpp",
+    "core/runtime/src/crypto.cpp",
+    "core/runtime/src/durable_file_replacement.cpp",
+    "core/runtime/src/durable_file_replacement_test_access.hpp",
+    "core/runtime/src/dynamic_library.cpp",
+    "core/runtime/src/expression.cpp",
+    "core/runtime/src/high_resolution_timer.cpp",
+    "core/runtime/src/http.cpp",
+    "core/runtime/src/i18n.cpp",
+    "core/runtime/src/identity.cpp",
+    "core/runtime/src/inter_process_lock.cpp",
+    "core/runtime/src/ip_address.cpp",
+    "core/runtime/src/json_rpc.cpp",
+    "core/runtime/src/license.cpp",
+    "core/runtime/src/mac_address.cpp",
+    "core/runtime/src/memory_mapped_file.cpp",
+    "core/runtime/src/memory_message_channel.cpp",
+    "core/runtime/src/model_download.cpp",
+    "core/runtime/src/model_registry.cpp",
+    "core/runtime/src/model_store.cpp",
+    "core/runtime/src/named_pipe.cpp",
+    "core/runtime/src/network_stream.cpp",
+    "core/runtime/src/primes.cpp",
+    "core/runtime/src/runtime.cpp",
+    "core/runtime/src/scoped_no_alloc.cpp",
+    "core/runtime/src/search_index.cpp",
+    "core/runtime/src/sha256.cpp",
+    "core/runtime/src/socket.cpp",
+    "core/runtime/src/stream.cpp",
+    "core/runtime/src/system_info.cpp",
+    "core/runtime/src/temporary_file.cpp",
+    "core/runtime/src/text_diff.cpp",
+    "core/runtime/src/trace.cpp",
+    "core/runtime/src/udev_monitor.cpp",
+    "core/runtime/src/url.cpp",
+    "core/runtime/src/websocket_channel.cpp",
+    "core/runtime/src/xml.cpp",
+    "core/runtime/src/zip.cpp",
+    "core/simd/include/pulp/simd/scalar_kernels.hpp",
+    "core/simd/include/pulp/simd/simd.hpp",
+    "core/simd/src/accelerate.cpp",
+    "core/simd/src/highway.cpp",
+    "core/simd/src/scalar.cpp",
+    "external/cpp-httplib/httplib.h",
+    "external/miniz/miniz.c",
+    "external/miniz/miniz.h",
+    "external/miniz/miniz_common.h",
+    "external/miniz/miniz_export.h",
+    "external/miniz/miniz_tdef.c",
+    "external/miniz/miniz_tdef.h",
+    "external/miniz/miniz_tinfl.c",
+    "external/miniz/miniz_tinfl.h",
+    "external/miniz/miniz_zip.c",
+    "external/miniz/miniz_zip.h",
+    "external/pugixml/pugiconfig.hpp",
+    "external/pugixml/pugixml.cpp",
+    "external/pugixml/pugixml.hpp",
+    "external/tweetnacl/tweetnacl.c",
+    "external/tweetnacl/tweetnacl.h"
+  ],
+  "generated_inputs": [
+    {
+      "normalization": {
+        "build_timestamp": "<build-timestamp>"
+      },
+      "path": "@build/core/runtime/generated/Release/pulp/runtime/build_info.hpp",
+      "producer_paths": [
+        "core/runtime/CMakeLists.txt",
+        "core/runtime/include/pulp/runtime/build_info.hpp.in"
+      ],
+      "sha256": "f4348365b2978d9ddf5ec3b51ba9899450a9973dc3ce91cc6da95699534108f4"
+    }
+  ],
+  "missing_targets": [],
+  "public_include_dirs": [
+    "@build/_deps/pulp-mutable-choc-src",
+    "@build/core/runtime/generated/Release",
+    "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48",
+    "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/3rdparty/everest/include",
+    "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/3rdparty/p256-m",
+    "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/3rdparty/p256-m/p256-m",
+    "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include",
+    "core/events/include",
+    "core/platform/include",
+    "core/runtime/include",
+    "core/runtime/src",
+    "core/simd",
+    "core/simd/include",
+    "external",
+    "external/cpp-httplib",
+    "external/miniz",
+    "external/pugixml"
+  ],
+  "resources": [],
+  "schema": "pulp.vellum.closure.v1",
+  "source_root": null,
+  "targets": [
+    {
+      "compile_definitions": [
+        "PULP_RT_WORK_COUNTERS=1",
+        "PULP_SIMD_DEFAULT_BACKEND_ACCELERATE=1",
+        "PULP_SIMD_HAS_ACCELERATE=1",
+        "PULP_SIMD_HAS_HIGHWAY=1"
+      ],
+      "external_link_inputs": [],
+      "include_dirs": [
+        "@build/_deps/pulp-mutable-choc-src",
+        "@build/core/runtime/generated/Release",
+        "core/events/include",
+        "core/platform/include",
+        "core/runtime/include",
+        "core/simd/include"
+      ],
+      "link_targets": [
+        "everest",
+        "hwy",
+        "mbedcrypto",
+        "mbedtls",
+        "mbedx509",
+        "p256m",
+        "pulp-platform",
+        "pulp-runtime",
+        "pulp-simd"
+      ],
+      "name": "pulp-events",
+      "public_headers": [
+        "core/events/include/pulp/events/child_process_manager.hpp",
+        "core/events/include/pulp/events/coalesced_updater.hpp",
+        "core/events/include/pulp/events/event_loop.hpp",
+        "core/events/include/pulp/events/events.hpp",
+        "core/events/include/pulp/events/in_app_purchase.hpp",
+        "core/events/include/pulp/events/interprocess_connection.hpp",
+        "core/events/include/pulp/events/main_thread_dispatcher.hpp",
+        "core/events/include/pulp/events/message_loop_integration.hpp",
+        "core/events/include/pulp/events/plugin_main_thread.hpp",
+        "core/events/include/pulp/events/push_notifications.hpp",
+        "core/events/include/pulp/events/service_discovery.hpp",
+        "core/events/include/pulp/events/timer.hpp",
+        "core/events/include/pulp/events/volume_detector.hpp"
+      ],
+      "sources": [
+        "core/events/platform/mac/bonjour_backend.cpp",
+        "core/events/platform/mac/user_notifications_backend.mm",
+        "core/events/src/child_process_manager.cpp",
+        "core/events/src/coalesced_updater.cpp",
+        "core/events/src/event_loop.cpp",
+        "core/events/src/in_app_purchase.cpp",
+        "core/events/src/interprocess_connection.cpp",
+        "core/events/src/main_thread_dispatcher.cpp",
+        "core/events/src/message_loop_integration.cpp",
+        "core/events/src/message_loop_pump_mac.mm",
+        "core/events/src/plugin_main_thread_mac.mm",
+        "core/events/src/push_notifications.cpp",
+        "core/events/src/service_discovery.cpp",
+        "core/events/src/timer.cpp",
+        "core/events/src/volume_detector.cpp"
+      ],
+      "type": "STATIC_LIBRARY"
+    },
+    {
+      "compile_definitions": [
+        "PULP_RT_WORK_COUNTERS=1"
+      ],
+      "external_link_inputs": [],
+      "include_dirs": [
+        "core/platform/include"
+      ],
+      "link_targets": [],
+      "name": "pulp-platform",
+      "public_headers": [
+        "core/platform/include/pulp/platform/android/jni.hpp",
+        "core/platform/include/pulp/platform/android/motion_bridge.h",
+        "core/platform/include/pulp/platform/child_process.hpp",
+        "core/platform/include/pulp/platform/clipboard.hpp",
+        "core/platform/include/pulp/platform/dbus.hpp",
+        "core/platform/include/pulp/platform/detect.hpp",
+        "core/platform/include/pulp/platform/device_capability.hpp",
+        "core/platform/include/pulp/platform/environment.hpp",
+        "core/platform/include/pulp/platform/file_dialog.hpp",
+        "core/platform/include/pulp/platform/native_handle.hpp",
+        "core/platform/include/pulp/platform/permissions.hpp",
+        "core/platform/include/pulp/platform/platform.hpp",
+        "core/platform/include/pulp/platform/popup_menu.hpp",
+        "core/platform/include/pulp/platform/progress_parser.hpp",
+        "core/platform/include/pulp/platform/win/registry.hpp",
+        "core/platform/include/pulp/platform/win32_sane.hpp"
+      ],
+      "sources": [
+        "core/platform/platform/mac/clipboard_mac.mm",
+        "core/platform/platform/mac/environment_mac.mm",
+        "core/platform/platform/mac/file_dialog_mac.mm",
+        "core/platform/platform/mac/popup_menu_mac.mm",
+        "core/platform/platform/posix/child_process_posix.cpp",
+        "core/platform/src/clipboard_common.cpp",
+        "core/platform/src/dbus.cpp",
+        "core/platform/src/environment.cpp",
+        "core/platform/src/file_dialog_stub.cpp",
+        "core/platform/src/permissions.cpp",
+        "core/platform/src/platform.cpp",
+        "core/platform/src/popup_menu_stub.cpp",
+        "core/platform/src/registry.cpp"
+      ],
+      "type": "STATIC_LIBRARY"
+    },
+    {
+      "compile_definitions": [
+        "CPPHTTPLIB_MBEDTLS_SUPPORT",
+        "PULP_RT_WORK_COUNTERS=1",
+        "PULP_SIMD_DEFAULT_BACKEND_ACCELERATE=1",
+        "PULP_SIMD_HAS_ACCELERATE=1",
+        "PULP_SIMD_HAS_HIGHWAY=1"
+      ],
+      "external_link_inputs": [],
+      "include_dirs": [
+        "@build/_deps/pulp-mutable-choc-src",
+        "@build/core/runtime/generated/Release",
+        "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/3rdparty/everest/include",
+        "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/3rdparty/p256-m",
+        "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/3rdparty/p256-m/p256-m",
+        "@external/mbed-tls/107ea89daaefb9867ea9121002fbbdf926780e98/include",
+        "core/platform/include",
+        "core/runtime/include",
+        "core/runtime/src",
+        "core/simd/include",
+        "external",
+        "external/cpp-httplib",
+        "external/miniz",
+        "external/pugixml"
+      ],
+      "link_targets": [
+        "everest",
+        "hwy",
+        "mbedcrypto",
+        "mbedtls",
+        "mbedx509",
+        "p256m",
+        "pulp-platform",
+        "pulp-simd"
+      ],
+      "name": "pulp-runtime",
+      "public_headers": [
+        "core/runtime/include/pulp/runtime/activity_channel.hpp",
+        "core/runtime/include/pulp/runtime/alive_token.hpp",
+        "core/runtime/include/pulp/runtime/analytics.hpp",
+        "core/runtime/include/pulp/runtime/assert.hpp",
+        "core/runtime/include/pulp/runtime/async_stream.hpp",
+        "core/runtime/include/pulp/runtime/background_job.hpp",
+        "core/runtime/include/pulp/runtime/base64.hpp",
+        "core/runtime/include/pulp/runtime/big_integer.hpp",
+        "core/runtime/include/pulp/runtime/budget_policy.hpp",
+        "core/runtime/include/pulp/runtime/child_process.hpp",
+        "core/runtime/include/pulp/runtime/crypto.hpp",
+        "core/runtime/include/pulp/runtime/detail/durable_file_replacement.hpp",
+        "core/runtime/include/pulp/runtime/dynamic_library.hpp",
+        "core/runtime/include/pulp/runtime/exceptions.hpp",
+        "core/runtime/include/pulp/runtime/expression.hpp",
+        "core/runtime/include/pulp/runtime/file_search_path.hpp",
+        "core/runtime/include/pulp/runtime/high_resolution_timer.hpp",
+        "core/runtime/include/pulp/runtime/http.hpp",
+        "core/runtime/include/pulp/runtime/i18n.hpp",
+        "core/runtime/include/pulp/runtime/identity.hpp",
+        "core/runtime/include/pulp/runtime/inter_process_lock.hpp",
+        "core/runtime/include/pulp/runtime/ip_address.hpp",
+        "core/runtime/include/pulp/runtime/json_rpc.hpp",
+        "core/runtime/include/pulp/runtime/license.hpp",
+        "core/runtime/include/pulp/runtime/log.hpp",
+        "core/runtime/include/pulp/runtime/mac_address.hpp",
+        "core/runtime/include/pulp/runtime/memory_mapped_file.hpp",
+        "core/runtime/include/pulp/runtime/memory_message_channel.hpp",
+        "core/runtime/include/pulp/runtime/message_channel.hpp",
+        "core/runtime/include/pulp/runtime/model_download.hpp",
+        "core/runtime/include/pulp/runtime/model_registry.hpp",
+        "core/runtime/include/pulp/runtime/model_store.hpp",
+        "core/runtime/include/pulp/runtime/named_pipe.hpp",
+        "core/runtime/include/pulp/runtime/network_stream.hpp",
+        "core/runtime/include/pulp/runtime/node_abi.hpp",
+        "core/runtime/include/pulp/runtime/primes.hpp",
+        "core/runtime/include/pulp/runtime/range.hpp",
+        "core/runtime/include/pulp/runtime/result.hpp",
+        "core/runtime/include/pulp/runtime/runtime.hpp",
+        "core/runtime/include/pulp/runtime/safe_relative_path.hpp",
+        "core/runtime/include/pulp/runtime/scope_guard.hpp",
+        "core/runtime/include/pulp/runtime/scoped_no_alloc.hpp",
+        "core/runtime/include/pulp/runtime/search_index.hpp",
+        "core/runtime/include/pulp/runtime/seqlock.hpp",
+        "core/runtime/include/pulp/runtime/simd.hpp",
+        "core/runtime/include/pulp/runtime/slot.hpp",
+        "core/runtime/include/pulp/runtime/socket.hpp",
+        "core/runtime/include/pulp/runtime/spsc_queue.hpp",
+        "core/runtime/include/pulp/runtime/spsc_ring_index.hpp",
+        "core/runtime/include/pulp/runtime/stream.hpp",
+        "core/runtime/include/pulp/runtime/system.hpp",
+        "core/runtime/include/pulp/runtime/temporary_file.hpp",
+        "core/runtime/include/pulp/runtime/text_diff.hpp",
+        "core/runtime/include/pulp/runtime/trace.hpp",
+        "core/runtime/include/pulp/runtime/trace_session.hpp",
+        "core/runtime/include/pulp/runtime/trace_timeout.hpp",
+        "core/runtime/include/pulp/runtime/triple_buffer.hpp",
+        "core/runtime/include/pulp/runtime/udev_monitor.hpp",
+        "core/runtime/include/pulp/runtime/url.hpp",
+        "core/runtime/include/pulp/runtime/websocket_channel.hpp",
+        "core/runtime/include/pulp/runtime/xml.hpp",
+        "core/runtime/include/pulp/runtime/zip.hpp"
+      ],
+      "sources": [
+        "core/runtime/src/analytics.cpp",
+        "core/runtime/src/async_stream.cpp",
+        "core/runtime/src/background_job.cpp",
+        "core/runtime/src/base64.cpp",
+        "core/runtime/src/big_integer.cpp",
+        "core/runtime/src/child_process.cpp",
+        "core/runtime/src/crypto.cpp",
+        "core/runtime/src/durable_file_replacement.cpp",
+        "core/runtime/src/dynamic_library.cpp",
+        "core/runtime/src/expression.cpp",
+        "core/runtime/src/high_resolution_timer.cpp",
+        "core/runtime/src/http.cpp",
+        "core/runtime/src/i18n.cpp",
+        "core/runtime/src/identity.cpp",
+        "core/runtime/src/inter_process_lock.cpp",
+        "core/runtime/src/ip_address.cpp",
+        "core/runtime/src/json_rpc.cpp",
+        "core/runtime/src/license.cpp",
+        "core/runtime/src/mac_address.cpp",
+        "core/runtime/src/memory_mapped_file.cpp",
+        "core/runtime/src/memory_message_channel.cpp",
+        "core/runtime/src/model_download.cpp",
+        "core/runtime/src/model_registry.cpp",
+        "core/runtime/src/model_store.cpp",
+        "core/runtime/src/named_pipe.cpp",
+        "core/runtime/src/network_stream.cpp",
+        "core/runtime/src/primes.cpp",
+        "core/runtime/src/runtime.cpp",
+        "core/runtime/src/scoped_no_alloc.cpp",
+        "core/runtime/src/search_index.cpp",
+        "core/runtime/src/sha256.cpp",
+        "core/runtime/src/socket.cpp",
+        "core/runtime/src/stream.cpp",
+        "core/runtime/src/system_info.cpp",
+        "core/runtime/src/temporary_file.cpp",
+        "core/runtime/src/text_diff.cpp",
+        "core/runtime/src/trace.cpp",
+        "core/runtime/src/udev_monitor.cpp",
+        "core/runtime/src/url.cpp",
+        "core/runtime/src/websocket_channel.cpp",
+        "core/runtime/src/xml.cpp",
+        "core/runtime/src/zip.cpp",
+        "external/miniz/miniz.c",
+        "external/miniz/miniz_tdef.c",
+        "external/miniz/miniz_tinfl.c",
+        "external/miniz/miniz_zip.c",
+        "external/pugixml/pugixml.cpp",
+        "external/tweetnacl/tweetnacl.c"
+      ],
+      "type": "STATIC_LIBRARY"
+    },
+    {
+      "compile_definitions": [
+        "HWY_STATIC_DEFINE",
+        "PULP_RT_WORK_COUNTERS=1",
+        "PULP_SIMD_DEFAULT_BACKEND_ACCELERATE=1",
+        "PULP_SIMD_HAS_ACCELERATE=1",
+        "PULP_SIMD_HAS_HIGHWAY=1",
+        "TOOLCHAIN_MISS_ASM_HWCAP_H",
+        "TOOLCHAIN_MISS_SYS_AUXV_H"
+      ],
+      "external_link_inputs": [],
+      "include_dirs": [
+        "@external/highway/457c891775a7397bdb0376bb1031e6e027af1c48",
+        "core/simd",
+        "core/simd/include"
+      ],
+      "link_targets": [
+        "hwy"
+      ],
+      "name": "pulp-simd",
+      "public_headers": [
+        "core/simd/include/pulp/simd/scalar_kernels.hpp",
+        "core/simd/include/pulp/simd/simd.hpp"
+      ],
+      "sources": [
+        "core/simd/src/accelerate.cpp",
+        "core/simd/src/highway.cpp",
+        "core/simd/src/scalar.cpp"
+      ],
+      "type": "STATIC_LIBRARY"
+    }
+  ],
+  "transitive_link_targets": [
+    "everest",
+    "hwy",
+    "mbedcrypto",
+    "mbedtls",
+    "mbedx509",
+    "p256m",
+    "pulp-platform",
+    "pulp-runtime",
+    "pulp-simd"
+  ]
+}

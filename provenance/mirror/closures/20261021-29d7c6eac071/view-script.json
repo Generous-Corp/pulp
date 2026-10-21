@@ -1,0 +1,1363 @@
+{
+  "build_dir": null,
+  "compile_definitions": [
+    "PULP_ENABLE_JS=1",
+    "PULP_HAS_DAWN=1",
+    "PULP_HAS_DESIGN_IMPORT=1",
+    "PULP_HAS_SKIA=1",
+    "PULP_HAS_SKRESOURCES=1",
+    "PULP_HAS_WEBGPU=1",
+    "PULP_RT_WORK_COUNTERS=1",
+    "PULP_SIMD_DEFAULT_BACKEND_ACCELERATE=1",
+    "PULP_SIMD_HAS_ACCELERATE=1",
+    "PULP_SIMD_HAS_HIGHWAY=1",
+    "SK_DAWN",
+    "SK_GRAPHITE",
+    "SK_RELEASE"
+  ],
+  "configuration": "Release",
+  "configure": {
+    "identity": {
+      "build_type": "Release",
+      "gpu": true,
+      "processor": "arm64",
+      "skia": true,
+      "system": "Darwin",
+      "text_shaping": true
+    },
+    "options": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "CMAKE_SYSTEM_NAME": "Darwin",
+      "CMAKE_SYSTEM_PROCESSOR": "arm64",
+      "PULP_AUDIO_QUALITY_LAB_GATE": "OFF",
+      "PULP_BENCHMARK": "OFF",
+      "PULP_BUILD_EXAMPLES": "OFF",
+      "PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS": "OFF",
+      "PULP_BUILD_NODEJS": "OFF",
+      "PULP_BUILD_PYTHON": "OFF",
+      "PULP_BUILD_RUST_CLI": "ON",
+      "PULP_BUILD_TESTS": "ON",
+      "PULP_BUILD_WASM_TESTS": "OFF",
+      "PULP_BUILD_WEBVIEW": "OFF",
+      "PULP_BUNDLE_NOTO_COLOR_EMOJI": "OFF",
+      "PULP_CHANGED_SURFACE_INVENTORY_TARGET": "OFF",
+      "PULP_CONFIGURE_CHECK_CACHE": "ON",
+      "PULP_D3D_AVAILABLE": "OFF",
+      "PULP_ENABLE_AAX": "OFF",
+      "PULP_ENABLE_ABLETON_LINK": "OFF",
+      "PULP_ENABLE_ARA": "OFF",
+      "PULP_ENABLE_AUDIO_PROBES": "ON",
+      "PULP_ENABLE_AUTHORING_CAPSULE": "ON",
+      "PULP_ENABLE_COVERAGE": "OFF",
+      "PULP_ENABLE_DESIGN_IMPORT": "ON",
+      "PULP_ENABLE_DRACO": "OFF",
+      "PULP_ENABLE_FUZZING": "OFF",
+      "PULP_ENABLE_GPU": "ON",
+      "PULP_ENABLE_INSPECTOR": "ON",
+      "PULP_ENABLE_JS": "ON",
+      "PULP_ENABLE_MTS_ESP": "OFF",
+      "PULP_ENABLE_PROJECT_PACKAGE": "ON",
+      "PULP_ENABLE_RACK": "OFF",
+      "PULP_ENABLE_SCALA_TUNING": "OFF",
+      "PULP_ENABLE_SCENE3D": "OFF",
+      "PULP_ENABLE_SWIFT": "OFF",
+      "PULP_ENABLE_THREEJS_RUNTIME": "ON",
+      "PULP_FETCHCONTENT_UPDATES_DISCONNECTED": "ON",
+      "PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER": "OFF",
+      "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF": "OFF",
+      "PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC": "OFF",
+      "PULP_HAS_AUSDK": "TRUE",
+      "PULP_HAS_CLAP": "TRUE",
+      "PULP_HAS_JSC_ACTUAL": "OFF",
+      "PULP_HAS_LV2": "TRUE",
+      "PULP_HAS_MTS_ESP": "FALSE",
+      "PULP_HAS_SCALA_TUNING": "FALSE",
+      "PULP_HAS_SKIA": "TRUE",
+      "PULP_HAS_VST3": "TRUE",
+      "PULP_HAS_WEBGPU": "TRUE",
+      "PULP_HOST_ENABLE_GPU_CONVOLUTION": "OFF",
+      "PULP_HOST_QUIRKS_DEFAULT_POLICY": "validated_only",
+      "PULP_INTEL_CANARY": "OFF",
+      "PULP_JS_ENGINE": "auto",
+      "PULP_LINK_JOBS": "",
+      "PULP_LOTTIE": "OFF",
+      "PULP_MACOS_ARCH": "host",
+      "PULP_PLUGIN_PACKAGING": "single",
+      "PULP_REAL_PLUGIN_TESTS": "OFF",
+      "PULP_RECORD_LINK_MAPS": "OFF",
+      "PULP_REQUIRE_CHECKOUT_DEPENDENCIES": "ON",
+      "PULP_REQUIRE_GPU_FOR_SDK": "OFF",
+      "PULP_RT_WORK_COUNTERS": "ON",
+      "PULP_RUST_CLI_PROFILE": "release",
+      "PULP_RUST_CLI_TARGET": "",
+      "PULP_SANITIZER": "",
+      "PULP_SIMD_BACKEND": "auto",
+      "PULP_SKIA_AUTOFETCH": "ON",
+      "PULP_TEST_PCH": "ON",
+      "PULP_TEST_PCH_HEADERS": "<catch2/catch_test_macros.hpp>;<catch2/catch_approx.hpp>;<catch2/matchers/catch_matchers_floating_point.hpp>;<catch2/matchers/catch_matchers_string.hpp>;<algorithm>;<array>;<atomic>;<chrono>;<cmath>;<cstddef>;<cstdint>;<cstdio>;<cstdlib>;<cstring>;<filesystem>;<fstream>;<functional>;<limits>;<memory>;<numbers>;<optional>;<span>;<sstream>;<string>;<string_view>;<thread>;<type_traits>;<utility>;<vector>",
+      "PULP_TEST_TIMEOUT_CEILING": "3600",
+      "PULP_TEST_TIMEOUT_COVERAGE_SCALE": "4",
+      "PULP_TEST_TIMEOUT_SANITIZER_SCALE": "8",
+      "PULP_TEST_TIMEOUT_SCALE": "",
+      "PULP_TEXT_SHAPING": "ON",
+      "PULP_TRACING": "OFF",
+      "PULP_USE_CCACHE": "ON",
+      "PULP_USE_SHARED_FETCHCONTENT_SOURCES": "ON",
+      "PULP_VALIDATE_V8_PROVIDER_STRICT": "OFF",
+      "PULP_VULKAN_AVAILABLE": "OFF"
+    },
+    "options_sha256": "baadeb2e38625f4ea79414123f15a28db4e516cbe79fcffeb0ea424256d90f00"
+  },
+  "external_inputs": [
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/dawn/webgpu.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "791eca8e9b9dffcd6cde63bb11b000e84541d827ecd1dd22e0c2a48fa81bdac2",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/dawn/webgpu_cpp.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "110fa9a71116114c0309b52a3312b4f3d5ace85da1f04c1d0a38595434509c22",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/config/SkUserConfig.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "e24518c884b871f2e0a243739028d489f690449f9a5470a78dbc562eda939727",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkAlphaType.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "4e1a8e75b069e79199e3a0b4229ffb3903ff17d3cae7fcdbbb3f60ef2548473e",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkBlendMode.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "13578e67b2f1ee0bfdc0a1878e08e59bf4b666297059b16841f53ba2911f49ea",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkColor.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "26a733272e91935424758f838b6b094a2c258fe4f08ba35f53d162e2a14b0cc6",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkColorSpace.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "f7308d5be05b0edbe487a330b49d055359d32d6e0a9524fc81a3c2b26f824093",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkColorType.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "083519ba6a9a06828407ab93b9e2adf7e1ea2866203f34ec1f387785f04b8096",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkData.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "dbf420417fa49a360e20c9d3a056e672fb44ed2c0d410e43144efba2032192a1",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkFontStyle.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "8409ce9d54e3b65b2b2f94b72adc503e680632c4adba940945aa10c154167c24",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkImage.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "4082cdc74a29b7000e76cc6b21c6c0be94b381f11f887a1449d0bcff91cc725a",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkImageInfo.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "b8587da422c6e74c672740124f3b10c334d0ddd3703b60c908cdfe70954abbfc",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkMatrix.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "adf13a462ef5530825ccd277a0f35d7a5cd1d4bdb2e50297c97d2ebb25d3f08a",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkPathTypes.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "53a8e4cb554ba0d72d85099897b4ad826155899ae4e34216fdf61f73753866c5",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkPixmap.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "72f8df678f9e0ae4824f26fb7744d5de3ecf34de976c8036517745ab5ac4c833",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkPoint.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "5738cc23ce836e68be3a674cacec66147b8aa8975bcd2ae293f2fe14932551c9",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkPoint3.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "f240e9c3195ec8e77917ecaf4918cc4f0d1cf6ba6858af2454461c8c06b857c4",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkRect.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "03e5fb31037aa3a40191c92189da435c92062f3f3ad90be044a0df9b4692ac86",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkRefCnt.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "39f7cd9cd3806be6eef0533ec9bf13e0cdfcfc2ee2883e50ca8d36b9c86da85b",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkSamplingOptions.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "1d63243fa796d52214cfb59a29dd94dade117a17a04d0785325cc3b1b24c92a4",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkScalar.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "dd0f81cdf750725537baa134ec2343098f60a9515ad9a4b048f5d3b1c9dc4a18",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkSize.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "28b191c992ad0124fd5b63733516fa45b07dd27351574d6d9a58e63fbe22d676",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkSpan.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "46ee18609d9fbfd91472ed7f973a45ea4f970601a063ad27758b4c08e1a49c59",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/core/SkTypes.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "617107436969cdd06f50891b90163d4ce089ecfafabdef9179a1c1f8be645656",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/gpu/GpuTypes.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "3b39d3d028361794c0a6a2fd5150d462693b7195992a24541d2745d5dd4c276d",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/gpu/graphite/Image.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "1f17e10ca68622382dfbdc42c82da2f3d662712b34776f030c1a148a138924b3",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkAPI.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "7fff0712d60946b882b0aa7a00185b4baf31b2659b65d67d92152b2218ae101f",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkAssert.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "1bf3b0f45731d1f38bc447407d845bb031dd4f372614c3ffddee07cf67750da8",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkAttributes.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "2c5182ef84da0241d2606440129112c7b58ff5ee7febd02010d919c181c191ca",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkCPUTypes.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "3b4b118465517b61823aac8495909c1e2738f76aba9dba9a51f2caac35a3c92b",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkDebug.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "e7425b888837a560cd005f2ce752979c0d646c663aef92c977d8aabaf676eb34",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkFeatures.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "d20d246f13400fe5a0e9f335611d825f936fa469e043e967849db673476196d1",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkFixed.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "0e70e9096a31bcee59712ec60fe59f695b52bf8b23453759334914d725409507",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkFloatingPoint.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "5ec4fc13cf8a4830392fc33d9e85d642f055a1de4cc30195ca6bd60da8dc9c2f",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkLoadUserConfig.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "eb0fae79a274c5a8d089f7e14b0414fb6f2b55276f7f3ef9ce529a786acf8450",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkLog.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "7bdfc059f62ce5072db54f3c85a09cc5a149b240752dfa9053515fe25d32900d",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkLogPriority.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "6fcd70ad1a6228067396542a99000d32bc4ea1cc0b50d26694e07e36ffa60bfc",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkMacros.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "42adcd76b5ffcbb99059022037c103a4716553bdd9b5f301dc86690b309fed01",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkMath.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "b27297f80ea13e15ade6c8416ad58701496ce958ad767759f445824e18c82086",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkOnce.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "7d63310c9c5839059a6e77b53f2363c6d7150564e3b4a20c10e3bc0c310256b0",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkSafe32.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "ee0ca55b299c5e9a7ee28531355b8f1c1ba8a1dd56c22bafc493641209d97275",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkTFitsIn.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "57a03bcd04f7f3cb237623ef94ad785c5d397ce968b232398d2c3e6fa34f276f",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkTPin.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "6a37dcfe77a2c5b2482fa2340db3771b681b6ea87596704a35fa29923e9ee611",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkThreadAnnotations.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "db04b25f616b86886b76d4223f650ccdd97482c167cd5dfc89db617923dec9e8",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/include/private/SkTo.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "a7c7ba4c6510010ca4fc94b9dff3d2a15a45228c428612b6e6c33d64f7a0c3cb",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/modules/skcms/skcms.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "f3431fe230076dda4dcad5c3b1cc4789ef6d71967f254c6fdac32a3b97bb94de",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/modules/skcms/src/skcms_public.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "1e4eee527f38913fc4ea2b66a13192827e4daa5c3eff6422d4cc298922187aea",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/third_party/externals/dawn/include/webgpu/webgpu.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "5316d9fd241e604b3260fa8d4398a458a3dc88ee69c540ac959260b444bdfae3",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/third_party/externals/dawn/include/webgpu/webgpu_cpp.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "1166cea03743213cbd0a7fe04b01c8bcae8aa117d1370c124572c65b24f74aac",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/third_party/externals/dawn/include/webgpu/webgpu_enum_class_bitmasks.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "fd436dc17d050e156ac073b6148d90d388e2585de924ae0274b6aed3067c2a96",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+      "path": "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/webgpu/webgpu_cpp_chained_struct.h",
+      "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+      "sha256": "7329fc197c9047ce1c08c3294401836f7f7b24bdf07fbaf0a266253ffa1ac3b8",
+      "source": "https://skia.googlesource.com/skia.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/containers/choc_FIFOReadWritePosition.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "c60f40d9c15cd022dda874d036d0370fa5603272ffffd8e445a6de5fc1e3af54",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/containers/choc_SingleReaderSingleWriterFIFO.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "038bbd0a84c7459bd7c0dbfe7eead53a1bffca356c1c0a0483e722ea8c497c4d",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/containers/choc_Value.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "bc627e86c0ae21dd0f6bfa0116777ccc7741b007d7f88a790642305ce9cc8672",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/javascript/choc_javascript.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "30442e3ff5b6991ccded15a28066d0a5224a9d5c6923e31b2232f50be5298e66",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/javascript/choc_javascript_Console.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "42cdb45ccc7856650192c163c57d900b57d15d0997065a3a4d81071badf75781",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/javascript/choc_javascript_QuickJS.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "687e9b7fed3512505d0f9e21fac193cad8dace40ae3504d5202f31070f6f0e7a",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/javascript/choc_javascript_V8.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "df5630c4a4ecb90dd2a8e155febe56d67b8a62251e1268b0371a009472c4207f",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/math/choc_MathHelpers.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "b5f92c6f9bc448a018c8992fe43361d2af001fb4bd90f31694d69ae296cf7051",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/platform/choc_Assert.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "3d26633e425cd35f74f740bcbae146a75078d8ffa71b94cc5157078d737fb01e",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/platform/choc_DisableAllWarnings.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "c2796bb603e01b29f1004dc331e55ae63386f1aec7e331356e1abb4f8d275609",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/platform/choc_FileWatcher.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "6e2fe8a36725bdbf92ed5d307d2ac684cc9c3c869f54c919948a44e35d7e3999",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/platform/choc_Platform.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "334dd65e920f476816ac0465d229dc17aada42d7b2b49e04906749ff7d6aa9c3",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/platform/choc_ReenableAllWarnings.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "fe9d4b3f6f7f21acc5b0f30cf936aa471897e39626a61fd336072b6df797d560",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/text/choc_FloatToString.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "d599b596301c8863c2b270607f14ae239ff1af3c89de995e7202ec691f05e723",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/text/choc_JSON.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "7ce92baeaa781dac7498036ac12e8e6d04b556313b08c3d8474fbfb009f379dc",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/text/choc_StringUtilities.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "e848fa942feee81cc8f441211a8d8aef50bc7265592cc5a644ae1231a825c063",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/text/choc_UTF8.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "ff7cf70c90873bfbae08041e37fbb86eb9f072bbb477ae709d7ff36814368a33",
+      "source": "https://github.com/danielraffel/choc.git"
+    },
+    {
+      "base_modification": "",
+      "copy_tree": "405e587c78b4f4ce9a7f0a6dacabc8976278ce6fb2632bf114e2ca4c18832d37",
+      "patch": "c3785840b2b660979cbeb2dc3a72516b545b832051d91d3515a7a9f5fa903ce0",
+      "patch_recipe": {
+        "formula": "sha256(utf8('patch-set:' + patch_set.key + '\\nbase-modification:' + base_modification + '\\ncopy-tree:' + copy_tree + '\\n'))",
+        "id": "pulp.vellum.patch-id.v1",
+        "replay": {
+          "functions": [
+            "pulp_patch_choc_v8",
+            "pulp_patch_choc_json_number_exponent"
+          ],
+          "method": "export the pinned commit with `git archive <pin>`; in a CMake -P script, include the patch-set file whose git blob is patch_set_blob and call each name in functions, in order, with the exported tree's root; copy_tree is the digest of the result",
+          "patch_set_blob": "70351123a721ba86356305394c2d099e124caf65"
+        }
+      },
+      "patch_set": {
+        "key": "17abe8d688be108f697e50aead5e7ef98abd5d3c4d3bbe039ee2b7d422ee84d5",
+        "pulp_blob": "70351123a721ba86356305394c2d099e124caf65",
+        "pulp_path": "tools/cmake/PulpPatchChoc.cmake"
+      },
+      "patched": true,
+      "path": "@external/choc/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60+patch-c3785840b2b66097/choc/threading/choc_TaskThread.h",
+      "pin": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60",
+      "sha256": "86c38549f68643ff4004b494fd45c5e43a526fb6cb366f8c289b7f97317ef1c1",
+      "source": "https://github.com/danielraffel/choc.git"
+    }
+  ],
+  "files": [
+    "core/canvas/include/pulp/canvas/affine_transform.hpp",
+    "core/canvas/include/pulp/canvas/attributed_string.hpp",
+    "core/canvas/include/pulp/canvas/bundled_fonts.hpp",
+    "core/canvas/include/pulp/canvas/canvas.hpp",
+    "core/canvas/include/pulp/canvas/canvas_capability.hpp",
+    "core/canvas/include/pulp/canvas/path.hpp",
+    "core/canvas/include/pulp/canvas/recording_canvas.hpp",
+    "core/canvas/include/pulp/canvas/rectangle_list.hpp",
+    "core/canvas/include/pulp/canvas/scene_recording.hpp",
+    "core/canvas/include/pulp/canvas/sdf_atlas.hpp",
+    "core/canvas/include/pulp/canvas/skia_canvas.hpp",
+    "core/canvas/include/pulp/canvas/text_shaper.hpp",
+    "core/canvas/include/pulp/canvas/text_utf8.hpp",
+    "core/canvas/include/pulp/canvas/view_effect.hpp",
+    "core/platform/include/pulp/platform/child_process.hpp",
+    "core/platform/include/pulp/platform/clipboard.hpp",
+    "core/platform/include/pulp/platform/detect.hpp",
+    "core/platform/include/pulp/platform/file_dialog.hpp",
+    "core/platform/include/pulp/platform/popup_menu.hpp",
+    "core/platform/include/pulp/platform/win32_sane.hpp",
+    "core/render/include/pulp/render/bench/perf_counters.hpp",
+    "core/render/include/pulp/render/gpu_surface.hpp",
+    "core/runtime/include/pulp/runtime/async_stream.hpp",
+    "core/runtime/include/pulp/runtime/background_job.hpp",
+    "core/runtime/include/pulp/runtime/base64.hpp",
+    "core/runtime/include/pulp/runtime/crypto.hpp",
+    "core/runtime/include/pulp/runtime/log.hpp",
+    "core/runtime/include/pulp/runtime/safe_relative_path.hpp",
+    "core/runtime/include/pulp/runtime/search_index.hpp",
+    "core/runtime/include/pulp/runtime/spsc_queue.hpp",
+    "core/runtime/include/pulp/runtime/stream.hpp",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "core/runtime/include/pulp/runtime/triple_buffer.hpp",
+    "core/runtime/include/pulp/runtime/zip.hpp",
+    "core/state/include/pulp/state/listener_token.hpp",
+    "core/state/include/pulp/state/param_json.hpp",
+    "core/state/include/pulp/state/parameter.hpp",
+    "core/state/include/pulp/state/state_migration.hpp",
+    "core/state/include/pulp/state/store.hpp",
+    "core/view/cmake/PulpViewJsPreludes.cmake",
+    "core/view/include/pulp/view/accessibility.hpp",
+    "core/view/include/pulp/view/accessibility_provider.hpp",
+    "core/view/include/pulp/view/anchor_strategy.hpp",
+    "core/view/include/pulp/view/animation.hpp",
+    "core/view/include/pulp/view/appearance_tracker.hpp",
+    "core/view/include/pulp/view/aria_roles.hpp",
+    "core/view/include/pulp/view/asset_manager.hpp",
+    "core/view/include/pulp/view/binding_diagnostics.hpp",
+    "core/view/include/pulp/view/buttons.hpp",
+    "core/view/include/pulp/view/canvas_widget.hpp",
+    "core/view/include/pulp/view/caret.hpp",
+    "core/view/include/pulp/view/css_animation.hpp",
+    "core/view/include/pulp/view/css_gradient.hpp",
+    "core/view/include/pulp/view/custom_shader_host.hpp",
+    "core/view/include/pulp/view/data_display.hpp",
+    "core/view/include/pulp/view/design_codegen.hpp",
+    "core/view/include/pulp/view/design_fidelity.hpp",
+    "core/view/include/pulp/view/design_import.hpp",
+    "core/view/include/pulp/view/design_ir.hpp",
+    "core/view/include/pulp/view/design_ir_io.hpp",
+    "core/view/include/pulp/view/design_shortcuts.hpp",
+    "core/view/include/pulp/view/design_source_types.hpp",
+    "core/view/include/pulp/view/design_sources.hpp",
+    "core/view/include/pulp/view/design_tokens.hpp",
+    "core/view/include/pulp/view/design_update.hpp",
+    "core/view/include/pulp/view/drag_drop.hpp",
+    "core/view/include/pulp/view/frame_clock.hpp",
+    "core/view/include/pulp/view/gap_widgets.hpp",
+    "core/view/include/pulp/view/geometry.hpp",
+    "core/view/include/pulp/view/gesture.hpp",
+    "core/view/include/pulp/view/hit_metrics.hpp",
+    "core/view/include/pulp/view/hot_reload.hpp",
+    "core/view/include/pulp/view/input_events.hpp",
+    "core/view/include/pulp/view/inspector_facts.hpp",
+    "core/view/include/pulp/view/js_engine.hpp",
+    "core/view/include/pulp/view/js_engine_recommend.hpp",
+    "core/view/include/pulp/view/modal.hpp",
+    "core/view/include/pulp/view/motion.hpp",
+    "core/view/include/pulp/view/motion_preferences.hpp",
+    "core/view/include/pulp/view/native_view_host.hpp",
+    "core/view/include/pulp/view/overlay_dismissal.hpp",
+    "core/view/include/pulp/view/param_subscription.hpp",
+    "core/view/include/pulp/view/pointer_dispatch.hpp",
+    "core/view/include/pulp/view/query_service.hpp",
+    "core/view/include/pulp/view/reload_capabilities.hpp",
+    "core/view/include/pulp/view/script_engine.hpp",
+    "core/view/include/pulp/view/script_event_dispatch.hpp",
+    "core/view/include/pulp/view/script_inspector_port.hpp",
+    "core/view/include/pulp/view/scripted_ui.hpp",
+    "core/view/include/pulp/view/scripted_ui_prewarm.hpp",
+    "core/view/include/pulp/view/selectable_text.hpp",
+    "core/view/include/pulp/view/slider_core.hpp",
+    "core/view/include/pulp/view/sprite_strip.hpp",
+    "core/view/include/pulp/view/svg_path_widget.hpp",
+    "core/view/include/pulp/view/text_editor.hpp",
+    "core/view/include/pulp/view/theme.hpp",
+    "core/view/include/pulp/view/ui_components.hpp",
+    "core/view/include/pulp/view/value_channel_json.hpp",
+    "core/view/include/pulp/view/value_channel_set.hpp",
+    "core/view/include/pulp/view/value_channel_telemetry.hpp",
+    "core/view/include/pulp/view/value_source.hpp",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/include/pulp/view/view_lifecycle.hpp",
+    "core/view/include/pulp/view/view_pool.hpp",
+    "core/view/include/pulp/view/virtual_grid.hpp",
+    "core/view/include/pulp/view/virtual_list.hpp",
+    "core/view/include/pulp/view/w3c_tokens.hpp",
+    "core/view/include/pulp/view/widget_bridge.hpp",
+    "core/view/include/pulp/view/widget_metrics.hpp",
+    "core/view/include/pulp/view/widget_painter.hpp",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/include/pulp/view/widgets/svg_line.hpp",
+    "core/view/include/pulp/view/widgets/svg_rect.hpp",
+    "core/view/js/css-colors.js",
+    "core/view/js/css-parser.js",
+    "core/view/js/embed_js.py",
+    "core/view/js/import-runtime.js",
+    "core/view/js/web-compat-animation.js",
+    "core/view/js/web-compat-canvas-gpu.js",
+    "core/view/js/web-compat-canvas-image.js",
+    "core/view/js/web-compat-canvas-matrix.js",
+    "core/view/js/web-compat-canvas.js",
+    "core/view/js/web-compat-document-gpu-mock.js",
+    "core/view/js/web-compat-document-selectors.js",
+    "core/view/js/web-compat-document.js",
+    "core/view/js/web-compat-dom-ops.js",
+    "core/view/js/web-compat-element-events.js",
+    "core/view/js/web-compat-element.js",
+    "core/view/js/web-compat-gpu-buffered.js",
+    "core/view/js/web-compat-observers.js",
+    "core/view/js/web-compat-scheduler.js",
+    "core/view/js/web-compat-style-decl-helpers.js",
+    "core/view/js/web-compat-style-decl-layout.js",
+    "core/view/js/web-compat-style-decl-misc.js",
+    "core/view/js/web-compat-style-decl-paint.js",
+    "core/view/js/web-compat-style-decl-transform.js",
+    "core/view/js/web-compat-style-decl-typography.js",
+    "core/view/js/web-compat-style-decl.js",
+    "core/view/js/web-compat-style-dedup-table.js",
+    "core/view/js/web-compat-transient-interaction.js",
+    "core/view/src/claude_bundle.cpp",
+    "core/view/src/claude_bundle_sources.cpp",
+    "core/view/src/design_import_internal.hpp",
+    "core/view/src/hot_reload.cpp",
+    "core/view/src/import_validation_bridge.hpp",
+    "core/view/src/js_engine_factory.cpp",
+    "core/view/src/js_engine_recommend.cpp",
+    "core/view/src/js_quickjs_engine.cpp",
+    "core/view/src/js_v8_engine.cpp",
+    "core/view/src/materialized_document_cache.cpp",
+    "core/view/src/pointer_dispatch_internal.hpp",
+    "core/view/src/script_engine.cpp",
+    "core/view/src/scripted_ui.cpp",
+    "core/view/src/scripted_ui_prewarm.cpp",
+    "core/view/src/widget_bridge.cpp",
+    "core/view/src/widget_bridge/accessibility_api.cpp",
+    "core/view/src/widget_bridge/animation_api.cpp",
+    "core/view/src/widget_bridge/api_registry.hpp",
+    "core/view/src/widget_bridge/border_box_api.cpp",
+    "core/view/src/widget_bridge/border_radius_api.cpp",
+    "core/view/src/widget_bridge/border_side_api.cpp",
+    "core/view/src/widget_bridge/bridge_dispatch.cpp",
+    "core/view/src/widget_bridge/bridge_dispatch.hpp",
+    "core/view/src/widget_bridge/canvas2d_api.cpp",
+    "core/view/src/widget_bridge/css_color.cpp",
+    "core/view/src/widget_bridge/css_color.hpp",
+    "core/view/src/widget_bridge/dom_api.cpp",
+    "core/view/src/widget_bridge/event_api.cpp",
+    "core/view/src/widget_bridge/factory_api.cpp",
+    "core/view/src/widget_bridge/gpu_api.cpp",
+    "core/view/src/widget_bridge/gpu_common.cpp",
+    "core/view/src/widget_bridge/gpu_common.hpp",
+    "core/view/src/widget_bridge/js_trace_scopes.hpp",
+    "core/view/src/widget_bridge/layout_api.cpp",
+    "core/view/src/widget_bridge/list_style_api.cpp",
+    "core/view/src/widget_bridge/metadata_api.cpp",
+    "core/view/src/widget_bridge/outline_api.cpp",
+    "core/view/src/widget_bridge/platform_services_api.cpp",
+    "core/view/src/widget_bridge/query_service_api.cpp",
+    "core/view/src/widget_bridge/realm_lifecycle.cpp",
+    "core/view/src/widget_bridge/registrars.hpp",
+    "core/view/src/widget_bridge/retained_shader_geometry.cpp",
+    "core/view/src/widget_bridge/retained_shader_geometry.hpp",
+    "core/view/src/widget_bridge/runtime_api.cpp",
+    "core/view/src/widget_bridge/runtime_import_api.cpp",
+    "core/view/src/widget_bridge/shader_api.cpp",
+    "core/view/src/widget_bridge/state_binding_api.cpp",
+    "core/view/src/widget_bridge/storage_assets_api.cpp",
+    "core/view/src/widget_bridge/style_cursor_api.cpp",
+    "core/view/src/widget_bridge/style_effects_api.cpp",
+    "core/view/src/widget_bridge/style_rn_compat_api.cpp",
+    "core/view/src/widget_bridge/style_state_api.cpp",
+    "core/view/src/widget_bridge/style_storage_api.cpp",
+    "core/view/src/widget_bridge/style_visibility_api.cpp",
+    "core/view/src/widget_bridge/style_visual_api.cpp",
+    "core/view/src/widget_bridge/subtree_cleanup.cpp",
+    "core/view/src/widget_bridge/svg_api.cpp",
+    "core/view/src/widget_bridge/text_runs_api.cpp",
+    "core/view/src/widget_bridge/theme_api.cpp",
+    "core/view/src/widget_bridge/tokens_api.cpp",
+    "core/view/src/widget_bridge/typography_api.cpp",
+    "core/view/src/widget_bridge/value_channel_access.cpp",
+    "core/view/src/widget_bridge/value_channel_binding_service.cpp",
+    "core/view/src/widget_bridge/value_widget_access.hpp",
+    "core/view/src/widget_bridge/widget_assets_api.cpp",
+    "core/view/src/widget_bridge/widget_callbacks.cpp",
+    "core/view/src/widget_bridge/widget_schema_api.cpp",
+    "core/view/src/widget_bridge/widget_value_basic_api.cpp",
+    "core/view/src/widget_bridge/widget_value_content_api.cpp",
+    "core/view/src/widget_bridge/widget_value_controls_api.cpp",
+    "core/view/src/widget_bridge/widget_value_list_api.cpp",
+    "core/view/src/widget_bridge_input.cpp"
+  ],
+  "generated_inputs": [
+    {
+      "path": "@build/core/view/web_compat_preludes_gen.cpp",
+      "producer_paths": [
+        "core/view/cmake/PulpViewJsPreludes.cmake",
+        "core/view/js/embed_js.py"
+      ],
+      "sha256": "39c1e7002bbdaa2f9f50466e182d85f8e6ed117dd408d9ef24e225e69dfa749c"
+    },
+    {
+      "path": "@build/core/view/web_compat_preludes_gen.hpp",
+      "producer_paths": [
+        "core/view/cmake/PulpViewJsPreludes.cmake",
+        "core/view/js/embed_js.py"
+      ],
+      "sha256": "7f9f354b1bfaf7dc68218ebc84c37ca30b72a59537720217aaf94291d2c76c0a"
+    }
+  ],
+  "missing_targets": [],
+  "public_include_dirs": [
+    "@build/_deps/pulp-mutable-choc-src",
+    "@build/core/runtime/generated/Release",
+    "@build/core/view",
+    "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build",
+    "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include",
+    "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/third_party/externals/dawn/include",
+    "core/canvas/include",
+    "core/events/include",
+    "core/platform/include",
+    "core/render/include",
+    "core/runtime/include",
+    "core/simd/include",
+    "core/state/include",
+    "core/view/include"
+  ],
+  "resources": [],
+  "schema": "pulp.vellum.closure.v1",
+  "source_root": null,
+  "targets": [
+    {
+      "compile_definitions": [
+        "PULP_ENABLE_JS=1",
+        "PULP_HAS_DAWN=1",
+        "PULP_HAS_DESIGN_IMPORT=1",
+        "PULP_HAS_SKIA=1",
+        "PULP_HAS_SKRESOURCES=1",
+        "PULP_HAS_WEBGPU=1",
+        "PULP_RT_WORK_COUNTERS=1",
+        "PULP_SIMD_DEFAULT_BACKEND_ACCELERATE=1",
+        "PULP_SIMD_HAS_ACCELERATE=1",
+        "PULP_SIMD_HAS_HIGHWAY=1",
+        "SK_DAWN",
+        "SK_GRAPHITE",
+        "SK_RELEASE"
+      ],
+      "external_link_inputs": [
+        {
+          "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+          "dependency": "skia",
+          "pin": "8b8c3872fbc03f025855db96ce683f34ec98a815",
+          "source": "https://skia.googlesource.com/skia.git"
+        }
+      ],
+      "include_dirs": [
+        "@build/_deps/pulp-mutable-choc-src",
+        "@build/core/runtime/generated/Release",
+        "@build/core/view",
+        "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build",
+        "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include",
+        "@external/skia/8b8c3872fbc03f025855db96ce683f34ec98a815/build/include/third_party/externals/dawn/include",
+        "core/canvas/include",
+        "core/events/include",
+        "core/platform/include",
+        "core/render/include",
+        "core/runtime/include",
+        "core/simd/include",
+        "core/state/include",
+        "core/view/include"
+      ],
+      "link_targets": [
+        "SDL3-static",
+        "SheenBidi",
+        "everest",
+        "hwy",
+        "mbedcrypto",
+        "mbedtls",
+        "mbedx509",
+        "p256m",
+        "pulp-bundled-fonts",
+        "pulp-canvas",
+        "pulp-design-import",
+        "pulp-events",
+        "pulp-gpu-device",
+        "pulp-platform",
+        "pulp-render",
+        "pulp-runtime",
+        "pulp-simd",
+        "pulp-state",
+        "pulp-view-core",
+        "yaml-cpp",
+        "yogacore"
+      ],
+      "name": "pulp-view-script",
+      "sources": [
+        "@build/core/view/web_compat_preludes_gen.cpp",
+        "core/view/src/claude_bundle.cpp",
+        "core/view/src/claude_bundle_sources.cpp",
+        "core/view/src/hot_reload.cpp",
+        "core/view/src/js_engine_factory.cpp",
+        "core/view/src/js_engine_recommend.cpp",
+        "core/view/src/js_quickjs_engine.cpp",
+        "core/view/src/js_v8_engine.cpp",
+        "core/view/src/materialized_document_cache.cpp",
+        "core/view/src/script_engine.cpp",
+        "core/view/src/scripted_ui.cpp",
+        "core/view/src/scripted_ui_prewarm.cpp",
+        "core/view/src/widget_bridge.cpp",
+        "core/view/src/widget_bridge/accessibility_api.cpp",
+        "core/view/src/widget_bridge/animation_api.cpp",
+        "core/view/src/widget_bridge/border_box_api.cpp",
+        "core/view/src/widget_bridge/border_radius_api.cpp",
+        "core/view/src/widget_bridge/border_side_api.cpp",
+        "core/view/src/widget_bridge/bridge_dispatch.cpp",
+        "core/view/src/widget_bridge/canvas2d_api.cpp",
+        "core/view/src/widget_bridge/css_color.cpp",
+        "core/view/src/widget_bridge/dom_api.cpp",
+        "core/view/src/widget_bridge/event_api.cpp",
+        "core/view/src/widget_bridge/factory_api.cpp",
+        "core/view/src/widget_bridge/gpu_api.cpp",
+        "core/view/src/widget_bridge/gpu_common.cpp",
+        "core/view/src/widget_bridge/layout_api.cpp",
+        "core/view/src/widget_bridge/list_style_api.cpp",
+        "core/view/src/widget_bridge/metadata_api.cpp",
+        "core/view/src/widget_bridge/outline_api.cpp",
+        "core/view/src/widget_bridge/platform_services_api.cpp",
+        "core/view/src/widget_bridge/query_service_api.cpp",
+        "core/view/src/widget_bridge/realm_lifecycle.cpp",
+        "core/view/src/widget_bridge/retained_shader_geometry.cpp",
+        "core/view/src/widget_bridge/runtime_api.cpp",
+        "core/view/src/widget_bridge/runtime_import_api.cpp",
+        "core/view/src/widget_bridge/shader_api.cpp",
+        "core/view/src/widget_bridge/state_binding_api.cpp",
+        "core/view/src/widget_bridge/storage_assets_api.cpp",
+        "core/view/src/widget_bridge/style_cursor_api.cpp",
+        "core/view/src/widget_bridge/style_effects_api.cpp",
+        "core/view/src/widget_bridge/style_rn_compat_api.cpp",
+        "core/view/src/widget_bridge/style_state_api.cpp",
+        "core/view/src/widget_bridge/style_storage_api.cpp",
+        "core/view/src/widget_bridge/style_visibility_api.cpp",
+        "core/view/src/widget_bridge/style_visual_api.cpp",
+        "core/view/src/widget_bridge/subtree_cleanup.cpp",
+        "core/view/src/widget_bridge/svg_api.cpp",
+        "core/view/src/widget_bridge/text_runs_api.cpp",
+        "core/view/src/widget_bridge/theme_api.cpp",
+        "core/view/src/widget_bridge/tokens_api.cpp",
+        "core/view/src/widget_bridge/typography_api.cpp",
+        "core/view/src/widget_bridge/value_channel_access.cpp",
+        "core/view/src/widget_bridge/value_channel_binding_service.cpp",
+        "core/view/src/widget_bridge/widget_assets_api.cpp",
+        "core/view/src/widget_bridge/widget_callbacks.cpp",
+        "core/view/src/widget_bridge/widget_schema_api.cpp",
+        "core/view/src/widget_bridge/widget_value_basic_api.cpp",
+        "core/view/src/widget_bridge/widget_value_content_api.cpp",
+        "core/view/src/widget_bridge/widget_value_controls_api.cpp",
+        "core/view/src/widget_bridge/widget_value_list_api.cpp",
+        "core/view/src/widget_bridge_input.cpp"
+      ],
+      "type": "STATIC_LIBRARY"
+    }
+  ],
+  "transitive_link_targets": [
+    "SDL3-static",
+    "SheenBidi",
+    "everest",
+    "hwy",
+    "mbedcrypto",
+    "mbedtls",
+    "mbedx509",
+    "p256m",
+    "pulp-bundled-fonts",
+    "pulp-canvas",
+    "pulp-design-import",
+    "pulp-events",
+    "pulp-gpu-device",
+    "pulp-platform",
+    "pulp-render",
+    "pulp-runtime",
+    "pulp-simd",
+    "pulp-state",
+    "pulp-view-core",
+    "yaml-cpp",
+    "yogacore"
+  ]
+}
