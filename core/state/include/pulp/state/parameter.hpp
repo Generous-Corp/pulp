@@ -609,9 +609,11 @@ class ParamValue {
         return value_.load(std::memory_order_relaxed);
     }
 
-    /// Legacy diagnostic mirror of the StateStore generation that last
-    /// completed a write. It is never used to authorize or identify writes;
-    /// the packed value CAS is the sole publication boundary.
+    /// Highest StateStore generation claimed or committed by a write to this
+    /// parameter. It only ever rises. Ordinary generation-ordered writers
+    /// claim it before publishing so an older paused writer cannot overwrite
+    /// a newer one; conditional writers authorize on the packed identity and
+    /// only raise it, so they never revoke a pending ordinary writer's claim.
     std::uint64_t committed_generation() const {
         return committed_generation_.load(std::memory_order_relaxed);
     }
@@ -709,7 +711,7 @@ class ParamValue {
                                             std::memory_order_acquire))
             return false;
         expected = replacement;
-        committed_generation_.store(generation, std::memory_order_relaxed);
+        raise_committed_generation(generation);
         return true;
     }
 
@@ -830,6 +832,17 @@ class ParamValue {
         return false;
     }
 
+    // Raise-only update. Lowering the mark would revoke the claim of an
+    // ordinary writer that claimed a newer generation and has not published
+    // yet, and would let an older writer claim past it.
+    void raise_committed_generation(std::uint64_t generation) noexcept {
+        auto committed = committed_generation_.load(std::memory_order_relaxed);
+        while (committed < generation &&
+               !committed_generation_.compare_exchange_weak(
+                   committed, generation, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+        }
+    }
+
     bool set_revisioned(float value, std::uint64_t generation,
                         std::uint32_t max_attempts) noexcept {
         auto current = value_.load(std::memory_order_acquire);
@@ -840,7 +853,7 @@ class ParamValue {
             const auto replacement = pack(value, revision + 1);
             if (value_.compare_exchange_weak(current, replacement, std::memory_order_acq_rel,
                                              std::memory_order_acquire)) {
-                committed_generation_.store(generation, std::memory_order_relaxed);
+                raise_committed_generation(generation);
                 return true;
             }
         }
@@ -861,8 +874,10 @@ class ParamValue {
     }
 
     std::atomic<VersionedValue> value_{pack(0.0f, 0)};
-    // Legacy diagnostic mirror only. It is intentionally not consulted by any
-    // writer because a split generation/value check would reintroduce a race.
+    // Generation high-water mark. Ordinary writers claim it before publishing
+    // (claim_generation) and abort publication if a newer claim replaced
+    // theirs; every other writer may only raise it. The packed value CAS
+    // remains the publication boundary.
     std::atomic<std::uint64_t> committed_generation_{0};
     std::atomic<VersionedValue> mod_offset_{pack(0.0f, 0)};
     std::atomic<std::uint64_t> committed_mod_generation_{0};
