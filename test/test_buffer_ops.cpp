@@ -3,9 +3,11 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/buffer_ops.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
+#include <utility>
 #include <vector>
 
 using namespace pulp::audio;
@@ -248,4 +250,91 @@ TEST_CASE("buffer_ops SIMD-equivalence: find_min_max matches scalar baseline",
     }
     REQUIRE_THAT(mm.min, WithinAbs(scalar_min, 1e-6f));
     REQUIRE_THAT(mm.max, WithinAbs(scalar_max, 1e-6f));
+}
+
+// ── measure_peak_rms ────────────────────────────────────────────────────
+
+TEST_CASE("buffer_ops::measure_peak_rms is exact on exactly representable input",
+          "[audio][buffer_ops][meter]") {
+    // Multiples of 0.25 square and sum exactly in float, so any summation
+    // order gives the same bits. 37 samples exercises the 16-lane body and a
+    // 5-sample tail; the largest magnitude is negative.
+    std::vector<float> v(37);
+    for (std::size_t i = 0; i < v.size(); ++i)
+        v[i] = 0.25f * static_cast<float>(i % 9) * ((i % 2) ? -1.0f : 1.0f);
+    v[36] = -3.0f;
+    double sum = 0.0;
+    for (float x : v) sum += static_cast<double>(x) * x;
+    const auto level = ops::measure_peak_rms(std::span<const float>{v});
+    REQUIRE(level.peak == 3.0f);
+    REQUIRE(level.rms == std::sqrt(static_cast<float>(sum) / 37.0f));
+}
+
+TEST_CASE("buffer_ops::measure_peak_rms of an empty span is zero",
+          "[audio][buffer_ops][meter]") {
+    const auto level = ops::measure_peak_rms(std::span<const float>{});
+    REQUIRE(level.peak == 0.0f);
+    REQUIRE(level.rms == 0.0f);
+}
+
+TEST_CASE("buffer_ops::measure_peak_rms matches a double-precision reference",
+          "[audio][buffer_ops][meter]") {
+    for (std::size_t n : {1u, 7u, 15u, 16u, 17u, 128u, 1031u}) {
+        std::vector<float> v(n);
+        float naive_peak = 0.0f;
+        double sum = 0.0;
+        for (std::size_t i = 0; i < n; ++i) {
+            v[i] = 0.8f * std::sin(0.37f * static_cast<float>(i) + 0.1f)
+                 + 0.15f * std::cos(2.9f * static_cast<float>(i));
+            naive_peak = std::max(naive_peak, std::abs(v[i]));
+            sum += static_cast<double>(v[i]) * v[i];
+        }
+        const auto level = ops::measure_peak_rms(std::span<const float>{v});
+        INFO("n = " << n);
+        REQUIRE(level.peak == naive_peak);
+        REQUIRE_THAT(level.rms,
+                     WithinRel(static_cast<float>(std::sqrt(sum / static_cast<double>(n))), 1e-6f));
+    }
+}
+
+TEST_CASE("buffer_ops::measure_peak_rms keeps NaN out of peak but not out of RMS",
+          "[audio][buffer_ops][meter][nan]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    // NaN in the first lane of the vector body, and NaN in the scalar tail.
+    for (std::size_t at : {0u, 3u, 18u}) {
+        std::vector<float> v(19, 0.5f);
+        v[11] = -0.75f;
+        v[at] = nan;
+        const auto level = ops::measure_peak_rms(std::span<const float>{v});
+        INFO("NaN at " << at);
+        REQUIRE(level.peak == 0.75f);
+        REQUIRE(std::isnan(level.rms));
+    }
+}
+
+TEST_CASE("buffer_ops::measure_peak_rms reports an infinite sample as infinite",
+          "[audio][buffer_ops][meter]") {
+    std::vector<float> v(16, 0.1f);
+    v[5] = -std::numeric_limits<float>::infinity();
+    const auto level = ops::measure_peak_rms(std::span<const float>{v});
+    REQUIRE(std::isinf(level.peak));
+    REQUIRE(std::isinf(level.rms));
+}
+
+TEST_CASE("buffer_ops::measure_peak_rms measures one channel of a BufferView",
+          "[audio][buffer_ops][meter]") {
+    Buffer<float> buf(2, 64);
+    for (std::size_t i = 0; i < 64; ++i) {
+        buf.channel(0)[i] = 0.5f;
+        buf.channel(1)[i] = (i == 40) ? -2.0f : 0.0f;
+    }
+    auto view = buf.view();
+    const auto left = ops::measure_peak_rms(view, 0);
+    REQUIRE(left.peak == 0.5f);
+    REQUIRE(left.rms == 0.5f);
+
+    const BufferView<const float> cview = std::as_const(buf).view();
+    const auto right = ops::measure_peak_rms(cview, 1);
+    REQUIRE(right.peak == 2.0f);
+    REQUIRE(right.rms == std::sqrt(4.0f / 64.0f));
 }

@@ -77,4 +77,37 @@ float find_magnitude(std::span<const float> samples);
 float find_magnitude(const BufferView<float>& buffer, std::size_t channel);
 float find_magnitude(const BufferView<const float>& buffer, std::size_t channel);
 
+/// Block level reading returned by `measure_peak_rms`: the peak absolute
+/// sample value and the root-mean-square level. Both are 0.0f for an empty
+/// input.
+struct PeakRms {
+    float peak = 0.0f;
+    float rms = 0.0f;
+};
+
+/// Number of independent partial sums `measure_peak_rms` keeps. Sample `i`
+/// is accumulated into partial `i % kPeakRmsLanes`; the partials are then
+/// combined pairwise (lane k with lane k + 8, then k with k + 4, k + 2, and
+/// finally 0 with 1). The order is fixed rather than tied to the host's SIMD
+/// width, so the result is identical on every platform that agrees on FMA
+/// contraction.
+inline constexpr std::size_t kPeakRmsLanes = 16;
+
+/// Measure the peak absolute value and RMS of a block in one pass.
+///
+/// This is the per-block meter reading a processor publishes for its UI. It
+/// is allocation-free, safe on the audio thread, and vectorizes: independent
+/// partial sums break the serial add chain a naive `sum += x * x` loop
+/// forms. RMS is `sqrt(sum_of_squares / size)`.
+///
+/// Non-finite input: a NaN sample is ignored by `peak` (the same result as
+/// folding with `std::max(peak, std::abs(x))`) but propagates to `rms`, so a
+/// NaN in the block still shows up in the reading. An infinite sample makes
+/// both values infinite.
+PeakRms measure_peak_rms(std::span<const float> samples) noexcept;
+
+/// Measure one channel of a multi-channel buffer.
+PeakRms measure_peak_rms(const BufferView<float>& buffer, std::size_t channel) noexcept;
+PeakRms measure_peak_rms(const BufferView<const float>& buffer, std::size_t channel) noexcept;
+
 } // namespace pulp::audio::buffer_ops

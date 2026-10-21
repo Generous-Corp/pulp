@@ -92,4 +92,48 @@ float find_magnitude(const BufferView<const float>& buffer, std::size_t channel)
     return find_magnitude(buffer.channel(channel));
 }
 
+PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
+    const std::size_t n = samples.size();
+    if (n == 0) return {};
+    const float* x = samples.data();
+
+    // Sixteen partials give four independent 4-wide accumulator chains, which
+    // is what it takes to run at FP throughput rather than FMA latency on
+    // current cores without making short blocks pay a long combine.
+    constexpr std::size_t L = kPeakRmsLanes;
+    float peak[L] = {};
+    float sum[L] = {};
+    // std::fmax returns the non-NaN operand, so a NaN sample never replaces
+    // the running peak (peak itself starts at 0 and is never NaN).
+    std::size_t i = 0;
+    for (; i + L <= n; i += L) {
+        for (std::size_t k = 0; k < L; ++k) {
+            const float v = x[i + k];
+            peak[k] = std::fmax(peak[k], std::fabs(v));
+            sum[k] += v * v;
+        }
+    }
+    for (std::size_t k = 0; i < n; ++i, ++k) {
+        const float v = x[i];
+        peak[k] = std::fmax(peak[k], std::fabs(v));
+        sum[k] += v * v;
+    }
+
+    for (std::size_t width = L / 2; width > 0; width /= 2) {
+        for (std::size_t k = 0; k < width; ++k) {
+            peak[k] = std::fmax(peak[k], peak[k + width]);
+            sum[k] += sum[k + width];
+        }
+    }
+    return {peak[0], std::sqrt(sum[0] / static_cast<float>(n))};
+}
+
+PeakRms measure_peak_rms(const BufferView<float>& buffer, std::size_t channel) noexcept {
+    return measure_peak_rms(std::span<const float>{buffer.channel(channel)});
+}
+
+PeakRms measure_peak_rms(const BufferView<const float>& buffer, std::size_t channel) noexcept {
+    return measure_peak_rms(buffer.channel(channel));
+}
+
 } // namespace pulp::audio::buffer_ops
