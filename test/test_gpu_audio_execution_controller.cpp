@@ -75,12 +75,10 @@ TEST_CASE("execution controller reserves occupancy before publishing admission",
     REQUIRE(controller.in_flight_for_testing() == 0);
 }
 
-TEST_CASE("execution controller retires occupancy before publishing slot reuse",
+TEST_CASE("execution controller keeps a retiring slot unavailable until it is published",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto minimum_capacity = contract();
     minimum_capacity.algorithmic_lead_blocks = 1;
-    // The lead consumes one pipeline slot, so two in-flight submissions
-    // require three logical slots under the controller's capacity contract.
     minimum_capacity.pipeline_depth = 3;
     minimum_capacity.max_inflight = 2;
 
@@ -91,23 +89,42 @@ TEST_CASE("execution controller retires occupancy before publishing slot reuse",
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
     REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
     REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
+    REQUIRE(controller.in_flight_for_testing() == 0);
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
 
+    // Every table slot is occupied while delivery retires sequence 0: the
+    // in-flight budget has room, but the retiring slot is not yet Empty.
     ReuseProbe probe;
-    probe.next_sequence = 2;
+    probe.next_sequence = 3;
     controller.set_before_reuse_test_hook(observe_before_reuse, &probe);
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Gpu);
     REQUIRE(probe.called);
     REQUIRE(probe.observed_in_flight == 1);
-    // A valid lead contract reserves one logical slot for delivery, leaving
-    // the spare slot available while the retired slot is still unpublished.
-    // The admission made by the hook therefore succeeds and consumes the
-    // next sequence; the following admission observes the full in-flight
-    // budget until that slot is retired.
-    REQUIRE(probe.admission_before_reuse == SharedIoAdmission::Accepted);
+    REQUIRE(probe.admission_before_reuse == SharedIoAdmission::CapacityFull);
+    controller.set_before_reuse_test_hook(nullptr, nullptr);
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
     REQUIRE(controller.in_flight_for_testing() == minimum_capacity.max_inflight);
-    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::CapacityFull);
+    REQUIRE(controller.admit_submission(4) == SharedIoAdmission::CapacityFull);
     REQUIRE(telemetry.snapshot().in_flight_high_water == minimum_capacity.max_inflight);
+}
+
+TEST_CASE("execution controller releases the in-flight budget at completion",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    auto single = contract();
+    single.max_inflight = 1;
+
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(single));
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::CapacityFull);
+    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.in_flight_for_testing() == 0);
+    // Sequence 0 still waits out the lead in its table slot, yet the provider
+    // is idle, so the next submission is admitted.
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(1, SharedIoCompletion::Failed));
+    REQUIRE(controller.in_flight_for_testing() == 0);
 }
 
 TEST_CASE("execution controller tracks lead separately from logical pipeline depth",
@@ -167,9 +184,9 @@ TEST_CASE("execution controller rejects a lead larger than logical pipeline dept
 TEST_CASE("execution controller sustains one submission per callback with a free slot beyond lead",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto exact_depth = contract();
-    exact_depth.algorithmic_lead_blocks = 1;
     exact_depth.pipeline_depth = exact_depth.algorithmic_lead_blocks + 1;
     exact_depth.max_inflight = 1;
+    REQUIRE(exact_depth.algorithmic_lead_blocks == 2);
 
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(exact_depth));
@@ -228,6 +245,72 @@ TEST_CASE("execution controller maps provider failure to the declared CPU fallba
     REQUIRE(delivery.path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(delivery.fallback_reason == SharedIoFallbackReason::DeviceLost);
     REQUIRE_FALSE(controller.record_completion(0, SharedIoCompletion::Success));
+}
+
+TEST_CASE("device-loss fallback preserves callback continuity and receipt accounting",
+          "[gpu_audio][shared_io][controller][continuity][fault-injection]") {
+    auto failure_contract = contract();
+    failure_contract.algorithmic_lead_blocks = 1;
+    failure_contract.pipeline_depth = 4;
+    failure_contract.max_inflight = 3;
+
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(failure_contract, &telemetry));
+
+    // Prime one successful block, then inject a deterministic provider loss
+    // for the next three blocks. Every callback must still produce either the
+    // GPU result or the declared CPU replacement; no callback may silently
+    // fall through to silence.
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(1, SharedIoCompletion::Failed,
+                                         SharedIoFallbackReason::DeviceLost));
+    const auto gpu = controller.deliver(1);
+    REQUIRE(gpu.path == SharedIoDeliveryPath::Gpu);
+    REQUIRE(gpu.expected_sequence == 0);
+
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(2, SharedIoCompletion::Failed,
+                                         SharedIoFallbackReason::DeviceLost));
+    const auto first_fallback = controller.deliver(2);
+    REQUIRE(first_fallback.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(first_fallback.fallback_reason == SharedIoFallbackReason::DeviceLost);
+
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(3, SharedIoCompletion::Failed,
+                                         SharedIoFallbackReason::DeviceLost));
+    const auto second_fallback = controller.deliver(3);
+    REQUIRE(second_fallback.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(second_fallback.fallback_reason == SharedIoFallbackReason::DeviceLost);
+
+    // With one lead block, callback 4 consumes the failed sequence 3 entry.
+    const auto third_fallback = controller.deliver(4);
+    REQUIRE(third_fallback.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(third_fallback.expected_sequence == 3);
+    REQUIRE(third_fallback.fallback_reason == SharedIoFallbackReason::DeviceLost);
+
+    const auto receipt = telemetry.snapshot();
+    REQUIRE(receipt.callback_blocks == 5);
+    REQUIRE(receipt.submitted_blocks == 4);
+    REQUIRE(receipt.retired_success == 1);
+    REQUIRE(receipt.retired_failure == 3);
+    REQUIRE(receipt.delivered_blocks == 5);
+    REQUIRE(receipt.fallback_blocks == 3);
+    REQUIRE(receipt.deadline_misses == 0);
+    REQUIRE(receipt.resync_drops == 0);
+}
+
+TEST_CASE("device-loss continuity refuses a missing CPU fallback",
+          "[gpu_audio][shared_io][controller][continuity][fault-injection][negative]") {
+    auto invalid = contract();
+    invalid.cpu_fallback_prepared = false;
+
+    SharedIoExecutionController controller;
+    REQUIRE_FALSE(controller.prepare(invalid));
 }
 
 TEST_CASE("execution controller bounds admission and rejects stale completion identities",

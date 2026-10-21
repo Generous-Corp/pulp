@@ -16,6 +16,14 @@ code and invokes `tools/ci/governed-build.sh` inside that namespace for its
 build. This preserves the lane's runner isolation while applying the same
 bounded worker and build-directory locking policy as the other build emitters.
 
+The advisory Windows release-path, MIDI Services, and BLE compile gates use
+PowerShell for their job steps but invoke `bash tools/ci/governed-build.sh`
+for each CMake build. The governor supplies the worker bound; its
+build-directory lock applies on POSIX runners (Git Bash/MSYS skips that lock
+because native and POSIX paths cannot be reconciled safely). The main Windows
+matrix follows the same rule, so custom runner selectors cannot bypass the
+worker governor.
+
 > Setting up a dedicated machine as a persistent CI runner? See
 > [self-hosted-runner.md](self-hosted-runner.md) for the walkthrough
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
@@ -2924,10 +2932,11 @@ verdict, its class and a confidence.
 
 - **Why a separate job.** A job's own log cannot be downloaded until the job
   has finished, so a step inside the failing job has nothing to read.
-- **Pinned and verified.** The extractor is the Shipyard release pinned in the
-  script (`v0.326.0`). Its SHA-256 must match the release checksum, or nothing
-  runs. Moving to a newer release means editing both the version and the
-  hashes in the script.
+- **Pinned and verified.** The extractor is the Shipyard release Pulp pins in
+  `tools/shipyard.toml`, the same one `tools/install-shipyard.sh` installs. Its
+  SHA-256 must match the asset's line in `tools/toolchain/shipyard.sha256`, or
+  nothing runs. A Shipyard pin bump therefore moves the extractor with it; a
+  pin or checksum the script cannot read is reported and names nothing.
 - **Never a gate.** The job is `continue-on-error`. A missing asset, an
   unreadable log or an extractor failure is reported and exits 0.
 - **Selftest.** `ci-cause-notices-selftest` covers the script.

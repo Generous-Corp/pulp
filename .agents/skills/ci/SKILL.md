@@ -142,6 +142,11 @@ directory explicit, including secondary artifact trees and the Linux RTSan
 lane, but do not include `-j`, `--parallel`, or a host-core probe: the
 governor owns parallelism, leases, and build-directory locking.
 
+Windows workflow steps that use `shell: pwsh` still invoke the same governor
+through `bash tools/ci/governed-build.sh ...`; do not bypass it with a direct
+`cmake --build`. This applies to the main matrix as well as advisory compile
+gates, so custom runner selectors cannot bypass the governor.
+
 The timeline hardening workflow's focused Ninja build follows the same rule:
 `timeline-hardening.yml` must invoke the governor directly and leave worker
 selection to it, even though the lane only builds two timeline test targets.
@@ -338,9 +343,13 @@ runner failure or gate verdict, with a class and a confidence.
   log in that case.
 - **Absent means it did not run.** If the notice is missing, the job may not
   have run at all; check its own log. It is advisory and never gates.
-- **Upgrading the pin.** The extractor is the Shipyard release pinned, with
-  its checksums, in `tools/ci/ci_cause_notices.sh`. Bump the version and the
-  hashes together.
+- **The extractor follows Pulp's Shipyard pin.** `tools/ci/ci_cause_notices.sh`
+  reads the version from `tools/shipyard.toml` and the asset's SHA-256 from
+  `tools/toolchain/shipyard.sha256`, so a Shipyard pin bump moves it too; never
+  copy a version or hash into the script. A record's quality is that release's
+  C2 extractor: a bare `shell-exit` or CMake `string` signature on a run
+  pinned below the C2 v7 release (Shipyard v0.337.0) is a known gap of the
+  old extractor, not a new failure mode.
 
 ## A green `macos` check can mean nothing ran
 
@@ -3363,7 +3372,12 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    `Planning-Bump:` trailer — usually an accidental bump from a `git reset --hard`
    + `git add -A`. Drop it with
    `git restore --staged --worktree planning && git submodule update planning`,
-   or add `Planning-Bump: reason="..."` for a deliberate re-pin.
+   or add `Planning-Bump: reason="..."` for a deliberate re-pin. A trailered
+   re-pin must also pin a commit on pulp-planning `main` (the guard fetches its
+   history); pin a side-branch commit and every `main` commit it lacks is
+   dropped. Locally an unfetchable planning remote fails closed ("NOT
+   VERIFIED"); CI has no planning credential and runs with `--ci-warn-only`,
+   so there it is only a `::warning`; check the pin locally before landing.
 2b1. **Config→doc drift?** The `config-doc` gate (`tools/scripts/config_doc_check.py`,
    map in `tools/scripts/config_doc_map.json`) fails if a mapped CI/release config
    surface (`.shipyard/config.toml`, the shipyard pin/installer, the
@@ -4654,7 +4668,7 @@ bisectable.
   pre-push hook, and `workflow-lint.yml`, so a new scheduled workflow missing the
   guard fails the PR. Add the guard when you add the workflow.
 - **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_coverage_surface_contract.py` plus the Codecov config tests guard the semantic producer/component inventory; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has exact Linux, macOS, Python, Apple, Android, and React receipts that Codecov reports merged for that exact run. Windows is inventoried and monitored but remains best-effort while its bounded suite can exceed the cap. This catches a report failure, transport failure, cancellation, or Codecov processing stall without putting coverage in protected main's required-check set. When triaging, inspect the semantic manifest, exact receipts, and Codecov upload records before changing `codecov.yml`.
-- **Parallel source coverage needs both an LLVM merge pool and a tolerant final merge.** `LLVM_PROFILE_FILE=...%Nm...` must use a pool at least as large as bounded CTest parallelism; plain `%m` is a one-file pool and parallel Linux exits have corrupted its header. A killed/timed-out test can still truncate one pooled shard, so both hosted and local/SSH scripts merge with `llvm-profdata --failure-mode=all` but fail closed when invalid shards exceed both 25 files and 5% of the pool. Do not revert either half to a single `%m` file or default `failure-mode=any`: one bad shard then blackholes every otherwise-valid report.
+- **Parallel source coverage needs both an LLVM merge pool and a tolerant final merge.** `LLVM_PROFILE_FILE=...%Nm...` must use a pool at least as large as bounded CTest parallelism; plain `%m` is a one-file pool and parallel Linux exits have corrupted its header. In `scripts/run_coverage.sh`, never add `%p`: one profile per test process put tens of thousands of shards on disk at once and filled the hosted Linux runner's root volume mid-suite (75 GB free to 6 GB in about eleven minutes); `%8m` bounds the count at binaries x 8. The pool is keyed by `%m` (module signature), so binaries never share one; `run_coverage.sh` fails a full run closed when the pools cover fewer than half its test binaries, the signature of profiles colliding and being dropped. `tools/scripts/local_diff_cover.sh` keeps `%p-%m`: it has no module-count guard, and an earlier `%Nm` pool there left 7 files for hundreds of binaries. A killed/timed-out test can still truncate one pooled shard, so both hosted and local/SSH scripts merge with `llvm-profdata --failure-mode=all` but fail closed when invalid shards exceed both 25 files and 5% of the pool. Do not revert either half to a single `%m` file or default `failure-mode=any`: one bad shard then blackholes every otherwise-valid report.
 - **Native Linux apt dependencies have one owner.** Workflows that compile native Pulp use `.github/actions/install-linux-build-deps`, backed by `tools/ci/install_linux_build_deps.py` and capability profiles in `tools/ci/linux_build_deps.json`. Toolchains and lane-specific utilities are explicit `extra-packages`; do not add a workflow-named profile. `linux_build_deps_workflows.json` enumerates adopters and intentional direct-apt exclusions, and `test_install_linux_build_deps.py` fails workflow-lint when a new apt workflow is unclassified or an adopter copies canonical packages. Add a shared native dependency to the manifest once; add a one-lane tool at that lane's action call.
 - **`control-shipping-native.yml` proves real installed-SDK artifacts.** Its
   path-scoped, advisory four-leg matrix builds production-stripped plug-ins on

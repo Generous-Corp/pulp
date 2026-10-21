@@ -34,6 +34,12 @@ pulp_add_test_suite(pulp-test-compressor-sidechain GROUP pulp-test-group-late-si
 # ARA scaffold validation
 pulp_add_test_suite(pulp-test-ara-scaffold LIBRARIES pulp::format)
 
+# Host-owned physical/project source catalog contract. External plugin formats
+# still own their routing menus; this tests the reusable Pulp-host seam only.
+pulp_add_test_suite(pulp-test-audio-route-catalog
+    SOURCES test_audio_route_catalog.cpp
+    LIBRARIES pulp::host)
+
 # MIDI 1.0 backend audit
 pulp_add_test_suite(pulp-test-midi1-backend-audit GROUP pulp-test-group-late-midi
     LIBRARIES pulp::midi)

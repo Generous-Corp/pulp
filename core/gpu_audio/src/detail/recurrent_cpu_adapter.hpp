@@ -57,6 +57,8 @@ struct RecurrentCpuKernel {
     bool (*release)(void*) noexcept = nullptr;
 };
 
+enum class RecurrentCpuPrepareError : std::uint8_t { None, InvalidContract, KernelPrepareFailed };
+
 /// Private model-neutral adapter for synthetic recurrent CPU kernels. It does
 /// not parse artifacts or publish provider capabilities; those remain outside
 /// this packet. All shape validation and preparation happen before publication.
@@ -74,12 +76,17 @@ class RecurrentCpuAdapter final : public StreamingModel {
         return shape_;
     }
 
+    RecurrentCpuPrepareError last_prepare_error() const noexcept {
+        return last_error_;
+    }
+
     bool prepare(const StreamingPrepareContext& context) noexcept override {
+        last_error_ = RecurrentCpuPrepareError::None;
         // A live instance owns the kernel state. Validation or a replacement
         // attempt must never tear down that state implicitly; the owner must
         // quiesce and release it before preparing a new configuration.
         if (prepared_ || cleanup_required_)
-            return false;
+            return fail(RecurrentCpuPrepareError::InvalidContract);
         if (!valid_recurrent_cpu_shape(shape_) || recurrent_state_bytes(shape_) == 0 ||
             !valid_streaming_prepare_context(context) || context.spec != &spec_ ||
             context.max_frames > kMaxSupportedFrames || spec_.input_channels != 1 ||
@@ -88,11 +95,12 @@ class RecurrentCpuAdapter final : public StreamingModel {
             spec_.state_schema_version != 1 || kernel_.state == nullptr ||
             kernel_.prepare == nullptr || kernel_.process == nullptr || kernel_.reset == nullptr ||
             kernel_.quiesce == nullptr || kernel_.release == nullptr)
-            return false;
+            return fail(RecurrentCpuPrepareError::InvalidContract);
 
         if (!kernel_.prepare(kernel_.state, context)) {
             // A failed preparation may have reserved partial state. Release is
             // idempotent by contract so the next transaction can retry.
+            last_error_ = RecurrentCpuPrepareError::KernelPrepareFailed;
             cleanup_required_ = !kernel_.release(kernel_.state);
             return false;
         }
@@ -113,7 +121,12 @@ class RecurrentCpuAdapter final : public StreamingModel {
     }
 
     bool quiesce() noexcept override {
-        return kernel_.quiesce != nullptr && kernel_.quiesce(kernel_.state);
+        // A failed prepare can leave resources that require a quiesce before
+        // release retries.  The cleanup transaction owns the kernel state
+        // even though it is not publishable for processing.
+        if ((!prepared_ && !cleanup_required_) || kernel_.quiesce == nullptr)
+            return false;
+        return kernel_.quiesce(kernel_.state);
     }
 
     void reset(std::uint64_t, StreamingResetReason) noexcept override {
@@ -137,6 +150,11 @@ class RecurrentCpuAdapter final : public StreamingModel {
   private:
     static constexpr std::uint32_t kMaxSupportedFrames = 4096;
 
+    bool fail(RecurrentCpuPrepareError error) noexcept {
+        last_error_ = error;
+        return false;
+    }
+
     static bool buffers_overlap(const float* input, float* output, std::uint32_t frames) noexcept {
         if (frames == 0)
             return false;
@@ -157,6 +175,7 @@ class RecurrentCpuAdapter final : public StreamingModel {
     std::uint32_t max_frames_ = 0;
     bool prepared_ = false;
     bool cleanup_required_ = false;
+    RecurrentCpuPrepareError last_error_ = RecurrentCpuPrepareError::None;
 };
 
 } // namespace pulp::gpu_audio::detail

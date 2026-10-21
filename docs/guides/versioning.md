@@ -271,6 +271,16 @@ Those are the macOS gate's repository scanners that read `tools/**` without
 naming files; they must run here because `build.yml`'s `classify` job may then
 skip the native matrix for a tooling-only change. Unset, the step is skipped.
 
+The planning-gitlink guard (`tools/scripts/planning_gitlink_guard.py`) checks
+that an authorized `planning` re-pin is an ancestor of pulp-planning `main`, by
+fetching that repository's commit history. This workflow has no credential for
+the private planning repository, so it passes `--ci-warn-only`: an ancestry it
+cannot verify becomes a `::warning` annotation and the step passes, while a pin
+it could fetch and found off `main` still fails. Pre-push and `gates.sh` run
+without the flag and fail closed on an unverifiable pin, using the developer's
+own access. Granting this workflow a read-only token for pulp-planning and
+dropping `--ci-warn-only` makes CI enforce the ancestry too.
+
 ### Action-major pins in the gate workflows
 
 The gate workflows (`version-skill-check.yml`, `coverage.yml`) run their scripts

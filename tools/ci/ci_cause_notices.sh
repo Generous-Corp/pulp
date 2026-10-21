@@ -5,24 +5,30 @@
 # A job's own log cannot be downloaded until the job completes, so this runs
 # in a job that needs the others and reads their finished logs through the
 # Actions API. Each record comes from `shipyard cause extract`, run on the
-# pinned Shipyard release below after its SHA-256 matches. The step is
-# advisory: every failure here is reported and exits 0.
+# Shipyard release Pulp pins (the version in tools/shipyard.toml) after its
+# SHA-256 matches the one in tools/toolchain/shipyard.sha256, so the extractor
+# moves with the repository's Shipyard pin rather than a copy of it. The step
+# is advisory: every failure here is reported and exits 0.
 #
 # Environment: GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT,
 # GITHUB_EVENT_NAME, GITHUB_EVENT_PATH, RUNNER_TEMP, GH_TOKEN (actions: read).
 # Test seams: CI_CAUSE_GH (the gh command), CI_CAUSE_CURL (the download
-# command), CI_CAUSE_ARCH (uname -m), CI_CAUSE_MAX_JOBS, and
+# command), CI_CAUSE_ARCH (uname -m), CI_CAUSE_MAX_JOBS, CI_CAUSE_TOOLS_DIR
+# (the directory holding shipyard.toml and toolchain/shipyard.sha256), and
 # CI_CAUSE_TEST_SHA256, which replaces the pinned hash so a fake binary can be
 # run; it is for the selftest beside this script only.
 set -uo pipefail
 
-SHIPYARD_VERSION="v0.326.0"
+tools_dir="${CI_CAUSE_TOOLS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+pin_file="$tools_dir/shipyard.toml"
+sums_file="$tools_dir/toolchain/shipyard.sha256"
+# The same parse as tools/install-shipyard.sh: `version = "..."` in [shipyard].
+SHIPYARD_VERSION="$(sed -n '/^\[shipyard\]/,/^\[/p' "$pin_file" 2>/dev/null \
+    | sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)"$/\1/p' \
+    | head -1)"
 asset_sha256() {
-    case "$1" in
-        shipyard-linux-x64) echo "1c2368fd8f038f198343cd7884687dcf00cc049828cfe3edaebd682dd885b3da" ;;
-        shipyard-linux-arm64) echo "d559667fd353b772f6156f877a250bbb3db9a08c75aecf6f670ef77f2cbb3a68" ;;
-        *) return 1 ;;
-    esac
+    [ -f "$sums_file" ] || return 1
+    awk -v asset="$1" '$2 == asset { print $1; found = 1; exit } END { exit !found }' "$sums_file"
 }
 
 gh_cmd="${CI_CAUSE_GH:-gh}"
@@ -55,7 +61,15 @@ if [ -z "$asset" ]; then
     echo "ci-cause: no pinned Shipyard asset for $(uname -s) $(uname -m); no records"
     exit 0
 fi
+if [ -z "$SHIPYARD_VERSION" ]; then
+    echo "::warning title=ci-cause::no Shipyard version in $pin_file; no records"
+    exit 0
+fi
 want="${CI_CAUSE_TEST_SHA256:-$(asset_sha256 "$asset")}"
+if [ -z "$want" ]; then
+    echo "::warning title=ci-cause::no SHA-256 for $asset in $sums_file; no records"
+    exit 0
+fi
 bin="$work/shipyard"
 url="https://github.com/danielraffel/Shipyard/releases/download/$SHIPYARD_VERSION/$asset"
 if ! "$curl_cmd" -fsSL --retry 3 -o "$bin" "$url"; then

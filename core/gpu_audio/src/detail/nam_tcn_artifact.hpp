@@ -566,7 +566,8 @@ class NamTcnArtifactAdapter final : public StreamingModel {
         if (prepared_)
             return false;
         if (!valid_streaming_prepare_context(context) || context.spec != &spec_ ||
-            context.max_frames == 0 || spec_.input_channels != 1 || spec_.output_channels != 1)
+            context.artifact_hash != spec_.weights_hash || context.max_frames == 0 ||
+            spec_.input_channels != 1 || spec_.output_channels != 1)
             return false;
         std::string error;
         if (!artifact_.load(artifact_path_, &error))

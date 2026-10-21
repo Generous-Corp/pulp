@@ -1330,6 +1330,11 @@ carries a `param_key`, the generated ctor calls
 `route_changes_to_host_params(true)` so the view runs unchanged embedded in
 JUCE / iPlug2 / native. Gotcha baked into a regression test: emitted float
 literals must be valid C++ (`120.f`, never the invalid `120f`).
+Strict validation (`validate_annotated_capture`) bounds each kind by its own
+geometry: a `knob` by `cx/cy ± hit_radius` inside the canvas, an `xy_pad` by
+its box (which must sit inside the canvas) with the `cx/cy` puck center inside
+that box, edges inclusive. An `xy_pad` has no `hit_radius`; applying the knob
+rule to it rejects every pad, because the absent radius parses as 0.
 
 **Under the hood: a 1:1 catalog component = subclass `DesignFrameView` with the embedded SVG.**
 See `core/view/{include/pulp/view,src}/musical_typing_keyboard*` +
@@ -7692,6 +7697,14 @@ Import-validation round-trip harnesses must route Pulp target builds through
 build receipt. This applies to the seven Pulp harnesses (`v0`, `figma`, `pencil`,
 `stitch`, `rn`, `designmd`, and `jsx`). Leave a separate external-project build
 (such as Spectr) on its own toolchain boundary.
+
+## Preconverted SVG source-contract metadata
+
+The `preconverted-svg` lane is validation-only: its source-contract row must
+describe the exact SVG and control-map sidecar boundary, name the local
+annotated-capture contract as its parser owner, and keep Illustrator/PDF
+conversion explicitly out of scope. When that metadata changes, update this
+skill note and the append-only Vellum watch event in the same review.
 
 ## Captured canvas authority
 

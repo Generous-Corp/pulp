@@ -2670,6 +2670,19 @@ output. See [the query contract](../../../docs/guides/custom-node-diagnostics.md
 
 ## SignalGraph authoring receipts
 
+## Host-owned audio route catalogs
+
+`pulp::host::AudioRouteCatalog` is the shared control-thread surface for a
+plugin or host UI to present selectable audio sources. Entries carry stable
+IDs, display names, channel counts, and a `AudioRouteKind` covering physical
+inputs, tracks, instruments, buses, files, and internal sources. The catalog is
+host-owned and mutable off the realtime thread; processors consume only the
+selected stable ID or already-routed buffers. It does not enumerate arbitrary
+DAW project tracks by itself: AU/VST3/CLAP/LV2 adapters must expose compatible
+input buses, and the DAW remains responsible for populating and routing its
+project-specific menu. Keep route-catalog tests independent of any particular
+DAW and record real-host routing as a separate acceptance receipt.
+
 Consumers that only capture or validate graph authoring lineage should include
 `<pulp/host/signal_graph_authoring.hpp>` instead of pulling in the full runtime
 header. The existing namespace-level `GraphAuthoringReceipt` and

@@ -236,6 +236,7 @@ struct GpuWaveNetRealtimeNode::Impl {
         pending_head = pending_count = 0;
         all_channels_mask = c.channels == 64 ? UINT64_MAX : (UINT64_C(1) << c.channels) - 1;
         next_input = sequence;
+        telemetry.reset();
         if (trace_config.enabled) {
             if (!trace_engine)
                 trace_engine = detail::next_shared_io_trace_engine_id();
@@ -259,10 +260,12 @@ struct GpuWaveNetRealtimeNode::Impl {
                                             .success_stride = trace_config.success_stride,
                                             .capture_admissions = trace_config.capture_admissions,
                                             .enabled = true});
-            telemetry.reset();
             closed_trace_stats = {};
-            bridge->set_trace(trace.get(), &telemetry);
         }
+        // Telemetry feeds the status projection even when detailed trace
+        // recording is disabled. The recorder is optional; the counters are
+        // part of the provider-neutral lifecycle contract.
+        bridge->set_trace(trace.get(), &telemetry);
         prepared = true;
         return true;
     }
@@ -496,6 +499,41 @@ GpuAudioRecoveryReason GpuWaveNetRealtimeNode::recovery_reason() const noexcept 
 std::uint64_t GpuWaveNetRealtimeNode::recovery_sequence() const noexcept {
     return impl_->bridge ? impl_->bridge->recovery_sequence()
                          : std::numeric_limits<std::uint64_t>::max();
+}
+GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
+    GpuAudioStatus status;
+    if (!impl_->prepared) {
+        status.provider_state = GpuAudioProviderState::Uninitialized;
+        return status;
+    }
+    const auto telemetry = impl_->telemetry.snapshot();
+    const auto& descriptor = impl_->config.session.descriptor;
+    status.requested_engine = GpuAudioEngine::Gpu;
+    status.fallback_policy = impl_->config.miss_policy;
+    status.sample_rate = descriptor.sample_rate;
+    status.block_size = descriptor.block_size;
+    status.latency_samples = impl_->config.lead_blocks * descriptor.block_size;
+    status.prepared_lead_blocks = impl_->config.lead_blocks;
+    status.fallback_available = impl_->fallback_prepared;
+    status.produced_blocks = telemetry.delivered_blocks;
+    status.missed_blocks = telemetry.deadline_misses;
+    status.fallback_blocks = telemetry.fallback_blocks;
+    status.resynced_blocks = telemetry.resync_drops;
+    status.input_dropped_frames = telemetry.input_drops;
+    status.last_block_us = static_cast<double>(telemetry.submit_to_completion_ns) / 1000.0;
+    // The private telemetry snapshot exposes a latest sample, not an average;
+    // leave the aggregate average unavailable rather than relabeling a GPU
+    // timestamp as a worker-time mean.
+    status.avg_block_us = 0.0;
+    status.provider = authenticated_provider() ? GpuAudioProvider::Dawn : GpuAudioProvider::Unknown;
+    status.recovery_reason = recovery_reason();
+    status.recovery_sequence = recovery_sequence();
+    status.diagnostics_available = true;
+    status.selected_engine =
+        authenticated_provider() ? GpuAudioEngine::Gpu : GpuAudioEngine::Unknown;
+    status.provider_state = authenticated_provider() && !fenced() ? GpuAudioProviderState::Ready
+                                                                  : GpuAudioProviderState::Degraded;
+    return status;
 }
 bool GpuWaveNetRealtimeNode::ready() const noexcept {
     return impl_->prepared;
