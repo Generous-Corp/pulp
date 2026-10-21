@@ -58,9 +58,45 @@ TEST_CASE("shared IO depth lead policy bounds multi-flight admission",
     REQUIRE_FALSE(SharedIoDepthLeadPolicy{contract.algorithmic_lead_blocks, contract.pipeline_depth,
                                           contract.max_inflight}
                       .valid());
-    REQUIRE(validate_shared_io_contract(contract).accepted());
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::InvalidMaxInflight);
     contract.max_inflight = 4;
     REQUIRE(validate_shared_io_contract(contract).accepted());
+    contract.max_inflight = 0;
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::InvalidMaxInflight);
+}
+
+TEST_CASE("shared IO contract rejects unknown backend-neutral enum values",
+          "[gpu_audio][shared_io]") {
+    const auto valid_contract = [] {
+        return SharedIoExecutionContract{
+            .channels = 2,
+            .block_size = 32,
+            .sample_rate = 48000,
+            .algorithmic_lead_blocks = 1,
+            .pipeline_depth = 2,
+            .provider_slots = 1,
+            .requested_path = SharedIoRequest::RequireSharedHostPointer,
+            .active_path = SharedIoPath::SharedHostPointer,
+            .shared_host_pointer_capable = true,
+            .cpu_fallback_prepared = true,
+        };
+    };
+
+    auto contract = valid_contract();
+    CHECK(validate_shared_io_contract(contract).accepted());
+    contract.active_path = static_cast<SharedIoPath>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+    contract = valid_contract();
+    contract.requested_path = static_cast<SharedIoRequest>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+    contract = valid_contract();
+    contract.miss_policy = static_cast<MissPolicy>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+    contract = valid_contract();
+    contract.fallback_reason = static_cast<SharedIoFallbackReason>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
 }
 
 TEST_CASE("shared IO contract fails closed for unavailable paths and fallback",
