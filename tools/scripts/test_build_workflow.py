@@ -72,12 +72,20 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
     def test_activation_precedes_all_build_tool_use(self) -> None:
         names = [step.get("name") for step in self.steps]
         activate = names.index("Activate pinned mise candidate toolchain")
+        enforce = names.index("Enforce pinned mise candidate toolchain")
         bootstrap = names.index("Bootstrap repository dependencies")
         report = names.index("Toolchain report against the manifest (warn only)")
         configure = names.index("Configure")
         self.assertLess(activate, bootstrap)
+        self.assertLess(activate, enforce)
+        self.assertLess(enforce, bootstrap)
         self.assertLess(activate, report)
         self.assertLess(activate, configure)
+        self.assertNotIn("continue-on-error", self.steps[enforce])
+        self.assertIn(
+            "python3 tools/toolchain/check_env.py --require-tools --format github",
+            self.steps[enforce]["run"],
+        )
         text = json.dumps(self.steps[activate], sort_keys=True)
         for marker in (
             "mise-2026.10.11/bin/mise",
