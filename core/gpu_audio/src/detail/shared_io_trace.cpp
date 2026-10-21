@@ -359,6 +359,10 @@ drain_shared_io_trace(SharedIoTraceRecorder& recorder,
     SharedIoTraceDrainResult result;
     result.tracing_compiled = runtime::kTracingEnabled;
     result.recording_enabled = recorder.enabled();
+    if (!valid_shared_io_trace_drain_observer(observer)) {
+        result.observer_valid = false;
+        return result;
+    }
     if (!result.recording_enabled)
         return result;
     [[maybe_unused]] const auto& config = recorder.config();

@@ -764,6 +764,42 @@ TEST_CASE("WaveNet owned trace discloses callback queue loss and preserves faile
           detail::SharedIoGpuTerminalDisposition::CancelledTeardown);
 }
 
+TEST_CASE("WaveNet rejects malformed trace observers before draining",
+          "[gpu_audio][wavenet][trace][negative]") {
+    Harness h(1, 1, 0, true);
+    TraceCapture capture;
+    const detail::SharedIoTraceDrainObserver malformed{
+        .context = &capture,
+        .record = [](void*, std::uint64_t, const detail::SharedIoTraceRecord&) noexcept {},
+    };
+    detail::WaveNetRealtimeTestAccess::observe_trace(h.node, malformed);
+    h.callback(1);
+    h.service();
+    h.service();
+    REQUIRE(h.node.release());
+    CHECK(capture.admission_count == 0);
+    CHECK(capture.record_count == 0);
+    CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(h.node).admissions_drained > 0);
+    CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(h.node).drained > 0);
+}
+
+TEST_CASE("WaveNet observer marks admitted terminal identity",
+          "[gpu_audio][wavenet][trace][observer]") {
+    Harness h(1, 1, 0, true);
+    TraceCapture capture;
+    capture.attach(h.node);
+    h.callback(1);
+    h.service();
+    h.service();
+    REQUIRE(h.node.release());
+    capture.require_closed();
+    for (std::size_t i = 0; i < capture.record_count; ++i) {
+        const auto& record = capture.records[i].value;
+        if (record.gpu_terminal != detail::SharedIoGpuTerminalDisposition::None)
+            CHECK(record.admission_identity_matched);
+    }
+}
+
 TEST_CASE("Stamped ingress timestamps survive reuse without changing stream identity",
           "[gpu_audio][wavenet][trace]") {
     using Bridge = detail::SharedIoStampedBridge;
@@ -951,6 +987,49 @@ TEST_CASE("WaveNet recovery diagnostics latch the first reason and sequence",
     CHECK(detail::WaveNetRealtimeTestAccess::recovery_sequence(h.node) == 37);
     CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderFailure);
     CHECK(h.node.recovery_sequence() == 37);
+    const auto status = h.node.status_snapshot();
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+    CHECK(status.recovery_sequence == 37);
+    CHECK(status.diagnostics_available);
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.selected_engine == GpuAudioEngine::Unknown);
+    CHECK(status.sample_rate == 48000);
+    CHECK(status.block_size == 2);
+    CHECK(status.latency_samples == 2);
+    CHECK(status.prepared_lead_blocks == 1);
+    CHECK(status.fallback_policy == MissPolicy::Silence);
+    CHECK_FALSE(status.fallback_available);
+}
+
+TEST_CASE("WaveNet status projection is truthful across prepare and release",
+          "[gpu_audio][wavenet][diagnostic]") {
+    GpuWaveNetRealtimeNode::Config config;
+    config.session.descriptor.block_size = 2;
+    config.session.descriptor.sample_rate = 48'000;
+    config.channels = 1;
+    config.lead_blocks = 1;
+    GpuWaveNetRealtimeNode node(config);
+    auto initial = node.status_snapshot();
+    CHECK(initial.schema_version == GpuAudioStatus::kSchemaVersion);
+    CHECK(initial.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK_FALSE(initial.diagnostics_available);
+    CHECK(initial.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(node.release());
+    auto released = node.status_snapshot();
+    CHECK(released.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK_FALSE(released.diagnostics_available);
+}
+
+TEST_CASE("WaveNet status telemetry remains available without trace recording",
+          "[gpu_audio][wavenet][diagnostic]") {
+    Harness h;
+    for (std::uint32_t block = 0; block < 4; ++block) {
+        (void)h.callback(static_cast<float>(block + 1));
+        (void)h.service();
+    }
+    const auto status = h.node.status_snapshot();
+    CHECK(status.diagnostics_available);
+    CHECK(status.produced_blocks + status.missed_blocks > 0);
 }
 
 TEST_CASE("WaveNet public recovery diagnostics preserve every recovery reason",

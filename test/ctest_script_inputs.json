@@ -2369,6 +2369,7 @@
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
   "pulp-test-audio-registration",
+  "pulp-test-audio-route-catalog",
   "pulp-test-audio-support",
   "pulp-test-audio-system-hotplug",
   "pulp-test-audio-tone-regression",
@@ -2890,6 +2891,7 @@
   "pulp-test-svg-path-range-orientation-1899",
   "pulp-test-svg-primitives-1926",
   "pulp-test-synthesiser",
+  "pulp-test-tcn-cpu-adapter",
   "pulp-test-template-ui-scripts",
   "pulp-test-texture-atlas",
   "pulp-test-threejs-bridge",
@@ -3306,6 +3308,7 @@
    "inputs": [
     ".github/workflows/android.yml",
     ".github/workflows/build-macos.yml",
+    ".github/workflows/build.yml",
     ".github/workflows/cross-platform-check.yml",
     ".github/workflows/gcc-compile-gate.yml",
     ".github/workflows/intel-portability.yml",
@@ -3329,7 +3332,8 @@
     "tools/scripts/contributor_check.sh",
     "tools/scripts/release-cli-local.sh",
     "tools/scripts/sdk_consumer_sweep.py",
-    "tools/validation/downstream/consumer-validation.json"
+    "tools/validation/downstream/consumer-validation.json",
+    "tools/validation/sample_region_installed_sdk.py"
    ],
    "kind": "python"
   },
@@ -3829,8 +3833,11 @@
   "ci-cause-notices-selftest": {
    "entry": "tools/ci/test_ci_cause_notices.py",
    "inputs": [
+    ".github/workflows/build.yml",
     "tools/ci/ci_cause_notices.sh",
-    "tools/ci/test_ci_cause_notices.py"
+    "tools/ci/test_ci_cause_notices.py",
+    "tools/shipyard.toml",
+    "tools/toolchain/shipyard.sha256"
    ],
    "kind": "python"
   },
@@ -5038,6 +5045,13 @@
    "entry": "tools/scripts/test_gpu_audio_p4_evidence.py",
    "inputs": [
     "tools/scripts/test_gpu_audio_p4_evidence.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-p5-unified-receipt-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_p5_receipt.py",
+   "inputs": [
+    "tools/validation/test_verify_gpu_audio_p5_receipt.py"
    ],
    "kind": "python"
   },
@@ -6353,6 +6367,14 @@
    "entry": "test/test_design_ir_observe_malformed.py",
    "inputs": [
     "test/test_design_ir_observe_malformed.py"
+   ],
+   "kind": "python"
+  },
+  "import-design-ir-observe-provider-boundary": {
+   "entry": "test/test_design_ir_observe_provider_boundary.py",
+   "inputs": [
+    "test/test_design_ir_observe_provider_boundary.py",
+    "tools/import-design/design_ir_observe.cpp"
    ],
    "kind": "python"
   },
@@ -12151,12 +12173,12 @@
    "kind": "python"
   },
   "vst3-bundle-layout-selftest": {
-   "kind": "python",
    "entry": "tools/cmake/scripts/test_check_vst3_bundle_layout.py",
    "inputs": [
     "tools/cmake/scripts/check_vst3_bundle_layout.py",
     "tools/cmake/scripts/test_check_vst3_bundle_layout.py"
-   ]
+   ],
+   "kind": "python"
   },
   "wasm-skia-fetch-mapping": {
    "entry": "tools/scripts/verify_wasm_skia_slice.py",
@@ -12282,6 +12304,14 @@
     "tools/scripts/test_windows_posix_shims.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
     "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "windows-vm-manifest-selftest": {
+   "entry": "tools/ci/test_windows_vm_manifest.py",
+   "inputs": [
+    "tools/ci/test_windows_vm_manifest.py",
+    "tools/ci/validate_windows_vm_manifest.py"
    ],
    "kind": "python"
   },

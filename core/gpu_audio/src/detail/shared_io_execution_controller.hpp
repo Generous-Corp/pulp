@@ -138,6 +138,21 @@ class SharedIoExecutionController {
                     expected, static_cast<std::uint8_t>(EntryState::Writing),
                     std::memory_order_acq_rel, std::memory_order_acquire))
                 continue;
+            // in_flight_ counts submissions the provider has not completed
+            // yet; it is released by record_completion(). Completed entries
+            // waiting out the lead keep their table slot, so table occupancy
+            // is bounded separately by capacity_ through the Empty claim above.
+            auto occupancy = in_flight_.load(std::memory_order_acquire);
+            while (occupancy < contract_.max_inflight &&
+                   !in_flight_.compare_exchange_weak(occupancy, occupancy + 1,
+                                                     std::memory_order_acq_rel,
+                                                     std::memory_order_acquire)) {
+            }
+            if (occupancy >= contract_.max_inflight) {
+                entry.state.store(static_cast<std::uint8_t>(EntryState::Empty),
+                                  std::memory_order_release);
+                return SharedIoAdmission::CapacityFull;
+            }
             entry.sequence = sequence;
             entry.completion = SharedIoCompletion::Failed;
             entry.failure_reason = SharedIoFallbackReason::SubmissionRejected;
@@ -145,6 +160,7 @@ class SharedIoExecutionController {
             if (!next_admission_sequence_.compare_exchange_strong(expected_sequence, sequence + 1,
                                                                   std::memory_order_acq_rel,
                                                                   std::memory_order_acquire)) {
+                in_flight_.fetch_sub(1, std::memory_order_relaxed);
                 entry.state.store(static_cast<std::uint8_t>(EntryState::Empty),
                                   std::memory_order_release);
                 if (telemetry_)
@@ -153,7 +169,7 @@ class SharedIoExecutionController {
             }
             // Occupancy must be reserved before the release-store publishes
             // the entry to provider and callback consumers.
-            const auto count = in_flight_.fetch_add(1, std::memory_order_relaxed) + 1;
+            const auto count = occupancy + 1;
 #if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
             if (before_publish_test_hook_)
                 before_publish_test_hook_(*this, sequence, before_publish_test_context_);
@@ -201,6 +217,7 @@ class SharedIoExecutionController {
                                        : (failure_reason == SharedIoFallbackReason::None
                                               ? SharedIoFallbackReason::SubmissionRejected
                                               : failure_reason);
+            in_flight_.fetch_sub(1, std::memory_order_acq_rel);
             entry.state.store(static_cast<std::uint8_t>(EntryState::Ready),
                               std::memory_order_release);
             if (telemetry_)
@@ -356,11 +373,13 @@ class SharedIoExecutionController {
         }
     }
 
+    // The entry's in-flight reservation was already released when its
+    // completion was recorded; retiring only returns the table slot.
     void retire_claimed_entry(Entry& entry) noexcept {
-        const auto remaining = in_flight_.fetch_sub(1, std::memory_order_relaxed) - 1;
 #if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
         if (before_reuse_test_hook_)
-            before_reuse_test_hook_(*this, remaining, before_reuse_test_context_);
+            before_reuse_test_hook_(*this, in_flight_.load(std::memory_order_acquire),
+                                    before_reuse_test_context_);
 #endif
         entry.state.store(static_cast<std::uint8_t>(EntryState::Empty), std::memory_order_release);
     }

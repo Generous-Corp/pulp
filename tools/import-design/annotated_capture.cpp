@@ -1,12 +1,22 @@
 #include "tools/import-design/annotated_capture.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <initializer_list>
+#include <climits>
+#include <limits>
 #include <optional>
+#include <regex>
+#include <string_view>
+#include <unordered_set>
 #include <sstream>
 #include <unordered_map>
+#include <vector>
 
 #include <choc/text/choc_JSON.h>
+#include <pulp/runtime/crypto.hpp>
 
 namespace pulp::import_design {
 
@@ -58,8 +68,25 @@ const char* kind_to_enum(DesignFrameElement::Kind k) {
 float num(const choc::value::ValueView& v, const char* key, float dflt) {
     if (!v.isObject() || !v.hasObjectMember(key)) return dflt;
     const auto m = v[key];
-    return (m.isInt() || m.isFloat()) ? static_cast<float>(m.getWithDefault(0.0))
-                                      : dflt;
+    if (!m.isInt() && !m.isFloat())
+        return dflt;
+    const auto value = static_cast<float>(m.getWithDefault(0.0));
+    return std::isfinite(value) ? value : std::numeric_limits<float>::quiet_NaN();
+}
+
+bool contains_non_finite_number(const choc::value::ValueView& value) {
+    if (value.isInt() || value.isFloat())
+        return !std::isfinite(value.getWithDefault(0.0));
+    if (value.isArray()) {
+        for (uint32_t i = 0; i < value.size(); ++i)
+            if (contains_non_finite_number(value[i]))
+                return true;
+    } else if (value.isObject()) {
+        for (uint32_t i = 0; i < value.size(); ++i)
+            if (contains_non_finite_number(value.getObjectMemberAt(i).value))
+                return true;
+    }
+    return false;
 }
 
 std::string str(const choc::value::ValueView& v, const char* key) {
@@ -181,6 +208,325 @@ bool parse_annotated_manifest(const std::string& json,
                                               static_cast<float>(e.target_frame)));
 
         out.elements.push_back(std::move(e));
+    }
+    return true;
+}
+
+bool validate_annotated_capture(const std::string& svg, const std::string& sidecar_json,
+                                std::string& error) {
+    error.clear();
+    choc::value::Value root;
+    try {
+        root = choc::json::parse(sidecar_json);
+    } catch (const std::exception& e) {
+        error = std::string("invalid sidecar JSON: ") + e.what();
+        return false;
+    }
+    if (!root.isObject()) {
+        error = "sidecar root must be an object";
+        return false;
+    }
+    if (contains_non_finite_number(root)) {
+        error = "sidecar contains a non-finite numeric value";
+        return false;
+    }
+    if (!root.hasObjectMember("provenance") || !root["provenance"].isObject()) {
+        error = "sidecar requires provenance object";
+        return false;
+    }
+    const auto provenance = root["provenance"];
+    const auto source = str(provenance, "source");
+    if (source.empty()) {
+        error = "provenance.source is required";
+        return false;
+    }
+    const auto hash = str(root, "svg_sha256");
+    static const std::regex hex64("^[0-9a-fA-F]{64}$");
+    if (!std::regex_match(hash, hex64)) {
+        error = "svg_sha256 must be a 64-character hex digest";
+        return false;
+    }
+    if (runtime::sha256_hex(svg) != hash) {
+        error = "svg_sha256 does not match SVG bytes";
+        return false;
+    }
+    if (!root.hasObjectMember("canvas") || !root["canvas"].isObject()) {
+        error = "sidecar requires canvas object";
+        return false;
+    }
+    const auto canvas = root["canvas"];
+    for (const char* key : {"width", "height"}) {
+        if (!canvas.hasObjectMember(key) || !(canvas[key].isInt() || canvas[key].isFloat())) {
+            error = std::string("canvas ") + key + " must be numeric";
+            return false;
+        }
+    }
+    const float cw = num(canvas, "width", 0), ch = num(canvas, "height", 0);
+    if (!(std::isfinite(cw) && std::isfinite(ch) && cw > 0 && ch > 0)) {
+        error = "canvas width and height must be positive";
+        return false;
+    }
+
+    // Remove non-markup regions before looking for start tags. Otherwise a
+    // nested `<rect id="x">` inside a comment, CDATA block, or script/style
+    // string could be mistaken for a real SVG element. Unclosed regions consume
+    // the rest of the source so malformed envelopes fail closed.
+    std::string svg_markup;
+    const auto starts_ci = [&](size_t pos, std::string_view token) {
+        if (pos + token.size() > svg.size())
+            return false;
+        for (size_t j = 0; j < token.size(); ++j)
+            if (std::tolower(static_cast<unsigned char>(svg[pos + j])) !=
+                std::tolower(static_cast<unsigned char>(token[j])))
+                return false;
+        return true;
+    };
+    for (size_t i = 0; i < svg.size();) {
+        if (svg.compare(i, 4, "<!--") == 0) {
+            const auto end = svg.find("-->", i + 4);
+            if (end == std::string::npos)
+                break;
+            i = end + 3;
+        } else if (svg.compare(i, 9, "<![CDATA[") == 0) {
+            const auto end = svg.find("]]>", i + 9);
+            if (end == std::string::npos)
+                break;
+            i = end + 3;
+        } else if (starts_ci(i, "<script") || starts_ci(i, "<style")) {
+            const auto name_end = svg.find('>', i + 1);
+            if (name_end == std::string::npos)
+                break;
+            const auto name = starts_ci(i, "<script") ? "script" : "style";
+            const auto close = svg.find(std::string("</") + name, name_end + 1);
+            if (close == std::string::npos)
+                break;
+            const auto close_end = svg.find('>', close + 2 + std::strlen(name));
+            if (close_end == std::string::npos)
+                break;
+            i = close_end + 1;
+        } else if (svg.compare(i, 2, "<?") == 0 || svg.compare(i, 2, "<!") == 0) {
+            const auto end = svg.find('>', i + 2);
+            if (end == std::string::npos)
+                break;
+            i = end + 1;
+        } else {
+            svg_markup.push_back(svg[i++]);
+        }
+    }
+
+    // A matching digest authenticates the bytes, but it does not establish that
+    // they are an SVG document. Walk the sanitized tags so fake root tags in
+    // attributes, wrappers, comments, or script/style bodies cannot satisfy
+    // this envelope. This remains a bounded structural check; full XML/SVG
+    // semantics belong to the rendering backend.
+    const std::regex envelope_tag_re(
+        R"(<\s*(/?)\s*([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^<>]*)?/\s*>|<\s*(/?)\s*([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^<>]*)?>)");
+    std::vector<std::string> tag_stack;
+    bool saw_root = false;
+    bool closed_root = false;
+    size_t cursor = 0;
+    bool envelope_valid = true;
+    for (std::sregex_iterator it(svg_markup.begin(), svg_markup.end(), envelope_tag_re), end;
+         it != end; ++it) {
+        const auto position = static_cast<size_t>(it->position());
+        const auto gap = svg_markup.substr(cursor, position - cursor);
+        if (gap.find('<') != std::string::npos ||
+            (tag_stack.empty() && gap.find_first_not_of(" \t\r\n") != std::string::npos)) {
+            envelope_valid = false;
+            break;
+        }
+        const auto tag = it->str();
+        bool single_quoted = false;
+        bool double_quoted = false;
+        for (const auto character : tag) {
+            if (character == '\'' && !double_quoted)
+                single_quoted = !single_quoted;
+            if (character == '"' && !single_quoted)
+                double_quoted = !double_quoted;
+        }
+        if (single_quoted || double_quoted) {
+            envelope_valid = false;
+            break;
+        }
+        size_t marker = 1;
+        while (marker < tag.size() && std::isspace(static_cast<unsigned char>(tag[marker])))
+            ++marker;
+        const bool closing = marker < tag.size() && tag[marker] == '/';
+        const auto last_content = tag.find_last_not_of(" \t\r\n>");
+        const bool self_closing = last_content != std::string::npos && tag[last_content] == '/';
+        const auto name_start =
+            tag.find_first_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+        if (name_start == std::string::npos) {
+            envelope_valid = false;
+            break;
+        }
+        size_t name_end = name_start;
+        while (name_end < tag.size() &&
+               (std::isalnum(static_cast<unsigned char>(tag[name_end])) || tag[name_end] == ':' ||
+                tag[name_end] == '_' || tag[name_end] == '-'))
+            ++name_end;
+        const auto name = tag.substr(name_start, name_end - name_start);
+        if (closing) {
+            if (tag_stack.empty() || tag_stack.back() != name) {
+                envelope_valid = false;
+                break;
+            }
+            tag_stack.pop_back();
+            if (tag_stack.empty()) {
+                if (!saw_root || name != "svg") {
+                    envelope_valid = false;
+                    break;
+                }
+                closed_root = true;
+            }
+        } else {
+            if (tag_stack.empty()) {
+                if (saw_root || name != "svg" || self_closing) {
+                    envelope_valid = false;
+                    break;
+                }
+                saw_root = true;
+            }
+            if (!self_closing)
+                tag_stack.push_back(name);
+        }
+        cursor = position + tag.size();
+    }
+    if (envelope_valid) {
+        const auto tail = svg_markup.substr(cursor);
+        envelope_valid = tag_stack.empty() && closed_root && tail.find('<') == std::string::npos &&
+                         tail.find_first_not_of(" \t\r\n") == std::string::npos;
+    }
+    if (!envelope_valid) {
+        error = "SVG bytes must contain an <svg> root element";
+        return false;
+    }
+
+    std::unordered_set<std::string> svg_ids;
+    // Restrict attribute matching to actual start tags. A word-boundary match
+    // over the whole source would accept `data-id`, `aria-id`, or comments as
+    // if they were real SVG id attributes.
+    const std::regex tag_re(R"(<\s*[A-Za-z][^<>]*>)");
+    const std::regex id_re(R"((?:^|\s)id\s*=\s*["']([^"']+)["'])");
+    for (std::sregex_iterator tag(svg_markup.begin(), svg_markup.end(), tag_re), end; tag != end;
+         ++tag) {
+        const auto tag_text = tag->str();
+        for (std::sregex_iterator id(tag_text.begin(), tag_text.end(), id_re), id_end; id != id_end;
+             ++id)
+            if (!svg_ids.insert((*id)[1].str()).second) {
+                error = "SVG contains duplicate id '" + (*id)[1].str() + "'";
+                return false;
+            }
+    }
+
+    AnnotatedCaptureManifest manifest;
+    if (!root.hasObjectMember("elements") || !root["elements"].isArray()) {
+        error = "sidecar requires elements array";
+        return false;
+    }
+    const auto elements = root["elements"];
+    for (uint32_t i = 0; i < elements.size(); ++i) {
+        const auto element = elements[i];
+        if (!element.isObject())
+            continue;
+        const auto check_numeric = [&](const choc::value::ValueView& object, const char* key) {
+            return !object.hasObjectMember(key) || object[key].isInt() || object[key].isFloat();
+        };
+        for (const char* key : {"selected_index", "note", "view_group", "target_frame"})
+            if (!check_numeric(element, key)) {
+                error = "element " + std::to_string(i) + " field '" + key + "' must be numeric";
+                return false;
+            }
+        for (const char* key : {"selected_index", "note", "view_group", "target_frame"})
+            if (element.hasObjectMember(key)) {
+                const auto value = element[key].getWithDefault(0.0);
+                if (!std::isfinite(value) || std::trunc(value) != value || value < INT_MIN ||
+                    value > INT_MAX) {
+                    error = "element " + std::to_string(i) + " field '" + key +
+                            "' must be an integer in range";
+                    return false;
+                }
+            }
+        if (!element.hasObjectMember("geometry") || !element["geometry"].isObject()) {
+            error = "element " + std::to_string(i) + " requires a geometry object";
+            return false;
+        }
+        const auto geometry = element["geometry"];
+        for (const char* key : {"cx", "cy", "hit_radius", "x", "y", "w", "h", "value", "value_y"})
+            if (!check_numeric(geometry, key)) {
+                error = "element " + std::to_string(i) + " geometry field '" + key +
+                        "' must be numeric";
+                return false;
+            }
+        const auto kind = element.hasObjectMember("kind") && element["kind"].isString()
+                              ? std::string(element["kind"].getString())
+                              : std::string{};
+        const bool circular = kind == "knob";
+        const bool xy = kind == "xy_pad";
+        const auto require_geometry = [&](std::initializer_list<const char*> keys) {
+            for (const auto* key : keys)
+                if (!geometry.hasObjectMember(key)) {
+                    error = "element " + std::to_string(i) + " geometry requires '" + key +
+                            "' for kind '" + kind + "'";
+                    return false;
+                }
+            return true;
+        };
+        if (circular) {
+            if (!require_geometry({"cx", "cy", "hit_radius"}))
+                return false;
+        } else if (xy) {
+            if (!require_geometry({"x", "y", "w", "h", "cx", "cy"}))
+                return false;
+        } else {
+            if (!require_geometry({"x", "y", "w", "h"}))
+                return false;
+        }
+    }
+    if (!parse_annotated_manifest(sidecar_json, manifest, error))
+        return false;
+    std::unordered_set<std::string> selectors;
+    for (size_t i = 0; i < manifest.elements.size(); ++i) {
+        const auto& e = manifest.elements[i];
+        if (!std::isfinite(e.cx) || !std::isfinite(e.cy) || !std::isfinite(e.hit_radius) ||
+            !std::isfinite(e.x) || !std::isfinite(e.y) || !std::isfinite(e.w) ||
+            !std::isfinite(e.h) || !std::isfinite(e.value) || !std::isfinite(e.value_y)) {
+            error = "element " + std::to_string(i) + " contains a non-finite numeric value";
+            return false;
+        }
+        if (e.source_node_id.size() < 2 || e.source_node_id[0] != '#') {
+            error = "element " + std::to_string(i) + " selector must be an SVG #id";
+            return false;
+        }
+        const auto id = e.source_node_id.substr(1);
+        if (!selectors.insert(id).second) {
+            error = "duplicate control selector '" + e.source_node_id + "'";
+            return false;
+        }
+        if (!svg_ids.count(id)) {
+            error = "control selector '" + e.source_node_id + "' is absent from SVG";
+            return false;
+        }
+        if ((e.kind != DesignFrameElement::Kind::knob && (e.w <= 0 || e.h <= 0)) || e.x < 0 ||
+            e.y < 0 || e.x + e.w > cw || e.y + e.h > ch) {
+            error = "element " + std::to_string(i) + " geometry is outside canvas";
+            return false;
+        }
+        if (e.kind == DesignFrameElement::Kind::knob &&
+            (e.cx < 0 || e.cy < 0 || e.cx > cw || e.cy > ch || e.hit_radius <= 0 ||
+             e.cx + e.hit_radius > cw || e.cy + e.hit_radius > ch || e.cx - e.hit_radius < 0 ||
+             e.cy - e.hit_radius < 0)) {
+            error = "element " + std::to_string(i) + " control center is outside canvas";
+            return false;
+        }
+        // An XY pad has no hit radius; its puck center must sit inside its own
+        // rectangle, which the check above already keeps inside the canvas.
+        if (e.kind == DesignFrameElement::Kind::xy_pad &&
+            (e.cx < e.x || e.cy < e.y || e.cx > e.x + e.w || e.cy > e.y + e.h || e.cx > cw ||
+             e.cy > ch)) {
+            error = "element " + std::to_string(i) + " control center is outside its pad";
+            return false;
+        }
     }
     return true;
 }

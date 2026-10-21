@@ -1,12 +1,14 @@
 #pragma once
 
 #include <pulp/format/graph_runtime_executor.hpp>
+#include <pulp/format/audio_input_provider.hpp>
 #include <pulp/format/process_block.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/processor_block_adapter.hpp>
 #include <pulp/state/store.hpp>
 
 #include <memory>
+#include <array>
 #include <span>
 #include <vector>
 
@@ -45,6 +47,14 @@ public:
     bool prepare(const PrepareContext& context);
     bool release() noexcept;
 
+    /// Install a host-owned route provider before prepare(). The handle is
+    /// copied as a small immutable POD and read from the audio thread without
+    /// allocation or locking. Clearing it requires the audio thread to be
+    /// stopped and the node to be prepared again.
+    void set_audio_input_provider(AudioInputBusProvider provider) noexcept {
+        input_provider_ = provider;
+    }
+
     /// Build the only valid graph binding for this adapter. The cached
     /// capability selects dense views or the legacy event expansion.
     GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept;
@@ -68,6 +78,11 @@ private:
     // once in prepare() and reused across blocks; never resized on the RT path.
     ProcessorBlockAdapterScratch scratch_;
     NodeCapabilities capabilities_{};
+    AudioInputBusProvider input_provider_{};
+    std::array<BusRole, BusBufferSet::kMaxBuses> input_roles_{};
+    std::array<int, BusBufferSet::kMaxBuses> input_channels_{};
+    std::array<bool, BusBufferSet::kMaxBuses> input_optional_{};
+    std::size_t input_bus_count_ = 0;
     bool prepared_ = false;
 };
 
@@ -85,6 +100,9 @@ class ProcessorNodeInstance final {
 
     bool prepare(const PrepareContext& context) noexcept;
     bool release() noexcept;
+    void set_audio_input_provider(AudioInputBusProvider provider) noexcept {
+        adapter_.set_audio_input_provider(provider);
+    }
     GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept {
         return adapter_.binding(node_id, required);
     }

@@ -369,6 +369,12 @@
       "timeout": 120.0
     },
     {
+      "name": "gpu-audio-p5-unified-receipt-verifier-selftest",
+      "argv": [
+        "{repo}/tools/validation/test_verify_gpu_audio_p5_receipt.py"
+      ]
+    },
+    {
       "name": "gpu-audio-trace-validator-selftest",
       "argv": [
         "{repo}/tools/scripts/test_validate_gpu_audio_trace_captures.py"
@@ -508,6 +514,15 @@
         "{repo}/tools/scripts/test_verify_gpu_trace_overhead_acceptance.py"
       ],
       "timeout": 300.0
+    },
+    {
+      "name": "import-design-ir-observe-provider-boundary",
+      "argv": [
+        "{repo}/test/test_design_ir_observe_provider_boundary.py",
+        "--source",
+        "{repo}/tools/import-design/design_ir_observe.cpp"
+      ],
+      "timeout": 60.0
     },
     {
       "name": "inspector-truth-check-selftest",
@@ -893,6 +908,12 @@
       "timeout": 120.0
     },
     {
+      "name": "shipyard-merge-gate-evidence-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_shipyard_merge_gate_evidence.py"
+      ]
+    },
+    {
       "name": "shipyard-target-defaults-selftest",
       "argv": [
         "{repo}/tools/ci/test_shipyard_target_defaults.py"
@@ -1075,9 +1096,9 @@
       "timeout": 180.0
     },
     {
-      "name": "shipyard-merge-gate-evidence-selftest",
+      "name": "windows-vm-manifest-selftest",
       "argv": [
-        "{repo}/tools/scripts/test_shipyard_merge_gate_evidence.py"
+        "{repo}/tools/ci/test_windows_vm_manifest.py"
       ]
     },
     {

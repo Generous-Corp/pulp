@@ -259,11 +259,13 @@ jobs:
 
       - name: Planning-gitlink guard
         # Rejects an accidental `planning` submodule pointer bump in a PR; a
-        # deliberate re-pin passes with a `Planning-Bump:` trailer.
+        # deliberate re-pin passes with a `Planning-Bump:` trailer. This runner
+        # cannot read the private planning repository, so an unverifiable pin
+        # ancestry is a warning here; pre-push and gates.sh fail closed on it.
         run: |
           python3 tools/scripts/planning_gitlink_guard.py \
               --base "${{ steps.base.outputs.ref }}" \
-              --mode=report
+              --mode=report --ci-warn-only
 
       - name: Source-contract registry check
         # Lightweight import-provider contract gate. The registry linter is

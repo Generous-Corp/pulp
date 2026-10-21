@@ -34,6 +34,7 @@ target_sources(pulp-gpu-device PRIVATE
     src/gpu_diagnostics.cpp
     src/gpu_startup_report.cpp
     src/gpu_surface_dawn.cpp
+    src/render_observer.cpp
     src/gpu_compute.cpp
 )
 target_link_libraries(pulp-gpu-device

@@ -34,7 +34,7 @@ enum class GpuAudioProviderState : std::uint8_t {
 /// preserve the distinction between GPU production and CPU fallback.  In
 /// particular, `missed_blocks` is not a synonym for `fallback_blocks`.
 struct GpuAudioStatus {
-    static constexpr std::uint32_t kSchemaVersion = 1;
+    static constexpr std::uint32_t kSchemaVersion = 2;
 
     std::uint32_t schema_version = kSchemaVersion;
     GpuAudioEngine requested_engine = GpuAudioEngine::Unknown;
@@ -49,7 +49,6 @@ struct GpuAudioStatus {
     std::uint32_t prepared_lead_blocks = 0;
     bool fallback_available = false;
     bool diagnostics_available = false;
-
     std::uint64_t produced_blocks = 0;
     std::uint64_t missed_blocks = 0;
     std::uint64_t fallback_blocks = 0;
@@ -57,8 +56,10 @@ struct GpuAudioStatus {
     std::uint64_t input_dropped_frames = 0;
     double last_block_us = 0.0;
     double avg_block_us = 0.0;
-    // Appended to preserve positional aggregate initialization of the v1 fields.
+    // Appended after the v1 fields so positional aggregate initialization of
+    // the installed status prefix remains source-compatible.
     GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
+    std::uint64_t recovery_sequence = UINT64_MAX;
 };
 
 /// Why a host-visible status snapshot is inconsistent.  The validator is

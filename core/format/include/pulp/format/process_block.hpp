@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/format/bus_role.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
@@ -111,12 +112,6 @@ public:
 enum class BusDirection : std::uint8_t {
     Input,
     Output,
-};
-
-enum class BusRole : std::uint8_t {
-    Main,
-    Aux,
-    Sidechain,
 };
 
 struct BusBuffer {

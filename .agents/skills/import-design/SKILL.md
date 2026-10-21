@@ -22,6 +22,16 @@ rendered workload and invalidates retained-versus-rebuild comparisons.
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+### Preconverted vector artwork is validation-only
+
+The import-design CLI accepts a preconverted SVG only when its sidecar binds
+the exact SVG SHA-256, source/provenance metadata, canvas dimensions, control
+selectors, and bounds. Illustrator `.ai`, PDF, and other unconverted artwork
+inputs fail closed with a diagnostic directing callers to a preconverted SVG;
+this path does not implement Illustrator/PDF conversion or grant rights to
+third-party artwork. Keep the sidecar and SVG together and retain both in the
+import receipt.
+
 ### Materialized browser source emission
 
 For a browser capture that publishes `materialized-document.json`, use
@@ -596,6 +606,12 @@ knowing before you touch that file:
   `DYLD_INSERT_LIBRARIES`) is not benign — the observer then hits WebGPU
   validation errors and a Tint internal compiler error. `--gpu-fault` seeds
   failures for parity-lane calibration only.
+
+  Keep provider-version reads and device-loss injection inside the private
+  render implementation. Including Dawn/WebGPU headers in the importer bypasses
+  that boundary; putting the observer declaration under `core/render/include`
+  also exports a development diagnostic into the installed SDK. The source
+  boundary regression checks both mistakes, alongside the GPU receipt tests.
 
 - `pulp-ui-frames-observe` records an imported panel (`--design-ir`) or a
   scripted UI (`--script`) frame by frame under a fixed host clock: a
@@ -1320,6 +1336,11 @@ carries a `param_key`, the generated ctor calls
 `route_changes_to_host_params(true)` so the view runs unchanged embedded in
 JUCE / iPlug2 / native. Gotcha baked into a regression test: emitted float
 literals must be valid C++ (`120.f`, never the invalid `120f`).
+Strict validation (`validate_annotated_capture`) bounds each kind by its own
+geometry: a `knob` by `cx/cy ± hit_radius` inside the canvas, an `xy_pad` by
+its box (which must sit inside the canvas) with the `cx/cy` puck center inside
+that box, edges inclusive. An `xy_pad` has no `hit_radius`; applying the knob
+rule to it rejects every pad, because the absent radius parses as 0.
 
 **Under the hood: a 1:1 catalog component = subclass `DesignFrameView` with the embedded SVG.**
 See `core/view/{include/pulp/view,src}/musical_typing_keyboard*` +
@@ -7682,6 +7703,14 @@ Import-validation round-trip harnesses must route Pulp target builds through
 build receipt. This applies to the seven Pulp harnesses (`v0`, `figma`, `pencil`,
 `stitch`, `rn`, `designmd`, and `jsx`). Leave a separate external-project build
 (such as Spectr) on its own toolchain boundary.
+
+## Preconverted SVG source-contract metadata
+
+The `preconverted-svg` lane is validation-only: its source-contract row must
+describe the exact SVG and control-map sidecar boundary, name the local
+annotated-capture contract as its parser owner, and keep Illustrator/PDF
+conversion explicitly out of scope. When that metadata changes, update this
+skill note and the append-only Vellum watch event in the same review.
 
 ## Captured canvas authority
 
