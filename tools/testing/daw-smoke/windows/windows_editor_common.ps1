@@ -277,7 +277,7 @@ function Test-WindowsPluginAbiCompatible([string]$HostAbi, [string]$PluginAbi) {
   switch ($HostAbi) {
     'x64' { return $PluginAbi -eq 'x64' }
     'arm64' { return $PluginAbi -eq 'arm64' }
-    'arm64ec' { return $PluginAbi -in @('arm64ec','arm64x') }
+    { $_ -in @('arm64ec','arm64x') } { return $PluginAbi -in @('arm64ec','arm64x') }
     default { return $false }
   }
 }
