@@ -189,6 +189,10 @@ struct SharedIoTelemetrySnapshot {
     std::uint32_t configured_max_inflight = 0;
     std::uint32_t configured_available_inflight = 0;
     std::uint64_t callback_blocks = 0;
+    // Number of provider-bound work items admitted by the worker. This is
+    // distinct from submitted_blocks because an admitted item may fail before
+    // the provider accepts its submission.
+    std::uint64_t admitted_blocks = 0;
     std::uint64_t submitted_blocks = 0;
     std::uint64_t retired_success = 0;
     std::uint64_t retired_failure = 0;
@@ -211,6 +215,88 @@ struct SharedIoTelemetrySnapshot {
     bool gpu_elapsed_available = false;
 };
 
+enum class SharedIoTelemetryError : std::uint8_t {
+    None,
+    InvalidDepthConfiguration,
+    OccupancyExceedsPipelineDepth,
+    OccupancyExceedsMaxInflight,
+    SubmittedExceedsAdmissions,
+    SuccessfulRetirementsExceedSubmissions,
+    RetirementsExceedAdmissions,
+    DeliveredExceedsCallbacks,
+    DeadlineMissesExceedCallbacks,
+    LateCompletionsExceedRetirements,
+    FallbacksExceedDelivered,
+    ScheduledCompletionBeforeComponents,
+    // Appended to preserve the numeric values of existing diagnostic errors.
+    RetirementsExceedSubmissions,
+};
+
+struct SharedIoTelemetryValidation {
+    SharedIoTelemetryError error = SharedIoTelemetryError::None;
+
+    constexpr bool accepted() const noexcept {
+        return error == SharedIoTelemetryError::None;
+    }
+};
+
+// Validate a quiescent diagnostic snapshot without making claims about a
+// concurrently updated counter set. A zeroed depth policy is valid because
+// producers may expose telemetry before attaching a scheduling policy.
+constexpr SharedIoTelemetryValidation
+validate_shared_io_telemetry(const SharedIoTelemetrySnapshot& snapshot) noexcept {
+    const bool depth_unconfigured =
+        snapshot.configured_lead_blocks == 0 && snapshot.configured_pipeline_depth == 0 &&
+        snapshot.configured_max_inflight == 0 && snapshot.configured_available_inflight == 0;
+    if (!depth_unconfigured) {
+        if (snapshot.configured_lead_blocks == 0 || snapshot.configured_pipeline_depth == 0 ||
+            snapshot.configured_max_inflight == 0 ||
+            snapshot.configured_pipeline_depth <= snapshot.configured_lead_blocks ||
+            snapshot.configured_available_inflight !=
+                snapshot.configured_pipeline_depth - snapshot.configured_lead_blocks ||
+            snapshot.configured_max_inflight > snapshot.configured_available_inflight)
+            return {SharedIoTelemetryError::InvalidDepthConfiguration};
+    }
+    if (snapshot.configured_pipeline_depth != 0 &&
+        snapshot.in_flight_high_water > snapshot.configured_pipeline_depth)
+        return {SharedIoTelemetryError::OccupancyExceedsPipelineDepth};
+    if (snapshot.configured_max_inflight != 0 &&
+        snapshot.in_flight_high_water > snapshot.configured_max_inflight)
+        return {SharedIoTelemetryError::OccupancyExceedsMaxInflight};
+    // Older controller-only producers use submitted_blocks for their
+    // admission boundary and do not expose a separate admission count. Keep
+    // those zero-admission snapshots compatible; traced providers opt into
+    // the stricter relation by recording admissions explicitly.
+    if (snapshot.admitted_blocks != 0 && snapshot.submitted_blocks > snapshot.admitted_blocks)
+        return {SharedIoTelemetryError::SubmittedExceedsAdmissions};
+    if (snapshot.retired_success > snapshot.submitted_blocks)
+        return {SharedIoTelemetryError::SuccessfulRetirementsExceedSubmissions};
+    if (snapshot.admitted_blocks == 0 &&
+        (snapshot.retired_success > UINT64_MAX - snapshot.retired_failure ||
+         snapshot.retired_success + snapshot.retired_failure > snapshot.submitted_blocks))
+        return {SharedIoTelemetryError::RetirementsExceedSubmissions};
+    if (snapshot.admitted_blocks != 0 &&
+        (snapshot.retired_success > UINT64_MAX - snapshot.retired_failure ||
+         snapshot.retired_success + snapshot.retired_failure > snapshot.admitted_blocks))
+        return {SharedIoTelemetryError::RetirementsExceedAdmissions};
+    if (snapshot.delivered_blocks > snapshot.callback_blocks)
+        return {SharedIoTelemetryError::DeliveredExceedsCallbacks};
+    if (snapshot.deadline_misses > snapshot.callback_blocks)
+        return {SharedIoTelemetryError::DeadlineMissesExceedCallbacks};
+    if (snapshot.retired_success > UINT64_MAX - snapshot.retired_failure ||
+        snapshot.late_completions > snapshot.retired_success + snapshot.retired_failure)
+        return {SharedIoTelemetryError::LateCompletionsExceedRetirements};
+    if (snapshot.fallback_blocks > snapshot.delivered_blocks)
+        return {SharedIoTelemetryError::FallbacksExceedDelivered};
+    // `scheduled_to_completion_ns` is the sum of the two component samples.
+    // A wrapped sum would otherwise look like a valid, tiny latency receipt
+    // and could hide a provider timing failure from health consumers.
+    if (snapshot.scheduled_to_completion_ns < snapshot.pre_submit_delay_ns ||
+        snapshot.scheduled_to_completion_ns < snapshot.submit_to_completion_ns)
+        return {SharedIoTelemetryError::ScheduledCompletionBeforeComponents};
+    return {};
+}
+
 // Atomic, allocation-free counters for the private bridge. Timing values are
 // the latest observed sample and a snapshot may span adjacent worker updates;
 // the bridge's bounded raw receipt remains the authority for correlated
@@ -232,6 +318,7 @@ class SharedIoTelemetry {
         configured_max_inflight_.store(0, std::memory_order_relaxed);
         configured_available_inflight_.store(0, std::memory_order_relaxed);
         callback_blocks_.store(0, std::memory_order_relaxed);
+        admitted_blocks_.store(0, std::memory_order_relaxed);
         submitted_blocks_.store(0, std::memory_order_relaxed);
         retired_success_.store(0, std::memory_order_relaxed);
         retired_failure_.store(0, std::memory_order_relaxed);
@@ -258,6 +345,9 @@ class SharedIoTelemetry {
         callback_blocks_.fetch_add(1, std::memory_order_relaxed);
         if (deadline_miss)
             deadline_misses_.fetch_add(1, std::memory_order_relaxed);
+    }
+    void record_admission() noexcept {
+        admitted_blocks_.fetch_add(1, std::memory_order_relaxed);
     }
     void record_deadline_miss() noexcept {
         deadline_misses_.fetch_add(1, std::memory_order_relaxed);
@@ -326,6 +416,7 @@ class SharedIoTelemetry {
         out.configured_available_inflight =
             configured_available_inflight_.load(std::memory_order_relaxed);
         out.callback_blocks = callback_blocks_.load(std::memory_order_relaxed);
+        out.admitted_blocks = admitted_blocks_.load(std::memory_order_relaxed);
         out.submitted_blocks = submitted_blocks_.load(std::memory_order_relaxed);
         out.retired_success = retired_success_.load(std::memory_order_relaxed);
         out.retired_failure = retired_failure_.load(std::memory_order_relaxed);
@@ -352,7 +443,7 @@ class SharedIoTelemetry {
     }
 
   private:
-    std::atomic<std::uint64_t> callback_blocks_{0}, submitted_blocks_{0};
+    std::atomic<std::uint64_t> callback_blocks_{0}, admitted_blocks_{0}, submitted_blocks_{0};
     std::atomic<std::uint64_t> retired_success_{0}, retired_failure_{0};
     std::atomic<std::uint64_t> delivered_blocks_{0}, deadline_misses_{0};
     std::atomic<std::uint64_t> late_completions_{0}, fallback_blocks_{0};
