@@ -1091,6 +1091,72 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
     return doc
 
 
+CMAKE_TOKEN_RE = re.compile(r"[A-Za-z0-9_.+-]+")
+
+
+def cmake_registration_tokens(root: Path) -> set[str]:
+    """Every name-shaped token in the tree's CMake sources, comments removed.
+
+    A test or test executable registered anywhere in the source, including
+    behind a configure option this build has off, keeps its name here; one
+    whose registration was deleted does not."""
+    rels = [r for r in tracked_paths(root) if r.endswith(".cmake") or r.endswith("CMakeLists.txt")]
+    if not rels:
+        rels = [_rel(p, root) or "" for p in root.rglob("*")
+                if p.is_file() and (p.suffix == ".cmake" or p.name == "CMakeLists.txt")]
+    tokens: set[str] = set()
+    for rel in rels:
+        try:
+            text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            tokens.update(CMAKE_TOKEN_RE.findall(line.split("#", 1)[0]))
+    return tokens
+
+
+def carry_unconfigured_entries(current: dict, checked_in: dict, inventory: dict, root: Path,
+                               build_dir: Path | None) -> list[str]:
+    """Keep checked-in entries for tests this configure does not register.
+
+    A test registered only behind a configure option (an opt-in diagnostic, a
+    platform switch) is absent from a build that has the option off. Writing
+    from that build must not delete its entry: the list holds every gate-shaped
+    configuration's tests, and `--check` already ignores tests absent here. An
+    entry is dropped only when its registration is gone from the CMake source.
+    Returns the carried names; mutates `current`."""
+    tokens = cmake_registration_tokens(root)
+    registered_here = {str(t.get("name", "")) for t in inventory.get("tests", [])}
+    carried: list[str] = []
+    for name, rec in (checked_in.get("tests") or {}).items():
+        if name in current["tests"] or name in registered_here or name not in tokens:
+            continue
+        current["tests"][name] = rec
+        carried.append(name)
+    current["tests"] = dict(sorted(current["tests"].items()))
+    if "executables" in current:
+        scanned_here = set(test_executables(build_dir) or {})
+        old_targets = checked_in.get("executable_targets") or {}
+
+        def unconfigured(exe: str) -> bool:
+            return exe not in scanned_here and (exe in tokens or old_targets.get(exe) in tokens)
+
+        for exe, rec in (checked_in.get("executables") or {}).items():
+            if exe not in current["executables"] and unconfigured(exe):
+                current["executables"][exe] = rec
+                carried.append(exe)
+        current["executables"] = dict(sorted(current["executables"].items()))
+        scanned = set(current.get("executables_scanned") or [])
+        scanned |= {exe for exe in checked_in.get("executables_scanned") or [] if unconfigured(exe)}
+        current["executables_scanned"] = sorted(scanned)
+        targets = dict(current.get("executable_targets") or {})
+        for exe, target in old_targets.items():
+            if exe not in targets and unconfigured(exe):
+                targets[exe] = target
+        current["executable_targets"] = dict(sorted(targets.items()))
+    return sorted(set(carried))
+
+
 def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | None:
     try:
         if inventory_json:
@@ -1299,10 +1365,19 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
     if a.write:
+        try:
+            previous = json.loads(list_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        carried = carry_unconfigured_entries(current, previous, inventory, root, build_dir)
         list_path.parent.mkdir(parents=True, exist_ok=True)
         list_path.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         print(f"script-test-inputs: wrote {len(current['tests'])} declared tests "
               f"(of {total_scripts} interpreter-driven entries) to {list_path}")
+        if carried:
+            print(f"script-test-inputs: kept {len(carried)} entr{'y' if len(carried) == 1 else 'ies'} this "
+                  "configure does not register but the CMake source still does (a configure option "
+                  "is off here): " + ", ".join(carried))
         excluded = outside_gate_profile(inventory, root)
         if excluded:
             print(f"script-test-inputs: excluded {len(excluded)} test(s) registered from examples/: "
