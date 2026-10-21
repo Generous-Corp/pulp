@@ -1462,6 +1462,7 @@ class GeneratedDigestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             build = Path(td)
             (build / "core/view").mkdir(parents=True)
+            (build / "vellum-unit-headers.txt").write_text("", encoding="utf-8")
             (build / "core/view/web_compat_preludes_gen.cpp").write_text("generated", encoding="utf-8")
             (build / "core/view/web_compat_preludes_gen.hpp").write_text("generated", encoding="utf-8")
             sources = [
