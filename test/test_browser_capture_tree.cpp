@@ -1875,6 +1875,137 @@ TEST_CASE("a hidden sibling does not move its neighbour's anchor",
           *survivor->stable_anchor_id);
 }
 
+namespace {
+
+/// A three-item list whose items carry the given attribute rows, in document
+/// order. Item k always lays out at the k-th row, so a reorder is expressed by
+/// permuting the attribute rows while the positions stay where they were.
+///
+/// strings: 0 #document 1 HTML 2 BODY 3 OL 4 LI 5 data-pulp-key
+///          6 drive 7 tone 8 mix 9 background-image 10 none 11 display
+///          12 block 13 data-pulp-id 14 item-drive
+LoweredSnapshot lower_list(const std::string& item_attributes,
+                           const std::string& name) {
+    return lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,4,4,4]",
+            .node_types = "[9,1,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,3,3]",
+            .attributes = "[[],[],[],[]," + item_attributes + "]",
+            .layout_nodes = "[0,1,2,3,4,5,6]",
+            .styles = "[[10,12],[10,12],[10,12],[10,12],[10,12],[10,12],"
+                      "[10,12]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[0,0,200,60],[0,0,200,20],[0,20,200,20],"
+                      "[0,40,200,20]]",
+            .paint_orders = "[0,1,1,2,3,4,5]",
+            .strings = R"("#document","HTML","BODY","OL","LI","data-pulp-key",)"
+                       R"("drive","tone","mix","background-image","none",)"
+                       R"("display","block","data-pulp-id","item-drive")",
+        },
+        name);
+}
+
+/// The lowered list items, in the order they sit under the `<ol>`.
+std::vector<const IRNode*> list_items(const IRNode& root) {
+    const auto* list = find_named(root, "ol");
+    REQUIRE(list != nullptr);
+    std::vector<const IRNode*> items;
+    for (const auto& child : list->children) items.push_back(&child);
+    return items;
+}
+
+std::string key_of(const IRNode& node) {
+    const auto found = node.attributes.find("pulp_key");
+    return found == node.attributes.end() ? std::string{} : found->second;
+}
+
+}  // namespace
+
+TEST_CASE("a keyed list item keeps its anchor when the list is reordered",
+          "[browser-capture][native-lowering][anchor]") {
+    // An edit stored against "the Drive row" must still reach Drive after the
+    // list is reordered. A positional anchor names the first row, which after
+    // a reverse is Mix, so the edit lands on the wrong item and reports a
+    // clean apply. The author key is the identity a reorder preserves.
+    const auto before = lower_list("[5,6,13,14],[5,7],[5,8]", "keyed-before");
+    const auto after = lower_list("[5,8],[5,7],[5,6,13,14]", "keyed-after");
+    CHECK(before.counts.keyed_anchors == 3);
+    CHECK(after.counts.keyed_anchors == 3);
+    CHECK(before.counts.duplicate_keys.empty());
+
+    std::map<std::string, std::string> anchor_before;
+    std::map<std::string, float> top_before;
+    for (const auto* item : list_items(before.root)) {
+        anchor_before[key_of(*item)] = item->stable_anchor_id.value_or("");
+        top_before[key_of(*item)] = item->style.top.value_or(-1.0f);
+    }
+    CHECK(anchor_before.at("drive") ==
+          "capture:html[0]/body[0]/ol[0]/li[key=drive]");
+
+    const auto items_after = list_items(after.root);
+    REQUIRE(items_after.size() == 3);
+    for (const auto* item : items_after) {
+        const auto key = key_of(*item);
+        INFO("key " << key);
+        REQUIRE(anchor_before.count(key) == 1);
+        CHECK(item->stable_anchor_id.value_or("") == anchor_before.at(key));
+    }
+    // The anchor followed the node, not the slot: Drive moved from the first
+    // row to the last and its anchor came with it.
+    const auto* drive = items_after.back();
+    CHECK(key_of(*drive) == "drive");
+    CHECK(drive->style.top.value_or(-1.0f) != top_before.at("drive"));
+    // The page-wide source id travels with the node as well.
+    CHECK(drive->attributes.at("pulp_id") == "item-drive");
+}
+
+TEST_CASE("an unkeyed list keeps positional anchors",
+          "[browser-capture][native-lowering][anchor]") {
+    // Without a key there is no identity a reorder preserves, so the anchor
+    // stays with the position exactly as it did before keys were read.
+    const auto lowered = lower_list("[],[],[]", "unkeyed");
+    CHECK(lowered.counts.keyed_anchors == 0);
+    CHECK(lowered.counts.duplicate_keys.empty());
+    std::vector<std::string> got;
+    for (const auto* item : list_items(lowered.root)) {
+        CHECK(item->attributes.count("pulp_key") == 0);
+        got.push_back(item->stable_anchor_id.value_or(""));
+    }
+    CHECK(got == std::vector<std::string>{
+                     "capture:html[0]/body[0]/ol[0]/li[0]",
+                     "capture:html[0]/body[0]/ol[0]/li[1]",
+                     "capture:html[0]/body[0]/ol[0]/li[2]"});
+}
+
+TEST_CASE("a duplicated sibling key is reported and falls back to positions",
+          "[browser-capture][native-lowering][anchor]") {
+    // Two siblings cannot both own "tone". Picking one by document order
+    // would make the anchor positional again while still looking keyed, so
+    // both colliding siblings take ordinals and the collision is reported.
+    const auto lowered = lower_list("[5,6],[5,7],[5,7]", "duplicate-key");
+    CHECK(lowered.counts.keyed_anchors == 1);
+    CHECK(lowered.counts.duplicate_keys ==
+          std::vector<std::string>{
+              "capture:html[0]/body[0]/ol[0] data-pulp-key=\"tone\""});
+    std::vector<std::string> got;
+    for (const auto* item : list_items(lowered.root))
+        got.push_back(item->stable_anchor_id.value_or(""));
+    // Ordinals count only the siblings without a usable key, so the unique
+    // key does not shift the colliding pair's numbering.
+    CHECK(got == std::vector<std::string>{
+                     "capture:html[0]/body[0]/ol[0]/li[key=drive]",
+                     "capture:html[0]/body[0]/ol[0]/li[0]",
+                     "capture:html[0]/body[0]/ol[0]/li[1]"});
+    // The collision does not erase what the author wrote.
+    CHECK(key_of(*list_items(lowered.root)[1]) == "tone");
+
+    // Every anchor is still unique, which is what bindings and the merge
+    // layer require of them.
+    const auto all = anchors(lowered.root);
+    CHECK(std::set<std::string>(all.begin(), all.end()).size() == all.size());
+}
+
 TEST_CASE("hiding a middle sibling misapplies no stored edit",
           "[browser-capture][native-lowering]") {
     // The consequence, rather than the mechanism. Three knobs; the MIDDLE one

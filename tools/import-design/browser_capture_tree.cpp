@@ -245,24 +245,72 @@ std::string describe(const CapturedStyleIndex& index, int node_index) {
     return name + "." + std::string(first);
 }
 
-/// Ordinal of every node among its same-signature siblings.
+/// The author-declared sibling key, `data-pulp-key`, read verbatim.
 ///
+/// A key names a node among its siblings the way a list key does in a
+/// component framework: a reorder moves the node and its key together, so an
+/// anchor built from the key follows the node where an ordinal would stay with
+/// the position. Only element nodes can carry one.
+std::string declared_key(const CapturedStyleIndex& index, int node_index) {
+    if (index.node_type_of(node_index) != kElementNode) return {};
+    return index.attribute(node_index, "data-pulp-key");
+}
+
+/// What identifies each node among its siblings: an author key when it is
+/// usable, otherwise an ordinal among the same-signature siblings.
+struct SiblingIdentity {
+    /// node index -> the key its anchor segment uses, empty for a positional
+    /// segment.
+    std::vector<std::string> key;
+    /// node index -> ordinal among the same-signature siblings that are NOT
+    /// keyed. Keyed siblings are excluded so reordering them cannot renumber
+    /// an unkeyed neighbour.
+    std::vector<int> ordinal;
+    int keyed = 0;
+    /// Each (parent node, key) declared by more than one child. Those
+    /// siblings fall back to positions.
+    std::vector<std::pair<int, std::string>> duplicates;
+};
+
 /// Computed over the WHOLE document rather than over the painted set: an
 /// anchor that counted only painted siblings would move whenever a sibling was
 /// hidden, which is a change to the page's state and not to its structure.
-std::vector<int> sibling_ordinals(const CapturedStyleIndex& index) {
-    const int count = index.node_count();
-    std::vector<int> ordinal(static_cast<size_t>(std::max(count, 0)), 0);
+///
+/// A key is used only when no other child of the same parent declares it. Two
+/// siblings sharing a key cannot both own it, and choosing one of them by
+/// document order would make the anchor silently positional again; both fall
+/// back to ordinals and the collision is reported instead.
+SiblingIdentity sibling_identity(const CapturedStyleIndex& index) {
+    const int count = std::max(index.node_count(), 0);
+    SiblingIdentity identity;
+    identity.key.assign(static_cast<size_t>(count), {});
+    identity.ordinal.assign(static_cast<size_t>(count), 0);
+
+    std::map<std::pair<int, std::string>, int> declared;
+    for (int node = 0; node < count; ++node) {
+        auto key = declared_key(index, node);
+        if (!key.empty()) ++declared[{index.parent_of(node), std::move(key)}];
+    }
+    for (const auto& [parent_and_key, uses] : declared) {
+        if (uses > 1) identity.duplicates.push_back(parent_and_key);
+    }
+
     // DOMSnapshot lists nodes in document order, so a single forward pass
     // visits every parent's children in order and the running tally per
     // (parent, signature) is the ordinal.
     std::map<std::pair<int, std::string>, int> seen;
     for (int node = 0; node < count; ++node) {
-        const auto key = std::make_pair(index.parent_of(node),
-                                        describe(index, node));
-        ordinal[static_cast<size_t>(node)] = seen[key]++;
+        const int parent = index.parent_of(node);
+        auto key = declared_key(index, node);
+        if (!key.empty() && declared[{parent, key}] == 1) {
+            identity.key[static_cast<size_t>(node)] = std::move(key);
+            ++identity.keyed;
+            continue;
+        }
+        identity.ordinal[static_cast<size_t>(node)] =
+            seen[{parent, describe(index, node)}]++;
     }
-    return ordinal;
+    return identity;
 }
 
 /// A DOM path an edit can be stored against and re-found after a re-capture.
@@ -272,20 +320,29 @@ std::vector<int> sibling_ordinals(const CapturedStyleIndex& index) {
 /// capture, which is the one job an anchor has to do ACROSS captures. A path of
 /// `tag#id` / `tag.class` segments with sibling ordinals is derived from the
 /// document's own structure, so the same design yields the same anchor however
-/// it was captured.
+/// it was captured. A node with a usable author key spells its segment
+/// `tag[key=<key>]` instead, which the escaped `[` of any author text keeps
+/// distinct from every ordinal segment.
 std::string anchor_path(const CapturedStyleIndex& index,
-                        const std::vector<int>& ordinal,
+                        const SiblingIdentity& identity,
                         int node_index) {
     std::vector<std::string> segments;
     walk_ancestry(index, node_index, [&](int node) {
-        const auto key = describe(index, node);
-        if (!key.empty()) {
-            const int position =
-                node < static_cast<int>(ordinal.size())
-                    ? ordinal[static_cast<size_t>(node)]
-                    : 0;
-            segments.push_back(escape_segment(key) + "[" +
-                               std::to_string(position) + "]");
+        const auto signature = describe(index, node);
+        if (!signature.empty()) {
+            const bool known = node >= 0 &&
+                               node < static_cast<int>(identity.key.size());
+            const std::string* key =
+                known ? &identity.key[static_cast<size_t>(node)] : nullptr;
+            if (key && !key->empty()) {
+                segments.push_back(escape_segment(signature) + "[key=" +
+                                   escape_segment(*key) + "]");
+            } else {
+                const int position =
+                    known ? identity.ordinal[static_cast<size_t>(node)] : 0;
+                segments.push_back(escape_segment(signature) + "[" +
+                                   std::to_string(position) + "]");
+            }
         }
         return true;
     });
@@ -1102,7 +1159,14 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         return answer;
     };
 
-    const auto ordinal = sibling_ordinals(index);
+    const auto identity = sibling_identity(index);
+    counts.keyed_anchors = identity.keyed;
+    for (const auto& [parent, key] : identity.duplicates) {
+        counts.duplicate_keys.push_back(
+            (parent >= 0 ? anchor_path(index, identity, parent)
+                         : std::string("capture:")) +
+            " data-pulp-key=\"" + key + "\"");
+    }
     // Slots in Chrome's paint order (ties already broken by document order),
     // and the reverse map that turns DOM parentage into tree parentage.
     std::vector<LoweredNode> slots;
@@ -1525,7 +1589,20 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         if (node.backend_node_id > 0)
             lowered.attributes["backend_node_id"] =
                 std::to_string(node.backend_node_id);
-        lowered.stable_anchor_id = anchor_path(index, ordinal, node.node_index);
+        // Author identity travels with the node, not only inside its anchor:
+        // `pulp_key` is the sibling key the anchor segment was built from (or
+        // refused for a collision), and `pulp_id` is the page-wide source id
+        // the materialized-runtime lane keys its ids map on.
+        if (!generated_text) {
+            if (auto key = declared_key(index, node.node_index); !key.empty())
+                lowered.attributes["pulp_key"] = std::move(key);
+            if (index.node_type_of(node.node_index) == kElementNode) {
+                if (auto id = index.attribute(node.node_index, "data-pulp-id");
+                    !id.empty())
+                    lowered.attributes["pulp_id"] = std::move(id);
+            }
+        }
+        lowered.stable_anchor_id = anchor_path(index, identity, node.node_index);
         if (generated_text) {
             // The pseudo's box already claims the path that names the pseudo,
             // so its runs need a segment of their own or every run of one
@@ -1684,7 +1761,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                 std::to_string(node.paint_order);
             vector_node.attributes["source_tag"] = shape.tag;
             vector_node.stable_anchor_id =
-                anchor_path(index, ordinal, shape.node_index);
+                anchor_path(index, identity, shape.node_index);
             vector_node.anchor_strategy = "capture-path";
 
             ++counts.native;
