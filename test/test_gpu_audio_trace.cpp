@@ -570,6 +570,60 @@ TEST_CASE("GPU audio trace records require ordered timestamps and preserve unava
     REQUIRE_FALSE(late_gpu_delivery.valid());
 }
 
+TEST_CASE("GPU audio trace records refuse callback timing that cannot be emitted signed",
+          "[gpu_audio][trace]") {
+    constexpr auto max_signed =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    SharedIoTraceRecorder recorder(config(1));
+
+    // Positive controls sit exactly on each refused boundary.
+    auto boundary = raw_delivery(0);
+    boundary.callback_start_ns = max_signed - 2;
+    boundary.callback_end_ns = max_signed - 1;
+    boundary.result_visible_ns = max_signed;
+    REQUIRE(boundary.valid());
+    REQUIRE(recorder.publish_callback(boundary));
+    auto equal_timing = raw_delivery(1);
+    equal_timing.callback_end_ns = equal_timing.callback_start_ns;
+    equal_timing.result_visible_ns = equal_timing.callback_end_ns;
+    REQUIRE(equal_timing.valid());
+    REQUIRE(recorder.publish_callback(equal_timing));
+    auto ingress = record(2);
+    ingress.callback_ingress_ns = max_signed;
+    REQUIRE(ingress.valid());
+    REQUIRE(recorder.publish_worker(ingress));
+    // Unavailable callback timing carries no claim, so stale values are inert.
+    auto unavailable = raw_delivery(3);
+    unavailable.callback_timing_available = false;
+    unavailable.callback_end_ns = 0;
+    unavailable.result_visible_ns = std::numeric_limits<std::uint64_t>::max();
+    REQUIRE(unavailable.valid());
+    REQUIRE(recorder.publish_callback(unavailable));
+
+    // Each planted negative differs from a positive control by one field.
+    auto wrapped_visible = boundary;
+    wrapped_visible.result_visible_ns = max_signed + 1;
+    auto end_before_start = equal_timing;
+    end_before_start.callback_end_ns = end_before_start.callback_start_ns - 1;
+    auto visible_before_end = equal_timing;
+    visible_before_end.result_visible_ns = visible_before_end.callback_end_ns - 1;
+    auto wrapped_ingress = ingress;
+    wrapped_ingress.callback_ingress_ns = max_signed + 1;
+    REQUIRE_FALSE(wrapped_visible.valid());
+    REQUIRE_FALSE(end_before_start.valid());
+    REQUIRE_FALSE(visible_before_end.valid());
+    REQUIRE_FALSE(wrapped_ingress.valid());
+    REQUIRE_FALSE(recorder.publish_callback(wrapped_visible));
+    REQUIRE_FALSE(recorder.publish_callback(end_before_start));
+    REQUIRE_FALSE(recorder.publish_callback(visible_before_end));
+    REQUIRE_FALSE(recorder.publish_worker(wrapped_ingress));
+
+    const auto stats = recorder.stats();
+    REQUIRE(stats.attempted == 8);
+    REQUIRE(stats.enqueued == 4);
+    REQUIRE(stats.invalid == 4);
+}
+
 TEST_CASE("GPU audio trace samples successes but keeps every anomaly", "[gpu_audio][trace]") {
     SharedIoTraceRecorder recorder(config(4));
     REQUIRE(recorder.enabled());
