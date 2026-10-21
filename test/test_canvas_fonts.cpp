@@ -692,6 +692,85 @@ TEST_CASE("a missing glyph does not move the rest of the run",
     CHECK(probe_band.first <= plain_band.second);
     CHECK(probe_band.second >= plain_band.first);
 }
+// ── fill_text puts the alphabetic baseline at y ─────────────────────────────
+//
+// Canvas2D fillText places the alphabetic baseline at y. SkiaCanvas draws
+// through SkParagraph, whose paint() takes the paragraph TOP, so fill_text
+// offsets by the paragraph's first baseline. With hinting on, SkParagraph
+// snaps that baseline to a whole unit while getAlphabeticBaseline() keeps
+// reporting the face's unrounded ascent; offsetting by the reported value
+// moves the glyphs by the rounding error, up to half a pixel, in a direction
+// that depends on the face and size. Bundled Inter at 18px has a fractional
+// ascent (17.4375), so a sweep of sub-pixel baselines exposes the error:
+// SkCanvas::drawSimpleText with the same face is the reference, since its
+// origin IS the baseline.
+TEST_CASE("SkiaCanvas::fill_text rasterizes the baseline where it was asked",
+          "[canvas][skia][text][baseline]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    if (!mgr) SKIP("no platform font manager on this build");
+    const SkFontStyle upright{SkFontStyle::kNormal_Weight,
+                              SkFontStyle::kNormal_Width,
+                              SkFontStyle::kUpright_Slant};
+    auto face = pulp::canvas::match_bundled_typeface(mgr.get(), "Inter", upright);
+    REQUIRE(face != nullptr);
+
+    constexpr int kW = 96;
+    constexpr int kH = 64;
+    constexpr float kSize = 18.0f;
+    constexpr float kX = 8.0f;
+    SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    // Last row carrying ink: 'H' sits flat on its baseline.
+    auto last_ink_row = [](const SkPixmap& pm) {
+        int last = -1;
+        for (int y = 0; y < pm.height(); ++y)
+            for (int x = 0; x < pm.width(); ++x)
+                if (SkColorGetR(pm.getColor(x, y)) < 160) { last = y; break; }
+        return last;
+    };
+
+    int mismatches = 0;
+    for (int step = 0; step < 10; ++step) {
+        const float baseline = 36.0f + 0.1f * static_cast<float>(step);
+
+        auto ref_surface = SkSurfaces::Raster(info);
+        REQUIRE(ref_surface != nullptr);
+        ref_surface->getCanvas()->clear(SK_ColorWHITE);
+        SkFont font(face, kSize);
+        SkPaint ink;
+        ink.setColor(SK_ColorBLACK);
+        ink.setAntiAlias(true);
+        ref_surface->getCanvas()->drawSimpleText(
+            "H", 1, SkTextEncoding::kUTF8, kX, baseline, font, ink);
+        SkPixmap ref_pm;
+        REQUIRE(ref_surface->peekPixels(&ref_pm));
+
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        {
+            SkiaCanvas canvas(surface->getCanvas());
+            canvas.set_font_full("Inter", kSize, 400, /*slant=*/0,
+                                 /*letter_spacing=*/0.0f);
+            canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_text("H", kX, baseline);
+        }
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+
+        const int want = last_ink_row(ref_pm);
+        const int got = last_ink_row(pm);
+        REQUIRE(want >= 0);
+        REQUIRE(got >= 0);
+        INFO("baseline " << baseline << ": reference last ink row " << want
+             << ", fill_text last ink row " << got);
+        CHECK(got == want);
+        if (got != want) ++mismatches;
+    }
+    CHECK(mismatches == 0);
+}
+
 // ── Variable-font weight instancing + SkParagraph bridge ────────────────────
 //
 // Root cause fixed here: imported designs register fonts via register_font,

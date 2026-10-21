@@ -98,6 +98,12 @@ struct PreparedParagraph {
     std::unique_ptr<skia::textlayout::Paragraph> paragraph;
     float advance = 0;
     float alphabetic_baseline = 0;
+    // Where paint() actually puts the first baseline below the paragraph
+    // origin. With hinting on, SkParagraph snaps that baseline to a whole
+    // unit in paragraph space while getAlphabeticBaseline() still reports
+    // the face's unrounded ascent, so offsetting by the reported value lands
+    // the glyphs up to half a unit away from the requested y.
+    float painted_baseline = 0;
 };
 
 PreparedParagraph make_paragraph(const std::string& text,
@@ -221,6 +227,9 @@ PreparedParagraph make_paragraph(const std::string& text,
     result.advance = std::max(paragraph->getLongestLine(),
                               paragraph->getMaxIntrinsicWidth());
     result.alphabetic_baseline = paragraph->getAlphabeticBaseline();
+    result.painted_baseline = pstyle.hintingIsOn()
+        ? std::round(result.alphabetic_baseline)
+        : result.alphabetic_baseline;
     result.paragraph = std::move(paragraph);
     return result;
 }
@@ -577,7 +586,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
             // at (x, y); Canvas2D fillText puts the alphabetic baseline
             // at y. Translate so the baseline lands on `y`.
             prepared.paragraph->paint(canvas_, draw_x,
-                                       y - prepared.alphabetic_baseline);
+                                       y - prepared.painted_baseline);
             return;
         }
     }
@@ -805,7 +814,7 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
             if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
             else if (text_align_ == TextAlign::right) draw_x -= prepared.advance;
             prepared.paragraph->paint(canvas_, draw_x,
-                                       y - prepared.alphabetic_baseline);
+                                       y - prepared.painted_baseline);
             if (needs_restore) canvas_->restore();
             return;
         }
