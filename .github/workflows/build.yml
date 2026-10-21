@@ -1688,13 +1688,16 @@ jobs:
       - name: Activate pinned mise candidate toolchain
         if: >-
           runner.os == 'macOS'
-          && runner.arch == 'ARM64'
           && github.event_name == 'workflow_dispatch'
           && github.ref == 'refs/heads/main'
           && inputs.mise_candidate == true
         shell: bash
         run: |
           set -euo pipefail
+          test "${RUNNER_ARCH:-}" = "ARM64" || {
+            echo "::error::mise candidate requires an ARM64 runner (RUNNER_ARCH=${RUNNER_ARCH:-unset})"
+            exit 1
+          }
           mise="$HOME/.local/opt/mise-2026.10.11/bin/mise"
           test -x "$mise" || { echo "::error::mise candidate binary is missing: $mise"; exit 1; }
           expected_mise_version="2026.10.11"
@@ -1725,7 +1728,6 @@ jobs:
       - name: Enforce pinned mise candidate toolchain
         if: >-
           runner.os == 'macOS'
-          && runner.arch == 'ARM64'
           && github.event_name == 'workflow_dispatch'
           && github.ref == 'refs/heads/main'
           && inputs.mise_candidate == true

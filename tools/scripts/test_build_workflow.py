@@ -89,7 +89,7 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
         text = json.dumps(self.steps[activate], sort_keys=True)
         for marker in (
             "mise-2026.10.11/bin/mise",
-            "runner.arch == 'ARM64'",
+            'RUNNER_ARCH',
             "expected_mise_version",
             "expected_mise_sha",
             "shasum -a 256",
@@ -100,7 +100,19 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
             "GITHUB_ENV",
         ):
             self.assertIn(marker, text)
-        self.assertIn("runner.arch == 'ARM64'", self.steps[enforce]["if"])
+        self.assertNotIn("runner.arch == 'ARM64'", self.steps[activate]["if"])
+        self.assertNotIn("runner.arch == 'ARM64'", self.steps[enforce]["if"])
+
+    def test_non_arm_candidate_fails_before_build(self) -> None:
+        activation = self.steps[
+            [step.get("name") for step in self.steps].index(
+                "Activate pinned mise candidate toolchain"
+            )
+        ]
+        run = activation["run"]
+        self.assertIn('RUNNER_ARCH', run)
+        self.assertIn('= "ARM64"', run)
+        self.assertIn('exit 1', run)
 
 
 class WgpuNativeDiagnosticWorkflowTest(unittest.TestCase):
