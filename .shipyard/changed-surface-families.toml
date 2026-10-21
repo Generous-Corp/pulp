@@ -6681,6 +6681,7 @@ tests = [
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
+  "ci-cause-notices-selftest",
   "ci-routing-digest-check",
   "ci-routing-digest-selftest",
   "classify-changes-selftest",

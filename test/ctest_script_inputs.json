@@ -3832,8 +3832,11 @@
   "ci-cause-notices-selftest": {
    "entry": "tools/ci/test_ci_cause_notices.py",
    "inputs": [
+    ".github/workflows/build.yml",
     "tools/ci/ci_cause_notices.sh",
-    "tools/ci/test_ci_cause_notices.py"
+    "tools/ci/test_ci_cause_notices.py",
+    "tools/shipyard.toml",
+    "tools/toolchain/shipyard.sha256"
    ],
    "kind": "python"
   },
