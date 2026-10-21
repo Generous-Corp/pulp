@@ -561,6 +561,18 @@ knowing before you touch that file:
   since the tweaks layer replays edits ACROSS captures. A hoisted node keeps its
   DOM anchor: hoisting is a rendering accommodation, not a claim about
   structure.
+- **A `data-pulp-key` sibling key replaces the ordinal.** An element whose
+  `data-pulp-key` no sibling shares gets the segment `tag[key=<key>]`, so a
+  reorder carries the anchor (and any stored edit) with the node; an ordinal
+  stays with the slot and would hand Drive's edit to whatever row moved into
+  first place. Ordinals are then counted over the siblings WITHOUT a usable key,
+  so reordering keyed rows never renumbers an unkeyed neighbour. A key declared
+  twice under one parent identifies neither sibling: both keep positional
+  anchors, and the collision is reported on the IR root
+  (`native_keyed_duplicate_keys`) and as an import warning, never silently.
+  The raw values ride along as `pulp_key` / `pulp_id` node attributes;
+  `data-pulp-id` is the page-wide source id the materialized lane maps, and it
+  does NOT change the anchor.
 
 - When improving the offline/native HTML importer, use the development-only
   Importer Differential Lab rather than changing the authoritative browser
