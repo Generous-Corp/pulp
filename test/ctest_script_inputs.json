@@ -186,6 +186,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-gpu-wgpu-native-staged-diagnostic": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "tools/diagnostics/pulp_wgpu_native_staged_adapter.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-au-v2-param-display": {
    "data": "none",
    "inputs": [],
@@ -2320,6 +2332,7 @@
   "pulp-generate-control-protocol-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
+  "pulp-gpu-wgpu-native-staged-diagnostic",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
@@ -2878,6 +2891,7 @@
   "pulp-test-svg-path-range-orientation-1899",
   "pulp-test-svg-primitives-1926",
   "pulp-test-synthesiser",
+  "pulp-test-tcn-cpu-adapter",
   "pulp-test-template-ui-scripts",
   "pulp-test-texture-atlas",
   "pulp-test-threejs-bridge",
@@ -3294,6 +3308,7 @@
    "inputs": [
     ".github/workflows/android.yml",
     ".github/workflows/build-macos.yml",
+    ".github/workflows/build.yml",
     ".github/workflows/cross-platform-check.yml",
     ".github/workflows/gcc-compile-gate.yml",
     ".github/workflows/intel-portability.yml",
@@ -3317,7 +3332,8 @@
     "tools/scripts/contributor_check.sh",
     "tools/scripts/release-cli-local.sh",
     "tools/scripts/sdk_consumer_sweep.py",
-    "tools/validation/downstream/consumer-validation.json"
+    "tools/validation/downstream/consumer-validation.json",
+    "tools/validation/sample_region_installed_sdk.py"
    ],
    "kind": "python"
   },
@@ -3817,8 +3833,11 @@
   "ci-cause-notices-selftest": {
    "entry": "tools/ci/test_ci_cause_notices.py",
    "inputs": [
+    ".github/workflows/build.yml",
     "tools/ci/ci_cause_notices.sh",
-    "tools/ci/test_ci_cause_notices.py"
+    "tools/ci/test_ci_cause_notices.py",
+    "tools/shipyard.toml",
+    "tools/toolchain/shipyard.sha256"
    ],
    "kind": "python"
   },
@@ -7341,6 +7360,23 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-gpu-wgpu-native-staged-diagnostic": {
+   "entry": "tools/diagnostics/verify_wgpu_native_staged.py",
+   "inputs": [
+    "tools/deps/manifest.json",
+    "tools/diagnostics/verify_wgpu_native_staged.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-gpu-wgpu-native-staged-identity-negative-control": {
+   "entry": "tools/diagnostics/test_verify_wgpu_native_staged.py",
+   "inputs": [
+    "tools/deps/manifest.json",
+    "tools/diagnostics/test_verify_wgpu_native_staged.py",
+    "tools/diagnostics/verify_wgpu_native_staged.py"
    ],
    "kind": "python"
   },

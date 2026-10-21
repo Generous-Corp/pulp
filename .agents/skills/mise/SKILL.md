@@ -136,6 +136,13 @@ issue (`deps-drift-check.yml`): `tools/deps/manifest.json` tracks mise as a
 `[mise].version`. A newer release there starts the evidence path above; it
 never moves a host by itself.
 
+jdx/mise also tags its sub-crates (`mise-sigstore-v0.1.0` beside
+`v2026.10.12`), so the mise row declares `upstream.tag_pattern`. The audit
+ignores tags outside it, and when the releases API names one, it falls back to
+tag order and marks the row "tag-order guess". If mise changes its release tag
+shape, update the pattern with the pin; the toolchain self-test requires the
+pinned tag to match it.
+
 ## Windows VM recipe
 
 For an ephemeral ARM64 or x64 Windows guest, copy only the locked config and

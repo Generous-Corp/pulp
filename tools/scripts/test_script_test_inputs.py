@@ -846,6 +846,60 @@ class CompiledDataTests(unittest.TestCase):
             self.assertEqual(lst["executables_scanned"], ["pulp-test-a", "pulp-test-b", "pulp-test-c", "pulp-test-d"])
             self.assertNotIn("pulp-test-d", lst["executables"])
 
+    def test_write_keeps_entries_registered_behind_an_option_this_build_has_off(self) -> None:
+        """A list regenerated from a build with an opt-in option OFF must keep
+        the option's tests: --check ignores them, so nothing else would notice
+        them vanish (the staged wgpu-native diagnostic was lost exactly so)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            write(repo.root, "test/cmake/diag_tests.cmake",
+                  "if(PULP_OPT_IN_DIAGNOSTIC)  # off in this build\n"
+                  "    add_executable(pulp-opt-diag tools/diag.cpp)\n"
+                  "    add_test(NAME pulp-opt-diag-verify COMMAND python3 tools/diag_verify.py)\n"
+                  "endif()\n")
+            diag_test = {"entry": "tools/diag_verify.py", "inputs": ["tools/diag_verify.py"], "kind": "python"}
+            diag_exe = {"kind": "compiled", "data": "none", "inputs": [], "sources": [],
+                        "undeclared_sources": [], "spawns": "undeclared",
+                        "spawning_sources": ["tools/diag.cpp"], "runtime_targets": []}
+            gone_test = {"entry": "tools/removed.py", "inputs": ["tools/removed.py"], "kind": "python"}
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            seeded = json.loads(list_path.read_text(encoding="utf-8"))
+            seeded["tests"]["pulp-opt-diag-verify"] = diag_test
+            seeded["tests"]["pulp-removed-test"] = gone_test
+            seeded["executables"]["pulp-opt-diag"] = diag_exe
+            seeded["executables_scanned"].append("pulp-opt-diag")
+            list_path.write_text(json.dumps(seeded), encoding="utf-8")
+
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            lst = json.loads(list_path.read_text(encoding="utf-8"))
+            self.assertEqual(lst["tests"].get("pulp-opt-diag-verify"), diag_test)
+            self.assertEqual(lst["executables"].get("pulp-opt-diag"), diag_exe)
+            self.assertIn("pulp-opt-diag", lst["executables_scanned"])
+            self.assertIn("kept 2 entries", proc.stdout)
+            # A registration deleted from the CMake source is a real removal.
+            self.assertNotIn("pulp-removed-test", lst["tests"])
+            # Entries this build does configure are regenerated, not carried.
+            self.assertIn("alpha", lst["tests"])
+            self.assertEqual(lst["executables_scanned"],
+                             ["pulp-opt-diag", "pulp-test-a", "pulp-test-b", "pulp-test-c", "pulp-test-d"])
+
+    def test_write_regenerates_a_registered_test_rather_than_carrying_its_old_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            write(repo.root, "test/cmake/alpha_tests.cmake", "add_test(NAME alpha COMMAND x)\n")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            fresh = json.loads(list_path.read_text(encoding="utf-8"))["tests"]["alpha"]
+            seeded = json.loads(list_path.read_text(encoding="utf-8"))
+            seeded["tests"]["alpha"] = {"entry": "stale.py", "inputs": [], "kind": "python"}
+            list_path.write_text(json.dumps(seeded), encoding="utf-8")
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertEqual(json.loads(list_path.read_text(encoding="utf-8"))["tests"]["alpha"], fresh)
+            self.assertNotIn("kept", proc.stdout)
+
     def test_detected_sources_lists_only_what_a_signal_matched(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)

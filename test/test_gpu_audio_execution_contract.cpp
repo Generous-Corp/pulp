@@ -37,6 +37,40 @@ TEST_CASE("shared IO contract separates logical capacity from physical provider 
             SharedIoContractError::MissingAlgorithmicLead);
 }
 
+TEST_CASE("shared IO contract rejects unknown backend-neutral enum values",
+          "[gpu_audio][shared_io]") {
+    const auto valid_contract = [] {
+        return SharedIoExecutionContract{
+            .channels = 2,
+            .block_size = 32,
+            .sample_rate = 48000,
+            .algorithmic_lead_blocks = 1,
+            .pipeline_depth = 2,
+            .provider_slots = 1,
+            .requested_path = SharedIoRequest::RequireSharedHostPointer,
+            .active_path = SharedIoPath::SharedHostPointer,
+            .shared_host_pointer_capable = true,
+            .cpu_fallback_prepared = true,
+        };
+    };
+
+    auto contract = valid_contract();
+    contract.active_path = static_cast<SharedIoPath>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+
+    contract = valid_contract();
+    contract.requested_path = static_cast<SharedIoRequest>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+
+    contract = valid_contract();
+    contract.miss_policy = static_cast<MissPolicy>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+
+    contract = valid_contract();
+    contract.fallback_reason = static_cast<SharedIoFallbackReason>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+}
+
 TEST_CASE("shared IO depth lead policy bounds multi-flight admission",
           "[gpu_audio][shared_io][p4]") {
     constexpr SharedIoDepthLeadPolicy policy{4, 8, 4};
