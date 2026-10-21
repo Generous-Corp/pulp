@@ -738,7 +738,8 @@ class DifferentialLabTests(unittest.TestCase):
                 "reference": {"asset_id": "reference:browser",
                                "logical_width": 1, "logical_height": 1,
                                "device_scale_factor": 1,
-                               "authored_frame": {"x": 0, "y": 0}},
+                               "authored_frame": {"x": 0, "y": 0,
+                                                   "width": 1, "height": 1}},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
@@ -759,15 +760,19 @@ class DifferentialLabTests(unittest.TestCase):
                     Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(
                         Path(argv[argv.index("--render") + 1]))
                     Path(argv[argv.index("--layout") + 1]).write_text(
-                        json.dumps({"views": []}), encoding="utf-8")
+                        json.dumps({"views": [], "nodes": [{
+                            "id": "browser:root",
+                            "rect": {"x": 0, "y": 0, "w": 1, "h": 1},
+                        }]}), encoding="utf-8")
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
                                     "ok": True}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
-                    output.write_text(json.dumps({"root": {"type": "frame",
-                                                              "children": []}}),
+                    output.write_text(json.dumps({"root": {
+                        "type": "frame", "style": {"width": 1, "height": 1},
+                        "children": []}}),
                                       encoding="utf-8")
                 return LAB.CommandResult(argv, 1, 0, "", "")
 
@@ -830,7 +835,8 @@ class DifferentialLabTests(unittest.TestCase):
             snapshot_path.write_text(json.dumps({"documents": []}), encoding="utf-8")
             # Exercise compare_one's wiring, not just the metrics helper: a
             # panel-local match must not replace the raw page-space score.
-            capture["reference"]["authored_frame"] = {"x": 0.25, "y": 0.25}
+            capture["reference"]["authored_frame"] = {
+                "x": 0.25, "y": 0.25, "width": 1, "height": 1}
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             browser = LAB.BrowserNode(
                 0, "main", -1, "", {}, (0.25, 0.25, 0.5, 0.5), {}, 10)
@@ -896,7 +902,8 @@ class DifferentialLabTests(unittest.TestCase):
                 "reference": {"asset_id": "reference:browser",
                                "logical_width": 1, "logical_height": 1,
                                "device_scale_factor": 1,
-                               "authored_frame": {"x": 0, "y": 0}},
+                               "authored_frame": {"x": 0, "y": 0,
+                                                   "width": 1, "height": 1}},
             }
             (evidence / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
             Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(evidence / "browser.png")
@@ -911,15 +918,19 @@ class DifferentialLabTests(unittest.TestCase):
                     Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(
                         Path(argv[argv.index("--render") + 1]))
                     Path(argv[argv.index("--layout") + 1]).write_text(
-                        json.dumps({"views": []}), encoding="utf-8")
+                        json.dumps({"views": [], "nodes": [{
+                            "id": "browser:root",
+                            "rect": {"x": 0, "y": 0, "w": 1, "h": 1},
+                        }]}), encoding="utf-8")
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
                                     "ok": True}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
-                    output.write_text(json.dumps({"root": {"type": "frame",
-                                                              "children": []}}),
+                    output.write_text(json.dumps({"root": {
+                        "type": "frame", "style": {"width": 1, "height": 1},
+                        "children": []}}),
                                       encoding="utf-8")
                 return LAB.CommandResult(argv, 1, 0, "", "")
 

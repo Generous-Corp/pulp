@@ -1882,7 +1882,10 @@ def aggregate_reports(
         {
             "fixture": report.get("source", {}).get("path", "unknown"),
             "classification": report["promotion"]["classification"],
-            "threshold_eligible": report["promotion"]["threshold_eligible"],
+            # Older receipts may predate the explicit eligibility field.  Keep
+            # aggregation backward-compatible while remaining fail-closed:
+            # absence means the fixture is not eligible for promotion.
+            "threshold_eligible": report["promotion"].get("threshold_eligible", False),
             "scores": {
                 name: report["comparison"][name]["score"]
                 for name in ("structural", "geometry", "typography", "visual")
