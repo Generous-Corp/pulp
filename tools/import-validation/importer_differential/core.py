@@ -14,7 +14,7 @@ import stat
 import statistics
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -154,6 +154,9 @@ class BrowserNode:
     bounds: tuple[float, float, float, float] | None
     styles: dict[str, str]
     backend_node_id: int | None = None
+    # For a shape inside an inline `<svg>`: the outermost `<svg>` box, which
+    # is the coordinate frame (viewBox mapping) its geometry is drawn in.
+    svg_viewport: tuple[float, float, float, float] | None = None
 
 
 @dataclass
@@ -319,10 +322,7 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
     raw_nodes = document.get("nodes", {})
     layout = document.get("layout", {})
     style_names = snapshot.get("computedStyleNames") or LEGACY_COMPUTED_STYLES
-    layout_by_node = {
-        node_index: layout_index
-        for layout_index, node_index in enumerate(layout.get("nodeIndex", []))
-    }
+    layout_by_node = principal_layout_rows(layout)
     parents = raw_nodes.get("parentIndex", [])
     types = raw_nodes.get("nodeType", [])
     names = raw_nodes.get("nodeName", [])
@@ -354,6 +354,27 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
                 return True
             cursor = parents[cursor] if cursor < len(parents) else -1
         return False
+
+    def tag_of(index: int) -> str:
+        return decode_string(
+            strings, names[index] if index < len(names) else None).lower()
+
+    def svg_viewport_of(index: int) -> tuple[float, float, float, float] | None:
+        # The outermost `<svg>` ancestor, because nested viewports are drawn
+        # inside their root's frame rather than as frames of their own.
+        viewport = None
+        seen: set[int] = set()
+        cursor = parents[index] if index < len(parents) else -1
+        while 0 <= cursor < len(parents) and cursor not in seen:
+            seen.add(cursor)
+            if tag_of(cursor) == "svg":
+                layout_index = layout_by_node.get(cursor)
+                raw_bounds = layout.get("bounds", [])
+                if (layout_index is not None and layout_index < len(raw_bounds)
+                        and len(raw_bounds[layout_index]) == 4):
+                    viewport = tuple(float(v) for v in raw_bounds[layout_index])
+            cursor = parents[cursor]
+        return viewport
 
     result: list[BrowserNode] = []
     for index, node_type in enumerate(types):
@@ -412,8 +433,38 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
                 and isinstance(backend_node_ids[index], int)
                 and backend_node_ids[index] > 0
                 else None),
+            svg_viewport=svg_viewport_of(index) if tag != "svg" else None,
         ))
     return result
+
+
+def principal_layout_rows(layout: dict[str, Any]) -> dict[int, int]:
+    """Map each DOM node to the layout row that carries its own box.
+
+    Chromium's DOMSnapshot can emit several layout rows for one DOM node: a
+    pseudo-element's box is followed by its generated-content row, which
+    reports a zero-size box at the page origin, and a split inline emits one
+    row per continuation. The node's own box is the first row with positive
+    area; a node whose rows are all empty keeps its first row so the empty
+    box is still visible to the caller.
+    """
+    raw_bounds = layout.get("bounds", [])
+    rows: dict[int, int] = {}
+    for layout_index, node_index in enumerate(layout.get("nodeIndex", [])):
+        bounds = raw_bounds[layout_index] if layout_index < len(raw_bounds) else None
+        has_area = (isinstance(bounds, list) and len(bounds) == 4
+                    and all(isinstance(v, (int, float)) for v in bounds)
+                    and bounds[2] > 0 and bounds[3] > 0)
+        if node_index not in rows:
+            rows[node_index] = layout_index
+            continue
+        current = raw_bounds[rows[node_index]] if rows[node_index] < len(raw_bounds) else None
+        current_has_area = (isinstance(current, list) and len(current) == 4
+                            and all(isinstance(v, (int, float)) for v in current)
+                            and current[2] > 0 and current[3] > 0)
+        if has_area and not current_has_area:
+            rows[node_index] = layout_index
+    return rows
 
 
 def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]:
@@ -665,22 +716,32 @@ def geometry_metrics(
         return value
 
     for browser, native, _ in matches:
-        if not browser.bounds or not native.bounds:
+        # A native vector shape is laid out in its root `<svg>`'s frame, with
+        # the path in viewBox coordinates, so its box is that frame and not
+        # the shape's ink box. Compare it with the frame Chromium solved; the
+        # shape's ink placement inside that frame is a visual-lens question.
+        reference_frame = "element"
+        reference_bounds = browser.bounds
+        if native.node_type.lower() == "path" and browser.svg_viewport:
+            reference_frame = "svg-viewport"
+            reference_bounds = browser.svg_viewport
+        if not reference_bounds or not native.bounds:
             continue
         labels = ("x", "y", "width", "height")
         signed_delta = [candidate - reference
-                        for reference, candidate in zip(browser.bounds, native.bounds)]
+                        for reference, candidate in zip(reference_bounds, native.bounds)]
         component_errors = [
             relative_error(reference, candidate)
-            for reference, candidate in zip(browser.bounds, native.bounds)
+            for reference, candidate in zip(reference_bounds, native.bounds)
         ]
         mean_error = statistics.fmean(component_errors)
         errors.append(mean_error)
         rows.append({
             "browser_node": browser.index,
             "native_anchor": native.anchor,
-            "browser": dict(zip(labels, browser.bounds)),
+            "browser": dict(zip(labels, reference_bounds)),
             "candidate": dict(zip(labels, native.bounds)),
+            "reference_frame": reference_frame,
             # Keep the direction visible. An absolute score can hide a
             # systematic offset by collapsing +N and -N into the same value.
             "signed_delta": dict(zip(labels, [round(v, 6) for v in signed_delta])),
@@ -979,15 +1040,16 @@ def register_browser_nodes_to_native_frame(
     dy = -frame_y
     if abs(dx) < 1e-9 and abs(dy) < 1e-9:
         return nodes, {"x": 0.0, "y": 0.0, "source": "authenticated-authored-frame"}
-    registered: list[BrowserNode] = []
-    for node in nodes:
-        bounds = node.bounds
-        if bounds is not None:
-            bounds = (bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3])
-        registered.append(BrowserNode(
-            index=node.index, tag=node.tag, parent=node.parent, text=node.text,
-            attributes=node.attributes, bounds=bounds, styles=node.styles,
-            backend_node_id=node.backend_node_id))
+    def shifted(bounds: tuple[float, float, float, float] | None):
+        if bounds is None:
+            return None
+        return (bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3])
+
+    registered = [
+        replace(node, bounds=shifted(node.bounds),
+                svg_viewport=shifted(node.svg_viewport))
+        for node in nodes
+    ]
     return registered, {"x": round(dx, 6), "y": round(dy, 6),
                        "source": "authenticated-authored-frame"}
 

@@ -370,6 +370,137 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(metrics["root_residual"]["native_anchor"], "root")
         self.assertEqual(metrics["signed_delta_summary"]["x"]["median"], 0.0)
 
+    @staticmethod
+    def _pseudo_badge_snapshot() -> dict:
+        # A badge whose ::before is absolutely positioned. Chromium emits the
+        # pseudo's own box first, then a zero-size row for its empty generated
+        # content, both pointing at the same DOM node.
+        strings = ["DIV", "::before", "#text", "On", "display", "block"]
+        return {
+            "strings": strings,
+            "computedStyleNames": ["display"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0, 0],
+                    "nodeType": [1, 1, 3],
+                    "nodeName": [0, 1, 2],
+                    "nodeValue": [-1, -1, 3],
+                    "backendNodeId": [11, 12, 13],
+                    "attributes": [[], [], []],
+                },
+                "layout": {
+                    "nodeIndex": [0, 1, 1, 2],
+                    "bounds": [[28, 28, 131, 42], [42, 44, 10, 10],
+                               [0, 0, 0, 0], [64, 40, 77, 17]],
+                    "styles": [[5], [5], [5], [5]],
+                },
+            }],
+        }
+
+    def test_a_pseudo_element_keeps_its_own_box_not_its_generated_row(self) -> None:
+        browser = LAB.browser_nodes(self._pseudo_badge_snapshot())
+        pseudo = [node for node in browser if node.tag == "::before"]
+        self.assertEqual(len(pseudo), 1)
+        self.assertEqual(pseudo[0].bounds, (42.0, 44.0, 10.0, 10.0))
+        native = [
+            LAB.NativeNode("badge", "frame", "div.badge", "", None, {},
+                           (28, 28, 131, 42), 11),
+            LAB.NativeNode("badge/::before", "frame", "::before", "", "badge", {},
+                           (42, 44, 10, 10), 12),
+            LAB.NativeNode("badge/#text", "text", "#text", "On", "badge", {},
+                           (64, 40, 77, 17), 13),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual(result["missing"], [])
+        self.assertEqual(result["extra"], [])
+        self.assertAlmostEqual(result["score"], 1.0)
+
+    def test_control_a_native_that_drops_the_pseudo_element_is_missing_it(self) -> None:
+        browser = LAB.browser_nodes(self._pseudo_badge_snapshot())
+        native = [
+            LAB.NativeNode("badge", "frame", "div.badge", "", None, {},
+                           (28, 28, 131, 42), 11),
+            LAB.NativeNode("badge/#text", "text", "#text", "On", "badge", {},
+                           (64, 40, 77, 17), 13),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual([node.tag for node in result["missing"]], ["::before"])
+        self.assertLess(result["score"], LAB.PROMOTION_THRESHOLDS["structural"])
+
+    def test_an_all_empty_node_still_reports_its_first_row(self) -> None:
+        rows = LAB.principal_layout_rows({
+            "nodeIndex": [0, 1, 1],
+            "bounds": [[0, 0, 10, 10], [0, 0, 0, 0], [5, 5, 0, 3]],
+        })
+        self.assertEqual(rows, {0: 0, 1: 1})
+
+    @staticmethod
+    def _icon_snapshot() -> dict:
+        strings = ["DIV", "svg", "circle", "display", "block"]
+        return {
+            "strings": strings,
+            "computedStyleNames": ["display"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0, 1],
+                    "nodeType": [1, 1, 1],
+                    "nodeName": [0, 1, 2],
+                    "nodeValue": [-1, -1, -1],
+                    "backendNodeId": [11, 12, 13],
+                    "attributes": [[], [], []],
+                },
+                "layout": {
+                    "nodeIndex": [0, 1, 2],
+                    "bounds": [[24, 24, 212, 124], [40, 40, 64, 64],
+                               [45, 45, 54, 54]],
+                    "styles": [[4], [4], [4]],
+                },
+            }],
+        }
+
+    def _icon_geometry(self, shape_box):
+        browser = LAB.browser_nodes(self._icon_snapshot())
+        native = [
+            LAB.NativeNode("icon", "frame", "div", "", None, {}, (24, 24, 212, 124), 11),
+            LAB.NativeNode("icon/svg", "frame", "svg", "", "icon", {}, (40, 40, 64, 64), 12),
+            LAB.NativeNode("icon/svg/circle", "path", "circle", "", "icon/svg", {},
+                           shape_box, 13),
+        ]
+        result = LAB.structural_comparison(browser, native)
+        return result, LAB.geometry_metrics(result["matches"])
+
+    def test_a_vector_shape_is_placed_in_its_svg_viewport_frame(self) -> None:
+        # The native shape carries its root <svg>'s box (the viewBox frame its
+        # path data is drawn in), not the circle's own ink box.
+        result, geometry = self._icon_geometry((40, 40, 64, 64))
+        self.assertEqual(result["missing"], [])
+        self.assertAlmostEqual(result["score"], 1.0)
+        shape_row = next(row for row in geometry["rows"]
+                         if row["native_anchor"] == "icon/svg/circle")
+        self.assertEqual(shape_row["reference_frame"], "svg-viewport")
+        self.assertEqual(shape_row["max_abs_delta"], 0)
+        element_rows = [row for row in geometry["rows"]
+                        if row["native_anchor"] != "icon/svg/circle"]
+        self.assertTrue(all(row["reference_frame"] == "element"
+                            for row in element_rows))
+
+    def test_control_a_shape_outside_its_svg_frame_fails_geometry(self) -> None:
+        _result, geometry = self._icon_geometry((43, 40, 64, 64))
+        shape_row = next(row for row in geometry["rows"]
+                         if row["native_anchor"] == "icon/svg/circle")
+        self.assertEqual(shape_row["max_abs_delta"], 3)
+        self.assertGreater(shape_row["max_abs_delta"],
+                           LAB.GEOMETRY_MAX_ABS_DELTA_PX)
+
+    def test_svg_viewport_frame_registers_with_the_authored_frame(self) -> None:
+        browser = LAB.browser_nodes(self._icon_snapshot())
+        capture = {"reference": {"authored_frame": {"x": 24, "y": 24}}}
+        registered, _ = LAB.register_browser_nodes_to_native_frame(
+            browser, capture, capture)
+        shape = next(node for node in registered if node.tag == "circle")
+        self.assertEqual(shape.svg_viewport, (16.0, 16.0, 64.0, 64.0))
+        self.assertEqual(shape.bounds, (21.0, 21.0, 54.0, 54.0))
+
     def test_viewport_dpr_audit_rejects_wrong_pixel_extent(self) -> None:
         capture, native_capture, _source_sha256 = self._bound_captures()
         for item in (capture, native_capture):
