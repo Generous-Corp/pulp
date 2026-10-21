@@ -3373,7 +3373,7 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    history); pin a side-branch commit and every `main` commit it lacks is
    dropped. Locally an unfetchable planning remote fails closed ("NOT
    VERIFIED"); CI has no planning credential and runs with `--ci-warn-only`,
-   so there it is only a `::warning` — check the pin locally before landing.
+   so there it is only a `::warning`; check the pin locally before landing.
 2b1. **Config→doc drift?** The `config-doc` gate (`tools/scripts/config_doc_check.py`,
    map in `tools/scripts/config_doc_map.json`) fails if a mapped CI/release config
    surface (`.shipyard/config.toml`, the shipyard pin/installer, the

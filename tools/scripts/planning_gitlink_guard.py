@@ -133,7 +133,7 @@ def check_pin_ancestry(head: str, remote: str | None) -> tuple[str, str]:
             f"    git add planning")
     except AncestryUnverified as exc:
         return ANCESTRY_UNVERIFIED, (
-            f"planning-gitlink: NOT VERIFIED — {exc}.\n"
+            f"planning-gitlink: NOT VERIFIED: {exc}.\n"
             f"  The planning pin must be checked against pulp-planning {PLANNING_BRANCH}\n"
             f"  before it can land; this guard does not pass an unverified pin. Run it\n"
             f"  where the planning remote is readable, or pass --planning-remote <url|path>.")
