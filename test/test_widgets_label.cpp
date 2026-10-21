@@ -770,6 +770,65 @@ TEST_CASE("Label honors Chromium captured vertical line positions",
     CHECK(fills[0].f[1] - em_fills[0].f[1] == Catch::Approx(2.0f));
 }
 
+TEST_CASE("Label places a captured baseline from the face's typographic ascent",
+          "[view][widget][label-cache][alignment][typography]") {
+    // Chromium's text line box is the content area: the face's typographic
+    // ascent + descent, with the line-height surplus split evenly around it.
+    // Its baseline therefore sits `ascent` below the top of a box exactly
+    // that tall. The shaper's clip-safe ascent()/descent() carry the glyph
+    // bounding box instead, which for most faces is taller; descending by it
+    // paints every captured line low by half the gap, growing with size.
+    constexpr float kSize = 32.0f;
+    const auto prepared =
+        global_text_shaper().prepare(" ", "Inter", kSize, 400, 0);
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty() || !prepared.metrics_are_real()) {
+        SKIP("Inter does not resolve to a real face on this host");
+    }
+    const float typo_ascent = prepared.font_ascent();
+    const float typo_descent = prepared.font_descent();
+    REQUIRE(typo_ascent > 0.0f);
+    REQUIRE(typo_descent > 0.0f);
+    // Control: the two metric pairs must actually disagree, or the
+    // assertion below could not tell them apart.
+    const float clip_safe_baseline =
+        ((typo_ascent + typo_descent) -
+         (prepared.ascent() + prepared.descent())) * 0.5f +
+        prepared.ascent();
+    REQUIRE(std::abs(clip_safe_baseline - typo_ascent) > 0.5f);
+
+    const float content_h = typo_ascent + typo_descent;
+    constexpr float kTop = 5.0f;
+    Label label("Analog character");
+    label.set_font_family("Inter");
+    label.set_font_size(kSize);
+    label.set_bounds({0, 0, 400, 60});
+    label.set_cached_line_boxes(
+        {{0, kTop, 300, content_h, 0, 16}}, 400.0f, face, false);
+    REQUIRE_FALSE(label.cached_line_boxes().empty());
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    CHECK(fills[0].f[1] == Catch::Approx(kTop + typo_ascent).margin(0.01f));
+
+    // A line-height surplus still splits evenly: a box 8px taller moves the
+    // baseline down by exactly 4px.
+    Label leaded("Analog character");
+    leaded.set_font_family("Inter");
+    leaded.set_font_size(kSize);
+    leaded.set_bounds({0, 0, 400, 60});
+    leaded.set_cached_line_boxes(
+        {{0, kTop, 300, content_h + 8.0f, 0, 16}}, 400.0f, face, false);
+    RecordingCanvas leaded_canvas;
+    leaded.paint(leaded_canvas);
+    const auto leaded_fills =
+        commands_of(leaded_canvas, DrawCommand::Type::fill_text);
+    REQUIRE(leaded_fills.size() == 1);
+    CHECK(leaded_fills[0].f[1] - fills[0].f[1] == Catch::Approx(4.0f).margin(0.01f));
+}
+
 TEST_CASE("Label keeps a retyped single captured line where Chromium put it",
           "[view][widget][label-cache][readout]") {
     // A modulated readout ("32 BANDS" playing "64 BANDS") changes its copy

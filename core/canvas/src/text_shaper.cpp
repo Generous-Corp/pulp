@@ -622,6 +622,8 @@ struct TextShaper::Impl {
         float descent = 0;  // positive distance below baseline
         float leading = 0;  // extra inter-line gap
         float line_height = 0;  // ascent + descent + leading
+        float font_ascent = 0;  // typographic ascent (fAscent), positive
+        float font_descent = 0; // typographic descent (fDescent), positive
         bool real = false;      // true if derived from SkFontMetrics, false for the heuristic fallback
     };
     std::unordered_map<CacheKey, LineBox, CacheKeyHash> metrics_cache;
@@ -701,6 +703,8 @@ struct TextShaper::Impl {
         box.descent = font_size * 0.2f;
         box.leading = font_size * 0.5f;
         box.line_height = box.ascent + box.descent + box.leading;
+        box.font_ascent = box.ascent;
+        box.font_descent = box.descent;
         box.real = false;
 
 #ifdef PULP_HAS_TEXT_SHAPING
@@ -733,6 +737,8 @@ struct TextShaper::Impl {
             const float bottom = m.fBottom > m.fDescent ? m.fBottom : m.fDescent;
             box.ascent  = -top;           // worst-case distance above baseline (positive)
             box.descent =  bottom;        // worst-case distance below baseline (positive)
+            box.font_ascent  = -m.fAscent;
+            box.font_descent =  m.fDescent;
             box.leading =  m.fLeading > 0 ? m.fLeading : 0;
             // Raw fTop/fBottom is now the default line box. The legacy
             // empirical `0.5 * font_size` safety margin was a stopgap for
@@ -1119,6 +1125,8 @@ PreparedText TextShaper::prepare(
     result.ascent_       = box.ascent;
     result.descent_      = box.descent;
     result.leading_      = box.leading;
+    result.font_ascent_  = box.font_ascent;
+    result.font_descent_ = box.font_descent;
     result.metrics_real_ = box.real;
 
     // Segment the text: split on whitespace and newlines
@@ -1211,6 +1219,10 @@ PreparedText TextShaper::prepare(
         result.ascent_ = std::max(result.ascent_, span_prepared.ascent_);
         result.descent_ = std::max(result.descent_, span_prepared.descent_);
         result.leading_ = std::max(result.leading_, span_prepared.leading_);
+        result.font_ascent_ =
+            std::max(result.font_ascent_, span_prepared.font_ascent_);
+        result.font_descent_ =
+            std::max(result.font_descent_, span_prepared.font_descent_);
         result.metrics_real_ = result.metrics_real_ || span_prepared.metrics_real_;
         fallback_line_height = std::max(fallback_line_height,
                                         span_prepared.line_height_);

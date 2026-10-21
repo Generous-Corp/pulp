@@ -45,20 +45,29 @@ public:
     /// Line height for this text
     float line_height() const { return line_height_; }
 
-    /// SkFontMetrics-derived line box of the resolved typeface. `ascent`
-    /// is the positive distance ABOVE the baseline (Skia's fAscent is
-    /// negative, so we flip it here). `descent` is distance below baseline.
-    /// `leading` is the extra inter-line gap.
-    /// `line_height` equals ascent + descent + leading. `real` is true
-    /// when these came from a resolved typeface, false when the
-    /// fallback heuristic ran (no Skia, family unresolvable, etc.).
-    /// Callers that need to place a baseline (paint code, custom
-    /// canvases) should use `ascent` rather than the previous
-    /// `font_size * 0.85` rule-of-thumb.
+    /// Clip-safe line box of the resolved typeface. `ascent` is the
+    /// positive distance ABOVE the baseline and `descent` the distance below
+    /// it; both are the larger of the face's glyph bounding-box extent
+    /// (SkFontMetrics fTop / fBottom) and its typographic ascent / descent,
+    /// so a box sized from them never clips a glyph. `leading` is the extra
+    /// inter-line gap and `line_height` equals ascent + descent + leading.
+    /// `real` is true when these came from a resolved typeface, false when
+    /// the fallback heuristic ran (no Skia, family unresolvable, etc.).
     float ascent()  const { return ascent_; }
     float descent() const { return descent_; }
     float leading() const { return leading_; }
     bool metrics_are_real() const { return metrics_real_; }
+
+    /// The face's typographic ascent / descent (SkFontMetrics fAscent /
+    /// fDescent, positive). These are the metrics CSS lays a line out with:
+    /// the inline box's content area is font_ascent + font_descent, and
+    /// half-leading is the line-height surplus over that sum. They are
+    /// usually smaller than `ascent()` / `descent()`, which carry the glyph
+    /// bounding box, so placing a CSS baseline from the clip-safe pair puts
+    /// it low by the difference. Attributed text reports the per-side
+    /// maximum over its spans.
+    float font_ascent()  const { return font_ascent_; }
+    float font_descent() const { return font_descent_; }
 
     /// The CSS numeric weight these segments were measured at.
     ///
@@ -81,6 +90,8 @@ private:
     float ascent_ = 0;
     float descent_ = 0;
     float leading_ = 0;
+    float font_ascent_ = 0;
+    float font_descent_ = 0;
     bool metrics_real_ = false;
     std::string font_family_;
     float font_size_ = 0;

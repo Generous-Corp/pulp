@@ -503,14 +503,15 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
             return command.type == pulp::canvas::DrawCommand::Type::fill_text;
         });
     REQUIRE(cached_text != cached_canvas.commands().end());
-    // CSS half-leading against the captured line box, using the same ink the
-    // baseline then descends by: (15 - (ascent + descent)) / 2 + ascent. Inter
-    // at 12px carries ~17.16px of ink, so a 15px box has NEGATIVE half-leading
-    // (~-1.08) and the glyphs overflow it evenly, which CSS permits. The
-    // earlier 11.7 encoded a rule of thumb -- 1.5 + 0.85 * 12 -- that measured
-    // the surplus against the em box while descending by a real face ascent,
-    // double-counting the gap between the two references.
-    CHECK(cached_text->f[1] == Catch::Approx(12.2139f).margin(0.01f));
+    // CSS half-leading against the captured line box, measured against the
+    // same content area the baseline then descends by: the face's typographic
+    // ascent + descent, which is what Chromium built the 15px box from (Inter
+    // 12px: 11.625 + 2.906). (15 - 14.53) / 2 + 11.625 puts the baseline at
+    // ~11.87, within rounding of Chromium's top + round(ascent) = 12. The
+    // glyph bounding box (~17.16px for Inter) is a clip bound, not a CSS
+    // metric; descending by it painted the line ~0.35px low here and by
+    // several pixels at display sizes.
+    CHECK(cached_text->f[1] == Catch::Approx(11.8652f).margin(0.01f));
 
     live_single->set_text("01  SLOW");
     pulp::canvas::RecordingCanvas changed_text_canvas;

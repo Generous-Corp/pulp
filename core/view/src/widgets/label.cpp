@@ -1137,6 +1137,10 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
     if (prepared.metrics_are_real() && prepared.ascent() > 0.0f) {
         m.ascent = prepared.ascent();
         m.descent = prepared.descent();
+        m.font_ascent = prepared.font_ascent() > 0.0f ? prepared.font_ascent()
+                                                       : m.ascent;
+        m.font_descent = prepared.font_ascent() > 0.0f ? prepared.font_descent()
+                                                        : m.descent;
         m.real = true;
     } else {
         // No Skia, or the family did not resolve. Keep the historic
@@ -1144,6 +1148,8 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
         // so, since callers gate the correction on `real`.
         m.ascent = font_size * 0.85f;
         m.descent = font_size * 0.15f;
+        m.font_ascent = m.ascent;
+        m.font_descent = m.descent;
         m.real = false;
     }
     face_metrics_family_ = family;
@@ -1977,16 +1983,33 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         // ascent. Do not center the complete owner bounds a second time.
         const auto& first_line = shaped_layout->lines.front();
         // One reference, not two. Half-leading is the surplus of the line BOX
-        // over the ink it carries, so it has to be measured against the same
-        // ascent + descent the baseline then descends by. Measuring it against
-        // the em box while descending by a real ascent double-counts the
-        // difference between them and paints the line low by exactly that gap.
-        // Unclamped for the same reason the native branch above is: a face
-        // whose ink exceeds the captured box has negative leading and CSS lets
-        // its glyphs overflow evenly, top and bottom.
+        // over the content area it carries, so it has to be measured against
+        // the same ascent + descent the baseline then descends by. And the
+        // captured box is Chromium's content area, which is built from the
+        // face's TYPOGRAPHIC ascent and descent, not its glyph bounding box:
+        // descending by the clip-safe bbox ascent paints every line low by
+        // half the gap between the two pairs, a gap that grows with the font
+        // size. Unclamped for the same reason the native branch above is: a
+        // face whose content area exceeds the captured box has negative
+        // leading and CSS lets its glyphs overflow evenly, top and bottom.
+        float css_ascent = first_line_ascent;
+        float css_descent = single_line_text_height - first_line_ascent;
+        if (has_attributed_) {
+            if (attributed_prepare_cache_.font_ascent() > 0.0f) {
+                css_ascent = attributed_prepare_cache_.font_ascent();
+                css_descent = attributed_prepare_cache_.font_descent();
+            }
+        } else {
+            const auto fm = face_metrics(family, effective_font_size,
+                                         effective_font_weight(), font_style_);
+            if (fm.real) {
+                css_ascent = fm.font_ascent;
+                css_descent = fm.font_descent;
+            }
+        }
         const float half_leading =
-            (first_line.height - single_line_text_height) * 0.5f;
-        baseline_y = first_line.y + half_leading + first_line_ascent;
+            (first_line.height - (css_ascent + css_descent)) * 0.5f;
+        baseline_y = first_line.y + half_leading + css_ascent;
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared
