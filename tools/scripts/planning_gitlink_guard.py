@@ -23,19 +23,113 @@ Recovery for an accidental bump:
 
     git restore --staged --worktree planning && git submodule update planning
 
+An authorized bump must also pin a commit that is on pulp-planning's main
+branch: a pin to a side-branch or rewritten commit silently drops every
+planning commit main has that the pin lacks. The guard fetches the planning
+remote's main (commit history only) and requires the new pin to be an
+ancestor of it. When the remote cannot be fetched the guard fails rather than
+passing unverified.
+
 See planning/2026-07-07-parallel-merge-land-coordination.md (T0.1).
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
+import tempfile
 
 # Single-file script invocation puts this directory on sys.path, so a plain
 # import works from CI, hooks, and ad-hoc runs (matches the other gates).
 from gate_common import git_diff_names, git_range_trailers
 
 TRAILER = "Planning-Bump"
+PLANNING_PATH = "planning"
+PLANNING_BRANCH = "main"
+FETCH_TIMEOUT_SECONDS = 180
+
+
+class AncestryUnverified(RuntimeError):
+    pass
+
+
+def _git(arguments: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    return subprocess.run(["git", *arguments], text=True, capture_output=True, env=env,
+                          **kwargs)
+
+
+def planning_pin(head: str) -> str | None:
+    """The gitlink commit `head` pins at `planning`, or None if it pins none."""
+    out = _git(["ls-tree", head, "--", PLANNING_PATH])
+    if out.returncode != 0:
+        raise AncestryUnverified(f"cannot read the planning gitlink at {head}: "
+                                 f"{out.stderr.strip()}")
+    fields = out.stdout.split()
+    if len(fields) >= 3 and fields[0] == "160000" and fields[1] == "commit":
+        return fields[2]
+    return None
+
+
+def planning_remote(head: str) -> str:
+    out = _git(["config", "--blob", f"{head}:.gitmodules",
+                f"submodule.{PLANNING_PATH}.url"])
+    url = out.stdout.strip()
+    if out.returncode != 0 or not url:
+        raise AncestryUnverified(f"cannot read submodule.{PLANNING_PATH}.url from "
+                                 f"{head}:.gitmodules")
+    return url
+
+
+def pin_is_on_planning_main(pin: str, remote: str) -> bool:
+    """Whether `pin` is an ancestor of `remote`'s main branch.
+
+    Fetches main's commit graph into a throwaway repository. A pin absent from
+    that history is not on main, which is the same verdict as not-an-ancestor.
+    """
+    with tempfile.TemporaryDirectory(prefix="planning-gitlink-") as scratch:
+        if _git(["init", "--quiet", "--bare", scratch]).returncode != 0:
+            raise AncestryUnverified("cannot create a scratch repository")
+        ref = f"refs/remotes/origin/{PLANNING_BRANCH}"
+        try:
+            fetched = _git(["-C", scratch, "fetch", "--quiet", "--no-tags",
+                            "--filter=tree:0", remote,
+                            f"+refs/heads/{PLANNING_BRANCH}:{ref}"],
+                           timeout=FETCH_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise AncestryUnverified(f"fetching {remote} {PLANNING_BRANCH} timed out")
+        if fetched.returncode != 0:
+            raise AncestryUnverified(f"cannot fetch {remote} {PLANNING_BRANCH}: "
+                                     f"{fetched.stderr.strip() or 'git fetch failed'}")
+        return _git(["-C", scratch, "merge-base", "--is-ancestor", pin, ref]).returncode == 0
+
+
+def check_pin_ancestry(head: str, remote: str | None) -> str | None:
+    """None when the pin is on planning main, else the failure message."""
+    try:
+        pin = planning_pin(head)
+        if pin is None:
+            return None
+        url = remote or planning_remote(head)
+        if pin_is_on_planning_main(pin, url):
+            print(f"planning-gitlink: pin {pin[:12]} is on {PLANNING_BRANCH} of {url}")
+            return None
+        return (
+            f"planning-gitlink: the new planning pin {pin} is not an ancestor of\n"
+            f"  {PLANNING_BRANCH} at {url}. Pinning it would drop every planning commit\n"
+            f"  on {PLANNING_BRANCH} that it lacks. Push the planning commit to\n"
+            f"  {PLANNING_BRANCH} first, then pin that {PLANNING_BRANCH} commit:\n"
+            f"    git -C planning fetch origin {PLANNING_BRANCH} && "
+            f"git -C planning checkout origin/{PLANNING_BRANCH}\n"
+            f"    git add planning")
+    except AncestryUnverified as exc:
+        return (
+            f"planning-gitlink: NOT VERIFIED — {exc}.\n"
+            f"  The planning pin must be checked against pulp-planning {PLANNING_BRANCH}\n"
+            f"  before it can land; this guard does not pass an unverified pin. Run it\n"
+            f"  where the planning remote is readable, or pass --planning-remote <url|path>.")
 
 
 def main(argv: list[str]) -> int:
@@ -46,6 +140,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--mode", choices=["report", "hint"], default="report",
                         help="report: non-zero exit on violation (default). "
                              "hint: advisory, always exits 0.")
+    parser.add_argument("--planning-remote",
+                        default=os.environ.get("PULP_PLANNING_REMOTE"),
+                        help="Planning repository to check the pin against (default: "
+                             "the head's .gitmodules URL; env PULP_PLANNING_REMOTE).")
     args = parser.parse_args(argv)
 
     changed = git_diff_names(args.base, args.head)
@@ -56,7 +154,14 @@ def main(argv: list[str]) -> int:
     reasons = trailers.get(TRAILER.lower(), [])
     if reasons:
         print(f"planning-gitlink: deliberate bump authorized ({reasons[0]})")
-        return 0
+        failure = check_pin_ancestry(args.head, args.planning_remote)
+        if failure is None:
+            return 0
+        if args.mode == "hint":
+            print("planning-gitlink (hint):\n" + failure)
+            return 0
+        print(failure, file=sys.stderr)
+        return 1
 
     message = (
         "planning-gitlink: this PR moves the `planning` submodule pointer but no\n"
