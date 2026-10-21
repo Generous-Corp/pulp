@@ -25,7 +25,7 @@ guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guard)
 
 
-def run(changed, trailers, mode="report", ancestry=None):
+def run(changed, trailers, mode="report", ancestry=("ok", "verified")):
     with mock.patch.object(guard, "git_diff_names", return_value=changed), \
          mock.patch.object(guard, "git_range_trailers", return_value=trailers), \
          mock.patch.object(guard, "check_pin_ancestry", return_value=ancestry):
@@ -58,8 +58,10 @@ class PlanningGitlinkGuardTest(unittest.TestCase):
 
     def test_authorized_bump_still_fails_an_ancestry_failure(self):
         trailers = {"planning-bump": ['reason="x"']}
-        self.assertEqual(run(["planning"], trailers, ancestry="not an ancestor"), 1)
-        self.assertEqual(run(["planning"], trailers, mode="hint", ancestry="x"), 0)
+        self.assertEqual(run(["planning"], trailers, ancestry=("rejected", "off main")), 1)
+        self.assertEqual(run(["planning"], trailers, ancestry=("unverified", "no fetch")), 1)
+        self.assertEqual(run(["planning"], trailers, mode="hint",
+                             ancestry=("rejected", "off main")), 0)
 
 
 def git(cwd, *args):
@@ -143,6 +145,27 @@ class PlanningPinAncestryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("planning-gitlink: NOT VERIFIED", result.stderr)
         self.assertIn("cannot fetch", result.stderr)
+
+    def test_ci_warn_only_passes_an_unreachable_remote_with_a_warning(self):
+        self.pin(self.main_pin)
+        missing = Path(self.scratch.name) / "no-such-remote"
+        result = self.run_guard("--planning-remote", str(missing), "--ci-warn-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("::warning title=planning-gitlink NOT VERIFIED::", result.stdout)
+        self.assertIn("cannot fetch", result.stdout)
+
+    def test_ci_warn_only_still_fails_a_pin_verified_off_main(self):
+        self.pin(self.side_pin)
+        result = self.run_guard("--ci-warn-only")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertNotIn("::warning", result.stdout)
+        self.assertIn("is not an ancestor of", result.stderr)
+
+    def test_ci_warn_only_still_passes_a_pin_on_main(self):
+        self.pin(self.main_pin)
+        result = self.run_guard("--ci-warn-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("::warning", result.stdout)
 
     def test_unauthorized_bump_fails_before_any_fetch(self):
         self.pin(self.main_pin, trailer=False)

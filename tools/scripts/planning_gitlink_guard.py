@@ -28,7 +28,10 @@ branch: a pin to a side-branch or rewritten commit silently drops every
 planning commit main has that the pin lacks. The guard fetches the planning
 remote's main (commit history only) and requires the new pin to be an
 ancestor of it. When the remote cannot be fetched the guard fails rather than
-passing unverified.
+passing unverified, except under --ci-warn-only: a CI runner that has no
+credential for the private planning repository reports the unverified pin as
+a loud warning and passes, so deliberate re-pins stay landable. A pin that WAS
+fetched and is not on main fails in every mode.
 
 See planning/2026-07-07-parallel-merge-land-coordination.md (T0.1).
 """
@@ -106,17 +109,21 @@ def pin_is_on_planning_main(pin: str, remote: str) -> bool:
         return _git(["-C", scratch, "merge-base", "--is-ancestor", pin, ref]).returncode == 0
 
 
-def check_pin_ancestry(head: str, remote: str | None) -> str | None:
-    """None when the pin is on planning main, else the failure message."""
+ANCESTRY_OK = "ok"
+ANCESTRY_REJECTED = "rejected"
+ANCESTRY_UNVERIFIED = "unverified"
+
+
+def check_pin_ancestry(head: str, remote: str | None) -> tuple[str, str]:
+    """(verdict, message): ok, rejected (pin verified off main), or unverified."""
     try:
         pin = planning_pin(head)
         if pin is None:
-            return None
+            return ANCESTRY_OK, "planning-gitlink: head pins no planning commit"
         url = remote or planning_remote(head)
         if pin_is_on_planning_main(pin, url):
-            print(f"planning-gitlink: pin {pin[:12]} is on {PLANNING_BRANCH} of {url}")
-            return None
-        return (
+            return ANCESTRY_OK, f"planning-gitlink: pin {pin[:12]} is on {PLANNING_BRANCH} of {url}"
+        return ANCESTRY_REJECTED, (
             f"planning-gitlink: the new planning pin {pin} is not an ancestor of\n"
             f"  {PLANNING_BRANCH} at {url}. Pinning it would drop every planning commit\n"
             f"  on {PLANNING_BRANCH} that it lacks. Push the planning commit to\n"
@@ -125,7 +132,7 @@ def check_pin_ancestry(head: str, remote: str | None) -> str | None:
             f"git -C planning checkout origin/{PLANNING_BRANCH}\n"
             f"    git add planning")
     except AncestryUnverified as exc:
-        return (
+        return ANCESTRY_UNVERIFIED, (
             f"planning-gitlink: NOT VERIFIED — {exc}.\n"
             f"  The planning pin must be checked against pulp-planning {PLANNING_BRANCH}\n"
             f"  before it can land; this guard does not pass an unverified pin. Run it\n"
@@ -144,6 +151,10 @@ def main(argv: list[str]) -> int:
                         default=os.environ.get("PULP_PLANNING_REMOTE"),
                         help="Planning repository to check the pin against (default: "
                              "the head's .gitmodules URL; env PULP_PLANNING_REMOTE).")
+    parser.add_argument("--ci-warn-only", action="store_true",
+                        help="For CI runners that cannot read the private planning "
+                             "repository: report an UNVERIFIED pin as a ::warning and "
+                             "pass. A pin verified to be off main still fails.")
     args = parser.parse_args(argv)
 
     changed = git_diff_names(args.base, args.head)
@@ -154,13 +165,21 @@ def main(argv: list[str]) -> int:
     reasons = trailers.get(TRAILER.lower(), [])
     if reasons:
         print(f"planning-gitlink: deliberate bump authorized ({reasons[0]})")
-        failure = check_pin_ancestry(args.head, args.planning_remote)
-        if failure is None:
+        verdict, detail = check_pin_ancestry(args.head, args.planning_remote)
+        if verdict == ANCESTRY_OK:
+            print(detail)
+            return 0
+        if verdict == ANCESTRY_UNVERIFIED and args.ci_warn_only:
+            # One-line ::warning so the Actions annotation is visible on the run.
+            summary = " ".join(line.strip() for line in detail.splitlines())
+            print(f"::warning title=planning-gitlink NOT VERIFIED::{summary}")
+            print(detail + "\n  --ci-warn-only: passing; verify the pin where the "
+                  "planning remote is readable.", file=sys.stderr)
             return 0
         if args.mode == "hint":
-            print("planning-gitlink (hint):\n" + failure)
+            print("planning-gitlink (hint):\n" + detail)
             return 0
-        print(failure, file=sys.stderr)
+        print(detail, file=sys.stderr)
         return 1
 
     message = (
