@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <limits>
 
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
@@ -206,6 +207,9 @@ struct SharedIoTelemetrySnapshot {
     std::uint64_t pre_submit_delay_ns = 0;
     std::uint64_t submit_to_completion_ns = 0;
     std::uint64_t scheduled_to_completion_ns = 0;
+    // False means the aggregate could not be represented without wrapping.
+    // Consumers must not treat the aggregate as authoritative in that case.
+    bool completion_timing_valid = true;
     std::uint64_t gpu_elapsed_ns = 0;
     std::uint64_t gpu_busy_counter = 0;
     bool gpu_elapsed_available = false;
@@ -246,9 +250,12 @@ class SharedIoTelemetry {
         callback_duration_ns_.store(0, std::memory_order_relaxed);
         worker_pack_copy_duration_ns_.store(0, std::memory_order_relaxed);
         encode_submit_duration_ns_.store(0, std::memory_order_relaxed);
+        begin_completion_timing_update();
         pre_submit_delay_ns_.store(0, std::memory_order_relaxed);
         submit_to_completion_ns_.store(0, std::memory_order_relaxed);
         scheduled_to_completion_ns_.store(0, std::memory_order_relaxed);
+        completion_timing_valid_.store(true, std::memory_order_relaxed);
+        completion_timing_sequence_.fetch_add(1, std::memory_order_release);
         gpu_elapsed_ns_.store(0, std::memory_order_relaxed);
         gpu_busy_counter_.store(0, std::memory_order_relaxed);
         gpu_elapsed_available_.store(false, std::memory_order_relaxed);
@@ -305,10 +312,20 @@ class SharedIoTelemetry {
     }
     void record_completion_timing(std::uint64_t pre_submit_delay_ns,
                                   std::uint64_t submit_to_completion_ns) noexcept {
+        begin_completion_timing_update();
         pre_submit_delay_ns_.store(pre_submit_delay_ns, std::memory_order_relaxed);
         submit_to_completion_ns_.store(submit_to_completion_ns, std::memory_order_relaxed);
+        if (submit_to_completion_ns >
+            std::numeric_limits<std::uint64_t>::max() - pre_submit_delay_ns) {
+            scheduled_to_completion_ns_.store(0, std::memory_order_relaxed);
+            completion_timing_valid_.store(false, std::memory_order_relaxed);
+            completion_timing_sequence_.fetch_add(1, std::memory_order_release);
+            return;
+        }
         scheduled_to_completion_ns_.store(pre_submit_delay_ns + submit_to_completion_ns,
                                           std::memory_order_relaxed);
+        completion_timing_valid_.store(true, std::memory_order_relaxed);
+        completion_timing_sequence_.fetch_add(1, std::memory_order_release);
     }
     void record_gpu_elapsed_ns(std::uint64_t value) noexcept {
         gpu_elapsed_ns_.store(value, std::memory_order_relaxed);
@@ -341,10 +358,20 @@ class SharedIoTelemetry {
         out.worker_pack_copy_duration_ns =
             worker_pack_copy_duration_ns_.load(std::memory_order_relaxed);
         out.encode_submit_duration_ns = encode_submit_duration_ns_.load(std::memory_order_relaxed);
-        out.pre_submit_delay_ns = pre_submit_delay_ns_.load(std::memory_order_relaxed);
-        out.submit_to_completion_ns = submit_to_completion_ns_.load(std::memory_order_relaxed);
-        out.scheduled_to_completion_ns =
-            scheduled_to_completion_ns_.load(std::memory_order_relaxed);
+        for (;;) {
+            const auto sequence = completion_timing_sequence_.load(std::memory_order_acquire);
+            if ((sequence & 1U) != 0U) {
+                continue;
+            }
+            out.pre_submit_delay_ns = pre_submit_delay_ns_.load(std::memory_order_relaxed);
+            out.submit_to_completion_ns = submit_to_completion_ns_.load(std::memory_order_relaxed);
+            out.scheduled_to_completion_ns =
+                scheduled_to_completion_ns_.load(std::memory_order_relaxed);
+            out.completion_timing_valid = completion_timing_valid_.load(std::memory_order_relaxed);
+            if (completion_timing_sequence_.load(std::memory_order_acquire) == sequence) {
+                break;
+            }
+        }
         out.gpu_elapsed_available = gpu_elapsed_available_.load(std::memory_order_acquire);
         out.gpu_elapsed_ns = gpu_elapsed_ns_.load(std::memory_order_relaxed);
         out.gpu_busy_counter = gpu_busy_counter_.load(std::memory_order_relaxed);
@@ -352,6 +379,17 @@ class SharedIoTelemetry {
     }
 
   private:
+    void begin_completion_timing_update() noexcept {
+        for (;;) {
+            auto sequence = completion_timing_sequence_.load(std::memory_order_relaxed);
+            if ((sequence & 1U) == 0U &&
+                completion_timing_sequence_.compare_exchange_weak(
+                    sequence, sequence + 1, std::memory_order_acquire, std::memory_order_relaxed)) {
+                return;
+            }
+        }
+    }
+
     std::atomic<std::uint64_t> callback_blocks_{0}, submitted_blocks_{0};
     std::atomic<std::uint64_t> retired_success_{0}, retired_failure_{0};
     std::atomic<std::uint64_t> delivered_blocks_{0}, deadline_misses_{0};
@@ -363,6 +401,8 @@ class SharedIoTelemetry {
     std::atomic<std::uint64_t> callback_duration_ns_{0}, worker_pack_copy_duration_ns_{0};
     std::atomic<std::uint64_t> encode_submit_duration_ns_{0}, pre_submit_delay_ns_{0};
     std::atomic<std::uint64_t> submit_to_completion_ns_{0}, scheduled_to_completion_ns_{0};
+    std::atomic<bool> completion_timing_valid_{true};
+    std::atomic<std::uint64_t> completion_timing_sequence_{0};
     std::atomic<std::uint64_t> gpu_elapsed_ns_{0}, gpu_busy_counter_{0};
     std::atomic<bool> gpu_elapsed_available_{false};
 };

@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
+
 #include "detail/shared_io_execution_contract.hpp"
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
@@ -161,7 +163,18 @@ TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing expl
     REQUIRE(before_gpu_timing.pre_submit_delay_ns == 324695);
     REQUIRE(before_gpu_timing.submit_to_completion_ns == 721250);
     REQUIRE(before_gpu_timing.scheduled_to_completion_ns == 1045945);
+    REQUIRE(before_gpu_timing.completion_timing_valid);
     REQUIRE_FALSE(before_gpu_timing.gpu_elapsed_available);
+
+    telemetry.record_completion_timing(std::numeric_limits<std::uint64_t>::max(), 1);
+    const auto overflowed_timing = telemetry.snapshot();
+    REQUIRE_FALSE(overflowed_timing.completion_timing_valid);
+    REQUIRE(overflowed_timing.scheduled_to_completion_ns == 0);
+
+    telemetry.record_completion_timing(10, 20);
+    const auto repaired_timing = telemetry.snapshot();
+    REQUIRE(repaired_timing.completion_timing_valid);
+    REQUIRE(repaired_timing.scheduled_to_completion_ns == 30);
 
     telemetry.record_gpu_elapsed_ns(42);
     telemetry.record_gpu_busy_counter(7);
@@ -175,4 +188,5 @@ TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing expl
     REQUIRE(telemetry.snapshot().configured_pipeline_depth == 0);
     REQUIRE(telemetry.snapshot().configured_available_inflight == 0);
     REQUIRE_FALSE(telemetry.snapshot().gpu_elapsed_available);
+    REQUIRE(telemetry.snapshot().completion_timing_valid);
 }
