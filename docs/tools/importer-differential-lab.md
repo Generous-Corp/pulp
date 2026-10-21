@@ -461,8 +461,8 @@ and unregistered metrics.
 P3 passes only when every in-scope fixture has authenticated three-run receipts,
 structure >=0.99; frame placement |recorded origin - observed Chromium
 origin| <= 0.5 CSS px, verified against the native layout; registered geometry
->=0.98 with every matched box within 1/64 CSS px (Chromium's layout
-unit) on x, y, width, and height; typography >=0.98; and registered
+>=0.98 with every matched box within 1.0 CSS px on x, y, width, and height;
+typography >=0.98; and registered
 authored-frame visual >=0.995. Raw page-space geometry is reported, not gated, with no held-out regression and a
 worst-fixture report. A registered score cannot erase a full-frame or
 outside-frame defect; those defects must be fixed or explicitly classified in
@@ -521,14 +521,15 @@ Chromium envelope the native capture carries. Fable ruled for an explicit,
 non-circular frame-placement check: Chromium dom-snapshot bounds of the
 authored root, the IR-recorded origin, and the native layout's root and
 `html` rects must agree within 0.5 CSS px. Registered intra-panel geometry
-keeps its >=0.98 mean and gains a per-node absolute bound, which the raw
-metric never had. Fable set a 1.0 CSS px ceiling; the implementation uses
-1/64 CSS px, Chromium's layout unit, because the measured floor across the
-16 completed fixtures is at most 0.0038 px. The frame-placement check remains
-partly circular, as each report's `circularity` field states: the recorded
-origin is transcribed from the candidate's own Chromium capture, so it proves
-faithful transcription and correct panel-relative placement, not that native
-layout reproduces the page margins outside the authored surface. Each part carries planted negative controls (origin
+keeps its >=0.98 mean and gains a per-node 1.0 CSS px absolute bound, which
+the raw metric never had (measured floor across the 16 completed fixtures:
+at most 0.0038 px). The frame-placement proof binds the Chromium DOMSnapshot
+authored-root box, the DesignIR recorded origin, and the native layout's own
+root and `html` rects; the capture-envelope agreement check is still run but
+not counted, because it compares two copies of the same envelope. The recorded
+origin remains transcribed from the candidate's Chromium capture, so the check
+proves faithful transcription and correct panel-relative native placement, not
+that native layout reproduces the page margins outside the authored surface. Each part carries planted negative controls (origin
 metadata shift, native `html` rect shift, +/-3 px on the farthest node, -10%
 width). This supersedes the earlier decision to keep raw page-space geometry
 canonical; raw remains reported in every receipt.
