@@ -200,6 +200,7 @@ jobs:
           #    policy when local is idle.
           WORKFLOW_DISPATCH_MACOS_SELECTOR: ${{ inputs.macos_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_MISE_CANDIDATE: ${{ inputs.mise_candidate }}
+          WORKFLOW_DISPATCH_LOCAL_PROOF: ${{ inputs.local_proof }}
           LOCAL_MACOS_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '' }}
           # Empty for anything that is not a pull request; for a PR it is the
           # head's owner/repo, which is how the block below detects a fork.
@@ -475,10 +476,18 @@ jobs:
               os.environ.get("WORKFLOW_DISPATCH_MISE_CANDIDATE", "").lower()
               == "true"
           )
+          local_proof = (
+              os.environ.get("WORKFLOW_DISPATCH_LOCAL_PROOF", "").lower()
+              == "true"
+          )
           if mise_candidate:
               if EVENT_NAME != "workflow_dispatch" or REF != "refs/heads/main":
                   raise SystemExit(
                       "resolve-provider: mise_candidate is main-only workflow_dispatch"
+                  )
+              if local_proof:
+                  raise SystemExit(
+                      "resolve-provider: mise_candidate cannot combine with local_proof"
                   )
               if workflow_dispatch_selector:
                   try:
@@ -486,12 +495,17 @@ jobs:
                   except (json.JSONDecodeError, TypeError):
                       candidate_selector = None
                   required_candidate_labels = {
-                      "self-hosted", "macOS", "ARM64", "pulp-build-vm-mise"
+                      "self-hosted", "macOS", "ARM64", "pulp-build-vm-mise",
+                      "pulp-build-pr-head",
                   }
                   if not isinstance(candidate_selector, list) or not required_candidate_labels.issubset(candidate_selector):
                       raise SystemExit(
                           "resolve-provider: mise_candidate requires the "
                           "pulp-build-vm-mise selector"
+                      )
+                  if "pulp-build-merge-group" in candidate_selector:
+                      raise SystemExit(
+                          "resolve-provider: mise_candidate cannot use the merge-group label"
                       )
               else:
                   workflow_dispatch_selector = json.dumps(

@@ -56,12 +56,18 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
         text = step["run"]
         for marker in (
             "WORKFLOW_DISPATCH_MISE_CANDIDATE",
+            "WORKFLOW_DISPATCH_LOCAL_PROOF",
             "mise_candidate is main-only workflow_dispatch",
+            "mise_candidate cannot combine with local_proof",
             "pulp-build-vm-mise",
             "pulp-build-pr-head",
+            "pulp-build-merge-group",
             "required_candidate_labels",
         ):
             self.assertIn(marker, text)
+        guard = text.split("required_candidate_labels = {", 1)[1].split("}", 1)[0]
+        self.assertIn('"pulp-build-pr-head"', guard)
+        self.assertNotIn('"pulp-build-merge-group"', guard)
 
     def test_activation_precedes_all_build_tool_use(self) -> None:
         names = [step.get("name") for step in self.steps]
