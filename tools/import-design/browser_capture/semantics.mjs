@@ -86,6 +86,20 @@ export const COMPUTED_STYLES = [
   "content",
   "cursor",
   "pointer-events",
+  // Form controls. A control whose used `appearance` is anything but `none` is
+  // painted by Chromium's native theme, and its computed fills and borders do
+  // not describe those pixels: an unstyled range reports a white background it
+  // never draws, and an unstyled button reports a 2px outset black border drawn
+  // as a thin rounded grey one. `appearance` is what separates a control the
+  // computed style can reproduce from one it cannot. `accent-color` is the one
+  // author input the native theme honours. Padding places the text a control
+  // draws from its value rather than from a DOM text node.
+  "appearance",
+  "accent-color",
+  "padding-top",
+  "padding-right",
+  "padding-bottom",
+  "padding-left",
   // SVG paint. An inline `<svg>` icon carries its colour three different ways —
   // a presentation attribute, a stylesheet rule, or `currentColor` inherited
   // from the box around it — and only the browser knows which one won. Reading

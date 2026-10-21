@@ -291,6 +291,38 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
             pairs.push_back(json_int(entry[static_cast<int>(j)], -1));
     }
 
+    // Form-control state. Both are RareData columns: parallel `index` /
+    // `value` arrays for the inputs that carry a value, and a bare `index`
+    // list for the options that are selected.
+    const auto node_values = member(nodes, "nodeValue");
+    index.node_value_.assign(node_count, -1);
+    if (node_values.isArray()) {
+        for (uint32_t i = 0; i < node_count && i < node_values.size(); ++i)
+            index.node_value_[i] = json_int(node_values[static_cast<int>(i)], -1);
+    }
+    const auto input_values = member(nodes, "inputValue");
+    if (input_values.isObject()) {
+        const auto which = member(input_values, "index");
+        const auto values = member(input_values, "value");
+        if (which.isArray() && values.isArray()) {
+            for (uint32_t i = 0; i < which.size() && i < values.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                const int value = json_int(values[static_cast<int>(i)], -1);
+                if (node >= 0 && value >= 0) index.input_value_[node] = value;
+            }
+        }
+    }
+    const auto option_selected = member(nodes, "optionSelected");
+    if (option_selected.isObject()) {
+        const auto which = member(option_selected, "index");
+        if (which.isArray()) {
+            for (uint32_t i = 0; i < which.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                if (node >= 0) index.option_selected_.push_back(node);
+            }
+        }
+    }
+
     const auto node_index = member(layout, "nodeIndex");
     const auto styles = member(layout, "styles");
     const auto bounds = member(layout, "bounds");
@@ -601,6 +633,48 @@ std::optional<CapturedBox> CapturedStyleIndex::bounds_for(
 std::string CapturedStyleIndex::string_at(int index) const {
     if (index < 0 || index >= static_cast<int>(strings_.size())) return {};
     return strings_[static_cast<size_t>(index)];
+}
+
+std::string CapturedStyleIndex::control_value(int node_index) const {
+    if (const auto found = input_value_.find(node_index);
+        found != input_value_.end())
+        return string_at(found->second);
+    if (tag_name(node_index) != "select") return {};
+    // The first selected option that belongs to THIS select — directly, or
+    // through an `<optgroup>`. A nested select is not valid HTML, so the walk
+    // up from the option cannot pass through a different one.
+    for (const int option : option_selected_) {
+        bool owned = false;
+        for (int cursor = parent_of(option), steps = 0;
+             cursor >= 0 && steps < node_count();
+             cursor = parent_of(cursor), ++steps) {
+            if (cursor == node_index) { owned = true; break; }
+            if (tag_name(cursor) == "select") break;
+        }
+        if (!owned) continue;
+        // An option's label is its text content with whitespace collapsed, as
+        // the closed select displays it.
+        std::string label;
+        for (int child = 0; child < node_count(); ++child) {
+            if (parent_of(child) != option || node_type_of(child) != 3)
+                continue;
+            if (static_cast<size_t>(child) < node_value_.size())
+                label += string_at(node_value_[static_cast<size_t>(child)]);
+        }
+        std::string collapsed;
+        bool pending_space = false;
+        for (const char c : label) {
+            if (std::isspace(static_cast<unsigned char>(c))) {
+                pending_space = !collapsed.empty();
+                continue;
+            }
+            if (pending_space) collapsed.push_back(' ');
+            pending_space = false;
+            collapsed.push_back(c);
+        }
+        return collapsed;
+    }
+    return {};
 }
 
 int CapturedStyleIndex::parent_of(int node_index) const {

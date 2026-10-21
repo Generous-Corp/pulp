@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -596,6 +597,75 @@ double px_value(const std::string& value) {
     } catch (const std::exception&) {
         return 0.0;
     }
+}
+
+/// What a form control draws from its own state, and where, or nothing.
+///
+/// Chrome renders an `<input>`'s value and a closed `<select>`'s selected
+/// option in a user-agent shadow tree that DOMSnapshot does not serialize, so
+/// the string reaches the capture only as control state and the box it sits in
+/// only as the control's content box. Both placements are CSS semantics rather
+/// than theme: a single-line text field and a button-type input lay their
+/// string out in the content box, vertically centred. A themed (`appearance`
+/// other than `none`) select is the exception — the theme reserves its own room
+/// for the arrow, which no computed length records — so it is refused rather
+/// than guessed.
+struct ControlValueText {
+    std::string text;
+    CapturedBox content_box;
+};
+
+std::optional<ControlValueText> control_value_text(
+    const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
+    const std::map<std::string, std::string>& computed) {
+    const auto tag = index.tag_name(node_index);
+    std::string kind;
+    if (tag == "input") {
+        auto type = index.attribute(node_index, "type");
+        std::transform(type.begin(), type.end(), type.begin(),
+                       [](unsigned char c) {
+                           return static_cast<char>(std::tolower(c));
+                       });
+        static const std::set<std::string> kValueTypes = {
+            "", "text", "search", "email", "url", "tel", "number",
+            "button", "submit", "reset"};
+        if (kValueTypes.count(type) == 0) return std::nullopt;
+        kind = type;
+    } else if (tag == "select") {
+        if (!index.attribute(node_index, "multiple").empty()) return std::nullopt;
+        const auto size = index.attribute(node_index, "size");
+        if (!size.empty() && px_value(size) > 1.0) return std::nullopt;
+        const auto appearance = computed.find("appearance");
+        if (appearance == computed.end() || appearance->second != "none")
+            return std::nullopt;
+        kind = "select";
+    } else {
+        return std::nullopt;
+    }
+    // Without padding the content box is unknown — a capture that predates it
+    // would place the string on the border, so it is not drawn at all.
+    for (const char* edge : {"padding-top", "padding-right", "padding-bottom",
+                             "padding-left"}) {
+        if (computed.find(edge) == computed.end()) return std::nullopt;
+    }
+    auto text = index.control_value(node_index);
+    if (text.empty()) return std::nullopt;
+    const auto length = [&](const char* name) {
+        const auto found = computed.find(name);
+        return found == computed.end() ? 0.0 : px_value(found->second);
+    };
+    const double left = length("border-left-width") + length("padding-left");
+    const double right = length("border-right-width") + length("padding-right");
+    const double top = length("border-top-width") + length("padding-top");
+    const double bottom =
+        length("border-bottom-width") + length("padding-bottom");
+    ControlValueText result;
+    result.text = std::move(text);
+    result.content_box = {box.left + left, box.top + top,
+                          box.width - left - right, box.height - top - bottom};
+    if (result.content_box.width <= 0.0 || result.content_box.height <= 0.0)
+        return std::nullopt;
+    return result;
 }
 
 /// Where a browser would actually clip a node, resolved from the snapshot.
@@ -1501,7 +1571,67 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         // a stored clip inside the node's own canvas, which the ancestor's
         // `rotate()` has already turned out of page space.
         slot.rotated = rotation.has_value() || frame_rotation != nullptr;
+        const int control_slot = static_cast<int>(slots.size());
+        const auto control_anchor = slot.node.stable_anchor_id;
         slots.push_back(std::move(slot));
+
+        if (node.node_type == kElementNode && !is_text) {
+            const auto appearance = computed.find("appearance");
+            const auto tag = node.tag_name;
+            if (appearance != computed.end() && appearance->second != "none" &&
+                (tag == "input" || tag == "button" || tag == "select" ||
+                 tag == "textarea" || tag == "meter" || tag == "progress")) {
+                slots.back().node.attributes["native_appearance"] =
+                    appearance->second;
+                ++counts.native_appearance_controls;
+            }
+        }
+
+        // The string a control draws from its own state, as a text run owned
+        // by the control. A rotated control is left alone: the content box is
+        // derived from page-space lengths that the rotated frame no longer
+        // shares.
+        if (node.node_type == kElementNode && !is_text &&
+            paint_class == PaintClass::native && !slots.back().rotated) {
+            if (auto value =
+                    control_value_text(index, node.node_index, box, computed)) {
+                IRNode text_node;
+                text_node.type = "text";
+                text_node.name = "#control-value";
+                text_node.text_content = value->text;
+                apply_computed_styles(computed, value->content_box,
+                                      text_node.style,
+                                      ComputedStyleScope::text_only,
+                                      type_scale.ok() ? type_scale.scale : 1.0);
+                // One line, never wrapped: a single-line field scrolls its
+                // value rather than breaking it.
+                text_node.style.white_space = "nowrap";
+                text_node.style.vertical_align = "middle";
+                text_node.style.position = "absolute";
+                text_node.attributes["paint_class"] =
+                    std::string(to_string(PaintClass::native));
+                text_node.attributes["paint_order"] =
+                    std::to_string(node.paint_order);
+                text_node.attributes["source_tag"] = "#control-value";
+                text_node.attributes["control_value_of"] = node.tag_name;
+                if (control_anchor)
+                    text_node.stable_anchor_id =
+                        *control_anchor + "/#control-value[0]";
+                text_node.anchor_strategy = "capture-path";
+                ++counts.native;
+                ++counts.lowered;
+                ++counts.text;
+                ++counts.control_value_text;
+                LoweredNode value_slot;
+                value_slot.node = std::move(text_node);
+                value_slot.node_index = node.node_index;
+                value_slot.owner_slot = control_slot;
+                value_slot.paint_order = node.paint_order;
+                value_slot.box = value->content_box;
+                value_slot.page_box = value->content_box;
+                slots.push_back(std::move(value_slot));
+            }
+        }
 
         // One vector node per shape, immediately after the `<svg>` that owns
         // them, in document order — which for a shape tree IS paint order, and

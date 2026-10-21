@@ -178,6 +178,13 @@ class CapturedStyleIndex {
     /// Walk up `parentIndex` from `node_index`. Returns -1 at the root.
     int parent_of(int node_index) const;
 
+    /// The string a form control draws from its own state rather than from a
+    /// DOM text node: an `<input>`'s current value (`inputValue`), or the text
+    /// of a `<select>`'s selected option (`optionSelected`). Chrome paints both
+    /// inside a user-agent shadow tree the snapshot does not serialize, so this
+    /// is the only place the string survives. Empty when the node has none.
+    std::string control_value(int node_index) const;
+
     /// The product of every ancestor `transform` scale above `node_index`.
     ///
     /// Nested transforms multiply, so a run three levels down inherits the
@@ -231,6 +238,9 @@ class CapturedStyleIndex {
     std::vector<int> node_type_;                     ///< node index → nodeType
     std::vector<int> node_name_;                     ///< node index → string
     std::vector<std::vector<int>> node_attributes_;  ///< node index → name/value
+    std::vector<int> node_value_;                    ///< node index → nodeValue
+    std::unordered_map<int, int> input_value_;       ///< node index → string
+    std::vector<int> option_selected_;               ///< selected option nodes
     std::unordered_map<int, int> backend_to_node_;
     std::vector<int> node_to_backend_;               ///< node index → backend
     std::unordered_map<int, int> node_to_layout_;

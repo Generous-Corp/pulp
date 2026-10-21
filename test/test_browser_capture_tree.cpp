@@ -199,6 +199,10 @@ struct SnapshotSpec {
     /// supplies its own rather than appending to a table whose indices a
     /// hundred other cases already depend on.
     std::string strings;
+    /// Further `nodes` members, written verbatim after `attributes` with a
+    /// leading comma — the RareData columns (`nodeValue`, `inputValue`,
+    /// `optionSelected`) that only form-control cases need.
+    std::string extra_nodes;
 };
 
 /// The shared string table, in index order:
@@ -290,7 +294,7 @@ std::string build_snapshot(const SnapshotSpec& spec) {
             R"(,"nodeType":)" + spec.node_types +
             R"(,"nodeName":)" + spec.node_names +
             R"(,"backendNodeId":)" + spec.node_names +
-            R"(,"attributes":)" + spec.attributes + "}," +
+            R"(,"attributes":)" + spec.attributes + spec.extra_nodes + "}," +
             R"("layout":{"nodeIndex":)" + spec.layout_nodes +
             R"(,"styles":)" + spec.styles +
             R"(,"bounds":)" + spec.bounds +
@@ -3478,4 +3482,103 @@ TEST_CASE("natively lowered IR is emitted for a real captured design",
     stream.close();
     REQUIRE(fs::is_regular_file(out));
     REQUIRE(fs::file_size(out) > 0);
+}
+
+// ── Form controls ───────────────────────────────────────────────────────────
+//
+// An `<input>`'s value and a closed `<select>`'s selected option are painted by
+// Chrome inside a user-agent shadow tree DOMSnapshot never serializes. The only
+// trace of either string is control state (`inputValue`, `optionSelected`), so
+// a lowering that reads DOM text alone draws every field empty.
+
+TEST_CASE("form controls draw the string their own state holds",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=text] (themed), 4 SELECT
+    // (appearance:none) holding 5 OPTION (selected) / 6 its text and 7 OPTION /
+    // 8 its text, 9 INPUT[type=checkbox] (themed), 10 SELECT (themed) holding
+    // 11 OPTION (selected) / 12 its text. Options have no layout row, exactly
+    // as Chrome reports them for a closed select.
+    //
+    // Row order: display, appearance, padding (top, right, bottom, left),
+    // border widths (top, right, bottom, left), font-size, color, text-align.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,4,5,6,5,6,3,4,5,6]",
+        .node_types = "[9,1,1,1,1,1,3,1,3,1,1,1,3]",
+        .parents = "[-1,0,1,2,2,4,5,4,7,2,2,10,11]",
+        .attributes = "[[],[],[],[7,8],[],[],[],[],[],[7,12],[],[],[]]",
+        .layout_nodes = "[1,2,3,4,9,10]",
+        .styles = "[[14,15,17,17,17,17,17,17,17,17,20,21,22],"
+                  "[14,15,17,17,17,17,17,17,17,17,20,21,22],"
+                  "[24,16,18,19,18,19,18,18,18,18,20,21,22],"
+                  "[24,15,17,19,17,19,18,18,18,18,20,21,22],"
+                  "[24,16,17,17,17,17,17,17,17,17,20,21,22],"
+                  "[24,16,17,19,17,19,18,18,18,18,20,21,22]]",
+        .bounds = "[[0,0,200,140],[0,0,200,140],[10,10,150,24],"
+                  "[10,40,150,24],[10,70,13,13],[10,90,150,24]]",
+        .paint_orders = "[0,1,2,3,4,5]",
+        .computed_names =
+            R"(["display","appearance","padding-top","padding-right",)"
+            R"("padding-bottom","padding-left","border-top-width",)"
+            R"("border-right-width","border-bottom-width","border-left-width",)"
+            R"("font-size","color","text-align"])",
+        .strings =
+            R"J("#document","HTML","BODY","INPUT","SELECT","OPTION","#text",)J"
+            R"J("type","text","Patch 1","  Bank\n A ","Bank B","checkbox",)J"
+            R"J("on","block","none","auto","0px","1px","6px","13px",)J"
+            R"J("rgb(31, 41, 51)","start","Auto","inline-block")J",
+        .extra_nodes =
+            R"(,"nodeValue":[-1,-1,-1,-1,-1,-1,10,-1,11,-1,-1,-1,23])"
+            R"(,"inputValue":{"index":[3,9],"value":[9,13]})"
+            R"(,"optionSelected":{"index":[5,11]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-values");
+
+    std::vector<const IRNode*> values;
+    std::vector<const IRNode*> owners;
+    const std::function<void(const IRNode&)> collect = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (child.name == "#control-value") {
+                values.push_back(&child);
+                owners.push_back(&node);
+            }
+            collect(child);
+        }
+    };
+    collect(lowered.root);
+
+    // The text field (themed or not, its value sits in the content box) and
+    // the author-styled select. Not the checkbox, whose `on` is never drawn,
+    // and not the themed select, whose arrow room no computed length records.
+    REQUIRE(values.size() == 2);
+    CHECK(lowered.counts.control_value_text == 2);
+
+    CHECK(values[0]->type == "text");
+    CHECK(values[0]->text_content == "Patch 1");
+    CHECK(attribute(*owners[0], "source_tag") == "input");
+    // Placed in the content box: border 1px plus padding 1px/6px in from
+    // (10,10), inside a 150x24 border box. A child is offset from its parent's
+    // padding box, so only the padding shows in the offsets.
+    CHECK(values[0]->style.left.value_or(-1.0f) == Catch::Approx(6.0f));
+    CHECK(values[0]->style.top.value_or(-1.0f) == Catch::Approx(1.0f));
+    CHECK(values[0]->style.width.value_or(-1.0f) == Catch::Approx(136.0f));
+    CHECK(values[0]->style.height.value_or(-1.0f) == Catch::Approx(20.0f));
+    CHECK(values[0]->style.font_size.value_or(-1.0f) == Catch::Approx(13.0f));
+    CHECK(values[0]->style.color.value_or("") == "rgb(31, 41, 51)");
+    CHECK(values[0]->style.white_space.value_or("") == "nowrap");
+
+    // The selected option's label, whitespace collapsed as the closed select
+    // shows it — and never the unselected option's.
+    CHECK(values[1]->text_content == "Bank A");
+    CHECK(attribute(*owners[1], "source_tag") == "select");
+    CHECK(values[1]->style.left.value_or(-1.0f) == Catch::Approx(6.0f));
+    CHECK(values[1]->style.top.value_or(-1.0f) == Catch::Approx(0.0f));
+    CHECK(values[1]->style.height.value_or(-1.0f) == Catch::Approx(22.0f));
+
+    // Every themed control says so, because its computed box is not what the
+    // native theme paints.
+    CHECK(lowered.counts.native_appearance_controls == 3);
+    const int themed = count_nodes(lowered.root, [](const IRNode& n) {
+        return attribute(n, "native_appearance") == "auto";
+    });
+    CHECK(themed == 3);
 }

@@ -2009,6 +2009,11 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         record_if("native_svg_lowered", tree.svg_lowered);
         record_if("native_svg_refused", tree.svg_refused);
         record_if("native_svg_shapes", tree.svg_shapes);
+        // Form controls: strings drawn from control state, and controls the
+        // native theme paints, whose boxes here are approximations.
+        record_if("native_control_value_text", tree.control_value_text);
+        record_if("native_appearance_controls",
+                  tree.native_appearance_controls);
         // A snapshot taken before the capture collected SVG paint holds the
         // geometry and no colour for it, so every icon in the design falls
         // back — and a reader sees a panel with no icons and no error, which
