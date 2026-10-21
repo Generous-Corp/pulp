@@ -2369,6 +2369,7 @@
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
   "pulp-test-audio-registration",
+  "pulp-test-audio-route-catalog",
   "pulp-test-audio-support",
   "pulp-test-audio-system-hotplug",
   "pulp-test-audio-tone-regression",
@@ -6366,6 +6367,14 @@
    "entry": "test/test_design_ir_observe_malformed.py",
    "inputs": [
     "test/test_design_ir_observe_malformed.py"
+   ],
+   "kind": "python"
+  },
+  "import-design-ir-observe-provider-boundary": {
+   "entry": "test/test_design_ir_observe_provider_boundary.py",
+   "inputs": [
+    "test/test_design_ir_observe_provider_boundary.py",
+    "tools/import-design/design_ir_observe.cpp"
    ],
    "kind": "python"
   },
@@ -12243,14 +12252,6 @@
    ],
    "kind": "python"
   },
-  "windows-vm-manifest-selftest": {
-   "entry": "tools/ci/test_windows_vm_manifest.py",
-   "inputs": [
-    "tools/ci/test_windows_vm_manifest.py",
-    "tools/ci/validate_windows_vm_manifest.py"
-   ],
-   "kind": "python"
-  },
   "windows-posix-shims-selftest": {
    "entry": "tools/scripts/test_windows_posix_shims.py",
    "inputs": [
@@ -12303,6 +12304,14 @@
     "tools/scripts/test_windows_posix_shims.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
     "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "windows-vm-manifest-selftest": {
+   "entry": "tools/ci/test_windows_vm_manifest.py",
+   "inputs": [
+    "tools/ci/test_windows_vm_manifest.py",
+    "tools/ci/validate_windows_vm_manifest.py"
    ],
    "kind": "python"
   },

@@ -2000,14 +2000,20 @@ reports or gates on hosted latency must branch on `latency_query()` first.
 `pulp audio render --latency-report` does exactly that, which is why an LV2 plugin
 comes back `unsupported` rather than being falsely certified as zero-latency.
 
-## A `CustomNodeType` pack is one header, and its consumer needs to be told
+## A `CustomNodeType` pack has one public header, and its consumer needs to be told
 
-Bake-layer DSP packs live as header-only `CustomNodeType` factories under
+Bake-layer DSP packs expose `CustomNodeType` factory declarations under
 `core/host/include/pulp/host/forge_*_catalog.hpp` — one header per pack
 (`forge_lofi_catalog.hpp`, `forge_character_delay_catalog.hpp`,
 `forge_modulation_catalog.hpp`). Each node declares its stable `k…TypeId`, its
 `baked_params` (the injectable macro contract), and its port arity, and gets
 registered on a `SignalGraph` before `bake()`.
+
+`forge_distortion_catalog.hpp` keeps its public IDs, descriptors, and factory
+declarations in the installed host header; its implementation bodies live in
+`core/host/src/forge_distortion_catalog.cpp`. This out-of-line ownership is a
+compile-surface refactor only: preserve catalog export bytes, registration order,
+and Forge compatibility mappings.
 
 Treat that consumer wiring as part of the DSP change, not a follow-up. A
 musician-facing audio, MIDI, instrument, drum, or timeline capability anywhere
@@ -2663,6 +2669,19 @@ release resets them; keep worker output distinct from authenticated GPU-selected
 output. See [the query contract](../../../docs/guides/custom-node-diagnostics.md).
 
 ## SignalGraph authoring receipts
+
+## Host-owned audio route catalogs
+
+`pulp::host::AudioRouteCatalog` is the shared control-thread surface for a
+plugin or host UI to present selectable audio sources. Entries carry stable
+IDs, display names, channel counts, and a `AudioRouteKind` covering physical
+inputs, tracks, instruments, buses, files, and internal sources. The catalog is
+host-owned and mutable off the realtime thread; processors consume only the
+selected stable ID or already-routed buffers. It does not enumerate arbitrary
+DAW project tracks by itself: AU/VST3/CLAP/LV2 adapters must expose compatible
+input buses, and the DAW remains responsible for populating and routing its
+project-specific menu. Keep route-catalog tests independent of any particular
+DAW and record real-host routing as a separate acceptance receipt.
 
 Consumers that only capture or validate graph authoring lineage should include
 `<pulp/host/signal_graph_authoring.hpp>` instead of pulling in the full runtime
