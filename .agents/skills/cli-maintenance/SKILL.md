@@ -364,6 +364,14 @@ their install targets. Pass their existing spinner label and lease-error
 prefix through the helper so user-facing diagnostics remain stable while
 lease, QoS, watchdog, lock, and bounded-parallelism policy stays centralized.
 
+Copyable build recipes a command prints for the user (`pulp import emit`'s
+"Build it" step) may name `tools/ci/governed-build.sh` only by the absolute
+path of a checkout the CLI actually found, and only if that file exists. An
+installed CLI has no checkout and ships no wrapper, so a relative
+`tools/ci/governed-build.sh` there is a path that does not exist; print a
+plain `cmake --build <dir>` instead. `test/test_cli_import_emit.cpp` copies the
+built CLI out of the checkout to pin the installed form.
+
 ### Build-shaped commands consult the focused-build selector
 
 `pulp build`, `pulp dev`, `pulp loop`, `pulp test`, and `pulp-cpp build --watch`
