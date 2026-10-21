@@ -343,9 +343,13 @@ runner failure or gate verdict, with a class and a confidence.
   log in that case.
 - **Absent means it did not run.** If the notice is missing, the job may not
   have run at all; check its own log. It is advisory and never gates.
-- **Upgrading the pin.** The extractor is the Shipyard release pinned, with
-  its checksums, in `tools/ci/ci_cause_notices.sh`. Bump the version and the
-  hashes together.
+- **The extractor follows Pulp's Shipyard pin.** `tools/ci/ci_cause_notices.sh`
+  reads the version from `tools/shipyard.toml` and the asset's SHA-256 from
+  `tools/toolchain/shipyard.sha256`, so a Shipyard pin bump moves it too; never
+  copy a version or hash into the script. A record's quality is that release's
+  C2 extractor: a bare `shell-exit` or CMake `string` signature on a run
+  pinned below the C2 v7 release (Shipyard v0.337.0) is a known gap of the
+  old extractor, not a new failure mode.
 
 ## A green `macos` check can mean nothing ran
 
@@ -3375,7 +3379,12 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    `Planning-Bump:` trailer — usually an accidental bump from a `git reset --hard`
    + `git add -A`. Drop it with
    `git restore --staged --worktree planning && git submodule update planning`,
-   or add `Planning-Bump: reason="..."` for a deliberate re-pin.
+   or add `Planning-Bump: reason="..."` for a deliberate re-pin. A trailered
+   re-pin must also pin a commit on pulp-planning `main` (the guard fetches its
+   history); pin a side-branch commit and every `main` commit it lacks is
+   dropped. Locally an unfetchable planning remote fails closed ("NOT
+   VERIFIED"); CI has no planning credential and runs with `--ci-warn-only`,
+   so there it is only a `::warning`; check the pin locally before landing.
 2b1. **Config→doc drift?** The `config-doc` gate (`tools/scripts/config_doc_check.py`,
    map in `tools/scripts/config_doc_map.json`) fails if a mapped CI/release config
    surface (`.shipyard/config.toml`, the shipyard pin/installer, the

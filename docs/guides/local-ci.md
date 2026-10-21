@@ -2932,10 +2932,11 @@ verdict, its class and a confidence.
 
 - **Why a separate job.** A job's own log cannot be downloaded until the job
   has finished, so a step inside the failing job has nothing to read.
-- **Pinned and verified.** The extractor is the Shipyard release pinned in the
-  script (`v0.326.0`). Its SHA-256 must match the release checksum, or nothing
-  runs. Moving to a newer release means editing both the version and the
-  hashes in the script.
+- **Pinned and verified.** The extractor is the Shipyard release Pulp pins in
+  `tools/shipyard.toml`, the same one `tools/install-shipyard.sh` installs. Its
+  SHA-256 must match the asset's line in `tools/toolchain/shipyard.sha256`, or
+  nothing runs. A Shipyard pin bump therefore moves the extractor with it; a
+  pin or checksum the script cannot read is reported and names nothing.
 - **Never a gate.** The job is `continue-on-error`. A missing asset, an
   unreadable log or an extractor failure is reported and exits 0.
 - **Selftest.** `ci-cause-notices-selftest` covers the script.

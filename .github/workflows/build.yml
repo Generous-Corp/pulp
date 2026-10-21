@@ -47,6 +47,11 @@ on:
         required: false
         default: ""
         type: string
+      mise_candidate:
+        description: "Run the main-only M1 pinned-mise candidate lane (pilot label required)"
+        required: false
+        default: false
+        type: boolean
       local_proof:
         description: "Run only the bounded protected-main Pulp repository-isolation proof"
         required: false
@@ -194,6 +199,8 @@ jobs:
           #    operator's "macOS local runner: primary required gate"
           #    policy when local is idle.
           WORKFLOW_DISPATCH_MACOS_SELECTOR: ${{ inputs.macos_runner_selector_json || '' }}
+          WORKFLOW_DISPATCH_MISE_CANDIDATE: ${{ inputs.mise_candidate }}
+          WORKFLOW_DISPATCH_LOCAL_PROOF: ${{ inputs.local_proof }}
           LOCAL_MACOS_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '' }}
           # Empty for anything that is not a pull request; for a PR it is the
           # head's owner/repo, which is how the block below detects a fork.
@@ -243,6 +250,7 @@ jobs:
 
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
           EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
+          REF = (os.environ.get("GITHUB_REF") or "").strip()
           WORKFLOW_REF = (os.environ.get("WORKFLOW_REF") or "").strip()
           # A pull request whose head lives in another repository. Empty
           # PR_HEAD_REPO means this is not a pull request at all.
@@ -464,6 +472,52 @@ jobs:
           workflow_dispatch_selector = (
               os.environ.get("WORKFLOW_DISPATCH_MACOS_SELECTOR") or ""
           ).strip()
+          mise_candidate = (
+              os.environ.get("WORKFLOW_DISPATCH_MISE_CANDIDATE", "").lower()
+              == "true"
+          )
+          local_proof = (
+              os.environ.get("WORKFLOW_DISPATCH_LOCAL_PROOF", "").lower()
+              == "true"
+          )
+          if mise_candidate:
+              if EVENT_NAME != "workflow_dispatch" or REF != "refs/heads/main":
+                  raise SystemExit(
+                      "resolve-provider: mise_candidate is main-only workflow_dispatch"
+                  )
+              if local_proof:
+                  raise SystemExit(
+                      "resolve-provider: mise_candidate cannot combine with local_proof"
+                  )
+              if workflow_dispatch_selector:
+                  try:
+                      candidate_selector = json.loads(workflow_dispatch_selector)
+                  except (json.JSONDecodeError, TypeError):
+                      candidate_selector = None
+                  required_candidate_labels = {
+                      "self-hosted", "macOS", "ARM64", "pulp-build-vm-mise",
+                      "pulp-build-pr-head",
+                  }
+                  if not isinstance(candidate_selector, list) or not required_candidate_labels.issubset(candidate_selector):
+                      raise SystemExit(
+                          "resolve-provider: mise_candidate requires the "
+                          "pulp-build-vm-mise selector"
+                      )
+                  if "pulp-build-merge-group" in candidate_selector:
+                      raise SystemExit(
+                          "resolve-provider: mise_candidate cannot use the merge-group label"
+                      )
+              else:
+                  workflow_dispatch_selector = json.dumps(
+                      [
+                          "self-hosted",
+                          "macOS",
+                          "ARM64",
+                          "pulp-build-vm-mise",
+                          "pulp-build-pr-head",
+                      ],
+                      separators=(",", ":"),
+                  )
           overflow_macos_selector = (
               os.environ.get("OVERFLOW_MACOS_RUNS_ON_JSON") or ""
           ).strip()
@@ -1630,6 +1684,58 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-
             ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-
+
+      - name: Activate pinned mise candidate toolchain
+        if: >-
+          runner.os == 'macOS'
+          && github.event_name == 'workflow_dispatch'
+          && github.ref == 'refs/heads/main'
+          && inputs.mise_candidate == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${RUNNER_ARCH:-}" = "ARM64" || {
+            echo "::error::mise candidate requires an ARM64 runner (RUNNER_ARCH=${RUNNER_ARCH:-unset})"
+            exit 1
+          }
+          mise="$HOME/.local/opt/mise-2026.10.11/bin/mise"
+          test -x "$mise" || { echo "::error::mise candidate binary is missing: $mise"; exit 1; }
+          expected_mise_version="2026.10.11"
+          expected_mise_sha="25e38f796fff67fc5f4c44f6963d4b8ed15be82a5d9244f693cc55d40a245ee3"
+          actual_mise_sha="$(shasum -a 256 "$mise" | awk '{print $1}')"
+          test "$actual_mise_sha" = "$expected_mise_sha" || {
+            echo "::error::mise candidate sha256 mismatch: $actual_mise_sha"; exit 1;
+          }
+          actual_mise_version="$("$mise" --version | awk 'NR == 1 {print $1}')"
+          test "$actual_mise_version" = "$expected_mise_version" || {
+            echo "::error::mise candidate version mismatch: $actual_mise_version"; exit 1;
+          }
+          cd "$GITHUB_WORKSPACE"
+          export MISE_ENV=toolchain
+          export MISE_TRUSTED_CONFIG_PATHS="$GITHUB_WORKSPACE"
+          export MISE_DISABLE_UPDATE_WARNING=1
+          "$mise" exec -- "$mise" --version
+          # shellcheck disable=SC2016
+          tool_path="$("$mise" exec -- sh -c 'printf "%s" "$PATH"')"
+          {
+            echo "MISE_ENV=toolchain"
+            echo "MISE_TRUSTED_CONFIG_PATHS=$GITHUB_WORKSPACE"
+            echo "MISE_DISABLE_UPDATE_WARNING=1"
+            echo "PATH=$HOME/.local/opt/mise-2026.10.11/bin:$HOME/.cargo/bin:$tool_path"
+          } >> "$GITHUB_ENV"
+          echo "mise candidate active: $tool_path"
+
+      - name: Enforce pinned mise candidate toolchain
+        if: >-
+          runner.os == 'macOS'
+          && github.event_name == 'workflow_dispatch'
+          && github.ref == 'refs/heads/main'
+          && inputs.mise_candidate == true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/toolchain/check_env.py --require-tools --format github
 
       # 0.3 min p50 / 1.1 min max on gate VMs, <= 3.5 min on hosted Linux. A
       # hang here otherwise holds a self-hosted gate VM until the host's
@@ -3547,9 +3653,10 @@ jobs:
   # Names the cause of each failed job in this run as a `ci.cause/v1` record,
   # printed as a `::notice title=ci-cause::` annotation. A job's own log can be
   # downloaded only once it has finished, so this job reads the failed jobs'
-  # finished logs and runs the pinned, checksum-verified
-  # `shipyard cause extract` over each (tools/ci/ci_cause_notices.sh). It is
-  # advisory: it never gates the run, and none of its failures fail it.
+  # finished logs and runs `shipyard cause extract` over each
+  # (tools/ci/ci_cause_notices.sh), on the release tools/shipyard.toml pins,
+  # verified against tools/toolchain/shipyard.sha256. It is advisory: it never
+  # gates the run, and none of its failures fail it.
   ci-cause:
     name: ci-cause (advisory)
     needs: [build, macos, macos-merge-group, linux, windows]
@@ -3566,6 +3673,8 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             tools/ci/ci_cause_notices.sh
+            tools/shipyard.toml
+            tools/toolchain/shipyard.sha256
           sparse-checkout-cone-mode: false
       - name: Name the cause of each failed job
         env:
