@@ -1850,6 +1850,25 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     for (size_t i = 0; i < slots.size(); ++i) {
         css_clip[i] = css_chain.resolve(slots[i].node_index);
         if (!css_clip[i].clipped) continue;
+        // The clipper's own background and border are painted on the snapped
+        // CSS-edge rectangle (see `record_paint_rect`), and Chromium clips its
+        // overflow on that same rectangle. Snapping the clip edges the same
+        // way keeps a clipped child's rounded corners and last row on the
+        // pixels where the clipper itself is drawn; an unsnapped clip at a
+        // half-pixel offset lands one device row away from its own track.
+        // Snapped here, before the clip is judged or stored, so the fidelity
+        // audit in `place()` compares the same rectangle the node carries.
+        if (device_scale > 0.0 && std::isfinite(device_scale) &&
+            !slots[i].rotated) {
+            const auto snap = [](double edge, double shift) {
+                return std::floor(edge + shift + 0.5) - shift;
+            };
+            auto& clip = css_clip[i].rect;
+            clip.left = snap(clip.left, dx);
+            clip.top = snap(clip.top, dy);
+            clip.right = snap(clip.right, dx);
+            clip.bottom = snap(clip.bottom, dy);
+        }
         // The PAGE footprint, which for a recovered rotation is not the box the
         // node carries. A clip is a page-space rectangle; comparing it against
         // a rectangle written in the node's own turned frame compares two

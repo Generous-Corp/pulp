@@ -2854,6 +2854,61 @@ TEST_CASE("a rounded clipper cuts its children to the curve, not to a box",
     CHECK_FALSE(inset->style.clip_rect.has_value());
 }
 
+TEST_CASE("a clip lands on the snapped edges its clipper is painted on",
+          "[browser-capture][native-lowering][clip-model]") {
+    // A rounded `overflow: hidden` track at a half-pixel page offset, with a
+    // fill bar in its left corners. The track's own box paints on the snapped
+    // CSS edge (206.5 -> 207), and so does Chromium's clip; an unsnapped clip
+    // would put the bar's corners and last row one device row above its
+    // track.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV#track, 4 DIV#fill
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[50,52,11,11,55,55,55,55,55],"
+                  "[50,52,11,11,55,55,55,55,55],"
+                  "[50,52,11,11,55,55,55,55,55],"
+                  "[51,52,11,11,55,55,55,55,59],"
+                  "[50,52,11,11,55,55,55,55,55]]",
+        .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                  "[20.25,206.5,180,24],[20.25,206.5,115,24]]",
+        .paint_orders = "[0,1,1,2,3]",
+        .computed_names = std::string(kClipRadiusProperties),
+    };
+    const auto fill_of = [](const IRNode& root) {
+        return find_node(root, [](const IRNode& node) {
+            return node.style.width && *node.style.width == 115.0f;
+        });
+    };
+
+    const auto snapped = lower_snapshot(spec, "clip-snapped", {}, false, 2.0);
+    const auto* fill = fill_of(snapped.root);
+    REQUIRE(fill != nullptr);
+    REQUIRE(fill->style.clip_rect.has_value());
+    CHECK(fill->style.clip_rect->x == Catch::Approx(-0.25));
+    CHECK(fill->style.clip_rect->y == Catch::Approx(0.5));
+    CHECK(fill->style.clip_rect->width == Catch::Approx(180.0));
+    CHECK(fill->style.clip_rect->height == Catch::Approx(24.0));
+    CHECK(fill->style.clip_rect->radius_tl == 12.0f);
+    // Snapping moves the clip and the audit together: no clip is reported as
+    // over-applied or lost for the half pixel the snap trims.
+    CHECK(snapped.counts.clip_over_applied == 0);
+    CHECK(snapped.counts.clip_lost == 0);
+
+    // Control: without a device scale there is no paint grid to snap to, and
+    // the clip stays on the solved layout edges.
+    const auto unsnapped = lower_snapshot(spec, "clip-unsnapped");
+    const auto* raw = fill_of(unsnapped.root);
+    REQUIRE(raw != nullptr);
+    REQUIRE(raw->style.clip_rect.has_value());
+    CHECK(raw->style.clip_rect->x == Catch::Approx(0.0));
+    CHECK(raw->style.clip_rect->y == Catch::Approx(0.0));
+}
+
 TEST_CASE("a clip that really does apply is carried, and a no-op one is not",
           "[browser-capture][native-lowering][clip-model]") {
     // Without this, the model could simply be "never clip anything" and both
