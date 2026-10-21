@@ -463,6 +463,28 @@ worst-fixture report. A registered score cannot erase a full-frame or
 outside-frame defect; those defects must be fixed or explicitly classified in
 the fixture report before P3 can close.
 
+### P4 pre-registered comparison (2026-10-21)
+
+Frozen before any retained-plan measurement. The production baseline is the
+`baked-native` lane with direct typed setters; `baked-native-rebuild`
+(full rematerialization) is reported as a control but beating it alone is not
+a win. Lanes run in separate, interleaved Release processes on one ARM64 host
+with warmup frames discarded and the cache state declared.
+
+The retained plan qualifies only if all of these hold on the same trace:
+
+- behavior equivalence at every step against a freshly rebuilt tree (anchor
+  set, bounds, typed widget values, recorded paint-command hash) plus Skia PNG
+  hashes at checkpoints, and a planted dropped-update control that fails;
+- per-update (update plus frame) median and p95 wall time each at most 0.80x
+  of `baked-native`;
+- allocation count and peak RSS no higher than `baked-native`.
+
+Lower layout, invalidation, or paint-command counters without the wall-time
+result do not qualify. `bridge_calls` is zero for every native lane and is not
+a discriminating counter; paint commands are RecordingCanvas counts, not GPU
+draw or resource measurements.
+
 ### Landed context
 
 - [PR 10475](https://github.com/Generous-Corp/pulp/pull/10475) merged as
