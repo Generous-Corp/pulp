@@ -33,6 +33,21 @@ class TargetUtmReachabilityTests(unittest.TestCase):
         )
         self.assertTrue(self.mod.utmctl_start("Ubuntu", run_fn=fake_run))
 
+    def test_wedged_utm_control_plane_fails_closed(self) -> None:
+        def timeout_run(command, **kwargs):
+            self.assertEqual(kwargs["timeout"], self.mod.UTMCTL_TIMEOUT_SECS)
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+        self.assertIsNone(self.mod.utmctl_vm_status("Windows", run_fn=timeout_run))
+        self.assertFalse(self.mod.utmctl_start("Windows", run_fn=timeout_run))
+
+    def test_unavailable_utm_control_plane_fails_closed(self) -> None:
+        def unavailable_run(command, **_kwargs):
+            raise OSError("UTM control socket unavailable")
+
+        self.assertIsNone(self.mod.utmctl_vm_status("Windows", run_fn=unavailable_run))
+        self.assertFalse(self.mod.utmctl_start("Windows", run_fn=unavailable_run))
+
 
 if __name__ == "__main__":
     unittest.main()
