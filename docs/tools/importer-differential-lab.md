@@ -291,7 +291,7 @@ provenance, source recognition, and deterministic three-run receipts pass.
 | P0 | Close existing acceptance debt | **DONE** | Attributable M1 ARM64 PR-head receipt recorded for root-canvas and provenance: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852 and protected artifact https://github.com/Generous-Corp/pulp/actions/runs/38996107653/artifacts/12088036268. The later merge-group run reused the receipt and ran zero suites; it is not claimed as fresh execution. |
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
 | P2 | Validate the evidence contract and instruments | **DONE** | 214 Python controls pass; three-run cold benchmark determinism is `pass`; authenticated Skia render receipts, DPR 2 checks, blank-render and planted-defect controls pass; frozen baseline manifest is `test/fixtures/import-differential/reset-manifest-20261018.json`. |
-| P3 | Prove native correctness | **IN PROGRESS — GATE NOT MEETABLE UNTIL P3a/P3b/P3c** | The latest cold corpus completed 16/18 fixtures: mean full-frame visual 0.799, mean registered authored-frame visual 0.846, and gate coverage of 13/16 structure, 8/16 geometry, 14/16 typography, and 6/16 registered visual. Only `02-flex-controls.html` has a three-run receipt. Before importer tuning resumes, P3a must prove candidate-stage provenance and reconcile the unexpectedly long native timing, P3b must measure the real Chromium/native disagreement floor, and P3c must replace the now-contaminated held-out split. |
+| P3 | Prove native correctness | **IN PROGRESS — P3a/P3b CALIBRATED; P3c OPEN** | The latest cold corpus completed 16/18 fixtures: mean full-frame visual 0.799, mean registered authored-frame visual 0.846, and gate coverage of 13/16 structure, 8/16 geometry, 14/16 typography, and 6/16 registered visual. Fresh P3a evidence distinguishes browser-assisted design-time lowering from browser-free Skia observation; fresh P3b evidence has a deterministic three-run `02-flex-controls.html` calibration at registered visual 0.999421 with a planted-negative score of 0.94715. P3c must still replace the now-contaminated held-out split before importer tuning resumes. |
 | P4 | Compare baked-native and retained typed-plan paths | **DEFERRED UNTIL P3a/P3b AND A PASSING P3 SUBSET** | Interleaved Release runs with identical inputs, proxy counters, wall time, p95, peak RSS/GPU resource measurements, and direct benchmark peak assertion. P4 is a native-to-native equivalence/performance check and may use only fixtures that pass the corrected P3 evidence gates; it must not become a second production UI architecture. |
 | P5 | Decide promotion or deferment | **NOT STARTED** | Promote only if behavior is equivalent and the pre-registered performance threshold wins without violating resource ceilings; otherwise retain the infrastructure as experimental and keep baked-native authoritative. |
 | P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |
@@ -372,6 +372,26 @@ instrument that currently exposes it. Before more importer tuning, the plan
 must complete the instrument-integrity, real disagreement-floor, and replacement
 held-out gates recorded in
 `docs/reports/importer-reset-20261019-handoff.md`.
+
+### P3a/P3b calibration evidence (2026-10-20)
+
+The current-origin workstream records two distinct pipeline boundaries. The
+native lowering import is intentionally **browser-assisted at design time**:
+its capture provenance is `chromium-cdp`, and its import command carries
+`--native-panel-lowering`. The subsequent native runtime stage invokes only
+`pulp-design-ir-observe --backend skia`; its render receipt reports
+`backend_used: skia`, `ok: true`, and its command contains no browser token.
+Therefore the approximately 9.5-second native-import timing is browser-assisted
+source evaluation plus lowering, not browser-free runtime startup. Native
+readback render time in the fresh run was 96 ms.
+
+The three-run cold calibration for `02-flex-controls.html` is deterministic:
+all authenticated source, browser, native capture, PNG, layout, font, and Skia
+receipt digests agree. Each run scored structure 1.0, geometry 0.999999,
+typography 1.0, and registered visual 0.999421. A planted 41x41-pixel magenta
+mutation scored 0.94715, below the 0.995 visual gate. This establishes a
+useful known-good/known-bad comparator control for this fixture class; it does
+not establish P3 across the corpus or prove a production performance win.
 
 ### P3 denominator and registration contract
 

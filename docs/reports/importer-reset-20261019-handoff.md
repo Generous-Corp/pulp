@@ -1,8 +1,10 @@
 # Importer reset handoff (2026-10-19)
 
-Status: **PAUSED before additional implementation.** The goal remains
-unfulfilled. P0, P1, and P2 are complete; P3 is open; P4 and P5 have not
-started. This document is the restart packet for a fresh session.
+Status: **ACTIVE; P3c remains open.** P0, P1, and P2 are complete. P3a
+pipeline-boundary evidence and the initial P3b comparator calibration are
+complete on the current-origin workstream; P3c and corpus-wide P3 remain open.
+P4 and P5 have not started. This document is the restart packet for the next
+session.
 
 ## Objective
 
@@ -31,20 +33,28 @@ existing renderer, never a second production UI architecture.
   typography scores therefore do not prove glyph placement.
 - Only `02-flex-controls.html` currently has a deterministic three-run
   receipt. The corpus reports are single cold runs.
+- The fresh three-run `02-flex-controls.html` calibration is deterministic at
+  registered visual `0.999421`; a planted 41x41-pixel mutation scores `0.94715`.
+- The native lane is browser-assisted during design-time lowering, while the
+  separate Skia observer has no browser argument and emits a successful Skia
+  receipt. Its 96 ms render time must not be conflated with the roughly 9.5 s
+  browser-assisted lowering time.
 
 ## Adversarial review findings
 
-Fable reviewed the plan and current receipts. Before any fixture-specific or
-generic importer tuning:
+Fable reviewed the plan and current receipts. The initial calibration confirms
+the comparator can distinguish a known-good fixture from a clear planted
+visual defect. Before any fixture-specific or generic importer tuning:
 
-1. **P3a: instrument integrity.** Prove candidate-stage provenance shows no
-   Chromium consultation. Reconcile the unexpectedly similar roughly 9.7-second
-   native timing. Pin comparator version/digest in every receipt and explicitly
-   re-baseline after comparator changes.
-2. **P3b: renderer disagreement floor.** Run authenticated same-source
-   Chromium/native known-good controls three times, with a planted negative
-   control, and report the floor by fixture class beside the `0.995` threshold.
-   Do not lower the threshold during this session.
+1. **P3a: instrument integrity (initial slice complete).** The report now
+   distinguishes browser-assisted design-time lowering from the browser-free
+   Skia observation stage and records the command/receipt evidence. The roughly
+   9.5-second native-import timing is explicitly not a runtime performance
+   claim.
+2. **P3b: renderer disagreement floor (initial slice complete).** The fresh
+   `02-flex-controls.html` three-run control is deterministic at 0.999421, and
+   its planted negative scores 0.94715. Extend this calibration to additional
+   fixture classes; do not lower the threshold during that work.
 3. **P3c: held-out integrity.** The former effective held-out set is
    contaminated because typography and keyed-list findings guided recent
    fixes. Freeze and hash a replacement held-out set of at least four in-scope

@@ -280,10 +280,24 @@ def run_command(argv: list[str], timeout_seconds: int) -> CommandResult:
 
 
 def command_record(result: CommandResult) -> dict[str, Any]:
+    def public_arg(value: str) -> str:
+        # Keep command provenance useful without leaking machine-local paths.
+        # Flags remain exact; path-like values are reduced to their basename.
+        return Path(value).name if "/" in value else value
+
+    timing_line = next(
+        (line.strip() for line in result.stdout.splitlines()
+         if line.strip().startswith("✓ imported ")),
+        None,
+    )
     return {
         "elapsed_ms": result.elapsed_ms,
         "exit_code": result.returncode,
         "executable": Path(result.argv[0]).name if result.argv else "",
+        "argv": [public_arg(value) for value in result.argv],
+        "stdout_sha256": hashlib.sha256(result.stdout.encode()).hexdigest(),
+        "stderr_sha256": hashlib.sha256(result.stderr.encode()).hexdigest(),
+        "import_timing_line": timing_line,
     }
 
 
@@ -1451,8 +1465,10 @@ def compare_one(
         native=True)
     browser_run = run_command(browser_args, timeout_seconds)
     native_run = run_command(native_args, timeout_seconds)
-    write_json(browser_dir / "command.json", command_record(browser_run))
-    write_json(native_dir / "import-command.json", command_record(native_run))
+    browser_command = command_record(browser_run)
+    native_command = command_record(native_run)
+    write_json(browser_dir / "command.json", browser_command)
+    write_json(native_dir / "import-command.json", native_command)
     if browser_run.returncode != 0:
         raise LabError(
             f"browser import failed ({browser_run.returncode}): {browser_run.stderr}")
@@ -1508,6 +1524,46 @@ def compare_one(
             or render_receipt.get("backend_used") != "skia"
             or render_receipt.get("ok") is not True):
         raise LabError("native render receipt did not prove a successful Skia render")
+
+    # The native comparison lane is browser-assisted during design-time import:
+    # Chromium evaluates the authored HTML and the native lowering consumes
+    # that capture. The runtime claim is narrower and testable: the observer
+    # receives DesignIR and renders it through Skia without a browser argument
+    # or browser capture process. Keep those two claims separate so the native
+    # import timing is never misreported as browser-free runtime startup.
+    render_command = command_record(render_run)
+    render_argv_lower = [str(value).lower() for value in render_command["argv"]]
+    browser_runtime_tokens = ("chrome", "chromium", "webkit", "browser")
+    browser_runtime_token_hits = [
+        token for token in render_argv_lower
+        if any(marker in token for marker in browser_runtime_tokens)
+    ]
+    stage_provenance = {
+        "schema": "pulp-importer-differential-stage-provenance-v1",
+        "design_time": {
+            "native_lane_browser_assisted": (
+                native_capture.get("provenance", {}).get("capture_method")
+                == "chromium-cdp"),
+            "capture_method": native_capture.get("provenance", {}).get(
+                "capture_method"),
+            "browser_build_hash": native_capture.get("provenance", {})
+                .get("browser", {}).get("build_hash"),
+            "scope": "authored-source evaluation and DesignIR lowering",
+        },
+        "native_runtime": {
+            "browser_required": bool(browser_runtime_token_hits),
+            "browser_argument_tokens": browser_runtime_token_hits,
+            "renderer_executable": render_command["executable"],
+            "backend_requested": render_receipt.get("backend_requested"),
+            "backend_used": render_receipt.get("backend_used"),
+            "skia_receipt_ok": render_receipt.get("ok") is True,
+            "scope": "DesignIR observation and native readback render",
+            "evidence": [
+                "candidate/render-command.json",
+                "candidate/render-receipt.json",
+            ],
+        },
+    }
 
     try:
         from PIL import Image
@@ -1622,6 +1678,8 @@ def compare_one(
         "native_import_ms": native_run.elapsed_ms,
         "native_render_ms": render_run.elapsed_ms,
         "native_total_ms": native_run.elapsed_ms + render_run.elapsed_ms,
+        "browser_import_timing_line": browser_command["import_timing_line"],
+        "native_import_timing_line": native_command["import_timing_line"],
         "browser_to_native_import_speedup": round(
             browser_run.elapsed_ms / max(1, native_run.elapsed_ms), 3),
     }
@@ -1647,6 +1705,7 @@ def compare_one(
         "native_render_sha256": sha256_file(native_render),
         "native_layout_sha256": sha256_file(native_layout),
         "native_render_receipt_sha256": sha256_file(native_receipt),
+        "stage_provenance": stage_provenance,
         "platform_fonts_sha256": (
             sha256_file(evidence / "platform-fonts.json")
             if (evidence / "platform-fonts.json").is_file() else None),

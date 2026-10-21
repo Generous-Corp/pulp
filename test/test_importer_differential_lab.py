@@ -11,6 +11,25 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+
+class StageProvenanceTests(unittest.TestCase):
+    def test_command_record_keeps_safe_argv_and_import_timing(self) -> None:
+        from importer_differential.core import CommandResult, command_record
+
+        result = CommandResult(
+            ["/private/build/pulp-import-design", "--file",
+             "/private/source/fixture.html"],
+            1234,
+            0,
+            '✓ imported "fixture" in 9.30s  — decode 9.10s · parse 20ms\n',
+            "",
+        )
+        record = command_record(result)
+        self.assertEqual(record["argv"], ["pulp-import-design", "--file", "fixture.html"])
+        self.assertEqual(record["import_timing_line"], result.stdout.strip())
+        self.assertEqual(len(record["stdout_sha256"]), 64)
+
 from unittest.mock import patch
 
 try:
