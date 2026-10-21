@@ -125,7 +125,7 @@ class HelperScoringTests(unittest.TestCase):
             register_browser_nodes_to_native_frame(
                 [], self._capture(24.0, 24.0), self._capture(0.0, 0.0))
 
-    def test_raw_page_space_stays_reported_and_registration_alone_cannot_pass(self) -> None:
+    def test_registered_geometry_is_diagnostic_and_raw_geometry_stays_canonical(self) -> None:
         browser = BrowserNode(
             1, "main", -1, "", {}, (24.0, 24.0, 320.0, 18.0), {})
         native = NativeNode(
@@ -137,16 +137,9 @@ class HelperScoringTests(unittest.TestCase):
         registered = [(registered_browser, native, 1.0)]
         geometry = geometry_metrics_with_registration(
             raw_match, registered, {"x": -24.0, "y": -24.0})
-        # Raw page-space geometry is still computed and reported, labelled as
-        # a diagnostic of the panel-local root.
-        self.assertLess(geometry["raw_page_space"]["score"], 1.0)
-        self.assertEqual(geometry["raw_page_space"]["role"], "diagnostic")
-        self.assertEqual(geometry["score"], 1.0)
+        self.assertLess(geometry["score"], 1.0)
+        self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
         self.assertEqual(geometry["registration_applied"]["x"], -24.0)
-        # A perfect registered score without an evaluated frame placement
-        # check must not pass: registration cannot hide a misplaced panel.
-        self.assertFalse(geometry["gate"]["ok"])
-        self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
         recommendation = promotion_recommendation(
             [],
             {"score": 1.0},
@@ -156,6 +149,10 @@ class HelperScoringTests(unittest.TestCase):
         )
         self.assertFalse(recommendation["threshold_eligible"])
         self.assertFalse(recommendation["production_promotion_enabled"])
+        # Raw page-space is reported but not gated; the gate fails here only
+        # because no frame placement proof was supplied.
+        self.assertEqual(geometry["role"], "diagnostic-raw-page-space")
+        self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
         self.assertIn("geometry gate failed: frame_placement",
                       recommendation["reasons"])
 

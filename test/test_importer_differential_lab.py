@@ -852,19 +852,19 @@ class DifferentialLabTests(unittest.TestCase):
                     fixture_metadata={"viewport": {"width": 1, "height": 1},
                                       "browser_interactions": "plan.json"})
             geometry = offset_report["comparison"]["geometry"]
-            self.assertLess(geometry["raw_page_space"]["score"], geometry["score"])
-            self.assertEqual(geometry["score"], 1.0)
+            self.assertLess(geometry["score"], geometry["registered_geometry"]["score"])
+            self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
             self.assertEqual(geometry["registration_applied"]["x"], -0.25)
-            # The snapshot has no DOM surface, so frame placement fails closed
-            # and the perfect registered score cannot promote.
+            # The snapshot has no DOM authored root, so frame placement fails
+            # closed and the perfect registered score cannot promote.
             self.assertFalse(
                 geometry["gate"]["checks"]["frame_placement"]["checks"]
-                ["dom_surface_found"]["ok"])
+                ["dom_authored_root_found"]["ok"])
             self.assertIn("geometry gate failed: frame_placement",
                           offset_report["promotion"]["reasons"])
             summary = (root / "out-offset/comparison/summary.md").read_text()
             self.assertIn("Geometry gate: fail (frame_placement)", summary)
-            self.assertIn("Raw page-space geometry score (diagnostic)", summary)
+            self.assertIn("Geometry raw page-space score (diagnostic, not gated)", summary)
             with patch.object(
                 LAB, "viewport_dpr_audit",
                 return_value={"ok": False, "checks": {"planted_negative": False}},
@@ -1360,8 +1360,8 @@ class DifferentialLabTests(unittest.TestCase):
 
 def surface_snapshot(surface: tuple[float, float, float, float],
                      children: list[tuple[float, float, float, float]]) -> dict:
-    """Minimal DOMSnapshot: html > body > surface > children."""
-    strings = ["#document", "HTML", "BODY", "SECTION", "P"]
+    """Minimal DOMSnapshot: html > body > authored root > children."""
+    strings = ["#document", "HTML", "BODY", "MAIN", "SPAN"]
     names = [0, 1, 2, 3] + [4] * len(children)
     parents = [-1, 0, 1, 2] + [3] * len(children)
     types = [9, 1, 1, 1] + [1] * len(children)
@@ -1379,131 +1379,140 @@ def surface_snapshot(surface: tuple[float, float, float, float],
 
 
 class GeometryGateTests(unittest.TestCase):
-    FRAME = (18.0, 18.0, 342.0, 137.8125)
-    CHILD = (348.0, 55.90625, 6.0, 28.0)
+    # Shapes taken from the absolute-overlay fixture: a 420x220 stage at
+    # (20, 20) and a far-right peak label.
+    FRAME = (20.0, 20.0, 420.0, 220.0)
+    CHILD = (368.4, 38.0, 51.6, 18.0)
+    ROOT_ANCHOR = "capture:html[0]/body[0]/main[0]"
+    CHILD_ANCHOR = "capture:html[0]/body[0]/main[0]/span[0]"
 
-    def build(self, *, native_child=None, recorded=None, capture_frame=None,
-              surface=None):
-        """Return the gated geometry for a panel-local import of one child."""
-        surface = surface or self.FRAME
-        snapshot = surface_snapshot(surface, [self.CHILD])
-        frame = capture_frame or self.FRAME
+    def local_child(self, dx=0.0, dw_scale=1.0):
+        return (self.CHILD[0] - self.FRAME[0] + dx, self.CHILD[1] - self.FRAME[1],
+                self.CHILD[2] * dw_scale, self.CHILD[3])
+
+    def build(self, *, native_child=None, recorded_shift=0.0, html_shift=0.0,
+              root_shift=0.0, provide_placement=True):
+        snapshot = surface_snapshot(self.FRAME, [self.CHILD])
         capture = {"reference": {"authored_frame": dict(
-            zip(("x", "y", "width", "height"), frame))}}
-        recorded = recorded or self.FRAME
-        ir = {"root": {
-            "style": {"width": self.FRAME[2], "height": round(self.FRAME[3], 3)},
-            "attributes": {
-                f"browser_authored_frame_{label}": f"{value:.6f}"
-                for label, value in zip(("x", "y", "width", "height"), recorded)},
-        }}
-        layout = {"nodes": [{"id": "browser:root",
-                             "rect": {"x": 0.0, "y": 0.0, "w": 1280, "h": 800}}]}
+            zip(("x", "y", "width", "height"), self.FRAME))}}
+        ir = {"root": {"attributes": {
+            "browser_authored_frame_x": f"{self.FRAME[0] + recorded_shift:.6f}",
+            "browser_authored_frame_y": f"{self.FRAME[1]:.6f}",
+        }}}
+        child = native_child or self.local_child()
+        root_box = (0.0, 0.0, self.FRAME[2], self.FRAME[3])
+        layout = {"nodes": [
+            {"id": "browser:root", "rect": {"x": 0.0, "y": 0.0, "w": 1280, "h": 800}},
+            {"id": "capture:html[0]", "rect": {
+                "x": -self.FRAME[0] + html_shift, "y": -self.FRAME[1],
+                "w": 1280, "h": 260}},
+            {"id": self.ROOT_ANCHOR, "rect": dict(zip("xywh", (
+                root_shift, 0.0, root_box[2], root_box[3])))},
+            {"id": self.CHILD_ANCHOR, "rect": dict(zip("xywh", child))},
+        ]}
         browser_raw = [
-            LAB.BrowserNode(3, "section", 2, "", {}, surface, {}, 3),
-            LAB.BrowserNode(4, "p", 3, "", {}, self.CHILD, {}, 4),
+            LAB.BrowserNode(3, "main", 2, "", {}, self.FRAME, {}, 3),
+            LAB.BrowserNode(4, "span", 3, "", {}, self.CHILD, {}, 4),
         ]
         registered_browser, registration = LAB.register_browser_nodes_to_native_frame(
             browser_raw, capture, capture)
-        child = native_child or (
-            self.CHILD[0] - frame[0], self.CHILD[1] - frame[1],
-            self.CHILD[2], self.CHILD[3])
         native = [
-            LAB.NativeNode("capture:section", "frame", "section", "", None, {},
-                           (0.0, 0.0, self.FRAME[2], round(self.FRAME[3], 3)), 3),
-            LAB.NativeNode("capture:p", "frame", "p", "", None, {}, child, 4),
+            LAB.NativeNode(self.ROOT_ANCHOR, "frame", "main", "", None, {}, root_box, 3),
+            LAB.NativeNode(self.CHILD_ANCHOR, "frame", "span", "", None, {}, child, 4),
         ]
         registered = list(zip(registered_browser, native, [100.0, 100.0]))
         raw = list(zip(browser_raw, native, [100.0, 100.0]))
-        placement = LAB.frame_placement_check(snapshot, capture, ir, layout, registered)
+        placement = (LAB.frame_placement_check(snapshot, ir, layout, registered, capture)
+                     if provide_placement else None)
         return LAB.geometry_metrics_with_registration(
             raw, registered, registration, placement)
 
-    def test_known_good_panel_local_import_passes_and_keeps_raw_reported(self) -> None:
+    def test_known_good_panel_local_import_passes_with_raw_reported(self) -> None:
         geometry = self.build()
         self.assertTrue(geometry["gate"]["ok"], geometry["gate"])
-        self.assertEqual(geometry["gate"]["failed"], [])
-        # The translation alone keeps raw page-space far below the threshold;
-        # it remains reported as a diagnostic.
-        self.assertLess(geometry["raw_page_space"]["score"], 0.98)
-        self.assertEqual(geometry["raw_page_space"]["role"], "diagnostic")
+        self.assertEqual(geometry["gate"]["matched_bounds"], 2)
+        # The panel translation keeps raw page-space below the threshold; it
+        # is reported and ungated.
+        self.assertLess(geometry["score"], 0.98)
+        self.assertEqual(geometry["role"], "diagnostic-raw-page-space")
 
-    def test_recorded_origin_mismatch_fails_frame_placement(self) -> None:
-        geometry = self.build(recorded=(10.0, 18.0, 342.0, 137.8125))
-        self.assertFalse(geometry["gate"]["ok"])
+    def test_registration_without_placement_proof_fails(self) -> None:
+        geometry = self.build(provide_placement=False)
+        self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
+
+    def test_design_ir_origin_shift_fails_with_dom_and_layout_untouched(self) -> None:
+        geometry = self.build(recorded_shift=3.0)
         self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
         checks = geometry["gate"]["checks"]["frame_placement"]["checks"]
-        self.assertFalse(checks["design_ir_recorded_frame_matches_dom_surface"]["ok"])
-        self.assertFalse(checks["native_surface_page_box_matches_dom_surface"]["ok"])
-        # Registration uses the capture frame, so intra-panel geometry is
-        # still perfect: only the dedicated check sees the misplacement.
-        self.assertEqual(geometry["score"], 1.0)
+        self.assertFalse(checks["design_ir_origin_matches_dom"]["ok"])
+        self.assertTrue(checks["native_html_layout_at_negative_dom_origin"]["ok"])
 
-    def test_dom_surface_disagreeing_with_capture_frame_fails_closed(self) -> None:
-        geometry = self.build(surface=(20.0, 18.0, 342.0, 137.8125))
+    def test_native_html_rect_shift_fails(self) -> None:
+        geometry = self.build(html_shift=3.0)
+        self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
         checks = geometry["gate"]["checks"]["frame_placement"]["checks"]
-        self.assertFalse(checks["dom_surface_matches_capture_frame"]["ok"])
-        self.assertIn("frame_placement", geometry["gate"]["failed"])
+        self.assertFalse(checks["native_html_layout_at_negative_dom_origin"]["ok"])
 
-    def test_missing_dom_surface_fails_closed(self) -> None:
-        placement = LAB.frame_placement_check({"documents": []}, {}, {}, {}, [])
+    def test_native_root_layout_off_panel_origin_fails(self) -> None:
+        geometry = self.build(root_shift=3.0)
+        self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
+        checks = geometry["gate"]["checks"]["frame_placement"]["checks"]
+        self.assertFalse(checks["native_root_layout_at_panel_origin"]["ok"])
+
+    def test_placement_within_half_pixel_passes(self) -> None:
+        self.assertTrue(self.build(recorded_shift=0.4, html_shift=-0.4)["gate"]["ok"])
+
+    def test_missing_dom_authored_root_fails_closed(self) -> None:
+        placement = LAB.frame_placement_check({"documents": []}, {}, {}, [])
         self.assertFalse(placement["ok"])
-        self.assertFalse(placement["checks"]["dom_surface_found"]["ok"])
+        self.assertFalse(placement["checks"]["dom_authored_root_found"]["ok"])
 
-    def test_three_pixel_shift_far_from_origin_fails_absolute_tolerance(self) -> None:
-        local_x = self.CHILD[0] - self.FRAME[0]
-        geometry = self.build(native_child=(
-            local_x + 3.0, self.CHILD[1] - self.FRAME[1], self.CHILD[2], self.CHILD[3]))
-        # The relative score cannot see it; the absolute bound must.
-        self.assertGreaterEqual(geometry["score"], 0.98)
-        self.assertEqual(geometry["gate"]["failed"], ["absolute_tolerance"])
-        violation = geometry["gate"]["checks"]["absolute_tolerance"]["violations"][0]
-        self.assertEqual(violation["native_anchor"], "capture:p")
-        self.assertAlmostEqual(violation["signed_delta"]["x"], 3.0)
-        # Raw page-space rewards this defect (it moves toward the page
-        # origin), which is why raw is a diagnostic and not the gate.
-        self.assertGreater(geometry["raw_page_space"]["score"],
-                           self.build()["raw_page_space"]["score"])
+    def test_three_pixel_shift_on_farthest_node_fails_both_directions(self) -> None:
+        for dx in (3.0, -3.0):
+            with self.subTest(dx=dx):
+                geometry = self.build(native_child=self.local_child(dx=dx))
+                # The relative mean cannot see a few pixels this far from the
+                # origin; the per-node maximum must.
+                self.assertGreaterEqual(geometry["gate"]["score"], 0.98)
+                self.assertEqual(geometry["gate"]["failed"],
+                                 ["registered_max_abs_delta"])
+                violation = (geometry["gate"]["checks"]["registered_max_abs_delta"]
+                             ["violations"][0])
+                self.assertEqual(violation["native_anchor"], self.CHILD_ANCHOR)
+                self.assertAlmostEqual(violation["signed_delta"]["x"], dx)
+        # Raw page-space rewards a shift toward the page origin, which is why
+        # it is a diagnostic and not the gate.
+        self.assertGreater(self.build(native_child=self.local_child(dx=3.0))["score"],
+                           self.build()["score"])
 
     def test_ten_percent_narrow_box_fails(self) -> None:
-        geometry = self.build(native_child=(
-            self.CHILD[0] - self.FRAME[0], self.CHILD[1] - self.FRAME[1],
-            self.CHILD[2] * 0.9, self.CHILD[3]))
-        self.assertFalse(geometry["gate"]["ok"])
-        self.assertIn("absolute_tolerance", geometry["gate"]["failed"])
+        geometry = self.build(native_child=self.local_child(dw_scale=0.9))
+        self.assertIn("registered_max_abs_delta", geometry["gate"]["failed"])
 
-    def test_large_intra_panel_defect_fails_registered_score(self) -> None:
-        geometry = self.build(native_child=(100.0, 120.0, 60.0, 4.0))
-        self.assertIn("registered_score", geometry["gate"]["failed"])
-        self.assertLess(geometry["score"], 0.98)
-
-    def test_sub_layout_unit_rounding_passes(self) -> None:
-        # DesignIR serializes sizes to three decimals; that floor must pass.
-        geometry = self.build(native_child=(
-            self.CHILD[0] - self.FRAME[0], self.CHILD[1] - self.FRAME[1] - 0.0005,
-            self.CHILD[2], self.CHILD[3] + 0.0005))
+    def test_sub_pixel_delta_passes(self) -> None:
+        geometry = self.build(native_child=self.local_child(dx=0.9))
         self.assertTrue(geometry["gate"]["ok"], geometry["gate"])
 
-    def test_aggregate_counts_geometry_gate_not_score(self) -> None:
-        good = self.build()
-        shifted = self.build(native_child=(
-            self.CHILD[0] - self.FRAME[0] + 3.0, self.CHILD[1] - self.FRAME[1],
-            self.CHILD[2], self.CHILD[3]))
+    def test_large_intra_panel_defect_fails_registered_mean(self) -> None:
+        geometry = self.build(native_child=(4.0, 120.0, 60.0, 4.0))
+        self.assertIn("registered_mean", geometry["gate"]["failed"])
 
+    def test_aggregate_counts_geometry_gate_not_score(self) -> None:
         def report(geometry):
             return {
                 "promotion": {"classification": "native-with-browser-validation"},
                 "comparison": {
                     "structural": {"score": 1.0}, "geometry": geometry,
-                    "typography": {"score": 1.0},
-                    "visual": {"score": 1.0}},
+                    "typography": {"score": 1.0}, "visual": {"score": 1.0}},
                 "timings": {"browser_import_ms": 1, "native_import_ms": 1,
                             "native_render_ms": 1, "native_total_ms": 2,
                             "browser_to_native_import_speedup": 1.0},
                 "classifications": [],
             }
 
-        aggregate = LAB.aggregate_reports([report(good), report(shifted)])
+        aggregate = LAB.aggregate_reports([
+            report(self.build()),
+            report(self.build(native_child=self.local_child(dx=3.0)))])
         self.assertEqual(aggregate["gate_summary"]["geometry"]["pass_count"], 1)
         raw = aggregate["diagnostics"]["raw_page_space_geometry"]
         self.assertEqual(raw["role"], "diagnostic")

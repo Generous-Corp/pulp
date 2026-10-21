@@ -26,6 +26,9 @@ def format_summary(report: dict[str, Any]) -> str:
     ]
     lines += [
         f"- {name.title()} score: {comparison[name]['score']:.3f}"
+        if name != "geometry" else
+        f"- Geometry raw page-space score (diagnostic, not gated): "
+        f"{comparison[name]['score']:.3f}"
         for name in ("structural", "geometry", "typography", "visual")
     ]
     if comparison["visual"].get("registered_visual"):
@@ -38,10 +41,11 @@ def format_summary(report: dict[str, Any]) -> str:
         "- Geometry gate: "
         + ("pass" if gate and gate.get("ok") is True else
            "fail (" + (", ".join(gate.get("failed", [])) if gate else "not evaluated") + ")"))
-    raw = geometry.get("raw_page_space")
-    if isinstance(raw, dict):
+    if gate:
+        bound = gate["checks"]["registered_max_abs_delta"]
         lines.append(
-            f"- Raw page-space geometry score (diagnostic): {raw['score']:.3f}")
+            f"- Registered geometry: mean {gate['score']:.3f}, max edge delta "
+            f"{bound['max_abs_delta']} px over {gate['matched_bounds']} matched boxes")
     lines += [
         "",
         "Chromium remains authoritative. This report never substitutes or "
