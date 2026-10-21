@@ -138,6 +138,7 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
         std::map<std::string, std::string> html_style, body_style;
         std::unordered_set<int> laid_out;
         std::map<int, int> marker_rows;
+        std::map<int, int> generated_rows;
         int html_row = -1;
         for (uint32_t i = 0; i < rows.size(); ++i) {
             const int at = static_cast<int>(i);
@@ -152,10 +153,20 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
             // share a DOM node identity, so this repetition is valid evidence
             // and must not invalidate otherwise trustworthy document-canvas
             // metadata.
-            const bool repeated_marker = tag_index >= 0 &&
-                                         tag_index < static_cast<int>(strings.size()) &&
-                                         strings[tag_index].toString() == "::marker";
-            if (node < 0 || (!laid_out.insert(node).second && !repeated_marker) || !row.isArray() ||
+            const auto tag_name = tag_index >= 0 &&
+                                          tag_index < static_cast<int>(strings.size())
+                                      ? strings[tag_index].toString()
+                                      : std::string{};
+            const bool repeated_marker = tag_name == "::marker";
+            // A ::before/::after with empty generated content is followed by a
+            // zero-size row for that content. It adds no paint and is valid
+            // evidence; any repeated row that has area is still a conflict.
+            const bool empty_generated_row =
+                tag_name.rfind("::", 0) == 0 && !repeated_marker && box.isArray() &&
+                box.size() == 4 && number(box[2]) == 0 && number(box[3]) == 0;
+            const bool first_row = node >= 0 && laid_out.insert(node).second;
+            if (node < 0 || (!first_row && !repeated_marker && !empty_generated_row) ||
+                !row.isArray() ||
                 (row.size() != names.size() && !(number(types[node]) == 9 && row.size() == 0)) ||
                 !box.isArray() || box.size() != 4)
                 return std::nullopt;
@@ -174,6 +185,8 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
             if (node == html)
                 html_row = at;
             if (repeated_marker && ++marker_rows[node] > 2)
+                return std::nullopt;
+            if (!repeated_marker && !first_row && ++generated_rows[node] > 1)
                 return std::nullopt;
         }
         if (html_row < 0 || body_style.empty())

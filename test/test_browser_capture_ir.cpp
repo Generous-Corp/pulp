@@ -651,6 +651,106 @@ TEST_CASE("producer-bound native document canvas changes only root background",
           pulp::view::serialize_design_ir(*baseline.design_ir));
 }
 
+namespace {
+
+// Append `extra` to the array value of the first `"key"` at or after `from`
+// in serialized JSON.
+void append_to_array(std::string& json, std::string_view key, std::string_view extra,
+                     std::string_view from = {}) {
+    const auto start = from.empty() ? 0 : json.find(from);
+    REQUIRE(start != std::string::npos);
+    INFO(key);
+    const auto at = json.find("\"" + std::string(key) + "\":", start);
+    REQUIRE(at != std::string::npos);
+    auto cursor = json.find_first_not_of(' ', at + key.size() + 3);
+    REQUIRE(cursor != std::string::npos);
+    REQUIRE(json[cursor] == '[');
+    int depth = 0;
+    for (; cursor < json.size(); ++cursor) {
+        if (json[cursor] == '[') ++depth;
+        if (json[cursor] == ']' && --depth == 0) break;
+    }
+    REQUIRE(cursor < json.size());
+    const bool empty = json[cursor - 1] == '[';
+    json.insert(cursor, (empty ? "" : ",") + std::string(extra));
+}
+
+// The frozen root-canvas capture plus one `::before` on its innermost DIV,
+// laid out as Chromium lays out an absolutely positioned pseudo with empty
+// `content`: its own box, then `generated` (the generated-content row).
+std::string root_canvas_with_pseudo(const std::vector<std::string>& generated) {
+    const auto parsed = choc::json::parse(root_canvas_snapshot());
+    const auto strings = parsed["strings"];
+    const auto div_style = choc::json::toString(parsed["documents"][0]["layout"]["styles"][5],
+                                                false);
+    const auto pseudo_name = std::to_string(strings.size());
+    // One row per layout entry: the pseudo's own box, then each generated row.
+    const auto rows = [&](const std::string& value) {
+        std::string joined = value;
+        for (size_t i = 0; i < generated.size(); ++i) joined += "," + value;
+        return joined;
+    };
+    std::string bounds = "[42,44,10,10]";
+    for (const auto& box : generated) bounds += "," + box;
+    auto json = choc::json::toString(parsed, false);
+    append_to_array(json, "strings", "\"::before\",\"before\"");
+    append_to_array(json, "parentIndex", "11");
+    append_to_array(json, "nodeType", "1");
+    append_to_array(json, "nodeName", pseudo_name);
+    append_to_array(json, "nodeValue", "-1");
+    append_to_array(json, "backendNodeId", "9001");
+    append_to_array(json, "attributes", "[]");
+    append_to_array(json, "index", "13", "\"pseudoType\"");
+    append_to_array(json, "value", std::to_string(strings.size() + 1), "\"pseudoType\"");
+    append_to_array(json, "nodeIndex", rows("13"));
+    append_to_array(json, "styles", rows(div_style));
+    append_to_array(json, "bounds", bounds);
+    append_to_array(json, "text", rows("-1"));
+    append_to_array(json, "paintOrders", rows("3"));
+    for (const auto* key : {"offsetRects", "scrollRects", "clientRects"})
+        append_to_array(json, key, rows("[]"));
+    append_to_array(json, "blendedBackgroundColors", rows("-1"));
+    append_to_array(json, "textColorOpacities", rows("1"));
+    return json;
+}
+
+std::optional<pulp::import_design::detail::DocumentCanvasPaint>
+canvas_paint_of(const std::string& snapshot, const std::string& name) {
+    const auto path = fs::temp_directory_path() / (name + ".json");
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << snapshot;
+    }
+    const auto index = pulp::import_design::CapturedStyleIndex::load(path);
+    fs::remove(path);
+    REQUIRE(index);
+    return index->document_canvas_paint();
+}
+
+} // namespace
+
+TEST_CASE("an empty pseudo-element's generated row keeps the document canvas",
+          "[import-design][browser-capture][ir][root-canvas]") {
+    // Control: the frozen capture proves its canvas paint on its own.
+    REQUIRE(canvas_paint_of(root_canvas_snapshot(), "root-canvas-plain"));
+
+    // A `::before` with `content: ""` adds a zero-size row for its generated
+    // content beside its own box. That row paints nothing, so the document
+    // canvas proof must survive it.
+    const auto empty = canvas_paint_of(root_canvas_with_pseudo({"[0,0,0,0]"}),
+                                       "root-canvas-empty-pseudo");
+    REQUIRE(empty);
+    CHECK(empty->color == canvas_paint_of(root_canvas_snapshot(), "root-canvas-again")->color);
+
+    // Negative control: a repeated row WITH area is a conflicting layout fact
+    // for one node and still withholds the proof.
+    CHECK_FALSE(canvas_paint_of(root_canvas_with_pseudo({"[42,44,10,10]"}),
+                                "root-canvas-conflicting-pseudo"));
+    // And a pseudo gets one generated row, not an unbounded run of them.
+    CHECK_FALSE(canvas_paint_of(root_canvas_with_pseudo({"[0,0,0,0]", "[0,0,0,0]"}),
+                                "root-canvas-repeated-pseudo"));
+}
+
 TEST_CASE("unsupported document canvas facts preserve complete legacy lowering",
           "[import-design][browser-capture][ir][root-canvas]") {
     TempCapture temp;
