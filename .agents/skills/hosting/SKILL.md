@@ -2000,14 +2000,20 @@ reports or gates on hosted latency must branch on `latency_query()` first.
 `pulp audio render --latency-report` does exactly that, which is why an LV2 plugin
 comes back `unsupported` rather than being falsely certified as zero-latency.
 
-## A `CustomNodeType` pack is one header, and its consumer needs to be told
+## A `CustomNodeType` pack has one public header, and its consumer needs to be told
 
-Bake-layer DSP packs live as header-only `CustomNodeType` factories under
+Bake-layer DSP packs expose `CustomNodeType` factory declarations under
 `core/host/include/pulp/host/forge_*_catalog.hpp` — one header per pack
 (`forge_lofi_catalog.hpp`, `forge_character_delay_catalog.hpp`,
 `forge_modulation_catalog.hpp`). Each node declares its stable `k…TypeId`, its
 `baked_params` (the injectable macro contract), and its port arity, and gets
 registered on a `SignalGraph` before `bake()`.
+
+`forge_distortion_catalog.hpp` keeps its public IDs, descriptors, and factory
+declarations in the installed host header; its implementation bodies live in
+`core/host/src/forge_distortion_catalog.cpp`. This out-of-line ownership is a
+compile-surface refactor only: preserve catalog export bytes, registration order,
+and Forge compatibility mappings.
 
 Treat that consumer wiring as part of the DSP change, not a follow-up. A
 musician-facing audio, MIDI, instrument, drum, or timeline capability anywhere
