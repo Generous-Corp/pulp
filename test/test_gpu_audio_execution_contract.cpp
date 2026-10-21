@@ -209,6 +209,7 @@ TEST_CASE("shared IO telemetry completion timing snapshots stay coherent under c
     // pre == max and an even submit; reset() publishes all zeros. A snapshot
     // that mixes fields from different updates matches none of these shapes.
     constexpr int kSnapshots = 200000;
+    constexpr std::uint64_t kMinOverlappingUpdates = 1000;
     constexpr auto kMax = std::numeric_limits<std::uint64_t>::max();
     SharedIoTelemetry telemetry;
     std::atomic<std::uint64_t> published{0};
@@ -240,7 +241,7 @@ TEST_CASE("shared IO telemetry completion timing snapshots stay coherent under c
     });
 
     std::uint64_t incoherent = 0;
-    for (int n = 0; writers_started && n < kSnapshots; ++n) {
+    const auto check_snapshot = [&] {
         const auto s = telemetry.snapshot();
         const bool zero = s.pre_submit_delay_ns == 0 && s.submit_to_completion_ns == 0 &&
                           s.scheduled_to_completion_ns == 0;
@@ -258,12 +259,28 @@ TEST_CASE("shared IO telemetry completion timing snapshots stay coherent under c
         }
         if (!coherent)
             ++incoherent;
-    }
+    };
+    const auto published_before = published.load(std::memory_order_relaxed);
+    const auto resets_before = resets.load(std::memory_order_relaxed);
+    for (int n = 0; writers_started && n < kSnapshots; ++n)
+        check_snapshot();
+    // Keep reading until both writers have advanced during the read phase, so
+    // the coherence check cannot pass without overlapping concurrent updates.
+    const bool overlapped =
+        writers_started && pulp::test::pump_until(
+                               [&] {
+                                   return published.load(std::memory_order_relaxed) >
+                                              published_before + kMinOverlappingUpdates &&
+                                          resets.load(std::memory_order_relaxed) >
+                                              resets_before + kMinOverlappingUpdates;
+                               },
+                               check_snapshot);
     stop.store(true, std::memory_order_relaxed);
     recorder.join();
     resetter.join();
 
     REQUIRE(writers_started);
+    REQUIRE(overlapped);
     REQUIRE(incoherent == 0);
 
     REQUIRE(telemetry.record_completion_timing(5, 11));
