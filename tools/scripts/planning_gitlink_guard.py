@@ -61,7 +61,7 @@ class AncestryUnverified(RuntimeError):
 def _git(arguments: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     return subprocess.run(["git", *arguments], text=True, capture_output=True, env=env,
-                          **kwargs)
+                          **kwargs, encoding="utf-8")
 
 
 def planning_pin(head: str) -> str | None:

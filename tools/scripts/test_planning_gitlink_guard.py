@@ -69,7 +69,7 @@ def git(cwd, *args):
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid",
                GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
     return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
-                          text=True, env=env).stdout.strip()
+                          text=True, env=env, encoding="utf-8").stdout.strip()
 
 
 class PlanningPinAncestryTest(unittest.TestCase):
@@ -94,7 +94,7 @@ class PlanningPinAncestryTest(unittest.TestCase):
         self.repo.mkdir()
         git(self.repo, "init", "--quiet", "-b", "main")
         (self.repo / ".gitmodules").write_text(
-            f'[submodule "planning"]\n\tpath = planning\n\turl = {self.planning}\n')
+            f'[submodule "planning"]\n\tpath = planning\n\turl = {self.planning}\n', encoding="utf-8")
         git(self.repo, "add", ".gitmodules")
         git(self.repo, "update-index", "--add", "--cacheinfo",
             f"160000,{self.base_pin},planning")
@@ -117,7 +117,7 @@ class PlanningPinAncestryTest(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(HERE / "planning_gitlink_guard.py"), "--base", "base",
              "--head", "HEAD", *extra],
-            cwd=self.repo, capture_output=True, text=True, env=env)
+            cwd=self.repo, capture_output=True, text=True, env=env, encoding="utf-8")
 
     def test_pin_on_planning_main_passes(self):
         self.pin(self.main_pin)
