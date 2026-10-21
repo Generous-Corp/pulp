@@ -1330,6 +1330,11 @@ carries a `param_key`, the generated ctor calls
 `route_changes_to_host_params(true)` so the view runs unchanged embedded in
 JUCE / iPlug2 / native. Gotcha baked into a regression test: emitted float
 literals must be valid C++ (`120.f`, never the invalid `120f`).
+Strict validation (`validate_annotated_capture`) bounds each kind by its own
+geometry: a `knob` by `cx/cy ± hit_radius` inside the canvas, an `xy_pad` by
+its box (which must sit inside the canvas) with the `cx/cy` puck center inside
+that box, edges inclusive. An `xy_pad` has no `hit_radius`; applying the knob
+rule to it rejects every pad, because the absent radius parses as 0.
 
 **Under the hood: a 1:1 catalog component = subclass `DesignFrameView` with the embedded SVG.**
 See `core/view/{include/pulp/view,src}/musical_typing_keyboard*` +

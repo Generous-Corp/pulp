@@ -853,6 +853,42 @@ TEST_CASE("strict annotated capture validation binds provenance and geometry",
         CHECK_FALSE(impd::validate_annotated_capture(svg, zero, error));
         CHECK(error.find("outside canvas") != std::string::npos);
     }
+    SECTION("xy pads are bounded by their rectangle, not a hit radius") {
+        const auto knob =
+            std::string(R"JSON("kind":"knob","geometry":{"cx":30,"cy":35,"hit_radius":10})JSON");
+        const auto with_pad = [&](const std::string& geometry) {
+            auto pad = sidecar;
+            pad.replace(pad.find(knob), knob.size(),
+                        R"JSON("kind":"xy_pad","geometry":)JSON" + geometry);
+            return pad;
+        };
+
+        const auto valid = with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30,"cx":30,"cy":35})JSON");
+        CHECK(impd::validate_annotated_capture(svg, valid, error));
+        CHECK(error.empty());
+
+        const auto on_edge = with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30,"cx":50,"cy":20})JSON");
+        CHECK(impd::validate_annotated_capture(svg, on_edge, error));
+
+        const auto center_outside_pad =
+            with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30,"cx":60,"cy":35})JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, center_outside_pad, error));
+        CHECK(error.find("outside its pad") != std::string::npos);
+
+        const auto center_above_pad =
+            with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30,"cx":30,"cy":5})JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, center_above_pad, error));
+        CHECK(error.find("outside its pad") != std::string::npos);
+
+        const auto pad_outside_canvas =
+            with_pad(R"JSON({"x":180,"y":20,"w":40,"h":30,"cx":190,"cy":35})JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, pad_outside_canvas, error));
+        CHECK(error.find("outside canvas") != std::string::npos);
+
+        const auto missing_center = with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30})JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, missing_center, error));
+        CHECK(error.find("requires 'cx'") != std::string::npos);
+    }
 }
 
 TEST_CASE("snake_case matches the generated-file convention",
