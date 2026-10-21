@@ -32,6 +32,61 @@ def _wgpu_native_diagnostic_workflow() -> dict[str, object]:
     )
 
 
+class MiseCandidateWorkflowTest(unittest.TestCase):
+    """The M1 pinned-mise lane is explicit, main-only, and ordered safely."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = _workflow()
+        trigger = cls.workflow.get("on", cls.workflow.get(True, {}))
+        cls.dispatch = trigger["workflow_dispatch"]
+        cls.steps = cls.workflow["jobs"]["build"]["steps"]
+
+    def test_dispatch_is_explicitly_opt_in(self) -> None:
+        candidate = self.dispatch["inputs"]["mise_candidate"]
+        self.assertEqual(candidate["type"], "boolean")
+        self.assertFalse(candidate["default"])
+        self.assertIn("main-only", candidate["description"])
+
+    def test_resolver_requires_main_and_pilot_selector(self) -> None:
+        step = next(
+            s for s in self.workflow["jobs"]["resolve-provider"]["steps"]
+            if s.get("id") == "resolve"
+        )
+        text = step["run"]
+        for marker in (
+            "WORKFLOW_DISPATCH_MISE_CANDIDATE",
+            "mise_candidate is main-only workflow_dispatch",
+            "pulp-build-vm-mise",
+            "pulp-build-pr-head",
+            "required_candidate_labels",
+        ):
+            self.assertIn(marker, text)
+
+    def test_activation_precedes_all_build_tool_use(self) -> None:
+        names = [step.get("name") for step in self.steps]
+        activate = names.index("Activate pinned mise candidate toolchain")
+        bootstrap = names.index("Bootstrap repository dependencies")
+        report = names.index("Toolchain report against the manifest (warn only)")
+        configure = names.index("Configure")
+        self.assertLess(activate, bootstrap)
+        self.assertLess(activate, report)
+        self.assertLess(activate, configure)
+        text = json.dumps(self.steps[activate], sort_keys=True)
+        for marker in (
+            "mise-2026.10.11/bin/mise",
+            "expected_mise_version",
+            "expected_mise_sha",
+            "shasum -a 256",
+            "actual_mise_version",
+            "MISE_ENV=toolchain",
+            "MISE_TRUSTED_CONFIG_PATHS",
+            "PATH=$HOME/.cargo/bin:$tool_path",
+            "GITHUB_ENV",
+        ):
+            self.assertIn(marker, text)
+
+
 class WgpuNativeDiagnosticWorkflowTest(unittest.TestCase):
     """The native callback diagnostic is advisory and fail-closed."""
 
