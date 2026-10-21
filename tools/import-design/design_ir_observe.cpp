@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <optional>
 
@@ -58,7 +59,7 @@ bool write_text(const std::filesystem::path& path, const std::string& text) {
 void usage() {
     std::cerr << "Usage: pulp-design-ir-observe --input <design.ir.json> "
                  "--render <png> --layout <json> --width <px> --height <px> "
-                 "[--scale <factor>] [--text-diagnostics <json>] [--set-value "
+                 "[--scale <factor>] [--origin <x>,<y>] [--text-diagnostics <json>] [--set-value "
                  "<anchor>=<normalized>]... [--click <x>,<y>]... "
                  "[--drag <x1>,<y1>:<x2>,<y2>]... [--key <name>]... "
                  "[--interaction-log <json>] [--backend skia|gpu] "
@@ -536,6 +537,9 @@ int main(int argc, char** argv) {
     float width = 0.0f;
     float height = 0.0f;
     float scale = 2.0f;
+    float origin_x = 0.0f;
+    float origin_y = 0.0f;
+    bool has_origin = false;
     std::vector<std::pair<std::string, float>> value_overrides;
     std::vector<InteractionStep> steps;
     std::filesystem::path interaction_log_path;
@@ -557,6 +561,16 @@ int main(int argc, char** argv) {
         else if (arg == "--width" && parse_positive(value, width)) {}
         else if (arg == "--height" && parse_positive(value, height)) {}
         else if (arg == "--scale" && parse_positive(value, scale)) {}
+        else if (arg == "--origin") {
+            auto point = parse_point(value);
+            if (!point) {
+                std::cerr << "Error: --origin expects <x>,<y>\n";
+                return 2;
+            }
+            origin_x = point->x;
+            origin_y = point->y;
+            has_origin = true;
+        }
         else if (arg == "--set-value") {
             auto parsed = parse_value_override(value);
             if (!parsed) {
@@ -651,6 +665,33 @@ int main(int argc, char** argv) {
     // relative local_paths resolve against it, and a local_path that no longer
     // points at its bytes is recovered by content hash from the asset folders
     // beside it. Without this the tool depends on the process CWD.
+    if (has_origin) {
+        // render_to_png lays the root out at the viewport origin. Translate
+        // the authored document child by the authenticated frame origin so a
+        // cropped panel-local IR is painted at its browser page-space rect.
+        // This is diagnostic harness registration; the imported IR remains
+        // panel-local and production consumers do not pass --origin.
+        for (auto& child : ir.root.children) {
+            child.style.left = child.style.left.value_or(0.0f) + origin_x;
+            child.style.top = child.style.top.value_or(0.0f) + origin_y;
+        }
+        // The raster observer clears with a framework default. Carry the
+        // authenticated document/body background onto the viewport root so
+        // page-space pixels outside a cropped authored surface match the
+        // Chromium page rather than the observer's diagnostic clear color.
+        std::function<std::optional<std::string>(const pulp::view::IRNode&)> find_background;
+        find_background = [&find_background](const pulp::view::IRNode& node)
+            -> std::optional<std::string> {
+            if (node.style.background_color)
+                return node.style.background_color;
+            for (const auto& child : node.children)
+                if (auto color = find_background(child))
+                    return color;
+            return std::nullopt;
+        };
+        if (auto color = find_background(ir.root))
+            ir.root.style.background_color = std::move(*color);
+    }
     auto root = pulp::view::build_native_view_tree(
         ir, ir.asset_manifest,
         {.asset_base_directory = input_path.parent_path()});

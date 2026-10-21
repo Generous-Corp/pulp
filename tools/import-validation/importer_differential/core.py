@@ -436,6 +436,23 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
     return result
 
 
+def translate_native_nodes(
+    nodes: list[NativeNode], dx: float, dy: float,
+) -> list[NativeNode]:
+    """Register panel-local native bounds into authenticated page-space."""
+    translated: list[NativeNode] = []
+    for node in nodes:
+        bounds = node.bounds
+        if bounds is not None:
+            bounds = (bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3])
+        translated.append(NativeNode(
+            anchor=node.anchor, node_type=node.node_type, name=node.name,
+            text=node.text, parent_anchor=node.parent_anchor,
+            style=node.style, bounds=bounds,
+            backend_node_id=node.backend_node_id))
+    return translated
+
+
 def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
     score = 0.0
     if (browser.backend_node_id is not None
@@ -1330,12 +1347,21 @@ def compare_one(
     native_snapshot_binding, native_snapshot_bytes = verify_capture_snapshot_binding(native_capture, native_evidence)
     viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
+    try:
+        authored_frame = native_capture["reference"]["authored_frame"]
+        authored_x = float(authored_frame["x"])
+        authored_y = float(authored_frame["y"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LabError("native capture is missing authenticated authored-frame metadata") from exc
+    if not math.isfinite(authored_x) or not math.isfinite(authored_y):
+        raise LabError("native authored-frame origin is non-finite")
     render_args = [
         str(observer), "--input", str(native_ir),
         "--render", str(native_render), "--layout", str(native_layout),
         "--width", str(capture_width), "--height", str(capture_height),
         "--scale", str(capture["reference"]["device_scale_factor"]),
         "--backend", "skia", "--render-receipt", str(native_receipt),
+        "--origin", f"{authored_x},{authored_y}",
     ]
     render_run = run_command(render_args, timeout_seconds)
     write_json(native_dir / "render-command.json", command_record(render_run))
@@ -1380,6 +1406,9 @@ def compare_one(
     browser_snapshot = json.loads(browser_snapshot_bytes)
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
     browser_flat_raw = browser_nodes(browser_snapshot)
+    # The observer's authenticated --origin registration shifts the rendered
+    # IR and its layout receipt into page-space together. Do not apply the
+    # authored-frame translation a second time here.
     native_flat = native_nodes(native_doc, native_layout_doc)
     browser_flat, geometry_registration = register_browser_nodes_to_native_frame(
         browser_flat_raw, capture, native_capture)
