@@ -1519,5 +1519,135 @@ class GeometryGateTests(unittest.TestCase):
         self.assertEqual(raw["fixture_count"], 2)
 
 
+class FormControlBoundaryTests(unittest.TestCase):
+    """Themed form controls are a stated boundary, never a hidden score."""
+
+    @staticmethod
+    def form_snapshot() -> dict:
+        # 0 DIV, 1 INPUT[type=range] (themed), 2 INPUT[type=checkbox]
+        # (appearance:none), 3 INPUT[type=range] (appearance:none), 4 SELECT,
+        # 5 OPTION (no layout), 6 its text, 7 SPAN (no layout, outside a select).
+        strings = [
+            "DIV", "INPUT", "SELECT", "OPTION", "#text", "SPAN", "type",
+            "range", "checkbox", "block", "auto", "none", "inline-block",
+            "A",
+        ]
+        return {
+            "strings": strings,
+            "computedStyleNames": ["display", "appearance"],
+            "documents": [{
+                "nodes": {
+                    "parentIndex": [-1, 0, 0, 0, 0, 4, 5, 0],
+                    "nodeType": [1, 1, 1, 1, 1, 1, 3, 1],
+                    "nodeName": [0, 1, 1, 1, 2, 3, 4, 5],
+                    "nodeValue": [-1, -1, -1, -1, -1, -1, 13, -1],
+                    "attributes": [[], [6, 7], [6, 8], [6, 7], [], [], [], []],
+                },
+                "layout": {
+                    "nodeIndex": [0, 1, 2, 3, 4],
+                    "bounds": [[0, 0, 100, 100], [10, 10, 40, 10],
+                               [10, 30, 10, 10], [10, 50, 40, 10],
+                               [10, 70, 40, 20]],
+                    "styles": [[9, 11], [12, 10], [12, 11], [12, 11], [12, 11]],
+                },
+            }],
+        }
+
+    def test_unlaid_out_options_are_not_expected_boxes(self) -> None:
+        tags = [node.tag for node in LAB.browser_nodes(self.form_snapshot())]
+        # The select draws its option; the option has no box to lower.
+        self.assertNotIn("option", tags)
+        # Control: an element without layout OUTSIDE a select is still counted,
+        # so the exclusion is the select's ownership and not missing layout.
+        self.assertIn("span", tags)
+        self.assertIn("select", tags)
+
+    def test_control_status_separates_theme_from_author_styling(self) -> None:
+        from importer_differential.form_controls import form_controls
+
+        rows = form_controls(LAB.browser_nodes(self.form_snapshot()))
+        status = {(row["tag"], row["type"], row["appearance"]): row["status"]
+                  for row in rows}
+        self.assertEqual(status[("input", "range", "auto")],
+                         "ua-default-form-chrome")
+        self.assertEqual(status[("input", "checkbox", "none")], "author-styled")
+        # appearance:none does not reach a range's thumb.
+        self.assertEqual(status[("input", "range", "none")],
+                         "ua-shadow-form-part")
+        self.assertEqual(status[("select", None, "none")], "author-styled")
+        # A capture without `appearance` cannot say, and does not guess.
+        from importer_differential.form_controls import control_status
+        self.assertEqual(control_status("button", "", {}),
+                         "appearance-unrecorded")
+
+    @requires_pillow
+    def test_residual_is_attributed_to_the_control_that_owns_it(self) -> None:
+        from importer_differential.form_controls import (
+            attribute_residual, support_boundaries)
+
+        controls = [
+            {"tag": "input", "type": "range", "appearance": "auto",
+             "status": "ua-default-form-chrome", "bounds": [10, 10, 20, 10]},
+            {"tag": "input", "type": "checkbox", "appearance": "none",
+             "status": "author-styled", "bounds": [60, 10, 10, 10]},
+        ]
+        reference = Image.new("RGBA", (100, 40), (240, 240, 240, 255))
+        candidate = reference.copy()
+        # Error only inside the themed control's box (page origin (5, 5)).
+        for x in range(6, 24):
+            for y in range(6, 14):
+                reference.putpixel((x, y), (0, 0, 255, 255))
+        attribution = attribute_residual(controls, reference, candidate,
+                                         (5.0, 5.0), 1.0)
+        shares = [row["foreground_error_share"]
+                  for row in attribution["controls"]]
+        self.assertEqual(shares, [1.0, 0.0])
+        self.assertEqual(attribution["boundary_foreground_error_share"], 1.0)
+        boundaries = support_boundaries(attribution)
+        self.assertEqual([b["boundary"] for b in boundaries],
+                         ["ua-default-form-chrome"])
+        # Negative control: the same error under the author-styled control is
+        # not the theme's, and no boundary takes credit for it.
+        candidate = reference.copy()
+        reference = Image.new("RGBA", (100, 40), (240, 240, 240, 255))
+        for x in range(56, 64):
+            for y in range(6, 14):
+                reference.putpixel((x, y), (0, 0, 255, 255))
+        attribution = attribute_residual(controls, reference,
+                                         Image.new("RGBA", (100, 40),
+                                                   (240, 240, 240, 255)),
+                                         (5.0, 5.0), 1.0)
+        self.assertEqual(attribution["boundary_foreground_error_share"], 0.0)
+        self.assertEqual(attribution["controls"][1]["foreground_error_share"],
+                         1.0)
+
+    def test_boundary_makes_fixture_browser_required_without_moving_scores(
+            self) -> None:
+        perfect = {"score": 1.0}
+        visual = {"score": 0.7, "registered_visual": {"score": 0.71}}
+        boundary = [{"boundary": "ua-default-form-chrome", "control_count": 2,
+                     "controls": ["button", "input[type=range]"],
+                     "foreground_error_share": 0.9}]
+        result = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, visual, boundary)
+        self.assertEqual(result["classification"], "browser-required")
+        self.assertFalse(result["threshold_eligible"])
+        self.assertEqual(result["visual_gate_score"], 0.71)
+        self.assertEqual(result["visual_full_frame_score"], 0.7)
+        self.assertEqual(result["support_boundaries"],
+                         ["ua-default-form-chrome"])
+        self.assertTrue(any("visual score below" in reason
+                            for reason in result["reasons"]))
+        # Even a passing score stays ineligible across the boundary.
+        result = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, perfect, boundary)
+        self.assertFalse(result["threshold_eligible"])
+        recognition = LAB.source_recognition("<!doctype html><html></html>")
+        causes = [finding["cause"] for finding in LAB.classify_gaps(
+            recognition, perfect, perfect, perfect, visual,
+            {"support_boundaries": boundary, "controls": []})]
+        self.assertIn("ua-default-form-chrome", causes)
+
+
 if __name__ == "__main__":
     unittest.main()

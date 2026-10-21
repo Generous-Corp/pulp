@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .form_controls import attribute_residual, form_controls, support_boundaries
 from .recognition import source_recognition, unsupported_features
 from .reports import format_summary
 
@@ -93,6 +94,8 @@ ROOT_CAUSE_ORDER = [
     "flex-layout", "grid-layout", "intrinsic-sizing", "absolute-positioning",
     "font-resolution", "font-metrics", "text-wrapping", "svg",
     "image-loading", "transform", "animation", "portal",
+    "ua-default-form-chrome", "ua-shadow-form-part",
+    "form-control-appearance-unrecorded",
     "unsupported-browser-api", "source-recognition", "unknown",
 ]
 
@@ -342,6 +345,16 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
             stack.extend(children.get(child, []))
         return " ".join(reversed(parts)).strip()
 
+    def inside_select(index: int) -> bool:
+        cursor = parents[index] if index < len(parents) else -1
+        for _ in range(len(parents)):
+            if cursor < 0:
+                return False
+            if decode_string(strings, names[cursor]).lower() == "select":
+                return True
+            cursor = parents[cursor] if cursor < len(parents) else -1
+        return False
+
     result: list[BrowserNode] = []
     for index, node_type in enumerate(types):
         if node_type != 1:
@@ -355,6 +368,10 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
             attrs[decode_string(strings, pairs[offset])] = decode_string(
                 strings, pairs[offset + 1])
         layout_index = layout_by_node.get(index)
+        if layout_index is None and inside_select(index):
+            # A closed select draws its selected option itself; its options
+            # have no layout object and no box of their own to lower.
+            continue
         bounds = None
         styles: dict[str, str] = {}
         if layout_index is not None:
@@ -1299,15 +1316,81 @@ def geometry_gate_failures(geometry: dict[str, Any]) -> list[str]:
     return list(gate.get("failed", []))
 
 
+def form_control_residual(
+    browser_flat_raw: list[BrowserNode],
+    reference_path: Path,
+    candidate_path: Path,
+    visual: dict[str, Any],
+) -> dict[str, Any]:
+    """Form controls, their support status, and their share of the residual.
+
+    Attributed on the image pair the visual gate scored: the registered
+    authored-frame crops when registration ran, the full frames otherwise.
+    """
+    controls = form_controls(browser_flat_raw)
+    if not controls:
+        return {"controls": [], "support_boundaries": [],
+                "foreground_error_total": 0.0,
+                "boundary_foreground_error_share": 0.0,
+                "scored_surface": None}
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise LabError("Pillow is required for form-control attribution") from exc
+    reference = Image.open(reference_path).convert("RGBA")
+    candidate = Image.open(candidate_path).convert("RGBA")
+    registered = visual.get("registered_visual")
+    scale = float(visual["registration"].get("device_scale_factor", 1.0))
+    origin = (0.0, 0.0)
+    surface = "full-frame"
+    if registered:
+        registration = registered["registration"]
+        reference = reference.crop(tuple(registration["browser_crop_px"]))
+        candidate = candidate.crop(tuple(registration["native_crop_px"]))
+        frame = registration["logical_frame"]
+        origin = (float(frame["x"]), float(frame["y"]))
+        surface = "registered-authored-frame"
+    attribution = attribute_residual(controls, reference, candidate, origin, scale)
+    attribution["support_boundaries"] = support_boundaries(attribution)
+    attribution["scored_surface"] = surface
+    return attribution
+
+
 def classify_gaps(
     recognition: dict[str, Any],
     structural: dict[str, Any],
     geometry: dict[str, Any],
     typography: dict[str, Any],
     visual: dict[str, Any],
+    form_control_report: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     features = recognition["features"]
     facts: dict[str, tuple[str, float, str]] = {}
+    if form_control_report:
+        for boundary in form_control_report.get("support_boundaries", []):
+            what = ("painted by Chromium's native theme (appearance is not none)"
+                    if boundary["boundary"] == "ua-default-form-chrome" else
+                    "drawing parts in a user-agent shadow tree the snapshot "
+                    "does not serialize")
+            facts[boundary["boundary"]] = (
+                f"{boundary['control_count']} form control(s) "
+                f"({', '.join(boundary['controls'])}) {what}; "
+                f"{boundary['foreground_error_share'] * 100:.1f}% of the scored "
+                "foreground error lies inside their boxes",
+                0.9,
+                "form-control-appearance",
+            )
+        unrecorded = [
+            row for row in form_control_report.get("controls", [])
+            if row["status"] == "appearance-unrecorded"]
+        if unrecorded:
+            facts["form-control-appearance-unrecorded"] = (
+                f"{len(unrecorded)} form control(s) have no captured "
+                "appearance, so whether the native theme paints them is "
+                "unknown; capture again",
+                0.5,
+                "browser-capture",
+            )
     mappings = {
         "canvas": ("canvas", 1.0),
         "webgl": ("webgl", 1.0),
@@ -1386,7 +1469,16 @@ def promotion_recommendation(
     geometry: dict[str, Any],
     typography: dict[str, Any],
     visual: dict[str, Any],
+    boundaries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Advisory classification. Support boundaries never change a score.
+
+    A support boundary is content Pulp's renderer cannot reproduce from the
+    capture (for example a control the native theme paints). It makes the
+    fixture browser-required and ineligible, while every score — including the
+    residual the boundary explains — stays reported and counted.
+    """
+    boundaries = boundaries or []
     registered_visual = visual.get("registered_visual")
     visual_gate_score = (
         registered_visual["score"] if registered_visual else visual["score"])
@@ -1403,10 +1495,24 @@ def promotion_recommendation(
     geometry_failures = geometry_gate_failures(geometry)
     if not geometry_gate_ok(geometry):
         failed.insert(1 if "structural" in failed else 0, "geometry")
-    threshold_eligible = not unsupported and not failed
-    if unsupported:
+    threshold_eligible = not unsupported and not failed and not boundaries
+    if unsupported or boundaries:
         classification = "browser-required"
-        reasons = [f"unsupported dynamic features: {', '.join(unsupported)}"]
+        reasons = []
+        if unsupported:
+            reasons.append(
+                f"unsupported dynamic features: {', '.join(unsupported)}")
+        for boundary in boundaries:
+            reasons.append(
+                f"support boundary {boundary['boundary']}: "
+                f"{boundary['control_count']} control(s), "
+                f"{boundary['foreground_error_share'] * 100:.1f}% of scored "
+                "foreground error")
+        reasons += [
+            (f"geometry gate failed: {', '.join(geometry_failures)}"
+             if name == "geometry" else
+             f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}")
+            for name in failed]
     else:
         classification = "native-with-browser-validation"
         reasons = (
@@ -1429,6 +1535,7 @@ def promotion_recommendation(
             registered_visual["score"] if registered_visual else None),
         "geometry_gate_ok": geometry_gate_ok(geometry),
         "geometry_gate_failed": geometry_failures,
+        "support_boundaries": [b["boundary"] for b in boundaries],
         "reasons": reasons,
     }
 
@@ -1894,10 +2001,14 @@ def compare_one(
     if visual.get("registered_visual"):
         visual["registered_visual"]["registration"]["native_layout"] = native_frame_registration
     blockers = unsupported_features(recognition)
+    form_control_report = form_control_residual(
+        browser_flat_raw, browser_dir / "browser.png", native_render, visual)
     classifications = classify_gaps(
-        recognition, structural, geometry, typography, visual)
+        recognition, structural, geometry, typography, visual,
+        form_control_report)
     recommendation = promotion_recommendation(
-        blockers, structural, geometry, typography, visual)
+        blockers, structural, geometry, typography, visual,
+        form_control_report["support_boundaries"])
     timings = {
         "browser_import_ms": browser_run.elapsed_ms,
         "native_import_ms": native_run.elapsed_ms,
@@ -2038,6 +2149,7 @@ def compare_one(
             "typography": typography,
             "visual": visual,
             "viewport_dpr_audit": viewport_dpr,
+            "form_controls": form_control_report,
         },
         "classifications": classifications,
         "promotion": recommendation,

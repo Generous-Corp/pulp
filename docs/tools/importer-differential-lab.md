@@ -200,7 +200,34 @@ Production promotion is disabled in this slice. A run is only marked
 - geometry score at least 0.98;
 - typography score at least 0.98;
 - visual score at least 0.995;
-- no recognized dynamic blocker.
+- no recognized dynamic blocker;
+- no support boundary.
+
+### Form-control support boundary
+
+Chromium paints a form control whose used `appearance` is not `none` with its
+native theme. Its computed fills and borders then do not describe its pixels:
+an unstyled range reports a white background it never draws, and an unstyled
+button reports a 2px outset black border drawn as a thin rounded grey one.
+Reproducing those pixels would mean copying the browser's own control
+appearance, so the lab states the boundary instead of scoring it as an
+importer failure. `comparison.form_controls` lists every laid-out control with
+its `appearance` and one status:
+
+- `ua-default-form-chrome` — themed; a support boundary;
+- `ua-shadow-form-part` — `appearance: none`, but parts such as a range
+  thumb, colour swatch, or date fields live in a user-agent shadow tree the
+  snapshot does not serialize; a support boundary;
+- `author-styled` — the computed box and the control's value describe it,
+  and the native lowering is expected to match;
+- `appearance-unrecorded` — the capture predates the `appearance` column;
+  reported as a hypothesis, never a boundary.
+
+Each control carries its share of the scored foreground error (the registered
+authored-frame crop when registration ran), so the report says how much of
+the residual is theme. A boundary makes the fixture `browser-required` and
+ineligible. It never removes the fixture from a denominator or changes any
+score; the summary prints the boundary beside the unchanged scores.
 
 React/Vue/Svelte evaluation, Canvas, WebGL, portals, shadow DOM, asynchronous
 initialization, conditional rendering, and animation are conservative blockers.

@@ -46,6 +46,13 @@ def format_summary(report: dict[str, Any]) -> str:
         lines.append(
             f"- Registered geometry: mean {gate['score']:.3f}, max edge delta "
             f"{bound['max_abs_delta']} px over {gate['matched_bounds']} matched boxes")
+    form_controls = comparison.get("form_controls") or {}
+    for boundary in form_controls.get("support_boundaries", []):
+        lines.append(
+            f"- Support boundary `{boundary['boundary']}`: "
+            f"{boundary['control_count']} control(s), "
+            f"{boundary['foreground_error_share'] * 100:.1f}% of scored "
+            "foreground error (scores unchanged)")
     lines += [
         "",
         "Chromium remains authoritative. This report never substitutes or "
