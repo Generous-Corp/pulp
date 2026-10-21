@@ -492,6 +492,25 @@ knowing before you touch that file:
 - **`native_tree_root_children` / `native_tree_depth` are the shape.** A depth
   of 1 means the lowering reflattened and every per-node count still looks
   right, so check the shape, not only the census.
+- **A captured `<canvas>` does NOT by itself flatten the panel.** Canvas panels
+  lower hierarchically first (hoisting already covers a canvas that paints
+  before its parent) and switch to the flat paint-order list only when that
+  hierarchy reports `overlapping_reorders > 0`; the count that forced it is
+  recorded as `native_tree_flattened_overlapping_reorders`. Always flattening
+  on a canvas cost static canvas panels their sections for no fidelity gain.
+- **Every lowered node, SVG shapes included, carries `backend_node_id`.** A
+  vector node's box is its root `<svg>`'s box (the viewBox frame), never the
+  shape's ink box, so anything comparing geometry by identity must compare a
+  shape against Chromium's `<svg>` box (the differential lab labels these rows
+  `reference_frame: svg-viewport`).
+- **A node can own several DOMSnapshot layout rows.** A pseudo-element's own
+  box is followed by a zero-size row for its generated content at the page
+  origin; a reader that keeps the last row per node sees every `::before` as
+  empty. Use the first positive-area row.
+- **Clips snap with the box paint.** A clipper's box paints on
+  `floor(edge + 0.5)` CSS edges, and so does Chromium's overflow clip; lowering
+  snaps the stored clip the same way (only when a device scale is known), or a
+  rounded track's clipped fill lands one device row off at half-pixel offsets.
 - **Clipping travels with the node, NOT with its place in the tree — never put
   `overflow` back on a lowered node.** A tree that carries `overflow` clips by
   DOM parentage, because a renderer applies it to whatever the node's children
