@@ -94,6 +94,49 @@ struct ConditionalParameterApplyResult {
     std::uint64_t current_identity = 0;
 };
 
+/// Pre-resolved audio-thread read handle for one parameter's base value.
+///
+/// `StateStore::get_value()` looks the ID up in a hash map on every call.
+/// A processor that reads the same parameters every block can resolve them
+/// once — typically in `prepare()` — and read through the handle instead:
+/// `get()` is an inline relaxed atomic load with no lookup and no call.
+///
+/// The handle stays valid for the lifetime of the store it came from, even
+/// if more parameters are registered afterwards (it holds the store's value
+/// table and an index, not a pointer to the value). A default-constructed
+/// handle, or one resolved from an unknown ID, reads 0.0f — the same result
+/// as `get_value()` for an unknown ID.
+///
+/// @code
+/// void prepare(const PrepareContext&) override {
+///     gain_ = state().param_reader(kGain);
+/// }
+/// void process(...) override {
+///     const float gain = gain_.get();
+///     ...
+/// }
+/// @endcode
+class ParamReader {
+public:
+    ParamReader() = default;
+
+    /// Current base value (lock-free, relaxed ordering), or 0.0f if unbound.
+    float get() const noexcept {
+        return values_ != nullptr ? (*values_)[index_].get() : 0.0f;
+    }
+
+    /// True if this handle refers to a registered parameter.
+    bool valid() const noexcept { return values_ != nullptr; }
+
+private:
+    friend class StateStore;
+    ParamReader(const std::vector<ParamValue>* values, std::size_t index) noexcept
+        : values_(values), index_(index) {}
+
+    const std::vector<ParamValue>* values_ = nullptr;
+    std::size_t index_ = 0;
+};
+
 /// Centralized parameter storage with lock-free value access.
 ///
 /// StateStore is the single source of truth for all plugin parameters.
@@ -129,6 +172,12 @@ public:
     /// Read a parameter's base value (lock-free).
     /// @note Safe to call from the audio thread.
     float get_value(ParamID id) const;
+
+    /// Resolve a read handle for a parameter's base value. Call off the
+    /// audio thread (e.g. in prepare()); the returned handle's get() is
+    /// cheaper than get_value() because the ID lookup is already done.
+    /// An unknown ID yields an unbound handle that reads 0.0f.
+    ParamReader param_reader(ParamID id) const;
 
     /// Read a parameter's modulated value: base + mod_offset (lock-free).
     /// @note Safe to call from the audio thread.

@@ -3342,3 +3342,68 @@ TEST_CASE("StateStore quantizes explicitly typed parameters on every write path"
     store.set_value(2, 0.6f);
     REQUIRE_THAT(store.get_value(2), WithinAbs(0.6, 0.0001));
 }
+
+TEST_CASE("ParamReader reads the live base value without an ID lookup",
+          "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 7, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
+    store.add_parameter({.id = 9, .name = "Mix", .range = {0.0f, 1.0f, 0.25f}});
+
+    const auto gain = store.param_reader(7);
+    const auto mix = store.param_reader(9);
+    REQUIRE(gain.valid());
+    REQUIRE(mix.valid());
+    REQUIRE(gain.get() == 1.0f);
+    REQUIRE(mix.get() == 0.25f);
+
+    store.set_value(7, 0.5f);
+    store.set_value(9, 0.75f);
+    REQUIRE(gain.get() == 0.5f);
+    REQUIRE(gain.get() == store.get_value(7));
+    REQUIRE(mix.get() == 0.75f);
+}
+
+TEST_CASE("ParamReader for an unknown ID or default handle reads zero",
+          "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
+
+    const auto unknown = store.param_reader(42);
+    REQUIRE_FALSE(unknown.valid());
+    REQUIRE(unknown.get() == store.get_value(42));
+    REQUIRE(unknown.get() == 0.0f);
+
+    const pulp::state::ParamReader unbound;
+    REQUIRE_FALSE(unbound.valid());
+    REQUIRE(unbound.get() == 0.0f);
+}
+
+TEST_CASE("ParamReader survives later parameter registration",
+          "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "First", .range = {0.0f, 10.0f, 3.0f}});
+    const auto first = store.param_reader(1);
+
+    // Grow the value table well past any initial capacity so it reallocates.
+    for (pulp::state::ParamID id = 2; id < 300; ++id)
+        store.add_parameter({.id = id, .name = "P", .range = {0.0f, 1.0f, 0.0f}});
+
+    store.set_value(1, 6.0f);
+    REQUIRE(first.get() == 6.0f);
+    const auto last = store.param_reader(299);
+    store.set_value(299, 0.5f);
+    REQUIRE(last.get() == 0.5f);
+}
+
+TEST_CASE("ParamReader::get does not allocate", "[state][param-reader][rt-safety]") {
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
+    const auto gain = store.param_reader(1);
+    float sum = 0.0f;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int i = 0; i < 64; ++i) sum += gain.get();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(sum == 64.0f);
+}

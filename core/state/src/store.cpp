@@ -422,6 +422,12 @@ float StateStore::get_value(ParamID id) const {
     return values_[it->second].get();
 }
 
+ParamReader StateStore::param_reader(ParamID id) const {
+    auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end()) return {};
+    return ParamReader(&values_, it->second);
+}
+
 float StateStore::get_modulated(ParamID id) const {
     auto it = id_to_index_.find(id);
     if (it == id_to_index_.end()) return 0.0f;
