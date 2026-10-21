@@ -207,8 +207,9 @@ struct SharedIoTelemetrySnapshot {
     std::uint64_t pre_submit_delay_ns = 0;
     std::uint64_t submit_to_completion_ns = 0;
     std::uint64_t scheduled_to_completion_ns = 0;
-    // False means the aggregate could not be represented without wrapping.
-    // Consumers must not treat the aggregate as authoritative in that case.
+    // False means the completion-timing triple is not authoritative: either
+    // the aggregate could not be represented without wrapping, or no coherent
+    // copy could be taken because a writer held the update open.
     bool completion_timing_valid = true;
     std::uint64_t gpu_elapsed_ns = 0;
     std::uint64_t gpu_busy_counter = 0;
@@ -216,9 +217,10 @@ struct SharedIoTelemetrySnapshot {
 };
 
 // Atomic, allocation-free counters for the private bridge. Timing values are
-// the latest observed sample and a snapshot may span adjacent worker updates;
-// the bridge's bounded raw receipt remains the authority for correlated
-// distributions. GPU elapsed time is explicitly unavailable until an
+// the latest observed sample and a snapshot may span adjacent worker updates,
+// except that the completion-timing triple is copied under a writer-serialized
+// sequence guard; the bridge's bounded raw receipt remains the authority for
+// correlated distributions. GPU elapsed time is explicitly unavailable until an
 // authentic provider timestamp is supplied.
 class SharedIoTelemetry {
   public:
@@ -230,6 +232,8 @@ class SharedIoTelemetry {
                                              std::memory_order_relaxed);
     }
 
+    // Non-realtime lifecycle operation: it may wait for an in-progress
+    // completion-timing record so that the reset is never dropped.
     void reset() noexcept {
         configured_lead_blocks_.store(0, std::memory_order_relaxed);
         configured_pipeline_depth_.store(0, std::memory_order_relaxed);
@@ -310,9 +314,13 @@ class SharedIoTelemetry {
     void record_encode_submit_duration_ns(std::uint64_t value) noexcept {
         encode_submit_duration_ns_.store(value, std::memory_order_relaxed);
     }
-    void record_completion_timing(std::uint64_t pre_submit_delay_ns,
+    // Returns false when the sample was dropped because a concurrent writer held
+    // the guard; that writer's update is the latest one instead, and dropping
+    // keeps this path wait-bounded.
+    bool record_completion_timing(std::uint64_t pre_submit_delay_ns,
                                   std::uint64_t submit_to_completion_ns) noexcept {
-        begin_completion_timing_update();
+        if (!try_begin_completion_timing_update())
+            return false;
         pre_submit_delay_ns_.store(pre_submit_delay_ns, std::memory_order_relaxed);
         submit_to_completion_ns_.store(submit_to_completion_ns, std::memory_order_relaxed);
         if (submit_to_completion_ns >
@@ -320,12 +328,13 @@ class SharedIoTelemetry {
             scheduled_to_completion_ns_.store(0, std::memory_order_relaxed);
             completion_timing_valid_.store(false, std::memory_order_relaxed);
             completion_timing_sequence_.fetch_add(1, std::memory_order_release);
-            return;
+            return true;
         }
         scheduled_to_completion_ns_.store(pre_submit_delay_ns + submit_to_completion_ns,
                                           std::memory_order_relaxed);
         completion_timing_valid_.store(true, std::memory_order_relaxed);
         completion_timing_sequence_.fetch_add(1, std::memory_order_release);
+        return true;
     }
     void record_gpu_elapsed_ns(std::uint64_t value) noexcept {
         gpu_elapsed_ns_.store(value, std::memory_order_relaxed);
@@ -358,17 +367,24 @@ class SharedIoTelemetry {
         out.worker_pack_copy_duration_ns =
             worker_pack_copy_duration_ns_.load(std::memory_order_relaxed);
         out.encode_submit_duration_ns = encode_submit_duration_ns_.load(std::memory_order_relaxed);
-        for (;;) {
+        out.completion_timing_valid = false;
+        for (int attempt = 0; attempt < kCompletionTimingAttempts; ++attempt) {
             const auto sequence = completion_timing_sequence_.load(std::memory_order_acquire);
             if ((sequence & 1U) != 0U) {
                 continue;
             }
-            out.pre_submit_delay_ns = pre_submit_delay_ns_.load(std::memory_order_relaxed);
-            out.submit_to_completion_ns = submit_to_completion_ns_.load(std::memory_order_relaxed);
-            out.scheduled_to_completion_ns =
-                scheduled_to_completion_ns_.load(std::memory_order_relaxed);
-            out.completion_timing_valid = completion_timing_valid_.load(std::memory_order_relaxed);
-            if (completion_timing_sequence_.load(std::memory_order_acquire) == sequence) {
+            const auto pre_submit = pre_submit_delay_ns_.load(std::memory_order_relaxed);
+            const auto submit = submit_to_completion_ns_.load(std::memory_order_relaxed);
+            const auto scheduled = scheduled_to_completion_ns_.load(std::memory_order_relaxed);
+            const auto valid = completion_timing_valid_.load(std::memory_order_relaxed);
+            // Orders the relaxed data loads before the re-check; an acquire
+            // load alone would let them be satisfied after it.
+            std::atomic_thread_fence(std::memory_order_acquire);
+            if (completion_timing_sequence_.load(std::memory_order_relaxed) == sequence) {
+                out.pre_submit_delay_ns = pre_submit;
+                out.submit_to_completion_ns = submit;
+                out.scheduled_to_completion_ns = scheduled;
+                out.completion_timing_valid = valid;
                 break;
             }
         }
@@ -379,14 +395,28 @@ class SharedIoTelemetry {
     }
 
   private:
-    void begin_completion_timing_update() noexcept {
-        for (;;) {
+    // Bounds both sides of the completion-timing guard. A snapshot that cannot
+    // observe a stable sequence within this many attempts reports the triple as
+    // invalid, and a recorder that cannot acquire it drops its sample.
+    static constexpr int kCompletionTimingAttempts = 64;
+
+    bool try_begin_completion_timing_update() noexcept {
+        for (int attempt = 0; attempt < kCompletionTimingAttempts; ++attempt) {
             auto sequence = completion_timing_sequence_.load(std::memory_order_relaxed);
             if ((sequence & 1U) == 0U &&
                 completion_timing_sequence_.compare_exchange_weak(
                     sequence, sequence + 1, std::memory_order_acquire, std::memory_order_relaxed)) {
-                return;
+                // Keeps the following data stores from becoming visible before
+                // the odd sequence value that marks the update as in progress.
+                std::atomic_thread_fence(std::memory_order_release);
+                return true;
             }
+        }
+        return false;
+    }
+
+    void begin_completion_timing_update() noexcept {
+        while (!try_begin_completion_timing_update()) {
         }
     }
 
