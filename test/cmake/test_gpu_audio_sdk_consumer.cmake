@@ -129,7 +129,8 @@ int main() {
         status.sample_rate != 48000 || status.block_size != 32 ||
         status.latency_samples != 64 ||
         status.fallback_policy != MissPolicy::CpuFallback ||
-        !status.fallback_available || !status.diagnostics_available) return 16;
+        !status.fallback_available || !status.diagnostics_available ||
+        status.recovery_reason != GpuAudioRecoveryReason::None) return 16;
     Buffer<float> input(1, 32), output(1, 32);
     for (std::uint32_t block = 1; block <= 4; ++block) {
         std::fill(input.channel(0).begin(), input.channel(0).end(), static_cast<float>(block));

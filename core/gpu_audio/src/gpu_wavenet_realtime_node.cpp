@@ -87,6 +87,7 @@ struct GpuWaveNetRealtimeNode::Impl {
     void trace_admit(Pending& pending, const Bridge::Lease& input) noexcept {
         if (!trace)
             return;
+        telemetry.record_admission();
         pending.trace_record = {};
         pending.trace_record.generation = epoch;
         pending.trace_record.sequence = input.stamp().sequence;
@@ -529,10 +530,10 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     status.recovery_reason = recovery_reason();
     status.recovery_sequence = recovery_sequence();
     status.diagnostics_available = true;
-    status.selected_engine =
-        authenticated_provider() ? GpuAudioEngine::Gpu : GpuAudioEngine::Unknown;
-    status.provider_state = authenticated_provider() && !fenced() ? GpuAudioProviderState::Ready
-                                                                  : GpuAudioProviderState::Degraded;
+    const bool provider_ready = authenticated_provider() && !fenced();
+    status.selected_engine = provider_ready ? GpuAudioEngine::Gpu : GpuAudioEngine::Unknown;
+    status.provider_state =
+        provider_ready ? GpuAudioProviderState::Ready : GpuAudioProviderState::Degraded;
     return status;
 }
 bool GpuWaveNetRealtimeNode::ready() const noexcept {

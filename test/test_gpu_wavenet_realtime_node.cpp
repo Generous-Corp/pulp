@@ -999,6 +999,7 @@ TEST_CASE("WaveNet recovery diagnostics latch the first reason and sequence",
     CHECK(status.prepared_lead_blocks == 1);
     CHECK(status.fallback_policy == MissPolicy::Silence);
     CHECK_FALSE(status.fallback_available);
+    CHECK(validate_gpu_audio_status(status).accepted());
 }
 
 TEST_CASE("WaveNet status projection is truthful across prepare and release",

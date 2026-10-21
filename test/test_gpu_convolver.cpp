@@ -871,6 +871,7 @@ TEST_CASE("GPU-off convolver nodes expose fail-closed provider status",
         SKIP("GPU provider enabled");
     REQUIRE_FALSE(convolver.gpu_available());
     REQUIRE(convolver.backend().empty());
+    CHECK(convolver.recovery_reason() == GpuAudioRecoveryReason::None);
 
     GpuMultiConvolver multi(32, 48000, {{1.0f}});
     REQUIRE_FALSE(multi.prepare());

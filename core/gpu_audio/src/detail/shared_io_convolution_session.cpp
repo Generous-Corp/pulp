@@ -267,6 +267,7 @@ void SharedIoConvolutionSession::close_trace_generation() noexcept {
 void SharedIoConvolutionSession::trace_admit(SharedIoSlotLedger::SlotToken token) noexcept {
     if (!trace_recorder_ || token.slot >= trace_slots_.size())
         return;
+    trace_telemetry_.record_admission();
     auto& slot = trace_slots_[token.slot];
     slot = {};
     slot.token = token;

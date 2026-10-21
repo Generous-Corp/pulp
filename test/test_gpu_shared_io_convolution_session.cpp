@@ -775,6 +775,12 @@ TEST_CASE("shared session loss retires exact work but never reprimes the lost pr
     fixture.provider->complete_all();
     CHECK(fixture.session.service(2).terminal_records == 1);
     CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::ProviderLost);
+    const auto receipts = fixture.session.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 1);
+    CHECK(receipts.front().device_lost);
+    CHECK(receipts.front().terminal);
+    CHECK_FALSE(receipts.front().terminal_success);
+    CHECK(receipts.front().discarded);
     CHECK_FALSE(fixture.session.fence_and_reprime());
     CHECK(fixture.session.epoch() == 1);
     CHECK(callback(fixture.session, b, output).stamp.epoch == 0);
@@ -812,5 +818,37 @@ TEST_CASE("shared session requires affirmative provider resume proof before reop
     std::array<float, 2> output;
     CHECK(callback(fixture.session, a, output).stamp.epoch == 0);
     CHECK(fixture.session.service(1).submitted == 0);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared session refuses lifecycle receipt extraction while work is active",
+          "[gpu_audio][shared_io][session][receipts][negative]") {
+    Fixture fixture;
+    fixture.prepare();
+    fixture.provider->auto_complete = false;
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+
+    // Receipt extraction is quiescent-only. A non-empty result here would
+    // permit a diagnostic consumer to observe partial lifecycle evidence.
+    CHECK(fixture.session.take_lifecycle_receipts().empty());
+    CHECK(fixture.session.lifecycle_receipt_valid());
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared session forwards a completed lifecycle receipt",
+          "[gpu_audio][shared_io][session][receipts]") {
+    Fixture fixture;
+    fixture.prepare();
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+
+    const auto receipts = fixture.session.take_lifecycle_receipts();
+    REQUIRE(receipts.size() == 1);
+    CHECK(receipts.front().terminal);
+    CHECK(receipts.front().terminal_success);
+    CHECK(receipts.front().output_released);
     REQUIRE(fixture.session.release());
 }

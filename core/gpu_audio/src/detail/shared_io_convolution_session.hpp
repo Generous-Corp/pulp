@@ -24,6 +24,7 @@ class SharedIoConvolutionSession {
   public:
     using Callback = SharedIoConvolutionPipeline::Callback;
     using Delivery = SharedIoConvolutionPipeline::Delivery;
+    using LifecycleReceipt = SharedIoComputePlan::LifecycleReceipt;
 
     struct ProviderDiagnostics {
         std::uint32_t configured_slots = 0;
@@ -143,6 +144,17 @@ class SharedIoConvolutionSession {
     }
     const SharedIoComputePlan::Telemetry& telemetry() const noexcept {
         return plan_.telemetry();
+    }
+    // Quiescent diagnostic extraction. An empty result while work is active is
+    // an intentional fail-closed result, not proof that no receipt exists.
+    std::vector<LifecycleReceipt> take_lifecycle_receipts() {
+        return plan_.take_lifecycle_receipts();
+    }
+    bool lifecycle_receipt_valid() const noexcept {
+        return plan_.lifecycle_receipt_valid();
+    }
+    bool lifecycle_receipt_overflow() const noexcept {
+        return plan_.lifecycle_receipt_overflow();
     }
     ProviderDiagnostics provider_diagnostics() const noexcept {
         const auto& plan = plan_.telemetry();

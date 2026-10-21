@@ -46,7 +46,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         desc.input_channels != desc.output_channels) {
         return false; // 3a: symmetric channel count only
     }
-    if (desc.block_size == 0 || desc.latency_blocks == 0)
+    if (desc.block_size == 0 || desc.sample_rate == 0 || desc.latency_blocks == 0)
         return false;
     // CpuFallback requires both a declaration and a host-thread witness that
     // prepare() built the allocation-free, latency-aligned fallback state.
@@ -641,6 +641,8 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
     status.prepared_lead_blocks = capability.prepared_lead_blocks;
     status.fallback_available = capability.fallback_available;
     status.diagnostics_available = capability.diagnostics_available;
+    status.recovery_reason =
+        node_ != nullptr ? node_->recovery_reason() : GpuAudioRecoveryReason::None;
     status.produced_blocks = timing.produced_blocks;
     status.missed_blocks = timing.miss_blocks;
     status.fallback_blocks = delivery.cpu_fallback_blocks;
@@ -665,7 +667,16 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
     // unknown provider. Keep the public status honest instead of turning an
     // unknown provider into a false "GPU/Ready" indicator. Concrete providers
     // establish the engine only when their identity is authenticated.
-    if (capability.path == GpuAudioExecutionPath::Cpu) {
+    // A latched recovery reason closes the shared provider admission gate until
+    // a host performs the quiescent fence/reprime transition. Keep the
+    // provider identity for diagnostics, but do not report the old GPU as the
+    // selected execution engine while callbacks are being served by fallback.
+    // This makes a status snapshot an honest health receipt rather than a stale
+    // "Ready/GPU" claim after device loss or another fail-closed transition.
+    const bool recovery_active = status.recovery_reason != GpuAudioRecoveryReason::None;
+    if (recovery_active) {
+        status.selected_engine = GpuAudioEngine::Unknown;
+    } else if (capability.path == GpuAudioExecutionPath::Cpu) {
         status.selected_engine = GpuAudioEngine::Cpu;
     } else if (capability.provider != GpuAudioProvider::Unknown &&
                capability.path != GpuAudioExecutionPath::Unavailable) {
@@ -674,7 +685,7 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
         status.selected_engine = GpuAudioEngine::Unknown;
     }
 
-    if (capability.eligibility != GpuAudioEligibility::Eligible) {
+    if (recovery_active || capability.eligibility != GpuAudioEligibility::Eligible) {
         status.provider_state = GpuAudioProviderState::Unavailable;
     } else if (status.selected_engine == GpuAudioEngine::Unknown) {
         // The transport is prepared, but its execution provider cannot be

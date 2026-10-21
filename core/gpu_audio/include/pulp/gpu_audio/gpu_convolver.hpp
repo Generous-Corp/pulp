@@ -122,6 +122,8 @@ class GpuConvolver : public GpuAudioNode {
     bool cpu_fallback_prepared() const noexcept override {
         return prepared_;
     }
+    /// First latched shared-I/O recovery cause, if the authenticated provider fenced.
+    GpuAudioRecoveryReason recovery_reason() const noexcept override;
     void process_block(const audio::BufferView<const float>& input,
                        audio::BufferView<float>& output, uint32_t n) override;
 

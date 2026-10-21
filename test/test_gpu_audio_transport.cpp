@@ -40,6 +40,42 @@ GpuAudioProgramDescriptor valid_shared_program() {
             .cpu_fallback_prepared = true};
 }
 
+GpuAudioCapabilityReport valid_shared_capability() {
+    return {.path = GpuAudioExecutionPath::SharedMemory,
+            .provider = GpuAudioProvider::Dawn,
+            .eligibility = GpuAudioEligibility::Eligible,
+            .fallback_policy = MissPolicy::CpuFallback,
+            .prepared_lead_blocks = 2,
+            .prepared = true,
+            .fallback_available = true,
+            .diagnostics_available = true,
+            .prepared_latency_blocks = 2};
+}
+
+GpuAudioCapabilityReport valid_staged_capability() {
+    return {.path = GpuAudioExecutionPath::Staged,
+            .provider = GpuAudioProvider::Unknown,
+            .eligibility = GpuAudioEligibility::Eligible,
+            .fallback_policy = MissPolicy::CpuFallback,
+            .prepared_lead_blocks = 0,
+            .prepared = true,
+            .fallback_available = true,
+            .diagnostics_available = true,
+            .prepared_latency_blocks = 3};
+}
+
+GpuAudioCapabilityReport valid_cpu_capability() {
+    return {.path = GpuAudioExecutionPath::Cpu,
+            .provider = GpuAudioProvider::Unknown,
+            .eligibility = GpuAudioEligibility::Eligible,
+            .fallback_policy = MissPolicy::Silence,
+            .prepared_lead_blocks = 0,
+            .prepared = true,
+            .fallback_available = false,
+            .diagnostics_available = true,
+            .prepared_latency_blocks = 0};
+}
+
 } // namespace
 
 TEST_CASE("GpuAudioProgramDescriptor validates a prepared shared program", "[gpu_audio][program]") {
@@ -48,6 +84,28 @@ TEST_CASE("GpuAudioProgramDescriptor validates a prepared shared program", "[gpu
     CHECK(validation.accepted());
     CHECK(program.provider == GpuAudioProvider::Dawn);
     CHECK(program.provider_owned_resources);
+}
+
+TEST_CASE("GpuAudioProgramDescriptor rejects unknown enum values", "[gpu_audio][program]") {
+    auto program = valid_shared_program();
+
+    // Each mutation is a planted negative for a future provider or SDK
+    // consumer that decodes a value outside the versioned contract.  It must
+    // fail before the normal path/provider checks can accidentally accept it.
+    program.kind = static_cast<GpuAudioProgramKind>(0xfe);
+    CHECK(validate_gpu_audio_program(program).error == GpuAudioProgramError::InvalidEnumValue);
+
+    program = valid_shared_program();
+    program.path = static_cast<GpuAudioExecutionPath>(0xfe);
+    CHECK(validate_gpu_audio_program(program).error == GpuAudioProgramError::InvalidEnumValue);
+
+    program = valid_shared_program();
+    program.provider = static_cast<GpuAudioProvider>(0xfe);
+    CHECK(validate_gpu_audio_program(program).error == GpuAudioProgramError::InvalidEnumValue);
+
+    program = valid_shared_program();
+    program.miss_policy = static_cast<MissPolicy>(0xfe);
+    CHECK(validate_gpu_audio_program(program).error == GpuAudioProgramError::InvalidEnumValue);
 }
 
 TEST_CASE("GpuAudioStatus preserves provider, delivery, and fallback meanings",
@@ -65,6 +123,100 @@ TEST_CASE("GpuAudioStatus preserves provider, delivery, and fallback meanings",
     CHECK(status.missed_blocks == 3);
     CHECK(status.fallback_blocks == 2);
     CHECK(status.missed_blocks != status.fallback_blocks);
+}
+
+TEST_CASE("GpuAudioStatus validates backend-neutral lifecycle projections", "[gpu_audio][status]") {
+    constexpr auto constexpr_status = [] {
+        GpuAudioStatus value;
+        value.selected_engine = GpuAudioEngine::Gpu;
+        value.provider_state = GpuAudioProviderState::Ready;
+        value.provider = GpuAudioProvider::Metal;
+        value.sample_rate = 44100;
+        value.block_size = 32;
+        return value;
+    }();
+    STATIC_REQUIRE(validate_gpu_audio_status(constexpr_status).accepted());
+
+    GpuAudioStatus status;
+    status.selected_engine = GpuAudioEngine::Gpu;
+    status.provider_state = GpuAudioProviderState::Ready;
+    status.provider = GpuAudioProvider::Dawn;
+    status.fallback_policy = MissPolicy::CpuFallback;
+    status.sample_rate = 48000;
+    status.block_size = 64;
+    status.fallback_available = true;
+    CHECK(validate_gpu_audio_status(status).accepted());
+
+    status.provider = GpuAudioProvider::Unknown;
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::GpuEngineWithoutProvider);
+
+    status.provider = GpuAudioProvider::Dawn;
+    status.selected_engine = GpuAudioEngine::Unknown;
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::ReadyWithoutEngine);
+
+    status.selected_engine = GpuAudioEngine::Gpu;
+    status.provider_state = GpuAudioProviderState::Degraded;
+    CHECK(validate_gpu_audio_status(status).error ==
+          GpuAudioStatusError::DegradedWithSelectedEngine);
+
+    status.provider_state = GpuAudioProviderState::Unavailable;
+    CHECK(validate_gpu_audio_status(status).error ==
+          GpuAudioStatusError::UnavailableWithSelectedEngine);
+
+    status.provider_state = GpuAudioProviderState::Ready;
+    status.selected_engine = GpuAudioEngine::Cpu;
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::CpuEngineWithProvider);
+
+    status.selected_engine = GpuAudioEngine::Gpu;
+    status.provider = GpuAudioProvider::Dawn;
+    status.fallback_available = false;
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::FallbackUnavailable);
+}
+
+TEST_CASE("GpuAudioStatus rejects an uninitialized snapshot that claims preparation",
+          "[gpu_audio][status]") {
+    GpuAudioStatus status;
+    status.block_size = 64;
+    CHECK(validate_gpu_audio_status(status).error ==
+          GpuAudioStatusError::UninitializedStateHasPreparation);
+
+    status = {};
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+    CHECK(validate_gpu_audio_status(status).error ==
+          GpuAudioStatusError::UninitializedStateHasRecovery);
+
+    status = {};
+    status.schema_version = GpuAudioStatus::kSchemaVersion + 1;
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::SchemaVersionMismatch);
+
+    status = {};
+    status.provider_state = GpuAudioProviderState::Ready;
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::PreparedShapeMissing);
+
+    status.sample_rate = 48000;
+    status.block_size = 32;
+    status.requested_engine = static_cast<GpuAudioEngine>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.requested_engine = GpuAudioEngine::Unknown;
+    status.selected_engine = static_cast<GpuAudioEngine>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.selected_engine = GpuAudioEngine::Unknown;
+    status.provider_state = static_cast<GpuAudioProviderState>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.provider_state = GpuAudioProviderState::Ready;
+    status.provider = static_cast<GpuAudioProvider>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.provider = GpuAudioProvider::Unknown;
+    status.fallback_policy = static_cast<MissPolicy>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
+
+    status.fallback_policy = MissPolicy::Silence;
+    status.recovery_reason = static_cast<GpuAudioRecoveryReason>(255);
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::InvalidEnumValue);
 }
 
 TEST_CASE("GpuAudioProgramDescriptor rejects incomplete shared preparation",
@@ -111,46 +263,123 @@ TEST_CASE("GpuAudioProgramDescriptor rejects unsafe provider and fallback claims
     CHECK(validate_gpu_audio_program(program).accepted());
 }
 
+TEST_CASE("GpuAudioCapabilityReport validates backend-neutral prepared snapshots",
+          "[gpu_audio][capability]") {
+    constexpr GpuAudioCapabilityReport inactive{};
+    STATIC_REQUIRE(validate_gpu_audio_capability(inactive).accepted());
+
+    CHECK(validate_gpu_audio_capability(valid_cpu_capability()).accepted());
+    CHECK(validate_gpu_audio_capability(valid_staged_capability()).accepted());
+    CHECK(validate_gpu_audio_capability(valid_shared_capability()).accepted());
+}
+
+TEST_CASE("GpuAudioCapabilityReport rejects forged enum and shape relationships",
+          "[gpu_audio][capability]") {
+    auto capability = valid_shared_capability();
+
+    capability.path = static_cast<GpuAudioExecutionPath>(0xfe);
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::InvalidEnumValue);
+    capability = valid_shared_capability();
+    capability.provider = static_cast<GpuAudioProvider>(0xfe);
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::InvalidEnumValue);
+    capability = valid_shared_capability();
+    capability.eligibility = static_cast<GpuAudioEligibility>(0xfe);
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::InvalidEnumValue);
+    capability = valid_shared_capability();
+    capability.fallback_policy = static_cast<MissPolicy>(0xfe);
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::InvalidEnumValue);
+
+    capability = {};
+    capability.path = GpuAudioExecutionPath::Staged;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::UnpreparedStateHasPreparation);
+
+    capability = valid_shared_capability();
+    capability.path = GpuAudioExecutionPath::Unavailable;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::PreparedPathUnavailable);
+    capability = valid_shared_capability();
+    capability.eligibility = GpuAudioEligibility::Unavailable;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::PreparedPathIneligible);
+    capability = valid_shared_capability();
+    capability.provider = GpuAudioProvider::Unknown;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::SharedProviderMissing);
+    capability = valid_shared_capability();
+    capability.prepared_lead_blocks = 0;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::SharedLeadMissing);
+
+    capability = valid_shared_capability();
+    capability.path = GpuAudioExecutionPath::Cpu;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::CpuProviderPresent);
+    capability = valid_cpu_capability();
+    capability.prepared_lead_blocks = 1;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::CpuLeadPresent);
+    capability = valid_shared_capability();
+    capability.fallback_available = false;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::FallbackUnavailable);
+
+    capability = valid_staged_capability();
+    capability.provider = GpuAudioProvider::Dawn;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::StagedProviderPresent);
+    capability = valid_staged_capability();
+    capability.prepared_lead_blocks = 1;
+    CHECK(validate_gpu_audio_capability(capability).error ==
+          GpuAudioCapabilityError::StagedLeadPresent);
+}
+
 TEST_CASE("GpuAudioProgramDescriptor binds only to an authenticated capability",
           "[gpu_audio][program]") {
     const auto program = valid_shared_program();
-    GpuAudioCapabilityReport capability;
-    capability.path = GpuAudioExecutionPath::SharedMemory;
-    capability.provider = GpuAudioProvider::Dawn;
-    capability.eligibility = GpuAudioEligibility::Eligible;
-    capability.fallback_policy = MissPolicy::CpuFallback;
-    capability.prepared_lead_blocks = 2;
-    capability.prepared = true;
-    capability.fallback_available = true;
+    auto capability = valid_shared_capability();
 
     CHECK(validate_gpu_audio_program(program, capability).accepted());
 
     capability.provider = GpuAudioProvider::Unknown;
     CHECK(validate_gpu_audio_program(program, capability).error ==
-          GpuAudioProgramError::CapabilityProviderMismatch);
+          GpuAudioProgramError::CapabilityInvalid);
 
     capability = {};
     CHECK(validate_gpu_audio_program(program, capability).error ==
           GpuAudioProgramError::CapabilityNotPrepared);
 }
 
+TEST_CASE("GpuAudioProgramDescriptor rejects forged capability enums for generic staged paths",
+          "[gpu_audio][program][capability]") {
+    auto program = valid_shared_program();
+    program.path = GpuAudioExecutionPath::Staged;
+    program.provider = GpuAudioProvider::Unknown;
+    program.provider_owned_resources = false;
+    program.algorithmic_lead_blocks = 1;
+    program.pipeline_depth = 3;
+    program.provider_slots = 2;
+
+    auto capability = valid_staged_capability();
+    capability.provider = static_cast<GpuAudioProvider>(0xfe);
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityInvalid);
+}
+
 TEST_CASE("GpuAudioProgramDescriptor rejects capability drift before execution",
           "[gpu_audio][program]") {
     const auto program = valid_shared_program();
-    GpuAudioCapabilityReport capability;
-    capability.path = GpuAudioExecutionPath::SharedMemory;
-    capability.provider = GpuAudioProvider::Dawn;
-    capability.eligibility = GpuAudioEligibility::Eligible;
-    capability.fallback_policy = MissPolicy::CpuFallback;
-    capability.prepared_lead_blocks = 2;
-    capability.prepared = true;
-    capability.fallback_available = true;
+    auto capability = valid_staged_capability();
 
-    capability.path = GpuAudioExecutionPath::Staged;
     CHECK(validate_gpu_audio_program(program, capability).error ==
           GpuAudioProgramError::CapabilityPathMismatch);
 
     capability.path = GpuAudioExecutionPath::SharedMemory;
+    capability.provider = GpuAudioProvider::Dawn;
     capability.prepared_lead_blocks = 4;
     CHECK(validate_gpu_audio_program(program, capability).error ==
           GpuAudioProgramError::CapabilityLeadMismatch);
@@ -196,6 +425,10 @@ class RealtimeHookNode : public GpuAudioNode {
 
     bool cpu_fallback_prepared() const noexcept override {
         return policy_ == MissPolicy::CpuFallback;
+    }
+
+    GpuAudioRecoveryReason recovery_reason() const noexcept override {
+        return recovery_reason_value;
     }
 
     void process_block(const BufferView<const float>& input, BufferView<float>& output,
@@ -270,6 +503,7 @@ class RealtimeHookNode : public GpuAudioNode {
     bool callback_shape_valid = true;
     const float* external_output_sample = nullptr;
     bool external_output_silent_on_rejection = true;
+    GpuAudioRecoveryReason recovery_reason_value = GpuAudioRecoveryReason::None;
 
   private:
     static std::uint8_t process_realtime(void* self, const BufferView<const float>& input,
@@ -938,6 +1172,28 @@ TEST_CASE("GpuAudioTransport silences mismatched / too-small views", "[gpu_audio
     REQUIRE(mono_out.storage[0][0] == 0.0f);
 }
 
+TEST_CASE("GpuAudioTransport rejects a prepared node with no sample rate",
+          "[gpu_audio][transport][status]") {
+    struct ZeroRateNode final : GpuAudioNode {
+        GpuAudioNodeDescriptor descriptor() const override {
+            return {.name = "zero-rate",
+                    .input_channels = 1,
+                    .output_channels = 1,
+                    .block_size = 32,
+                    .sample_rate = 0,
+                    .latency_blocks = 1};
+        }
+        bool prepare() override {
+            return true;
+        }
+        void process_block(const BufferView<const float>&, BufferView<float>&, uint32_t) override {}
+    } node;
+
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    CHECK_FALSE(transport.prepare(&node, {.ring_blocks = 8}));
+}
+
 // A node that declares nothing about its miss behavior must not pass audio
 // through on a miss. Passing through is the WORST default here: the transport's
 // output is delayed by latency_blocks, so a dry sample for the CURRENT time jumps
@@ -1352,6 +1608,8 @@ TEST_CASE("GpuAudioTransport status snapshot is stable before and after prepare"
     CHECK(before.schema_version == GpuAudioStatus::kSchemaVersion);
     CHECK(before.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK(before.selected_engine == GpuAudioEngine::Unknown);
+    CHECK(before.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(validate_gpu_audio_status(before).accepted());
 
     REQUIRE(node.prepare());
     REQUIRE(t.prepare(&node, {8}));
@@ -1366,6 +1624,80 @@ TEST_CASE("GpuAudioTransport status snapshot is stable before and after prepare"
     CHECK(after.latency_samples == 64);
     CHECK(after.fallback_available);
     CHECK(after.fallback_policy == MissPolicy::CpuFallback);
+    CHECK(after.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(validate_gpu_audio_status(after).accepted());
+}
+
+TEST_CASE("GpuAudioTransport status snapshot propagates the latched recovery reason",
+          "[gpu_audio][transport][status][recovery]") {
+    constexpr uint32_t BS = 32;
+    test_detail::RealtimeHookNode node(1, BS, MissPolicy::CpuFallback);
+    REQUIRE(node.prepare());
+
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.ring_blocks = 8}));
+
+    const auto healthy = transport.status_snapshot();
+    CHECK(healthy.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(validate_gpu_audio_status(healthy).accepted());
+
+    node.recovery_reason_value = GpuAudioRecoveryReason::ProviderLost;
+    const auto recovered = transport.status_snapshot();
+    CHECK(recovered.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(recovered.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(recovered.selected_engine == GpuAudioEngine::Unknown);
+    CHECK(recovered.fallback_policy == MissPolicy::CpuFallback);
+    CHECK(recovered.fallback_available);
+    CHECK(validate_gpu_audio_status(recovered).accepted());
+}
+
+TEST_CASE("GpuAudioTransport keeps the bounded CPU fallback timeline after provider loss",
+          "[gpu_audio][transport][recovery][fallback-continuity]") {
+    constexpr uint32_t BS = 32;
+    constexpr uint32_t LATENCY = 2;
+    test_detail::RealtimeHookNode node(1, BS, MissPolicy::CpuFallback, LATENCY);
+    node.stateful_fallback = true;
+    node.realtime_status = detail::kRealtimeGpuReady;
+    REQUIRE(node.prepare());
+
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.ring_blocks = 8}));
+
+    Block input(1, BS), output(1, BS);
+    auto process_block = [&](float value) {
+        input.fill(value);
+        auto output_view = output.view();
+        transport.process(input.cview(), output_view, BS);
+        return output.storage[0][0];
+    };
+
+    // Before loss, the authenticated shared hook supplies its GPU result.
+    CHECK(process_block(1.0f) == 1001.0f);
+    CHECK(process_block(2.0f) == 1002.0f);
+
+    // A latched loss closes GPU delivery. The prepared fallback is continuously
+    // primed on every callback, so its first post-loss block is the input from
+    // exactly LATENCY blocks earlier and subsequent blocks remain contiguous.
+    node.recovery_reason_value = GpuAudioRecoveryReason::ProviderLost;
+    node.realtime_status = detail::kRealtimeGpuMissed;
+    CHECK(process_block(3.0f) == 1.0f);
+    CHECK(process_block(4.0f) == 2.0f);
+    CHECK(process_block(5.0f) == 3.0f);
+
+    const auto delivery = transport.delivery_snapshot();
+    CHECK(delivery.gpu_blocks == 2);
+    CHECK(delivery.cpu_fallback_blocks == 3);
+    CHECK(delivery.silence_blocks == 0);
+    CHECK(transport.stats().miss_blocks == 3);
+
+    const auto status = transport.status_snapshot();
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(status.selected_engine == GpuAudioEngine::Unknown);
+    CHECK(status.fallback_policy == MissPolicy::CpuFallback);
+    CHECK(status.fallback_available);
+    CHECK(status.fallback_blocks == 3);
+    CHECK(validate_gpu_audio_status(status).accepted());
 }
 
 TEST_CASE("GpuAudioTransport delivery snapshot supports concurrent diagnostic reads",

@@ -50,4 +50,97 @@ struct GpuAudioCapabilityReport {
     std::uint32_t prepared_latency_blocks = 0;
 };
 
+/// Why a host-visible capability snapshot was rejected.  The snapshot is
+/// intentionally structural: it proves only the selected path and its
+/// authenticated metadata, never a provider handle or realtime deadline.
+enum class GpuAudioCapabilityError : std::uint8_t {
+    None = 0,
+    InvalidEnumValue = 1,
+    UnpreparedStateHasPreparation = 2,
+    PreparedPathUnavailable = 3,
+    PreparedPathIneligible = 4,
+    SharedProviderMissing = 5,
+    SharedLeadMissing = 6,
+    CpuProviderPresent = 7,
+    CpuLeadPresent = 8,
+    FallbackUnavailable = 9,
+    StagedProviderPresent = 10,
+    StagedLeadPresent = 11,
+};
+
+struct GpuAudioCapabilityValidation {
+    GpuAudioCapabilityError error = GpuAudioCapabilityError::None;
+
+    constexpr bool accepted() const noexcept {
+        return error == GpuAudioCapabilityError::None;
+    }
+};
+
+/// Validate a host-visible capability snapshot before it authenticates a
+/// program descriptor.  This is allocation-free and backend-neutral: it
+/// checks only versioned enum domains and relationships that the report itself
+/// can witness.  A report for an unprepared transport must remain the zero
+/// snapshot; a prepared shared path must identify its provider and lead, while
+/// a CPU path must not claim either.
+constexpr GpuAudioCapabilityValidation
+validate_gpu_audio_capability(const GpuAudioCapabilityReport& capability) noexcept {
+    const auto valid_path = [](GpuAudioExecutionPath value) constexpr {
+        return value == GpuAudioExecutionPath::Unavailable ||
+               value == GpuAudioExecutionPath::Staged ||
+               value == GpuAudioExecutionPath::SharedMemory || value == GpuAudioExecutionPath::Cpu;
+    };
+    const auto valid_provider = [](GpuAudioProvider value) constexpr {
+        return value == GpuAudioProvider::Unknown || value == GpuAudioProvider::Dawn ||
+               value == GpuAudioProvider::Metal;
+    };
+    const auto valid_eligibility = [](GpuAudioEligibility value) constexpr {
+        return value == GpuAudioEligibility::Unavailable || value == GpuAudioEligibility::Eligible;
+    };
+    const auto valid_miss_policy = [](MissPolicy value) constexpr {
+        return value == MissPolicy::Silence || value == MissPolicy::PassthroughDry ||
+               value == MissPolicy::CpuFallback;
+    };
+    if (!valid_path(capability.path) || !valid_provider(capability.provider) ||
+        !valid_eligibility(capability.eligibility) ||
+        !valid_miss_policy(capability.fallback_policy))
+        return {GpuAudioCapabilityError::InvalidEnumValue};
+
+    if (!capability.prepared) {
+        if (capability.path != GpuAudioExecutionPath::Unavailable ||
+            capability.provider != GpuAudioProvider::Unknown ||
+            capability.eligibility != GpuAudioEligibility::Unavailable ||
+            capability.fallback_policy != MissPolicy::Silence ||
+            capability.prepared_lead_blocks != 0 || capability.fallback_available ||
+            capability.diagnostics_available || capability.prepared_latency_blocks != 0)
+            return {GpuAudioCapabilityError::UnpreparedStateHasPreparation};
+        return {};
+    }
+
+    if (capability.path == GpuAudioExecutionPath::Unavailable)
+        return {GpuAudioCapabilityError::PreparedPathUnavailable};
+    if (capability.eligibility != GpuAudioEligibility::Eligible)
+        return {GpuAudioCapabilityError::PreparedPathIneligible};
+
+    if (capability.path == GpuAudioExecutionPath::SharedMemory) {
+        if (capability.provider == GpuAudioProvider::Unknown)
+            return {GpuAudioCapabilityError::SharedProviderMissing};
+        if (capability.prepared_lead_blocks == 0)
+            return {GpuAudioCapabilityError::SharedLeadMissing};
+    } else if (capability.path == GpuAudioExecutionPath::Staged) {
+        if (capability.provider != GpuAudioProvider::Unknown)
+            return {GpuAudioCapabilityError::StagedProviderPresent};
+        if (capability.prepared_lead_blocks != 0)
+            return {GpuAudioCapabilityError::StagedLeadPresent};
+    } else if (capability.path == GpuAudioExecutionPath::Cpu) {
+        if (capability.provider != GpuAudioProvider::Unknown)
+            return {GpuAudioCapabilityError::CpuProviderPresent};
+        if (capability.prepared_lead_blocks != 0)
+            return {GpuAudioCapabilityError::CpuLeadPresent};
+    }
+
+    if (capability.fallback_policy == MissPolicy::CpuFallback && !capability.fallback_available)
+        return {GpuAudioCapabilityError::FallbackUnavailable};
+    return {};
+}
+
 } // namespace pulp::gpu_audio

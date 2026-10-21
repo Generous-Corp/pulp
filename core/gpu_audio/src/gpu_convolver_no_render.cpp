@@ -52,6 +52,10 @@ bool GpuConvolver::has_realtime_shared_io() const noexcept {
     return false;
 }
 
+GpuAudioRecoveryReason GpuConvolver::recovery_reason() const noexcept {
+    return GpuAudioRecoveryReason::None;
+}
+
 GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
     GpuAudioNodeDescriptor d;
     d.name = "gpu-convolver";
