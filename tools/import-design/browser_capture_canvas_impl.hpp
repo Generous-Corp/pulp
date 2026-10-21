@@ -202,8 +202,15 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
         };
         const auto html_color = color(html_style["background-color"]);
         const auto body_color = color(body_style["background-color"]);
-        if (!html_color || !body_color || (*html_color)[3] != 1 ||
-            ((*body_color)[3] != 0 && *body_color != *html_color))
+        if (!html_color || !body_color ||
+            ((*html_color)[3] != 0 && (*html_color)[3] != 1) ||
+            ((*body_color)[3] != 0 && (*body_color)[3] != 1) ||
+            ((*html_color)[3] == 1 && (*body_color)[3] == 1 &&
+             *body_color != *html_color))
+            return std::nullopt;
+        const auto* effective_color = (*body_color)[3] == 1 ? &*body_color
+                                                             : &*html_color;
+        if ((*effective_color)[3] != 1)
             return std::nullopt;
         const double width = number(member(doc, "contentWidth"));
         const double height = number(member(doc, "contentHeight"));
@@ -214,9 +221,9 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
         if (number(box[0]) != 0 || number(box[1]) != 0 || number(box[2]) <= 0 ||
             number(box[3]) <= 0 || number(box[2]) > width || number(box[3]) > height)
             return std::nullopt;
-        return DocumentCanvasPaint{"rgb(" + std::to_string(static_cast<int>((*html_color)[0])) +
-                                       ", " + std::to_string(static_cast<int>((*html_color)[1])) +
-                                       ", " + std::to_string(static_cast<int>((*html_color)[2])) +
+        return DocumentCanvasPaint{"rgb(" + std::to_string(static_cast<int>((*effective_color)[0])) +
+                                       ", " + std::to_string(static_cast<int>((*effective_color)[1])) +
+                                       ", " + std::to_string(static_cast<int>((*effective_color)[2])) +
                                        ")",
                                    width, height};
     } catch (const std::exception&) {
