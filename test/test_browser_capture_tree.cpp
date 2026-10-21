@@ -1431,6 +1431,135 @@ TEST_CASE("a drawn icon's vector nodes sit under it and share its box",
     CHECK(attribute(root, "native_svg_shapes") == "8");
 }
 
+TEST_CASE("a drawn icon's vector nodes carry their own Chromium identity",
+          "[browser-capture][native-lowering][svg]") {
+    // Every other lowered node carries the backend id of the DOM node it
+    // draws; a shape must too, or a consumer binding by identity finds the
+    // icon's `<svg>` and none of the geometry inside it.
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+    const auto index = CapturedStyleIndex::load(
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
+        "browser-capture-svg-icons" / "dom-snapshot.json");
+    REQUIRE(index);
+
+    const auto shapes = vector_nodes(root);
+    REQUIRE(shapes.size() == 8);
+    std::set<std::string> identities;
+    for (const auto* shape : shapes) {
+        const auto backend = attribute(*shape, "backend_node_id");
+        INFO(shape->stable_anchor_id.value_or(""));
+        REQUIRE_FALSE(backend.empty());
+        CHECK(identities.insert(backend).second);
+        const auto* icon = find_node(root, [shape](const IRNode& node) {
+            return std::any_of(node.children.begin(), node.children.end(),
+                               [shape](const IRNode& child) {
+                                   return &child == shape;
+                               });
+        });
+        REQUIRE(icon != nullptr);
+        CHECK(attribute(*icon, "backend_node_id") != backend);
+        // The id names the very shape element the node draws: same tag, and
+        // a DOM child of the icon's own element.
+        int dom_node = -1;
+        for (int i = 0; i < index->node_count(); ++i)
+            if (index->backend_node_id_of(i) == std::stoi(backend)) dom_node = i;
+        REQUIRE(dom_node >= 0);
+        CHECK(index->tag_name(dom_node) == attribute(*shape, "source_tag"));
+        CHECK(index->backend_node_id_of(index->parent_of(dom_node)) ==
+              std::stoi(attribute(*icon, "backend_node_id")));
+    }
+}
+
+TEST_CASE("a captured canvas that paints in tree order keeps the panel nested",
+          "[browser-capture][native-lowering][paint-order]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV(url bg), 4 CANVAS
+    // The panel paints, then the canvas inside it: Chromium's list is the
+    // same order a nested tree draws, so flattening would buy no fidelity and
+    // would cost the panel its sections.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,6]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[11,14],[11,14],[11,14],[12,14],[11,14]]",
+        .bounds = "[[0,0,200,100],[0,0,200,100],[0,0,200,100],"
+                  "[0,0,200,100],[10,20,80,40]]",
+        .paint_orders = "[0,1,1,2,3]",
+    };
+    IRNode root;
+    const auto counts = lower_into(spec, "captured-canvas-in-order", root,
+                                   {{6, "canvas:6"}});
+    REQUIRE(counts.overlapping_reorders == 0);
+
+    const auto path = write_snapshot(build_snapshot(spec), "captured-canvas-auto");
+    const auto index = CapturedStyleIndex::load(path);
+    fs::remove(path);
+    REQUIRE(index);
+    IRNode preferred;
+    const auto chosen = lower_painted_tree_preferring_hierarchy(
+        *index, 0.0, 0.0, 0.0, preferred, {{6, "canvas:6"}});
+    CHECK(chosen.flattened_overlapping_reorders == 0);
+    CHECK(chosen.max_depth > 1);
+    const auto* panel = find_node(preferred, [](const IRNode& node) {
+        return attribute(node, "source_tag") == "div";
+    });
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->children.size() == 1);
+    CHECK(attribute(panel->children[0], "captured_element") == "canvas");
+    CHECK(attribute(panel->children[0], "asset_ref") == "canvas:6");
+}
+
+TEST_CASE("a captured canvas that interleaves with another subtree is flattened",
+          "[browser-capture][native-lowering][paint-order]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV(url bg), 4 CANVAS in 3,
+    //        5 DIV(url bg) beside 3, overlapping the canvas.
+    // Chromium paints the first panel, then the second panel, then the canvas
+    // nested in the first panel ON TOP of the second. A nested tree draws a
+    // subtree contiguously, so the second panel would cover the canvas; no
+    // hoist can fix it because the canvas already paints after its parent.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,6,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,3,2]",
+        .attributes = "[[],[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4,5]",
+        .styles = "[[11,14],[11,14],[11,14],[12,14],[11,14],[12,14]]",
+        .bounds = "[[0,0,200,100],[0,0,200,100],[0,0,200,100],"
+                  "[0,0,100,100],[10,20,150,40],[100,0,100,100]]",
+        .paint_orders = "[0,1,1,2,5,3]",
+    };
+    IRNode nested;
+    const auto audit = lower_into(spec, "captured-canvas-interleaved", nested,
+                                  {{6, "canvas:6"}});
+    REQUIRE(audit.overlapping_reorders == 1);
+
+    const auto path = write_snapshot(build_snapshot(spec), "captured-canvas-interleaved-auto");
+    const auto index = CapturedStyleIndex::load(path);
+    fs::remove(path);
+    REQUIRE(index);
+    IRNode root;
+    const auto counts = lower_painted_tree_preferring_hierarchy(
+        *index, 0.0, 0.0, 0.0, root, {{6, "canvas:6"}});
+    CHECK(counts.flattened_overlapping_reorders == 1);
+    CHECK(counts.max_depth == 1);
+    int canvas_z = -1;
+    int later_panel_z = -1;
+    for (const auto& child : root.children) {
+        CHECK(child.children.empty());
+        REQUIRE(child.style.z_index);
+        if (attribute(child, "captured_element") == "canvas")
+            canvas_z = *child.style.z_index;
+        else if (attribute(child, "paint_order") == "3")
+            later_panel_z = *child.style.z_index;
+    }
+    REQUIRE(canvas_z >= 0);
+    REQUIRE(later_panel_z >= 0);
+    CHECK(later_panel_z < canvas_z);
+}
+
 TEST_CASE("canvas and image elements classify away from native",
           "[browser-capture][native-lowering]") {
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 CANVAS, 4 IMG, 5 DIV(url bg)

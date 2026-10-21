@@ -1760,6 +1760,13 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             vector_node.attributes["paint_order"] =
                 std::to_string(node.paint_order);
             vector_node.attributes["source_tag"] = shape.tag;
+            // The same Chromium identity every other lowered node carries, so
+            // a shape binds to the DOM element it draws rather than only to a
+            // path that renumbers when a sibling shape is added.
+            if (const int backend = index.backend_node_id_of(shape.node_index);
+                backend > 0)
+                vector_node.attributes["backend_node_id"] =
+                    std::to_string(backend);
             vector_node.stable_anchor_id =
                 anchor_path(index, identity, shape.node_index);
             vector_node.anchor_strategy = "capture-path";
@@ -2152,6 +2159,28 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                                        label(second));
         }
     }
+    return counts;
+}
+
+PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
+    const CapturedStyleIndex& index, double dx, double dy, double device_scale,
+    IRNode& root,
+    const std::unordered_map<int, std::string>& captured_element_assets) {
+    // Lower into a copy so the flat fallback starts from the caller's root
+    // exactly as it was handed in, not from a half-built nested tree.
+    IRNode nested = root;
+    auto counts = lower_painted_tree(index, dx, dy, device_scale, nested,
+                                     captured_element_assets,
+                                     /*flatten_to_paint_order=*/false);
+    if (counts.overlapping_reorders == 0) {
+        root = std::move(nested);
+        return counts;
+    }
+    const int inversions = counts.overlapping_reorders;
+    counts = lower_painted_tree(index, dx, dy, device_scale, root,
+                                captured_element_assets,
+                                /*flatten_to_paint_order=*/true);
+    counts.flattened_overlapping_reorders = inversions;
     return counts;
 }
 

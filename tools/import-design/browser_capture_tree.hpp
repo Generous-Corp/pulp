@@ -133,6 +133,11 @@ struct PaintedTreeCounts {
     /// pairing has to be captured here because the audit runs after the nodes
     /// have been moved into the emitted tree and can no longer be written to.
     std::vector<std::string> overlapping_reorder_pairs;
+    /// Set only by `lower_painted_tree_preferring_hierarchy` when it flattened:
+    /// the visible inversions the nested tree would have drawn, which is the
+    /// reason the emission gave up its hierarchy. Zero means nothing was
+    /// flattened.
+    int flattened_overlapping_reorders = 0;
     /// Nodes whose type lengths were multiplied by the scale their box already
     /// carried from an ancestor `transform`. Chrome scales glyphs along with
     /// the box; the snapshot reports the box post-transform and `font-size`
@@ -190,5 +195,21 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                      const std::unordered_map<int, std::string>&
                                          captured_element_assets = {},
                                      bool flatten_to_paint_order = false);
+
+/// Lower hierarchically, and fall back to the flat paint-order emission only
+/// when the nested tree would visibly disagree with Chromium.
+///
+/// A captured element raster (a `<canvas>` snapshot) can sit anywhere in
+/// Chromium's paint list, including before an ancestor that paints over it,
+/// and a nested tree draws every parent before its children. Flattening fixes
+/// that order at the cost of the whole editing surface, so it is spent only
+/// when the hierarchical audit finds an inked node drawn on the wrong side of
+/// an overlapping one (`overlapping_reorders > 0`). A panel whose canvas paints
+/// in tree order keeps its sections, and a panel that genuinely interleaves
+/// is flattened and says why in `flattened_overlapping_reorders`.
+PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
+    const CapturedStyleIndex& index, double dx, double dy, double device_scale,
+    pulp::view::IRNode& root,
+    const std::unordered_map<int, std::string>& captured_element_assets);
 
 }  // namespace pulp::import_design

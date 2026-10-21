@@ -214,6 +214,18 @@ class CapturedStyleIndex {
         return node_type_[static_cast<size_t>(node_index)];
     }
 
+    /// A node's Chromium `backendNodeId`, or -1 when absent or out of range.
+    ///
+    /// The painted-node list carries this for every laid-out row, but a node
+    /// lowered outside that list (an SVG shape emitted beside its `<svg>`)
+    /// still needs the same identity to bind to the DOM node it draws.
+    int backend_node_id_of(int node_index) const noexcept {
+        if (node_index < 0 ||
+            node_index >= static_cast<int>(node_to_backend_.size()))
+            return -1;
+        return node_to_backend_[static_cast<size_t>(node_index)];
+    }
+
     /// How many nodes the document declares, laid out or not.
     ///
     /// A stable anchor is a DOM path, and a path segment's ordinal has to count

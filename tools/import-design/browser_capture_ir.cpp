@@ -1913,14 +1913,18 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // controls after the tree is what keeps a value ring above the knob face it
     // belongs to rather than under it.
     if (native_lowering) {
-        const auto tree = lower_painted_tree(
-            *captured_styles, control_dx, control_dy, dpr, ir.root,
-            captured_element_assets,
-            // A captured canvas can interleave with pseudo-elements and DOM
-            // ancestors in Chromium's paint list. Preserve hierarchy for
-            // ordinary native panels; switch to the exact flat compositor only
-            // when executable canvas paint was captured as an image layer.
-            /*flatten_to_paint_order=*/!captured_element_assets.empty());
+        // A captured canvas can interleave with pseudo-elements and DOM
+        // ancestors in Chromium's paint list. Ordinary native panels keep
+        // their hierarchy; a panel with a captured canvas layer keeps it too
+        // unless the nested tree would visibly reorder overlapping paint, and
+        // only then switches to the exact flat compositor.
+        const auto tree =
+            captured_element_assets.empty()
+                ? lower_painted_tree(*captured_styles, control_dx, control_dy,
+                                     dpr, ir.root)
+                : lower_painted_tree_preferring_hierarchy(
+                      *captured_styles, control_dx, control_dy, dpr, ir.root,
+                      captured_element_assets);
         ir.root.attributes["native_painted_nodes"] =
             std::to_string(tree.painted);
         ir.root.attributes["native_nodes_lowered"] =
@@ -1971,6 +1975,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         const auto record_if = [&ir](const char* key, int value) {
             if (value > 0) ir.root.attributes[key] = std::to_string(value);
         };
+        record_if("native_tree_flattened_overlapping_reorders",
+                  tree.flattened_overlapping_reorders);
         record_if("native_nodes_skipped_empty_box", tree.skipped_empty_box);
         record_if("native_nodes_skipped_blank_text", tree.skipped_blank_text);
         record_if("native_nodes_skipped_non_visual", tree.skipped_non_visual);
