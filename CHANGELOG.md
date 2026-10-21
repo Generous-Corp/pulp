@@ -9,6 +9,27 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09941"></a>
+## [0.994.1] - 2026-10-21
+
+- release/version bump ([#10604](https://github.com/Generous-Corp/pulp/pull/10604))
+
+<a id="v09940"></a>
+## [0.994.0] - 2026-10-21
+
+- release/version bump ([#10601](https://github.com/Generous-Corp/pulp/pull/10601))
+- fix/gpu audio p5 receipt negative controls ([#10597](https://github.com/Generous-Corp/pulp/pull/10597))
+- fix/annotated capture xy pad bounds ([#10595](https://github.com/Generous-Corp/pulp/pull/10595))
+- fix/import run installed build hint ([#10596](https://github.com/Generous-Corp/pulp/pull/10596))
+- fix/shared io inflight release on completion ([#10594](https://github.com/Generous-Corp/pulp/pull/10594))
+- fix/param committed generation monotonic ([#10593](https://github.com/Generous-Corp/pulp/pull/10593))
+- release/version bump ([#10590](https://github.com/Generous-Corp/pulp/pull/10590))
+- fix/coverage profraw online merge ([#10586](https://github.com/Generous-Corp/pulp/pull/10586))
+- release/version bump ([#10587](https://github.com/Generous-Corp/pulp/pull/10587))
+- fix/audit upstream tag pattern ([#10494](https://github.com/Generous-Corp/pulp/pull/10494))
+- dependabot/github_actions/github actions df7079a5cc ([#10583](https://github.com/Generous-Corp/pulp/pull/10583))
+- fix/zsh colon setup source cache ([#10584](https://github.com/Generous-Corp/pulp/pull/10584))
+
 <a id="v09932"></a>
 ## [0.993.2] - 2026-10-20
 
@@ -11119,6 +11140,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.994.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.994.1
+[0.994.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.994.0
 [0.993.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.993.2
 [0.993.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.993.1
 [0.993.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.993.0
