@@ -67,6 +67,13 @@ def _read_ignore_regex() -> str:
     return match.group("pattern")
 
 
+def _profile_pattern() -> str:
+    """The LLVM_PROFILE_FILE basename pattern run_coverage.sh exports."""
+    match = re.search(r'^COVERAGE_PROFILE_PATTERN="([^"]+)"$', SCRIPT.read_text(encoding="utf-8"), re.M)
+    assert match, "COVERAGE_PROFILE_PATTERN not found in run_coverage.sh"
+    return match.group(1)
+
+
 def _script_contains(fragment: str) -> bool:
     return fragment in SCRIPT.read_text()
 
@@ -357,34 +364,47 @@ class ObjectDiscoveryTests(unittest.TestCase):
 
     def test_profraw_shards_are_reclaimed_after_merge(self) -> None:
         text = SCRIPT.read_text()
-        marker = 'echo "=== Merged ${PROFILE_SHARDS_SEEN} raw profile shard(s) (${RECLAIMED_SHARDS} absorbed during the run); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="'
+        marker = 'echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s) from ${PROFILE_MODULES} module pool(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="'
         self.assertIn(marker, text)
         self.assertIn('find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete', text[text.index(marker):])
 
-    def test_profraw_pattern_is_per_process_with_incremental_reclamation(self) -> None:
-        """Preserve every binary's counters while bounding disk incrementally."""
-        text = SCRIPT.read_text()
-        self.assertIn(
-            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"',
-            text,
-            "each process needs an isolated merge-enabled profile so binaries "
-            "with different counter layouts cannot overwrite one another.",
+    def test_profraw_pattern_is_a_per_module_pool_not_per_process(self) -> None:
+        """Bound the shard count by binaries, not by processes.
+
+        `%p` gives every test process its own file, so the whole suite's raw
+        profiles sit on disk at once and filled the hosted Linux runner's root
+        volume mid-suite. `%Nm` keeps one online-merge pool per module.
+        """
+        pattern = _profile_pattern()
+        self.assertNotIn("%p", pattern, "a per-process profile grows with every test process")
+        self.assertRegex(
+            pattern, r"%[1-9]m",
+            "the pool needs `%Nm`: plain `%m` is one file per module, which "
+            "parallel exits of one binary corrupt",
         )
-        self.assertIn("coverage_reclaim_loop &", text)
-        self.assertIn("coverage_absorb_finished_shards()", text)
-        self.assertIn('kill -0 "${pid}"', text)
+        self.assertIn(
+            'export LLVM_PROFILE_FILE="${PROFRAW_DIR}/${COVERAGE_PROFILE_PATTERN}"',
+            SCRIPT.read_text(encoding="utf-8"),
+        )
+
+    def test_full_run_fails_closed_when_pools_cover_too_few_modules(self) -> None:
+        """A pool shared across binaries drops profiles without failing.
+
+        The guard compares distinct pool signatures with the test-binary count,
+        after TEST_BINARIES exists, and only for an unfiltered run.
+        """
+        text = SCRIPT.read_text(encoding="utf-8")
+        guard = text.index("PROFILE_MODULES * 2 < ${#TEST_BINARIES[@]}")
+        self.assertLess(text.index("TEST_BINARIES+=("), guard)
+        self.assertIn('[[ -z "${TESTS_REGEX}" ]]', text[guard - 200:guard])
+        self.assertIn("exit 1", text[guard:guard + 400])
 
     def test_merge_tolerates_isolated_bad_shards_but_has_a_mass_guard(self) -> None:
         text = SCRIPT.read_text()
         self.assertIn("--failure-mode=all", text)
         self.assertIn('INVALID_PROFILE_SHARDS}" -gt 25', text)
         self.assertIn("INVALID_PROFILE_SHARDS * 100", text)
-        # The denominator must be every shard SEEN, not just those still on
-        # disk at the final merge. Incremental reclamation removes absorbed
-        # shards mid-run, so scoping the ratio to the survivors would shrink
-        # the denominator and fire this guard on a healthy run.
-        self.assertIn("PROFILE_SHARDS_SEEN * 5", text)
-        self.assertIn("PROFILE_SHARDS + RECLAIMED_SHARDS", text)
+        self.assertIn("PROFILE_SHARDS * 5", text)
 
     def test_merge_uses_one_input_list_invocation(self) -> None:
         text = SCRIPT.read_text()
@@ -401,181 +421,99 @@ class ObjectDiscoveryTests(unittest.TestCase):
         )
 
 
-class IncrementalReclaimTests(unittest.TestCase):
-    """Behavioural tests for mid-run profile reclamation.
+class ProfilePoolBehaviourTests(unittest.TestCase):
+    """Run the script's real LLVM_PROFILE_FILE pattern against real binaries.
 
-    Per-process `%p-%m` shards make this lane's coverage correct but let raw
-    profiles accumulate for the whole suite, which is what exhausts a hosted
-    macOS runner's disk mid-run. The script absorbs finished shards into a
-    running profdata while the suite runs.
-
-    The load-bearing property is the safety gate: a shard may be absorbed only
-    when its owning process has exited. Getting that wrong drops a slow test's
-    coverage silently, so it is tested by behaviour here, not only by grep.
+    The load-bearing property is that the pool is keyed per BINARY: two
+    different instrumented programs exiting concurrently must land in separate
+    pools and both keep every run's counters. A pool shared across binaries is
+    the silent under-reporting this lane once had, so it is tested by
+    behaviour, not only by grep.
     """
 
     @staticmethod
-    def _extract_reclaim_functions() -> str:
-        text = SCRIPT.read_text()
-        start = text.index("coverage_free_kib() {")
-        end = text.index("coverage_reclaim_loop() {")
-        return text[start:end]
-
-    @staticmethod
-    def _llvm_profdata() -> str | None:
-        found = shutil.which("llvm-profdata")
+    def _tool(name: str) -> str | None:
+        found = shutil.which(name)
         if found:
             return found
         try:
             out = subprocess.run(
-                ["xcrun", "-f", "llvm-profdata"],
-                capture_output=True, text=True, check=False,
+                ["xcrun", "-f", name], capture_output=True, text=True, check=False,
             )
         except FileNotFoundError:
             return None
-        path = out.stdout.strip()
-        return path or None
+        return out.stdout.strip() or None
 
-    def _make_profraw(self, workdir: Path) -> Path:
-        """Compile and run a tiny instrumented binary to get a REAL profraw."""
+    def test_concurrent_runs_of_two_binaries_pool_per_module_and_keep_counters(self) -> None:
         clang = shutil.which("clang")
-        if clang is None:
-            self.skipTest("clang not available")
-        src = workdir / "t.c"
-        src.write_text("int f(int x){return x>0?x:-x;}\nint main(void){return f(1)==1?0:1;}\n")
-        binary = workdir / "t"
-        subprocess.run(
-            [clang, "-fprofile-instr-generate", "-fcoverage-mapping", "-O0",
-             "-o", str(binary), str(src)],
-            check=True, capture_output=True,
-        )
-        raw = workdir / "seed.profraw"
-        env = dict(os.environ, LLVM_PROFILE_FILE=str(raw))
-        subprocess.run([str(binary)], env=env, check=True, capture_output=True)
-        if not raw.exists():
-            self.skipTest("instrumented run produced no profraw")
-        return raw
-
-    def _run_absorb(self, build_dir: Path, profdata_dir: str) -> subprocess.CompletedProcess:
-        harness = build_dir / "harness.sh"
-        harness.write_text(
-            "set -uo pipefail\n"
-            f'BUILD_DIR="{build_dir}"\n'
-            'PROFRAW_DIR="${BUILD_DIR}/profraw"\n'
-            'REPORT_DIR="${BUILD_DIR}/coverage"\n'
-            'RUNNING_PROFDATA="${REPORT_DIR}/pulp-running.profdata"\n'
-            'RECLAIM_LOG="${REPORT_DIR}/llvm-profdata-reclaim.log"\n'
-            'RECLAIM_COUNT_FILE="${BUILD_DIR}/.coverage-reclaim-count"\n'
-            + self._extract_reclaim_functions()
-            + "\ncoverage_absorb_finished_shards\n"
-        )
-        env = dict(os.environ, PATH=profdata_dir + os.pathsep + os.environ["PATH"])
-        return subprocess.run(
-            ["bash", str(harness)], capture_output=True, text=True, env=env,
-        )
-
-    def test_absorbs_dead_owner_shard_and_spares_live_owner_shard(self) -> None:
-        profdata = self._llvm_profdata()
-        if profdata is None:
-            self.skipTest("llvm-profdata not available")
+        profdata = self._tool("llvm-profdata")
+        if clang is None or profdata is None:
+            self.skipTest("clang / llvm-profdata not available")
+        runs_per_binary = 12
 
         with tempfile.TemporaryDirectory() as tmp:
-            build = Path(tmp)
-            (build / "profraw").mkdir()
-            (build / "coverage").mkdir()
-            seed = self._make_profraw(build)
+            work = Path(tmp)
+            profraw = work / "profraw"
+            profraw.mkdir()
+            binaries = []
+            for name, body in (("alpha", "x * 2"), ("beta", "x > 0 ? x : -x")):
+                src = work / f"{name}.c"
+                src.write_text(
+                    f"int {name}(int x){{return {body};}}\n"
+                    f"int main(void){{return {name}(1) == 0;}}\n",
+                    encoding="utf-8",
+                )
+                binary = work / name
+                subprocess.run(
+                    [clang, "-fprofile-instr-generate", "-fcoverage-mapping", "-O0",
+                     "-o", str(binary), str(src)],
+                    check=True, capture_output=True,
+                )
+                binaries.append(binary)
 
-            # A PID that is definitively gone: start a process and reap it.
-            done = subprocess.Popen(["true"])
-            done.wait()
-            dead_pid = done.pid
-            live_pid = os.getpid()
+            env = dict(os.environ, LLVM_PROFILE_FILE=str(profraw / _profile_pattern()))
+            procs = [
+                subprocess.Popen([str(b)], env=env)
+                for _ in range(runs_per_binary) for b in binaries
+            ]
+            for proc in procs:
+                self.assertEqual(proc.wait(), 0)
 
-            dead_shard = build / "profraw" / f"pulp-{dead_pid}-111_0.profraw"
-            live_shard = build / "profraw" / f"pulp-{live_pid}-222_0.profraw"
-            shutil.copyfile(seed, dead_shard)
-            shutil.copyfile(seed, live_shard)
-
-            result = self._run_absorb(build, str(Path(profdata).parent))
-            self.assertEqual(result.returncode, 0, result.stderr)
-
-            self.assertFalse(
-                dead_shard.exists(),
-                "a shard whose owning process has exited must be absorbed and deleted",
+            shards = sorted(p.name for p in profraw.glob("*.profraw"))
+            self.assertTrue(shards, "the pattern produced no profiles")
+            self.assertLessEqual(
+                len(shards), 2 * 8,
+                f"{len(shards)} shards for 2 binaries: the pool is not bounded per module",
             )
-            self.assertTrue(
-                live_shard.exists(),
-                "a shard owned by a LIVE process must never be reclaimed — doing so "
-                "drops that test's coverage silently",
+            # The script's own signature extraction must see one pool per binary.
+            inputs = work / "inputs.txt"
+            inputs.write_text("".join(f"{profraw / s}\n" for s in shards), encoding="utf-8")
+            extract = re.search(r"PROFILE_MODULES=\$\((sed -n '[^']+')", SCRIPT.read_text(encoding="utf-8"))
+            self.assertIsNotNone(extract, "PROFILE_MODULES extraction not found")
+            modules = subprocess.run(
+                ["bash", "-c", f'{extract.group(1)} "$1" | sort -u | wc -l', "_", str(inputs)],
+                capture_output=True, text=True, encoding="utf-8", check=True,
+            ).stdout.strip()
+            self.assertEqual(modules, "2", f"expected one pool per binary, got {modules}: {shards}")
+
+            merged = work / "m.profdata"
+            subprocess.run(
+                [profdata, "merge", "-sparse", *map(str, profraw.glob("*.profraw")),
+                 "-o", str(merged)],
+                check=True, capture_output=True,
             )
-            running = build / "coverage" / "pulp-running.profdata"
-            self.assertTrue(running.exists(), "absorbed counters must land in a running profdata")
-            self.assertEqual(
-                (build / ".coverage-reclaim-count").read_text().strip(), "1",
-                "exactly one shard was absorbable, so the count must say 1",
-            )
-
-    def test_running_profdata_is_fed_back_in_and_never_deleted(self) -> None:
-        """Accumulation, not replacement.
-
-        `-o` over a fresh subset would overwrite the prior result instead of
-        accumulating it, which is the documented hazard in the script. The
-        running profdata must be an INPUT to each batch and must survive it.
-        """
-        profdata = self._llvm_profdata()
-        if profdata is None:
-            self.skipTest("llvm-profdata not available")
-
-        with tempfile.TemporaryDirectory() as tmp:
-            build = Path(tmp)
-            (build / "profraw").mkdir()
-            (build / "coverage").mkdir()
-            seed = self._make_profraw(build)
-            running = build / "coverage" / "pulp-running.profdata"
-
-            for signature in ("111", "222"):
-                done = subprocess.Popen(["true"])
-                done.wait()
-                shard = build / "profraw" / f"pulp-{done.pid}-{signature}_0.profraw"
-                shutil.copyfile(seed, shard)
-                result = self._run_absorb(build, str(Path(profdata).parent))
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertTrue(running.exists(), "running profdata must survive each batch")
-
-            self.assertEqual(
-                (build / ".coverage-reclaim-count").read_text().strip(), "2",
-                "the shard count must accumulate across batches, not reset",
-            )
-
-            # The decisive assertion. Both shards are copies of one profraw
-            # whose function ran once, so a profdata that ACCUMULATED both
-            # batches reports a maximum function count of 2. A profdata that
-            # was overwritten by the second batch reports 1 — which is exactly
-            # what `-o` over a fresh subset would produce, and is the silent
-            # data loss this design exists to avoid.
             shown = subprocess.run(
-                [profdata, "show", str(running)],
-                capture_output=True, text=True, check=True,
+                [profdata, "show", "--all-functions", str(merged)],
+                capture_output=True, text=True, encoding="utf-8", check=True,
             ).stdout
-            counts = re.findall(r"Maximum function count:\s*(\d+)", shown)
-            self.assertTrue(counts, f"llvm-profdata show gave no function count:\n{shown}")
-            self.assertEqual(
-                counts[0], "2",
-                "counters from earlier batches were lost: the running profdata was "
-                "overwritten instead of accumulated",
-            )
-
-    def test_reclaim_gates_on_process_liveness_not_mtime(self) -> None:
-        text = SCRIPT.read_text()
-        self.assertIn("kill -0", text)
-        self.assertRegex(
-            text, r"pulp-\(\[0-9\]\+\)-\[0-9\]\+_\[0-9\]\+",
-            "the owning PID must be parsed out of the %p-%m filename",
-        )
-        self.assertNotIn(
-            "-newermt", text,
-            "an mtime gate would reclaim a slow test's live shard; use PID liveness",
-        )
+            # Every run of each binary must survive the pool merge: a dropped
+            # profile shows up as a function count below runs_per_binary.
+            for name in ("alpha", "beta"):
+                block = re.search(
+                    rf"^\s*{name}:\n(?:.*\n)*?\s*Function count: (\d+)", shown, re.M,
+                )
+                self.assertIsNotNone(block, f"{name} missing from the merged profile:\n{shown}")
+                self.assertEqual(int(block.group(1)), runs_per_binary, shown)
 
 
 class StaleCacheTests(unittest.TestCase):

@@ -145,6 +145,17 @@ commit. When you bump such a tag, update `upstream.commit` in the same change
 (`git ls-remote <repo> 'refs/tags/<tag>^{}'` gives the peeled commit), or the
 gate fails on every row from that dependency.
 
+### An upstream that tags more than one product needs `tag_pattern`
+
+`audit.py --check-upstream` reports `latest=` from the GitHub releases API, else
+the highest semver tag. A repository that also tags sub-crates or side products
+can win with the wrong tag. Add `"tag_pattern": "<regex>"` to the row's
+`upstream` (full-match against the tag name): tags outside it are ignored, and a
+releases-API answer outside it is discarded and reported as a "tag-order guess".
+A declared pattern also disables the year-shaped-major filter, so date-versioned
+projects (mise) work. An invalid regex flags only that row; the rest of the audit
+still runs.
+
 ## Overlap Awareness
 
 Before suggesting a package, check if Pulp's built-in `core/signal/` already covers the need:
