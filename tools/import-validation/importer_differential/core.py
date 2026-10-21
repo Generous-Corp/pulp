@@ -704,25 +704,229 @@ def geometry_metrics(
     return result
 
 
+# Chromium lays out in LayoutUnits of 1/64 CSS px, so a box delta above one
+# LayoutUnit is a layout difference rather than coordinate quantization. The
+# measured browser-to-native floor on the differential corpus is ~0.0005 px
+# (DesignIR serializes sizes to three decimals), well below this bound.
+GEOMETRY_ABSOLUTE_TOLERANCE_PX = 1.0 / 64.0
+
+
+def dom_authored_surface(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the first occupying body child from the Chromium DOM snapshot.
+
+    This mirrors the capture's authored-frame rule (first body element child
+    with a positive layout box) but reads the DOMSnapshot layout tree, an
+    artifact produced by a different CDP call than the capture's recorded
+    authored frame.
+    """
+    strings = snapshot.get("strings", [])
+    documents = snapshot.get("documents", [])
+    if not documents:
+        return None
+    document = documents[0]
+    raw_nodes = document.get("nodes", {})
+    layout = document.get("layout", {})
+    parents = raw_nodes.get("parentIndex", [])
+    types = raw_nodes.get("nodeType", [])
+    names = raw_nodes.get("nodeName", [])
+    layout_by_node = {
+        node_index: layout_index
+        for layout_index, node_index in enumerate(layout.get("nodeIndex", []))
+    }
+    raw_bounds = layout.get("bounds", [])
+    body = next((index for index, node_type in enumerate(types)
+                 if node_type == 1
+                 and decode_string(strings, names[index] if index < len(names) else None
+                                   ).lower() == "body"), None)
+    if body is None:
+        return None
+    for index, parent in enumerate(parents):
+        if parent != body or index >= len(types) or types[index] != 1:
+            continue
+        layout_index = layout_by_node.get(index)
+        if layout_index is None or layout_index >= len(raw_bounds):
+            continue
+        bounds = raw_bounds[layout_index]
+        if len(bounds) != 4:
+            continue
+        try:
+            box = tuple(float(value) for value in bounds)
+        except (TypeError, ValueError):
+            continue
+        if not all(math.isfinite(value) for value in box):
+            continue
+        if box[2] > 0 and box[3] > 0:
+            return {"index": index, "bounds": box}
+    return None
+
+
+def frame_placement_check(
+    snapshot: dict[str, Any], capture: dict[str, Any], native_ir: dict[str, Any],
+    native_layout: dict[str, Any],
+    registered_matches: list[tuple[BrowserNode, NativeNode, float]],
+    tolerance: float = GEOMETRY_ABSOLUTE_TOLERANCE_PX,
+) -> dict[str, Any]:
+    """Check where the native panel claims to sit against Chromium's DOM.
+
+    Intra-panel geometry is scored after registration, so the panel's page
+    placement needs its own fail-closed check. The Chromium side is the
+    DOMSnapshot layout box of the authored surface element, cross-checked
+    against the capture's recorded frame. The native side is the origin the
+    DesignIR root records, the root size, the native layout's viewport origin,
+    and the native box of the matched surface element.
+
+    The recorded DesignIR origin is transcribed from the candidate's own
+    Chromium capture: the native layout never computes the page margins
+    outside the authored surface. This check therefore proves cross-run
+    agreement, faithful transcription, and native placement relative to the
+    recorded origin, not a native reproduction of those margins.
+    """
+    labels = ("x", "y", "width", "height")
+    checks: dict[str, Any] = {}
+
+    def compare(name: str, expected: tuple[float, ...] | None,
+                actual: tuple[float, ...] | None) -> None:
+        if expected is None or actual is None:
+            checks[name] = {"ok": False, "reason": "unavailable"}
+            return
+        delta = [a - e for e, a in zip(expected, actual)]
+        checks[name] = {
+            "ok": all(math.isfinite(v) and abs(v) <= tolerance for v in delta),
+            "expected": dict(zip(labels, expected)),
+            "actual": dict(zip(labels, actual)),
+            "signed_delta": dict(zip(labels, [round(v, 6) for v in delta])),
+        }
+
+    def floats(values: Any) -> tuple[float, ...] | None:
+        try:
+            result = tuple(float(value) for value in values)
+        except (KeyError, TypeError, ValueError):
+            return None
+        return result if all(math.isfinite(value) for value in result) else None
+
+    surface = dom_authored_surface(snapshot)
+    dom_box = surface["bounds"] if surface else None
+    checks["dom_surface_found"] = {
+        "ok": surface is not None,
+        "dom_node_index": surface["index"] if surface else None,
+    }
+    frame = (capture.get("reference") or {}).get("authored_frame")
+    capture_box = (floats(frame[key] for key in labels)
+                   if isinstance(frame, dict) and all(key in frame for key in labels)
+                   else None)
+    compare("dom_surface_matches_capture_frame", dom_box, capture_box)
+
+    root = native_ir.get("root") if isinstance(native_ir, dict) else None
+    root = root if isinstance(root, dict) else {}
+    attributes = root.get("attributes") if isinstance(root.get("attributes"), dict) else {}
+    keys = [f"browser_authored_frame_{label}" for label in labels]
+    recorded = (floats(attributes[key] for key in keys)
+                if all(key in attributes for key in keys) else None)
+    compare("design_ir_recorded_frame_matches_dom_surface", dom_box, recorded)
+
+    style = root.get("style") if isinstance(root.get("style"), dict) else {}
+    root_size = (floats((style["width"], style["height"]))
+                 if "width" in style and "height" in style else None)
+    compare("design_ir_root_size_matches_dom_surface",
+            dom_box[2:] if dom_box else None, root_size)
+
+    viewport_root = next(
+        (node for node in native_layout.get("nodes", [])
+         if isinstance(node, dict) and node.get("id") == "browser:root"), None)
+    viewport_rect = viewport_root.get("rect") if isinstance(viewport_root, dict) else None
+    viewport_origin = (floats((viewport_rect["x"], viewport_rect["y"]))
+                       if isinstance(viewport_rect, dict)
+                       and "x" in viewport_rect and "y" in viewport_rect else None)
+    compare("native_viewport_root_at_origin", (0.0, 0.0), viewport_origin)
+
+    native_surface = None
+    if surface is not None:
+        native_surface = next(
+            (native for browser, native, _score in registered_matches
+             if browser.index == surface["index"]), None)
+    checks["dom_surface_matched_to_native"] = {
+        "ok": native_surface is not None,
+        "native_anchor": native_surface.anchor if native_surface else None,
+    }
+    page_box = None
+    if (native_surface is not None and native_surface.bounds is not None
+            and recorded is not None):
+        local = native_surface.bounds
+        page_box = (local[0] + recorded[0], local[1] + recorded[1], local[2], local[3])
+    compare("native_surface_page_box_matches_dom_surface", dom_box, page_box)
+
+    return {
+        "ok": all(row["ok"] for row in checks.values()),
+        "tolerance_px": tolerance,
+        "checks": checks,
+        "circularity": (
+            "the DesignIR recorded origin is transcribed from the candidate "
+            "Chromium capture; native layout does not compute page margins "
+            "outside the authored surface"),
+    }
+
+
 def geometry_metrics_with_registration(
     raw_matches: list[tuple[BrowserNode, NativeNode, float]],
     registered_matches: list[tuple[BrowserNode, NativeNode, float]],
     registration: dict[str, float],
+    frame_placement: dict[str, Any] | None = None,
+    tolerance: float = GEOMETRY_ABSOLUTE_TOLERANCE_PX,
 ) -> dict[str, Any]:
-    """Return canonical page-space geometry plus an explicit diagnostic view.
+    """Return gated panel geometry with raw page-space kept as a diagnostic.
 
-    Promotion and aggregate scores must remain based on the raw page-space
-    comparison.  The registered view explains an authenticated panel-local
-    frame contract without allowing that registration to hide a placement
-    mismatch from callers consuming the canonical score.
+    The native root is panel-local, so raw page-space bounds differ from
+    Chromium by the authored-frame origin on every node. Under the
+    relative-error score that translation dominates and is not monotone in
+    defect size: a defect that moves a box toward the page origin raises the
+    raw score. The gate therefore has three parts, all required:
+
+    - frame placement: the fail-closed check from ``frame_placement_check``;
+    - registered intra-panel geometry score at or above the threshold;
+    - every registered matched box within ``tolerance`` CSS px on each edge,
+      because the relative score barely sees a few-pixel shift far from the
+      origin.
+
+    Raw page-space metrics stay in the report under ``raw_page_space``.
     """
-    raw_geometry = geometry_metrics(raw_matches)
-    raw_geometry["registration"] = {
-        "x": 0.0, "y": 0.0, "source": "page-space",
+    geometry = geometry_metrics(registered_matches)
+    raw = geometry_metrics(raw_matches)
+    raw["role"] = "diagnostic"
+    raw["registration"] = {"x": 0.0, "y": 0.0, "source": "page-space"}
+    geometry["raw_page_space"] = raw
+    geometry["registration_applied"] = registration
+
+    violations = [
+        {key: row[key] for key in ("browser_node", "native_anchor",
+                                   "signed_delta", "max_abs_delta")}
+        for row in geometry["rows"] if row["max_abs_delta"] > tolerance
+    ]
+    absolute = {
+        "ok": geometry["matched_bounds"] > 0 and not violations,
+        "tolerance_px": tolerance,
+        "max_abs_delta": max(
+            (row["max_abs_delta"] for row in geometry["rows"]), default=None),
+        "violation_count": len(violations),
+        "violations": violations,
     }
-    raw_geometry["registered_geometry"] = geometry_metrics(registered_matches)
-    raw_geometry["registration_applied"] = registration
-    return raw_geometry
+    if frame_placement is None:
+        frame_placement = {"ok": False, "reason": "not evaluated"}
+    threshold = PROMOTION_THRESHOLDS["geometry"]
+    checks = {
+        "frame_placement": frame_placement,
+        "registered_score": {
+            "ok": geometry["score"] >= threshold,
+            "score": geometry["score"],
+            "threshold": threshold,
+        },
+        "absolute_tolerance": absolute,
+    }
+    geometry["gate"] = {
+        "ok": all(check["ok"] for check in checks.values()),
+        "failed": [name for name, check in checks.items() if not check["ok"]],
+        "checks": checks,
+    }
+    return geometry
 
 
 def register_browser_nodes_to_native_frame(
@@ -1084,6 +1288,19 @@ def visual_metrics(
     return full
 
 
+def geometry_gate_ok(geometry: dict[str, Any]) -> bool:
+    """Absence of an evaluated geometry gate is a failure, never a pass."""
+    gate = geometry.get("gate")
+    return isinstance(gate, dict) and gate.get("ok") is True
+
+
+def geometry_gate_failures(geometry: dict[str, Any]) -> list[str]:
+    gate = geometry.get("gate")
+    if not isinstance(gate, dict):
+        return ["gate not evaluated"]
+    return list(gate.get("failed", []))
+
+
 def classify_gaps(
     recognition: dict[str, Any],
     structural: dict[str, Any],
@@ -1129,11 +1346,12 @@ def classify_gaps(
             0.75,
             "parser",
         ))
-    if geometry["score"] < PROMOTION_THRESHOLDS["geometry"]:
+    if not geometry_gate_ok(geometry):
         likely = "flex-layout" if features.get("flex_layout") else (
             "grid-layout" if features.get("grid_layout") else "intrinsic-sizing")
         facts.setdefault(likely, (
-            f"geometry score was {geometry['score']:.3f}",
+            f"geometry score was {geometry['score']:.3f}; failed gate checks: "
+            f"{', '.join(geometry_gate_failures(geometry))}",
             0.65,
             "layout",
         ))
@@ -1182,8 +1400,11 @@ def promotion_recommendation(
     }
     failed = [
         name for name, threshold in PROMOTION_THRESHOLDS.items()
-        if scores[name] < threshold
+        if name != "geometry" and scores[name] < threshold
     ]
+    geometry_failures = geometry_gate_failures(geometry)
+    if not geometry_gate_ok(geometry):
+        failed.insert(1 if "structural" in failed else 0, "geometry")
     threshold_eligible = not unsupported and not failed
     if unsupported:
         classification = "browser-required"
@@ -1191,7 +1412,9 @@ def promotion_recommendation(
     else:
         classification = "native-with-browser-validation"
         reasons = (
-            [f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}"
+            [(f"geometry gate failed: {', '.join(geometry_failures)}"
+              if name == "geometry" else
+              f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}")
              for name in failed]
             if failed else
             ["threshold-eligible, but production promotion is disabled until "
@@ -1206,6 +1429,8 @@ def promotion_recommendation(
         "visual_full_frame_score": visual["score"],
         "visual_registered_score": (
             registered_visual["score"] if registered_visual else None),
+        "geometry_gate_ok": geometry_gate_ok(geometry),
+        "geometry_gate_failed": geometry_failures,
         "reasons": reasons,
     }
 
@@ -1641,12 +1866,14 @@ def compare_one(
             for browser, native, score in matches
         ],
     }
-    # Keep page-space geometry canonical. Registered panel-space geometry is a
-    # diagnostic view of the intentional panel-local contract and must never
-    # silently turn a placement mismatch into a promotion pass.
+    # Registered panel geometry is gated together with an explicit frame
+    # placement check, so registration cannot hide a misplaced panel. Raw
+    # page-space geometry stays in the report as a diagnostic.
     raw_comparison = structural_comparison(browser_flat_raw, native_flat)
+    frame_placement = frame_placement_check(
+        browser_snapshot, capture, native_doc, native_layout_doc, matches)
     geometry = geometry_metrics_with_registration(
-        raw_comparison["matches"], matches, geometry_registration)
+        raw_comparison["matches"], matches, geometry_registration, frame_placement)
     typography = typography_metrics(matches)
     authored_frame = capture.get("reference", {}).get("authored_frame")
     native_authored_frame = native_capture.get("reference", {}).get("authored_frame")
@@ -1893,6 +2120,10 @@ def aggregate_reports(
             "registered_visual": (
                 report["comparison"]["visual"].get("registered_visual", {})
                 or {}).get("score"),
+            "geometry_gate_ok": geometry_gate_ok(report["comparison"]["geometry"]),
+            "raw_page_space_geometry": (
+                report["comparison"]["geometry"].get("raw_page_space") or {}
+            ).get("score"),
         }
         for report in reports
     ]
@@ -1925,6 +2156,11 @@ def aggregate_reports(
         "typography": [float(r["comparison"]["typography"]["score"]) for r in reports],
         "registered_visual": registered_visual_values,
     }
+    raw_geometry_values = [
+        float(r["comparison"]["geometry"]["raw_page_space"]["score"])
+        for r in reports
+        if isinstance(r["comparison"]["geometry"].get("raw_page_space"), dict)
+    ]
     gate_thresholds = {
         "structural": PROMOTION_THRESHOLDS["structural"],
         "geometry": PROMOTION_THRESHOLDS["geometry"],
@@ -1965,11 +2201,26 @@ def aggregate_reports(
         "gate_summary": {
             name: {
                 "fixture_count": len(values),
-                "pass_count": sum(value >= gate_thresholds[name] for value in values),
+                # Geometry passes on its full gate (frame placement, registered
+                # score, absolute tolerance), not on the score alone.
+                "pass_count": (
+                    sum(geometry_gate_ok(r["comparison"]["geometry"]) for r in reports)
+                    if name == "geometry" else
+                    sum(value >= gate_thresholds[name] for value in values)),
                 "min_score": round(min(values), 6) if values else None,
                 "threshold": gate_thresholds[name],
             }
             for name, values in gate_values.items()
+        },
+        "diagnostics": {
+            "raw_page_space_geometry": {
+                "role": "diagnostic",
+                "fixture_count": len(raw_geometry_values),
+                "min_score": round(min(raw_geometry_values), 6)
+                if raw_geometry_values else None,
+                "mean_score": round(statistics.fmean(raw_geometry_values), 6)
+                if raw_geometry_values else None,
+            },
         },
         "mean_timings_ms": {
             "browser_import": mean(("timings", "browser_import_ms")),

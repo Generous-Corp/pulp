@@ -32,6 +32,16 @@ def format_summary(report: dict[str, Any]) -> str:
         lines.append(
             f"- Registered authored-frame visual score: "
             f"{comparison['visual']['registered_visual']['score']:.3f}")
+    geometry = comparison["geometry"]
+    gate = geometry.get("gate") if isinstance(geometry.get("gate"), dict) else None
+    lines.append(
+        "- Geometry gate: "
+        + ("pass" if gate and gate.get("ok") is True else
+           "fail (" + (", ".join(gate.get("failed", [])) if gate else "not evaluated") + ")"))
+    raw = geometry.get("raw_page_space")
+    if isinstance(raw, dict):
+        lines.append(
+            f"- Raw page-space geometry score (diagnostic): {raw['score']:.3f}")
     lines += [
         "",
         "Chromium remains authoritative. This report never substitutes or "
@@ -84,6 +94,11 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
         lines.append(
             f"- Registered authored-frame visual: {registered['mean_score']:.3f} "
             f"({registered['fixture_count']} fixtures)")
+    raw_geometry = aggregate.get("diagnostics", {}).get("raw_page_space_geometry", {})
+    if raw_geometry.get("fixture_count"):
+        lines.append(
+            f"- Raw page-space geometry (diagnostic): mean "
+            f"{raw_geometry['mean_score']:.3f}, minimum {raw_geometry['min_score']:.3f}")
     gate_summary = aggregate.get("gate_summary", {})
     if gate_summary:
         lines += ["", "## Gate coverage", ""]
