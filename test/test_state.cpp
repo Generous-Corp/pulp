@@ -1349,6 +1349,123 @@ TEST_CASE("versioned parameter writes use a monotonic packed revision",
     CHECK(long_lived.committed_generation() == wrap + 1);
 }
 
+TEST_CASE("conditional and plain writes never revoke a pending ordinary claim",
+          "[state][store][generation][race]") {
+    // A conditional write at an older generation lands between an ordinary
+    // writer's claim and its publication; the ordinary writer must still win.
+    ParamValue feedback(0.0f);
+    REQUIRE(ParamValueTest::claim_generation(feedback, 5, 1));
+    auto expected = feedback.versioned_value();
+    REQUIRE(feedback.compare_exchange_packed(expected, 0.25f, 3));
+    CHECK(feedback.committed_generation() == 5);
+    CHECK(ParamValueTest::publish_after_generation_claim(feedback, 0.75f, 5, 4));
+    CHECK_THAT(feedback.get(), WithinAbs(0.75f, 0.001f));
+
+    // A plain set() between claim and publication must not reset the mark.
+    ParamValue plain(0.0f);
+    REQUIRE(ParamValueTest::claim_generation(plain, 5, 1));
+    plain.set(0.25f);
+    CHECK(plain.committed_generation() == 5);
+    CHECK(ParamValueTest::publish_after_generation_claim(plain, 0.75f, 5, 4));
+    CHECK_THAT(plain.get(), WithinAbs(0.75f, 0.001f));
+
+    // Nor may a lowered mark let an older ordinary writer claim past a newer one.
+    ParamValue older(0.0f);
+    REQUIRE(older.set_packed_revisioned(0.75f, 5, 1));
+    auto older_expected = older.versioned_value();
+    REQUIRE(older.compare_exchange_packed(older_expected, 0.5f, 2));
+    older.set(0.5f);
+    CHECK(older.committed_generation() == 5);
+    CHECK_FALSE(older.set_packed_revisioned(0.25f, 4, 4));
+    CHECK_THAT(older.get(), WithinAbs(0.5f, 0.001f));
+}
+
+TEST_CASE("committed parameter generation is monotonic under concurrent writers",
+          "[state][store][generation][race]") {
+    constexpr int kOrdinaryWriters = 3;
+    constexpr int kConditionalWriters = 2;
+    constexpr int kPlainWriters = 1;
+    constexpr int kIterations = 20000;
+
+    ParamValue value(0.0f);
+    std::atomic<std::uint64_t> next_generation{0};
+    std::atomic<std::uint64_t> highest_issued{0};
+    std::atomic<bool> start{false};
+    std::atomic<int> running{0};
+    std::atomic<bool> regressed{false};
+
+    const auto issue = [&] {
+        const auto generation = next_generation.fetch_add(1, std::memory_order_acq_rel) + 1;
+        auto seen = highest_issued.load(std::memory_order_relaxed);
+        while (seen < generation &&
+               !highest_issued.compare_exchange_weak(seen, generation, std::memory_order_relaxed)) {
+        }
+        return generation;
+    };
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < kOrdinaryWriters; ++t) {
+        threads.emplace_back([&, t] {
+            ++running;
+            while (!start.load(std::memory_order_acquire)) {
+            }
+            for (int i = 0; i < kIterations; ++i)
+                (void)value.set_packed_revisioned(static_cast<float>(t), issue(), 64);
+            --running;
+        });
+    }
+    for (int t = 0; t < kConditionalWriters; ++t) {
+        threads.emplace_back([&] {
+            ++running;
+            while (!start.load(std::memory_order_acquire)) {
+            }
+            for (int i = 0; i < kIterations; ++i) {
+                auto expected = value.versioned_value();
+                (void)value.compare_exchange_packed(expected, 0.5f, issue());
+            }
+            --running;
+        });
+    }
+    for (int t = 0; t < kPlainWriters; ++t) {
+        threads.emplace_back([&] {
+            ++running;
+            while (!start.load(std::memory_order_acquire)) {
+            }
+            for (int i = 0; i < kIterations; ++i)
+                value.set(0.125f);
+            --running;
+        });
+    }
+    std::thread observer([&] {
+        while (!start.load(std::memory_order_acquire)) {
+        }
+        std::uint64_t last = 0;
+        do {
+            const auto now = value.committed_generation();
+            if (now < last)
+                regressed.store(true, std::memory_order_relaxed);
+            last = now;
+        } while (running.load(std::memory_order_acquire) > 0);
+    });
+
+    while (running.load(std::memory_order_acquire) <
+           kOrdinaryWriters + kConditionalWriters + kPlainWriters) {
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& thread : threads)
+        thread.join();
+    observer.join();
+
+    CHECK_FALSE(regressed.load());
+    const auto final_mark = value.committed_generation();
+    CHECK(final_mark > 0);
+    CHECK(final_mark <= highest_issued.load());
+    value.set(0.0f);
+    auto expected = value.versioned_value();
+    REQUIRE(value.compare_exchange_packed(expected, 0.25f, 1));
+    CHECK(value.committed_generation() == final_mark);
+}
+
 TEST_CASE("packed feedback revision exhaustion never wraps", "[state][store][feedback][negative]") {
     ParamValue exhausted(0.0f);
     ParamValueTest::seed_revision(exhausted, std::numeric_limits<std::uint32_t>::max());
