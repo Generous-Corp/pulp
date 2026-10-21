@@ -343,9 +343,13 @@ runner failure or gate verdict, with a class and a confidence.
   log in that case.
 - **Absent means it did not run.** If the notice is missing, the job may not
   have run at all; check its own log. It is advisory and never gates.
-- **Upgrading the pin.** The extractor is the Shipyard release pinned, with
-  its checksums, in `tools/ci/ci_cause_notices.sh`. Bump the version and the
-  hashes together.
+- **The extractor follows Pulp's Shipyard pin.** `tools/ci/ci_cause_notices.sh`
+  reads the version from `tools/shipyard.toml` and the asset's SHA-256 from
+  `tools/toolchain/shipyard.sha256`, so a Shipyard pin bump moves it too; never
+  copy a version or hash into the script. A record's quality is that release's
+  C2 extractor: a bare `shell-exit` or CMake `string` signature on a run
+  pinned below the C2 v7 release (Shipyard v0.337.0) is a known gap of the
+  old extractor, not a new failure mode.
 
 ## A green `macos` check can mean nothing ran
 
