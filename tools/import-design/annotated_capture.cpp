@@ -512,12 +512,19 @@ bool validate_annotated_capture(const std::string& svg, const std::string& sidec
             error = "element " + std::to_string(i) + " geometry is outside canvas";
             return false;
         }
-        if ((e.kind == DesignFrameElement::Kind::knob ||
-             e.kind == DesignFrameElement::Kind::xy_pad) &&
+        if (e.kind == DesignFrameElement::Kind::knob &&
             (e.cx < 0 || e.cy < 0 || e.cx > cw || e.cy > ch || e.hit_radius <= 0 ||
              e.cx + e.hit_radius > cw || e.cy + e.hit_radius > ch || e.cx - e.hit_radius < 0 ||
              e.cy - e.hit_radius < 0)) {
             error = "element " + std::to_string(i) + " control center is outside canvas";
+            return false;
+        }
+        // An XY pad has no hit radius; its puck center must sit inside its own
+        // rectangle, which the check above already keeps inside the canvas.
+        if (e.kind == DesignFrameElement::Kind::xy_pad &&
+            (e.cx < e.x || e.cy < e.y || e.cx > e.x + e.w || e.cy > e.y + e.h || e.cx > cw ||
+             e.cy > ch)) {
+            error = "element " + std::to_string(i) + " control center is outside its pad";
             return false;
         }
     }
