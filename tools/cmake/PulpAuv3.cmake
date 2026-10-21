@@ -297,6 +297,25 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
     set(appex_src "$<TARGET_BUNDLE_DIR:${target}_AUv3>")
     set(embed_sentinel "${CMAKE_BINARY_DIR}/AUv3/${target}_embed.stamp")
 
+    # Affected-target builds may select only the host target and omit the
+    # directory-level `ALL` embed target.  Keep the explicit sentinel target
+    # for framework-only rebuilds, but also make every host link self-contained:
+    # whenever the host target is built, its AUv3 pieces are copied into the
+    # app before the build command returns.  This prevents a successful host
+    # build from producing an unregistrable app with empty PlugIns/Frameworks.
+    add_custom_command(
+        TARGET ${host_target}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${host_bundle}/Contents/Frameworks"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${host_bundle}/Contents/PlugIns"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${host_bundle}/Contents/Frameworks/${name}AUv3Framework.framework"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${host_bundle}/Contents/PlugIns/${name}.appex"
+        COMMAND cp -RP "${fw_src}" "${host_bundle}/Contents/Frameworks/"
+        COMMAND cp -RP "${appex_src}" "${host_bundle}/Contents/PlugIns/"
+        COMMENT "Embedding ${name}AUv3Framework + ${name}.appex into ${name}.app"
+        VERBATIM
+    )
+
     # The sentinel depends on the upstream framework + appex outputs so
     # the embed step re-fires when either is rebuilt. We also re-run if
     # the host bundle was relinked (host_target itself is a dep) — that
