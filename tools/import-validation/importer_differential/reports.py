@@ -35,6 +35,15 @@ def format_summary(report: dict[str, Any]) -> str:
         lines.append(
             f"- Registered authored-frame visual score: "
             f"{comparison['visual']['registered_visual']['score']:.3f}")
+    full_frame = comparison["visual"].get("full_frame_classification")
+    if isinstance(full_frame, dict):
+        detail = ""
+        if "shifted_score" in full_frame:
+            detail = (f" (shifted {full_frame['shifted_score']:.3f}, "
+                      f"{full_frame['shifted_outside_frame']['differing_pixel_count']} "
+                      "outside-frame pixels differ)")
+        lines.append(
+            f"- Full-frame classification: {full_frame['classification']}{detail}")
     geometry = comparison["geometry"]
     gate = geometry.get("gate") if isinstance(geometry.get("gate"), dict) else None
     lines.append(

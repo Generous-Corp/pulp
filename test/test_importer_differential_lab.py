@@ -1649,5 +1649,160 @@ class FormControlBoundaryTests(unittest.TestCase):
         self.assertIn("ua-default-form-chrome", causes)
 
 
+@requires_pillow
+class FullFrameClassificationTests(unittest.TestCase):
+    PAGE = (16, 21, 34, 255)
+    PANEL = (40, 60, 90, 255)
+    INK = (230, 230, 230, 255)
+    FRAME = {"x": 6, "y": 4, "width": 12, "height": 10}
+
+    def panel(self, image, left, top):
+        for y in range(top, top + 10):
+            for x in range(left, left + 12):
+                image.putpixel((x, y), self.PANEL)
+        for x in range(left + 2, left + 8):
+            image.putpixel((x, top + 4), self.INK)
+
+    def classify(self, native_hook=None):
+        browser = Image.new("RGBA", (40, 30), self.PAGE)
+        self.panel(browser, 6, 4)
+        native = Image.new("RGBA", (40, 30), self.PAGE)
+        self.panel(native, 0, 0)
+        if native_hook:
+            native_hook(native)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            browser.save(root / "browser.png")
+            native.save(root / "native.png")
+            return LAB.visual_metrics(
+                root / "browser.png", root / "native.png", root / "overlays",
+                (40, 30), self.FRAME, 1.0)
+
+    def promote(self, visual):
+        perfect = {"score": 1.0}
+        geometry = {"score": 1.0, "gate": {"ok": True, "failed": []}}
+        return LAB.promotion_recommendation([], perfect, geometry, perfect, visual)
+
+    def test_panel_translation_is_measured_and_promotes(self) -> None:
+        visual = self.classify()
+        self.assertLess(visual["score"], 0.995)
+        self.assertEqual(visual["registered_visual"]["score"], 1.0)
+        classification = visual["full_frame_classification"]
+        self.assertEqual(classification["classification"], "panel-translation")
+        self.assertEqual(classification["offset_px"], [6, 4])
+        self.assertEqual(classification["shifted_score"], 1.0)
+        self.assertEqual(
+            classification["shifted_outside_frame"]["differing_pixel_count"], 0)
+        self.assertTrue(LAB.full_frame_ok(visual))
+        self.assertTrue(self.promote(visual)["threshold_eligible"])
+
+    def test_planted_outside_frame_defect_stays_unexplained_and_blocks(self) -> None:
+        def blob(native):
+            for y in range(20, 24):
+                for x in range(30, 34):
+                    native.putpixel((x, y), self.INK)
+        visual = self.classify(blob)
+        # The panel itself still registers perfectly; only the full-frame
+        # classification can see the defect.
+        self.assertEqual(visual["registered_visual"]["score"], 1.0)
+        classification = visual["full_frame_classification"]
+        self.assertEqual(classification["classification"], "unexplained")
+        self.assertIn("outside-frame", classification["residual_locus"])
+        self.assertGreater(
+            classification["shifted_outside_frame"]["differing_pixel_count"], 0)
+        self.assertFalse(LAB.full_frame_ok(visual))
+        result = self.promote(visual)
+        self.assertFalse(result["threshold_eligible"])
+        self.assertTrue(any(reason.startswith("full-frame visual")
+                            and reason.endswith("classified unexplained")
+                            for reason in result["reasons"]), result["reasons"])
+
+    def test_page_background_mismatch_stays_unexplained(self) -> None:
+        def host_clear(native):
+            for y in range(native.height):
+                for x in range(native.width):
+                    if not (x < 12 and y < 10):
+                        native.putpixel((x, y), (30, 30, 46, 255))
+        classification = self.classify(host_clear)["full_frame_classification"]
+        self.assertEqual(classification["classification"], "unexplained")
+        self.assertIn("outside-frame", classification["residual_locus"])
+
+    def test_subtle_outside_frame_defect_blocks_despite_high_shifted_score(self) -> None:
+        def faint(native):
+            native.putpixel((20, 15), (22, 21, 34, 255))
+        classification = self.classify(faint)["full_frame_classification"]
+        # One faint pixel barely moves the similarity score, but any differing
+        # outside-frame pixel leaves the residual unexplained.
+        self.assertGreaterEqual(classification["shifted_score"], 0.995)
+        self.assertEqual(
+            classification["shifted_outside_frame"]["differing_pixel_count"], 1)
+        self.assertEqual(classification["classification"], "unexplained")
+
+    def test_vacated_margin_uses_native_background_not_browser(self) -> None:
+        # A panel that nearly fills the native canvas leaves only margin that
+        # shifts out of view. The vacated page margin must be filled from the
+        # native render; filling it from the browser would hide a native page
+        # background that differs from Chromium's.
+        browser = Image.new("RGBA", (40, 30), self.PAGE)
+        native = Image.new("RGBA", (40, 30), (30, 30, 46, 255))
+        for image, left, top in ((browser, 6, 4), (native, 0, 0)):
+            for y in range(top, top + 26):
+                for x in range(left, left + 34):
+                    image.putpixel((x, y), self.PANEL)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            browser.save(root / "browser.png")
+            native.save(root / "native.png")
+            visual = LAB.visual_metrics(
+                root / "browser.png", root / "native.png", root / "overlays",
+                (40, 30), {"x": 6, "y": 4, "width": 34, "height": 26}, 1.0)
+        classification = visual["full_frame_classification"]
+        self.assertEqual(classification["fill"], [30, 30, 46, 255])
+        self.assertEqual(classification["classification"], "unexplained")
+
+    def test_unoffset_residual_is_unexplained(self) -> None:
+        frame = Image.new("RGBA", (40, 30), self.PAGE)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frame.save(root / "browser.png")
+            Image.new("RGBA", (40, 30), self.INK).save(root / "native.png")
+            visual = LAB.visual_metrics(
+                root / "browser.png", root / "native.png", root / "overlays",
+                (40, 30), {"x": 0, "y": 0, "width": 40, "height": 30}, 1.0)
+        self.assertEqual(visual["full_frame_classification"]["classification"],
+                         "unexplained")
+        self.assertFalse(LAB.full_frame_ok(visual))
+
+    def test_low_full_frame_without_classification_fails_closed(self) -> None:
+        self.assertFalse(LAB.full_frame_ok({"score": 0.9}))
+        self.assertFalse(LAB.full_frame_ok({"score": 0.9, "full_frame_classification": {
+            "classification": "panel-translation", "shifted_score": 0.9,
+            "shifted_outside_frame": {"differing_pixel_count": 0}}}))
+        self.assertFalse(LAB.full_frame_ok({"score": 0.9, "full_frame_classification": {
+            "classification": "panel-translation", "shifted_score": 1.0,
+            "shifted_outside_frame": {"differing_pixel_count": 3}}}))
+        self.assertTrue(LAB.full_frame_ok({"score": 0.999}))
+
+    def test_boundary_and_full_frame_reasons_are_both_reported(self) -> None:
+        def blob(native):
+            for y in range(20, 24):
+                for x in range(30, 34):
+                    native.putpixel((x, y), self.INK)
+        perfect = {"score": 1.0}
+        geometry = {"score": 1.0, "gate": {"ok": True, "failed": []}}
+        boundary = [{"boundary": "ua-default-form-chrome", "control_count": 1,
+                     "controls": ["input[type=range]"],
+                     "foreground_error_share": 0.5}]
+        result = LAB.promotion_recommendation(
+            [], perfect, geometry, perfect, self.classify(blob), boundary)
+        self.assertEqual(result["classification"], "browser-required")
+        self.assertFalse(result["threshold_eligible"])
+        self.assertTrue(any(reason.startswith("support boundary ua-default-form-chrome")
+                            for reason in result["reasons"]), result["reasons"])
+        self.assertTrue(any(reason.startswith("full-frame visual")
+                            and reason.endswith("classified unexplained")
+                            for reason in result["reasons"]), result["reasons"])
+
+
 if __name__ == "__main__":
     unittest.main()

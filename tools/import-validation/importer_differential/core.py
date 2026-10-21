@@ -1300,7 +1300,101 @@ def visual_metrics(
     else:
         full["registered_visual"] = None
         full["registration"] = registration
+
+    def classify_full_frame() -> dict[str, Any]:
+        threshold = PROMOTION_THRESHOLDS["visual"]
+        if full["score"] >= threshold:
+            return {"classification": "full-frame-pass", "threshold": threshold}
+        if registered_reference is None:
+            return {"classification": "unexplained", "threshold": threshold,
+                    "reason": "no authored frame to test a panel translation"}
+        # Shift control: the native root renders the panel at native origin,
+        # while Chromium paints it at the authored origin. Translate the native
+        # render by the browser crop offset and fill the vacated margin with the
+        # native render's own outside-frame background. If the full-frame
+        # residual is only that translation, the shifted render reproduces the
+        # browser PNG and no outside-frame pixel differs.
+        offset = (registration["browser_crop_px"][0], registration["browser_crop_px"][1])
+        native_box = tuple(registration["native_crop_px"])
+        outside_native = [
+            pixel for index, pixel in enumerate(candidate.get_flattened_data())
+            if not (native_box[0] <= index % candidate.width < native_box[2]
+                    and native_box[1] <= index // candidate.width < native_box[3])]
+        if offset == (0, 0) or not outside_native:
+            return {"classification": "unexplained", "threshold": threshold,
+                    "offset_px": list(offset),
+                    "residual_locus": (
+                        ["in-frame"] if full["registered_visual"]["score"] < threshold
+                        else ["outside-frame"]),
+                    "reason": "residual is not a panel translation: the panel "
+                              "is not offset or has no outside-frame area"}
+        fill = Counter(outside_native).most_common(1)[0][0]
+        shifted = Image.new("RGBA", candidate.size, fill)
+        shifted.paste(candidate, offset)
+        shifted_score = score_images(
+            reference, shifted, artifacts_dir / "shifted",
+            {"source": "panel-translation-shift-control",
+             "offset_px": list(offset), "fill": list(fill)})
+        diff = ImageChops.difference(reference, shifted)
+        frame_box = registration["browser_crop_px"]
+        outside_total = 0
+        outside_differing = 0
+        for index, pixel in enumerate(diff.get_flattened_data()):
+            x, y = index % diff.width, index // diff.width
+            if frame_box[0] <= x < frame_box[2] and frame_box[1] <= y < frame_box[3]:
+                continue
+            outside_total += 1
+            if sum(pixel[:3]) > 2 or pixel[3] > 2:
+                outside_differing += 1
+        explained = shifted_score["score"] >= threshold and outside_differing == 0
+        locus = []
+        if outside_differing:
+            locus.append("outside-frame")
+        if full["registered_visual"]["score"] < threshold:
+            locus.append("in-frame")
+        if not explained and not locus:
+            locus.append("shifted-frame")
+        return {
+            "classification": "panel-translation" if explained else "unexplained",
+            "threshold": threshold,
+            "offset_px": list(offset),
+            "fill": list(fill),
+            "shifted_score": shifted_score["score"],
+            "shifted_outside_frame": {
+                "pixel_count": outside_total,
+                "differing_pixel_count": outside_differing,
+                "differing_pixel_fraction": round(
+                    outside_differing / max(1, outside_total), 6),
+            },
+            "artifacts": {
+                "side_by_side": "overlays/shifted/side-by-side.png",
+                "heatmap": "overlays/shifted/visual-diff.png",
+                "overlay": "overlays/shifted/overlay.png",
+            },
+            **({} if explained else {
+                "residual_locus": locus,
+                "reason": "residual remains after the panel translation: "
+                          "a page-background, overflow, or in-frame defect"}),
+        }
+
+    full["full_frame_classification"] = classify_full_frame()
     return full
+
+
+def full_frame_ok(visual: dict[str, Any]) -> bool:
+    """Full frame passes, or its residual is proven to be the panel translation.
+
+    A full-frame score below threshold without a classification is a failure.
+    """
+    threshold = PROMOTION_THRESHOLDS["visual"]
+    if visual.get("score", 0.0) >= threshold:
+        return True
+    classification = visual.get("full_frame_classification")
+    return (isinstance(classification, dict)
+            and classification.get("classification") == "panel-translation"
+            and float(classification.get("shifted_score", 0.0)) >= threshold
+            and (classification.get("shifted_outside_frame") or {}).get(
+                "differing_pixel_count") == 0)
 
 
 def geometry_gate_ok(geometry: dict[str, Any]) -> bool:
@@ -1495,6 +1589,21 @@ def promotion_recommendation(
     geometry_failures = geometry_gate_failures(geometry)
     if not geometry_gate_ok(geometry):
         failed.insert(1 if "structural" in failed else 0, "geometry")
+    full_frame_classification = (
+        visual.get("full_frame_classification") or {}).get(
+            "classification", "unclassified")
+    if not full_frame_ok(visual):
+        failed.append("full_frame")
+
+    def failure_reason(name: str) -> str:
+        if name == "geometry":
+            return f"geometry gate failed: {', '.join(geometry_failures)}"
+        if name == "full_frame":
+            return (f"full-frame visual {visual['score']:.3f} below "
+                    f"{PROMOTION_THRESHOLDS['visual']:.3f} and classified "
+                    f"{full_frame_classification}")
+        return f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}"
+
     threshold_eligible = not unsupported and not failed and not boundaries
     if unsupported or boundaries:
         classification = "browser-required"
@@ -1508,18 +1617,11 @@ def promotion_recommendation(
                 f"{boundary['control_count']} control(s), "
                 f"{boundary['foreground_error_share'] * 100:.1f}% of scored "
                 "foreground error")
-        reasons += [
-            (f"geometry gate failed: {', '.join(geometry_failures)}"
-             if name == "geometry" else
-             f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}")
-            for name in failed]
+        reasons += [failure_reason(name) for name in failed]
     else:
         classification = "native-with-browser-validation"
         reasons = (
-            [(f"geometry gate failed: {', '.join(geometry_failures)}"
-              if name == "geometry" else
-              f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}")
-             for name in failed]
+            [failure_reason(name) for name in failed]
             if failed else
             ["threshold-eligible, but production promotion is disabled until "
              "a candidate-only classifier passes a frozen holdout corpus"])
@@ -1534,6 +1636,8 @@ def promotion_recommendation(
         "visual_registered_score": (
             registered_visual["score"] if registered_visual else None),
         "geometry_gate_ok": geometry_gate_ok(geometry),
+        "full_frame_ok": full_frame_ok(visual),
+        "full_frame_classification": full_frame_classification,
         "geometry_gate_failed": geometry_failures,
         "support_boundaries": [b["boundary"] for b in boundaries],
         "reasons": reasons,
