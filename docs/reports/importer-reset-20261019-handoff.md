@@ -43,8 +43,9 @@ existing renderer, never a second production UI architecture.
   Three-run cold receipts pass for all four held-out fixtures: `basic-card`
   registered visual `0.917983`, `grid-meter` `0.999954`, `absolute-overlay`
   `0.999905`, and `form-controls` `0.712497`. The worst held-out score is
-  form controls; the set fails P3 because its visual and raw geometry gates do
-  not all pass. Repeat-run timing differences are diagnostic design-time
+  form controls; the set fails P3 on registered visual. The low raw geometry
+  scores were frame-origin translations; raw page-space geometry is now
+  reported but not gated (see "Geometry gate correction" in the plan). Repeat-run timing differences are diagnostic design-time
   transactions and do not prove runtime speedup.
 
 ## Adversarial review findings

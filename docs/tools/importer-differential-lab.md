@@ -268,7 +268,8 @@ Before collecting promotion evidence, write down and freeze:
 - an authenticated PNG receipt binding source hash, Chromium build, Pulp head,
   renderer/backend, viewport, DPR, font receipt, image dimensions, and PNG
   hashes for both sides;
-- parity thresholds for structure (>=0.99), page-space geometry (>=0.98),
+- parity thresholds for structure (>=0.99), geometry (frame placement plus
+  registered intra-panel geometry; see the P3 contract below),
   typography (>=0.98), and authenticated authored-frame visual similarity
   (>=0.995). Full-frame visual similarity remains separately reported, with
   outside-frame residuals recorded rather than cropped away; worst-fixture
@@ -412,9 +413,10 @@ hashes.
 | `form-controls` | 1.000000 | 1.000000 | 1.000000 | 0.712497 | 0.712497 | pass |
 
 The worst held-out registered visual score is `0.712497` on form controls.
-`basic-card` and `absolute-overlay` also fail the raw geometry gate because
-their authored panels begin away from the native root; their registered
-geometry is within tolerance, while their full-frame residuals remain visible
+`basic-card` and `absolute-overlay` scored low on raw page-space geometry
+because their authored panels begin away from the panel-local native root;
+under the corrected geometry contract below, raw page-space geometry is
+reported but not gated, and their registered geometry is within tolerance, while their full-frame residuals remain visible
 in the report. The registered visual gate passes only for `grid-meter` and
 `absolute-overlay`; the held-out set therefore fails P3 correctness as a
 whole. Repeat-run native-total median differences were approximately 42.0 ms,
@@ -457,8 +459,11 @@ disagreeing frame metadata fails closed rather than silently mixing registered
 and unregistered metrics.
 
 P3 passes only when every in-scope fixture has authenticated three-run receipts,
-structure >=0.99, raw page-space geometry >=0.98, typography >=0.98, and
-registered authored-frame visual >=0.995, with no held-out regression and a
+structure >=0.99; frame placement |recorded origin - observed Chromium
+origin| <= 0.5 CSS px, verified against the native layout; registered geometry
+>=0.98 with every matched box within 1/64 CSS px (Chromium's layout
+unit) on x, y, width, and height; typography >=0.98; and registered
+authored-frame visual >=0.995. Raw page-space geometry is reported, not gated, with no held-out regression and a
 worst-fixture report. A registered score cannot erase a full-frame or
 outside-frame defect; those defects must be fixed or explicitly classified in
 the fixture report before P3 can close.
@@ -503,6 +508,30 @@ define authenticated parity and performance thresholds before measuring, freeze
 the held-out split, and require negative controls. They also confirmed that the
 existing renderer and Chromium-only oracle should remain unchanged while the
 retained-plan hypothesis is tested.
+
+**Geometry gate correction (2026-10-21).** Every low raw page-space geometry
+score in the corpus was a pure whole-tree translation by the authored-frame
+origin: the native root is panel-local by contract, and `relative_error`
+divides by the reference coordinate, so the root row alone costs 0.5 for any
+nonzero origin. Raw >=0.98 was therefore unattainable by construction, and the
+raw metric failed its own negative control (a +3 px child shift toward the
+page origin raised the score). The previous metadata agreement check was
+circular because the IR root's authored-frame origin is copied from the same
+Chromium envelope the native capture carries. Fable ruled for an explicit,
+non-circular frame-placement check: Chromium dom-snapshot bounds of the
+authored root, the IR-recorded origin, and the native layout's root and
+`html` rects must agree within 0.5 CSS px. Registered intra-panel geometry
+keeps its >=0.98 mean and gains a per-node absolute bound, which the raw
+metric never had. Fable set a 1.0 CSS px ceiling; the implementation uses
+1/64 CSS px, Chromium's layout unit, because the measured floor across the
+16 completed fixtures is at most 0.0038 px. The frame-placement check remains
+partly circular, as each report's `circularity` field states: the recorded
+origin is transcribed from the candidate's own Chromium capture, so it proves
+faithful transcription and correct panel-relative placement, not that native
+layout reproduces the page margins outside the authored surface. Each part carries planted negative controls (origin
+metadata shift, native `html` rect shift, +/-3 px on the farthest node, -10%
+width). This supersedes the earlier decision to keep raw page-space geometry
+canonical; raw remains reported in every receipt.
 
 ### Stop and continuation rules
 
