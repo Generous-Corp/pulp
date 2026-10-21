@@ -291,7 +291,7 @@ provenance, source recognition, and deterministic three-run receipts pass.
 | P0 | Close existing acceptance debt | **DONE** | Attributable M1 ARM64 PR-head receipt recorded for root-canvas and provenance: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852 and protected artifact https://github.com/Generous-Corp/pulp/actions/runs/38996107653/artifacts/12088036268. The later merge-group run reused the receipt and ran zero suites; it is not claimed as fresh execution. |
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
 | P2 | Validate the evidence contract and instruments | **DONE** | 214 Python controls pass; three-run cold benchmark determinism is `pass`; authenticated Skia render receipts, DPR 2 checks, blank-render and planted-defect controls pass; frozen baseline manifest is `test/fixtures/import-differential/reset-manifest-20261018.json`. |
-| P3 | Prove native correctness | **IN PROGRESS — P3a/P3b CALIBRATED; P3c OPEN** | The latest cold corpus completed 16/18 fixtures: mean full-frame visual 0.799, mean registered authored-frame visual 0.846, and gate coverage of 13/16 structure, 8/16 geometry, 14/16 typography, and 6/16 registered visual. Fresh P3a evidence distinguishes browser-assisted design-time lowering from browser-free Skia observation; fresh P3b evidence has a deterministic three-run `02-flex-controls.html` calibration at registered visual 0.999421 with a planted-negative score of 0.94715. P3c must still replace the now-contaminated held-out split before importer tuning resumes. |
+| P3 | Prove native correctness | **IN PROGRESS — P3a/P3b/P3c COMPLETE; P3d OPEN** | The latest cold corpus completed 16/18 fixtures: mean full-frame visual 0.799, mean registered authored-frame visual 0.846, and gate coverage of 13/16 structure, 8/16 geometry, 14/16 typography, and 6/16 registered visual. Fresh P3a evidence distinguishes browser-assisted design-time lowering from browser-free Skia observation; fresh P3b evidence has a deterministic three-run `02-flex-controls.html` calibration at registered visual 0.999421 with a planted-negative score of 0.94715. P3c now has four frozen held-out fixtures with authenticated three-run receipts; the set fails correctness thresholds, so P3d generic importer fixes remain open. |
 | P4 | Compare baked-native and retained typed-plan paths | **DEFERRED UNTIL P3a/P3b AND A PASSING P3 SUBSET** | Interleaved Release runs with identical inputs, proxy counters, wall time, p95, peak RSS/GPU resource measurements, and direct benchmark peak assertion. P4 is a native-to-native equivalence/performance check and may use only fixtures that pass the corrected P3 evidence gates; it must not become a second production UI architecture. |
 | P5 | Decide promotion or deferment | **NOT STARTED** | Promote only if behavior is equivalent and the pre-registered performance threshold wins without violating resource ceilings; otherwise retain the infrastructure as experimental and keep baked-native authoritative. |
 | P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |
@@ -392,6 +392,46 @@ typography 1.0, and registered visual 0.999421. A planted 41x41-pixel magenta
 mutation scored 0.94715, below the 0.995 visual gate. This establishes a
 useful known-good/known-bad comparator control for this fixture class; it does
 not establish P3 across the corpus or prove a production performance win.
+
+### P3c replacement held-out evidence (2026-10-21)
+
+The replacement held-out manifest is frozen and committed as
+`test/fixtures/import-differential/reset-manifest-20261020.json`. It contains
+`basic-card`, `grid-meter`, `absolute-overlay`, and `form-controls`, with source
+hashes recorded before P3d importer tuning. Each fixture has an authenticated
+three-run cold receipt with matching source, Chromium capture, native capture,
+PNG, layout, font, and Skia receipt digests. The campaigns used Chrome
+151.0.7922.47, DPR 2, the same ARM64 host, and the same importer and observer
+hashes.
+
+| Held-out fixture | Structure | Geometry | Typography | Full-frame visual | Registered visual | Determinism |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `basic-card` | 1.000000 | 0.675549 | 1.000000 | 0.904209 | 0.917983 | pass |
+| `grid-meter` | 1.000000 | 1.000000 | 1.000000 | 0.999954 | 0.999954 | pass |
+| `absolute-overlay` | 1.000000 | 0.738819 | 1.000000 | 0.976336 | 0.999905 | pass |
+| `form-controls` | 1.000000 | 1.000000 | 1.000000 | 0.712497 | 0.712497 | pass |
+
+The worst held-out registered visual score is `0.712497` on form controls.
+`basic-card` and `absolute-overlay` also fail the raw geometry gate because
+their authored panels begin away from the native root; their registered
+geometry is within tolerance, while their full-frame residuals remain visible
+in the report. The registered visual gate passes only for `grid-meter` and
+`absolute-overlay`; the held-out set therefore fails P3 correctness as a
+whole. Repeat-run native-total median differences were approximately 42.0 ms,
+48.5 ms, 8.0 ms, and 9.5 ms respectively. These are browser-assisted
+design-time transactions, not browser-free runtime startup or a retained-plan
+performance result.
+
+One initial `grid-meter` campaign stopped on a provenance mismatch during its
+third invocation. It was discarded as an incomplete receipt and rerun in a
+fresh output directory; the replacement three-run receipt passed. No score
+from the failed campaign is used.
+
+P3c is **DONE**. P3d remains **OPEN**: intrinsic sizing and page geometry,
+typography baseline/leading placement, keyed-list behavior, and form controls
+require generic importer work followed by full-corpus and held-out reruns. P4
+remains deferred until a passing P3 subset exists and a real retained
+materializer can be compared with baked-native on identical traces.
 
 ### P3 denominator and registration contract
 

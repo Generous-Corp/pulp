@@ -1,10 +1,10 @@
 # Importer reset handoff (2026-10-19)
 
-Status: **ACTIVE; P3c remains open.** P0, P1, and P2 are complete. P3a
-pipeline-boundary evidence and the initial P3b comparator calibration are
-complete on the current-origin workstream; P3c and corpus-wide P3 remain open.
-P4 and P5 have not started. This document is the restart packet for the next
-session.
+Status: **ACTIVE; P3c complete, P3d remains open.** P0, P1, and P2 are
+complete. P3a pipeline-boundary evidence, P3b comparator calibration, and P3c
+replacement held-out freezing plus three-run receipts are complete on the
+current-origin workstream; corpus-wide P3 correctness remains open. P4 and P5
+have not started. This document is the restart packet for the next session.
 
 ## Objective
 
@@ -39,6 +39,13 @@ existing renderer, never a second production UI architecture.
   separate Skia observer has no browser argument and emits a successful Skia
   receipt. Its 96 ms render time must not be conflated with the roughly 9.5 s
   browser-assisted lowering time.
+- Replacement held-out manifest `reset-manifest-20261020.json` is committed.
+  Three-run cold receipts pass for all four held-out fixtures: `basic-card`
+  registered visual `0.917983`, `grid-meter` `0.999954`, `absolute-overlay`
+  `0.999905`, and `form-controls` `0.712497`. The worst held-out score is
+  form controls; the set fails P3 because its visual and raw geometry gates do
+  not all pass. Repeat-run timing differences are diagnostic design-time
+  transactions and do not prove runtime speedup.
 
 ## Adversarial review findings
 
@@ -55,10 +62,12 @@ visual defect. Before any fixture-specific or generic importer tuning:
    `02-flex-controls.html` three-run control is deterministic at 0.999421, and
    its planted negative scores 0.94715. Extend this calibration to additional
    fixture classes; do not lower the threshold during that work.
-3. **P3c: held-out integrity.** The former effective held-out set is
-   contaminated because typography and keyed-list findings guided recent
-   fixes. Freeze and hash a replacement held-out set of at least four in-scope
-   fixtures before further tuning, and record which fixtures guided each rule.
+3. **P3c: held-out integrity (complete).** The former effective held-out set
+   was contaminated because typography and keyed-list findings guided recent
+   fixes. The replacement four-fixture manifest is frozen and hashed before
+   P3d tuning. Each fixture has a deterministic authenticated three-run cold
+   receipt; the results are recorded in the authoritative plan. The set fails
+   the correctness thresholds, so P3d remains required.
 4. **P3d: correctness, only after P3a-c.** Address geometry/intrinsic sizing
    first, then typography baseline/leading placement, keyed-list behavior, and
    form controls. Treat `svg-shapes` as a known native painter gap, not as a
