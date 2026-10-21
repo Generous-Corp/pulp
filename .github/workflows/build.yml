@@ -1688,6 +1688,7 @@ jobs:
       - name: Activate pinned mise candidate toolchain
         if: >-
           runner.os == 'macOS'
+          && runner.arch == 'ARM64'
           && github.event_name == 'workflow_dispatch'
           && github.ref == 'refs/heads/main'
           && inputs.mise_candidate == true
@@ -1717,13 +1718,14 @@ jobs:
             echo "MISE_ENV=toolchain"
             echo "MISE_TRUSTED_CONFIG_PATHS=$GITHUB_WORKSPACE"
             echo "MISE_DISABLE_UPDATE_WARNING=1"
-            echo "PATH=$HOME/.cargo/bin:$tool_path"
+            echo "PATH=$HOME/.local/opt/mise-2026.10.11/bin:$HOME/.cargo/bin:$tool_path"
           } >> "$GITHUB_ENV"
           echo "mise candidate active: $tool_path"
 
       - name: Enforce pinned mise candidate toolchain
         if: >-
           runner.os == 'macOS'
+          && runner.arch == 'ARM64'
           && github.event_name == 'workflow_dispatch'
           && github.ref == 'refs/heads/main'
           && inputs.mise_candidate == true

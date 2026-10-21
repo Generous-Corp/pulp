@@ -89,16 +89,18 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
         text = json.dumps(self.steps[activate], sort_keys=True)
         for marker in (
             "mise-2026.10.11/bin/mise",
+            "runner.arch == 'ARM64'",
             "expected_mise_version",
             "expected_mise_sha",
             "shasum -a 256",
             "actual_mise_version",
             "MISE_ENV=toolchain",
             "MISE_TRUSTED_CONFIG_PATHS",
-            "PATH=$HOME/.cargo/bin:$tool_path",
+            "PATH=$HOME/.local/opt/mise-2026.10.11/bin:$HOME/.cargo/bin:$tool_path",
             "GITHUB_ENV",
         ):
             self.assertIn(marker, text)
+        self.assertIn("runner.arch == 'ARM64'", self.steps[enforce]["if"])
 
 
 class WgpuNativeDiagnosticWorkflowTest(unittest.TestCase):
