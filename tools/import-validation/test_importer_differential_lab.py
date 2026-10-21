@@ -2,11 +2,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
+try:
+    from PIL import Image
+except ImportError:
+    # Only the visual-registration case needs Pillow; the frame and promotion
+    # cases run on stdlib types alone.
+    Image = None
+
 
 class VisualRegistrationTests(unittest.TestCase):
+    @unittest.skipUnless(Image is not None, "requires Pillow")
     def test_visual_registration_compares_authenticated_panel_frame(self) -> None:
         from importer_differential.core import visual_metrics
-        from PIL import Image
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -62,3 +69,7 @@ class VisualRegistrationTests(unittest.TestCase):
         result = promotion_recommendation([], structural, geometry, typography, full)
         self.assertFalse(result["threshold_eligible"])
         self.assertEqual(result["visual_gate_score"], 0.9)
+
+
+if __name__ == "__main__":
+    unittest.main()
