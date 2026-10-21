@@ -743,6 +743,68 @@ TEST_CASE("WaveNet partial channel rejection produces one failed terminal after 
     CHECK(stats.enqueued == stats.drained);
 }
 
+TEST_CASE("WaveNet live drains defer telemetry validation and quiescent release validates it",
+          "[gpu_audio][wavenet][trace]") {
+    Harness h(1, 2, 0, true);
+    h.callback(1);
+    h.service();
+    h.service();
+    h.callback(2);
+    h.service();
+    // Negative control: the worker drain may race the audio callback, so its
+    // counters receipt must not claim validity.
+    auto live = detail::WaveNetRealtimeTestAccess::last_trace_drain(h.node);
+    CHECK(live.recording_enabled);
+    CHECK_FALSE(live.telemetry_valid);
+    CHECK(live.telemetry_error == detail::SharedIoTelemetryError::TelemetryValidationDeferred);
+    // The same counters are coherent: a quiescent validation accepts them.
+    CHECK(detail::validate_shared_io_telemetry(detail::WaveNetRealtimeTestAccess::telemetry(h.node))
+              .accepted());
+
+    REQUIRE(h.node.release());
+    const auto closed = detail::WaveNetRealtimeTestAccess::last_trace_drain(h.node);
+    CHECK(closed.recording_enabled);
+    CHECK(closed.telemetry_valid);
+    CHECK(closed.telemetry_error == detail::SharedIoTelemetryError::None);
+}
+
+TEST_CASE("WaveNet destructor drain validates telemetry after failed release",
+          "[gpu_audio][wavenet][trace]") {
+    struct Witness {
+        GpuWaveNetRealtimeNode* node = nullptr;
+        detail::SharedIoTraceDrainResult before_release;
+        detail::SharedIoTraceDrainResult at_destruction;
+        std::size_t ownership_count = 0;
+    } witness;
+    {
+        Harness h(1, 1, 0, true);
+        witness.node = &h.node;
+        detail::WaveNetRealtimeTestAccess::observe_trace(
+            h.node,
+            {&witness, [](void*, std::uint64_t, const detail::SharedIoTraceRecord&) noexcept {},
+             [](void*, std::uint64_t, const detail::SharedIoTraceAdmission&) noexcept {},
+             [](void* context, const detail::SharedIoTraceOwnership&) noexcept {
+                 // Called from the destructor body after its final drains.
+                 auto& self = *static_cast<Witness*>(context);
+                 ++self.ownership_count;
+                 self.at_destruction =
+                     detail::WaveNetRealtimeTestAccess::last_trace_drain(*self.node);
+             }});
+        h.controls[0].complete = false;
+        h.callback(1);
+        h.service();
+        h.controls[0].release = false;
+        // A failed release keeps the generation open and does not drain.
+        REQUIRE_FALSE(h.node.release());
+        witness.before_release = detail::WaveNetRealtimeTestAccess::last_trace_drain(h.node);
+    }
+    CHECK(witness.before_release.telemetry_error ==
+          detail::SharedIoTelemetryError::TelemetryValidationDeferred);
+    REQUIRE(witness.ownership_count == 1);
+    CHECK(witness.at_destruction.telemetry_valid);
+    CHECK(witness.at_destruction.telemetry_error == detail::SharedIoTelemetryError::None);
+}
+
 TEST_CASE("WaveNet owned trace discloses callback queue loss and preserves failed release",
           "[gpu_audio][wavenet][trace]") {
     Harness h(1, 1, 0, true);

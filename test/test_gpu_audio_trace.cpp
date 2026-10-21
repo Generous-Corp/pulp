@@ -1327,6 +1327,12 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
             event.sequence = 0;
             recorder.publish_callback(event);
             drain_shared_io_trace(recorder, {}, 256);
+            // Planted impossible quiescent counters: more retirements than
+            // submissions must surface as an invalid_telemetry issue.
+            SharedIoTelemetrySnapshot forged;
+            forged.retired_failure = 1;
+            REQUIRE(drain_shared_io_trace(recorder, forged, 0, nullptr, true).telemetry_error ==
+                    SharedIoTelemetryError::RetirementsExceedSubmissions);
             for (std::uint64_t sequence = 1000;
                  sequence < 1000 + SharedIoTraceRecorder::capacity + 44; ++sequence) {
                 terminal = record(sequence);

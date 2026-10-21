@@ -46,6 +46,8 @@ positive = {
     'delivery_rows': 2,
     'recovery_rows': 0,
     'capture_issue_rows': 0,
+    'invalid_telemetry_issue_rows': 0,
+    'validated_telemetry_rows': 1,
     'full_lifecycle_issue_rows': 0,
     'full_lifecycle_generation_rows': 1,
     'lifecycle_violation_rows': 0,
@@ -58,6 +60,7 @@ positive = {
 }
 negative = {
     'queue_dropped_issue_rows': 1,
+    'invalid_telemetry_issue_rows': 1,
     'full_lifecycle_issue_rows': 2,
     'lifecycle_violation_rows': 2,
     'missing_gpu_terminal_rows': 1,
@@ -74,6 +77,12 @@ metrics = positive if Path(sys.argv[4]).name.startswith('positive') else negativ
 if os.environ.get('GPU_AUDIO_TRACE_FAKE_BAD_POSITIVE') and metrics is positive:
     metrics = dict(metrics)
     metrics['session_rows'] = 0
+override = os.environ.get('GPU_AUDIO_TRACE_FAKE_OVERRIDE')
+if override:
+    kind, name, value = override.split(':')
+    if (kind == 'positive') == (metrics is positive):
+        metrics = dict(metrics)
+        metrics[name] = int(value)
 for name, value in metrics.items():
     print(f'pulp_gpu_audio_validation:{name}={value}')
 """
@@ -111,6 +120,21 @@ class ValidateGpuAudioTraceCapturesTests(unittest.TestCase):
         self.assertIn("-- checked-in definitions remain immutable", combined)
         self.assertIn("pulp_gpu_audio_validation:session_rows=", combined)
         self.assertIn("pulp_gpu_audio_validation:queue_dropped_issue_rows=", combined)
+
+    def test_telemetry_receipt_controls_fail_closed(self) -> None:
+        # Each override breaks exactly one telemetry expectation that the
+        # passing fake controls above satisfy.
+        for override, message in (
+            ("positive:invalid_telemetry_issue_rows:1", "invalid_telemetry_issue_rows=1"),
+            ("positive:validated_telemetry_rows:0", "validated_telemetry_rows=0"),
+            ("negative:invalid_telemetry_issue_rows:0", "invalid_telemetry_issue_rows=0"),
+        ):
+            with self.subTest(override=override):
+                with mock.patch.dict(os.environ, {"GPU_AUDIO_TRACE_FAKE_OVERRIDE": override}):
+                    with self.assertRaisesRegex(MODULE.ValidationError, message):
+                        MODULE.validate_captures(
+                            self.processor, self.definitions, self.positive, self.negative,
+                        )
 
     def test_positive_control_mismatch_fails_closed(self) -> None:
         with mock.patch.dict(os.environ, {"GPU_AUDIO_TRACE_FAKE_BAD_POSITIVE": "1"}):

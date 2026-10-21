@@ -363,6 +363,11 @@ void emit_shared_io_unresolved_ownership(const SharedIoTraceOwnership& ownership
         observer->ownership(observer->context, ownership);
 }
 
+// .agents/skills/trace-sql/pulp_gpu_audio_blocks.sql classifies the emitted
+// telemetry_error by these numeric values.
+static_assert(static_cast<unsigned>(SharedIoTelemetryError::None) == 0);
+static_assert(static_cast<unsigned>(SharedIoTelemetryError::TelemetryValidationDeferred) == 13);
+
 SharedIoTraceDrainResult
 drain_shared_io_trace(SharedIoTraceRecorder& recorder,
                       [[maybe_unused]] const SharedIoTelemetrySnapshot& telemetry,
