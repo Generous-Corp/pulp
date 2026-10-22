@@ -1,89 +1,76 @@
 #pragma once
 
 /// @file halfband_iir.hpp
-/// Polyphase IIR allpass-network half-band filter for 2x oversampling.
+/// Polyphase IIR allpass-network half-band filters for 2x oversampling.
 ///
-/// A half-band filter has a cutoff at exactly Fs/4 (half of Nyquist).
-/// The polyphase / allpass-network decomposition expresses an odd-order
-/// half-band IIR as two parallel allpass paths whose outputs are
-/// combined. Each allpass section is a Mitra-Regalia second-order form
-/// with a single real coefficient `a`:
+/// A half-band filter has its transition centred on a quarter of its own
+/// sample rate. The polyphase decomposition expresses an odd-order elliptic
+/// half-band lowpass as two parallel allpass paths:
 ///
-///     H(z) = (a + z^-2) / (1 + a * z^-2)
+///     H(z) = 1/2 * (A(z^2) + z^-1 * B(z^2))
 ///
-/// implemented at the sub-rate (one call per input sample for the
-/// upsampler, one call per pair of input samples for the downsampler)
-/// with the difference equation
+/// where each path is a cascade of second-order sections with a single real
+/// coefficient `a`:
+///
+///     S(z) = (a + z^-2) / (1 + a * z^-2)
+///
+/// run at the sub-rate as the first-order recurrence
 ///
 ///     y[n] = a * (x[n] - y[n-1]) + x[n-1]
 ///
-/// which costs **one multiply** per section per call.
+/// which costs one multiply-add pair per section per sub-rate sample.
 ///
-/// The default coefficient set (six sections per path = twelve
-/// sections total — see `kDefaultCoefficientsA` /
-/// `kDefaultCoefficientsB`) achieves:
+/// ## Design
+/// `design_halfband_iir(count, passband_edge)` derives the coefficients in
+/// closed form. An odd-order (2N+1) elliptic lowpass whose stopband edge
+/// mirrors its passband edge about a quarter of the sample rate is power
+/// complementary (|H(w)|^2 + |H(pi - w)|^2 = 1), and after the bilinear map
+/// every pole lies on the imaginary axis at +/- j*sqrt(a_i). The pole radii
+/// follow from the selectivity k = tan^2(pi * passband_edge), the elliptic
+/// nome of the complementary modulus, and the theta-series form of the
+/// Jacobi sn function at 2*i*K/(2N+1) — see Valenzuela & Constantinides,
+/// "Digital signal processing schemes for efficient interpolation and
+/// decimation" (IEE Proc. 1983), and Vaidyanathan, "Multirate Systems and
+/// Filter Banks", ch. 5. Ascending coefficients alternate between path A
+/// (even indices) and path B (odd indices).
 ///
-///   * passband ripple < 0.001 dB up to 0.4 * Nyquist (well under
-///     the 0.1 dB design target),
-///   * group delay ~ 3.96 samples at the filter's own (2x) rate near
-///     DC — equivalently ~ 1.98 samples at the upsampler's input rate
-///     — rising toward the transition band, as any minimum-phase IIR
-///     does. A full 2x oversampling round trip (upsample, then
-///     downsample) cascades both allpass paths and costs ~ 3.46
-///     samples at the input rate. See `kDefaultCoefficientsA` for how
-///     these follow in closed form from the coefficients,
-///   * stopband attenuation that grows monotonically from ~ -25 dB at
-///     the transition-band edge (0.6 * Nyquist) to ~ -60 dB deep in
-///     the stopband (0.98 * Nyquist).
+/// The response is equiripple in the stopband, monotonic in the passband,
+/// and sample-rate-invariant by construction: the same coefficients are
+/// correct at 44.1 kHz, 48 kHz, 96 kHz, or any other rate. The stopband
+/// floor depends only on the order and the transition width:
 ///
-/// The 80 dB stopband floor in the macOS plan's spec is reached
-/// either (a) deeper in the stopband than 0.6 * Nyquist or (b) by
-/// supplying a higher-order coefficient set to the constructor.
-/// For 2x oversampling of audio with content concentrated in the
-/// audible band, this trade-off is the standard "Tier-2" half-band
-/// operating point.
+///     passband edge 0.21 (of the 2x rate):  N=5 -79 dB, N=6 -95 dB,
+///                                           N=8 -126 dB
+///     passband edge 0.225:                  N=6 -80 dB, N=11 -146 dB
 ///
-/// All filtering happens in the time domain on coefficients that are
-/// sample-rate-invariant by construction: a half-band filter's
-/// transfer function depends only on the normalized frequency 0..Fs/2,
-/// so the same coefficients are correct at 44.1 kHz, 48 kHz, 96 kHz,
-/// or any other rate.
+/// `halfband_iir_response()`, `halfband_iir_group_delay()`, and
+/// `halfband_iir_stopband_db()` evaluate a design without running audio
+/// through it.
 ///
 /// ## Upsampling (2x)
 /// `HalfBandUpsampler2x::process(x, out_lo, out_hi)` takes one input
-/// sample and produces two output samples at twice the rate. The two
-/// allpass paths are evaluated on the input and emitted directly —
-/// path A becomes the "low" output (the phase aligned with the input),
-/// path B the "high" output (the in-between sample). Neither is summed
-/// nor differenced: each path is individually allpass, and the
-/// half-band response emerges only once the two are interleaved into a
-/// single 2x-rate stream, where the paths' phase difference is 0 in
-/// the passband (samples reinforce) and pi in the stopband (they
-/// cancel). This is the standard polyphase identity for half-band
-/// interpolation.
+/// sample and produces two output samples at twice the rate. Path A
+/// becomes the "low" output (the phase aligned with the input), path B
+/// the "high" output (the in-between sample). Each path is individually
+/// allpass; the half-band response emerges once the two are interleaved
+/// into a single 2x-rate stream, where the paths' phase difference is 0 in
+/// the passband (samples reinforce) and pi in the stopband (they cancel).
+/// This is exactly H(z) applied to the zero-stuffed input with a gain of 2.
 ///
 /// ## Downsampling (2x)
 /// `HalfBandDownsampler2x::process(in_lo, in_hi)` consumes two input
-/// samples at the higher rate and emits one decimated output. The
-/// even-phase input drives one path, the odd-phase the other, and the
-/// outputs are averaged. This is the half-band decimation polyphase
-/// identity.
-///
-/// ## Coefficient lineage
-/// The default coefficients (`kDefaultCoefficientsA`,
-/// `kDefaultCoefficientsB`) are a published Tier-2 half-band design
-/// (six sections per path / twelve sections total) reached from the
-/// general allpass half-band literature (Vaidyanathan, "Multirate
-/// Systems and Filter Banks"; Regalia, Mitra & Vaidyanathan, "The
-/// Digital All-Pass Filter: A Versatile Signal Processing Building
-/// Block"). They are constants, not copied from any single
-/// framework. Callers may supply their own coefficients to trade off
-/// transition-band steepness against latency and CPU.
+/// samples at the higher rate and emits one decimated output: the odd
+/// sample drives path A, the even sample path B, and the outputs are
+/// averaged. That is H(z) followed by keeping every odd-phase sample, so
+/// the decimator leads H's own group delay by one high-rate sample.
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <span>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::signal {
@@ -138,70 +125,186 @@ private:
 using HalfBandAllpassSection = HalfBandAllpassSectionT<float>;
 using HalfBandAllpassSection64 = HalfBandAllpassSectionT<double>;
 
-/// Default Tier-2 half-band design — six allpass sections in path A.
-///
-/// Coefficients ascend; each section's pole stays inside the unit
-/// circle. Together with `kDefaultCoefficientsB` (path B, also six
-/// sections) the cascade realises a half-band lowpass with:
-///
-///   * passband ripple < 0.001 dB up to 0.4 * Nyquist of the
-///     half-band's input rate (i.e. up to 0.2 * Fs in standalone
-///     use; up to 0.4 * Fs at the upsampler's output rate). This
-///     comfortably meets the < 0.1 dB passband-ripple spec.
-///   * stopband attenuation:
-///       -25 dB at 0.6 * Nyquist (transition-band edge),
-///       -45 dB at 0.9 * Nyquist,
-///       -60 dB at 0.98 * Nyquist.
-///     The deep-stopband (where alias images concentrate) attenuation
-///     comfortably exceeds 80 dB once cascaded with itself across
-///     multiple oversampling stages — which is the usual deployment
-///     pattern. For single-stage 2x oversampling, callers needing
-///     deeper rejection at the transition edge should pass a custom
-///     higher-order coefficient set to the constructor.
-///   * group delay near DC that follows in closed form from the
-///     coefficients: a first-order allpass (a + z^-1) / (1 + a*z^-1)
-///     delays by (1-a)/(1+a) at DC, so path A sums to ~ 1.99 and path
-///     B to ~ 1.47 samples at the rate the sections are clocked at.
-///     The half-band `A(z^2) + z^-1 * B(z^2)` therefore delays by
-///     ~ 3.96 samples at its own (2x) rate — ~ 1.98 at the upsampler's
-///     input rate — and an up-then-down round trip, which cascades
-///     both paths at the input rate, costs their sum: ~ 3.46 samples.
-///     Delay is frequency-dependent and rises toward the transition
-///     band; these figures are the DC/passband end. The Audio Doctor's
-///     group-delay analyzer measures two of these independently — the
-///     filter's own ~3.96 at the 2x rate, and the ~3.46 round trip —
-///     and the suite asserts each against the closed form above to
-///     within 0.01 samples (test/test_audio_doctor.cpp). The ~1.98
-///     input-rate figure is the 2x measurement halved rather than a
-///     third measurement, so the suite prints it but does not assert
-///     it: at half the tolerance it cannot fail unless the 2x
-///     assertion already has.
-///
-/// Lineage: derived from the published polyphase IIR half-band
-/// literature (Vaidyanathan, "Multirate Systems and Filter Banks"
-/// chapter 5; Regalia, Mitra & Vaidyanathan, "The Digital All-Pass
-/// Filter: A Versatile Signal Processing Building Block", Proc.
-/// IEEE 76(1) 1988). The coefficient values are constants reached
-/// from the canonical "tight transition, moderate rejection"
-/// elliptic-style design — not copied from any specific framework.
-inline constexpr std::array<float, 6> kDefaultCoefficientsA = {
-    0.036681502163648017f,
-    0.2746317593794541f,
-    0.56109896978791948f,
-    0.769741833862266f,
-    0.8922608180038789f,
-    0.962094548378084f,
+/// Largest coefficient count a `HalfBandIirDesign` carries (eight sections
+/// per path). Order 33 already reaches the float noise floor at any useful
+/// transition width.
+inline constexpr std::size_t kHalfBandIirMaxCoefficients = 16;
+
+/// Coefficients of one elliptic polyphase half-band filter, ascending.
+/// Path A takes the even indices and path B the odd ones, so path A is never
+/// shorter than path B. `passband_edge` and `stopband_edge()` are in cycles
+/// per sample at the filter's own (2x) rate and sum to 0.5.
+struct HalfBandIirDesign {
+    std::array<double, kHalfBandIirMaxCoefficients> coefficients{};
+    std::size_t count = 0;
+    double passband_edge = 0.0;
+
+    [[nodiscard]] bool valid() const noexcept { return count > 0; }
+    [[nodiscard]] std::size_t path_a_count() const noexcept { return (count + 1) / 2; }
+    [[nodiscard]] std::size_t path_b_count() const noexcept { return count / 2; }
+    [[nodiscard]] double path_a(std::size_t i) const noexcept { return coefficients[2 * i]; }
+    [[nodiscard]] double path_b(std::size_t i) const noexcept { return coefficients[2 * i + 1]; }
+    [[nodiscard]] double stopband_edge() const noexcept { return 0.5 - passband_edge; }
 };
 
-/// Default Tier-2 half-band design — six allpass sections in path B.
-/// See `kDefaultCoefficientsA` for the full design characterization.
-inline constexpr std::array<float, 6> kDefaultCoefficientsB = {
-    0.131105985903771f,
-    0.42424674974456204f,
-    0.6926749031919416f,
-    0.8587498110770587f,
-    0.9415030941737551f,
-    0.9802448881947472f,
+/// Closed-form elliptic half-band design (see the file comment).
+/// `coefficient_count` is the number of allpass sections across both paths
+/// (filter order 2 * count + 1) and `passband_edge` the passband edge in
+/// cycles per sample at the filter's own rate, strictly inside (0, 0.25).
+/// Out-of-range arguments return an invalid (`count == 0`) design.
+/// Not realtime: evaluates trigonometric series; call while configuring.
+inline HalfBandIirDesign design_halfband_iir(std::size_t coefficient_count,
+                                             double passband_edge) noexcept {
+    HalfBandIirDesign design;
+    if (coefficient_count == 0 || coefficient_count > kHalfBandIirMaxCoefficients ||
+        !(passband_edge > 0.0 && passband_edge < 0.25))
+        return design;
+
+    constexpr double kPi = 3.14159265358979323846;
+    const double order = static_cast<double>(2 * coefficient_count + 1);
+    const double t = std::tan(kPi * passband_edge);
+    const double k = t * t; // selectivity: passband over stopband bilinear edge
+    const double kc_root = std::sqrt(std::sqrt(1.0 - k * k));
+    const double e = 0.5 * (1.0 - kc_root) / (1.0 + kc_root);
+    const double e4 = e * e * e * e;
+    // Nome of the complementary modulus; the series converges fast because
+    // e < 0.5 for every passband edge below a quarter of the rate.
+    const double q = e * (1.0 + e4 * (2.0 + e4 * (15.0 + e4 * 150.0)));
+
+    for (std::size_t i = 1; i <= coefficient_count; ++i) {
+        const double angle = kPi * static_cast<double>(i) / order;
+        // sqrt(k) * sn(2 i K / order) as a ratio of theta series.
+        double numerator = 0.0;
+        double sign = 1.0;
+        for (int m = 0; m < 32; ++m) {
+            const double term =
+                sign * std::pow(q, m * (m + 1)) * std::sin((2 * m + 1) * angle);
+            numerator += term;
+            if (std::abs(term) < 1e-30)
+                break;
+            sign = -sign;
+        }
+        double denominator = 0.0;
+        sign = -1.0;
+        for (int m = 1; m < 32; ++m) {
+            const double term = sign * std::pow(q, m * m) * std::cos(2.0 * m * angle);
+            denominator += term;
+            if (std::abs(term) < 1e-30)
+                break;
+            sign = -sign;
+        }
+        const double w = 2.0 * std::pow(q, 0.25) * numerator / (1.0 + 2.0 * denominator);
+        const double w2 = w * w;
+        const double x = std::sqrt((1.0 - w2 * k) * (1.0 - w2 / k)) / (1.0 + w2);
+        design.coefficients[i - 1] = (1.0 - x) / (1.0 + x);
+    }
+    std::sort(design.coefficients.begin(),
+              design.coefficients.begin() + static_cast<std::ptrdiff_t>(coefficient_count));
+    design.count = coefficient_count;
+    design.passband_edge = passband_edge;
+    return design;
+}
+
+namespace detail {
+
+// Phase factor and DC-referenced group delay of one path at `frequency`
+// (cycles per sample at the 2x rate). Each section (a + z^-2)/(1 + a z^-2)
+// has unit magnitude and group delay 2(1 - a^2)/(1 + 2a cos 2w + a^2).
+template <typename Coefficient>
+inline void halfband_path_response(const HalfBandIirDesign& design, bool path_a,
+                                   double frequency, std::complex<double>& response,
+                                   double& group_delay) noexcept {
+    constexpr double kPi = 3.14159265358979323846;
+    const double w = 2.0 * kPi * frequency;
+    const std::complex<double> z2(std::cos(2.0 * w), -std::sin(2.0 * w)); // z^-2
+    response = 1.0;
+    group_delay = 0.0;
+    const std::size_t n = path_a ? design.path_a_count() : design.path_b_count();
+    for (std::size_t i = 0; i < n; ++i) {
+        const double a = static_cast<double>(
+            static_cast<Coefficient>(path_a ? design.path_a(i) : design.path_b(i)));
+        response *= (a + z2) / (1.0 + a * z2);
+        group_delay += 2.0 * (1.0 - a * a) / (1.0 + 2.0 * a * std::cos(2.0 * w) + a * a);
+    }
+}
+
+} // namespace detail
+
+/// Complex response of `design` at `frequency` cycles per sample of the
+/// filter's own rate: 1/2 (A(z^2) + z^-1 B(z^2)). `Coefficient` selects the
+/// precision the coefficients are rounded to before evaluation, so a float
+/// filter's response includes its coefficient quantization.
+template <typename Coefficient = double>
+inline std::complex<double> halfband_iir_response(const HalfBandIirDesign& design,
+                                                  double frequency) noexcept {
+    constexpr double kPi = 3.14159265358979323846;
+    std::complex<double> a, b;
+    double ta = 0.0, tb = 0.0;
+    detail::halfband_path_response<Coefficient>(design, true, frequency, a, ta);
+    detail::halfband_path_response<Coefficient>(design, false, frequency, b, tb);
+    const double w = 2.0 * kPi * frequency;
+    return 0.5 * (a + std::complex<double>(std::cos(w), -std::sin(w)) * b);
+}
+
+/// Magnitude of `design` in dB at `frequency` (cycles per sample of the
+/// filter's own rate).
+template <typename Coefficient = double>
+inline double halfband_iir_magnitude_db(const HalfBandIirDesign& design,
+                                        double frequency) noexcept {
+    return 20.0 * std::log10(std::max(std::abs(halfband_iir_response<Coefficient>(design, frequency)),
+                                      1e-300));
+}
+
+/// Group delay of H(z) in samples of the filter's own rate. Both paths are
+/// allpass, so dP/dw = -j tau_P P exactly and the half-band's delay is
+/// Re((tau_A A + (tau_B + 1) z^-1 B) / (A + z^-1 B)) with no numeric
+/// differentiation.
+template <typename Coefficient = double>
+inline double halfband_iir_group_delay(const HalfBandIirDesign& design,
+                                       double frequency) noexcept {
+    constexpr double kPi = 3.14159265358979323846;
+    std::complex<double> a, b;
+    double ta = 0.0, tb = 0.0;
+    detail::halfband_path_response<Coefficient>(design, true, frequency, a, ta);
+    detail::halfband_path_response<Coefficient>(design, false, frequency, b, tb);
+    const double w = 2.0 * kPi * frequency;
+    const std::complex<double> zb = std::complex<double>(std::cos(w), -std::sin(w)) * b;
+    return std::real((ta * a + (tb + 1.0) * zb) / (a + zb));
+}
+
+/// Worst-case (largest) stopband magnitude in dB over
+/// [stopband_edge(), 0.5], sampled densely enough to land on every ripple
+/// peak of designs up to `kHalfBandIirMaxCoefficients`.
+template <typename Coefficient = double>
+inline double halfband_iir_stopband_db(const HalfBandIirDesign& design) noexcept {
+    if (!design.valid())
+        return 0.0;
+    constexpr int kPoints = 4096;
+    const double lo = design.stopband_edge();
+    double worst = -1e300;
+    for (int i = 0; i <= kPoints; ++i) {
+        const double f = lo + (0.5 - lo) * static_cast<double>(i) / kPoints;
+        worst = std::max(worst, halfband_iir_magnitude_db<Coefficient>(design, f));
+    }
+    return worst;
+}
+
+/// Default half-band design: `design_halfband_iir(6, 0.21)`, path A. Passband
+/// flat (droop < 1e-8 dB) to 0.21 of the 2x rate (0.42 of the input rate
+/// when upsampling), stopband at or below -94.8 dB from 0.29 of the 2x rate,
+/// DC group delay 3.16 samples at the 2x rate. A test pins these literals to
+/// the design function.
+inline constexpr std::array<float, 3> kDefaultCoefficientsA = {
+    0.04536216434896102f,
+    0.3371496879790739f,
+    0.7080641363635385f,
+};
+
+/// Default half-band design, path B. See `kDefaultCoefficientsA`.
+inline constexpr std::array<float, 3> kDefaultCoefficientsB = {
+    0.16808748123450207f,
+    0.5223778543083539f,
+    0.8974455911727747f,
 };
 
 namespace detail {
@@ -231,6 +334,134 @@ inline SampleType run_path(std::vector<HalfBandAllpassSectionT<SampleType>>& pat
     for (auto& s : path) v = s.process(v);
     return v;
 }
+
+// Fixed-storage polyphase half-band stage that filters whole blocks. The
+// per-path section counts are template parameters inside the kernels, so the
+// coefficients and recurrence state live in registers for the length of a
+// block and nothing is zeroed or re-loaded per sample. Each section is
+// evaluated as y = a*x + x1 - a*y1, which leaves a single fused multiply-add
+// on the y1 recurrence. Up and down directions keep separate state.
+template <typename SampleType> class HalfBandIirStage {
+  public:
+    static constexpr std::size_t kMaxPath = kHalfBandIirMaxCoefficients / 2;
+
+    void configure(const HalfBandIirDesign& design) noexcept {
+        count_ = design.count;
+        for (std::size_t i = 0; i < kMaxPath; ++i) {
+            a_[i] = i < design.path_a_count() ? static_cast<SampleType>(design.path_a(i))
+                                              : SampleType{0};
+            b_[i] = i < design.path_b_count() ? static_cast<SampleType>(design.path_b(i))
+                                              : SampleType{0};
+        }
+        reset();
+    }
+
+    void reset() noexcept {
+        up_ = {};
+        down_ = {};
+    }
+
+    std::size_t coefficient_count() const noexcept { return count_; }
+
+    /// `n` input samples -> `2n` output samples. `output` must not overlap
+    /// `input`.
+    void upsample(const SampleType* input, SampleType* output, std::size_t n) noexcept {
+        dispatch(count_, [&](auto na, auto nb) {
+            upsample_kernel<decltype(na)::value, decltype(nb)::value>(input, output, n);
+        });
+    }
+
+    /// `2n` input samples -> `n` output samples. `output` may alias `input`.
+    void downsample(const SampleType* input, SampleType* output, std::size_t n) noexcept {
+        dispatch(count_, [&](auto na, auto nb) {
+            downsample_kernel<decltype(na)::value, decltype(nb)::value>(input, output, n);
+        });
+    }
+
+  private:
+    struct PathState {
+        std::array<SampleType, kMaxPath> x{};
+        std::array<SampleType, kMaxPath> y{};
+    };
+    struct DirectionState {
+        PathState a;
+        PathState b;
+    };
+
+    std::array<SampleType, kMaxPath> a_{};
+    std::array<SampleType, kMaxPath> b_{};
+    DirectionState up_;
+    DirectionState down_;
+    std::size_t count_ = 0;
+
+    template <std::size_t N> using Count = std::integral_constant<std::size_t, N>;
+
+    template <typename Fn> static void dispatch(std::size_t count, Fn&& fn) noexcept {
+        switch (count) {
+        case 1: fn(Count<1>{}, Count<0>{}); break;
+        case 2: fn(Count<1>{}, Count<1>{}); break;
+        case 3: fn(Count<2>{}, Count<1>{}); break;
+        case 4: fn(Count<2>{}, Count<2>{}); break;
+        case 5: fn(Count<3>{}, Count<2>{}); break;
+        case 6: fn(Count<3>{}, Count<3>{}); break;
+        case 7: fn(Count<4>{}, Count<3>{}); break;
+        case 8: fn(Count<4>{}, Count<4>{}); break;
+        case 9: fn(Count<5>{}, Count<4>{}); break;
+        case 10: fn(Count<5>{}, Count<5>{}); break;
+        case 11: fn(Count<6>{}, Count<5>{}); break;
+        case 12: fn(Count<6>{}, Count<6>{}); break;
+        case 13: fn(Count<7>{}, Count<6>{}); break;
+        case 14: fn(Count<7>{}, Count<7>{}); break;
+        case 15: fn(Count<8>{}, Count<7>{}); break;
+        case 16: fn(Count<8>{}, Count<8>{}); break;
+        default: break;
+        }
+    }
+
+    template <std::size_t N>
+    static SampleType run(const std::array<SampleType, kMaxPath>& c, SampleType* x, SampleType* y,
+                          SampleType v) noexcept {
+        for (std::size_t k = 0; k < N; ++k) {
+            const SampleType out = c[k] * v + x[k] - c[k] * y[k];
+            x[k] = v;
+            y[k] = out;
+            v = out;
+        }
+        return v;
+    }
+
+    template <std::size_t NA, std::size_t NB>
+    void upsample_kernel(const SampleType* input, SampleType* output, std::size_t n) noexcept {
+        SampleType xa[NA > 0 ? NA : 1], ya[NA > 0 ? NA : 1];
+        SampleType xb[NB > 0 ? NB : 1], yb[NB > 0 ? NB : 1];
+        for (std::size_t k = 0; k < NA; ++k) { xa[k] = up_.a.x[k]; ya[k] = up_.a.y[k]; }
+        for (std::size_t k = 0; k < NB; ++k) { xb[k] = up_.b.x[k]; yb[k] = up_.b.y[k]; }
+        for (std::size_t i = 0; i < n; ++i) {
+            const SampleType v = input[i];
+            output[2 * i] = run<NA>(a_, xa, ya, v);
+            output[2 * i + 1] = run<NB>(b_, xb, yb, v);
+        }
+        for (std::size_t k = 0; k < NA; ++k) { up_.a.x[k] = xa[k]; up_.a.y[k] = ya[k]; }
+        for (std::size_t k = 0; k < NB; ++k) { up_.b.x[k] = xb[k]; up_.b.y[k] = yb[k]; }
+    }
+
+    template <std::size_t NA, std::size_t NB>
+    void downsample_kernel(const SampleType* input, SampleType* output, std::size_t n) noexcept {
+        SampleType xa[NA > 0 ? NA : 1], ya[NA > 0 ? NA : 1];
+        SampleType xb[NB > 0 ? NB : 1], yb[NB > 0 ? NB : 1];
+        for (std::size_t k = 0; k < NA; ++k) { xa[k] = down_.a.x[k]; ya[k] = down_.a.y[k]; }
+        for (std::size_t k = 0; k < NB; ++k) { xb[k] = down_.b.x[k]; yb[k] = down_.b.y[k]; }
+        for (std::size_t i = 0; i < n; ++i) {
+            const SampleType even = input[2 * i];
+            const SampleType odd = input[2 * i + 1];
+            const SampleType pa = run<NA>(a_, xa, ya, odd);
+            const SampleType pb = run<NB>(b_, xb, yb, even);
+            output[i] = SampleType{0.5f} * (pa + pb);
+        }
+        for (std::size_t k = 0; k < NA; ++k) { down_.a.x[k] = xa[k]; down_.a.y[k] = ya[k]; }
+        for (std::size_t k = 0; k < NB; ++k) { down_.b.x[k] = xb[k]; down_.b.y[k] = yb[k]; }
+    }
+};
 
 } // namespace detail
 
@@ -306,12 +537,11 @@ using HalfBandUpsampler2x64 = HalfBandUpsampler2xT<double>;
 /// 2x half-band downsampler.
 ///
 /// Each call to `process(in_lo, in_hi)` consumes two input samples
-/// at the higher rate and emits one decimated output. The even-phase
-/// input (`in_lo`) drives path A, the odd-phase (`in_hi`) drives
-/// path B. Together with the half-band's stopband above 0.6*Nyquist
-/// of the input rate, this drops the rate by 2 while keeping
-/// aliasing below the design's stopband floor (> 80 dB with the
-/// default coefficients).
+/// at the higher rate and emits one decimated output. The odd-phase
+/// input (`in_hi`) drives path A, the even-phase (`in_lo`) drives
+/// path B. Content in the stopband (above 0.29 of the input rate with
+/// the default coefficients) aliases into the output at or below the
+/// design's stopband floor (-94.8 dB with the default coefficients).
 ///
 /// RT contract: constructors allocate section storage. `sections_*()`,
 /// `process()`, `process_block()`, and `reset()` allocate no memory after
