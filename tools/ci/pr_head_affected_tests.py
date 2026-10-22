@@ -20,7 +20,8 @@ with the Shipyard changed-surface families), plus these rules:
   * path families the projection cannot see: `tools/cmake/**` reaches the
     `cmake-*` fixture tests, and the wide non-native tier's manifest, classifier
     or any ctest registration under `test/` reaches `wide-non-native-selftest`,
-    and `experimental/pulp-rs/**` reaches `pulp-rust-cli-cargo-tests`;
+    and `experimental/pulp-rs/**` or a file the crate embeds reaches the
+    `pulp-rust-cli-{cargo,doc}-tests`;
   * `pr-fast` members already ran and are left out;
   * the extra time is capped: tests run in batches, no batch starts once the
     budget is spent, and every test that did not run is listed as skipped;
@@ -78,6 +79,18 @@ PR_FAST_LABEL = "pr-fast"
 NON_TEST_PREFIXES = (".agents/", ".claude", ".codex", ".github/", "docs/", "planning")
 NON_TEST_SUFFIXES = (".md",)
 
+# Files outside experimental/pulp-rs that the crate compiles in with
+# include_str!/include_bytes!. A test checks this list against the crate's
+# sources, so a new embedded file cannot be missed.
+PULP_RS_EXTERNAL_INPUTS = (
+    ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+    ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+    ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+    "tools/import-design/browser_capture/runtime_manifest.txt",
+    "tools/packages/pulp-packages-verify.cmake",
+    "tools/packages/tool-registry.json",
+)
+
 # Paths the build graph cannot connect to the tests that read them.
 PATH_FAMILIES = (
     ("cmake-fixtures", re.compile(r"^tools/cmake/"), re.compile(r"^cmake-")),
@@ -110,12 +123,14 @@ PATH_FAMILIES = (
      re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
     # The Rust CLI is built and tested by cargo, not by CMake targets, so the
     # crate owns no CMake sources and the projection never reaches its cargo
-    # test. Without this an edit under experimental/pulp-rs/ runs that test
-    # only in the merge group, where a failure ejects the whole batch. The
-    # crate embeds no Markdown, so its notes select nothing.
+    # tests. Without this an edit to the crate, or to a file it embeds, runs
+    # them only in the merge group, where a failure ejects the whole batch.
+    # Only the crate's top-level prose selects nothing; Markdown under
+    # tests/fixtures is test input.
     ("pulp-rs-cargo",
-     re.compile(r"^experimental/pulp-rs/(?!.*\.md$)"),
-     re.compile(r"^pulp-rust-cli-cargo-tests$")),
+     re.compile(r"^(experimental/pulp-rs/(?!(README|UPSTREAM_SYNC)\.md$)"
+                r"|(" + "|".join(re.escape(p) for p in PULP_RS_EXTERNAL_INPUTS) + r")$)"),
+     re.compile(r"^pulp-rust-cli-(cargo|doc)-tests$")),
     # The sync primitives are included by most of the tree, so an edit to one
     # selects thousands of tests and the budget reaches their own concurrency
     # hammers only by luck. The hammers are the one proof those edits did not
@@ -200,7 +215,7 @@ def source_lane_contract_tests(paths: list[str], names: list[str],
 # renamed case), which would silently reopen the gap it closes, so the step
 # fails. The other families name platform- or configuration-specific tests
 # that are legitimately absent from some builds.
-REQUIRED_FAMILIES = frozenset({"runtime-sync-hammers", "audio-buffer-ops"})
+REQUIRED_FAMILIES = frozenset({"runtime-sync-hammers", "audio-buffer-ops", "pulp-rs-cargo"})
 
 
 def empty_required_families(families: dict[str, list[str]]) -> list[str]:
