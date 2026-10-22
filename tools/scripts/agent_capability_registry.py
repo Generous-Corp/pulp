@@ -238,7 +238,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/spectral_frame_engine.hpp",
-        "fingerprint": "sha256:0ecaccef2ad745c8509a74447eb12b07d9fd061743d850bfe563497d77264d05",
+        "fingerprint": "sha256:79757445451e61f1e9d043abe9fc566b89a07df381c76f4b1d3cae525eeb5d49",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -448,7 +448,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:cf26ffef2f59dcc9e06e9bd578b48ae214f34f893f9cedc61e18fab9151c50ab",
+        "fingerprint": "sha256:2794461c6ba9fb79a274f86182439f40b0b003454c5c323f853b730ee7ad6083",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (
@@ -748,7 +748,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/stft.hpp",
-        "fingerprint": "sha256:0b42a15443f679c5eb3c7f92940403f4886ff7286a62dfaa2b1e50645758ae27",
+        "fingerprint": "sha256:1e8bf8737a90a4fc8b7330af7c4b1c9d39f5db95ad24803544369801ccc181ad",
         "disposition": "capability_support",
         "capability_keys": [
             "signal.bounded-sample-history",
@@ -1305,7 +1305,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver.hpp",
-        "fingerprint": "sha256:7b6f5cc6d4bd8a3c71c07149958db256d08aa0f264544df0abfa07eb3a4b5825",
+        "fingerprint": "sha256:f2324d75e7b1fde411c4907b5f2b5f4f4a2849e4877a7b45cf9bd368d6da7564",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1379,7 +1379,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_messages.hpp",
-        "fingerprint": "sha256:2d4d3361cfa9099d4cd549fc250de196c1053c9c5448fa15b540089433e74e29",
+        "fingerprint": "sha256:f12dc10a6090a81966552ece2a5ebf26b7370cd59d3a310b66e84d2616b36c2f",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1400,6 +1400,31 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "K-times-larger tail, both PartitionedConvolver engines. A bounded DSP primitive "
             "a processor drives from its own process() at a fixed block size, documented "
             "with the convolution engines in the signal guide; it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/halfband_iir.hpp",
+        "fingerprint": "sha256:53cdf36221de5bc046af7a9627809126410cea863daeab56d66eb7757e31aa0d",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Closed-form elliptic half-band allpass designs, their pure response, group-delay "
+            "and stopband evaluators, and the polyphase stage kernels OversamplerT cascades. "
+            "Filter-design infrastructure behind the oversampler rather than an advertised "
+            "generator surface; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/oversampling.hpp",
+        "fingerprint": "sha256:fda530c94b159df23ae9a6e8b7f7c36292b7be2f79d00e959d9c5cb30e3bd2e1",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Block-processing up/downsampler that runs a caller's nonlinearity at 2x-16x with "
+            "minimum-phase IIR, linear-phase FIR or legacy biquad anti-aliasing and truthful "
+            "latency reporting. A bounded DSP primitive a processor drives from its own "
+            "process(), documented in the signal guide; it makes no installed agent "
             "capability claim of its own."
         ),
     },
