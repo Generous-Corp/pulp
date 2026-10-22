@@ -820,4 +820,19 @@ uint16_t Socket::local_port() const {
     return ntohs(addr.sin_port);
 }
 
+std::string Socket::local_address() const {
+    if (fd_ == kInvalidSocketHandle || type_ == SocketType::Local) return {};
+
+    struct sockaddr_in addr{};
+    socklen_t addr_len = sizeof(addr);
+    if (::getsockname(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&addr),
+                      &addr_len) != 0) {
+        return {};
+    }
+    char text[INET_ADDRSTRLEN] = {};
+    if (inet_ntop(AF_INET, &addr.sin_addr, text, sizeof(text)) == nullptr)
+        return {};
+    return text;
+}
+
 }  // namespace pulp::runtime

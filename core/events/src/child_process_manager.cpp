@@ -8,9 +8,33 @@
 #include <pulp/runtime/scope_guard.hpp>
 #include <random>
 
+#ifndef _WIN32
+#include <cerrno>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 namespace pulp::events {
 
 namespace {
+
+#ifndef _WIN32
+// Child IPC endpoints live in a per-user 0700 directory so another account
+// cannot pre-create or open the FIFOs. Falls back to the shared temp
+// directory when a private one cannot be established and verified.
+std::filesystem::path private_pipe_directory() {
+    const auto tmp = std::filesystem::temp_directory_path();
+    const auto owner = static_cast<std::uint64_t>(::geteuid());
+    const auto directory = tmp / ("pulp-ipc-" + std::to_string(owner));
+    struct stat status {};
+    if (::mkdir(directory.c_str(), 0700) != 0 && errno != EEXIST)
+        return tmp;
+    if (::lstat(directory.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) ||
+        status.st_uid != ::geteuid() || (status.st_mode & 0077) != 0)
+        return tmp;
+    return directory;
+}
+#endif
 
 constexpr auto kChildIpcConnectTimeout = std::chrono::seconds(5);
 // How long a launch keeps waiting for the IPC handshake after the child has
@@ -147,7 +171,7 @@ bool ConnectedChildProcess::launch(std::string_view executable,
 #ifdef _WIN32
     pipe_name_ = "pulp_ipc_" + suffix;
 #else
-    pipe_name_ = (std::filesystem::temp_directory_path() / ("pulp_ipc_" + suffix)).string();
+    pipe_name_ = (private_pipe_directory() / ("pulp_ipc_" + suffix)).string();
 #endif
 
     // Build args: executable + pipe_name + extra_args
