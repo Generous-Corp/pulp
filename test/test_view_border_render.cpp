@@ -713,11 +713,13 @@ bool chrome_pixel(const Pixels& px, int x, int y, Rgb want) {
 // the flat colours, which fails.
 bool edge_pixel(const Pixels& px, int x, int y, Rgb inside, Rgb outside, float lo, float hi) {
     const Rgb got = px.at(x, y);
-    const float coverage = static_cast<float>(got.g - outside.g) /
-                           static_cast<float>(inside.g - outside.g);
+    const float coverage =
+        static_cast<float>(got.g - outside.g) / static_cast<float>(inside.g - outside.g);
     INFO("pixel (" << x << "," << y << ") = " << got.r << "," << got.g << "," << got.b
                    << " coverage " << coverage);
-    const auto within = [](int v, int a, int b) { return v >= std::min(a, b) - 1 && v <= std::max(a, b) + 1; };
+    const auto within = [](int v, int a, int b) {
+        return v >= std::min(a, b) - 1 && v <= std::max(a, b) + 1;
+    };
     return within(got.r, inside.r, outside.r) && within(got.g, inside.g, outside.g) &&
            within(got.b, inside.b, outside.b) && coverage > lo && coverage < hi;
 }
