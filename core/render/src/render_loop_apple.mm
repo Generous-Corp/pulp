@@ -13,6 +13,8 @@
 // FRAME RATE — while frames are being drawn the link requests the screen's
 // maximum rate (120 Hz on ProMotion; iOS otherwise holds it at 60 Hz), and it
 // returns to the system default once DisplayRateBoost sees the loop go idle.
+// apply_display_rate_change(), defined at the end of this file, is shared with
+// the iOS window and plug-in view hosts, which own their own display links.
 // An iPhone app also needs CADisableMinimumFrameDurationOnPhone in its
 // Info.plist for the request to take effect; the iOS host template sets it.
 //
@@ -33,7 +35,6 @@
 
 #import <QuartzCore/QuartzCore.h>
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
 
 namespace pulp::render {
 class IOSRenderLoop;
@@ -73,7 +74,7 @@ public:
 
     void stop() override {
         state_.stop();
-        apply_rate_change(rate_.on_stop());
+        apply_display_rate_change((__bridge void*)display_link_, rate_.on_stop());
         @autoreleasepool {
             // Clear the target's back-pointer FIRST so any selector that
             // somehow runs between here and invalidate observes a nil loop
@@ -102,7 +103,7 @@ public:
     // Invoked from the CADisplayLink target on the main thread.
     void on_vsync() {
         const bool draw = state_.consume_frame_request() && state_.is_running();
-        apply_rate_change(rate_.on_vsync(draw));
+        apply_display_rate_change((__bridge void*)display_link_, rate_.on_vsync(draw));
         if (draw && callback_)
             callback_();
     }
@@ -113,32 +114,6 @@ private:
     FrameCallback callback_;
     RenderLoopState state_;
     DisplayRateBoost rate_;
-
-    void apply_rate_change(DisplayRateBoost::Change change) {
-        if (change == DisplayRateBoost::Change::none || !display_link_)
-            return;
-        if (@available(iOS 15.0, *)) {
-            CAFrameRateRange range = CAFrameRateRangeDefault;
-            if (change == DisplayRateBoost::Change::raise) {
-                const float max_fps = maximum_screen_fps();
-                if (max_fps <= 60.0f)
-                    return;
-                range = CAFrameRateRangeMake(60.0f, max_fps, max_fps);
-            }
-            display_link_.preferredFrameRateRange = range;
-        }
-    }
-
-    static float maximum_screen_fps() {
-        // [UIScreen mainScreen] is deprecated in iOS 26 in favour of a
-        // window's scene screen; the loop has no window, and the panel cap
-        // is the same for every scene on a single-screen device.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        UIScreen* screen = [UIScreen mainScreen];
-#pragma clang diagnostic pop
-        return screen ? static_cast<float>(screen.maximumFramesPerSecond) : 0.0f;
-    }
 };
 
 std::unique_ptr<RenderLoop> make_ios_render_loop() {
@@ -157,3 +132,37 @@ std::unique_ptr<RenderLoop> make_ios_render_loop() {
 @end
 
 #endif // iOS
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+
+#import <QuartzCore/QuartzCore.h>
+#import <UIKit/UIKit.h>
+
+namespace pulp::render {
+
+void apply_display_rate_change(void* ca_display_link, DisplayRateBoost::Change change) {
+    if (change == DisplayRateBoost::Change::none || !ca_display_link)
+        return;
+    if (@available(iOS 15.0, *)) {
+        CADisplayLink* link = (__bridge CADisplayLink*)ca_display_link;
+        CAFrameRateRange range = CAFrameRateRangeDefault;
+        if (change == DisplayRateBoost::Change::raise) {
+            // [UIScreen mainScreen] is deprecated in iOS 26 in favour of a
+            // window's scene screen; a display link has no window, and the
+            // panel cap is the same for every scene on a single-screen device.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            UIScreen* screen = [UIScreen mainScreen];
+#pragma clang diagnostic pop
+            const float max_fps = screen ? static_cast<float>(screen.maximumFramesPerSecond) : 0.0f;
+            if (max_fps <= 60.0f)
+                return;
+            range = CAFrameRateRangeMake(60.0f, max_fps, max_fps);
+        }
+        link.preferredFrameRateRange = range;
+    }
+}
+
+} // namespace pulp::render
+
+#endif // TARGET_OS_IPHONE
