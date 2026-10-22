@@ -6,12 +6,14 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
+    "design-ir-contract",
     "design-output-and-packaging",
     "design-source-ingest",
     "render-assets-and-backends"
   ],
-  "rationale": "Pulp-owned JS runtime changes under the watched design-import families: the materialized metadata applier reads layout metrics in phases ahead of its writes (78 to 2 layout passes on one apply, byte-identical renders), @pulp/react resolves typography length units before the bridge, installs one native listener per widget event, and type-checks a consumer against its published declarations (the generator now omits DOM-lib names from the global block). Generated bridge outputs change only their fingerprint and two global declarations. No design-import, Chromium, rendering, or packaging authority moves.",
+  "rationale": "Pulp-owned JS runtime changes under the watched design-import families: the materialized metadata applier reads layout metrics in phases ahead of its writes (78 to 2 layout passes on one apply, byte-identical renders), @pulp/react resolves typography length units before the bridge, installs one native listener per widget event, and type-checks a consumer against its published declarations (the generator now omits DOM-lib names from the global block). Generated bridge outputs change only their fingerprint and two global declarations. @pulp/import-ir gains a committed lockfile so its CI job installs with npm ci; its source is unchanged. No design-import, Chromium, rendering, or packaging authority moves.",
   "tests": [
+    "cd packages/pulp-import-ir && npm ci && npm run build && npm test",
     "cd packages/pulp-react && npm run build && npx vitest run",
     "ctest --test-dir build -R 'geometry reads batched ahead of writes cost one layout pass'",
     "ctest --test-dir build -R 'letter spacing given an em string is read as bare pixels'",
