@@ -79,7 +79,62 @@ class DaWContinuityReceipt(unittest.TestCase):
         receipt = load(self.bad)
         self.assertEqual(self.verify(receipt, self.bad), "fail")
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT)
-        self.assertEqual(receipt["nulls"]["bounce"]["first_deviating_sample"], FAULT)
+        # The host compensates PDC, so in its realtime render the dropout starts
+        # PDC samples earlier; the fault-free offline bounce still nulls.
+        self.assertEqual(receipt["nulls"]["realtime"]["first_deviating_sample"],
+                         FAULT - receipt["pdc_samples"])
+        self.assertTrue(receipt["nulls"]["bounce"]["passed"])
+
+    # M3: continuous-but-wrong planted negatives must FAIL; the path negative
+    # must be INCONCLUSIVE ("not on the shared-I/O path").
+    def test_every_planted_negative_verifies_as_fail(self):
+        for planted in gfc.PLANTED:
+            with self.subTest(planted=planted), tempfile.TemporaryDirectory() as tmp:
+                self.assertEqual(dry_run(Path(tmp), "force_loss_after", "--planted", planted), 1)
+                self.assertEqual(self.verify(load(Path(tmp)), Path(tmp)), "fail")
+
+    def test_gpu_off_verifies_as_inconclusive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(dry_run(Path(tmp), "force_loss_after", "--gpu-off"), 3)
+            receipt = load(Path(tmp))
+            self.assertEqual(self.verify(receipt, Path(tmp)), "inconclusive")
+            self.assertTrue(any("shared-I/O" in r for r in receipt["verdict_reasons"]))
+
+    # M2: the per-block delivery stream.
+    def test_delivery_requirements(self):
+        run = self.copy_run(self.good)
+        cap = gfc.read_capture(run / "capture.bin")
+        kw = dict(fault="force_loss_between", fault_sample=FAULT, applied_sample=FAULT + 128,
+                  quantum=128, lead_blocks=2, window_post=POST)
+        ok = gfc.delivery_analysis(cap, **kw)
+        self.assertTrue(ok["met"], ok["note"])
+        self.assertEqual(ok["pre_fault_gpu_share"], 1.0)
+
+        def rewrite(edit):
+            records = [dict(r) for r in cap.records]
+            edit(records)
+            return gfc.delivery_analysis(gfc.Capture(**{**cap.__dict__, "records": records}),
+                                         **kw)
+        # A GPU that kept delivering after the loss.
+        def gpu_after(records):
+            for r in records:
+                if r["position"] >= FAULT + 1024:
+                    r["gpu"] += 5
+        self.assertFalse(rewrite(gpu_after)["met"])
+        # Mostly fallback before the fault: void.
+        def mostly_fallback(records):
+            bump = 0
+            for r in records:
+                if 0 <= r["position"] < FAULT:
+                    bump += 3
+                r["fallback"] += bump
+        self.assertTrue(rewrite(mostly_fallback)["void"])
+        # Any silence block is reported.
+        def silence(records):
+            for r in records:
+                if r["position"] >= FAULT:
+                    r["silence"] += 1
+        self.assertGreater(rewrite(silence)["silence_blocks"], 0)
 
     # Rejections, each against the passing receipt.
     def test_a_dry_run_is_not_daw_evidence(self):
@@ -234,18 +289,44 @@ class DaWContinuityReceipt(unittest.TestCase):
     def test_the_analysed_window_must_be_the_one_the_plugin_observed(self):
         evidence = gfc.evaluate_run(self.good, fault="force_loss_between", fault_sample=FAULT,
                                     tolerance=1e-4, window_pre=PRE, window_post=POST - 100,
-                                    host_alive=True, bounce_path=self.good / "bounce.wav")
+                                    host_alive=True, bounce_path=self.good / "bounce.wav",
+                                    realtime_path=self.good / "realtime.wav")
         self.assertEqual(evidence["verdict"], "fail")
         self.assertTrue(any("observes until" in r for r in evidence["verdict_reasons"]))
+
+    def test_a_host_that_fed_silence_is_inconclusive_not_a_fail(self):
+        # Seen live: REAPER's online render occasionally fed the plug-in
+        # silence instead of the stimulus; the output nulled trivially.
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            gfc.synthesize_run(run, fault="force_loss_after", fault_sample=FAULT, frames=FRAMES,
+                               tail=POST)
+            cap = gfc.read_capture(run / "capture.bin")
+            blocks = []
+            for r in cap.records:
+                start, n = r["stream"], r["frames"]
+                blocks.append({"position": None if r["position"] < 0 else r["position"],
+                               "flags": (gfc.FLAG_PLAYING if r["position"] >= 0 else 0) |
+                                        ((gfc.FLAG_SEGMENT_START | (1 << gfc.PREPARE_INDEX_SHIFT))
+                                         if r["segment_start"] else 0),
+                               "inputs": [[0.0] * n] * 2, "outputs": [[0.0] * n] * 2,
+                               "counters": (r["gpu"], r["fallback"], r["silence"], r["priming"])})
+            gfc.write_capture(run / "capture.bin", 48000, blocks)
+            result = gfc.evaluate_run(run, fault="force_loss_after", fault_sample=FAULT,
+                                      tolerance=1e-4, window_pre=PRE, window_post=POST,
+                                      host_alive=True, bounce_path=None)
+            self.assertEqual(result["verdict"], "inconclusive", result["verdict_reasons"])
+            self.assertTrue(any("did not feed the stimulus" in r
+                                for r in result["verdict_reasons"]))
 
     def test_a_capture_overflow_is_inconclusive_not_an_audio_fail(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = Path(tmp)
-            gfc.synthesize_run(run, fault="hang", fault_sample=FAULT, frames=FRAMES, tail=POST,
+            gfc.synthesize_run(run, fault="worker_stall", fault_sample=FAULT, frames=FRAMES, tail=POST,
                                break_fallback=True)
             with (run / "events.jsonl").open("a", encoding="utf-8") as stream:
                 stream.write('{"event": "capture_overflow", "dropped_records": 1}\n')
-            kw = dict(fault="hang", fault_sample=FAULT, tolerance=1e-4, window_pre=PRE,
+            kw = dict(fault="worker_stall", fault_sample=FAULT, tolerance=1e-4, window_pre=PRE,
                       window_post=POST, host_alive=True, bounce_path=None)
             result = gfc.evaluate_run(run, **kw)
             self.assertIsNone(result["nulls"]["plugin"])
@@ -254,11 +335,11 @@ class DaWContinuityReceipt(unittest.TestCase):
     def test_a_corrupt_capture_is_inconclusive_not_an_audio_fail(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = Path(tmp)
-            gfc.synthesize_run(run, fault="hang", fault_sample=FAULT, frames=FRAMES, tail=POST)
+            gfc.synthesize_run(run, fault="worker_stall", fault_sample=FAULT, frames=FRAMES, tail=POST)
             blob = bytearray((run / "capture.bin").read_bytes())
             blob[20 + 8:20 + 12] = (1 << 30).to_bytes(4, "little")  # absurd frame count
             (run / "capture.bin").write_bytes(bytes(blob))
-            result = gfc.evaluate_run(run, fault="hang", fault_sample=FAULT, tolerance=1e-4,
+            result = gfc.evaluate_run(run, fault="worker_stall", fault_sample=FAULT, tolerance=1e-4,
                                       window_pre=PRE, window_post=POST, host_alive=True,
                                       bounce_path=None)
             self.assertIsNone(result["nulls"]["plugin"])
@@ -271,14 +352,17 @@ class DaWContinuityReceipt(unittest.TestCase):
             self.verify(resign(receipt), self.good)
         evidence = gfc.evaluate_run(self.good, fault="delay_completion", fault_sample=FAULT,
                                     tolerance=1e-4, window_pre=PRE, window_post=POST,
-                                    host_alive=True, bounce_path=self.good / "bounce.wav")
+                                    host_alive=True, bounce_path=self.good / "bounce.wav",
+                                    realtime_path=self.good / "realtime.wav")
         self.assertEqual(evidence["verdict"], "fail")
         self.assertIn("names fault", evidence["verdict_reasons"][0])
 
     def test_a_live_receipt_needs_a_one_second_window(self):
         run = self.copy_run(self.good)
         (run / "reaper.out.txt").write_text("CLAP: initialized 'dry-run'\n", encoding="utf-8")
+        (run / "claim").write_text("4242\n", encoding="utf-8")
         receipt = load(run)
+        receipt["artifacts"]["claim"] = gfc.sha256_file(run / "claim")
         receipt["trigger_transport"] = "in_process_file"
         receipt["host"]["reaper_version"] = "7.82"
         receipt["host"]["reaper_pid"] = 4242
@@ -295,9 +379,27 @@ class DaWContinuityReceipt(unittest.TestCase):
         (run / "events.jsonl").write_text(events, encoding="utf-8")
         evidence = gfc.evaluate_run(run, fault="force_loss_between", fault_sample=FAULT,
                                     tolerance=1e-4, window_pre=PRE, window_post=POST,
-                                    host_alive=True, bounce_path=run / "bounce.wav")
+                                    host_alive=True, bounce_path=run / "bounce.wav",
+                      realtime_path=run / "realtime.wav")
         self.assertEqual(evidence["verdict"], "fail")
         self.assertIn("applied at", evidence["verdict_reasons"][0])
+
+    def test_a_fault_on_another_device_is_a_mismatch(self):
+        # S1: the applied fault must name this plug-in's provider device.
+        run = self.copy_run(self.good)
+        events = (run / "events.jsonl").read_text(encoding="utf-8")
+        lines = [json.loads(line) for line in events.splitlines() if line.strip()]
+        for event in lines:
+            if event.get("event") == "provider_fault_applied":
+                event["device"] = "0xdeadbeef"
+        (run / "events.jsonl").write_text("\n".join(json.dumps(e) for e in lines) + "\n",
+                                          encoding="utf-8")
+        evidence = gfc.evaluate_run(run, fault="force_loss_between", fault_sample=FAULT,
+                                    tolerance=1e-4, window_pre=PRE, window_post=POST,
+                                    host_alive=True, bounce_path=run / "bounce.wav",
+                                    realtime_path=run / "realtime.wav")
+        self.assertEqual(evidence["verdict"], "fail")
+        self.assertIn("not this plug-in's provider", evidence["verdict_reasons"][0])
 
     def test_a_foreign_nonce_is_a_mismatch(self):
         receipt = load(self.good)
@@ -326,6 +428,7 @@ class Decisions(unittest.TestCase):
 
     def decide(self, **kw):
         base = dict(fault="force_loss_before", plugin_null=self.OK, bounce_null=self.OK,
+                    realtime_null=self.OK, delivery={"met": True, "degraded_host": False},
                     health_ok=True, fault_fired=True, host_alive=True, realtime_at_fault=True)
         base.update(kw)
         return gfc.decide(**base)[0]
@@ -344,6 +447,16 @@ class Decisions(unittest.TestCase):
 
     def test_evidence_from_another_run_is_a_fail(self):
         self.assertEqual(self.decide(mismatches=["foreign nonce"]), "fail")
+
+    def test_a_missing_realtime_render_is_inconclusive(self):
+        self.assertEqual(self.decide(realtime_null=None), "inconclusive")
+
+    def test_a_failed_realtime_render_null_is_a_fail(self):
+        broken = {**self.OK, "passed": False, "max_abs_error": 0.5}
+        self.assertEqual(self.decide(realtime_null=broken), "fail")
+
+    def test_unmet_delivery_requirements_are_inconclusive(self):
+        self.assertEqual(self.decide(delivery={"met": False, "note": "x"}), "inconclusive")
 
     def test_an_unfired_fault_is_inconclusive(self):
         self.assertEqual(self.decide(fault_fired=False), "inconclusive")
@@ -376,8 +489,8 @@ class HealthExpectations(unittest.TestCase):
         self.assertFalse(gfc.health_expectation("force_loss_after", snaps(7, 30, 4))[0])
         # Nothing covered the stream.
         self.assertFalse(gfc.health_expectation("force_loss_after", snaps(7, 7, 0))[0])
-        # A transport that names the loss is accepted even if delivery moved.
-        self.assertTrue(gfc.health_expectation(
+        # S3: naming the loss does not excuse a GPU that kept delivering.
+        self.assertFalse(gfc.health_expectation(
             "force_loss_after", snaps(7, 9, 4, "provider-lost"))[0])
 
     def test_render_loss_must_leave_audio_untouched(self):
@@ -395,7 +508,7 @@ class HealthExpectations(unittest.TestCase):
         for phase in snaps.values():
             phase["delivery"] = {"gpu_blocks": 0}
         self.assertFalse(gfc.health_expectation("force_loss_after", snaps)[0])
-        snaps["before"]["delivery"] = {"gpu_blocks": 3}
+        snaps["before"] = {**snaps["before"], "delivery": {"gpu_blocks": 3}}
         self.assertTrue(gfc.health_expectation("force_loss_after", snaps)[0])
 
     def test_missing_phase_is_not_met(self):
@@ -421,7 +534,7 @@ class CaptureFormat(unittest.TestCase):
             path.write_bytes(path.read_bytes()[:-3])
             cut = gfc.read_capture(path)
             self.assertEqual(cut.positions, [-1, -1])
-            self.assertEqual(cut.truncated_tail_bytes, 16 + 2 * 2 * 2 * 4 - 3)
+            self.assertEqual(cut.truncated_tail_bytes, gfc.CAPTURE_RECORD.size + 2 * 2 * 2 * 4 - 3)
 
     def test_a_reprepare_restarts_the_reference(self):
         ir = [1.0, 0.5]
@@ -439,14 +552,16 @@ class CaptureFormat(unittest.TestCase):
         # the last of those prepares owns the audio that follows.
         with tempfile.TemporaryDirectory() as tmp:
             run = Path(tmp)
-            gfc.synthesize_run(run, fault="hang", fault_sample=FAULT, frames=FRAMES, tail=POST)
+            gfc.synthesize_run(run, fault="worker_stall", fault_sample=FAULT, frames=FRAMES, tail=POST)
             events = (run / "events.jsonl").read_text(encoding="utf-8")
             stale = json.dumps({"event": "prepared", "ok": True, "pdc_samples": 999,
                                 "path": "shared_memory", "ir_taps": gfc.IR_TAPS,
-                                "nonce": "dry-run", "pid": 0, "prepare_index": 0})
+                                "nonce": "dry-run", "pid": 0, "prepare_index": 0,
+                                "provider_device": "0x1d2e3f"})
             (run / "events.jsonl").write_text(stale + "\n" + events, encoding="utf-8")
-            kw = dict(fault="hang", fault_sample=FAULT, tolerance=1e-4, window_pre=PRE,
-                      window_post=POST, host_alive=True, bounce_path=run / "bounce.wav")
+            kw = dict(fault="worker_stall", fault_sample=FAULT, tolerance=1e-4, window_pre=PRE,
+                      window_post=POST, host_alive=True, bounce_path=run / "bounce.wav",
+                      realtime_path=run / "realtime.wav")
             self.assertEqual(gfc.evaluate_run(run, **kw)["verdict"], "pass")
             # Positive control for the pairing: point the segment at the stale
             # prepare and the null fails on its wrong PDC.

@@ -211,15 +211,27 @@ TEST_CASE("gpu fault plug-in output is conv(input) delayed by its reported PDC",
     const auto blob = read_text(dir.path / "capture.bin");
     REQUIRE(blob.size() > 20);
     CHECK(blob.compare(0, 4, "PGFC") == 0);
+    std::uint32_t version = 0;
+    std::memcpy(&version, blob.data() + 4, 4);
+    CHECK(version == 2);
+    // v2 record header: position, frames, flags, host time, then cumulative
+    // gpu / fallback / silence / priming delivery counters.
+    constexpr std::size_t kHeader = 56;
     std::size_t at = 20, frames = 0, records = 0;
-    bool outputs_match = true;
-    while (at + 16 <= blob.size()) {
-        std::uint64_t position = 0;
+    std::uint64_t last_gpu = 0, last_time = 0;
+    bool outputs_match = true, counters_monotonic = true;
+    while (at + kHeader <= blob.size()) {
+        std::uint64_t position = 0, host_time = 0, gpu = 0;
         std::uint32_t n = 0, flags = 0;
         std::memcpy(&position, blob.data() + at, 8);
         std::memcpy(&n, blob.data() + at + 8, 4);
         std::memcpy(&flags, blob.data() + at + 12, 4);
-        at += 16;
+        std::memcpy(&host_time, blob.data() + at + 16, 8);
+        std::memcpy(&gpu, blob.data() + at + 24, 8);
+        counters_monotonic = counters_monotonic && gpu >= last_gpu && host_time >= last_time;
+        last_gpu = gpu;
+        last_time = host_time;
+        at += kHeader;
         CHECK(position == frames);
         CHECK((flags & 1u) == 1u);
         CHECK(((flags & 8u) != 0) == (records == 0));
@@ -236,6 +248,8 @@ TEST_CASE("gpu fault plug-in output is conv(input) delayed by its reported PDC",
     CHECK(at == blob.size());
     CHECK(frames == x.size());
     CHECK(outputs_match);
+    CHECK(counters_monotonic);
+    CHECK(last_gpu > 0); // paced, so the GPU delivered and the record says so
 }
 
 TEST_CASE("gpu fault plug-in arms a fault only when it can inject it", "[gpu-fault-continuity]") {
@@ -301,7 +315,8 @@ TEST_CASE("provider faults fire in the running GPU path and audio stays continuo
         {"force_loss_between", "between_submit_and_completion_registration", true},
         {"force_loss_after", "after_completion_registration", true},
         {"delay_completion", "process_events_stall", false},
-        {"hang", "process_events_stall", false},
+        {"worker_stall", "process_events_stall", false},
+        {"missing_completion", "completion_callback_swallowed", false},
         // A host that prepares again (the VST3 adapter does, repeatedly) gets
         // a new device; the fault must hit that one, never the freed one.
         {"force_loss_after", "after_completion_registration", true, true},
@@ -377,4 +392,96 @@ TEST_CASE("only the first instance to prepare owns the run directory", "[gpu-fau
     const auto after = read_text(dir.path / "events.jsonl");
     CHECK(after == before);
     CHECK(fs::file_size(dir.path / "capture.bin") == 20);
+}
+
+namespace {
+
+struct RequestRun {
+    std::string events;
+    Run run;
+    int pdc = 0;
+    bool shared = false;
+};
+
+RequestRun run_request(const std::string& request) {
+    RunDir dir;
+    write_ir(dir.path, make_ir());
+    const auto events = dir.path / "events.jsonl";
+    std::ofstream(dir.path / "fault-request.json") << request;
+    RequestRun out;
+    {
+        GpuFaultContinuityProcessor p;
+        p.prepare(prepare_context());
+        REQUIRE(wait_for(events, "\"event\":\"prepared\""));
+        out.shared = on_shared_path(events);
+        if (!out.shared)
+            return out;
+        wait_for(events, "\"event\":\"fault_armed\"");
+        out.pdc = p.latency_samples();
+        out.run = drive(p, make_input(), /*paced=*/true);
+        wait_for(events, "\"phase\":\"after\"");
+    }
+    out.events = read_text(events);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("planted negatives keep audio flowing but break the null", "[gpu-fault-continuity]") {
+    const auto x = make_input();
+    const auto ir = make_ir();
+    for (const char* planted : {"no_fallback", "fallback_misaligned", "fallback_stale"}) {
+        DYNAMIC_SECTION(planted) {
+            const auto r =
+                run_request(std::string(R"({"fault": "force_loss_after",)") +
+                            R"( "at_project_sample": 4000, "after_project_sample": 9000,)" +
+                            R"( "planted": ")" + planted + R"("})");
+            if (!r.shared)
+                SKIP("no shared-I/O GPU provider on this host");
+            INFO(r.events);
+            CHECK(r.events.find(std::string("\"planted\":\"") + planted + "\"") !=
+                  std::string::npos);
+            CHECK(r.run.allocations == 0);
+            // The planted shape must be caught: the output no longer nulls.
+            CHECK(max_error(r.run.output, reference(x, ir, static_cast<std::size_t>(r.pdc))) >
+                  1e-2);
+        }
+    }
+}
+
+TEST_CASE("the positive control fires and faults nothing", "[gpu-fault-continuity]") {
+    const auto r = run_request(
+        R"({"fault": "none", "at_project_sample": 4000, "after_project_sample": 9000})");
+    if (!r.shared)
+        SKIP("no shared-I/O GPU provider on this host");
+    INFO(r.events);
+    CHECK(r.events.find("\"event\":\"fault_fired\",\"fault\":\"none\"") != std::string::npos);
+    CHECK(r.events.find("\"event\":\"provider_fault_applied\"") == std::string::npos);
+    CHECK(max_error(r.run.output,
+                    reference(make_input(), make_ir(), static_cast<std::size_t>(r.pdc))) < 1e-4);
+}
+
+TEST_CASE("an internal stimulus replaces whatever the host feeds", "[gpu-fault-continuity]") {
+    const auto r = run_request(R"({"fault": "none", "at_project_sample": 4000,)"
+                               R"( "after_project_sample": 9000, "stimulus": "internal"})");
+    if (!r.shared)
+        SKIP("no shared-I/O GPU provider on this host");
+    CHECK(r.events.find("\"stimulus\":\"internal\"") != std::string::npos);
+    // The output is the convolution of the plug-in's own noise, not of the
+    // host input, so it does not null against the host-input reference.
+    CHECK(max_error(r.run.output,
+                    reference(make_input(), make_ir(), static_cast<std::size_t>(r.pdc))) > 1e-2);
+}
+
+TEST_CASE("gpu_off puts the plug-in on the staged path", "[gpu-fault-continuity]") {
+    ::setenv("PULP_GPU_FAULT_PROVIDER", "staged", 1);
+    RunDir dir;
+    write_ir(dir.path, make_ir());
+    {
+        GpuFaultContinuityProcessor p;
+        p.prepare(prepare_context());
+        REQUIRE(wait_for(dir.path / "events.jsonl", "\"event\":\"prepared\""));
+    }
+    ::unsetenv("PULP_GPU_FAULT_PROVIDER");
+    CHECK_FALSE(on_shared_path(dir.path / "events.jsonl"));
 }

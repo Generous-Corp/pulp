@@ -79,17 +79,32 @@ absolute REAPER executable. An invalid, relative, or symlinked selection fails
 instead of silently falling back to another installed host.
 
 `--mode gpu-fault` is the GPU-audio continuity smoke (WP-h1). One GPU fault fires
-during realtime playback in the GPU fault-continuity test plug-in, and the
-plug-in's own output is nulled against a CPU reference across it. The REAPER
-bounce comes afterwards from an offline render. It is a cross-check of the
-offline path and PDC, not of the fault. The run writes a
-`pulp.gpu-audio.daw-continuity.v1` receipt that only
-`tools/validation/verify_gpu_audio_daw_continuity_receipt.py` accepts. A PASS
-there proves that the plug-in's output stayed sample-exact across that one fault
-while it ran in REAPER with its editor open. It does not prove render-owner loss
-propagation, resource replay or teardown callback suppression, which stay
-Vellum-gated. It also does not prove recovery, because the GPU stays lost for
-the rest of the run.
+in the GPU fault-continuity test plug-in while REAPER renders the track online
+(in realtime). A PASS needs three nulls against a CPU reference across the fault
+window:
+- the plug-in's own output capture;
+- REAPER's realtime render of that pass (the host-side evidence);
+- an offline bounce of the reopened project (an offline-path and PDC
+  cross-check only).
+
+It also needs the per-block delivery counters to show the GPU carrying the
+audio before the fault, the CPU fallback taking over promptly, and no silence.
+Planted negatives must FAIL and the GPU-off path negative must be INCONCLUSIVE.
+The run writes a `pulp.gpu-audio.daw-continuity.v1` receipt that only
+`tools/validation/verify_gpu_audio_daw_continuity_receipt.py` accepts.
+
+A PASS proves only this: the plug-in's output, and REAPER's realtime render of
+it, stayed sample-exact across that one fault, with the plug-in running in
+REAPER and its editor open. It does not prove:
+- continuity for any node other than the shared-I/O `GpuConvolver`;
+- behaviour under a real (watchdog, eGPU, TDR) device loss;
+- GPU resume after the fault;
+- anything about the render slice beyond "losing the editor's device did not
+  stop audio or kill the host";
+- render-owner loss propagation, resource replay or teardown callback
+  suppression, which stay Vellum-gated;
+- that the run's files could not have been fabricated: the receipt is
+  run-bound, not signed.
 
 A CLAP/VST3 run that ends "could not find/insert the FX" or "flaky launch" was,
 until 2026-10-22, most likely the pre-warm stopping REAPER after it wrote a

@@ -38,9 +38,13 @@ _spec.loader.exec_module(gfc)
 
 EXIT_PASS, EXIT_NOT_PASS, EXIT_INVALID = 0, 1, 2
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
-REQUIRED_ARTIFACTS = ("stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json")
-# A live run must also bind the host's own log, which names the plug-in it loaded.
-LIVE_ARTIFACTS = ("reaper.out.txt",)
+# realtime.wav is the host's own realtime render of the fault pass: the primary
+# host-side evidence, so every receipt binds it.
+REQUIRED_ARTIFACTS = ("stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json",
+                      "realtime.wav")
+# A live run must also bind the host's own log, which names the plug-in it
+# loaded, and the run directory's claim, which names the owning process.
+LIVE_ARTIFACTS = ("reaper.out.txt", "claim")
 
 
 class ReceiptError(ValueError):
@@ -143,6 +147,8 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     bounce_name = receipt.get("bounce_artifact")
     if bounce_name is not None:
         _require(bounce_name in artifacts, "bounce artifact not digest-bound")
+    _require(receipt.get("realtime_artifact") == "realtime.wav",
+             "the host's realtime render is not the bound realtime.wav")
     floor = gfc.MIN_WINDOW_POST if live else gfc.MIN_WINDOW_POST_DRY_RUN
     _require(window["post"] >= floor, f"analysis.window.post is shorter than {floor} samples")
     # The render length comes from the bound stimulus, not from the receipt:
@@ -160,16 +166,17 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
         host_alive=bool(receipt.get("host_alive")),
         bounce_path=(run_dir / bounce_name) if bounce_name else None,
         render_frames=render_frames, nonce=nonce, reaper_pid=reaper_pid,
-        listed=list(artifacts))
+        listed=list(artifacts), realtime_path=run_dir / "realtime.wav")
     for key in ("fault", "pdc_samples", "plugin_identity", "capture", "nulls", "health",
-                "host_alive", "verdict", "verdict_reasons"):
+                "delivery", "controls", "host_alive", "verdict", "verdict_reasons"):
         _require(_close(receipt.get(key), recomputed.get(key)),
                  f"{key} does not re-derive from the artifacts")
     _require(recomputed["verdict"] in gfc.VERDICTS, "verdict outside the closed set")
     if recomputed["verdict"] == "pass":
-        _require(recomputed["nulls"]["plugin"] is not None and
-                 recomputed["nulls"]["bounce"] is not None,
-                 "a PASS needs both the plug-in and the bounce null")
+        _require(all(recomputed["nulls"][k] is not None for k in ("plugin", "realtime", "bounce")),
+                 "a PASS needs the plug-in, realtime-render and bounce nulls")
+        _require(bool(recomputed["delivery"] and recomputed["delivery"].get("met")),
+                 "a PASS needs the per-block delivery requirements met")
     return recomputed["verdict"]
 
 

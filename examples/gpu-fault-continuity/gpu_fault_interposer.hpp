@@ -20,9 +20,14 @@ void begin_provider_fault_target_capture() noexcept;
 bool end_provider_fault_target_capture(std::string& detail);
 bool provider_fault_target_captured() noexcept;
 
+// The captured target device, and the device the last applied fault hit, as
+// addresses for the receipt's device binding (0 when none).
+std::uint64_t provider_fault_target_device() noexcept;
+std::uint64_t provider_fault_applied_device() noexcept;
+
 // Any non-audio thread. Arms one provider fault; it is applied, once, at the
 // provider's next matching Dawn call on a non-main thread. `delay_ms` is the
-// stall for delay_completion and hang.
+// stall for delay_completion and worker_stall.
 bool arm_provider_fault(FaultKind kind, std::uint32_t delay_ms, std::string& detail);
 
 // Host thread, before the engine is released. Drops a fault that was armed

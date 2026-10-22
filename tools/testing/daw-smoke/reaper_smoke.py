@@ -33,18 +33,20 @@ MODES  (--mode, default reload)
                        (test/test_signal_graph_live_swap_continuity.cpp); this
                        mode is the local-only in-host proof.
     gpu-fault          Load the GPU fault-continuity test plug-in on its shared-I/O
-                       GPU path, float its editor, and play a known stimulus while
-                       the plug-in fires one GPU fault (--gpu-fault) at a recorded
-                       project sample. The plug-in's own output capture is nulled
-                       against an independent CPU reference across the fault window
-                       (the continuity evidence); REAPER's later offline bounce is
-                       nulled too, as an offline-path/PDC cross-check only. Transport
-                       health is snapshotted
-                       before/at/after, and a pulp.gpu-audio.daw-continuity.v1
-                       receipt is written (verify it with
+                       GPU path, float its editor, and render the track online
+                       (realtime) while the plug-in fires one GPU fault
+                       (--gpu-fault) at a recorded project sample. The plug-in's
+                       own capture and REAPER's realtime render are nulled against
+                       an independent CPU reference across the fault window, and a
+                       later offline bounce is nulled as an offline/PDC cross-check.
+                       Per-block delivery counters must show the GPU carrying the
+                       audio before the fault and the fallback taking over after
+                       it. A pulp.gpu-audio.daw-continuity.v1 receipt is written
+                       (verify it with
                        tools/validation/verify_gpu_audio_daw_continuity_receipt.py).
                        A REAPER crash on render_force_loss is recorded as FAIL, not
-                       hidden. --dry-run runs the evidence chain with no REAPER.
+                       hidden. --planted / --gpu-off are the negatives; --dry-run
+                       runs the evidence chain with no REAPER.
     sequence-loop-seek Load a Pulp plugin that embeds a sequence, set a loop region
                        on the REAPER timeline, start playback, and perform a scripted
                        series of seeks (into/out of the loop and across the loop
@@ -1467,14 +1469,16 @@ def _finish_gpu_fault(lib, run_dir: Path, args: argparse.Namespace, *, transport
                       host_alive: bool, bounce: Path | None, identity: dict, nonce: str,
                       reaper_pid: int | None) -> int:
     names = ["stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json",
-             "reaper.out.txt"] + ([bounce.name] if bounce is not None else [])
+             "reaper.out.txt", "claim", "realtime.wav"] + (
+                 [bounce.name] if bounce is not None else [])
     artifacts = lib.artifact_digests(run_dir, names)
     render_frames = args.stimulus_frames + args.window_post
     evidence = lib.evaluate_run(run_dir, fault=args.gpu_fault, fault_sample=args.fault_at_sample,
                                 tolerance=args.null_tolerance, window_pre=args.window_pre,
                                 window_post=args.window_post, host_alive=host_alive,
                                 bounce_path=bounce, render_frames=render_frames, nonce=nonce,
-                                reaper_pid=reaper_pid, listed=list(artifacts))
+                                reaper_pid=reaper_pid, listed=list(artifacts),
+                                realtime_path=run_dir / "realtime.wav")
     preflight = lib.summarize_preflight(
         json.loads((run_dir / "preflight.json").read_text(encoding="utf-8")))
     receipt = lib.build_receipt(
@@ -1485,6 +1489,7 @@ def _finish_gpu_fault(lib, run_dir: Path, args: argparse.Namespace, *, transport
         analysis={"tolerance": args.null_tolerance, "render_frames": render_frames,
                   "window": {"pre": args.window_pre, "post": args.window_post}},
         bounce_artifact=bounce.name if bounce is not None and bounce.name in artifacts else None,
+        realtime_artifact="realtime.wav" if "realtime.wav" in artifacts else None,
         preflight=preflight,
         host_quiet=preflight["quiet_host"],
         artifacts=artifacts,
@@ -1515,8 +1520,8 @@ def run_gpu_fault_dry_run(args: argparse.Namespace) -> int:
     run_dir = Path(args.out_dir or tempfile.mkdtemp(prefix="pulp-gpu-fault-dry-"))
     nonce = "dry-run-" + secrets.token_hex(8)
     lib.synthesize_run(run_dir, fault=args.gpu_fault, fault_sample=args.fault_at_sample,
-                       frames=args.stimulus_frames, break_fallback=args.dry_run_break_fallback,
-                       nonce=nonce, tail=args.window_post)
+                       frames=args.stimulus_frames, nonce=nonce, tail=args.window_post,
+                       planted="gpu_off" if args.gpu_off else args.planted)
     preflight = {"status": "dry_run", "quiet_host": False, "reasons": ["dry_run"]}
     (run_dir / "preflight.json").write_text(json.dumps(preflight) + "\n", encoding="utf-8")
     identity = {"host": {"reaper_version": None, "machine": platform.machine(),
@@ -1556,8 +1561,14 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
     lib.write_wav_f32(run_dir / "stimulus.wav", [stim] * lib.CHANNELS)
     lib.write_f32(run_dir / "ir.f32", lib.make_impulse_response())
     bounce = run_dir / "bounce.wav"
-    # Play (and later bounce) far enough past the fault for the `after` snapshot.
+    realtime = run_dir / "realtime.wav"
+    # Render far enough past the fault for the `after` snapshot.
     render_end = (frames + args.window_post) / 48000.0
+    # RENDER_1X 2 = "Online Render": the fault pass renders in realtime, with the
+    # plug-in's GPU path live. No API call can set it; only a project file can.
+    project = run_dir / "gpu-fault.rpp"
+    project.write_text('<REAPER_PROJECT 0.1 "7.0" 0\n  SAMPLERATE 48000 1 0\n'
+                       "  RENDER_1X 2\n>\n", encoding="utf-8")
 
     # The fault request reaches the plug-in through a file. WP-A2's
     # gpu_audio_fault_inject control op cannot reach a plug-in inside REAPER
@@ -1569,11 +1580,15 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
                      "after_project_sample": args.fault_at_sample + args.window_post}
     if args.fault_delay_ms is not None:
         fault_request["delay_ms"] = args.fault_delay_ms
+    if args.planted:
+        fault_request["planted"] = args.planted
+    if args.stimulus == "internal":
+        fault_request["stimulus"] = "internal"
     request.write_text(json.dumps(fault_request) + "\n", encoding="utf-8")
     go = run_dir / "go"
 
     _announce(f'"{args.plugin_name}" ({args.format}) gpu-fault {args.gpu_fault} smoke '
-              "(realtime playback, then an offline bounce)", args.timeout)
+              "(online realtime render, then an offline bounce)", args.timeout)
     session = ReaperSession(reaper, args)
     session.extra_ini["renderclosewhendone"] = "4"
     status = session.portable / "status.txt"
@@ -1596,7 +1611,8 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
             "PULP_GPU_FAULT_GO": str(go),
             "PULP_GPU_FAULT_BOUNCE": str(bounce),
             "PULP_GPU_FAULT_RENDER_END": f"{render_end:.6f}",
-            "PULP_GPU_FAULT_PLAY_END": f"{render_end:.6f}",
+            "PULP_GPU_FAULT_PROJECT": str(project),
+            "PULP_GPU_FAULT_REALTIME": str(realtime),
             "PULP_GPU_FAULT_ANTICIPATIVE": "1" if args.anticipative_fx else "0",
             # The harness may wait one timeout for `prepared` and another for
             # `fault_armed` after FX_SHOWN; the script must outlast both.
@@ -1610,6 +1626,8 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
                 (run_dir / name).unlink(missing_ok=True)
 
         env["PULP_GPU_FAULT_STIMULUS"] = str(run_dir / "stimulus.wav")
+        if args.gpu_off:
+            env["PULP_GPU_FAULT_PROVIDER"] = "staged"
         not_shown = session.run_until_fx_shown(env, status, script=GPU_FAULT_LUA,
                                                before_scripted=forget_scan_instances)
         if not_shown is not None:
@@ -1628,7 +1646,7 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
             return EXIT_INCONCLUSIVE
         go.write_text("go\n", encoding="utf-8")
 
-        # Realtime playback of the whole stimulus, then the bounce.
+        # An online render of the whole stimulus in realtime, then the bounce.
         deadline = time.time() + args.timeout + render_end * 4
         done, text = False, ""
         while time.time() < deadline:
@@ -1729,10 +1747,20 @@ def build_parser() -> argparse.ArgumentParser:
     fault_group = ap.add_argument_group("gpu-fault mode")
     fault_group.add_argument("--gpu-fault",
                              choices=["force_loss_before", "force_loss_between",
-                                      "force_loss_after", "delay_completion", "hang",
-                                      "render_force_loss"],
+                                      "force_loss_after", "delay_completion", "worker_stall",
+                                      "missing_completion", "render_force_loss", "none"],
                              help="The fault to inject. render_force_loss loses the editor's "
-                                  "render device, not the audio device.")
+                                  "render device, not the audio device; none is the positive "
+                                  "control.")
+    fault_group.add_argument("--planted",
+                             choices=["no_fallback", "fallback_misaligned", "fallback_stale"],
+                             help="Planted negative (test-only plug-in shape); the run must FAIL.")
+    fault_group.add_argument("--gpu-off", action="store_true",
+                             help="Path negative: run the plug-in on the staged path; the run "
+                                  "must be INCONCLUSIVE.")
+    fault_group.add_argument("--stimulus", choices=["host", "internal"], default="host",
+                             help="internal: the plug-in makes its own input, so nothing from a "
+                                  "host input can reach the capture.")
     fault_group.add_argument("--fault-at-sample", type=int, default=96000,
                              help="Project sample at which the plug-in fires the fault.")
     fault_group.add_argument("--stimulus-frames", type=int, default=240000,
@@ -1749,14 +1777,15 @@ def build_parser() -> argparse.ArgumentParser:
                                   "It runs callbacks back to back, so the GPU never meets its "
                                   "lead and every block is CPU fallback.")
     fault_group.add_argument("--fault-delay-ms", type=int,
-                             help="Worker stall for delay_completion/hang (plug-in defaults: "
+                             help="Worker stall for delay_completion/worker_stall (plug-in defaults: "
                                   "100 ms and 3000 ms).")
     fault_group.add_argument("--out-dir", help="Run directory for artifacts and the receipt.")
     fault_group.add_argument("--dry-run", action="store_true",
                              help="Exercise the analysis, receipt and verifier on synthetic "
                                   "captures; needs no REAPER and no plug-in.")
-    fault_group.add_argument("--dry-run-break-fallback", action="store_true",
-                             help="Planted negative for --dry-run: silence after the fault.")
+    fault_group.add_argument("--dry-run-break-fallback", dest="planted",
+                             action="store_const", const="no_fallback",
+                             help="Alias of --planted no_fallback.")
     return ap
 
 
@@ -1775,8 +1804,8 @@ def validate_mode_args(ap: argparse.ArgumentParser, args: argparse.Namespace) ->
         if args.fault_at_sample < args.window_pre:
             ap.error("--fault-at-sample must leave room for --window-pre before it: the "
                      "fault window has to lie entirely inside the compared audio")
-        if args.dry_run_break_fallback and not args.dry_run:
-            ap.error("--dry-run-break-fallback only applies to --dry-run")
+        if args.stimulus == "internal" and args.dry_run:
+            ap.error("--stimulus internal needs a live run")
         return
     if args.mode != "gpu-fault" and (args.dry_run or args.gpu_fault):
         ap.error("--gpu-fault/--dry-run apply only to --mode gpu-fault")

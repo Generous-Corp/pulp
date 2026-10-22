@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pulp.dev/contracts/gpu-audio-daw-continuity-v1.schema.json",
   "title": "pulp.gpu-audio.daw-continuity.v1",
-  "description": "One GPU fault injected while the GPU fault-continuity test plug-in runs in REAPER with its editor open, and the null of the plug-in's own output and REAPER's bounce against an independent CPU reference. Produced by tools/testing/daw-smoke/reaper_smoke.py --mode gpu-fault; accepted only by tools/validation/verify_gpu_audio_daw_continuity_receipt.py, which re-derives every number below from the digest-bound artifacts. It does not prove render-owner loss propagation, resource replay or teardown callback suppression.",
+  "description": "One GPU fault injected while the GPU fault-continuity test plug-in runs in REAPER with its editor open, and the null of the plug-in's own output, the host's realtime render of the fault pass and its later offline bounce against an independent CPU reference. Produced by tools/testing/daw-smoke/reaper_smoke.py --mode gpu-fault; accepted only by tools/validation/verify_gpu_audio_daw_continuity_receipt.py, which re-derives every number below from the digest-bound artifacts. It does not prove render-owner loss propagation, resource replay or teardown callback suppression.",
   "type": "object",
   "required": [
     "schema",
@@ -26,7 +26,10 @@
     "host_alive",
     "verdict",
     "verdict_reasons",
-    "receipt_sha256"
+    "receipt_sha256",
+    "realtime_artifact",
+    "delivery",
+    "controls"
   ],
   "properties": {
     "schema": {
@@ -162,7 +165,8 @@
         "ir.f32",
         "events.jsonl",
         "capture.bin",
-        "preflight.json"
+        "preflight.json",
+        "realtime.wav"
       ],
       "additionalProperties": {
         "type": "string",
@@ -244,8 +248,10 @@
             "force_loss_between",
             "force_loss_after",
             "delay_completion",
-            "hang",
-            "render_force_loss"
+            "worker_stall",
+            "missing_completion",
+            "render_force_loss",
+            "none"
           ]
         },
         "requested_project_sample": {
@@ -352,6 +358,7 @@
       "type": "object",
       "required": [
         "plugin",
+        "realtime",
         "bounce",
         "bounce_lag_estimate"
       ],
@@ -367,6 +374,9 @@
             "integer",
             "null"
           ]
+        },
+        "realtime": {
+          "$ref": "#/$defs/null_result"
         }
       }
     },
@@ -428,6 +438,82 @@
     },
     "anticipative_fx": {
       "type": "boolean"
+    },
+    "realtime_artifact": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The host's own realtime render of the fault pass (REAPER: an online render). The primary host-side evidence; a PASS needs its null."
+    },
+    "delivery": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Per-block delivery derived from the v2 capture's counters (pre-fault GPU share over the last 96 quanta, silence blocks, where the fallback took over, GPU blocks after a loss). A PASS needs `met`.",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "met": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        },
+        "pre_fault_gpu_share": {
+          "type": "number"
+        },
+        "pre_fault_quanta": {
+          "type": "integer"
+        },
+        "degraded_host": {
+          "type": "boolean"
+        },
+        "void": {
+          "type": "boolean"
+        },
+        "silence_blocks": {
+          "type": "integer"
+        },
+        "first_fallback_project_sample": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeover_deadline_project_sample": {
+          "type": "integer"
+        },
+        "gpu_blocks_after_takeover": {
+          "type": "integer"
+        },
+        "post_fault_gpu_share": {
+          "type": "number"
+        }
+      }
+    },
+    "controls": {
+      "type": "object",
+      "description": "Which test shape ran: a planted negative (must FAIL), the internal stimulus, or the gpu_off path negative (must be INCONCLUSIVE).",
+      "properties": {
+        "planted": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stimulus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gpu_off": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "$defs": {
@@ -451,7 +537,8 @@
         "candidate_rms",
         "covered",
         "required_frames",
-        "candidate_frames"
+        "candidate_frames",
+        "window_reference_rms"
       ],
       "properties": {
         "passed": {
@@ -521,6 +608,10 @@
         "candidate_frames": {
           "type": "integer",
           "minimum": 0
+        },
+        "window_reference_rms": {
+          "type": "number",
+          "description": "Reference RMS over the fault window; must be at least 1e-3 so a silence substitution cannot null."
         }
       }
     }

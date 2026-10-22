@@ -24,7 +24,10 @@ namespace {
 
 // Capture format, mirrored by tools/testing/daw-smoke/gpu_fault_continuity.py.
 constexpr char kCaptureMagic[4] = {'P', 'G', 'F', 'C'};
-constexpr std::uint32_t kCaptureVersion = 1;
+// v2 appends to each record header the host time and the transport's
+// cumulative delivery counters at the end of the record, so the reader can
+// derive which path delivered every quantum.
+constexpr std::uint32_t kCaptureVersion = 2;
 constexpr std::uint64_t kPositionNone = UINT64_MAX;
 constexpr std::uint32_t kFlagPlaying = 1u << 0;
 constexpr std::uint32_t kFlagOffline = 1u << 1;
@@ -40,16 +43,29 @@ struct RecordHeader {
     std::uint64_t position;
     std::uint32_t frames;
     std::uint32_t flags;
+    std::uint64_t host_time_ns;
+    std::uint64_t gpu_blocks;
+    std::uint64_t fallback_blocks;
+    std::uint64_t silence_blocks;
+    std::uint64_t priming_blocks;
 };
-static_assert(sizeof(RecordHeader) == 16);
+static_assert(sizeof(RecordHeader) == 56);
 
-constexpr std::array<std::pair<FaultKind, const char*>, 6> kFaultNames{{
+constexpr std::array<std::pair<FaultKind, const char*>, 8> kFaultNames{{
     {FaultKind::ForceLossBefore, "force_loss_before"},
     {FaultKind::ForceLossBetween, "force_loss_between"},
     {FaultKind::ForceLossAfter, "force_loss_after"},
     {FaultKind::DelayCompletion, "delay_completion"},
-    {FaultKind::Hang, "hang"},
+    {FaultKind::WorkerStall, "worker_stall"},
+    {FaultKind::MissingCompletion, "missing_completion"},
     {FaultKind::RenderForceLoss, "render_force_loss"},
+    {FaultKind::Control, "none"},
+}};
+
+constexpr std::array<std::pair<Planted, const char*>, 3> kPlantedNames{{
+    {Planted::NoFallback, "no_fallback"},
+    {Planted::FallbackMisaligned, "fallback_misaligned"},
+    {Planted::FallbackStale, "fallback_stale"},
 }};
 
 std::uint64_t now_ns() {
@@ -235,6 +251,8 @@ GpuFaultContinuityProcessor::GpuFaultContinuityProcessor() {
     ir_path_ = env_path("PULP_GPU_FAULT_IR");
     if (const char* nonce = std::getenv("PULP_GPU_FAULT_NONCE"))
         nonce_ = nonce;
+    if (const char* provider = std::getenv("PULP_GPU_FAULT_PROVIDER"))
+        gpu_off_ = std::string(provider) == "staged";
 }
 
 void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
@@ -301,6 +319,7 @@ void GpuFaultContinuityProcessor::prepare(const format::PrepareContext& context)
     quantum_ = std::clamp(max_block_, kMinQuantum, kMaxQuantum);
     stage_in_.assign(static_cast<std::size_t>(kChannels) * quantum_, 0.0f);
     stage_out_.assign(static_cast<std::size_t>(kChannels) * quantum_, 0.0f);
+    stage_prev_.assign(static_cast<std::size_t>(kChannels) * quantum_, 0.0f);
     scratch_in_.assign(static_cast<std::size_t>(kChannels) * max_block_, 0.0f);
     scratch_out_.assign(static_cast<std::size_t>(kChannels) * max_block_, 0.0f);
     in_ptrs_.assign(kChannels, nullptr);
@@ -344,11 +363,14 @@ void GpuFaultContinuityProcessor::prepare_engine() {
         }
         begin_provider_fault_target_capture();
     }
-    const bool node_ok =
-        node_->set_provider_policy(gpu_audio::GpuConvolver::ProviderPolicy::SharedRequired) &&
-        node_->prepare();
+    // gpu_off is the path negative: the staged path must make the run
+    // INCONCLUSIVE ("not on the shared-I/O path"), never a PASS.
+    const auto policy = gpu_off_ ? gpu_audio::GpuConvolver::ProviderPolicy::StagedOnly
+                                 : gpu_audio::GpuConvolver::ProviderPolicy::SharedRequired;
+    const bool node_ok = node_->set_provider_policy(policy) && node_->prepare();
     if (harness_ && provider_fault_interposer_installed())
         end_provider_fault_target_capture(interposer_detail);
+    target_device_ = provider_fault_target_device();
     const gpu_audio::GpuAudioTransport::Config config{
         .ring_blocks = 8,
         .run_worker_thread = true,
@@ -368,18 +390,18 @@ void GpuFaultContinuityProcessor::prepare_engine() {
 
     if (harness_) {
         char line[768];
-        std::snprintf(line, sizeof(line),
-                      "{\"event\":\"prepared\",\"ok\":%s,\"pdc_samples\":%d,\"quantum\":%u,"
-                      "\"lead_blocks\":%u,\"ir_taps\":%zu,\"provider\":\"%s\",\"path\":\"%s\","
-                      "\"sample_rate\":%u,\"max_block\":%u,\"audio_fault_seam\":%s,"
-                      "\"seam_detail\":\"%s\",\"nonce\":\"%s\",\"pid\":%d,"
-                      "\"prepare_index\":%u}",
-                      transport_ok ? "true" : "false", latency_samples(), quantum_,
-                      capability.prepared_lead_blocks, ir_.size(), provider_name_.c_str(),
-                      path_name_.c_str(), sample_rate_, max_block_,
-                      audio_fault_seam_available() ? "true" : "false",
-                      escape(interposer_detail).c_str(), escape(nonce_).c_str(),
-                      static_cast<int>(::getpid()), prepare_index_ & 0xFFFFu);
+        std::snprintf(
+            line, sizeof(line),
+            "{\"event\":\"prepared\",\"ok\":%s,\"pdc_samples\":%d,\"quantum\":%u,"
+            "\"lead_blocks\":%u,\"ir_taps\":%zu,\"provider\":\"%s\",\"path\":\"%s\","
+            "\"sample_rate\":%u,\"max_block\":%u,\"audio_fault_seam\":%s,"
+            "\"seam_detail\":\"%s\",\"nonce\":\"%s\",\"pid\":%d,"
+            "\"prepare_index\":%u,\"provider_device\":\"0x%llx\"}",
+            transport_ok ? "true" : "false", latency_samples(), quantum_,
+            capability.prepared_lead_blocks, ir_.size(), provider_name_.c_str(), path_name_.c_str(),
+            sample_rate_, max_block_, audio_fault_seam_available() ? "true" : "false",
+            escape(interposer_detail).c_str(), escape(nonce_).c_str(), static_cast<int>(::getpid()),
+            prepare_index_ & 0xFFFFu, static_cast<unsigned long long>(target_device_));
         emit(line);
     }
 }
@@ -422,46 +444,52 @@ void GpuFaultContinuityProcessor::process(audio::BufferView<float>& output,
         flags |= kFlagFaultBlock;
         fire_offline_.store(offline, std::memory_order_relaxed);
         fire_pending_.store(true, std::memory_order_release);
+        planted_live_ = true;
     }
+    const auto planted = static_cast<Planted>(planted_.load(std::memory_order_relaxed));
+    const bool internal = internal_stimulus_.load(std::memory_order_relaxed);
     if (playing)
         latest_position_.store(position + n, std::memory_order_release);
 
     const bool capture = harness_ && n <= max_block_;
     if (harness_ && !capture)
         ring_.note_drop();
-    if (capture) {
-        for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
-            float* dst = scratch_in_.data() + static_cast<std::size_t>(ch) * max_block_;
-            if (ch < input.num_channels())
-                std::copy_n(input.channel_ptr(ch), n, dst);
-            else
-                std::fill_n(dst, n, 0.0f);
+    // The input this callback uses: the host's, or with "stimulus":"internal"
+    // a deterministic noise the plug-in makes itself, so nothing from a host
+    // input (a live template's microphone) can reach the capture.
+    float* in_plane[kChannels];
+    for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+        in_plane[ch] = scratch_in_.data() + static_cast<std::size_t>(ch) * max_block_;
+        if (n > max_block_)
+            continue;
+        if (internal) {
+            for (std::uint32_t i = 0; i < n; ++i) {
+                if (ch == 0)
+                    stimulus_state_ = 1664525u * stimulus_state_ + 1013904223u;
+                in_plane[ch][i] =
+                    ch == 0 ? 0.25f * (static_cast<float>(stimulus_state_) / 4294967296.0f - 0.5f)
+                            : in_plane[0][i];
+            }
+        } else if (ch < input.num_channels()) {
+            std::copy_n(input.channel_ptr(ch), n, in_plane[ch]);
+        } else {
+            std::fill_n(in_plane[ch], n, 0.0f);
         }
     }
+    const bool usable = n <= max_block_;
 
     // Stage host samples into the fixed transport quantum: the sample written
     // at slot f leaves exactly one quantum later, whatever the callback size.
     for (std::uint32_t i = 0; i < n; ++i) {
         for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
             const std::size_t slot = static_cast<std::size_t>(ch) * quantum_ + stage_fill_;
-            stage_in_[slot] = ch < input.num_channels() ? input.channel_ptr(ch)[i] : 0.0f;
+            stage_in_[slot] = usable ? in_plane[ch][i] : 0.0f;
             if (ch < out_ch)
                 output.channel_ptr(ch)[i] = stage_out_[slot];
         }
         if (++stage_fill_ == quantum_) {
             stage_fill_ = 0;
-            for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
-                in_ptrs_[ch] = stage_in_.data() + static_cast<std::size_t>(ch) * quantum_;
-                out_ptrs_[ch] = stage_out_.data() + static_cast<std::size_t>(ch) * quantum_;
-            }
-            const audio::BufferView<const float> q_in(in_ptrs_.data(), kChannels, quantum_);
-            audio::BufferView<float> q_out(out_ptrs_.data(), kChannels, quantum_);
-            if (!ready)
-                std::fill(stage_out_.begin(), stage_out_.end(), 0.0f);
-            else if (offline)
-                transport_->process_offline(q_in, q_out, quantum_);
-            else
-                transport_->process(q_in, q_out, quantum_);
+            run_quantum(ready, offline, planted);
         }
     }
     for (std::uint32_t ch = kChannels; ch < out_ch; ++ch)
@@ -475,8 +503,16 @@ void GpuFaultContinuityProcessor::process(audio::BufferView<float>& output,
             else
                 std::fill_n(dst, n, 0.0f);
         }
-        const RecordHeader header{playing ? static_cast<std::uint64_t>(position) : kPositionNone, n,
-                                  flags};
+        const auto d = ready ? transport_->delivery_snapshot()
+                             : gpu_audio::GpuAudioTransport::DeliverySnapshot{};
+        const RecordHeader header{playing ? static_cast<std::uint64_t>(position) : kPositionNone,
+                                  n,
+                                  flags,
+                                  now_ns(),
+                                  d.gpu_blocks,
+                                  d.cpu_fallback_blocks,
+                                  d.silence_blocks,
+                                  d.priming_blocks};
         const float* planes[2 * kChannels];
         for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
             planes[ch] = scratch_in_.data() + static_cast<std::size_t>(ch) * max_block_;
@@ -485,6 +521,36 @@ void GpuFaultContinuityProcessor::process(audio::BufferView<float>& output,
         }
         ring_.push(&header, sizeof(header), planes, 2 * kChannels, n);
     }
+}
+
+void GpuFaultContinuityProcessor::run_quantum(bool ready, bool offline, Planted planted) noexcept {
+    for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+        in_ptrs_[ch] = stage_in_.data() + static_cast<std::size_t>(ch) * quantum_;
+        out_ptrs_[ch] = stage_out_.data() + static_cast<std::size_t>(ch) * quantum_;
+    }
+    const bool live = planted_live_ && planted != Planted::Off;
+    if (live && planted == Planted::FallbackStale && !stale_done_) {
+        // Withhold this quantum's input from the node: its history goes stale
+        // while the output stays continuous.
+        std::fill(stage_in_.begin(), stage_in_.end(), 0.0f);
+        stale_done_ = true;
+    }
+    const audio::BufferView<const float> q_in(in_ptrs_.data(), kChannels, quantum_);
+    audio::BufferView<float> q_out(out_ptrs_.data(), kChannels, quantum_);
+    const auto fallback_before = ready ? transport_->delivery_snapshot().cpu_fallback_blocks : 0;
+    if (!ready)
+        std::fill(stage_out_.begin(), stage_out_.end(), 0.0f);
+    else if (offline)
+        transport_->process_offline(q_in, q_out, quantum_);
+    else
+        transport_->process(q_in, q_out, quantum_);
+    if (!live)
+        return;
+    if (planted == Planted::NoFallback && ready &&
+        transport_->delivery_snapshot().cpu_fallback_blocks != fallback_before)
+        std::fill(stage_out_.begin(), stage_out_.end(), 0.0f); // a dropout, not a fallback
+    if (planted == Planted::FallbackMisaligned)
+        stage_out_.swap(stage_prev_); // emit the previous quantum (one late), keep this one
 }
 
 // ── Service thread ───────────────────────────────────────────────────────
@@ -546,13 +612,22 @@ void GpuFaultContinuityProcessor::poll_request() {
     const std::int64_t at = json_int(body, "at_project_sample");
     const std::int64_t after = json_int(body, "after_project_sample");
     const std::int64_t delay = json_int(body, "delay_ms");
-    const bool audio = kind != FaultKind::RenderForceLoss;
+    const bool audio = kind != FaultKind::RenderForceLoss && kind != FaultKind::Control;
+    const std::string planted_name = json_string(body, "planted");
+    Planted planted = Planted::Off;
+    for (const auto& [p, name] : kPlantedNames)
+        if (planted_name == name)
+            planted = p;
     std::string refusal;
     if (kind == FaultKind::None)
         refusal = "unknown fault kind";
+    else if (!planted_name.empty() && planted == Planted::Off)
+        refusal = "unknown planted negative";
     else if (at < 0)
         refusal = "missing at_project_sample";
-    else if (audio && !audio_fault_seam_available())
+    else if (audio && !audio_fault_seam_available() && !gpu_off_)
+        // (With gpu_off the run goes ahead so its receipt can show the path
+        // negative; the fault itself is refused when it fires.)
         refusal = audio_fault_unavailable_reason(kind);
     if (!refusal.empty()) {
         emit("{\"event\":\"fault_refused\",\"fault\":\"" + escape(json_string(body, "fault")) +
@@ -560,17 +635,22 @@ void GpuFaultContinuityProcessor::poll_request() {
         return;
     }
     after_at_.store(after, std::memory_order_relaxed);
-    // A delayed completion stalls the worker for longer than the lead; a hang
-    // for seconds. Either way the callback must not notice.
+    // A delayed completion stalls the worker for longer than the lead; a worker
+    // stall for seconds. Either way the callback must not notice.
     delay_ms_ = delay > 0 ? static_cast<std::uint32_t>(std::min<std::int64_t>(delay, 60'000))
-                          : (kind == FaultKind::Hang ? 3000u : 100u);
+                          : (kind == FaultKind::WorkerStall ? 3000u : 100u);
+    const bool internal = json_string(body, "stimulus") == "internal";
+    planted_.store(static_cast<std::uint8_t>(planted), std::memory_order_relaxed);
+    internal_stimulus_.store(internal, std::memory_order_relaxed);
     fault_at_.store(at, std::memory_order_release);
     armed_kind_.store(static_cast<std::uint8_t>(kind), std::memory_order_release);
-    char line[200];
+    char line[320];
     std::snprintf(line, sizeof(line),
                   "{\"event\":\"fault_armed\",\"fault\":\"%s\",\"at_project_sample\":%" PRId64
-                  ",\"after_project_sample\":%" PRId64 "}",
-                  fault_name(kind), at, after);
+                  ",\"after_project_sample\":%" PRId64
+                  ",\"planted\":\"%s\",\"stimulus\":\"%s\",\"gpu_off\":%s}",
+                  fault_name(kind), at, after, planted_name.empty() ? "none" : planted_name.c_str(),
+                  internal ? "internal" : "host", gpu_off_ ? "true" : "false");
     emit(line);
 }
 
@@ -583,7 +663,9 @@ void GpuFaultContinuityProcessor::fire_pending_fault() {
     emit_health("before");
     std::string detail;
     bool issued = true;
-    if (kind == FaultKind::RenderForceLoss) {
+    if (kind == FaultKind::Control) {
+        detail = "positive control: no fault injected";
+    } else if (kind == FaultKind::RenderForceLoss) {
         std::lock_guard lock(hook_mutex_);
         issued = static_cast<bool>(render_loss_hook_);
         if (issued) {
@@ -630,16 +712,21 @@ void GpuFaultContinuityProcessor::report_render_loss(bool performed, const std::
 void GpuFaultContinuityProcessor::maybe_snapshot_after() {
     if (!fired_)
         return;
-    if (!applied_reported_ && provider_faults_applied() > applied_before_) {
+    const auto fired_kind = static_cast<FaultKind>(armed_kind_.load(std::memory_order_acquire));
+    const bool audio_fault =
+        fired_kind != FaultKind::RenderForceLoss && fired_kind != FaultKind::Control;
+    if (audio_fault && !applied_reported_ && provider_faults_applied() > applied_before_) {
         // The interposer actually faulted the provider (not merely armed).
         applied_reported_ = true;
         applied_ns_ = now_ns();
         char line[256];
         std::snprintf(line, sizeof(line),
                       "{\"event\":\"provider_fault_applied\",\"point\":\"%s\","
-                      "\"project_sample\":%" PRId64 ",\"delay_ms\":%u}",
+                      "\"project_sample\":%" PRId64 ",\"delay_ms\":%u,"
+                      "\"device\":\"0x%llx\",\"prepare_index\":%u}",
                       provider_fault_point(), latest_position_.load(std::memory_order_acquire),
-                      delay_ms_);
+                      delay_ms_, static_cast<unsigned long long>(provider_fault_applied_device()),
+                      prepare_index_ & 0xFFFFu);
         emit(line);
     }
     const auto kind = static_cast<FaultKind>(armed_kind_.load(std::memory_order_acquire));

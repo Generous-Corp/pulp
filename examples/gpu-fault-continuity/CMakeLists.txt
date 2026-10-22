@@ -42,6 +42,9 @@ endfunction()
 if(TARGET PulpGpuFaultContinuity_Core)
     target_link_libraries(PulpGpuFaultContinuity_Core PUBLIC
         pulp::gpu-audio pulp::render pulp::view pulp::canvas)
+    # The proc-table interposer refuses to compile without this (it injects
+    # device loss); only this test-only plug-in and its test define it.
+    target_compile_definitions(PulpGpuFaultContinuity_Core PUBLIC PULP_GPU_FAULT_TEST_ONLY=1)
     _pulp_gpu_fault_dawn_headers(PulpGpuFaultContinuity_Core)
 endif()
 
@@ -55,6 +58,7 @@ if(PULP_BUILD_TESTS)
         Catch2::Catch2WithMain)
     target_include_directories(gpu-fault-continuity-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/test)
+    target_compile_definitions(gpu-fault-continuity-test PRIVATE PULP_GPU_FAULT_TEST_ONLY=1)
     _pulp_gpu_fault_dawn_headers(gpu-fault-continuity-test)
     catch_discover_tests(gpu-fault-continuity-test)
 endif()

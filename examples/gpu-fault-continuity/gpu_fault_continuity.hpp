@@ -41,8 +41,25 @@ enum class FaultKind : std::uint8_t {
     ForceLossBetween,
     ForceLossAfter,
     DelayCompletion,
-    Hang,
+    // The provider's worker sleeps inside ProcessEvents: completions arrive
+    // late, the GPU itself is fine. (Formerly "hang".)
+    WorkerStall,
+    // One queue-completion callback is swallowed, so the provider waits on a
+    // submission that never reports done: the hung-device route.
+    MissingCompletion,
     RenderForceLoss,
+    // Positive control: fires at the sample, takes the same snapshots, faults
+    // nothing. Named "none" in requests and receipts.
+    Control,
+};
+
+// Planted negatives, test-only, applied from the fault block on. Each makes the
+// audio continuous but wrong (or absent) in a way the null must catch.
+enum class Planted : std::uint8_t {
+    Off,
+    NoFallback,         // fallback blocks are replaced by silence
+    FallbackMisaligned, // output is delayed by one extra quantum
+    FallbackStale,      // one quantum of input is withheld from the node
 };
 
 const char* fault_name(FaultKind kind) noexcept;
@@ -117,6 +134,7 @@ class GpuFaultContinuityProcessor : public format::Processor {
 
   private:
     void claim_run_dir(std::uint32_t sample_rate);
+    void run_quantum(bool ready, bool offline, Planted planted) noexcept;
     void prepare_engine();
     void release_engine();
     void service_loop();
@@ -149,6 +167,16 @@ class GpuFaultContinuityProcessor : public format::Processor {
     std::uint32_t stage_fill_ = 0;
     std::uint32_t quantum_ = 512;
     std::uint32_t prepare_index_ = 0;
+    // Request-selected test shapes; written by the service thread once, read
+    // by the audio thread.
+    std::atomic<std::uint8_t> planted_{0};
+    std::atomic<bool> internal_stimulus_{false};
+    std::uint32_t stimulus_state_ = 0x5EEDu;
+    std::vector<float> stage_prev_; // FallbackMisaligned: the previous quantum's output
+    bool planted_live_ = false;     // audio thread: the fault block has passed
+    bool stale_done_ = false;
+    std::uint64_t target_device_ = 0; // this instance's provider device, for binding
+    bool gpu_off_ = false;            // PULP_GPU_FAULT_PROVIDER=staged: path negative
     std::vector<const float*> in_ptrs_;
     std::vector<float*> out_ptrs_;
     std::vector<float> scratch_in_; // [channel][max block] contiguous copy for capture

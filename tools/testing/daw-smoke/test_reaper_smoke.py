@@ -639,7 +639,8 @@ class GpuFaultMode(unittest.TestCase):
     def test_mode_and_fault_kinds_are_offered(self):
         ap = rs.build_parser()
         for kind in ("force_loss_before", "force_loss_between", "force_loss_after",
-                     "delay_completion", "hang", "render_force_loss"):
+                     "delay_completion", "worker_stall", "missing_completion",
+                     "render_force_loss", "none"):
             args = ap.parse_args(["--mode", "gpu-fault", "--gpu-fault", kind, "--dry-run"])
             rs.validate_mode_args(ap, args)
 
@@ -651,7 +652,7 @@ class GpuFaultMode(unittest.TestCase):
 
     def test_a_live_run_needs_a_one_second_window(self):
         ap = rs.build_parser()
-        args = ap.parse_args(["--mode", "gpu-fault", "--gpu-fault", "hang",
+        args = ap.parse_args(["--mode", "gpu-fault", "--gpu-fault", "worker_stall",
                               "--plugin-name", "X", "--plugin-path", __file__,
                               "--window-post", "4800"])
         with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
@@ -659,7 +660,7 @@ class GpuFaultMode(unittest.TestCase):
 
     def test_the_fault_must_fall_inside_the_stimulus(self):
         ap = rs.build_parser()
-        args = ap.parse_args(["--mode", "gpu-fault", "--gpu-fault", "hang", "--dry-run",
+        args = ap.parse_args(["--mode", "gpu-fault", "--gpu-fault", "worker_stall", "--dry-run",
                               "--stimulus-frames", "100", "--fault-at-sample", "100"])
         with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
             rs.validate_mode_args(ap, args)
@@ -708,15 +709,16 @@ class GpuFaultMode(unittest.TestCase):
 
     def test_the_lua_handshakes_and_renders_only_after_go(self):
         lua = rs.GPU_FAULT_LUA.read_text(encoding="utf-8")
-        for needle in ("FX_SHOWN", "PLAYING", "RENDERING", "RENDER_DONE", "GO_TIMEOUT",
-                       "PULP_GPU_FAULT_GO", "OnPlayButton", "Main_OnCommand(41824",
-                       "TrackFX_Show"):
+        for needle in ("FX_SHOWN", "RENDERING_REALTIME", "RENDERING_OFFLINE", "RENDER_DONE",
+                       "GO_TIMEOUT", "PULP_GPU_FAULT_GO", "Main_OnCommand(41824",
+                       "TrackFX_Show", "RENDER_1X 0", "Main_SaveProjectEx"):
             self.assertIn(needle, lua)
-        # Armed first, then realtime playback (where the fault fires), then the bounce.
-        self.assertLess(lua.index("file_exists(go_path)"), lua.index("OnPlayButton()"))
-        # The bounce runs only once playback has stopped.
-        self.assertIn("reaper.OnStopButton()\n    reaper.defer(wait_for_stop)", lua)
-        self.assertEqual(lua.count("bounce_track()"), 2)  # definition + the one call
+        # Armed first, then the online (realtime) render where the fault fires,
+        # then the offline bounce of the reopened project.
+        go = lua.index("file_exists(go_path)")
+        self.assertLess(go, lua.index('write_status("RENDERING_REALTIME")'))
+        self.assertLess(lua.index('write_status("RENDERING_REALTIME")'),
+                        lua.index("reaper.defer(offline_bounce)"))
 
     def test_preconditions_make_a_clean_null_inconclusive(self):
         lib = rs._gpu_fault_lib()
@@ -728,7 +730,7 @@ class GpuFaultMode(unittest.TestCase):
         for name, (old, new) in cases.items():
             with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
                 run = pathlib.Path(tmp)
-                fault = "render_force_loss" if name.startswith("render") else "hang"
+                fault = "render_force_loss" if name.startswith("render") else "worker_stall"
                 lib.synthesize_run(run, fault=fault, fault_sample=self.FAULT,
                                    frames=self.FRAMES, window_post=self.POST)
                 events = (run / "events.jsonl").read_text(encoding="utf-8")
@@ -741,20 +743,22 @@ class GpuFaultMode(unittest.TestCase):
                 (run / "events.jsonl").write_text(events, encoding="utf-8")
                 result = lib.evaluate_run(run, fault=fault, fault_sample=self.FAULT,
                                           tolerance=1e-4, window_pre=100, window_post=self.POST,
-                                          host_alive=True, bounce_path=run / "bounce.wav")
+                                          host_alive=True, bounce_path=run / "bounce.wav",
+                                          realtime_path=run / "realtime.wav")
                 self.assertEqual(result["verdict"], "inconclusive", result["verdict_reasons"])
                 # Positive control: the untouched run passes.
                 lib.synthesize_run(run, fault=fault, fault_sample=self.FAULT, frames=self.FRAMES,
                                    window_post=self.POST)
                 result = lib.evaluate_run(run, fault=fault, fault_sample=self.FAULT,
                                           tolerance=1e-4, window_pre=100, window_post=self.POST,
-                                          host_alive=True, bounce_path=run / "bounce.wav")
+                                          host_alive=True, bounce_path=run / "bounce.wav",
+                                          realtime_path=run / "realtime.wav")
                 self.assertEqual(result["verdict"], "pass", result["verdict_reasons"])
 
     def test_dry_run_needs_no_reaper(self):
         with tempfile.TemporaryDirectory() as tmp:
             rc = subprocess.run(
-                [sys.executable, str(MODULE_PATH), "--mode", "gpu-fault", "--gpu-fault", "hang",
+                [sys.executable, str(MODULE_PATH), "--mode", "gpu-fault", "--gpu-fault", "worker_stall",
                  "--dry-run", "--stimulus-frames", str(self.FRAMES), "--fault-at-sample",
                  str(self.FAULT), "--window-pre", "1000", "--window-post", str(self.POST),
                  "--out-dir", tmp,

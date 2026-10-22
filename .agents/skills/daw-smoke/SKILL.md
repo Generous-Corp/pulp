@@ -97,22 +97,31 @@ companion gates; screenshots alone do not prove audio or performance.
 - **`gpu-fault`** — GPU-audio continuity at the DAW boundary (WP-h1). Loads the
   test-only GPU fault-continuity plug-in (`examples/gpu-fault-continuity`, built
   with `-DPULP_GPU_AUDIO_FAULT_HOOKS=ON`) on its shared-I/O path, floats its
-  editor, and plays a known stimulus in realtime while the plug-in fires one
-  `--gpu-fault` when the playhead crosses `--fault-at-sample`. Audio faults are
-  applied to the running provider by a test-only Dawn proc-table interposer in
-  the plug-in. The provider's own fault hooks are construction-time, and WP-A2's
-  control op cannot reach a plug-in in REAPER. The plug-in's own capture, nulled
-  against an independent CPU reference across the fault window, is the
-  continuity evidence. The REAPER bounce is an offline render made after the
-  fault, so it only cross-checks the offline path and PDC. Health is
-  snapshotted before/at/after, and a
-  `pulp.gpu-audio.daw-continuity.v1` receipt is written; only
-  `tools/validation/verify_gpu_audio_daw_continuity_receipt.py`, which
-  re-derives everything from the artifacts, can accept it. `render_force_loss`
-  loses the EDITOR's render device via the surface's device accessor; a REAPER
-  crash there is a FAIL finding, never hidden. A fault delivered by the request
-  file (`in_process_file`) is not control-op evidence. `--dry-run` (and
-  `--dry-run-break-fallback`, the planted negative) needs no REAPER.
+  editor, and renders the track ONLINE (realtime; set through the project
+  file) while the plug-in fires one `--gpu-fault` at `--fault-at-sample`.
+  - Audio faults are applied to this instance's running provider by a
+    test-only Dawn proc-table interposer (`#error` unless
+    `PULP_GPU_FAULT_TEST_ONLY`). The faults are `force_loss_*`,
+    `delay_completion`, `worker_stall` (formerly `hang`) and
+    `missing_completion`.
+  - `render_force_loss` loses the EDITOR's render device; a REAPER crash there
+    is a FAIL finding.
+  - `none` is the positive control.
+  - PASS needs three nulls across the fault window: the plug-in capture,
+    REAPER's realtime render (`realtime.wav`, primary), and an offline bounce
+    of the reopened project (cross-check only). It also needs the v2 capture's
+    per-block delivery counters to show a GPU share of at least 90% over the
+    96 quanta before the fault, a prompt fallback takeover, a frozen GPU after
+    a loss, and zero silence.
+  - `--planted no_fallback|fallback_misaligned|fallback_stale` must FAIL;
+    `--gpu-off` must be INCONCLUSIVE; `--stimulus internal` keeps any host
+    input out of the capture.
+  - Only `tools/validation/verify_gpu_audio_daw_continuity_receipt.py` accepts
+    the receipt. It re-derives everything from digest-bound artifacts and
+    binds the run by nonce, pid and claim.
+  - A fault delivered by the request file (`in_process_file`) is not control-op
+    evidence.
+  - `--dry-run` needs no REAPER.
 - All modes share the same REAPER lifecycle (`ReaperSession`): fresh portable
   dir, temp scan path, pre-warm scan, scripted insert+float, guaranteed teardown.
   They differ only in what they SEED, the TRIGGER they fire once the FX is shown,

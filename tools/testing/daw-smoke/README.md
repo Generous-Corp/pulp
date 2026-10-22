@@ -90,37 +90,55 @@ must bind one exact host executable; an invalid or symlinked path fails closed.
 
 ### `gpu-fault` — audio continuity through one injected GPU fault (WP-h1)
 Loads the GPU fault-continuity test plug-in (`examples/gpu-fault-continuity`,
-built only with `-DPULP_GPU_AUDIO_FAULT_HOOKS=ON`) on its shared-I/O GPU path,
-floats its editor, and plays a known stimulus in realtime while the plug-in fires
-one fault when the playhead crosses `--fault-at-sample`:
+built only with `-DPULP_GPU_AUDIO_FAULT_HOOKS=ON`) on its shared-I/O GPU path
+and floats its editor. It then renders the track **online** (REAPER's
+realtime render, set through the project file the harness writes), and the
+plug-in fires one fault when the playhead crosses `--fault-at-sample`:
 
-- `force_loss_before|force_loss_between|force_loss_after|delay_completion|hang`
+- `force_loss_before|force_loss_between|force_loss_after|delay_completion|worker_stall|missing_completion`
   hit the running **audio** provider. The provider's own fault hooks are
   construction-time options, and WP-A2's `gpu_audio_fault_inject` control op
   cannot reach a plug-in inside REAPER. So the test plug-in interposes Dawn's
-  proc table (test-only, off the main thread only) and applies the fault at the
-  provider's own call sites: ForceLoss before `Submit`, between `Submit` and
-  `OnSubmittedWorkDone`, or after it; or a stalled `ProcessEvents` (100 ms for
-  `delay_completion`, 3 s for `hang`, `--fault-delay-ms` to change). An audio
-  fault counts only once the plug-in reports it was applied, not merely armed;
+  proc table (test-only, guarded by `#error` unless `PULP_GPU_FAULT_TEST_ONLY`)
+  and applies the fault at the provider's own call sites, on this instance's
+  provider device only:
+  - ForceLoss before `Submit`, between `Submit` and `OnSubmittedWorkDone`, or
+    after it;
+  - a stalled `ProcessEvents` (`delay_completion`, 100 ms; `worker_stall`,
+    3 s, formerly `hang`; `--fault-delay-ms` to change);
+  - a swallowed completion callback (`missing_completion`).
+
+  An audio fault counts only once the plug-in reports it applied it, and to
+  which device.
 - `render_force_loss` loses the **editor's render** device through the
   surface's existing device accessor. Audio owns a separate Dawn device, so the
   expectation is "audio continues"; a REAPER crash is recorded as FAIL.
+- `none` is the positive control: it fires at the sample and faults nothing.
 
-The plug-in captures every callback's input and output from a host thread. That
-capture is nulled against an independent CPU reference (its own recorded input
-convolved with the same IR, delayed by the PDC each prepare reported) over the
-whole run and in a window around the fault sample. **That null is the
-continuity evidence.** After playback the track is bounced with an offline
-render. The fault fires once, on the realtime pass, and an offline render runs
-the CPU path, so the bounce holds neither the fault nor GPU output. Its null
-(stimulus convolved with the IR, PDC-compensated by REAPER) is a cross-check of
-the offline path and of PDC reporting, nothing more. Both nulls must cover the
-whole fault window, and the bounce must reach the render end, or they fail.
-Transport health and delivery counters are snapshotted before, at, and after
-the fault. The run directory holds every artifact plus a
+A PASS needs three nulls against an independent CPU reference, each covering
+the whole fault window:
+1. the plug-in's own capture of every callback (its recorded input convolved
+   with the IR, delayed by the PDC each prepare reported);
+2. **the host's realtime render of the fault pass** (`realtime.wav`, the
+   primary host-side evidence);
+3. an offline bounce of the reopened project. The bounce comes from a fresh,
+   fault-free instance, so it only cross-checks the offline path and PDC.
+
+The capture (v2) also records the transport's delivery counters for every
+block. From them a PASS further requires:
+- the GPU carried at least 90% of the 96 quanta before the fault (50–90% is
+  reported as a degraded host; below 50% the run is void);
+- no silence block anywhere;
+- the fallback took over within `lead_blocks + 1` quanta of the applied fault;
+- after a loss, the GPU delivered nothing.
+
+Controls: `--planted no_fallback|fallback_misaligned|fallback_stale` are planted
+negatives that keep audio flowing but wrong (or absent), and must FAIL.
+`--gpu-off` (the staged path) is the path negative and must be INCONCLUSIVE.
+`--stimulus internal` has the plug-in make its own input, so nothing from a
+host input can reach the capture. The run directory holds every artifact plus a
 `pulp.gpu-audio.daw-continuity.v1` receipt
-([schema](../../../docs/contracts/gpu-audio-daw-continuity-v1.schema.json)):
+([schema](../../../docs/contracts/gpu-audio-daw-continuity-v1.schema.json)).
 
 Build it with the shared-I/O convolver compiled in; without these flags
 `SharedRequired` refuses and every run is INCONCLUSIVE:
@@ -146,8 +164,11 @@ null, the counter expectations, the verdict, and the preflight summary (from
 `preflight.json`). It checks that the plug-in's events carry this run's nonce
 and REAPER's pid, and that every fault event names the fault and sample the
 receipt claims. It also checks that the post-fault window is the one the
-plug-in was asked to observe, at least 4800 samples long, and that the render
-length comes from the bound stimulus. Edited numbers, unlisted or swapped files, and events from
+plug-in was asked to observe, at least 1 s long for a live run (100 ms for a dry
+run), that the render length comes from the bound stimulus, that the run
+directory's claim names the process every event came from, and that the
+applied fault hit this plug-in's provider device at the call site its kind
+names. Edited numbers, unlisted or swapped files, and events from
 another run are rejected (exit 2). What it cannot prove is that the bound files
 came from a real REAPER rather than a careful forger: the receipt is
 self-contained, with no external signer. `--require-quiet-host` makes host
@@ -167,8 +188,9 @@ that. The plug-in's transport quantum is the host's whole prepared block for the
 same reason: smaller quanta run back to back inside one callback.
 
 `--dry-run` runs the whole evidence chain on synthetic captures with no REAPER;
-`--dry-run --dry-run-break-fallback` is the planted negative (silence after the
-fault) and must come back FAIL at the fault sample.
+`--dry-run --planted <shape>` and `--dry-run --gpu-off` synthesize the same
+negatives the plug-in plants, which must come back FAIL and INCONCLUSIVE
+respectively.
 
 ## Scan-path note (2026-10-22)
 

@@ -13,8 +13,11 @@
 //   force_loss_after    deviceForceLoss after the next queueOnSubmittedWorkDone
 //   delay_completion    the next instanceProcessEvents sleeps `delay_ms` first,
 //                       so the provider observes completions that much late
-//   hang                the same, for long enough that the worker is stuck
-//                       well past the transport's lead
+//   worker_stall        the same, for seconds: the worker is stuck well past
+//                       the transport's lead while the GPU itself is fine
+//   missing_completion  the next queueOnSubmittedWorkDone callback is
+//                       swallowed, so that submission never reports done (the
+//                       hung-device route)
 //
 // The table is re-asserted every time a fault is armed: the editor's render
 // surface reinstalls Dawn's native table each time it initializes
@@ -41,6 +44,13 @@
 
 #include "gpu_fault_interposer.hpp"
 
+// This file must never reach a shipped product: it rewrites Dawn's process-wide
+// proc table to inject device loss. Only the test-only plug-in's build defines
+// the macro below.
+#if !defined(PULP_GPU_FAULT_TEST_ONLY)
+#error "gpu_fault_interposer.cpp is test-only; build it only with PULP_GPU_FAULT_TEST_ONLY"
+#endif
+
 #if defined(PULP_GPU_FAULT_HAS_DAWN)
 #include "dawn/dawn_proc.h"
 #include "dawn/native/DawnNative.h"
@@ -61,6 +71,7 @@ std::atomic<std::uint8_t> g_armed{0}; // FaultKind, 0 = none
 std::atomic<std::uint32_t> g_delay_ms{0};
 std::atomic<std::uint64_t> g_applied{0};
 std::atomic<const char*> g_applied_point{""};
+std::atomic<std::uintptr_t> g_applied_device{0};
 std::once_flag g_install_once;
 bool g_installed = false;
 
@@ -131,8 +142,11 @@ void applied(const char* point) noexcept {
 void force_loss(WGPUDevice device, const char* point) noexcept {
     g_native.deviceForceLoss(device, WGPUDeviceLostReason_Unknown,
                              WGPUStringView{"WP-h1 provider fault", WGPU_STRLEN});
+    g_applied_device.store(reinterpret_cast<std::uintptr_t>(device), std::memory_order_release);
     applied(point);
 }
+
+void swallow_work_done(WGPUQueueWorkDoneStatus, WGPUStringView, void*, void*) {}
 
 WGPUQueue get_queue(WGPUDevice device) {
     WGPUQueue queue = g_native.deviceGetQueue(device);
@@ -160,6 +174,12 @@ WGPUFuture on_submitted_work_done(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo
     if (take(FaultKind::ForceLossBetween, is_target(device)))
         force_loss(device, "between_submit_and_completion_registration");
     const bool after = take(FaultKind::ForceLossAfter, is_target(device));
+    if (take(FaultKind::MissingCompletion, is_target(device))) {
+        // The work still completes on the GPU; the provider just never hears.
+        info.callback = &swallow_work_done;
+        g_applied_device.store(reinterpret_cast<std::uintptr_t>(device), std::memory_order_release);
+        applied("completion_callback_swallowed");
+    }
     const WGPUFuture future = g_native.queueOnSubmittedWorkDone(queue, info);
     if (after)
         force_loss(device, "after_completion_registration");
@@ -169,7 +189,10 @@ WGPUFuture on_submitted_work_done(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo
 void process_events(WGPUInstance instance) {
     const bool mine =
         instance != nullptr && instance == g_target_instance.load(std::memory_order_acquire);
-    if (take(FaultKind::DelayCompletion, mine) || take(FaultKind::Hang, mine)) {
+    if (take(FaultKind::DelayCompletion, mine) || take(FaultKind::WorkerStall, mine)) {
+        g_applied_device.store(
+            reinterpret_cast<std::uintptr_t>(g_target_device.load(std::memory_order_acquire)),
+            std::memory_order_release);
         applied("process_events_stall");
         std::this_thread::sleep_for(
             std::chrono::milliseconds(g_delay_ms.load(std::memory_order_acquire)));
@@ -239,6 +262,18 @@ bool end_provider_fault_target_capture(std::string& detail) {
     detail = "built without Dawn headers";
     return false;
 #endif
+}
+
+std::uint64_t provider_fault_target_device() noexcept {
+#if defined(PULP_GPU_FAULT_HAS_DAWN)
+    return reinterpret_cast<std::uintptr_t>(g_target_device.load(std::memory_order_acquire));
+#else
+    return 0;
+#endif
+}
+
+std::uint64_t provider_fault_applied_device() noexcept {
+    return g_applied_device.load(std::memory_order_acquire);
 }
 
 bool provider_fault_target_captured() noexcept {
