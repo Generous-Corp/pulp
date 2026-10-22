@@ -188,6 +188,9 @@ class CapturedStyleIndex {
 
     /// An element's authored attribute value, or empty when absent.
     std::string attribute(int node_index, std::string_view name) const;
+    /// Whether an element carries the attribute at all, which an empty
+    /// `attribute()` cannot tell from an empty value.
+    bool has_attribute(int node_index, std::string_view name) const;
 
     /// A node's lowercase tag name, for any node in the document — not only the
     /// ones that were laid out. Ancestry questions have to reach elements that

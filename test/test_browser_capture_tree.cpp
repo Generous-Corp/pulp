@@ -4062,6 +4062,47 @@ TEST_CASE("an input's type is read as HTML reads it",
     CHECK(detail::normalized_input_type(" password ") == "text");
 }
 
+TEST_CASE("a submit or reset button without a value draws the default label",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=submit],
+    // 4 INPUT[type=reset], 5 INPUT[type=submit value=""], 6 INPUT[type=button].
+    // Chrome labels the first two "Submit" and "Reset" in an en-US capture; an
+    // empty `value` and a plain button label nothing.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3,3]",
+        .node_types = "[9,1,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2,2]",
+        .attributes = "[[],[],[],[4,5],[4,6],[4,5,7,8],[4,9]]",
+        .layout_nodes = "[1,2,3,4,5,6]",
+        .styles = "[[10,16,12,12,12,12,12,12,12,12,15,17,18],"
+                  "[10,16,12,12,12,12,12,12,12,12,15,17,18],"
+                  "[10,11,13,14,13,14,13,13,13,13,15,17,18],"
+                  "[10,11,13,14,13,14,13,13,13,13,15,17,18],"
+                  "[10,11,13,14,13,14,13,13,13,13,15,17,18],"
+                  "[10,11,13,14,13,14,13,13,13,13,15,17,18]]",
+        .bounds = "[[0,0,200,140],[0,0,200,140],[10,10,150,24],"
+                  "[10,40,150,24],[10,70,150,24],[10,100,150,24]]",
+        .paint_orders = "[0,1,2,3,4,5]",
+        .computed_names =
+            R"(["display","appearance","padding-top","padding-right",)"
+            R"("padding-bottom","padding-left","border-top-width",)"
+            R"("border-right-width","border-bottom-width","border-left-width",)"
+            R"("font-size","color","text-align"])",
+        .strings =
+            R"J("#document","HTML","BODY","INPUT","type","submit","reset",)J"
+            R"J("value","","button","block","auto","0px","1px","6px","13px",)J"
+            R"J("none","rgb(31, 41, 51)","center")J",
+        .extra_nodes =
+            R"(,"nodeValue":[-1,-1,-1,-1,-1,-1,-1])"
+            R"(,"inputValue":{"index":[3,4,5,6],"value":[-1,-1,8,-1]})",
+    };
+    const auto lowered = lower_snapshot(spec, "default-button-labels");
+
+    CHECK(find_by_text(lowered.root, "Submit") != nullptr);
+    CHECK(find_by_text(lowered.root, "Reset") != nullptr);
+    CHECK(lowered.counts.control_value_text == 2);
+}
+
 TEST_CASE("a control masked by -webkit-text-security never draws its value",
           "[browser-capture][native-lowering][form-controls][security]") {
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=text] under

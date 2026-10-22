@@ -82,6 +82,16 @@ std::optional<ControlValueText> control_value_text(
         if (computed.find(edge) == computed.end()) return std::nullopt;
     }
     auto text = index.control_value(node_index);
+    // A submit or reset button with no `value` attribute draws the user
+    // agent's default label; one with an empty `value` draws nothing. The
+    // default is localised in Chromium (the IDS_FORM_SUBMIT_LABEL and
+    // IDS_FORM_RESET_LABEL resources), so these are the English strings,
+    // which is what an en-US capture paints.
+    if (text.empty() && tag == "input" &&
+        !index.has_attribute(node_index, "value")) {
+        if (kind == "submit") text = "Submit";
+        if (kind == "reset") text = "Reset";
+    }
     if (text.empty()) return std::nullopt;
     const auto length = [&](const char* name) {
         const auto found = computed.find(name);

@@ -815,6 +815,19 @@ std::string CapturedStyleIndex::attribute(int node_index,
     return {};
 }
 
+bool CapturedStyleIndex::has_attribute(int node_index,
+                                       std::string_view name) const {
+    if (node_index < 0 ||
+        node_index >= static_cast<int>(node_attributes_.size())) {
+        return false;
+    }
+    const auto& pairs = node_attributes_[static_cast<size_t>(node_index)];
+    for (size_t i = 0; i + 1 < pairs.size(); i += 2) {
+        if (string_at(pairs[i]) == name) return true;
+    }
+    return false;
+}
+
 std::string CapturedStyleIndex::tag_name(int node_index) const {
     if (node_index < 0 || node_index >= static_cast<int>(node_name_.size()))
         return {};
