@@ -56,9 +56,12 @@ nothing, and the release ships THIN per-arch binaries. It lives in
 path: a redundant canary for an artifact we do not ship must never be able to
 block or starve a release. `intel-portability.yml` covers Intel at PR time.
 
-Before Tier 3 accepts the universal build, its m153 capability step must produce
-one source/asset/generation-bound receipt containing both an arm64 native
-compile/link/run and an explicitly Rosetta-run x86_64 compile/link/run. The
+Before Tier 3 accepts the universal build, its universal Skia capability step
+(`verify_skia_m153_capabilities.py`, which checks the m153-and-later provider
+contract, so the step and its `skia-universal-capabilities.json` result carry no
+milestone) must produce one source/asset/generation-bound receipt containing
+both an arm64 native compile/link/run and an explicitly Rosetta-run x86_64
+compile/link/run. The
 final `Compute result` step consumes that status alongside build, lipo, and
 dual-arch auval; an absent or partial capability receipt is a failure, not an
 advisory skip.
