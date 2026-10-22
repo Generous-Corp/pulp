@@ -34,6 +34,9 @@ enum class GpuAudioTerminalDisposition : std::uint8_t {
     DeviceLost = 6,
     Cancelled = 7,
 };
+static_assert(static_cast<std::uint32_t>(GpuAudioTerminalDisposition::Cancelled) + 1 ==
+                  GpuAudioStatus::kTerminalDispositionCount,
+              "GpuAudioStatus::terminal_counts must cover every terminal disposition");
 
 /// Why a prepared program descriptor was rejected. Validation is constexpr so
 /// providers and SDK consumers can use the same fail-closed rules without

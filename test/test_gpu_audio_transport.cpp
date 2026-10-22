@@ -67,6 +67,94 @@ TEST_CASE("GpuAudioStatus preserves provider, delivery, and fallback meanings",
     CHECK(status.missed_blocks != status.fallback_blocks);
 }
 
+TEST_CASE("GpuAudioStatus v3 fields default to unreported", "[gpu_audio][status]") {
+    const GpuAudioStatus status;
+    CHECK(GpuAudioStatus::kSchemaVersion == 3);
+    CHECK(status.schema_version == 3);
+    CHECK(status.provider == GpuAudioProvider::Unknown);
+    CHECK(status.fallback_policy == MissPolicy::Silence);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(status.recovery_sequence == UINT64_MAX);
+    CHECK(status.epoch == 0);
+    CHECK_FALSE(status.delivery_epoch_active);
+    for (const auto count : status.terminal_counts)
+        CHECK(count == 0);
+    CHECK(status.completion_mode == GpuAudioCompletionMode::Unknown);
+    CHECK_FALSE(status.timestamps_available);
+    CHECK(status.last_delivery_ns == 0);
+    CHECK_FALSE(status.gpu_kernel_available);
+}
+
+TEST_CASE("GpuAudioStatus v2 positional prefix still aggregate-initializes",
+          "[gpu_audio][status]") {
+    // Every v2 field, positionally, as an installed v2 consumer would write it.
+    const GpuAudioStatus status{2,
+                                GpuAudioEngine::Gpu,
+                                GpuAudioEngine::Cpu,
+                                GpuAudioProviderState::Degraded,
+                                GpuAudioProvider::Dawn,
+                                MissPolicy::CpuFallback,
+                                48000,
+                                64,
+                                128,
+                                2,
+                                true,
+                                true,
+                                10,
+                                3,
+                                2,
+                                1,
+                                5,
+                                12.5,
+                                11.0,
+                                GpuAudioRecoveryReason::ProviderLost,
+                                42};
+    CHECK(status.schema_version == 2);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(status.provider == GpuAudioProvider::Dawn);
+    CHECK(status.fallback_policy == MissPolicy::CpuFallback);
+    CHECK(status.block_size == 64);
+    CHECK(status.avg_block_us == 11.0);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(status.recovery_sequence == 42);
+    CHECK(status.epoch == 0);
+    CHECK(status.completion_mode == GpuAudioCompletionMode::Unknown);
+    CHECK_FALSE(status.gpu_kernel_available);
+}
+
+TEST_CASE("GPU audio contract enums append without renumbering", "[gpu_audio][status]") {
+    CHECK(static_cast<int>(GpuAudioRecoveryReason::InvalidCallback) == 6);
+    CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderUnresponsive) == 7);
+    CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderReacquired) == 8);
+    CHECK(static_cast<int>(GpuAudioProvider::Metal) == 2);
+    CHECK(static_cast<int>(GpuAudioProvider::Cpu) == 3);
+    const GpuAudioCapabilityReport report;
+    CHECK_FALSE(report.gpu_kernel_available);
+    CHECK(report.recovery_policy == GpuAudioRecoveryPolicy::Manual);
+    const detail::RealtimeGpuNodePath path;
+    CHECK(path.health == nullptr);
+    CHECK(path.reprepare == nullptr);
+}
+
+TEST_CASE("GpuAudioNode appended hooks have inert defaults", "[gpu_audio][status]") {
+    struct MinimalNode final : GpuAudioNode {
+        GpuAudioNodeDescriptor descriptor() const override {
+            return {};
+        }
+        bool prepare() override {
+            return true;
+        }
+        void process_block(const pulp::audio::BufferView<const float>&,
+                           pulp::audio::BufferView<float>&, uint32_t) override {}
+    };
+    MinimalNode node;
+    GpuAudioNode& base = node;
+    const auto status = base.status_snapshot();
+    CHECK(status.schema_version == GpuAudioStatus::kSchemaVersion);
+    CHECK(status.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK(base.release_bounded(0));
+}
+
 TEST_CASE("GpuAudioProgramDescriptor rejects incomplete shared preparation",
           "[gpu_audio][program]") {
     auto program = valid_shared_program();

@@ -72,7 +72,7 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
     std::uint64_t recovery_sequence() const noexcept;
     /// Allocation-free provider-neutral lifecycle projection for hosts that
     /// own this stamped node directly.
-    GpuAudioStatus status_snapshot() const noexcept;
+    GpuAudioStatus status_snapshot() const noexcept override;
     /// Not a legacy FIFO node. GpuAudioTransport rejects an unprepared instance.
     void process_block(const audio::BufferView<const float>&, audio::BufferView<float>&,
                        std::uint32_t) final;
