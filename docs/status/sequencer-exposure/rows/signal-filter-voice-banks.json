@@ -7,7 +7,6 @@
   "owned_paths": [
     "core/signal/include/pulp/signal/ladder_bank.hpp",
     "core/signal/include/pulp/signal/svf_bank.hpp",
-    "docs/guides/signal-processing.md",
     "docs/status/sequencer-exposure/rows/signal-filter-voice-banks.json"
   ],
   "evidence": [
