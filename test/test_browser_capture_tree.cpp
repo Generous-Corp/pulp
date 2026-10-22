@@ -1560,6 +1560,76 @@ TEST_CASE("a captured canvas that interleaves with another subtree is flattened"
     CHECK(later_panel_z < canvas_z);
 }
 
+TEST_CASE("a canvas captured as a viewport plane is placed rather than squeezed",
+          "[browser-capture][native-lowering][canvas]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 CANVAS (1px border, 2px padding)
+    // The capture holds the canvas as a 400x300 CSS px viewport plane with the
+    // bitmap at its page position. Drawn into the canvas box with `fill`, the
+    // whole page would shrink into it; the plane must instead sit at the page
+    // origin inside the canvas and be clipped to its content box.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3]",
+        .node_types = "[9,1,1,1]",
+        .parents = "[-1,0,1,2]",
+        .attributes = "[[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3]",
+        .styles = "[[4,5,5,5,5,5,5,5,5],[4,5,5,5,5,5,5,5,5],"
+                  "[4,5,5,5,5,5,5,5,5],[4,6,6,6,6,7,7,7,7]]",
+        .bounds = "[[0,0,400,300],[0,0,400,300],[0,0,400,300],"
+                  "[20,79.4375,106,66]]",
+        .paint_orders = "[0,1,1,2]",
+        .computed_names =
+            R"(["display","border-left-width","border-top-width",)"
+            R"("border-right-width","border-bottom-width","padding-left",)"
+            R"("padding-top","padding-right","padding-bottom"])",
+        .strings = R"J("#document","HTML","BODY","CANVAS","block","0px","1px","2px")J",
+    };
+    const std::unordered_map<std::string, CapturedLayerExtent> layers{
+        {"canvas:3", {400.0, 300.0}}};
+
+    IRNode root;
+    lower_into(spec, "canvas-plane", root, {{3, "canvas:3"}});
+    const auto* canvas = find_node(root, [](const IRNode& node) {
+        return attribute(node, "captured_element") == "canvas";
+    });
+    REQUIRE(canvas != nullptr);
+    // Element-sized behaviour without a plane extent: the picture is the box.
+    CHECK(canvas->type == "image");
+    CHECK(attribute(*canvas, "asset_ref") == "canvas:3");
+
+    const auto path = write_snapshot(build_snapshot(spec), "canvas-plane-layer");
+    const auto index = CapturedStyleIndex::load(path);
+    fs::remove(path);
+    REQUIRE(index);
+    IRNode placed_root;
+    lower_painted_tree(*index, 0.0, 0.0, 0.0, placed_root, {{3, "canvas:3"}},
+                       false, layers);
+    const auto* box = find_node(placed_root, [](const IRNode& node) {
+        return attribute(node, "captured_element") == "canvas";
+    });
+    REQUIRE(box != nullptr);
+    CHECK(box->type == "frame");
+    CHECK(box->attributes.count("asset_ref") == 0);
+    REQUIRE(box->children.size() == 1);
+    const auto& plane = box->children[0];
+    CHECK(plane.type == "image");
+    CHECK(attribute(plane, "asset_ref") == "canvas:3");
+    CHECK(plane.stable_anchor_id.value_or("") ==
+          box->stable_anchor_id.value_or("") + "/layer[0]");
+    // The plane's page origin, expressed against the canvas padding box
+    // (border box origin plus the 1px border).
+    CHECK(*plane.style.left == Catch::Approx(-21.0));
+    CHECK(*plane.style.top == Catch::Approx(-80.4375));
+    CHECK(*plane.style.width == Catch::Approx(400.0));
+    CHECK(*plane.style.height == Catch::Approx(300.0));
+    // Clipped to the content box in page coordinates: border + padding in.
+    REQUIRE(plane.style.clip_rect);
+    CHECK(plane.style.clip_rect->x == Catch::Approx(23.0));
+    CHECK(plane.style.clip_rect->y == Catch::Approx(82.4375));
+    CHECK(plane.style.clip_rect->width == Catch::Approx(100.0));
+    CHECK(plane.style.clip_rect->height == Catch::Approx(60.0));
+}
+
 TEST_CASE("canvas and image elements classify away from native",
           "[browser-capture][native-lowering]") {
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 CANVAS, 4 IMG, 5 DIV(url bg)

@@ -1475,6 +1475,10 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     std::optional<std::string> chrome_asset_id;
     std::optional<std::string> canvas_composite_asset_id;
     std::unordered_map<int, std::string> captured_element_assets;
+    // Canvas snapshots are viewport planes at the capture DPR (the canvas
+    // composited at its final page geometry), so their CSS extent is the
+    // capture's logical size, not the element's box.
+    std::unordered_map<std::string, CapturedLayerExtent> captured_layers;
     std::unordered_set<std::string> captured_asset_ids{
         "reference:browser"};
     constexpr std::uint64_t kMaximumCapturedCanvasPixels =
@@ -1635,6 +1639,12 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
                                      static_cast<int>(height), result.error))
                 return result;
             const int backend_id = static_cast<int>(backend);
+            // A plane is exactly the reference screenshot's size; anything
+            // else is an element-sized raster and is drawn into the box.
+            if (dpr > 0.0 && std::isfinite(dpr) &&
+                std::abs(width - logical_width * dpr) < 0.5 &&
+                std::abs(height - logical_height * dpr) < 0.5)
+                captured_layers[id] = {logical_width, logical_height};
             if (!captured_element_assets.emplace(backend_id, id).second) {
                 result.error = "browser capture has duplicate canvas backend node assets";
                 return result;
@@ -1924,7 +1934,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
                                      dpr, ir.root)
                 : lower_painted_tree_preferring_hierarchy(
                       *captured_styles, control_dx, control_dy, dpr, ir.root,
-                      captured_element_assets);
+                      captured_element_assets, captured_layers);
         ir.root.attributes["native_painted_nodes"] =
             std::to_string(tree.painted);
         ir.root.attributes["native_nodes_lowered"] =

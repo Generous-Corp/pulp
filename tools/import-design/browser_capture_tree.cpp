@@ -924,7 +924,10 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                      IRNode& root,
                                      const std::unordered_map<int, std::string>&
                                          captured_element_assets,
-                                     bool flatten_to_paint_order) {
+                                     bool flatten_to_paint_order,
+                                     const std::unordered_map<std::string,
+                                                              CapturedLayerExtent>&
+                                         captured_layers) {
     PaintedTreeCounts counts;
     const auto painted = index.painted_nodes();
     counts.painted = static_cast<int>(painted.size());
@@ -1487,11 +1490,60 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         } else if (capture_only &&
                    captured_element_assets.count(node.backend_node_id) != 0) {
             paint_class = PaintClass::image_asset;
-            lowered.type = "image";
-            lowered.attributes["asset_ref"] =
-                captured_element_assets.at(node.backend_node_id);
+            const auto& asset = captured_element_assets.at(node.backend_node_id);
             lowered.attributes["captured_element"] = node.tag_name;
-            lowered.style.object_fit = "fill";
+            const auto layer = captured_layers.find(asset);
+            if (layer == captured_layers.end()) {
+                // An element-sized raster: the picture IS the element.
+                lowered.type = "image";
+                lowered.attributes["asset_ref"] = asset;
+                lowered.style.object_fit = "fill";
+            } else {
+                // A viewport-plane raster. Squeezing the whole plane into the
+                // element's box would draw the page in miniature, so the
+                // element stays a box (its own border and background paint as
+                // usual) and the plane hangs inside it at the page origin,
+                // clipped to the content box where Chromium draws the bitmap.
+                lowered.type = "frame";
+                const auto length = [&](const char* name) {
+                    const auto found = computed.find(name);
+                    return found == computed.end() ? 0.0 : px_value(found->second);
+                };
+                const double border_left = length("border-left-width");
+                const double border_top = length("border-top-width");
+                const double inset_left = border_left + length("padding-left");
+                const double inset_top = border_top + length("padding-top");
+                const double inset_right =
+                    length("border-right-width") + length("padding-right");
+                const double inset_bottom =
+                    length("border-bottom-width") + length("padding-bottom");
+                // Children are placed against the padding box (see `place()`),
+                // so the plane's page origin sits at minus that box's origin.
+                const double frame_left = box.left + border_left;
+                const double frame_top = box.top + border_top;
+                IRNode plane;
+                plane.type = "image";
+                plane.name = lowered.name + "/layer";
+                plane.attributes["asset_ref"] = asset;
+                plane.attributes["captured_layer"] = "viewport";
+                plane.attributes["paint_class"] =
+                    std::string(to_string(PaintClass::image_asset));
+                plane.style.position = "absolute";
+                plane.style.object_fit = "fill";
+                plane.style.left = static_cast<float>(-frame_left);
+                plane.style.top = static_cast<float>(-frame_top);
+                plane.style.width = static_cast<float>(layer->second.width);
+                plane.style.height = static_cast<float>(layer->second.height);
+                pulp::view::IRStyle::ClipRect content{};
+                content.x = static_cast<float>(box.left + inset_left);
+                content.y = static_cast<float>(box.top + inset_top);
+                content.width = static_cast<float>(
+                    std::max(0.0, box.width - inset_left - inset_right));
+                content.height = static_cast<float>(
+                    std::max(0.0, box.height - inset_top - inset_bottom));
+                plane.style.clip_rect = content;
+                lowered.children.push_back(std::move(plane));
+            }
         } else if (capture_only) {
             // WHY it cannot be drawn, because the two reasons have different
             // fixes: an uncaptured `<canvas>` needs a native painter (or a
@@ -1618,6 +1670,13 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         // consumer re-deriving one of those against an anchor built here would
         // compute `frame[0]/frame[0]` and match nothing.
         lowered.anchor_strategy = "capture-path";
+        // A captured element's raster plane is addressed under the element
+        // it paints, so an edit to the canvas finds its pixels with it.
+        for (auto& child : lowered.children) {
+            if (!child.attributes.count("captured_layer")) continue;
+            child.stable_anchor_id = *lowered.stable_anchor_id + "/layer[0]";
+            child.anchor_strategy = "capture-path";
+        }
 
         switch (paint_class) {
             case PaintClass::native: ++counts.native; break;
@@ -1925,6 +1984,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             !s.box_shadow.empty() ||
             (s.border_width && *s.border_width > 0.0f) ||
             !slot.node.text_content.empty() || slot.node.type == "image" ||
+            slot.node.attributes.count("captured_element") != 0 ||
             slot.node.type == "vector" || slot.node.type == "text";
     }
 
@@ -2184,13 +2244,15 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
 PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
     const CapturedStyleIndex& index, double dx, double dy, double device_scale,
     IRNode& root,
-    const std::unordered_map<int, std::string>& captured_element_assets) {
+    const std::unordered_map<int, std::string>& captured_element_assets,
+    const std::unordered_map<std::string, CapturedLayerExtent>& captured_layers) {
     // Lower into a copy so the flat fallback starts from the caller's root
     // exactly as it was handed in, not from a half-built nested tree.
     IRNode nested = root;
     auto counts = lower_painted_tree(index, dx, dy, device_scale, nested,
                                      captured_element_assets,
-                                     /*flatten_to_paint_order=*/false);
+                                     /*flatten_to_paint_order=*/false,
+                                     captured_layers);
     if (counts.overlapping_reorders == 0) {
         root = std::move(nested);
         return counts;
@@ -2198,7 +2260,7 @@ PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
     const int inversions = counts.overlapping_reorders;
     counts = lower_painted_tree(index, dx, dy, device_scale, root,
                                 captured_element_assets,
-                                /*flatten_to_paint_order=*/true);
+                                /*flatten_to_paint_order=*/true, captured_layers);
     counts.flattened_overlapping_reorders = inversions;
     return counts;
 }

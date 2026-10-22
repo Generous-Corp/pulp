@@ -160,6 +160,15 @@ struct PaintedTreeCounts {
     std::vector<std::string> duplicate_keys;
 };
 
+/// The CSS-px extent of a captured element raster that is a viewport plane:
+/// the element's pixels sit at their page position inside a plane of this
+/// size, with everything else transparent. Chromium's canvas snapshots are
+/// captured this way, composited at their final viewport geometry.
+struct CapturedLayerExtent {
+    double width = 0.0;
+    double height = 0.0;
+};
+
 /// Lower every painted node in the captured document into a TREE under `root`
 /// that mirrors the captured DOM.
 ///
@@ -194,7 +203,10 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                      pulp::view::IRNode& root,
                                      const std::unordered_map<int, std::string>&
                                          captured_element_assets = {},
-                                     bool flatten_to_paint_order = false);
+                                     bool flatten_to_paint_order = false,
+                                     const std::unordered_map<std::string,
+                                                              CapturedLayerExtent>&
+                                         captured_layers = {});
 
 /// Lower hierarchically, and fall back to the flat paint-order emission only
 /// when the nested tree would visibly disagree with Chromium.
@@ -210,6 +222,8 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
 PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
     const CapturedStyleIndex& index, double dx, double dy, double device_scale,
     pulp::view::IRNode& root,
-    const std::unordered_map<int, std::string>& captured_element_assets);
+    const std::unordered_map<int, std::string>& captured_element_assets,
+    const std::unordered_map<std::string, CapturedLayerExtent>& captured_layers =
+        {});
 
 }  // namespace pulp::import_design
