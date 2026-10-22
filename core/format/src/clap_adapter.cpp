@@ -23,6 +23,7 @@
 #include <array>
 #include <span>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 
@@ -235,13 +236,26 @@ static T load_event(const clap_event_header_t* hdr) {
     // thread). Copy only the bytes the host actually provided; the rest stay
     // zero-initialized. memcpy-into-a-stack-local also fixes alignment.
     T out{};
-    // A full-size event (the normal case) copies a constant size, which the
-    // compiler inlines; only a short one pays for a variable-length copy.
-    if (hdr->size >= sizeof(T))
-        std::memcpy(&out, hdr, sizeof(T));
-    else
-        std::memcpy(&out, hdr, hdr->size);
+    std::memcpy(&out, hdr, std::min(static_cast<std::size_t>(hdr->size), sizeof(T)));
     return out;
+}
+
+// The two fields of a CLAP_EVENT_PARAM_VALUE the store needs. A full-size,
+// aligned event (what hosts send) is the struct the host built, so the fields
+// are read in place; copying the whole event cost an out-of-line memcpy per
+// event, a third of a dense block. A short or misaligned event is copied.
+struct ParamValueFields {
+    clap_id param_id = 0;
+    double value = 0.0;
+};
+static ParamValueFields load_param_value(const clap_event_header_t* hdr) {
+    if (hdr->size >= sizeof(clap_event_param_value_t) &&
+        reinterpret_cast<std::uintptr_t>(hdr) % alignof(clap_event_param_value_t) == 0) {
+        const auto* ev = reinterpret_cast<const clap_event_param_value_t*>(hdr);
+        return {ev->param_id, ev->value};
+    }
+    const auto ev = load_event<clap_event_param_value_t>(hdr);
+    return {ev.param_id, ev.value};
 }
 
 bool clap_init(const clap_plugin_t* plugin) {
@@ -736,7 +750,7 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
             // core type IDs. clap-validator `param-set-wrong-namespace`.
             if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
             if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
-                const auto ev = load_event<clap_event_param_value_t>(hdr);
+                const auto ev = load_param_value(hdr);
                 // Shared dual-write (SF-1): enqueue for the sample-accurate DSP
                 // cursor AND publish to Main/Audio listeners via the RT-safe
                 // set_value_rt path (atomic store + non-allocating SPSC push).
@@ -2149,7 +2163,7 @@ void clap_params_flush(const clap_plugin_t* plugin,
             const auto* hdr = in->get(in, i);
             if (!hdr || hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
             if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
-                const auto ev = load_event<clap_event_param_value_t>(hdr);
+                const auto ev = load_param_value(hdr);
                 self->store.set_value(static_cast<state::ParamID>(ev.param_id),
                                       static_cast<float>(ev.value));
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {

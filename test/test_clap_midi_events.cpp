@@ -3195,6 +3195,56 @@ TEST_CASE("CLAP block-rate automation writes a gesture's value before the gestur
     ObservingParamIngressProcessor::sample_accurate = true;
 }
 
+TEST_CASE("CLAP reads a misaligned or short parameter-value event safely",
+          "[clap][params][automation]") {
+    // A full-size, aligned event is read in place; anything else is copied.
+    // Byte images with 4-byte alignment place the event off an 8-byte
+    // boundary, behind a 20-byte event in a foreign namespace the adapter
+    // skips.
+    struct alignas(4) Skipped {
+        clap_event_header_t header;
+        std::uint32_t pad;
+    };
+    struct alignas(4) ValueBytes {
+        unsigned char bytes[sizeof(clap_event_param_value_t)];
+    };
+    const auto value_event = [](double value, std::uint32_t size) {
+        clap_event_param_value_t ev{};
+        ev.header = make_header(sizeof(ev), CLAP_EVENT_PARAM_VALUE, 0);
+        ev.header.size = size;
+        ev.param_id = ObservingParamIngressProcessor::kParamId;
+        ev.value = value;
+        ValueBytes out{};
+        std::memcpy(out.bytes, &ev, sizeof(ev));
+        return out;
+    };
+    Skipped skipped{};
+    skipped.header = make_header(sizeof(skipped), CLAP_EVENT_PARAM_VALUE, 0);
+    skipped.header.space_id = CLAP_CORE_EVENT_SPACE_ID + 1;
+
+    ObservingParamIngressProcessor::sample_accurate = false;
+    {
+        Harness h(make_observing_param_ingress);
+        InputEventList events;
+        events.push(skipped);
+        events.push(value_event(0.625, sizeof(clap_event_param_value_t)));
+        REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_param_ingress->observed_state_value == 0.625f);
+    }
+    {
+        // A short event lacks the value field; the missing bytes read as zero,
+        // so it replaces the full event before it.
+        Harness h(make_observing_param_ingress);
+        InputEventList events;
+        events.push(value_event(0.625, sizeof(clap_event_param_value_t)));
+        events.push(value_event(
+            0.625, static_cast<std::uint32_t>(offsetof(clap_event_param_value_t, value))));
+        REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_param_ingress->observed_state_value == 0.0f);
+    }
+    ObservingParamIngressProcessor::sample_accurate = true;
+}
+
 TEST_CASE("CLAP_EVENT_MIDI decodes CC into MidiBuffer",
           "[clap][midi][issue-pending]") {
     g_pending_opts_mpe = false;
