@@ -6319,7 +6319,11 @@ correctness bug before it was made explicit; treat them as invariants.
   laid-out boxes — imported roots opt out via
   `View::set_subpixel_layout(true)` (set by `build_native_view_tree` and
   by the emitted `setSubpixelLayout('', true)` bridge call in generated
-  JS; discovered pass-wide in yoga_layout.cpp). When diagnosing a
+  JS; discovered pass-wide in yoga_layout.cpp). The same roots are also
+  marked `set_captured_frame_root(true)` / `setCapturedFrameRoot('', true)`,
+  a separate flag Label snaps captured baselines to; a new import lane must
+  set both, since sub-pixel layout no longer implies a captured frame
+  (see the `text-metrics` skill). When diagnosing a
   "shape misregistered by <1px" report, check BOTH layers before touching
   paint code — `--dump-layout` shows the post-Yoga truth, and integer-only
   x/y/width/height there means the opt-out is not reaching the pass.
