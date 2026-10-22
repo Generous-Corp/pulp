@@ -1043,6 +1043,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **harness** — coverage + deterministic visual harness
 - The visual-harness Dockerfile's Skia pin may have drifted from the manifest. → `tools/harness/visual/check_skia_pin.py`
 - Check web-compat coverage — and that a `supported` claim is backed by a real test. → `python3 -m tools.harness.verifier`
+- You need proof that committed update N actually reached the screen (a retained or persistent scene that stops refreshing passes every similarity score), or how many captures showed the due update, held one, skipped one, or juddered. → `python3 -m tools.motion.visual.frame_stamp_decode`
+  - ⚠ **Cannot see:** Sees only frames that carry the stamp; it proves which update a capture shows, never that the rest of the frame is drawn right. A capture that crops, scales or color-manages the stamp off its declared layout decodes as -1, so a run that is all -1 says the instrument is blind, not that nothing presented. Without --timestamps-json the captures are assumed one refresh apart, so judder is measured in capture slots, not time; and an unreadable capture is reported as unknown rather than counted held or skipped.
 - Measure installed CLI/MCP GPU trace-analysis latency and prove both surfaces consume one sibling artifact pair. → `tools/scripts/gpu_trace_overhead_acceptance.py`
   - ⚠ **Cannot see:** Measures offline analyzer overhead only. It cannot grade trace-producer capture cost; new producer call sites require separate compile-out, idle-session, and active-capture product trials.
 - Build the visual-harness Docker image — use this, not a raw docker build. → `tools/harness/visual/docker-build.sh`
