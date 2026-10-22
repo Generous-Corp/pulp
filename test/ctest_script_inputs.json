@@ -1504,7 +1504,8 @@
    ],
    "inputs": [
     "external/fonts/FunnelDisplay-VariableFont_wght.ttf",
-    "external/fonts/Inter-Regular.ttf"
+    "external/fonts/Inter-Regular.ttf",
+    "test/fixtures/fonts/pulp-test-opsz-trak.ttf"
    ],
    "kind": "compiled",
    "sources": [
