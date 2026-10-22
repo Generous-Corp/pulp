@@ -1822,7 +1822,7 @@ TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unav
         bool device_lost;
         GpuAudioProviderState expected;
     };
-    const std::array<Case, 11> cases{{
+    const std::array<Case, 12> cases{{
         {GpuAudioRecoveryReason::SequenceGap, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::InputSaturated, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::ProviderFailure, false, GpuAudioProviderState::Degraded},
@@ -1832,9 +1832,10 @@ TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unav
         {GpuAudioRecoveryReason::SustainedDeadlineMisses, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::ProviderLost, false, GpuAudioProviderState::Unavailable},
         {GpuAudioRecoveryReason::ProviderUnresponsive, false, GpuAudioProviderState::Unavailable},
-        // A loss observed after an earlier latched cause still makes the
-        // provider unavailable; the first cause is preserved.
+        // A loss observed after a failure it caused is reported as the loss.
         {GpuAudioRecoveryReason::ProviderFailure, true, GpuAudioProviderState::Unavailable},
+        // An independent cause stays first: the device was not what failed.
+        {GpuAudioRecoveryReason::SequenceGap, true, GpuAudioProviderState::Unavailable},
         {GpuAudioRecoveryReason::None, true, GpuAudioProviderState::Unavailable},
         // Sustained misses describe a live GPU; a later loss is the loss.
         {GpuAudioRecoveryReason::SustainedDeadlineMisses, true, GpuAudioProviderState::Unavailable},
@@ -1848,10 +1849,13 @@ TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unav
         const auto status = validated(h.transport.status_snapshot());
         INFO("reason=" << static_cast<int>(c.reason) << " device_lost=" << c.device_lost);
         CHECK(status.provider_state == c.expected);
-        const bool loss_replaces_misses =
-            c.device_lost && c.reason == GpuAudioRecoveryReason::SustainedDeadlineMisses;
+        // A loss outranks the provider failures and stalls it induces.
+        const bool loss_outranks =
+            c.device_lost && (c.reason == GpuAudioRecoveryReason::SustainedDeadlineMisses ||
+                              c.reason == GpuAudioRecoveryReason::ProviderFailure ||
+                              c.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
         CHECK(status.recovery_reason ==
-              (loss_replaces_misses ? GpuAudioRecoveryReason::ProviderLost : c.reason));
+              (loss_outranks ? GpuAudioRecoveryReason::ProviderLost : c.reason));
         CHECK(status.selected_engine == GpuAudioEngine::Cpu);
     }
 

@@ -116,12 +116,18 @@ inline GpuAudioProviderState provider_state_for_health(const RealtimeGpuHealth& 
     return GpuAudioProviderState::Ready;
 }
 
-// The latched cause as the status reports it. A loss observed after
-// sustained deadline misses is reported as the loss: misses describe a live
-// GPU, and a status may not be Unavailable for that cause.
+// The latched cause as the status reports it. The bridge keeps the first
+// cause, but a status may not be Unavailable for sustained misses, and a
+// failure or stall the lost device caused should not hide the loss.
 inline GpuAudioRecoveryReason reported_recovery_reason(const RealtimeGpuHealth& health) noexcept {
+    // A lost device is the root cause of the failures and stalls it induces,
+    // so loss observed after any of them is reported as the loss; the latched
+    // sequence still marks where delivery first stopped. Independent causes
+    // (sequence gaps, saturation, invalid callbacks, offline fences) stay first.
     if (health.device_lost &&
-        health.recovery_reason == GpuAudioRecoveryReason::SustainedDeadlineMisses)
+        (health.recovery_reason == GpuAudioRecoveryReason::ProviderFailure ||
+         health.recovery_reason == GpuAudioRecoveryReason::ProviderUnresponsive ||
+         health.recovery_reason == GpuAudioRecoveryReason::SustainedDeadlineMisses))
         return GpuAudioRecoveryReason::ProviderLost;
     return health.recovery_reason;
 }

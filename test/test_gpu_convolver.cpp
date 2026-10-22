@@ -1105,6 +1105,54 @@ TEST_CASE("GpuConvolver shared-path status counts a refused GPU block as CPU fal
     transport.release();
 }
 
+TEST_CASE("GpuConvolver shared-path status reports a loss that follows the failure it caused",
+          "[gpu_audio][convolver][status][health]") {
+    for (const bool lose_device : {false, true}) {
+        CAPTURE(lose_device);
+        LossProvider* provider = nullptr;
+        auto convolver = convolver_with_loss_provider(provider);
+        if (!convolver)
+            SKIP("shared-I/O provider state is not compiled into this build");
+        GpuAudioTransport transport;
+        REQUIRE(transport.prepare(convolver.get(), {8}));
+        std::vector<float> in(kHealthBlock, 0.5f), out(kHealthBlock, 0.0f);
+        const float* in_ptrs[] = {in.data()};
+        float* out_ptrs[] = {out.data()};
+        BufferView<const float> input(in_ptrs, 1, kHealthBlock);
+        BufferView<float> output(out_ptrs, 1, kHealthBlock);
+        // A refused submission latches ProviderFailure first, as a dying
+        // device does before its loss is observable. Run until the fallback
+        // has delivered that block, so every snapshot below is coherent.
+        for (std::uint32_t block = 0; block < GpuConvolver::kLatencyBlocks + 2; ++block) {
+            transport.process(input, output, kHealthBlock);
+            transport.pump();
+        }
+        auto status = validated(transport.status_snapshot());
+        REQUIRE(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+        const auto failure_sequence = status.recovery_sequence;
+
+        provider->lost = lose_device;
+        transport.pump();
+        status = validated(transport.status_snapshot());
+        const auto node_status = validated(convolver->status_snapshot());
+        if (lose_device) {
+            // The loss is the root cause: it outranks the failure it induced,
+            // and the sequence still marks where delivery first stopped.
+            CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
+            CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+            CHECK(status.recovery_sequence == failure_sequence);
+            CHECK(node_status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+            CHECK(convolver->recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
+        } else {
+            // Positive control: a failure without loss stays a Degraded failure.
+            CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+            CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+            CHECK(node_status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+        }
+        transport.release();
+    }
+}
+
 TEST_CASE("GpuConvolver shared-path status latches the offline fence as Degraded",
           "[gpu_audio][convolver][status][health]") {
     LossProvider* provider = nullptr;
