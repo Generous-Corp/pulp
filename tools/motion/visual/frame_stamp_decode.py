@@ -262,7 +262,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     timestamps = None
     if args.timestamps_json is not None:
         try:
-            timestamps = json.loads(args.timestamps_json.read_text())
+            timestamps = json.loads(args.timestamps_json.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             print(f"frame_stamp_decode: bad timestamps: {exc}", file=sys.stderr)
             return 2
@@ -276,7 +276,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     text = json.dumps(asdict(report), indent=2)
     if args.json is not None:
-        args.json.write_text(text + "\n")
+        args.json.write_text(text + "\n", encoding="utf-8")
     else:
         print(text)
     if args.min_exact_pct is not None and report.exact_pct < args.min_exact_pct:
