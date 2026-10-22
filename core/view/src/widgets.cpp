@@ -67,23 +67,23 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
                 style.feather_mode = geometry->style.feather_mode;
             }
             // A glow whose reach is shorter than its falloff would be cut off
-            // in a hard edge at the draw rect. Refuse it out loud and paint the
-            // default body instead of a clipped glow.
+            // in a hard edge at the draw rect. The chart draw is refused out
+            // loud and the body shader below paints instead, exactly as for a
+            // chart draw that fails.
             const float min_reach = canvas::Canvas::sdf_feather_min_reach(style);
             if (options.reach < min_reach) {
                 if (!host.shader_draw_failure_logged()) {
                     runtime::log_error("[custom-shader] chart feather sigma {} needs reach >= {} "
-                                       "but the shader's reach is {}; painting the default "
-                                       "widget body instead",
+                                       "but the shader's reach is {}; painting the body "
+                                       "shader instead of the chart",
                                        style.feather_sigma, min_reach, options.reach);
                     host.mark_shader_draw_failure_logged();
                 }
-                return false;
-            }
-            if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc,
-                                                  0, 0, w, h, style,
-                                                  host.chart_shader(), options))
+            } else if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0,
+                                                         w, h, style, host.chart_shader(),
+                                                         options)) {
                 return true;
+            }
         }
     }
     if (canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options)) {

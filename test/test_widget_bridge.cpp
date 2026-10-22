@@ -1,6 +1,8 @@
 #include "widget_bridge_test_support.hpp"
 #include <pulp/view/screenshot.hpp>
 
+#include <array>
+
 TEST_CASE("WidgetBridge counts native calls used by imported UI mount and steps",
           "[view][bridge][wp0]") {
     ScriptEngine engine;
@@ -4873,7 +4875,9 @@ TEST_CASE("WidgetBridge knob chart glow paints outside the widget rect",
     // 3 px outside the knob's own rect, both on its horizontal centre line.
     // The capture fills its background opaque, so "painted" means the colour
     // moved off that background.
-    auto render_knob = [](const char* feather, const char* after) {
+    auto render_knob = [](const char* feather, const char* after,
+                          const char* body = "PulpFragment shade(PulpGeom g, float2 p) "
+                                             "{ return PulpFragment(half4(0), 0, 0); }") {
         ScriptEngine engine;
         View root;
         root.set_bounds({0, 0, 160, 160});
@@ -4883,9 +4887,9 @@ TEST_CASE("WidgetBridge knob chart glow paints outside the widget rect",
             createKnob('knob', 'root');
             setFlex('knob', 'width', 80);
             setFlex('knob', 'height', 80);
-            globalThis.body = setWidgetShader('knob',
-              'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(0), 0, 0); }',
-              { geometry: { shape: 'flat_arc' }, )") +
+            globalThis.body = setWidgetShader('knob', ')") +
+                           body + R"(',
+              { geometry: { shape: 'flat_arc' }, )" +
                            feather + R"( });
             globalThis.chart = setWidgetShaderChart('knob',
               'half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }');
@@ -4914,11 +4918,24 @@ TEST_CASE("WidgetBridge knob chart glow paints outside the widget rect",
     CHECK(red_at(flat, 83, 40) == kBackgroundRed);
 
     // Shrinking the reach below 3 sigma refuses the chart draw rather than
-    // cutting the glow off at the rect edge.
-    const auto clipped =
-        render_knob("feather: { sigma: 8, mode: 'glow' }", "setWidgetShaderReach('knob', 4);");
-    CHECK(red_at(clipped, 81, 40) == kBackgroundRed);
-    CHECK(red_at(clipped, 83, 40) == kBackgroundRed);
+    // cutting the glow off at the rect edge, and the body shader paints
+    // instead, as it does for any chart draw that fails. An opaque green body
+    // tells it apart from both the white chart and the default knob body.
+    const auto refused =
+        render_knob("feather: { sigma: 8, mode: 'glow' }", "setWidgetShaderReach('knob', 4);",
+                    "half4 main(float2 p) { return half4(0, 1, 0, 1); }");
+    auto pixel_at = [](const std::vector<uint8_t>& rgba, int x, int y) {
+        const auto* p = &rgba[(static_cast<size_t>(y) * 160 + static_cast<size_t>(x)) * 4];
+        return std::array<int, 3>{p[0], p[1], p[2]};
+    };
+    for (const auto& [x, y] : {std::pair{40, 40}, std::pair{4, 40}, std::pair{40, 4}}) {
+        const auto rgb = pixel_at(refused, x, y);
+        CHECK(rgb[0] < 10);
+        CHECK(rgb[1] > 240);
+        CHECK(rgb[2] < 10);
+    }
+    // No white chart glow reaches past the knob.
+    CHECK(red_at(refused, 83, 40) < kBackgroundRed + 10);
 #else
     SUCCEED("chart shaders need the Skia backend");
 #endif
