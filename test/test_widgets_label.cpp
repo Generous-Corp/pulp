@@ -851,7 +851,9 @@ TEST_CASE("Label puts a captured text fragment's baseline a rounded ascent below
     const float unrounded = (fragment_h - (a + d)) * 0.5f + a;
     REQUIRE(std::abs(unrounded - std::round(a)) > 0.05f);
 
-    constexpr float kTop = 3.25f;
+    // A whole-px top keeps the captured baseline on the CSS-px grid it is
+    // snapped to, so this measures the rounded-ascent rule alone.
+    constexpr float kTop = 3.0f;
     Label label("Fragment");
     label.set_font_family("Inter");
     label.set_font_size(kSize);
@@ -884,7 +886,7 @@ TEST_CASE("Label places a captured baseline from the browser's measured ascent",
     // values can produce the expected baseline.
     constexpr float kAscent = 13.0f;
     constexpr float kDescent = 7.0f;
-    constexpr float kTop = 2.5f;
+    constexpr float kTop = 2.0f;
     REQUIRE(std::abs(std::round(prepared.font_ascent()) - kAscent) > 0.5f);
 
     auto paint_baseline = [&](bool recorded, float box_h) {
@@ -908,11 +910,12 @@ TEST_CASE("Label places a captured baseline from the browser's measured ascent",
     CHECK(with_metrics == Catch::Approx(kTop + kAscent).margin(0.001f));
     CHECK(std::abs(derived - (kTop + kAscent)) > 0.25f);
 
-    // A box of any other height is not the fragment those metrics built, so
-    // they are not trusted there.
-    const float other_box = paint_baseline(true, kAscent + kDescent + 4.0f);
-    const float other_box_derived = paint_baseline(false, kAscent + kDescent + 4.0f);
-    CHECK(other_box == Catch::Approx(other_box_derived).margin(0.001f));
+    // A taller box carries leading, which CSS splits evenly around the same
+    // content area: the measured metrics still decide where the baseline is.
+    const float leaded = paint_baseline(true, kAscent + kDescent + 4.0f);
+    const float leaded_derived = paint_baseline(false, kAscent + kDescent + 4.0f);
+    CHECK(leaded == Catch::Approx(kTop + 2.0f + kAscent).margin(0.001f));
+    CHECK(std::abs(leaded_derived - (kTop + 2.0f + kAscent)) > 0.25f);
 }
 
 TEST_CASE("Label keeps a retyped single captured line where Chromium put it",

@@ -2004,7 +2004,15 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         // leading and CSS lets its glyphs overflow evenly, top and bottom.
         float css_ascent = first_line_ascent;
         float css_descent = single_line_text_height - first_line_ascent;
-        if (has_attributed_) {
+        if (has_cached_line_metrics_) {
+            // The browser's own metrics outrank anything derived here: they
+            // already carry its rounding and any per-platform adjustment it
+            // made to the face, which this Label cannot reproduce from the
+            // font file. That holds for the half-leading split too, when the
+            // captured box is taller or shorter than the content area.
+            css_ascent = cached_line_ascent_;
+            css_descent = cached_line_descent_;
+        } else if (has_attributed_) {
             if (attributed_prepare_cache_.font_ascent() > 0.0f) {
                 css_ascent = attributed_prepare_cache_.font_ascent();
                 css_descent = attributed_prepare_cache_.font_descent();
@@ -2028,10 +2036,8 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         if (std::abs(first_line.height -
                      (rounded_ascent + std::round(css_descent))) < 0.01f)
             baseline_y = first_line.y + rounded_ascent;
-        // The browser's own metrics outrank both derivations above: they
-        // already carry its rounding and any per-platform adjustment it made
-        // to the face, which this Label cannot reproduce from the font file.
-        // Only a box exactly that tall is known to be the fragment they built.
+        // Measured metrics are already on the browser's grid; a box exactly
+        // that tall is the fragment they built, so descend by them unrounded.
         if (has_cached_line_metrics_ &&
             std::abs(first_line.height -
                      (cached_line_ascent_ + cached_line_descent_)) < 0.01f)
