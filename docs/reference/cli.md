@@ -70,7 +70,7 @@ What the full create path does:
 6. Configures (with `-G Ninja` when `ninja` is on `PATH` and the build dir is new, as `pulp build` does), builds the generated test target plus the default platform outputs, and runs tests
 7. Leaves the project ready for `pulp build`, which you use for rebuilds, explicit targets, or optional deliverables after changing configuration
 
-The generated test target uses Catch2 3. When CMake can find an installed Catch2 3 (for example from `brew install catch2`, or a prefix on `CMAKE_PREFIX_PATH`), the project uses it and skips downloading and compiling Catch2; otherwise configure downloads the pinned Catch2 release archive and checks its SHA-256.
+The generated test target uses Catch2 3. When CMake can find an installed Catch2 at least as new as the pinned 3.16.1, within major version 3 (for example from `brew install catch2`, or a prefix on `CMAKE_PREFIX_PATH`), the project uses it and skips downloading and compiling Catch2; otherwise configure downloads the pinned Catch2 release archive and checks its SHA-256.
 
 Notes:
 - `pulp create` is meant to prove that a fresh machine and fresh project can scaffold, configure, build the default native outputs, and pass the generated tests.
