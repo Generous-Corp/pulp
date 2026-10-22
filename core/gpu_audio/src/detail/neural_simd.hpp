@@ -146,7 +146,9 @@ struct ScalarIsa {
     }
 };
 
-#if PULP_NEURAL_SIMD_HAS_NEON
+// The architecture test is spelled out (not only the derived macro) so the
+// Intel canary sees an ARM guard around the intrinsics.
+#if defined(__aarch64__) && PULP_NEURAL_SIMD_HAS_NEON
 struct NeonIsa {
     using V = float32x4_t;
     static constexpr const char* name = "neon";
