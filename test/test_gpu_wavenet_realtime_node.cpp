@@ -1144,3 +1144,42 @@ TEST_CASE("WaveNet failed destructor release discloses unresolved physical owner
         }
     }
 }
+
+TEST_CASE("WaveNet transport status reports the latched recovery cause after a fence",
+          "[gpu_audio][wavenet][status][health]") {
+    using Recovery = detail::SharedIoRecoveryReason;
+    Harness h;
+    REQUIRE(h.path.health != nullptr);
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&h.node, {8}));
+    // Positive control: the unfenced test node has no authenticated provider,
+    // so it is Degraded with no latched cause, never Unavailable.
+    auto status = transport.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK_FALSE(h.node.fenced());
+
+    // This tests the node's device-loss seam, not a real lost GPU.
+    detail::WaveNetRealtimeTestAccess::request_recovery(h.node, Recovery::ProviderLost, 21);
+    transport.pump();
+    status = transport.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(status.recovery_sequence == 21);
+    transport.release();
+}
+
+TEST_CASE("WaveNet transport status reports a recoverable cause as Degraded",
+          "[gpu_audio][wavenet][status][health]") {
+    using Recovery = detail::SharedIoRecoveryReason;
+    Harness h;
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&h.node, {8}));
+    detail::WaveNetRealtimeTestAccess::request_recovery(h.node, Recovery::InputSaturated, 4);
+    transport.pump();
+    const auto status = transport.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::InputSaturated);
+    CHECK(status.recovery_sequence == 4);
+    transport.release();
+}

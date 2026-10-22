@@ -8,6 +8,10 @@
 #include <utility>
 
 namespace pulp::gpu_audio {
+namespace {
+// Declared PDC in host blocks; shared by descriptor() and status_snapshot().
+constexpr uint32_t kMultiConvolverLatencyBlocks = 2;
+} // namespace
 
 std::string GpuMultiConvolver::backend() const {
     return gpu_ ? gpu_->capabilities().backend : std::string();
@@ -27,7 +31,7 @@ GpuAudioNodeDescriptor GpuMultiConvolver::descriptor() const {
     d.output_channels = 2;
     d.block_size = block_;
     d.sample_rate = sample_rate_;
-    d.latency_blocks = 2;
+    d.latency_blocks = kMultiConvolverLatencyBlocks;
     // The multi-room mode is the regime CPU cannot sustain at scale, so there is
     // no honest real-time CPU fallback: a (rare) miss outputs silence.
     d.miss_policy = MissPolicy::Silence;
@@ -182,6 +186,40 @@ void GpuMultiConvolver::process_block(const audio::BufferView<const float>& inpu
     }
     if (!convolve_stereo(mono.data(), output.channel_ptr(0), output.channel_ptr(1), n))
         output.clear();
+}
+
+GpuAudioStatus GpuMultiConvolver::status_snapshot() const noexcept {
+    GpuAudioStatus status;
+    if (!prepared_) {
+        status.provider_state = GpuAudioProviderState::Uninitialized;
+        return status;
+    }
+    status.requested_engine = GpuAudioEngine::Gpu;
+    status.selected_engine = GpuAudioEngine::Unknown;
+    status.provider = GpuAudioProvider::Unknown;
+    status.fallback_policy = MissPolicy::Silence;
+    status.fallback_available = false;
+    status.diagnostics_available = true;
+    status.sample_rate = sample_rate_;
+    status.block_size = block_;
+    status.latency_samples = kMultiConvolverLatencyBlocks * block_;
+    status.recovery_reason = gpu_ != nullptr && gpu_->device_lost()
+                                 ? GpuAudioRecoveryReason::ProviderLost
+                                 : GpuAudioRecoveryReason::None;
+    status.provider_state = status.recovery_reason == GpuAudioRecoveryReason::ProviderLost
+                                ? GpuAudioProviderState::Unavailable
+                                : GpuAudioProviderState::Degraded;
+    return status;
+}
+
+GpuAudioRecoveryReason GpuMultiConvolver::recovery_reason() const noexcept {
+    return status_snapshot().recovery_reason;
+}
+
+bool GpuMultiConvolver::fenced() const noexcept {
+    const auto status = status_snapshot();
+    return status.provider_state == GpuAudioProviderState::Uninitialized ||
+           status.recovery_reason != GpuAudioRecoveryReason::None;
 }
 
 void GpuMultiConvolver::process_cpu_fallback(const audio::BufferView<const float>&,

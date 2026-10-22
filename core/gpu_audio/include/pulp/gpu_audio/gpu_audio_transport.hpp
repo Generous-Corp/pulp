@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <semaphore>
 #include <thread>
@@ -16,6 +17,11 @@
 #include <pulp/gpu_audio/gpu_audio_status.hpp>
 
 namespace pulp::gpu_audio {
+
+namespace detail {
+struct RealtimeGpuHealth;
+class RealtimeGpuHealthMirror;
+} // namespace detail
 
 /// Fixed-latency real-time transport between the audio thread and a non-RT
 /// worker that runs a GpuAudioNode.
@@ -95,10 +101,8 @@ class GpuAudioTransport {
         std::uint64_t invalid_blocks = 0;
     };
 
-    GpuAudioTransport() = default;
-    ~GpuAudioTransport() {
-        release();
-    }
+    GpuAudioTransport();
+    ~GpuAudioTransport();
 
     GpuAudioTransport(const GpuAudioTransport&) = delete;
     GpuAudioTransport& operator=(const GpuAudioTransport&) = delete;
@@ -160,6 +164,14 @@ class GpuAudioTransport {
     /// Allocation-free host/UI snapshot with stable, versioned field
     /// semantics.  This is a projection of the transport and capability
     /// snapshots; it does not claim that a GPU result met an audio deadline.
+    ///
+    /// Node health is folded in: a fenced or provider-lost node reports
+    /// `Degraded` or `Unavailable` with its first latched recovery reason,
+    /// sequence, epoch and terminal counts. A node on the private realtime
+    /// path is sampled by the serialized worker after every service step (and
+    /// by prepare() and the offline fence), then read here as one coherent
+    /// copy, so the snapshot may trail the node by at most one pump. A staged
+    /// node is asked for its own allocation-free status_snapshot().
     GpuAudioStatus status_snapshot() const noexcept;
 
     /// Allocation-free independent atomic loads: approximate while process()
@@ -274,6 +286,12 @@ class GpuAudioTransport {
     bool (*realtime_gpu_fence_)(void*) noexcept = nullptr;
     void (*realtime_gpu_delivered_)(void*, std::uint64_t, std::uint8_t, std::uint64_t,
                                     std::uint64_t) noexcept = nullptr;
+    // Serialized non-RT health read for the same context. The worker
+    // republishes it into `health_mirror_` so status_snapshot() never calls
+    // into worker-owned node state from a host or UI thread.
+    bool (*realtime_gpu_health_)(const void*, detail::RealtimeGpuHealth&) noexcept = nullptr;
+    std::unique_ptr<detail::RealtimeGpuHealthMirror> health_mirror_;
+    void refresh_realtime_health() noexcept;
     std::uint64_t callback_sequence_ = 0; // one monotonic RT/offline callback timeline
     bool realtime_gpu_fenced_for_offline_ = false;
 

@@ -105,6 +105,17 @@ class SharedIoConvolutionSession {
     SharedIoRecoveryReason recovery_reason() const noexcept {
         return pipeline_.recovery_reason();
     }
+    std::uint64_t recovery_sequence() const noexcept {
+        return pipeline_.recovery_sequence();
+    }
+    // Zero while the bridge keeps callbacks CPU-only.
+    std::uint64_t delivery_epoch() const noexcept {
+        return pipeline_.delivery_epoch();
+    }
+    // Serialized non-RT diagnostic, like the provider query it forwards.
+    bool provider_device_lost() const noexcept {
+        return provider_ != nullptr && provider_->device_lost();
+    }
     bool complete_callback_delivery(const Callback& callback, SharedIoDeliveryDisposition actual,
                                     std::uint64_t callback_end_ns = 0,
                                     std::uint64_t result_visible_ns = 0) noexcept {

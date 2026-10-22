@@ -2,10 +2,12 @@
 
 #include "detail/gpu_audio_transport_trial_observer.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <new>
 
 namespace pulp::gpu_audio {
 namespace {
@@ -35,10 +37,29 @@ bool configure_gpu_audio_transport_trial_observer(
     return true;
 }
 
+GpuAudioTransport::GpuAudioTransport() = default;
+
+GpuAudioTransport::~GpuAudioTransport() {
+    release();
+}
+
+void GpuAudioTransport::refresh_realtime_health() noexcept {
+    if (realtime_gpu_health_ == nullptr || !health_mirror_)
+        return;
+    detail::RealtimeGpuHealth health;
+    if (realtime_gpu_health_(realtime_gpu_context_, health))
+        (void)health_mirror_->publish(health);
+}
+
 bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     release();
     if (node == nullptr)
         return false;
+    if (!health_mirror_) {
+        health_mirror_.reset(new (std::nothrow) detail::RealtimeGpuHealthMirror());
+        if (!health_mirror_)
+            return false;
+    }
 
     // The descriptor is the single source of truth for channels/block/latency.
     const GpuAudioNodeDescriptor desc = node->descriptor(); // host thread — may allocate
@@ -76,7 +97,10 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         realtime_gpu_service_ = realtime_path.service;
         realtime_gpu_fence_ = realtime_path.fence;
         realtime_gpu_delivered_ = realtime_path.delivered;
+        realtime_gpu_health_ = realtime_path.health;
         callback_sequence_ = realtime_path.next_sequence(realtime_path.context);
+        // Quiescent host read: neither the callback nor the worker has started.
+        refresh_realtime_health();
     }
 
     const std::uint64_t cap = static_cast<std::uint64_t>(ring_blocks_) * block_size_;
@@ -230,6 +254,9 @@ void GpuAudioTransport::release() noexcept {
     realtime_gpu_service_ = nullptr;
     realtime_gpu_fence_ = nullptr;
     realtime_gpu_delivered_ = nullptr;
+    realtime_gpu_health_ = nullptr;
+    if (health_mirror_)
+        health_mirror_->reset();
     trial_observer_context_ = nullptr;
     trial_observer_ = nullptr;
     callback_sequence_ = 0;
@@ -455,8 +482,10 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
     std::lock_guard<std::mutex> lock(pump_mutex_);
 
     if (realtime_gpu_fence_ != nullptr) {
-        if (!realtime_gpu_fenced_for_offline_)
+        if (!realtime_gpu_fenced_for_offline_) {
             realtime_gpu_fenced_for_offline_ = realtime_gpu_fence_(realtime_gpu_context_);
+            refresh_realtime_health();
+        }
         // A failed barrier retains its owner and stays CPU-only. The same
         // continuously primed fallback carries the RT/offline timeline.
         process_shared(input, output, n, sequence, input_valid, monotonic_now_ns(), false);
@@ -516,6 +545,9 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
             static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch())
                     .count()));
+        // The service step is where a node observes provider loss or failure;
+        // publish what it saw before the next host/UI read.
+        refresh_realtime_health();
         if (produced != detail::kRealtimeGpuServiceInactive) {
             const auto block_ns =
                 static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -682,6 +714,45 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
         status.provider_state = GpuAudioProviderState::Degraded;
     } else {
         status.provider_state = GpuAudioProviderState::Ready;
+    }
+
+    // Node health can only lower the state established above. The enum values
+    // are ordered Ready < Degraded < Unavailable for a prepared transport.
+    const auto lower_to = [&status](GpuAudioProviderState state) noexcept {
+        if (static_cast<std::uint8_t>(state) > static_cast<std::uint8_t>(status.provider_state))
+            status.provider_state = state;
+    };
+    if (realtime_gpu_health_ != nullptr) {
+        detail::RealtimeGpuHealth health;
+        if (health_mirror_ && health_mirror_->read(health)) {
+            lower_to(detail::provider_state_for_health(health));
+            status.recovery_reason = health.recovery_reason;
+            status.recovery_sequence = health.recovery_sequence;
+            status.epoch = health.epoch;
+            status.delivery_epoch_active = health.delivery_epoch_active;
+            for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
+                status.terminal_counts[i] = health.terminal_counts[i];
+        } else {
+            // No coherent health copy: never report an unverified provider as
+            // Ready, and claim no recovery cause that was not observed.
+            lower_to(GpuAudioProviderState::Degraded);
+        }
+    } else if (realtime_gpu_process_ == nullptr) {
+        // Staged nodes report their own allocation-free status. The base
+        // default is Uninitialized, which carries no health to merge.
+        const auto node_status = node_->status_snapshot();
+        if (node_status.provider_state != GpuAudioProviderState::Uninitialized) {
+            if (node_status.provider_state == GpuAudioProviderState::Unavailable)
+                lower_to(GpuAudioProviderState::Unavailable);
+            else if (node_status.recovery_reason != GpuAudioRecoveryReason::None)
+                lower_to(GpuAudioProviderState::Degraded);
+            status.recovery_reason = node_status.recovery_reason;
+            status.recovery_sequence = node_status.recovery_sequence;
+            status.epoch = node_status.epoch;
+            status.delivery_epoch_active = node_status.delivery_epoch_active;
+            for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
+                status.terminal_counts[i] = node_status.terminal_counts[i];
+        }
     }
     return status;
 }

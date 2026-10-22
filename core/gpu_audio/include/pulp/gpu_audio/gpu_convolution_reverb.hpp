@@ -43,6 +43,9 @@ struct GpuConvolutionReverbLaneReport {
     GpuAudioCapabilityReport capability;
     GpuAudioTransport::Stats stats;
     GpuAudioTransport::DeliverySnapshot delivery;
+    // The lane transport's status_snapshot(), including its convolver's
+    // health. Appended so positional initialization of the fields above holds.
+    GpuAudioStatus status;
 };
 
 struct GpuConvolutionReverbReport {
@@ -107,6 +110,16 @@ class GpuConvolutionReverb final {
                  std::uint32_t n) noexcept;
 
     GpuConvolutionReverbReport report() const noexcept;
+
+    /// Allocation-free status of the least healthy lane (lane 0 on a tie),
+    /// because one fenced or lost lane already changes what the route emits.
+    /// Per-lane statuses are in report().lanes[i].status. Uninitialized until
+    /// prepare() succeeds. Host/UI thread; not concurrent with prepare().
+    GpuAudioStatus status_snapshot() const noexcept;
+    /// First latched recovery cause of that lane, or None.
+    GpuAudioRecoveryReason recovery_reason() const noexcept;
+    /// True before preparation, or when any lane's GPU delivery is fenced.
+    bool fenced() const noexcept;
 
   private:
     struct Lane;
