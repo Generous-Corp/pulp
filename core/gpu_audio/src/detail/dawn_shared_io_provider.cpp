@@ -2555,8 +2555,13 @@ DawnSharedIoProvider::Stats DawnSharedIoProvider::stats() const noexcept {
     if (!impl_)
         return Stats{};
     auto result = impl_->stats;
-    result.device_lost_callback_ns = impl_->device_lost_callback_ns.load(std::memory_order_acquire);
-    result.device_lost_reason = impl_->device_lost_reason.load(std::memory_order_acquire);
+    // The callback stores both values before its release-store of device_lost,
+    // so they are read only once that flag is observed and are never torn.
+    if (impl_->device_lost.load(std::memory_order_acquire)) {
+        result.device_lost_callback_ns =
+            impl_->device_lost_callback_ns.load(std::memory_order_relaxed);
+        result.device_lost_reason = impl_->device_lost_reason.load(std::memory_order_relaxed);
+    }
     return result;
 }
 

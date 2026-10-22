@@ -698,14 +698,18 @@ int main(int argc, char** argv) {
         scenario->fault ==
             DawnSharedIoProvider::Fault::ForceLossBetweenSubmitAndCompletionRegistration ||
         scenario->fault == DawnSharedIoProvider::Fault::ForceLossAfterCompletionRegistration;
+    // Keep an earlier failure's reason; these only explain a run that was
+    // otherwise passing.
     if (forced_loss && (stats.device_lost_callback_ns == 0 || stats.device_lost_reason == 0)) {
+        if (passed)
+            reason = "device_lost_callback_not_recorded";
         passed = false;
-        reason = "device_lost_callback_not_recorded";
     }
     if (scenario->name == "baseline" &&
         (stats.device_lost_callback_ns != 0 || stats.device_lost_reason != 0)) {
+        if (passed)
+            reason = "device_lost_callback_recorded_without_loss";
         passed = false;
-        reason = "device_lost_callback_recorded_without_loss";
     }
     if (scenario->name == "wait-any-timeout" && stats.wait_any_timeouts == 0) {
         passed = false;
