@@ -1565,6 +1565,23 @@ void Label::paint_selection_line_(canvas::Canvas& canvas, const std::string& lin
     selection_layout_pending_.lines.push_back(std::move(rec));
 }
 
+namespace {
+
+// `view`'s y offset from the captured frame it was imported into: the nearest
+// ancestor that lays out at sub-pixel precision, which every import lane sets
+// on its root. Ancestors above that frame (a host's embed offset, scroll or
+// transform) do not count. Without such an ancestor, the offset from the top.
+float captured_frame_y(const View& view) {
+    float y = 0.0f;
+    for (const View* v = &view; v != nullptr; v = v->parent()) {
+        if (v->subpixel_layout()) break;
+        y += v->bounds().y;
+    }
+    return y;
+}
+
+}  // namespace
+
 void Label::paint(canvas::Canvas& canvas) {
     // A Label that also has element children draws its own text inside the
     // anonymous inline box the layout pass reserved for it on the flex line.
@@ -1957,17 +1974,12 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             ? 0.0f
             : (first_line_box_h - single_line_ink_height) * 0.5f;
     float baseline_y;
-    // Chromium lays captured text out in CSS px and paints each line at its
-    // baseline snapped to a whole CSS px; the import is CSS-px canonical, so a
-    // captured line is drawn on that grid too, measured in root (design)
-    // space. The root is the captured frame, whose origin is a whole CSS px.
-    // Text without a captured layout is not snapped.
+    // Captured lines are placed and snapped by captured_baseline(); these
+    // carry its inputs from the first line to the rest.
     float captured_root_y = 0.0f;
-    float captured_first_baseline = 0.0f;
-    auto snap_captured_baseline = [&](float local_baseline) {
-        const float root_baseline = captured_root_y + local_baseline;
-        return std::floor(root_baseline + 0.5f) - captured_root_y;
-    };
+    float captured_line_height = 0.0f;
+    float captured_css_ascent = 0.0f;
+    float captured_css_descent = 0.0f;
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
             baseline_y = pad.top + first_half_leading + first_line_ascent;
@@ -2011,15 +2023,7 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         // leading and CSS lets its glyphs overflow evenly, top and bottom.
         float css_ascent = first_line_ascent;
         float css_descent = single_line_text_height - first_line_ascent;
-        if (cached_line_metrics_) {
-            // The browser's own metrics outrank anything derived here: they
-            // already carry its rounding and any per-platform adjustment it
-            // made to the face, which this Label cannot reproduce from the
-            // font file. That holds for the half-leading split too, when the
-            // captured box is taller or shorter than the content area.
-            css_ascent = cached_line_metrics_->ascent;
-            css_descent = cached_line_metrics_->descent;
-        } else if (has_attributed_) {
+        if (has_attributed_) {
             if (attributed_prepare_cache_.font_ascent() > 0.0f) {
                 css_ascent = attributed_prepare_cache_.font_ascent();
                 css_descent = attributed_prepare_cache_.font_descent();
@@ -2032,28 +2036,14 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                 css_descent = fm.font_descent;
             }
         }
-        const float half_leading =
-            (first_line.height - (css_ascent + css_descent)) * 0.5f;
-        baseline_y = first_line.y + half_leading + css_ascent;
-        // Chromium rounds a face's ascent and descent to whole CSS px before
-        // it builds the content area, so a captured box exactly that tall IS
-        // the text fragment, and its baseline sits a rounded ascent below the
-        // box top rather than wherever the unrounded split above puts it.
-        const float rounded_ascent = std::round(css_ascent);
-        if (std::abs(first_line.height -
-                     (rounded_ascent + std::round(css_descent))) < 0.01f)
-            baseline_y = first_line.y + rounded_ascent;
-        // Measured metrics are already on the browser's grid; a box exactly
-        // that tall is the fragment they built, so descend by them unrounded.
-        if (cached_line_metrics_ &&
-            std::abs(first_line.height - (cached_line_metrics_->ascent +
-                                          cached_line_metrics_->descent)) < 0.01f)
-            baseline_y = first_line.y + cached_line_metrics_->ascent;
-        captured_first_baseline = baseline_y;
-        for (const View* v = this; v != nullptr; v = v->parent())
-            captured_root_y += v->bounds().y;
-        if (has_own_text_box()) captured_root_y += own_text_box().y;
-        baseline_y = snap_captured_baseline(baseline_y);
+        captured_root_y = captured_frame_y(*this) +
+                          (has_own_text_box() ? own_text_box().y : 0.0f);
+        captured_line_height = first_line.height;
+        captured_css_ascent = css_ascent;
+        captured_css_descent = css_descent;
+        baseline_y = captured_baseline(first_line.y, first_line.height,
+                                       css_ascent, css_descent,
+                                       cached_line_metrics_, captured_root_y);
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared
@@ -2170,9 +2160,6 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             // of `\n`-splitting. Line-clamp + ellipsis logic is identical,
             // driven by source_lines (= shaped_layout.line_count) and
             // visible_lines.
-            const float captured_first_top = captured_cache_usable &&
-                    !shaped_layout->lines.empty()
-                ? shaped_layout->lines.front().y : 0.0f;
             std::size_t source_cursor = 0;
             for (const auto& shaped_line : shaped_layout->lines) {
                 if (emitted >= visible_lines) break;
@@ -2181,8 +2168,10 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                     line.append("\xe2\x80\xa6");
                 }
                 const float line_baseline = captured_cache_usable
-                    ? snap_captured_baseline(captured_first_baseline +
-                                             shaped_line.y - captured_first_top)
+                    ? captured_baseline(shaped_line.y, captured_line_height,
+                                        captured_css_ascent,
+                                        captured_css_descent,
+                                        cached_line_metrics_, captured_root_y)
                     : y;
                 // Map the shaped line back to its origin in `display_text`.
                 // The shaper drops the whitespace it broke at, so byte spans

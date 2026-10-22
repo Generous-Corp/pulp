@@ -947,6 +947,73 @@ TEST_CASE("Label places a captured baseline from the browser's measured ascent",
     CHECK(std::abs(leaded_derived - (kTop + 2.0f + kAscent)) > 0.25f);
 }
 
+TEST_CASE("captured_baseline places and snaps a captured line",
+          "[view][widget][label-cache][alignment][typography]") {
+    const LineMetrics measured{13.0f, 7.0f};
+    // A box exactly the measured content area: the measured ascent down.
+    CHECK(captured_baseline_offset(20.0f, 99.0f, 99.0f, measured) == 13.0f);
+    // A taller box splits its surplus evenly around the measured content area.
+    CHECK(captured_baseline_offset(24.0f, 99.0f, 99.0f, measured) == 15.0f);
+    // Nothing measured: a box exactly the rounded content area takes the
+    // rounded ascent; any other height splits against the unrounded pair.
+    CHECK(captured_baseline_offset(20.0f, 16.469f, 4.117f, std::nullopt) == 16.0f);
+    CHECK(captured_baseline_offset(30.0f, 16.469f, 4.117f, std::nullopt) ==
+          Catch::Approx((30.0f - 20.586f) * 0.5f + 16.469f).margin(1e-4f));
+
+    // Snapped to a whole CSS px measured from the captured frame, returned
+    // in the label's own coordinates.
+    CHECK(captured_baseline(2.0f, 20.0f, 0, 0, measured, 0.0f) == 15.0f);
+    // root 10.375 + local 2.25 + 13 = 25.625 -> 26, i.e. local 15.625.
+    CHECK(captured_baseline(2.25f, 20.0f, 0, 0, measured, 10.375f) ==
+          Catch::Approx(15.625f).margin(1e-4f));
+    // root 10.125 + local 2.25 + 13 = 25.375 -> 25, i.e. local 14.875.
+    CHECK(captured_baseline(2.25f, 20.0f, 0, 0, measured, 10.125f) ==
+          Catch::Approx(14.875f).margin(1e-4f));
+}
+
+TEST_CASE("A captured baseline snaps on its captured frame's grid and not the host's",
+          "[view][widget][label-cache][alignment][typography]") {
+    // An imported panel mounted at a fractional offset, or under a scaled or
+    // scrolled host container, must paint its text exactly as it does at the
+    // origin: the snap grid is the captured frame (the import root, which
+    // lays out at sub-pixel precision), not the application root.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty()) SKIP("Inter does not resolve to a real face on this host");
+    auto local_baseline = [&](float embed_y, float scale, bool mark_frame) {
+        View host;
+        host.set_bounds({0, 0, 800, 600});
+        auto embed = std::make_unique<View>();
+        embed->set_bounds({0, embed_y, 600, 400});
+        if (scale != 1.0f) embed->set_scale(scale);
+        auto frame = std::make_unique<View>();
+        frame->set_bounds({0, 0, 500, 300});
+        frame->set_subpixel_layout(mark_frame);
+        auto label = std::make_unique<Label>("Grid");
+        label->set_font_family("Inter");
+        label->set_font_size(17.0f);
+        label->set_bounds({0, 3.25f, 200, 40});
+        label->set_cached_line_boxes({{0, 0, 120, 19, 0, 4}}, 200.0f, face, false);
+        label->set_cached_line_metrics({15.0f, 4.0f});
+        Label* raw = label.get();
+        frame->add_child(std::move(label));
+        embed->add_child(std::move(frame));
+        host.add_child(std::move(embed));
+        RecordingCanvas canvas;
+        raw->paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[1];
+    };
+    // In the frame: 3.25 + 15 = 18.25 -> 18, so 14.75 below the label's top.
+    const float at_origin = local_baseline(0.0f, 1.0f, true);
+    CHECK(at_origin == Catch::Approx(14.75f).margin(1e-4f));
+    CHECK(local_baseline(10.5f, 1.0f, true) == Catch::Approx(at_origin).margin(1e-4f));
+    CHECK(local_baseline(10.5f, 1.5f, true) == Catch::Approx(at_origin).margin(1e-4f));
+    // Control: without the frame marker the grid falls back to the host's,
+    // and the half-pixel embed offset moves the snapped baseline.
+    CHECK(std::abs(local_baseline(10.5f, 1.0f, false) - at_origin) > 0.25f);
+}
+
 TEST_CASE("Label snaps a captured baseline to a whole CSS px in root space",
           "[view][widget][label-cache][alignment][typography]") {
     // Chromium paints captured text with each line's baseline on a whole CSS
