@@ -4453,6 +4453,14 @@ Need Windows on a specific branch before the nightly:
 ghapp workflow run build.yml --ref <branch>
 ```
 
+A `build.yml` dispatch always includes the macOS leg, so it also spends a macOS
+gate VM. When only Windows matters, dispatch the nightly with `windows_only=true`
+instead. To prove a self-hosted Windows runner (the Mac Pro Windows x64 slot), also
+pass `windows_runner_selector_json` with that slot's labels. The schedule has no
+inputs, so the nightly stays on `windows-latest`. A run with either input set skips
+`tracking-issues`, so a red result on a new runner never files or closes the main
+tracking issue. Read where the job actually ran from the job's `runner_name`.
+
 **Before "fixing" this by putting Windows back on merge_group**, note the trade was
 explicit: up to ~24 h of latency on a Windows regression, bought with merge-queue
 capacity. Revisit only if Windows parity becomes an active workstream rather than a
