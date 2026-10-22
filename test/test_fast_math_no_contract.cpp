@@ -98,6 +98,7 @@ TEST_CASE("Compressor stays within -120 dBFS of libm without fused multiply-add"
     const float release = c.release_coefficient();
     const float slope = 1.0f / 6.0f - 1.0f;
     float env = 0.0f;
+    float hold = 0.0f;
     double worst = 0.0;
     for (std::size_t i = 0; i < input.size(); ++i) {
         const float in_db = 20.0f * std::log10(std::max(std::abs(input[i]), 1e-10f));
@@ -108,7 +109,10 @@ TEST_CASE("Compressor stays within -120 dBFS of libm without fused multiply-add"
             const float x = in_db + 24.0f + 3.0f;
             g = slope * x * x / 12.0f;
         }
-        env = env + (g < env ? attack : release) * (g - env);
+        // The default (decoupled) ballistics: peak hold, then attack.
+        const float released = hold + release * (g - hold);
+        hold = g < released ? g : released;
+        env = env + attack * (hold - env);
         const float ref = input[i] * std::pow(10.0f, (env + 3.0f) / 20.0f);
         worst = std::max(worst, std::abs(static_cast<double>(output[i]) - ref));
     }

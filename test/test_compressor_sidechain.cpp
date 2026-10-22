@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/compressor.hpp>
 
 #include <algorithm>
@@ -6,9 +7,13 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <numbers>
+#include <utility>
 #include <vector>
 
 using namespace pulp::signal;
+using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
 
 namespace {
 
@@ -235,7 +240,7 @@ void configure(Compressor& c, const CompressorCase& k, float sample_rate) {
 // two conversions matches the shipping arithmetic, so the residual isolates
 // them.
 std::vector<float> reference_compress(const std::vector<float>& input, const CompressorCase& k,
-                                      float sample_rate) {
+                                      float sample_rate, CompressorBallistics ballistics) {
     auto coeff = [&](float ms) {
         return ms <= 0.0f ? 1.0f : 1.0f - std::exp(-1.0f / (ms * 0.001f * sample_rate));
     };
@@ -261,11 +266,19 @@ std::vector<float> reference_compress(const std::vector<float>& input, const Com
     const auto delay = static_cast<std::size_t>(std::round(k.lookahead_ms * 0.001f * sample_rate));
     std::vector<float> out(input.size());
     float env = 0.0f;
+    float hold = 0.0f;
     for (std::size_t i = 0; i < input.size(); ++i) {
         const float det = k.hpf_hz > 0.0f ? hpf.process(input[i]) : input[i];
         const float in_db = 20.0f * std::log10(std::max(std::abs(det), 1e-10f));
         const float g = curve(in_db);
-        env = env + (g < env ? attack : release) * (g - env);
+        if (ballistics == CompressorBallistics::decoupled) {
+            // Peak hold of the (negative) gain change, then attack smoothing.
+            const float released = hold + release * (g - hold);
+            hold = g < released ? g : released;
+            env = env + attack * (hold - env);
+        } else {
+            env = env + (g < env ? attack : release) * (g - env);
+        }
         const float gain = std::pow(10.0f, (env + k.makeup_db) / 20.0f);
         const float dry = delay > 0 ? (i >= delay ? input[i - delay] : 0.0f) : input[i];
         out[i] = dry * gain;
@@ -277,46 +290,53 @@ std::vector<float> reference_compress(const std::vector<float>& input, const Com
 
 TEST_CASE("Compressor block path is bit-identical to the sample path across split blocks",
           "[signal][compressor][determinism]") {
-    for (const auto& k : kCompressorCases) {
-        INFO("threshold " << k.threshold_db << " knee " << k.knee_db << " hpf " << k.hpf_hz
-                          << " lookahead " << k.lookahead_ms);
-        const auto input = loud_program(16384, 48000.0f);
-        Compressor by_sample;
-        Compressor by_block;
-        configure(by_sample, k, 48000.0f);
-        configure(by_block, k, 48000.0f);
-        auto expected = input;
-        for (float& x : expected)
-            x = by_sample.process(x);
-        auto actual = input;
-        std::size_t pos = 0;
-        for (int block : uneven_blocks(input.size())) {
-            by_block.process(actual.data() + pos, block);
-            pos += static_cast<std::size_t>(block);
+    for (const auto detector : {CompressorBallistics::branching, CompressorBallistics::decoupled})
+        for (const auto& k : kCompressorCases) {
+            INFO("detector " << static_cast<int>(detector) << " threshold " << k.threshold_db
+                             << " knee " << k.knee_db << " hpf " << k.hpf_hz << " lookahead "
+                             << k.lookahead_ms);
+            const auto input = loud_program(16384, 48000.0f);
+            Compressor by_sample;
+            Compressor by_block;
+            configure(by_sample, k, 48000.0f);
+            configure(by_block, k, 48000.0f);
+            by_sample.set_ballistics(detector);
+            by_block.set_ballistics(detector);
+            auto expected = input;
+            for (float& x : expected)
+                x = by_sample.process(x);
+            auto actual = input;
+            std::size_t pos = 0;
+            for (int block : uneven_blocks(input.size())) {
+                by_block.process(actual.data() + pos, block);
+                pos += static_cast<std::size_t>(block);
+            }
+            CHECK(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0);
+            CHECK(by_block.gain_reduction_db() == by_sample.gain_reduction_db());
         }
-        CHECK(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0);
-        CHECK(by_block.gain_reduction_db() == by_sample.gain_reduction_db());
-    }
 }
 
 TEST_CASE("Compressor output stays within -120 dBFS of the libm conversions",
           "[signal][compressor][precision]") {
-    for (const float sr : {44100.0f, 48000.0f, 96000.0f}) {
-        for (const auto& k : kCompressorCases) {
-            INFO("sr " << sr << " threshold " << k.threshold_db << " knee " << k.knee_db);
-            const auto input = loud_program(16384, sr);
-            Compressor c;
-            configure(c, k, sr);
-            auto output = input;
-            c.process(output.data(), static_cast<int>(output.size()));
-            const auto reference = reference_compress(input, k, sr);
-            double worst = 0.0;
-            for (std::size_t i = 0; i < output.size(); ++i)
-                worst = std::max(worst, std::abs(static_cast<double>(output[i]) -
-                                                 static_cast<double>(reference[i])));
-            CHECK(worst < 1.0e-6);
+    for (const auto ballistics : {CompressorBallistics::decoupled, CompressorBallistics::branching})
+        for (const float sr : {44100.0f, 48000.0f, 96000.0f}) {
+            for (const auto& k : kCompressorCases) {
+                INFO("ballistics " << static_cast<int>(ballistics) << " sr " << sr << " threshold "
+                                   << k.threshold_db << " knee " << k.knee_db);
+                const auto input = loud_program(16384, sr);
+                Compressor c;
+                configure(c, k, sr);
+                c.set_ballistics(ballistics);
+                auto output = input;
+                c.process(output.data(), static_cast<int>(output.size()));
+                const auto reference = reference_compress(input, k, sr, ballistics);
+                double worst = 0.0;
+                for (std::size_t i = 0; i < output.size(); ++i)
+                    worst = std::max(worst, std::abs(static_cast<double>(output[i]) -
+                                                     static_cast<double>(reference[i])));
+                CHECK(worst < 1.0e-6);
+            }
         }
-    }
 }
 
 TEST_CASE("Compressor ballistic coefficients follow parameter and rate changes",
@@ -397,4 +417,146 @@ TEST_CASE("Compressor block path rejects non-finite samples at the exact sample"
     for (float x : actual)
         REQUIRE(std::isfinite(x));
     CHECK(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0);
+}
+
+namespace {
+
+// 10%-90% time (ms) of a gain-reduction transition from `from` to `to`.
+double transition_ms(const std::vector<float>& gr, std::size_t begin, std::size_t end, double from,
+                     double to, double sample_rate) {
+    const double low = from + 0.1 * (to - from);
+    const double high = from + 0.9 * (to - from);
+    long t_low = -1;
+    for (std::size_t i = begin; i < end; ++i) {
+        const double v = gr[i];
+        if (t_low < 0 && (v - low) * (to - from) >= 0.0)
+            t_low = static_cast<long>(i);
+        if ((v - high) * (to - from) >= 0.0)
+            return static_cast<double>(static_cast<long>(i) - t_low) * 1000.0 / sample_rate;
+    }
+    return -1.0;
+}
+
+struct StepTiming {
+    double attack_ms, release_ms, settled_db;
+};
+
+// A -40 -> -6 dBFS step and back, at threshold -20 dB, 4:1, hard knee, as a
+// steady level (tone_hz 0) or a sine of tone_hz.
+StepTiming step_timing(CompressorBallistics detector, float attack_ms, float release_ms,
+                       double sample_rate, double tone_hz) {
+    Compressor c;
+    c.set_sample_rate(static_cast<float>(sample_rate));
+    Compressor::Params p;
+    p.threshold_db = -20.0f;
+    p.ratio = 4.0f;
+    p.attack_ms = attack_ms;
+    p.release_ms = release_ms;
+    p.knee_db = 0.0f;
+    c.set_params(p);
+    c.set_ballistics(detector);
+    const auto n = static_cast<std::size_t>(sample_rate * 1.2);
+    const auto on = static_cast<std::size_t>(sample_rate * 0.2);
+    const auto off = static_cast<std::size_t>(sample_rate * 0.7);
+    std::vector<float> gr(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const double level = (i >= on && i < off) ? std::pow(10.0, -6.0 / 20.0) : 0.01;
+        const double x = tone_hz > 0.0 ? level * std::sin(2.0 * std::numbers::pi * tone_hz *
+                                                          static_cast<double>(i) / sample_rate)
+                                       : level;
+        (void)c.process(static_cast<float>(x));
+        gr[i] = c.gain_reduction_db();
+    }
+    const double settled = gr[off - 1];
+    return {transition_ms(gr, on, off, 0.0, settled, sample_rate),
+            transition_ms(gr, off, n, settled, 0.0, sample_rate), settled};
+}
+
+// THD+N of a compressed -6 dBFS tone: everything but a least-squares fit of
+// the fundamental, relative to it, after the detector has settled.
+double tone_thd_n_db(CompressorBallistics detector, double tone_hz) {
+    constexpr double kSr = 48000.0;
+    Compressor c;
+    c.set_sample_rate(static_cast<float>(kSr));
+    Compressor::Params p;
+    p.threshold_db = -20.0f;
+    p.ratio = 4.0f;
+    p.attack_ms = 5.0f;
+    p.release_ms = 100.0f;
+    p.knee_db = 0.0f;
+    c.set_params(p);
+    c.set_ballistics(detector);
+    std::vector<float> y(static_cast<std::size_t>(kSr));
+    for (std::size_t i = 0; i < y.size(); ++i)
+        y[i] = static_cast<float>(
+            0.5 * std::sin(2.0 * std::numbers::pi * tone_hz * static_cast<double>(i) / kSr));
+    c.process(y.data(), static_cast<int>(y.size()));
+    const std::size_t begin = y.size() / 2;
+    double ss = 0, sc = 0, cc = 0, ys = 0, yc = 0;
+    for (std::size_t i = begin; i < y.size(); ++i) {
+        const double w = 2.0 * std::numbers::pi * tone_hz * static_cast<double>(i) / kSr;
+        const double s = std::sin(w), co = std::cos(w);
+        ss += s * s;
+        cc += co * co;
+        sc += s * co;
+        ys += y[i] * s;
+        yc += y[i] * co;
+    }
+    const double det = ss * cc - sc * sc;
+    const double a = (ys * cc - yc * sc) / det, b = (yc * ss - ys * sc) / det;
+    double fundamental = 0, residual = 0;
+    for (std::size_t i = begin; i < y.size(); ++i) {
+        const double w = 2.0 * std::numbers::pi * tone_hz * static_cast<double>(i) / kSr;
+        const double f = a * std::sin(w) + b * std::cos(w);
+        fundamental += f * f;
+        residual += (y[i] - f) * (y[i] - f);
+    }
+    return 10.0 * std::log10(residual / fundamental);
+}
+
+} // namespace
+
+TEST_CASE("Compressor attack and release are one-pole time constants on a level step",
+          "[signal][compressor][timing]") {
+    // A steady-level step moves from 10% to 90% in ln(9) tau = 2.197 tau for
+    // either detector.
+    for (const auto detector : {CompressorBallistics::branching, CompressorBallistics::decoupled})
+        for (const double sr : {44100.0, 96000.0})
+            for (const auto [attack, release] : {std::pair{5.0f, 100.0f}, std::pair{1.0f, 50.0f}}) {
+                INFO("detector " << static_cast<int>(detector) << " sr " << sr << " attack "
+                                 << attack << " release " << release);
+                const auto t = step_timing(detector, attack, release, sr, 0.0);
+                CHECK_THAT(t.attack_ms, WithinRel(2.197 * attack, 0.02));
+                CHECK_THAT(t.release_ms, WithinRel(2.197 * release, 0.02));
+                CHECK_THAT(t.settled_db, WithinAbs(-10.5, 0.01));
+            }
+}
+
+TEST_CASE("Compressor decoupled detector tracks the attack knob on a tone",
+          "[signal][compressor][timing]") {
+    // On a 1 kHz tone the branching detector rides the waveform: attack about
+    // twice the knob and settling short of the static curve. The decoupled
+    // detector holds each cycle's peak, so it matches the level step.
+    const auto branching =
+        step_timing(CompressorBallistics::branching, 5.0f, 100.0f, 48000.0, 1000.0);
+    const auto decoupled =
+        step_timing(CompressorBallistics::decoupled, 5.0f, 100.0f, 48000.0, 1000.0);
+    CHECK(branching.attack_ms > 1.6 * 2.197 * 5.0);
+    CHECK(branching.settled_db > -10.0);
+    CHECK_THAT(decoupled.attack_ms, WithinRel(2.197 * 5.0, 0.05));
+    CHECK_THAT(decoupled.release_ms, WithinRel(2.197 * 100.0, 0.02));
+    CHECK_THAT(decoupled.settled_db, WithinAbs(-10.5, 0.05));
+}
+
+TEST_CASE("Compressor decoupled detector distorts low tones less",
+          "[signal][compressor][distortion]") {
+    // Gain that moves within each cycle is harmonic distortion. Measured at
+    // 5/100 ms: branching -39.5 / -45.5 dB THD+N at 50 / 100 Hz, decoupled
+    // -48.8 / -60.3 dB.
+    for (const double hz : {50.0, 100.0}) {
+        INFO(hz << " Hz");
+        const double branching = tone_thd_n_db(CompressorBallistics::branching, hz);
+        const double decoupled = tone_thd_n_db(CompressorBallistics::decoupled, hz);
+        CHECK(decoupled < branching - 8.0);
+    }
 }
