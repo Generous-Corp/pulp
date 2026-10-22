@@ -97,9 +97,10 @@ the prepared core state coherent, keep fixed per-block scratch accounted in
 
 ## Read parameters once per block, not per sample
 
-`store.get_value(id)` is a `std::atomic<float>::load(relaxed)`. Cheap,
-but not free: repeated atomic loads add inner-loop work and prevent the
-compiler from treating the value as an ordinary loop-local scalar.
+`store.get_value(id)` is an out-of-line call that looks the ID up in a hash
+map and then does a `std::atomic<float>::load(relaxed)`. Cheap, but not
+free: repeated reads add inner-loop work and prevent the compiler from
+treating the value as an ordinary loop-local scalar.
 
 The right pattern is to **snapshot** the parameters you need at the
 top of `process()`, then read from the snapshot inside the per-sample
@@ -147,6 +148,37 @@ void MyPlugin::process(audio::BufferView<float>& out,
 For modulated reads (the CLAP per-voice modulation path), use
 `snapshot_modulated()` — same idea, but each slot is
 `base + mod_offset` instead of just `base`.
+
+To skip the ID lookup as well, resolve a `StateStore::param_reader()` handle
+once in `prepare()` and read it per block. `ParamReader::get()` is an inline
+relaxed atomic load; the handle stays valid for the store's lifetime, and an
+unknown ID reads `0.0f` just as `get_value()` does:
+
+```cpp
+void prepare(const PrepareContext&) override {
+    gain_ = state().param_reader(kGainId);
+}
+
+void process(audio::BufferView<float>& out, const audio::BufferView<const float>& in,
+             midi::MidiBuffer&, midi::MidiBuffer&, const ProcessContext&) override {
+    const float gain = gain_.get();
+    const std::size_t n = out.num_samples();
+    const std::size_t channels = std::min(out.num_channels(), in.num_channels());
+    for (std::size_t ch = 0; ch < channels; ++ch) {
+        const float* src = in.channel_ptr(ch);   // once per channel, not per sample
+        float* dst = out.channel_ptr(ch);
+        for (std::size_t s = 0; s < n; ++s)
+            dst[s] = src[s] * gain;               // vectorizes; in-place safe
+    }
+}
+```
+
+Take `channel_ptr(ch)` outside the sample loop rather than indexing
+`out.channel(ch)[s]`, which rebuilds a `std::span` from the view on every
+sample. For a per-block UI meter, `audio::buffer_ops::measure_peak_rms()`
+returns peak and RMS in one vectorized pass; a hand-written
+`sum += x * x` loop is a single serial add chain and can cost more than the
+processing it measures. `pulp create` templates use all three.
 
 ## How parameter changes reach the UI
 
