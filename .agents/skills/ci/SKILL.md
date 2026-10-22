@@ -778,6 +778,34 @@ on apply mode. The protected-main worker must stay repository-serialized,
 perform a dry run first, and prove one live exact-head canary before scheduled
 activation.
 
+## The control-shipping scanner reads raw bytes: two CMake quirks it depends on
+
+`tools/cmake/check_control_shipping_artifact.cmake` reads each linked image
+with `file(READ)` and searches the bytes with `string(FIND)`. Two CMake
+behaviours make that correct only as written:
+
+- **NUL truncation.** Several CMake paths stop a value at its first NUL byte,
+  measured on CMake 4.3 and 3.24.3: `${var}` in a `-P` script with no
+  `cmake_minimum_required` on 3.x (old CMP0053 rules), `set(... PARENT_SCOPE)`
+  on every version (a 44 MB image returned from a function arrived as 5 bytes
+  while the function's own length check passed), and `string(REPLACE)` /
+  `string(REGEX)` on every version. `string(LENGTH)` and `string(FIND)` see
+  the whole value. Truncation fails OPEN for the forbidden-marker checks. So
+  the scanner pins `cmake_minimum_required(VERSION 3.24)`, reads with a macro
+  (the bytes land in the caller's scope), touches the bytes only with LENGTH
+  and FIND, fails closed when the read is shorter than half the file, and has
+  `_pulp_binary_contains` re-check the searched length against the recorded
+  `<var>_length`. Never remove any of these; a test host on 4.x cannot catch
+  the 3.x case by itself.
+- **CRLF folding.** `file(READ)` turns each CRLF pair into LF, so the value is
+  shorter than the file by the number of folded pairs, at most half of it.
+  Markers contain no CR or LF, so the fold cannot hide or create one.
+
+The matrix test carries a NUL-before-marker and a CRLF-before-marker leak, and
+`_pulp_binary_contains` refuses markers that are under 14 bytes, contain
+whitespace or contain `;` (`-DPULP_CONTROL_MARKER_SELFTEST=<marker>` exercises
+the refusal).
+
 ## Every test file must run somewhere
 
 `unregistered-tests-check` fails when a tracked `tools/**/test_*.py` is invoked by

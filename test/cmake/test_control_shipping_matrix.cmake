@@ -347,6 +347,15 @@ expect_leak_blocked(capability-marker
 # inside a longer run of printable bytes must still be found.
 expect_leak_blocked(embedded-marker
     "#if defined(_MSC_VER)\n#define USED\n#else\n#define USED __attribute__((used))\n#endif\nextern \"C\" USED const volatile char leak[] = \"prefix-PULP_INSPECT_SHIPPING_MANIFEST_V1-suffix\";")
+# The scanner reads the raw image. A NUL before the marker must not hide it:
+# without the scanner's CMake policy pin a 3.x CMake truncates the read at
+# the first NUL, and the read-length check must then fail the scan closed.
+expect_leak_blocked(nul-before-marker
+    "#if defined(_MSC_VER)\n#define USED\n#else\n#define USED __attribute__((used))\n#endif\nextern \"C\" USED const volatile char leak[] = \"x\\0PULP_INSPECT_SHIPPING_MANIFEST_V1\";")
+# file(READ) folds CRLF to LF. A marker right after CRLF pairs must still be
+# found, and the folds must not trip the read-length check.
+expect_leak_blocked(crlf-before-marker
+    "#if defined(_MSC_VER)\n#define USED\n#else\n#define USED __attribute__((used))\n#endif\nextern \"C\" USED const volatile char leak[] = \"a\\r\\n\\r\\nPULP_INSPECT_SHIPPING_MANIFEST_V1\";")
 expect_leak_blocked(symbol-leak
     "namespace pulp::inspect { class ControlBroker { public: int run(); }; int ControlBroker::run() { return 7; } }")
 
