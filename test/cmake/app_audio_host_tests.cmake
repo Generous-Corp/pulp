@@ -650,7 +650,8 @@ catch_discover_tests(pulp-test-negative-path)
 # AUv3 HostApp template shape).
 pulp_add_test_suite(pulp-test-ios-foundation GROUP pulp-test-group-app-view
     LIBRARIES pulp::view pulp::platform)
-pulp_test_data(pulp-test-ios-foundation PATHS templates/ios-auv3/HostApp/ContentView.swift)
+pulp_test_data(pulp-test-ios-foundation PATHS templates/ios-auv3/HostApp/ContentView.swift
+    templates/ios-auv3/HostApp/Info.plist.in templates/ios-auv3/Info.plist.in)
 # Identity/UUID tests
 pulp_add_test_suite(pulp-test-identity LIBRARIES pulp::runtime)
 # WebView tests (requires PULP_BUILD_WEBVIEW — WebViewPanel::create is only compiled when ON)
