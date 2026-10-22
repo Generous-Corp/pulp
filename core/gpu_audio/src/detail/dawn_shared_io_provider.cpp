@@ -1738,6 +1738,11 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
     if (!impl_ || !impl_->accepting || impl_->wavenet || handles.empty() ||
         !validate_wavenet_spec(spec).accepted() || spec.stream_instances != 1)
         return false;
+    // The first layer of array 0 starts each block's head sum (head_init), so
+    // the plan needs at least one layer there. The spec validator already
+    // rejects empty arrays; this keeps the kernel's precondition local.
+    if (spec.arrays.empty() || spec.arrays.front().dilations.empty())
+        return false;
     try {
         auto plan = std::make_unique<Impl::WavenetPlan>();
         plan->block_size = spec.block_size;

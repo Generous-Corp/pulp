@@ -813,6 +813,38 @@
                 SKIP_RETURN_CODE 77
                 TIMEOUT 60)
 
+            # Physical proof that the private WaveNet provider keeps completing
+            # blocks with staged storage plus opt-in GPU timestamps (two slots,
+            # six blocks, bounded per-block deadline) and that the audio matches
+            # imported storage byte for byte, for an ungated and a gated net.
+            add_executable(pulp-gpu-dawn-wavenet-staged-timestamps-probe
+                test_gpu_dawn_wavenet_staged_timestamps_probe.cpp)
+            target_link_libraries(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                ../core/gpu_audio/src)
+            target_include_directories(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                ${SKIA_INCLUDE_DIRS})
+            if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+                target_include_directories(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                    "${SKIA_INCLUDE_DIRS}/dawn")
+            endif()
+            target_compile_definitions(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                target_link_libraries(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
+                    Vellum::Gpu Vellum::DawnHeaders)
+            endif()
+            add_dependencies(pulp-gpu-dawn-wavenet-staged-timestamps-probe
+                pulp-gpu-dawn-shared-io-provider-probe)
+            add_test(NAME pulp-gpu-dawn-wavenet-staged-timestamps-probe
+                COMMAND pulp-gpu-dawn-wavenet-staged-timestamps-probe)
+            set_tests_properties(pulp-gpu-dawn-wavenet-staged-timestamps-probe PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                SKIP_RETURN_CODE 77
+                TIMEOUT 120)
+
             if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
                 # Matched staged/shared lifecycle screening. This is deliberately
                 # an intermediate p4.matched.v1 diagnostic and never emits p4.raw.v1:
