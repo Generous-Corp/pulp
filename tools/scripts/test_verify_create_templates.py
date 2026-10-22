@@ -234,5 +234,64 @@ class TestRealtimePatterns(unittest.TestCase):
             self.assertEqual(vct.check_realtime_patterns("gain", root), [])
 
 
+
+class TestCatch2Fetch(unittest.TestCase):
+    """The Catch2 fetch in the standalone templates runs on every first
+    configure of a generated project. The real tree must pass, and each slow or
+    broken shape must fail when planted."""
+
+    GOOD = (
+        "include(FetchContent)\n"
+        "FetchContent_Declare(Catch2\n"
+        "    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz\n"
+        "    URL_HASH SHA256=" + "c" * 64 + "\n"
+        "    FIND_PACKAGE_ARGS 3 CONFIG\n"
+        ")\n"
+        "FetchContent_MakeAvailable(Catch2)\n"
+        "if(catch2_SOURCE_DIR)\n"
+        "    list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)\n"
+        "endif()\n"
+    )
+
+    def _check(self, text: str) -> list[str]:
+        with TemporaryDirectory() as td:
+            d = Path(td) / "standalone" / "effect"
+            d.mkdir(parents=True)
+            (d / "CMakeLists.txt.template").write_text(text, encoding="utf-8")
+            return vct.check_catch2_fetch("standalone", Path(td) / "standalone")
+
+    def test_real_standalone_templates_pass_and_are_scanned(self) -> None:
+        root = _HERE.parent / "templates" / "standalone"
+        templates = sorted(root.rglob("CMakeLists.txt.template"))
+        # Positive control: the scan must reach real Catch2 declarations.
+        self.assertGreaterEqual(len(templates), 4)
+        for t in templates:
+            self.assertIn("FetchContent_Declare(Catch2", t.read_text(encoding="utf-8"))
+        self.assertEqual(vct.check_catch2_fetch("standalone", root), [])
+
+    def test_good_shape_passes(self) -> None:
+        self.assertEqual(self._check(self.GOOD), [])
+
+    def test_git_clone_is_flagged(self) -> None:
+        text = self.GOOD.replace(
+            "    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz\n",
+            "    GIT_REPOSITORY https://github.com/catchorg/Catch2.git\n    GIT_TAG v3.7.1\n")
+        self.assertTrue(any("fetched with git" in f for f in self._check(text)))
+
+    def test_unpinned_archive_is_flagged(self) -> None:
+        text = self.GOOD.replace("    URL_HASH SHA256=" + "c" * 64 + "\n", "")
+        self.assertTrue(any("URL_HASH" in f for f in self._check(text)))
+
+    def test_missing_find_package_args_is_flagged(self) -> None:
+        text = self.GOOD.replace("    FIND_PACKAGE_ARGS 3 CONFIG\n", "")
+        self.assertTrue(any("FIND_PACKAGE_ARGS" in f for f in self._check(text)))
+
+    def test_unguarded_extras_path_is_flagged(self) -> None:
+        text = self.GOOD.replace(
+            "if(catch2_SOURCE_DIR)\n    list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)\nendif()\n",
+            "list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)\n")
+        self.assertTrue(any("unconditionally" in f for f in self._check(text)))
+
+
 if __name__ == "__main__":
     unittest.main()
