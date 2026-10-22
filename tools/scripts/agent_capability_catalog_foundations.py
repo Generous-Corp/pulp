@@ -199,7 +199,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SaturatorT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:575576593e3edcd18104082feebfc48584a3f160cc5dcd24d8d48909cb8e6b2b"
+                    "sha256:f0c2dcfb1651fbf3fb3ac812c00788688c1894a075fdd02d9435a4c3df05d2cd"
                 ),
             )
         ],

@@ -408,7 +408,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/compressor.hpp", "sha256:5c1974f731de731d31ec324ff586854f003d987279367c2e939c7eceaca98b46"),
+            ("pulp/signal/compressor.hpp", "sha256:9f81a0de92b4e8d825080533ebb7a266a5cf90067ecb6382251b6d0866d8b02c"),
             ("pulp/signal/diode_bridge_compressor.hpp", "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3"),
             ("pulp/signal/feedforward_compressor.hpp", "sha256:afcd1e63df356725f2256c0b449900c894e1120f016ac511512cc94b11263524"),
             ("pulp/signal/fet_compressor.hpp", "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee"),
@@ -773,7 +773,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:91a8e1988a0a25ee9bfcf5f871dae5b9e5b18d38344b900fd05a65ce3efa0966",
+        "fingerprint": "sha256:cb9aabb8444a4324a0588f396c6e36f41d40b9d56ba11537842cc65866cfafbf",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1316,6 +1316,138 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/classic_reverb.hpp",
+        "fingerprint": "sha256:260a528f11d3641e227e4cd301f91103d51a7aaeb40bdbf9994a5c4b58878fac",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The classic comb-and-allpass reverb tier, driven by the same fdn::Param set as "
+            "the FDN engine. A processor primitive driven from the owner's own process(); "
+            "it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/detail/simd_lanes.hpp",
+        "fingerprint": "sha256:a03dec563cc1eb560335d4968e1d238dd80134ed1a501d713275b438404d09cb",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Four-lane float and two-lane double vector helpers for the reverb and meter "
+            "block kernels. Internal numeric support with no agent-facing surface."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/config.hpp",
+        "fingerprint": "sha256:a63cebacd0da5920556092f5e802fc863add06d8ff951ec78fe00eb2721770ce",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/config). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/diffusion.hpp",
+        "fingerprint": "sha256:f13e994a57fde15e7042439506fdd9ab226d35f53369f93ea3117637bf754e01",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/diffusion). It is "
+            "reached only through FdnReverb and makes no installed agent capability claim "
+            "of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/frac_delay.hpp",
+        "fingerprint": "sha256:282c25e49387c19a1a278dac2fa72c1af65a24a19ef427b7a514092741a06836",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/frac_delay). It is "
+            "reached only through FdnReverb and makes no installed agent capability claim "
+            "of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/interp.hpp",
+        "fingerprint": "sha256:2ef007b4975090651752065daf26b48972d3743a121e4984b653b16b1cdab9dd",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/interp). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/loop_eq.hpp",
+        "fingerprint": "sha256:553d65de8f48182b8d4362d8c974824dd4ade3d0cf9b5605283992c8bae0affc",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/loop_eq). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/modulation.hpp",
+        "fingerprint": "sha256:906f603c217334ecf34d63eaa76b971a75b4e774b280e54d552e7d3388e3ff36",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/modulation). It is "
+            "reached only through FdnReverb and makes no installed agent capability claim "
+            "of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/multirate.hpp",
+        "fingerprint": "sha256:41420dc60ad30c20c5417c35adbc2cffff712cf5e5256b375a1a34de8dddafe6",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/multirate). It is "
+            "reached only through FdnReverb and makes no installed agent capability claim "
+            "of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/stages.hpp",
+        "fingerprint": "sha256:d397bfcef37a288a29648ad2bd95010c4f995b135693c23cb5da36b3ab7ed9b1",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/stages). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/tank.hpp",
+        "fingerprint": "sha256:baa049a48e5171b5e467376568be1e52b73bf72816a47f2096bdf4fe8ac45216",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/tank). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn_reverb.hpp",
+        "fingerprint": "sha256:e6631c96bfee1e8f051fb6ee1abc538c90215ec2434e7cad603991330b34f0e2",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The multirate sixteen-line FDN reverb engine and its block-processing entry "
+            "points. A processor primitive driven from the owner's own process(); the Forge "
+            "FDN reverb catalog exposes it to products, and it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
+    {
         "include": "pulp/signal/denormal.hpp",
         "fingerprint": "sha256:a8a9433f0bd463d455260b3b1470571ce1f139722b4cb8acfe42f0e142ed56f4",
         "disposition": "infrastructure",
@@ -1354,7 +1486,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/oversampling_fir.hpp",
-        "fingerprint": "sha256:b9834233787912af899e21571b08517b4c60135e4a61f5be6e04391ac2e4831a",
+        "fingerprint": "sha256:b69bdfdfad33b8806c2b8c04a6e1bce898b5d97e2714c3d876f8f4a49f84008e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1441,7 +1573,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/oversampling.hpp",
-        "fingerprint": "sha256:fda530c94b159df23ae9a6e8b7f7c36292b7be2f79d00e959d9c5cb30e3bd2e1",
+        "fingerprint": "sha256:9a716ddcb90581edd9a8f7214a02a604933bd6e355d46d88749c031908bd6568",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

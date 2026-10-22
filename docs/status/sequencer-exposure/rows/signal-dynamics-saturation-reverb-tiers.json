@@ -1,0 +1,63 @@
+{
+  "id": "signal-dynamics-saturation-reverb-tiers",
+  "title": "Decoupled compressor detector, minimax ladder saturator, and a classic reverb tier",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "signal-dynamics-saturation-reverb-tiers-20261022",
+  "owned_paths": [
+    "core/signal/include/pulp/signal/classic_reverb.hpp",
+    "docs/guides/signal-processing.md",
+    "docs/status/sequencer-exposure/rows/signal-dynamics-saturation-reverb-tiers.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/signal/include/pulp/signal/classic_reverb.hpp",
+      "needles": [
+        "Classic reverb tier"
+      ]
+    },
+    {
+      "path": "docs/guides/signal-processing.md",
+      "needles": [
+        "| `set_ballistics(CompressorBallistics)` | Select the gain-reduction detector (`decoupled` default, or `branching`). |",
+        "### ClassicReverb",
+        "### MultiChannelMeter"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The public signal headers add a selectable compressor detector (decoupled by default), a minimax tanh for the realtime-efficient ladder saturator, a second-order ADAA saturator policy, and the ClassicReverb tier behind FdnReverb's controls. This pending source receipt does not establish a released SDK artifact.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/signal/include/pulp/signal/classic_reverb.hpp",
+          "needles": ["Classic reverb tier"]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "These are in-process processor primitives and add no offline timeline command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "They add no timeline MCP operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No remote control operation is added; the Forge FDN reverb node's tier is a baked node parameter driven like its other controls."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The new and changed headers are registered as reviewed infrastructure with no capability keys, so no installed agent capability is added or changed."
+    }
+  }
+}
