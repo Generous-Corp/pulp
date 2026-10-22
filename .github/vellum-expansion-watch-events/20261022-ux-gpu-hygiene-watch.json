@@ -14,9 +14,10 @@
   "tests": [
     "ctest --test-dir build -R 'DisplayRateBoost'",
     "ctest --test-dir build -R 'Frame stamp'",
+    "ctest --test-dir build -R 'Graphite still shadows the coordinates with an author local named pos'",
     "ctest --test-dir build -R 'Runtime-effect names Graphite reserves are refused or render as written'",
     "ctest --test-dir build -R 'compile_sksl refuses a local named pos in main on every backend'",
-    "ctest --test-dir build -R 'ios-auv3 HostApp template opts out of the 60 Hz iPhone frame cap'",
+    "ctest --test-dir build -R 'ios-auv3 templates opt out of the 60 Hz iPhone frame cap'",
     "ctest --test-dir build -R 'pulp-motion-frame-stamp'",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
