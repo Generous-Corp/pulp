@@ -15,6 +15,10 @@ Run:  python3 tools/scripts/test_realtime_pool_resource_locks.py
 
 from __future__ import annotations
 
+import os
+import posixpath
+import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -35,13 +39,51 @@ POOL_MARKERS = (
 LOCK = "RESOURCE_LOCK pulp_realtime_worker_pool"
 
 
-def pool_sources() -> set[str]:
-    found = set()
-    for path in sorted(TEST_DIR.glob("test_*.cpp")):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        if any(marker in text for marker in POOL_MARKERS):
-            found.add(path.name)
-    return found
+SOURCE_SUFFIXES = (".cpp", ".mm")
+HEADER_SUFFIXES = (".hpp", ".h")
+INCLUDE_RE = re.compile(r'^\s*#\s*(?:include|import)\s+"([^"]+)"', re.M)
+# Data trees, not code; some are large.
+SKIPPED_DIRS = {"fixtures"}
+
+
+def _test_tree_files(test_dir: Path) -> dict[str, str]:
+    """Every C/C++/Objective-C++ source and header under test/, by path
+    relative to test/."""
+    out: dict[str, str] = {}
+    for dirpath, dirnames, filenames in os.walk(test_dir):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIPPED_DIRS)
+        for name in sorted(filenames):
+            if not name.endswith(SOURCE_SUFFIXES + HEADER_SUFFIXES):
+                continue
+            path = Path(dirpath) / name
+            out[path.relative_to(test_dir).as_posix()] = path.read_text(
+                encoding="utf-8", errors="replace")
+    return out
+
+
+def pool_sources(test_dir: Path = TEST_DIR) -> set[str]:
+    """Translation units under test/ that start a worker pool, relative to
+    test/: those that name a marker themselves, and those that include,
+    directly or through other test-tree headers, a file that does. A helper
+    in test/support or a subdirectory starts the pool for every suite that
+    includes it, so a scan of top-level test sources alone would miss it."""
+    files = _test_tree_files(test_dir)
+    marked = {rel for rel, text in files.items() if any(m in text for m in POOL_MARKERS)}
+    changed = True
+    while changed:
+        changed = False
+        for rel, text in files.items():
+            if rel in marked:
+                continue
+            for inc in INCLUDE_RE.findall(text):
+                # test/ is an include root, and a quoted include also resolves
+                # beside the including file.
+                beside = posixpath.normpath(posixpath.join(posixpath.dirname(rel), inc))
+                if inc in marked or beside in marked:
+                    marked.add(rel)
+                    changed = True
+                    break
+    return {rel for rel in marked if rel.endswith(SOURCE_SUFFIXES)}
 
 
 def sources_of(target: str, body: str) -> str:
@@ -93,6 +135,28 @@ class RealtimePoolResourceLockTests(unittest.TestCase):
         ):
             with self.subTest(source=name):
                 self.assertIn(name, sources)
+
+    def test_the_scan_reaches_objective_cpp_subdirectories_and_helpers(self) -> None:
+        """A pool started from a .mm source, a subdirectory source, or a test
+        helper header is found; a source that only mentions an unrelated
+        header is not."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {
+                "test_direct.mm": "pool.start(GraphRuntimeWorkerPool{});\n",
+                "suite/test_nested.cpp": "graph.set_parallel_routing_enabled(true);\n",
+                "support/pool_helper.hpp": "inline void go() { GraphRuntimeWorkerPool p; }\n",
+                "support/wrapper.hpp": '#include "pool_helper.hpp"\n',
+                "test_via_helper.cpp": '#include "support/wrapper.hpp"\n',
+                "support/plain.hpp": "inline int x = 1;\n",
+                "test_plain.cpp": '#include "support/plain.hpp"\n',
+                "fixtures/test_data.cpp": "GraphRuntimeWorkerPool in a fixture is data\n",
+            }
+            for rel, text in files.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(text, encoding="utf-8")
+            self.assertEqual(pool_sources(root),
+                             {"test_direct.mm", "suite/test_nested.cpp", "test_via_helper.cpp"})
 
     def test_a_suite_without_the_lock_is_reported(self) -> None:
         """Negative control: the policy flags a planted unlocked registration,
