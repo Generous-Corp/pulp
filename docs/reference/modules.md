@@ -134,7 +134,7 @@ http_download("https://example.com/ir.wav", "/tmp/impulse.wav");
 
 ### Crypto — Hashing and encryption
 
-SHA-256, MD5, AES-256-CBC via Mbed TLS (Apache 2.0). Use for license validation, integrity checks, secure preset storage.
+SHA-256 (Pulp's own implementation: the ARMv8 SHA-2 instructions on arm64 targets that have them, portable rounds elsewhere, identical digests), plus MD5 and AES-256-CBC via Mbed TLS (Apache 2.0). Use for license validation, integrity checks, secure preset storage.
 
 ```cpp
 #include <pulp/runtime/crypto.hpp>
