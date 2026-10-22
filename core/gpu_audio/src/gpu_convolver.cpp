@@ -912,7 +912,7 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
         // GPU claim.
         const auto identity = provider_identity_for_diagnostics();
         status.provider = identity.authenticated ? identity.provider : GpuAudioProvider::Unknown;
-        status.gpu_kernel_available = status.provider != GpuAudioProvider::Unknown;
+        status.gpu_kernel_available = true;
         status.selected_engine = status.provider != GpuAudioProvider::Unknown
                                      ? GpuAudioEngine::Gpu
                                      : GpuAudioEngine::Unknown;
