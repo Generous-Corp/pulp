@@ -38,6 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -46,6 +47,8 @@ jobs:
       - id: resolve
         env:
           MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+          EVENT_NAME: ${{ github.event_name }}
+          ALLOW_HOSTED_WINDOWS_VAR: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
         run: |
           set -euo pipefail
           macos=$(python3 tools/scripts/resolve_runs_on.py \
@@ -54,16 +57,21 @@ jobs:
             --override-env MACOS_RUNS_ON_JSON \
             --default-label macos-latest)
           echo "macos_runs_on=${macos}" >>"${GITHUB_OUTPUT}"
+          # GitHub-hosted Windows is opt-in on a push to main
+          # (PULP_ALLOW_HOSTED_WINDOWS=1); schedules and dispatches keep it.
+          matrix=$(MACOS="$macos" python3 -c '
+          import json, os
+          rows = [{"os": "macos-latest", "runs_on_json": os.environ["MACOS"]}]
+          if os.environ["EVENT_NAME"] != "push" or os.environ.get("ALLOW_HOSTED_WINDOWS_VAR") == "1":
+              rows.append({"os": "windows-latest", "runs_on_json": json.dumps("windows-latest")})
+          print(json.dumps({"include": rows}))
+          ')
+          echo "matrix=${matrix}" >>"${GITHUB_OUTPUT}"
 
   android-build:
     needs: resolve-runners
     strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            runs_on_json: ${{ needs.resolve-runners.outputs.macos_runs_on }}
-          - os: windows-latest
-            runs_on_json: '"windows-latest"'
+      matrix: ${{ fromJSON(needs.resolve-runners.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     timeout-minutes: 30
 

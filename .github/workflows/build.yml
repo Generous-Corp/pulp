@@ -58,9 +58,14 @@ on:
         default: false
         type: boolean
       run_windows:
-        description: "Include the hosted Windows leg; disable for a trusted Linux-only Mac Pro dispatch"
+        description: "Include the Windows leg when it has a permitted runner (a local windows_runner_selector_json, or allow_hosted_windows); disable for a trusted Linux-only Mac Pro dispatch"
         required: false
         default: true
+        type: boolean
+      allow_hosted_windows:
+        description: "Allow GitHub-hosted Windows runners for this dispatch. Off by default: without it, or a local windows_runner_selector_json, no hosted Windows job runs"
+        required: false
+        default: false
         type: boolean
 
 # Cancel superseded runs when a new commit lands on the same PR.
@@ -146,6 +151,8 @@ jobs:
       linux_configured_selector_json: ${{ steps.resolve.outputs.linux_configured_selector_json }}
       linux_event_authorized_selector_json: ${{ steps.resolve.outputs.linux_event_authorized_selector_json }}
       macos_runs_on_json: ${{ steps.resolve.outputs.macos_runs_on_json }}
+      windows_leg: ${{ steps.resolve.outputs.windows_leg }}
+      hosted_windows_allowed: ${{ steps.resolve.outputs.hosted_windows_allowed }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -178,6 +185,10 @@ jobs:
           # only for explicit one-off experiments.
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
+          # GitHub-hosted Windows is opt-in: a dispatch input, or the repository
+          # variable PULP_ALLOW_HOSTED_WINDOWS=1 (which also covers a push).
+          WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS: ${{ inputs.allow_hosted_windows }}
+          ALLOW_HOSTED_WINDOWS_VAR: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
           AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
@@ -859,23 +870,56 @@ jobs:
               or os.environ.get("WORKFLOW_DISPATCH_RUN_WINDOWS", "").lower()
               != "false"
           )
-          if (
-              EVENT_NAME not in ("pull_request", "merge_group")
-              and dispatch_runs_windows
+          # GitHub-hosted Windows is opt-in on a push or a dispatch: agents
+          # kept landing on it by default. A selector naming a self-hosted
+          # runner is not hosted; a bare label or a list without
+          # "self-hosted" is.
+          def windows_selector_is_hosted(selector_json):
+              try:
+                  selector = json.loads(selector_json)
+              except (TypeError, ValueError):
+                  return True
+              labels = selector if isinstance(selector, list) else [selector]
+              return "self-hosted" not in [str(label) for label in labels]
+
+          hosted_windows_allowed = (
+              os.environ.get("ALLOW_HOSTED_WINDOWS_VAR", "").strip() == "1"
+              or (
+                  EVENT_NAME == "workflow_dispatch"
+                  and os.environ.get(
+                      "WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS", ""
+                  ).lower() == "true"
+              )
+          )
+          windows_leg = "included"
+          if EVENT_NAME in ("pull_request", "merge_group"):
+              windows_leg = "omitted: pull request or merge group"
+          elif not dispatch_runs_windows:
+              windows_leg = "omitted: run_windows=false"
+          elif (
+              windows_selector_is_hosted(windows_runs_on)
+              and not hosted_windows_allowed
           ):
+              windows_leg = (
+                  "omitted: GitHub-hosted Windows is opt-in "
+                  "(set allow_hosted_windows, a local windows_runner_selector_json, "
+                  "or PULP_ALLOW_HOSTED_WINDOWS=1)"
+              )
+          print(f"resolve-provider: Windows leg {windows_leg}", file=sys.stderr)
+          if windows_leg == "included":
               include.append({
                   "key": "windows",
                   "name": "Windows (x64)",
                   "runs_on_json": windows_runs_on,
                   "provider": windows_provider,
               })
-          elif EVENT_NAME == "workflow_dispatch":
+          elif EVENT_NAME == "workflow_dispatch" and not dispatch_runs_windows:
               print(
                   "resolve-provider: trusted Linux-only workflow_dispatch — "
                   "Windows leg omitted by operator request",
                   file=sys.stderr,
               )
-          else:
+          elif EVENT_NAME in ("pull_request", "merge_group"):
               print(
                   "resolve-provider: pull_request event — Windows leg omitted "
                   "(gated in the merge queue; keeps hosted concurrency free for "
@@ -897,6 +941,11 @@ jobs:
               handle.write(f"provider={REQUESTED}\n")
               handle.write(f"matrix_json={json.dumps(matrix)}\n")
               handle.write(f"macos_runs_on_json={macos_runs_on}\n")
+              handle.write(f"windows_leg={windows_leg}\n")
+              handle.write(
+                  "hosted_windows_allowed="
+                  f"{'true' if hosted_windows_allowed else 'false'}\n"
+              )
               handle.write(f"linux_route_reason={linux_route_reason}\n")
               handle.write(
                   "linux_configured_selector_json="
@@ -3182,6 +3231,7 @@ jobs:
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
       && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
+      && (inputs.allow_hosted_windows == true || vars.PULP_ALLOW_HOSTED_WINDOWS == '1')
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
@@ -3260,6 +3310,7 @@ jobs:
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
       && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
+      && (inputs.allow_hosted_windows == true || vars.PULP_ALLOW_HOSTED_WINDOWS == '1')
     runs-on: windows-latest
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
@@ -3325,6 +3376,7 @@ jobs:
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
       && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
+      && (inputs.allow_hosted_windows == true || vars.PULP_ALLOW_HOSTED_WINDOWS == '1')
     runs-on: windows-latest
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
@@ -3607,7 +3659,7 @@ jobs:
           exit 1
 
   windows:
-    needs: [build, windows-msvc-release-gate, classify]
+    needs: [build, windows-msvc-release-gate, classify, resolve-provider]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
     # alias, and for a sharper reason than symmetry: an alias job pinned to the
     # shared hosted pool can be starved of a runner indefinitely. Because it is
@@ -3625,6 +3677,8 @@ jobs:
       - name: Windows leg outcome (advisory)
         env:
           GH_TOKEN: ${{ github.token }}
+          WINDOWS_LEG: ${{ needs.resolve-provider.outputs.windows_leg }}
+          HOSTED_WINDOWS_ALLOWED: ${{ needs.resolve-provider.outputs.hosted_windows_allowed }}
         run: |
           set -euo pipefail
           classify_result="${{ needs.classify.result }}"
@@ -3644,9 +3698,20 @@ jobs:
             echo "Trusted Linux-only dispatch — Windows omitted by operator request; windows alias ✓"
             exit 0
           fi
+          case "$WINDOWS_LEG" in
+            "omitted: GitHub-hosted Windows is opt-in"*)
+              echo "$WINDOWS_LEG — windows alias ✓ (nothing ran)"
+              exit 0
+              ;;
+          esac
           conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
             --jq '.jobs[] | select(.name | startswith("Windows (x64)")) | .conclusion' | head -1)
           msvc_ok="${{ needs.windows-msvc-release-gate.result }}"
+          # The MSVC gate runs only on GitHub-hosted windows-latest; without the
+          # hosted opt-in it is skipped by design, not failed.
+          if [ "$msvc_ok" = "skipped" ] && [ "$HOSTED_WINDOWS_ALLOWED" != "true" ]; then
+            msvc_ok=success
+          fi
           echo "Windows matrix leg: ${conclusion:-unknown}"
           echo "Windows MSVC release-path: $msvc_ok"
           if [ "$conclusion" = "success" ] && [ "$msvc_ok" = "success" ]; then
