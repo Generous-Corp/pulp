@@ -492,8 +492,8 @@ class DifferentialLabTests(unittest.TestCase):
         # test_browser_capture_ir.cpp asserts CapturedStyleIndex::own_layout_row
         # against the same expected rows, so the two readers share one rule.
         fixture = REPO / "test/fixtures/browser-capture-layout-rows"
-        snapshot = json.loads((fixture / "dom-snapshot.json").read_text())
-        expected = json.loads((fixture / "expected-own-rows.json").read_text())
+        snapshot = json.loads((fixture / "dom-snapshot.json").read_text(encoding="utf-8"))
+        expected = json.loads((fixture / "expected-own-rows.json").read_text(encoding="utf-8"))
         rows = LAB.principal_layout_rows(snapshot["documents"][0]["layout"])
         self.assertEqual({str(node): row for node, row in rows.items()},
                          expected["own_rows"])
@@ -1086,7 +1086,7 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertIn("geometry score below 0.980", offset_report["promotion"]["reasons"])
             self.assertIn("geometry gate failed: page_space_mean, frame_placement, "
                           "registered_mean", offset_report["promotion"]["reasons"])
-            summary = (root / "out-offset/comparison/summary.md").read_text()
+            summary = (root / "out-offset/comparison/summary.md").read_text(encoding="utf-8")
             self.assertIn("Geometry gate: fail (page_space_mean, frame_placement", summary)
             self.assertIn("Page-space geometry (gated)", summary)
             # A receipt that records a different placement than was requested
@@ -1568,11 +1568,11 @@ class DifferentialLabTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             unknown = root / "unknown.json"
-            unknown.write_text(json.dumps({"ttfp_ms": 10}))
+            unknown.write_text(json.dumps({"ttfp_ms": 10}), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "unknown metric"):
                 LAB_CLI.read_timing_budgets(unknown)
             empty = root / "empty.json"
-            empty.write_text("{}")
+            empty.write_text("{}", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "at least one"):
                 LAB_CLI.read_timing_budgets(empty)
 
@@ -1758,7 +1758,7 @@ class DifferentialLabTests(unittest.TestCase):
                     "source": "missing.html",
                     "from": "claude",
                 }],
-            }))
+            }), encoding="utf-8")
             output = root / "output"
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 result = LAB_CLI.command_corpus(Namespace(
@@ -1773,7 +1773,7 @@ class DifferentialLabTests(unittest.TestCase):
                     fail_fast=False,
                 ))
             self.assertEqual(result, 1)
-            report = json.loads((output / "report.json").read_text())
+            report = json.loads((output / "report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["fixture_count"], 1)
             self.assertEqual(report["completed_fixture_count"], 0)
             self.assertEqual(report["failed_fixture_count"], 1)

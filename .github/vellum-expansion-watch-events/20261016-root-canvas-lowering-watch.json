@@ -12,8 +12,8 @@
   ],
   "rationale": "Pulp browser importer lowers a bounded producer-bound opaque HTML canvas background onto its existing synthetic native root. Internal snapshot paint evidence, frozen Chromium fixture regressions, and import-design guidance preserve existing renderer, schema, geometry, and source-authority boundaries. No materialized composition or unbound legacy capture gains a fill.",
   "tests": [
-    "pulp-test-browser-capture-import [root-canvas] (M1 ARM64 PR-head receipt: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852; PR head 4f805aa099a3f3cb98b58ab0bd2ce99c50fa96e6; root-canvas cases passed)",
-    "pulp-test-browser-capture-import [provenance] (M1 ARM64 PR-head receipt: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852; PR head 4f805aa099a3f3cb98b58ab0bd2ce99c50fa96e6; provenance cases passed)",
+    "pulp-test-browser-capture-import [root-canvas] (pending M1 execution)",
+    "pulp-test-browser-capture-import [provenance] (pending M1 execution)",
     "vellum-expansion-watch",
     "vellum-freeze"
   ],
