@@ -613,7 +613,9 @@ def bind(raw: dict[str, Any], binary: Path, preflight: dict[str, Any] | None,
                                         if preflight is not None else None)
     receipt["host_quiet"] = host_quiet(preflight)
     receipt["source_revision"] = _git("rev-parse", "HEAD")
-    receipt["source_dirty"] = bool(_git("status", "--porcelain", "--untracked-files=no"))
+    # Include untracked files: a campaign is only valid for a clean source
+    # tree, and `--untracked-files=no` would let source-tree pollution through.
+    receipt["source_dirty"] = bool(_git("status", "--porcelain"))
     receipt["binary_sha256"] = sha256_hex(binary.read_bytes())
     receipt["host"] = {"node": platform.node(), "machine": platform.machine(),
                        "os": platform.platform()}

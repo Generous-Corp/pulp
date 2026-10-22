@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import gpu_audio_comparator_v2 as comparator
 
@@ -238,6 +239,21 @@ class ComparatorV2Tests(unittest.TestCase):
         result = evaluate(seal(first), second)
         self.assertEqual(result["verdict"], "INCONCLUSIVE")
         self.assertIn("source_tree_dirty", result["reasons"])
+
+    def test_bind_marks_untracked_source_tree_pollution_dirty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "comparator"
+            binary.write_bytes(b"test binary")
+
+            def git(*args):
+                if args and args[0] == "status":
+                    return "?? untracked-source-pollution.txt"
+                return "a" * 40
+
+            with patch.object(comparator, "_git", side_effect=git):
+                bound = comparator.bind({}, binary, None)
+
+        self.assertTrue(bound["source_dirty"])
 
     # -- kernel matching ----------------------------------------------------
 
