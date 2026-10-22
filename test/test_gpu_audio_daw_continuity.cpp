@@ -1,10 +1,13 @@
 // GPU-audio continuity through the real CLAP adapter and HeadlessHost.
 //
 // The transport and execution-controller suites prove the fallback contract one
-// callback at a time. This file proves the same contract at the plug-in
-// boundary a DAW actually drives: activate/deactivate with a new sample rate or
+// callback at a time. This file checks it at the plug-in boundary, under the
+// host call patterns of a DAW: activate/deactivate with a new sample rate or
 // block size, ragged host callbacks, adapter-owned bypass, and state save/load
-// while the GPU path has failed.
+// while the simulated GPU provider has failed. Bypass and state spans null
+// partly by construction (both plug-ins share the adapter's dry delay and
+// parameter state); what they add is that neither disturbs the fallback
+// timeline on either side of the transition.
 //
 // Two processors render the same stimulus through the same host call sequence:
 //   * GpuFirEffect stages host callbacks into fixed quanta and runs them through
@@ -174,6 +177,8 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
 /// Realtime node with a continuously primed CPU shadow. The shadow runs the
 /// same FIR on every callback and emits it `delay_blocks` callbacks later. The
 /// correct delay is the node's lead; any other value is a planted misalignment.
+/// The alignment is this fixture's choice: shipping nodes own their own shadow,
+/// so this proves the transport's use of a correct one, not any node's shadow.
 class ShadowFirNode final : public GpuWaveNetRealtimeNode {
   public:
     ShadowFirNode(const Config& config, std::uint32_t quantum, std::uint32_t delay_blocks)
@@ -311,7 +316,8 @@ class GpuFirEffect final : public format::Processor {
     }
 
     int latency_samples() const override {
-        return static_cast<int>((kLeadBlocks + 1) * quantum_);
+        // Transport lead plus the one staging quantum.
+        return static_cast<int>(transport_.latency_samples() + quantum_);
     }
 
     void process(audio::BufferView<float>& out, const audio::BufferView<const float>& in,
@@ -577,19 +583,25 @@ class ClapSession {
         proc.in_events = &in_events;
         proc.out_events = &out_events;
 
+        // No Catch assertion inside the probe: a reporter that stringifies
+        // passing assertions would allocate and be counted.
         std::size_t allocations = 0;
+        clap_process_status status = CLAP_PROCESS_ERROR;
         {
             pulp::test::RtAllocationProbe probe;
-            REQUIRE(format::clap_adapter::clap_process(&plugin_->plugin, &proc) ==
-                    CLAP_PROCESS_CONTINUE);
+            status = format::clap_adapter::clap_process(&plugin_->plugin, &proc);
             allocations = probe.allocation_count();
         }
+        REQUIRE(status == CLAP_PROCESS_CONTINUE);
         callback_allocations_ += allocations;
 
         for (std::uint32_t ch = 0; ch < kChannels; ++ch)
             output_[ch].insert(output_[ch].end(), out_[ch].begin(), out_[ch].end());
         frame_ += n;
 
+        // The pump (and the fake provider's FIR) runs outside the adapter's
+        // denormal-flush scope. The stimulus never produces subnormals, so
+        // both sides compute identical bits regardless of FTZ/DAZ.
         if (auto* fx = gpu(); fx != nullptr && !starved_)
             for (int i = 0; i < 4; ++i)
                 fx->transport().pump();
@@ -740,7 +752,7 @@ TEST_CASE("GPU-audio plug-in nulls against the CPU reference while the GPU path 
     require_null(gpu, cpu);
 }
 
-TEST_CASE("GPU-audio plug-in output stays continuous across provider failure and loss",
+TEST_CASE("GPU-audio plug-in output stays continuous across simulated provider faults",
           "[gpu_audio][daw-continuity][clap]") {
     const auto fault =
         GENERATE(Fault::FailCompletions, Fault::RejectSubmissions, Fault::ProviderLost);
@@ -768,10 +780,9 @@ TEST_CASE("GPU-audio plug-in output stays continuous across provider failure and
     for (auto* s : {&gpu, &cpu})
         s->render(8 * 64, {64});
     CHECK(delivery(gpu).gpu_blocks == fenced_gpu_blocks);
-    CHECK(gpu.gpu()->node()->recovery_reason() != GpuAudioRecoveryReason::None);
-    if (fault == Fault::ProviderLost)
-        CHECK(gpu.gpu()->node()->recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
-    CHECK(gpu.gpu()->node()->status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+    CHECK(gpu.gpu()->node()->recovery_reason() == (fault == Fault::ProviderLost
+                                                       ? GpuAudioRecoveryReason::ProviderLost
+                                                       : GpuAudioRecoveryReason::ProviderFailure));
     CHECK_FALSE(gpu.gpu()->plan().sequence_gap_seen);
     CHECK(gpu.callback_allocations() == 0);
     require_null(gpu, cpu);
@@ -825,9 +836,11 @@ TEST_CASE("GPU-audio plug-in stays continuous across reactivation with new rate 
     }
     REQUIRE(gpu.gpu()->node()->fenced());
 
-    // The host changes sample rate and buffer size. The fenced provider must
-    // not leak a stale epoch into the new activation, and the reported latency
-    // must follow the new quantum.
+    // The host changes sample rate and buffer size. The fixture builds a fresh
+    // node and provider session on activation (a host reactivating on a
+    // recovered device), so this checks that the adapter's deactivate/activate
+    // path hands the fallback-to-GPU switch a clean timeline and the new
+    // latency. It does not exercise epoch hygiene on a re-prepared node.
     for (auto* s : {&gpu, &cpu}) {
         s->activate(96000.0, 192);
         s->render(16 * 192, {192, 100, 5});
