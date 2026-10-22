@@ -988,8 +988,16 @@ static void clap_phase_snapshot_params(
     // clap_activate() or the first block grow-and-allocates. Adding a new
     // per-param scratch below requires a matching reserve there; the
     // `ClapSlot::process is allocation-free` rt-safety test guards this.
-    boundary::snapshot_param_values(self->store, all_params,
-                                    self->param_snapshot);
+    self->pre_process_generation = self->store.state_generation();
+    if (!self->snapshot_valid ||
+        self->snapshot_generation != self->pre_process_generation ||
+        self->param_snapshot.size() != all_params.size()) {
+        boundary::snapshot_param_values(self->store, all_params,
+                                        self->param_snapshot);
+        self->snapshot_generation = self->pre_process_generation;
+        self->snapshot_valid =
+            self->store.state_snapshot_is_current(self->pre_process_generation);
+    }
     self->output_param_has_event.assign(all_params.size(), 0);
 }
 
@@ -1244,6 +1252,7 @@ static void record_outbound_release_debt(PulpClapPlugin* self,
             static_cast<std::size_t>(channel) * kOutboundReleaseControllers.size() +
             static_cast<std::size_t>(index)];
     }
+    self->outbound_release_debt_pending = true;
     if (*counter != std::numeric_limits<uint8_t>::max()) {
         ++*counter;
         return;
@@ -1278,6 +1287,8 @@ static OutboundReleaseDrainResult drain_outbound_release_debt(
     // Bound callback work even in that state. The persistent cursor gives
     // every debt slot a turn; debt remaining after the budget is exhausted
     // suppresses fresh MIDI attacks until a later block completes the drain.
+    if (!self->outbound_release_debt_pending)
+        return {.host_accepting = true, .debt_remaining = false};
     constexpr std::size_t kMaxReleaseRetriesPerBlock = 64;
     constexpr std::size_t kSlotsPerChannel =
         1 + 128 + kOutboundReleaseControllers.size();
@@ -1340,6 +1351,7 @@ static OutboundReleaseDrainResult drain_outbound_release_debt(
         std::any_of(self->outbound_control_release_debt.begin(),
                     self->outbound_control_release_debt.end(),
                     [](uint8_t count) { return count != 0; });
+    self->outbound_release_debt_pending = debt_remaining;
     return {.host_accepting = true, .debt_remaining = debt_remaining};
 }
 
@@ -1388,8 +1400,12 @@ static void clap_phase_emit_output(
         // (1) Snapshot-diff fallback, at time 0, for params WITHOUT explicit
         // events. These are all at offset 0 (the earliest time), so emitting
         // them before the offset-ordered merge below preserves CLAP's global
-        // ascending-time contract.
-        for (std::size_t i = 0; i < all_params.size(); ++i) {
+        // ascending-time contract. Skipped entirely while no store write landed
+        // across process(): every value still equals its snapshot.
+        const bool store_moved =
+            self->store.state_generation() != self->pre_process_generation;
+        if (store_moved) self->snapshot_valid = false;
+        for (std::size_t i = 0; store_moved && i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
             float current = self->store.get_value(all_params[i].id);
             if (boundary::changed_since_snapshot(current,
@@ -1740,7 +1756,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // Build one ProcessBusBufferView per routed output bus. Index 0 is the
     // main output (already wired into output_view above); each subsequent entry
     // wires the host's aux output channel pointers into per-bus storage.
-    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> output_buses{};
+    auto& output_buses = self->rt_output_buses;
     output_buses[0] = {
         .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                  out_channels, false, process->audio_outputs_count > 0},
@@ -1823,7 +1839,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             .buffer = sidechain64_view,
         },
     }};
-    std::array<ProcessBusBufferView<double>, kMaxOutputBuses> output64_buses{};
+    auto& output64_buses = self->rt_output64_buses;
     output64_buses[0] = {
         .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                  out_channels, false, process->audio_outputs_count > 0},

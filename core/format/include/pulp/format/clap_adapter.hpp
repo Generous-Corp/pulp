@@ -199,8 +199,17 @@ struct PulpClapPlugin {
     std::array<std::vector<float>, kMaxChannels> f64_sidechain_scratch{};
     bool native_f64_enabled = false;
 
-    // Parameter snapshot for detecting plugin-side changes during process
+    // Parameter snapshot for detecting plugin-side changes during process.
+    // Refreshed only when the store generation moved since it was taken; the
+    // post-process diff only runs when the generation moved across process().
     std::vector<float> param_snapshot;
+    std::uint64_t snapshot_generation = 0;
+    std::uint64_t pre_process_generation = 0;
+    bool snapshot_valid = false;
+    // Bus views handed to the Processor. Members so a block writes only the
+    // entries it routes instead of value-initialising every slot.
+    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> rt_output_buses{};
+    std::array<ProcessBusBufferView<double>, kMaxOutputBuses> rt_output64_buses{};
     state::ParameterEventQueue param_events;
     // Timestamp-preserving host PARAM_MOD lane for processors that apply
     // modulation sample-accurately. The StateStore offset remains a bounded
@@ -241,6 +250,9 @@ struct PulpClapPlugin {
     std::array<std::uint8_t, 16 * 6> outbound_control_release_debt{};
     std::array<bool, 16> outbound_panic_debt{};
     std::size_t outbound_release_drain_cursor = 0;
+    // True while any of the three debt arrays above may be nonzero. Lets the
+    // per-block drain skip its full slot walk in the normal no-debt case.
+    bool outbound_release_debt_pending = false;
 
     // MPE sidecar — populated from midi_in before each process() call when
     // the Processor declares MPE in its effective PluginDescriptor capabilities.

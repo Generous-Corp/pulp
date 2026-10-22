@@ -2881,6 +2881,41 @@ TEST_CASE("CLAP store-only param change still emits a single event at time 0",
     REQUIRE(params[0]->value == 0.625);
 }
 
+TEST_CASE("CLAP reports a store-only change once and stays quiet on idle blocks",
+          "[clap][params][out-events]") {
+    // The adapter skips its snapshot and diff while the store is unchanged, so
+    // idle blocks must emit nothing and a later processor write must still be
+    // reported exactly once.
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_output_param);
+    REQUIRE(g_output_param != nullptr);
+
+    InputEventList events;
+    for (int block = 0; block < 3; ++block) {
+        OutputEventList idle;
+        REQUIRE(h.run(events, &idle) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(idle.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE).empty());
+    }
+
+    g_output_param->mutate_store_only = true;
+    g_output_param->store_only_value = 0.375f;
+    {
+        OutputEventList out;
+        REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+        auto params = out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE);
+        REQUIRE(params.size() == 1);
+        REQUIRE(params[0]->param_id == OutputParamProcessor::kParamId);
+        REQUIRE(params[0]->value == 0.375);
+    }
+    // Same value again: nothing moved, nothing to report.
+    for (int block = 0; block < 2; ++block) {
+        OutputEventList out;
+        REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE).empty());
+    }
+}
+
 TEST_CASE("CLAP release backlog does not suppress accepted parameter output",
           "[clap][params][out-events][midi][ownership][regression]") {
     g_pending_opts_mpe = false;
@@ -2889,6 +2924,7 @@ TEST_CASE("CLAP release backlog does not suppress accepted parameter output",
     REQUIRE(g_output_param != nullptr);
     g_output_param->push_events = true;
     h.plugin.outbound_note_release_debt[3 * 128 + 60] = 2;
+    h.plugin.outbound_release_debt_pending = true;  // seeded directly, not via record
 
     InputEventList events;
     OutputEventList out;
@@ -3951,6 +3987,30 @@ TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks"
         CHECK(no_duplicate.size() == 0);
     }
 
+    SECTION("a release debt recorded after an earlier debt drained still retries") {
+        // The drain skips its slot walk while no debt is pending; a later debt
+        // must re-arm it.
+        for (int note : {66, 67}) {
+            g_emitting->to_emit = {midi::MidiEvent::note_off(1, static_cast<uint8_t>(note))};
+            OutputEventList rejecting;
+            rejecting.accept_at_most(0);
+            REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+            REQUIRE(h.plugin.outbound_release_debt_pending);
+
+            g_emitting->to_emit.clear();
+            OutputEventList accepted;
+            REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+            auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+            REQUIRE(events.size() == 1);
+            CHECK(events[0]->data[1] == note);
+            CHECK_FALSE(h.plugin.outbound_release_debt_pending);
+
+            OutputEventList idle;
+            REQUIRE(h.run(in, &idle) == CLAP_PROCESS_CONTINUE);
+            CHECK(idle.size() == 0);
+        }
+    }
+
     SECTION("a missing host sink retains a release") {
         g_emitting->to_emit = {midi::MidiEvent::note_off(1, 61)};
         REQUIRE(h.run(in, nullptr) == CLAP_PROCESS_CONTINUE);
@@ -4109,6 +4169,7 @@ TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks"
     SECTION("retry work is bounded and later blocks eventually drain") {
         for (std::size_t note = 0; note < 65; ++note)
             h.plugin.outbound_note_release_debt[7 * 128 + note] = 1;
+        h.plugin.outbound_release_debt_pending = true;
         auto attack = midi::MidiEvent::note_on(7, 72, 100);
         attack.sample_offset = 8;
         g_emitting->to_emit = {attack};
@@ -4137,6 +4198,7 @@ TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks"
         for (int block = 0; block < 4; ++block) {
             for (std::size_t note = 0; note < 128; ++note)
                 h.plugin.outbound_note_release_debt[note] = 1;
+            h.plugin.outbound_release_debt_pending = true;
             OutputEventList accepted;
             REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
             CHECK(accepted.attempt_count() <= 64);
