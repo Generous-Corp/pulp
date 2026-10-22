@@ -483,11 +483,10 @@ public:
     /// group too large for 32-bit buffer sizes, or on GPU failure. The default
     /// implementation reports the capability as unavailable.
     virtual bool prepare_wavenet_group(const WavenetLayerArraySpec* /*arrays*/,
-                                       uint32_t /*num_arrays*/,
-                                       const float* const* /*weights*/,
-                                       uint32_t /*weights_len*/,
-                                       const float* /*head_scales*/, uint32_t /*count*/,
-                                       uint32_t /*block_size*/, uint32_t /*group*/) {
+                                       uint32_t /*num_arrays*/, const float* const* /*weights*/,
+                                       uint32_t /*weights_len*/, const float* /*head_scales*/,
+                                       uint32_t /*count*/, uint32_t /*block_size*/,
+                                       uint32_t /*group*/) {
         return false;
     }
 
@@ -502,7 +501,8 @@ public:
                                        float* const* /*out_blocks*/, uint32_t /*count*/,
                                        uint32_t /*block_size*/, uint32_t /*group*/,
                                        double* gpu_busy_us = nullptr) {
-        if (gpu_busy_us) *gpu_busy_us = -1.0;
+        if (gpu_busy_us)
+            *gpu_busy_us = -1.0;
         return false;
     }
 
@@ -524,11 +524,14 @@ public:
     virtual bool wavenet_forward_batch(const float* const* in_blocks, float* const* out_blocks,
                                        const uint32_t* instances, uint32_t count,
                                        uint32_t block_size, double* gpu_busy_us = nullptr) {
-        if (gpu_busy_us) *gpu_busy_us = -1.0;
-        if (!in_blocks || !out_blocks || !instances || count == 0) return false;
+        if (gpu_busy_us)
+            *gpu_busy_us = -1.0;
+        if (!in_blocks || !out_blocks || !instances || count == 0)
+            return false;
         for (uint32_t i = 0; i < count; ++i)
             for (uint32_t j = i + 1; j < count; ++j)
-                if (instances[i] == instances[j]) return false;
+                if (instances[i] == instances[j])
+                    return false;
         for (uint32_t i = 0; i < count; ++i)
             if (!wavenet_forward(in_blocks[i], out_blocks[i], block_size, instances[i]))
                 return false;

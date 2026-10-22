@@ -31,6 +31,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -43,7 +44,6 @@
 #include <sstream>
 #include <string>
 #include <thread>
-#include <atomic>
 #include <vector>
 
 using pulp::render::GpuCompute;
@@ -61,13 +61,14 @@ struct ModelShape {
     std::string name;
     std::vector<ArrayShape> arrays;
     float head_scale = 0.02f;
-    std::vector<float> weights;  // empty -> synthesized per instance
+    std::vector<float> weights; // empty -> synthesized per instance
     std::string provenance;
 };
 
 std::vector<uint32_t> pow2_dilations(uint32_t first, uint32_t last) {
     std::vector<uint32_t> d;
-    for (uint32_t v = first; v <= last; v *= 2u) d.push_back(v);
+    for (uint32_t v = first; v <= last; v *= 2u)
+        d.push_back(v);
     return d;
 }
 
@@ -96,32 +97,43 @@ ModelShape a1_preset(const std::string& name) {
         return m;
     }
     uint32_t c0 = 0, c1 = 0;
-    if (name == "lite") { c0 = 12; c1 = 6; }
-    else if (name == "feather") { c0 = 8; c1 = 4; }
-    else if (name == "nano") { c0 = 4; c1 = 2; }
-    else return {};
+    if (name == "lite") {
+        c0 = 12;
+        c1 = 6;
+    } else if (name == "feather") {
+        c0 = 8;
+        c1 = 4;
+    } else if (name == "nano") {
+        c0 = 4;
+        c1 = 2;
+    } else
+        return {};
     std::vector<uint32_t> d1 = {128, 256, 512};
-    for (uint32_t v : pow2_dilations(1, 512)) d1.push_back(v);
-    m.arrays = {{1, c0, c1, 3, false, pow2_dilations(1, 64)},
-                {c0, c1, 1, 3, true, d1}};
+    for (uint32_t v : pow2_dilations(1, 512))
+        d1.push_back(v);
+    m.arrays = {{1, c0, c1, 3, false, pow2_dilations(1, 64)}, {c0, c1, 1, 3, true, d1}};
     return m;
 }
 
 bool load_nam(const std::string& path, ModelShape& m) {
     std::ifstream f(path);
-    if (!f) return false;
+    if (!f)
+        return false;
     std::stringstream ss;
     ss << f.rdbuf();
     try {
         auto v = choc::json::parse(ss.str());
-        if (v["architecture"].getString() != "WaveNet") return false;
+        if (v["architecture"].getString() != "WaveNet")
+            return false;
         auto cfg = v["config"];
         auto layers = cfg["layers"];
         m.arrays.clear();
         for (uint32_t i = 0; i < layers.size(); ++i) {
             auto l = layers[i];
-            if (l["gated"].getBool() || l["activation"].getString() != "Tanh") return false;
-            if (l["condition_size"].getWithDefault<int64_t>(1) != 1) return false;
+            if (l["gated"].getBool() || l["activation"].getString() != "Tanh")
+                return false;
+            if (l["condition_size"].getWithDefault<int64_t>(1) != 1)
+                return false;
             ArrayShape a;
             a.input_size = static_cast<uint32_t>(l["input_size"].getInt64());
             a.channels = static_cast<uint32_t>(l["channels"].getInt64());
@@ -189,10 +201,11 @@ std::vector<float> make_input(std::size_t n, uint32_t seed) {
 std::vector<double> cpu_reference(const ModelShape& m, const std::vector<float>& w,
                                   const std::vector<float>& x) {
     const std::size_t T = x.size();
-    std::vector<double> cur(T);  // array input, input_size channels, sample-major
-    for (std::size_t t = 0; t < T; ++t) cur[t] = x[t];
+    std::vector<double> cur(T); // array input, input_size channels, sample-major
+    for (std::size_t t = 0; t < T; ++t)
+        cur[t] = x[t];
     uint32_t cur_ch = 1;
-    std::vector<double> head_in;  // previous array's head output (head_size == channels)
+    std::vector<double> head_in; // previous array's head output (head_size == channels)
     std::size_t off = 0;
     std::vector<double> out(T, 0.0);
     for (std::size_t ai = 0; ai < m.arrays.size(); ++ai) {
@@ -208,16 +221,19 @@ std::vector<double> cpu_reference(const ModelShape& m, const std::vector<float>&
             }
         off += static_cast<std::size_t>(C) * cur_ch;
         std::vector<double> head(T * C, 0.0);
-        if (ai > 0) head = head_in;
+        if (ai > 0)
+            head = head_in;
         std::vector<double> next(T * C), z(C), av(C);
         for (uint32_t dil : a.dilations) {
-            const std::size_t cw = off, cb = cw + C * C * K, mw = cb + C, lw = mw + C, lb = lw + C * C;
+            const std::size_t cw = off, cb = cw + C * C * K, mw = cb + C, lw = mw + C,
+                              lb = lw + C * C;
             for (std::size_t t = 0; t < T; ++t) {
                 for (uint32_t oc = 0; oc < C; ++oc) {
                     double acc = w[cb + oc];
                     for (uint32_t k = 0; k < K; ++k) {
                         const std::size_t back = static_cast<std::size_t>(dil) * (K - 1u - k);
-                        if (t < back) continue;  // zero history before the stream
+                        if (t < back)
+                            continue; // zero history before the stream
                         for (uint32_t ic = 0; ic < C; ++ic)
                             acc += w[cw + oc * C * K + ic * K + k] * act[(t - back) * C + ic];
                     }
@@ -230,7 +246,8 @@ std::vector<double> cpu_reference(const ModelShape& m, const std::vector<float>&
                 }
                 for (uint32_t oc = 0; oc < C; ++oc) {
                     double r = w[lb + oc];
-                    for (uint32_t ic = 0; ic < C; ++ic) r += w[lw + oc * C + ic] * av[ic];
+                    for (uint32_t ic = 0; ic < C; ++ic)
+                        r += w[lw + oc * C + ic] * av[ic];
                     next[t * C + oc] = act[t * C + oc] + r;
                 }
             }
@@ -242,7 +259,8 @@ std::vector<double> cpu_reference(const ModelShape& m, const std::vector<float>&
         for (std::size_t t = 0; t < T; ++t)
             for (uint32_t oc = 0; oc < H; ++oc) {
                 double acc = a.head_bias ? w[off + H * C + oc] : 0.0;
-                for (uint32_t ic = 0; ic < C; ++ic) acc += w[off + oc * C + ic] * head[t * C + ic];
+                for (uint32_t ic = 0; ic < C; ++ic)
+                    acc += w[off + oc * C + ic] * head[t * C + ic];
                 hout[t * H + oc] = acc;
             }
         off += static_cast<std::size_t>(H) * C + (a.head_bias ? H : 0u);
@@ -250,7 +268,8 @@ std::vector<double> cpu_reference(const ModelShape& m, const std::vector<float>&
         cur = act;
         cur_ch = C;
         if (ai + 1 == m.arrays.size())
-            for (std::size_t t = 0; t < T; ++t) out[t] = hout[t * H] * w.back();
+            for (std::size_t t = 0; t < T; ++t)
+                out[t] = hout[t * H] * w.back();
     }
     return out;
 }
@@ -262,13 +281,15 @@ double null_db(const std::vector<float>& got, const std::vector<double>& ref) {
         e += d * d;
         s += ref[i] * ref[i];
     }
-    if (s <= 0.0) return 0.0;
+    if (s <= 0.0)
+        return 0.0;
     return e <= 0.0 ? -300.0 : 10.0 * std::log10(e / s);
 }
 
 bool all_finite(const std::vector<float>& v) {
     for (float f : v)
-        if (!std::isfinite(f)) return false;
+        if (!std::isfinite(f))
+            return false;
     return true;
 }
 
@@ -279,9 +300,11 @@ double thread_cpu_us() {
 }
 
 double pct(std::vector<double> v, double p) {
-    if (v.empty()) return 0.0;
+    if (v.empty())
+        return 0.0;
     std::sort(v.begin(), v.end());
-    const std::size_t i = std::min(v.size() - 1, static_cast<std::size_t>(p * (v.size() - 1) + 0.5));
+    const std::size_t i =
+        std::min(v.size() - 1, static_cast<std::size_t>(p * (v.size() - 1) + 0.5));
     return v[i];
 }
 
@@ -290,7 +313,8 @@ std::vector<std::string> split(const std::string& s) {
     std::stringstream ss(s);
     std::string item;
     while (std::getline(ss, item, ','))
-        if (!item.empty()) out.push_back(item);
+        if (!item.empty())
+            out.push_back(item);
     return out;
 }
 
@@ -316,7 +340,7 @@ Plan make_specs(const ModelShape& m) {
     return p;
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv) {
     std::vector<std::string> models = {"nano", "feather", "lite", "standard"};
@@ -330,15 +354,30 @@ int main(int argc, char** argv) {
     bool keep_warm = false;
     for (int i = 1; i + 1 < argc; i += 2) {
         const std::string k = argv[i], v = argv[i + 1];
-        if (k == "--models") models = split(v);
-        else if (k == "--blocks") { blocks.clear(); for (auto& s : split(v)) blocks.push_back(std::stoul(s)); }
-        else if (k == "--instances") { counts.clear(); for (auto& s : split(v)) counts.push_back(std::stoul(s)); }
-        else if (k == "--mode") mode = v;
-        else if (k == "--seconds") seconds = std::stod(v);
-        else if (k == "--check-instances") check_instances = static_cast<uint32_t>(std::stoul(v));
-        else if (k == "--json") json_path = v;
-        else if (k == "--keep-warm") keep_warm = v == "1";
-        else { std::fprintf(stderr, "unknown argument %s\n", k.c_str()); return 2; }
+        if (k == "--models")
+            models = split(v);
+        else if (k == "--blocks") {
+            blocks.clear();
+            for (auto& s : split(v))
+                blocks.push_back(std::stoul(s));
+        } else if (k == "--instances") {
+            counts.clear();
+            for (auto& s : split(v))
+                counts.push_back(std::stoul(s));
+        } else if (k == "--mode")
+            mode = v;
+        else if (k == "--seconds")
+            seconds = std::stod(v);
+        else if (k == "--check-instances")
+            check_instances = static_cast<uint32_t>(std::stoul(v));
+        else if (k == "--json")
+            json_path = v;
+        else if (k == "--keep-warm")
+            keep_warm = v == "1";
+        else {
+            std::fprintf(stderr, "unknown argument %s\n", k.c_str());
+            return 2;
+        }
     }
     if (mode != "serial" && mode != "batch" && mode != "group") {
         std::fprintf(stderr, "--mode serial|batch|group\n");
@@ -346,7 +385,10 @@ int main(int argc, char** argv) {
     }
 
     auto probe = GpuCompute::create();
-    if (!probe || !probe->initialize_standalone()) { std::printf("SKIP: no GPU compute device\n"); return 77; }
+    if (!probe || !probe->initialize_standalone()) {
+        std::printf("SKIP: no GPU compute device\n");
+        return 77;
+    }
     probe.reset();
 
     // Optional background load: a second device continuously running trivial
@@ -356,13 +398,16 @@ int main(int argc, char** argv) {
     if (keep_warm) {
         warm_thread = std::thread([&] {
             auto dev = GpuCompute::create();
-            if (!dev || !dev->initialize_standalone()) return;
+            if (!dev || !dev->initialize_standalone())
+                return;
             ModelShape t = a1_preset("trivial");
             Plan tp = make_specs(t);
             auto w = synth_weights(t, 0);
-            if (!dev->prepare_wavenet(tp.specs.data(), 1, w.data(), blob_len(t), 32, w.back(), 0)) return;
+            if (!dev->prepare_wavenet(tp.specs.data(), 1, w.data(), blob_len(t), 32, w.back(), 0))
+                return;
             std::vector<float> a(32, 0.1f), b(32);
-            while (!stop_warm.load()) dev->wavenet_forward(a.data(), b.data(), 32, 0);
+            while (!stop_warm.load())
+                dev->wavenet_forward(a.data(), b.data(), 32, 0);
         });
     }
 
@@ -376,10 +421,16 @@ int main(int argc, char** argv) {
     for (const auto& mname : models) {
         ModelShape m;
         if (mname.find(".nam") != std::string::npos) {
-            if (!load_nam(mname, m)) { std::fprintf(stderr, "cannot load %s\n", mname.c_str()); return 2; }
+            if (!load_nam(mname, m)) {
+                std::fprintf(stderr, "cannot load %s\n", mname.c_str());
+                return 2;
+            }
         } else {
             m = a1_preset(mname);
-            if (m.arrays.empty()) { std::fprintf(stderr, "unknown model %s\n", mname.c_str()); return 2; }
+            if (m.arrays.empty()) {
+                std::fprintf(stderr, "unknown model %s\n", mname.c_str());
+                return 2;
+            }
         }
         const Plan plan = make_specs(m);
         const uint32_t need = blob_len(m);
@@ -392,7 +443,10 @@ int main(int argc, char** argv) {
             for (uint32_t N : counts) {
                 // A fresh device per row keeps plan memory bounded and history clean.
                 auto gpu = GpuCompute::create();
-                if (!gpu || !gpu->initialize_standalone()) { std::printf("SKIP: no GPU compute device\n"); return 77; }
+                if (!gpu || !gpu->initialize_standalone()) {
+                    std::printf("SKIP: no GPU compute device\n");
+                    return 77;
+                }
                 std::vector<std::vector<float>> weights(N);
                 bool ok = true;
                 std::vector<const float*> wp(N);
@@ -402,17 +456,24 @@ int main(int argc, char** argv) {
                     wp[i] = weights[i].data();
                     scales[i] = weights[i].back();
                     if (mode != "group")
-                        ok = gpu->prepare_wavenet(plan.specs.data(), static_cast<uint32_t>(plan.specs.size()),
+                        ok = gpu->prepare_wavenet(plan.specs.data(),
+                                                  static_cast<uint32_t>(plan.specs.size()),
                                                   weights[i].data(), need, B, weights[i].back(), i);
                 }
                 if (ok && mode == "group")
-                    ok = gpu->prepare_wavenet_group(plan.specs.data(), static_cast<uint32_t>(plan.specs.size()),
+                    ok = gpu->prepare_wavenet_group(plan.specs.data(),
+                                                    static_cast<uint32_t>(plan.specs.size()),
                                                     wp.data(), need, scales.data(), N, B, 0);
-                if (!ok) { std::printf("%s B=%u N=%u: prepare_wavenet failed\n", m.name.c_str(), B, N); ++failures; continue; }
+                if (!ok) {
+                    std::printf("%s B=%u N=%u: prepare_wavenet failed\n", m.name.c_str(), B, N);
+                    ++failures;
+                    continue;
+                }
 
                 const double period_us = 1e6 * B / sample_rate;
                 const uint32_t warm = 32;
-                const uint32_t periods = std::max<uint32_t>(64, static_cast<uint32_t>(seconds * sample_rate / B));
+                const uint32_t periods =
+                    std::max<uint32_t>(64, static_cast<uint32_t>(seconds * sample_rate / B));
                 const uint32_t check = std::min(N, check_instances);
                 // Correctness covers the warmup plus at least 4096 samples.
                 const uint32_t check_periods = std::max<uint32_t>(warm, (4096u + B - 1u) / B);
@@ -425,7 +486,8 @@ int main(int argc, char** argv) {
                 std::vector<const float*> ip(N);
                 std::vector<float*> op(N);
                 std::vector<uint32_t> ids(N);
-                for (uint32_t i = 0; i < N; ++i) ids[i] = i;
+                for (uint32_t i = 0; i < N; ++i)
+                    ids[i] = i;
                 std::vector<double> wall, cpu, gpu_busy;
                 wall.reserve(total);
                 // Stop early once the minimum period count and the time budget are
@@ -435,7 +497,8 @@ int main(int argc, char** argv) {
                 uint32_t ran = 0;
                 for (uint32_t p = 0; p < total && ok; ++p) {
                     if (p >= min_total &&
-                        std::chrono::duration<double>(Clock::now() - budget_start).count() >= seconds)
+                        std::chrono::duration<double>(Clock::now() - budget_start).count() >=
+                            seconds)
                         break;
                     ran = p + 1;
                     for (uint32_t i = 0; i < N; ++i) {
@@ -450,35 +513,48 @@ int main(int argc, char** argv) {
                     const double c0 = thread_cpu_us();
                     const auto t0 = Clock::now();
                     if (mode == "serial") {
-                        for (uint32_t i = 0; i < N && ok; ++i) ok = gpu->wavenet_forward(ip[i], op[i], B, i);
+                        for (uint32_t i = 0; i < N && ok; ++i)
+                            ok = gpu->wavenet_forward(ip[i], op[i], B, i);
                     } else if (mode == "batch") {
-                        ok = gpu->wavenet_forward_batch(ip.data(), op.data(), ids.data(), N, B, timed ? &g : nullptr);
+                        ok = gpu->wavenet_forward_batch(ip.data(), op.data(), ids.data(), N, B,
+                                                        timed ? &g : nullptr);
                     } else {
-                        ok = gpu->wavenet_forward_group(ip.data(), op.data(), N, B, 0, timed ? &g : nullptr);
+                        ok = gpu->wavenet_forward_group(ip.data(), op.data(), N, B, 0,
+                                                        timed ? &g : nullptr);
                     }
                     const auto t1 = Clock::now();
                     const double c1 = thread_cpu_us();
                     if (p >= warm) {
-                        if (g >= 0.0) gpu_busy.push_back(g);
+                        if (g >= 0.0)
+                            gpu_busy.push_back(g);
                         if (!timed) {
-                            wall.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+                            wall.push_back(
+                                std::chrono::duration<double, std::micro>(t1 - t0).count());
                             cpu.push_back(c1 - c0);
                         }
                     }
                 }
-                if (!ok) { std::printf("%s B=%u N=%u: forward failed\n", m.name.c_str(), B, N); ++failures; continue; }
+                if (!ok) {
+                    std::printf("%s B=%u N=%u: forward failed\n", m.name.c_str(), B, N);
+                    ++failures;
+                    continue;
+                }
                 (void)ran;
 
                 // Correctness: every checked instance plus the last one.
                 double worst = -300.0;
                 bool finite = true;
                 std::vector<uint32_t> checked;
-                for (uint32_t i = 0; i < check; ++i) checked.push_back(i);
-                if (N > check) checked.push_back(N - 1);
+                for (uint32_t i = 0; i < check; ++i)
+                    checked.push_back(i);
+                if (N > check)
+                    checked.push_back(N - 1);
                 const std::size_t ns = static_cast<std::size_t>(check_periods) * B;
                 for (uint32_t i : checked) {
-                    std::vector<float> x(in[i].begin(), in[i].begin() + static_cast<std::ptrdiff_t>(ns));
-                    std::vector<float> y(out[i].begin(), out[i].begin() + static_cast<std::ptrdiff_t>(ns));
+                    std::vector<float> x(in[i].begin(),
+                                         in[i].begin() + static_cast<std::ptrdiff_t>(ns));
+                    std::vector<float> y(out[i].begin(),
+                                         out[i].begin() + static_cast<std::ptrdiff_t>(ns));
                     finite = finite && all_finite(y);
                     worst = std::max(worst, null_db(y, cpu_reference(m, weights[i], x)));
                 }
@@ -488,57 +564,68 @@ int main(int argc, char** argv) {
                 // land above the -80 dB pass line, proving the gate can see them.
                 double ctl_swap = 0.0, ctl_gain = 0.0;
                 {
-                    std::vector<float> y0(out[0].begin(), out[0].begin() + static_cast<std::ptrdiff_t>(ns));
+                    std::vector<float> y0(out[0].begin(),
+                                          out[0].begin() + static_cast<std::ptrdiff_t>(ns));
                     std::vector<float> xo = make_input(ns, 1000u);
                     ctl_swap = null_db(y0, cpu_reference(m, weights[0], xo));
-                    std::vector<float> x0(in[0].begin(), in[0].begin() + static_cast<std::ptrdiff_t>(ns));
+                    std::vector<float> x0(in[0].begin(),
+                                          in[0].begin() + static_cast<std::ptrdiff_t>(ns));
                     auto wrong = weights[0];
                     wrong.back() *= 1.001f;
                     ctl_gain = null_db(y0, cpu_reference(m, wrong, x0));
                 }
                 const bool pass = finite && worst < -80.0 && ctl_swap > -80.0 && ctl_gain > -80.0;
-                if (!pass) ++failures;
+                if (!pass)
+                    ++failures;
 
                 double mean = 0.0;
-                for (double v : wall) mean += v;
+                for (double v : wall)
+                    mean += v;
                 mean /= static_cast<double>(wall.size());
                 double cmean = 0.0;
-                for (double v : cpu) cmean += v;
+                for (double v : cpu)
+                    cmean += v;
                 cmean /= static_cast<double>(cpu.size());
                 double gmean = -1.0;
                 if (!gpu_busy.empty()) {
                     gmean = 0.0;
-                    for (double v : gpu_busy) gmean += v;
+                    for (double v : gpu_busy)
+                        gmean += v;
                     gmean /= static_cast<double>(gpu_busy.size());
                 }
                 uint32_t misses = 0;
-                for (double v : wall) misses += v > period_us ? 1u : 0u;
+                for (double v : wall)
+                    misses += v > period_us ? 1u : 0u;
                 const double p50 = pct(wall, 0.50), p99 = pct(wall, 0.99), mx = pct(wall, 1.0),
                              mn = pct(wall, 0.0);
-                std::printf("%-26s %5u %4u %6s %10.1f %10.1f %10.1f %10.1f %10.1f %10.1f %8.2f %6u %9.1f%s\n",
+                std::printf("%-26s %5u %4u %6s %10.1f %10.1f %10.1f %10.1f %10.1f %10.1f %8.2f %6u "
+                            "%9.1f%s\n",
                             m.name.c_str(), B, N, mode.c_str(), mean, p50, p99, mn, cmean, gmean,
                             period_us / mean, misses, worst, pass ? "" : "  FAIL");
                 if (!pass)
-                    std::printf("    finite=%d swap_control=%.1f dB gain_control=%.1f dB\n", finite ? 1 : 0,
-                                ctl_swap, ctl_gain);
+                    std::printf("    finite=%d swap_control=%.1f dB gain_control=%.1f dB\n",
+                                finite ? 1 : 0, ctl_swap, ctl_gain);
                 char buf[1024];
-                std::snprintf(buf, sizeof(buf),
-                              "%s  {\"model\":\"%s\",\"provenance\":\"%s\",\"block\":%u,\"instances\":%u,"
-                              "\"mode\":\"%s\",\"periods\":%zu,\"period_us\":%.3f,\"mean_us\":%.3f,"
-                              "\"p50_us\":%.3f,\"p99_us\":%.3f,\"max_us\":%.3f,\"min_us\":%.3f,\"cpu_us\":%.3f,"
-                              "\"gpu_busy_us\":%.3f,\"rt_ratio\":%.4f,\"misses\":%u,\"null_db_worst\":%.2f,"
-                              "\"control_swap_db\":%.2f,\"control_gain_db\":%.2f,\"finite\":%s,\"pass\":%s}",
-                              first_row ? "" : ",\n", m.name.c_str(), m.provenance.c_str(), B, N,
-                              mode.c_str(), wall.size(), period_us, mean, p50, p99, mx, mn, cmean, gmean,
-                              period_us / mean, misses, worst, ctl_swap, ctl_gain,
-                              finite ? "true" : "false", pass ? "true" : "false");
+                std::snprintf(
+                    buf, sizeof(buf),
+                    "%s  {\"model\":\"%s\",\"provenance\":\"%s\",\"block\":%u,\"instances\":%u,"
+                    "\"mode\":\"%s\",\"periods\":%zu,\"period_us\":%.3f,\"mean_us\":%.3f,"
+                    "\"p50_us\":%.3f,\"p99_us\":%.3f,\"max_us\":%.3f,\"min_us\":%.3f,\"cpu_us\":%."
+                    "3f,"
+                    "\"gpu_busy_us\":%.3f,\"rt_ratio\":%.4f,\"misses\":%u,\"null_db_worst\":%.2f,"
+                    "\"control_swap_db\":%.2f,\"control_gain_db\":%.2f,\"finite\":%s,\"pass\":%s}",
+                    first_row ? "" : ",\n", m.name.c_str(), m.provenance.c_str(), B, N,
+                    mode.c_str(), wall.size(), period_us, mean, p50, p99, mx, mn, cmean, gmean,
+                    period_us / mean, misses, worst, ctl_swap, ctl_gain, finite ? "true" : "false",
+                    pass ? "true" : "false");
                 json += buf;
                 first_row = false;
             }
         }
     }
     stop_warm = true;
-    if (warm_thread.joinable()) warm_thread.join();
+    if (warm_thread.joinable())
+        warm_thread.join();
     json += "\n]\n";
     if (!json_path.empty()) {
         std::ofstream f(json_path);
