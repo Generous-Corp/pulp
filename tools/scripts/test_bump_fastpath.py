@@ -86,12 +86,13 @@ class ClassifyNotice(unittest.TestCase):
                 + classify_snippet().replace("${{ github.token }}", "token")
                 + '\necho "native_build_required=$native_build_required"\n')
             result = subprocess.run(
-                ["/bin/bash", "-c", script], capture_output=True, text=True, timeout=60,
+                ["/bin/bash", "-c", script], capture_output=True, text=True, encoding="utf-8",
+                timeout=60,
                 env={"PATH": "/usr/bin:/bin", "GITHUB_HEAD_REF": head_ref,
                      "GITHUB_STEP_SUMMARY": str(summary)})
             self.assertEqual(result.returncode, 0, result.stderr)
             return (result.stdout, result.stderr,
-                    summary.read_text() if summary.exists() else "")
+                    summary.read_text(encoding="utf-8") if summary.exists() else "")
 
     def test_a_bump_refused_by_the_verifier_reports_its_reason(self) -> None:
         out, err, summary = self.run_block(
@@ -193,7 +194,7 @@ class Report(unittest.TestCase):
 
 class AdvisorySkips(unittest.TestCase):
     def jobs(self, name: str) -> dict:
-        return yaml.safe_load((ROOT / ".github" / "workflows" / name).read_text())["jobs"]
+        return yaml.safe_load((ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8"))["jobs"]
 
     def test_every_job_skips_the_bump_and_keeps_its_condition_otherwise(self) -> None:
         for workflow in ADVISORY:
@@ -224,14 +225,14 @@ class AdvisorySkips(unittest.TestCase):
     def test_non_bump_pull_requests_still_trigger_each_workflow(self) -> None:
         for workflow in ADVISORY:
             with self.subTest(workflow=workflow):
-                doc = yaml.safe_load((ROOT / ".github" / "workflows" / workflow).read_text())
+                doc = yaml.safe_load((ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
                 on = doc.get("on", doc.get(True))
                 self.assertIn("pull_request", on)
                 self.assertEqual(on["pull_request"].get("types"), ["auto_merge_enabled"])
                 self.assertNotIn("branches-ignore", on["pull_request"])
 
     def test_no_skipped_context_is_required(self) -> None:
-        ruleset = json.loads(RULESET.read_text())
+        ruleset = json.loads(RULESET.read_text(encoding="utf-8"))
         required = {check["context"] for rule in ruleset["rules"]
                     if rule["type"] == "required_status_checks"
                     for check in rule["parameters"]["required_status_checks"]}
@@ -265,7 +266,7 @@ class AdvisorySkips(unittest.TestCase):
         return names
 
     def test_the_weekly_count_runs_the_report(self) -> None:
-        doc = yaml.safe_load(WEEKLY.read_text())
+        doc = yaml.safe_load(WEEKLY.read_text(encoding="utf-8"))
         self.assertIn("schedule", doc.get("on", doc.get(True)))
         steps = [s.get("run", "") for job in doc["jobs"].values() for s in job["steps"]]
         self.assertTrue(any("tools/scripts/bump_fastpath_report.py" in s for s in steps))

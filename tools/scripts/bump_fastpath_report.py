@@ -42,7 +42,7 @@ Fetch = Callable[[str], Any]
 def gh_fetch(gh: str) -> Fetch:
     def fetch(endpoint: str) -> Any:
         out = subprocess.run([gh, "api", endpoint], capture_output=True, text=True,
-                             check=True, timeout=120).stdout
+                             encoding="utf-8", check=True, timeout=120).stdout
         return json.loads(out)
     return fetch
 

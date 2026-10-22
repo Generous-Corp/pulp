@@ -345,6 +345,15 @@ alone would make one runner image's version the contract while `docs-material.ym
 and `docs-deploy.yml` drifted from it. If image drift ever does flip this check,
 pin all three together rather than just this one.
 
+**The release bot's bump skips the advisory lanes.** `control-shipping-native.yml`,
+`examples-validation.yml`, `intel-portability.yml` and `coverage.yml` AND
+`github.head_ref != 'release/version-bump'` into every job's condition. The
+bump's tree is main's plus version files, which those lanes already ran on, none
+of their contexts is required, and it keeps bump pull requests off hosted
+Windows, macOS and Linux runners. `tools/scripts/test_bump_fastpath.py` checks
+the guard on every job and that no skipped context is in
+`.github/rulesets/main-protection.json`.
+
 **Status: advisory until promoted.** Until `api-contracts` is added to `main`'s
 `required_status_checks`, this lane reports the same defect the old one did and is
 equally unable to stop it. Promotion is a branch-protection change:
