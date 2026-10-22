@@ -489,12 +489,43 @@ TEST_CASE("FastMath log2 orders common gain ratios", "[signal][fast_math]") {
 
 namespace {
 
+// FastMath::tanh's contract written with early returns: exactly +/-1 beyond
+// |x| = 4, the [7/6] Pade form inside.
+float tanh_reference(float x) {
+    if (x < -4.0f) return -1.0f;
+    if (x > 4.0f) return 1.0f;
+    const float x2 = x * x;
+    const float num = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
+    const float den = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
+    return num / den;
+}
+
 double ulp_of(double value) {
     const float f = static_cast<float>(std::abs(value));
     return static_cast<double>(std::nextafter(f, std::numeric_limits<float>::infinity()) - f);
 }
 
 } // namespace
+
+TEST_CASE("FastMath::tanh is bit-identical to its saturating Pade contract",
+          "[signal][fast-math][tanh]") {
+    std::size_t mismatches = 0;
+    for (float x = -12.0f; x <= 12.0f; x += 1.0e-4f) {
+        const float a = FastMath::tanh(x);
+        const float b = tanh_reference(x);
+        mismatches += std::bit_cast<std::uint32_t>(a) != std::bit_cast<std::uint32_t>(b);
+    }
+    CHECK(mismatches == 0);
+    CHECK(FastMath::tanh(4.0f) == tanh_reference(4.0f));
+    CHECK(FastMath::tanh(-4.0f) == tanh_reference(-4.0f));
+    CHECK(FastMath::tanh(std::nextafter(4.0f, 5.0f)) == 1.0f);
+    CHECK(FastMath::tanh(std::nextafter(-4.0f, -5.0f)) == -1.0f);
+    CHECK(FastMath::tanh(1.0e30f) == 1.0f);
+    CHECK(FastMath::tanh(-1.0e30f) == -1.0f);
+    CHECK(FastMath::tanh(std::numeric_limits<float>::infinity()) == 1.0f);
+    CHECK(FastMath::tanh(-std::numeric_limits<float>::infinity()) == -1.0f);
+    CHECK(std::isnan(FastMath::tanh(std::numeric_limits<float>::quiet_NaN())));
+}
 
 TEST_CASE("log10_float stays within a few ulps of libm",
           "[signal][fast-math][decibel]") {
