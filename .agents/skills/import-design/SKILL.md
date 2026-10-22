@@ -498,6 +498,14 @@ knowing before you touch that file:
   hierarchy reports `overlapping_reorders > 0`; the count that forced it is
   recorded as `native_tree_flattened_overlapping_reorders`. Always flattening
   on a canvas cost static canvas panels their sections for no fidelity gain.
+- **A canvas snapshot is a VIEWPORT PLANE, not an element raster.** Capture
+  composites the canvas bitmap into its content box on a transparent,
+  capture-sized PNG. Native lowering keeps the canvas as a box (its border and
+  background paint normally) holding the plane as an `image` child at the page
+  origin, clipped to the content box and anchored `<canvas anchor>/layer[0]`.
+  Drawing the plane into the canvas box with `fill` shrinks the whole page
+  into the canvas. Only an asset whose pixel size matches the capture is
+  treated as a plane.
 - **Every lowered node, SVG shapes included, carries `backend_node_id`.** A
   vector node's box is its root `<svg>`'s box (the viewBox frame), never the
   shape's ink box, so anything comparing geometry by identity must compare a
