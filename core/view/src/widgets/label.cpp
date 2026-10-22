@@ -1568,13 +1568,13 @@ void Label::paint_selection_line_(canvas::Canvas& canvas, const std::string& lin
 namespace {
 
 // `view`'s y offset from the captured frame it was imported into: the nearest
-// ancestor that lays out at sub-pixel precision, which every import lane sets
-// on its root. Ancestors above that frame (a host's embed offset, scroll or
-// transform) do not count. Without such an ancestor, the offset from the top.
+// ancestor marked as a captured frame root. Ancestors above that frame (a
+// host's embed offset, scroll or transform) do not count. Without such an
+// ancestor, the offset from the top.
 float captured_frame_y(const View& view) {
     float y = 0.0f;
     for (const View* v = &view; v != nullptr; v = v->parent()) {
-        if (v->subpixel_layout()) break;
+        if (v->captured_frame_root()) break;
         y += v->bounds().y;
     }
     return y;

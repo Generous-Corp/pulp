@@ -3060,8 +3060,9 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     // de-centering concentric shapes (knob value-ring vs body). Opt the
     // host's layout pass out; typeof-guarded so the bundle still loads on
     // runtimes that predate the function and on web-compat DOM hosts
-    // (browsers lay out subpixel already).
-    ss << "if (typeof setSubpixelLayout === 'function') setSubpixelLayout('', true);\n\n";
+    // (browsers lay out subpixel already). The root is also the captured frame.
+    ss << "if (typeof setSubpixelLayout === 'function') setSubpixelLayout('', true);\n"
+       << "if (typeof setCapturedFrameRoot === 'function') setCapturedFrameRoot('', true);\n\n";
 
     // Register bundled (non-system) fonts BEFORE any setFontFamily, so a
     // family like "Clash Grotesk" / "Inter" resolves to the shipped face

@@ -976,7 +976,7 @@ TEST_CASE("A captured baseline snaps on its captured frame's grid and not the ho
     // An imported panel mounted at a fractional offset, or under a scaled or
     // scrolled host container, must paint its text exactly as it does at the
     // origin: the snap grid is the captured frame (the import root, which
-    // lays out at sub-pixel precision), not the application root.
+    // every import lane marks as one), not the application root.
     const auto face = resolved_face_identity("Inter", 400.0f);
     if (face.empty()) SKIP("Inter does not resolve to a real face on this host");
     auto local_baseline = [&](float embed_y, float scale, bool mark_frame) {
@@ -987,7 +987,9 @@ TEST_CASE("A captured baseline snaps on its captured frame's grid and not the ho
         if (scale != 1.0f) embed->set_scale(scale);
         auto frame = std::make_unique<View>();
         frame->set_bounds({0, 0, 500, 300});
-        frame->set_subpixel_layout(mark_frame);
+        frame->set_captured_frame_root(mark_frame);
+        // Sub-pixel layout is a separate property and does not mark a frame.
+        frame->set_subpixel_layout(true);
         auto label = std::make_unique<Label>("Grid");
         label->set_font_family("Inter");
         label->set_font_size(17.0f);
@@ -1010,7 +1012,8 @@ TEST_CASE("A captured baseline snaps on its captured frame's grid and not the ho
     CHECK(local_baseline(10.5f, 1.0f, true) == Catch::Approx(at_origin).margin(1e-4f));
     CHECK(local_baseline(10.5f, 1.5f, true) == Catch::Approx(at_origin).margin(1e-4f));
     // Control: without the frame marker the grid falls back to the host's,
-    // and the half-pixel embed offset moves the snapped baseline.
+    // and the half-pixel embed offset moves the snapped baseline, even though
+    // the frame still lays out at sub-pixel precision.
     CHECK(std::abs(local_baseline(10.5f, 1.0f, false) - at_origin) > 0.25f);
 }
 

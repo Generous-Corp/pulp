@@ -3144,6 +3144,8 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
         // is discovered pass-wide, so setting it on the imported root also
         // covers a host that embeds this tree under its own layout root.
         root->set_subpixel_layout(true);
+        // Captured text snaps its baselines to this frame's grid.
+        root->set_captured_frame_root(true);
         if (options.diagnostics_out != nullptr) {
             options.diagnostics_out->insert(options.diagnostics_out->end(),
                                             materialize_diagnostics.begin(),

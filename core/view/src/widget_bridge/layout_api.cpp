@@ -879,6 +879,16 @@ void BridgeRegistrars::register_layout_position_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // setCapturedFrameRoot(id, enabled) — mark this view as the root of a
+    // captured frame (View::set_captured_frame_root), the grid captured text
+    // baselines snap to. Design-import codegen emits it on the imported root.
+    register_bridge_function(api, "setCapturedFrameRoot", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        if (v) v->set_captured_frame_root(args.get<bool>(1, true));
+        return choc::value::Value();
+    });
+
     // setTop/setRight/setBottom/setLeft(id, px-or-percent) — CSS positioning
     // offsets. Accept either a number ("50" -> px) or a percentage string
     // ("50%" -> percent of parent). The CSS translator and @pulp/react

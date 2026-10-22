@@ -1248,6 +1248,8 @@ TEST_CASE("build_native_view_tree opts the imported root into sub-pixel layout",
     auto root = build_native_view_tree(ir, {}, {});
     REQUIRE(root != nullptr);
     REQUIRE(root->subpixel_layout());
+    // The import root is also the captured frame its text baselines snap to.
+    CHECK(root->captured_frame_root());
 }
 
 TEST_CASE("sub-pixel layout keeps concentric siblings on one centre",

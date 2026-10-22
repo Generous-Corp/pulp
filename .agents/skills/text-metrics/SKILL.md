@@ -42,7 +42,11 @@ taller than the box overflows it evenly, top and bottom.
 Chromium paints each captured line with its baseline on a whole CSS px of the
 page. `captured_baseline()` takes the grid's origin as `root_y`: the label's
 offset from its **captured frame**, the nearest ancestor with
-`subpixel_layout()` set (every import lane sets it on the import root). Never
+`captured_frame_root()` set. Every import lane marks its root: the native
+materializer and the C++ codegen call `set_captured_frame_root(true)`, the JS
+codegen emits `setCapturedFrameRoot('', true)`. It is deliberately separate
+from `subpixel_layout()`, which a hand-built tree can set without being a
+captured frame; an import lane that skips the marker snaps to the tree top. Never
 sum offsets up to the application root: an import mounted at y=10.5, or under
 a scaled or animating host, then snaps against the host's grid and its text
 moves by a pixel. Native, non-captured text is not snapped at all.

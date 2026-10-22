@@ -898,6 +898,8 @@ void emit_node(std::ostringstream& out,
         // component factories, so opt each tree out of Yoga's pixel rounding.
         emit_line(out, depth, ctx.opts.indent_spaces,
                   var + "->set_subpixel_layout(true);");
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  var + "->set_captured_frame_root(true);");
         emit_line(out, depth, ctx.opts.indent_spaces, "return " + var + ";");
     }
 
