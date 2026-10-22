@@ -903,7 +903,11 @@ TEST_CASE("Oversampler factor and sample-rate setters are order-independent",
 
 TEST_CASE("Oversampler polyphase_iir kind selects half-band filter",
           "[signal][oversampling][polyphase_iir]") {
+    // polyphase_iir is the default: the biquad lane's ~7 dB rejection made
+    // an unconfigured oversampler an anti-aliasing trap.
     Oversampler os;
+    REQUIRE(os.kind() == Oversampler::Kind::polyphase_iir);
+    os.set_kind(Oversampler::Kind::fir_biquad);
     REQUIRE(os.kind() == Oversampler::Kind::fir_biquad);
     os.set_kind(Oversampler::Kind::polyphase_iir);
     REQUIRE(os.kind() == Oversampler::Kind::polyphase_iir);
@@ -1021,6 +1025,7 @@ TEST_CASE("Oversampler polyphase_iir vs fir_biquad both reject stopband",
     // had the chance to fold), and confirm both lanes attenuate.
     Oversampler os_fir;
     Oversampler os_iir;
+    os_fir.set_kind(Oversampler::Kind::fir_biquad);
     os_iir.set_kind(Oversampler::Kind::polyphase_iir);
     os_fir.set_factor(Oversampler::Factor::x2);
     os_iir.set_factor(Oversampler::Factor::x2);

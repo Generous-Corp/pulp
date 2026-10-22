@@ -19,16 +19,19 @@ namespace pulp::signal {
 //
 // Three filter `Kind`s are available:
 //
-//   * `fir_biquad` (default) — a Butterworth Biquad pair per 2x stage.
+//   * `fir_biquad` — a Butterworth Biquad pair per 2x stage.
 //     Lightweight and symmetric, but a single biquad cannot reject much near
 //     the fold boundary: worst-case base-band alias rejection is only around
 //     7 dB, and the passband is about -1.9 dB at 0.3 of the base rate. Those
 //     figures hold at every factor — raising the factor buys headroom for the
 //     callback's own harmonics, not a cleaner filter. Reach for one of the
 //     kinds below when the anti-aliasing itself has to be good.
-//   * `polyphase_iir` — elliptic polyphase half-band IIR per 2x stage
-//     (`design_halfband_iir`). Minimum phase, so no constant latency, and
-//     the cheapest of the three at a given rejection. `Quality::standard`
+//   * `polyphase_iir` (default) — elliptic polyphase half-band IIR per 2x
+//     stage (`design_halfband_iir`). Minimum phase, so no constant latency,
+//     and the cheapest of the three: about a sixth of the biquad lane's cost
+//     at x2 while rejecting 88 dB more. Its round trip delays the base band
+//     by 2.66 samples near DC at x2 (3.49 at x4), rising toward the passband
+//     edge, against the biquad lane's 0.97 (1.46). `Quality::standard`
 //     keeps the base band flat (< 1e-8 dB droop) to 0.42 Fs and rejects
 //     images and aliases from 0.58 Fs by at least 94 dB; `Quality::pristine`
 //     is flat to 0.45 Fs and rejects from 0.55 Fs by at least 140 dB (the
@@ -64,8 +67,8 @@ template <typename SampleType = float> class OversamplerT {
 
     /// Which anti-aliasing filter family the oversampler uses.
     enum class Kind {
-        fir_biquad,       ///< Original biquad lowpass on both sides.
-        polyphase_iir,    ///< Elliptic half-band polyphase IIR (allpass network).
+        fir_biquad,       ///< Butterworth biquad lowpass on both sides; ~7 dB rejection.
+        polyphase_iir,    ///< Elliptic half-band polyphase IIR (allpass network). Default.
         linear_phase_fir, ///< Linear-phase FIR with reported integer latency.
     };
 
@@ -243,7 +246,7 @@ template <typename SampleType = float> class OversamplerT {
     // Oversampled samples per chunk; the base-rate chunk is this over the factor.
     static constexpr std::size_t kScratchSamples = 512;
     Factor factor_ = Factor::x2;
-    Kind kind_ = Kind::fir_biquad;
+    Kind kind_ = Kind::polyphase_iir;
     Quality quality_ = Quality::standard;
     SampleType sample_rate_ = SampleType{44100.0f};
 
