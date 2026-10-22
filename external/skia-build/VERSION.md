@@ -146,7 +146,7 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-mac-universal-gpu-release.zip` | `0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9` |
 | `skia-build-mac-x86_64-gpu-release.zip` | `0aeb3a4879d59bf42bb4a42a21cda292b6c5401fa24377b241623a600664471d` |
 | `skia-build-wasm-wasm32-gpu-release.zip` | `a5218b84266b0d79dd9c1ce514be6d06f8898085aaa9309a9830442f29ca4887` |
-| `skia-build-win-arm64-gpu-release.zip` | `18e57481e84992fecccbc4ac0f8f283c4a68d90d7978a61ce2e68f21dd34a9c7` |
+| `skia-build-win-arm64-gpu-release.zip` | `2c1ff32381e46f39f84312affdd690dd1220782b76d88ae3e3b1d67fdf79d21d` |
 | `skia-build-win-x64-gpu-release.zip` | `9480972c67f07d0762183e962ec3483210eb446ff10ca4e9ddf83ad188f0d11b` |
 
 The manifest's `mac-arm64` selector uses the universal archive, so its cache
@@ -167,6 +167,14 @@ universal provider used by Pulp and keeps arm64/universal cache generations
 identical; the standalone asset remains recorded above for release coverage.
 
 ### Windows ARM64 asset provenance
+
+The `chrome/m153` ARM64 asset was replaced on 2026-10-22 after a native
+`windows-11-arm` rebuild through the provenance-checked workflow. The current
+asset is 80,821,298 bytes with SHA-256
+`2c1ff32381e46f39f84312affdd690dd1220782b76d88ae3e3b1d67fdf79d21d`. Its
+receipt records MSVC toolset `14.51.36231`, compiler version
+`19.51.36260`, Windows SDK `10.0.26100.0`, native ARM64, and static `/MT`.
+Consumers must use that toolset or a newer toolset with a passing link probe.
 
 The fork re-published `skia-build-win-arm64-gpu-release.zip` in place under the
 `chrome/m153` tag at 2026-10-11T22:53:43Z (backfill run 38178800952 at fork

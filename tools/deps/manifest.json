@@ -1042,7 +1042,7 @@
           },
           "win-arm64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-arm64-gpu-release.zip",
-            "sha256": "18e57481e84992fecccbc4ac0f8f283c4a68d90d7978a61ce2e68f21dd34a9c7"
+            "sha256": "2c1ff32381e46f39f84312affdd690dd1220782b76d88ae3e3b1d67fdf79d21d"
           },
           "win-x64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-x64-gpu-release.zip",
