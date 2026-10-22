@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
+#include "support/denormal_tail.hpp"
 
 #include <pulp/signal/filter_design.hpp>
 #include <pulp/signal/iir_design.hpp>
@@ -12,6 +13,8 @@
 #include <chrono>
 #include <cmath>
 #include <complex>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <span>
 #include <vector>
@@ -392,4 +395,121 @@ TEST_CASE("SOS cascade Release throughput stays bounded", "[signal][sos-cascade]
 #else
     static_cast<void>(elapsed);
 #endif
+}
+
+namespace {
+
+std::vector<float> cascade_busy_signal(std::size_t n) {
+    std::vector<float> s(n);
+    std::uint32_t lcg = 0x5eed123u;
+    for (std::size_t i = 0; i < n; ++i) {
+        lcg = lcg * 1664525u + 1013904223u;
+        const float noise = static_cast<float>(lcg >> 8) / 16777216.0f - 0.5f;
+        const float t = static_cast<float>(i) / 48000.0f;
+        s[i] = 0.5f * std::sin(6.2831853f * 220.0f * t) + 0.3f * std::sin(6.2831853f * 3150.0f * t) +
+               0.2f * noise;
+    }
+    return s;
+}
+
+std::vector<BiquadCoefficients> peaking_bands(std::size_t count) {
+    std::vector<BiquadCoefficients> bands;
+    for (std::size_t k = 0; k < count; ++k) {
+        Biquad design;
+        design.set_coefficients(Biquad::Type::peaking,
+                                100.0f * std::pow(2.0f, static_cast<float>(k % 8)) *
+                                    (1.0f + 0.1f * static_cast<float>(k / 8)),
+                                2.0f, 48000.0f, k % 2 ? -6.0f : 6.0f);
+        bands.push_back(design.coefficients());
+    }
+    return bands;
+}
+
+} // namespace
+
+TEST_CASE("SosCascade block path is bit-identical to chained Biquad sample paths",
+          "[signal][sos][determinism]") {
+    static constexpr int kPattern[] = {1, 63, 64, 65, 7, 128, 333, 1024, 2, 512, 31};
+    const auto input = cascade_busy_signal(8192);
+    // Section counts below, at and above one sample-major pass, and a
+    // remainder pass after full ones.
+    for (std::size_t count : {std::size_t{1}, std::size_t{3}, std::size_t{8}, std::size_t{9},
+                              std::size_t{13}, std::size_t{16}}) {
+        INFO("sections " << count);
+        const auto bands = peaking_bands(count);
+        std::vector<Biquad> chain(count);
+        for (std::size_t k = 0; k < count; ++k)
+            chain[k].set_coefficients(bands[k]);
+        SosCascadeT<float, 16> cascade;
+        REQUIRE(cascade.prepare(16));
+        REQUIRE(cascade.set_coefficients(std::span<const BiquadCoefficients>(bands)) ==
+                SosCascadeInstallStatus::installed);
+
+        auto expected = input;
+        for (float& x : expected)
+            for (auto& section : chain)
+                x = section.process(x);
+        auto actual = input;
+        std::size_t pos = 0;
+        for (std::size_t k = 0; pos < actual.size(); ++k) {
+            const std::size_t block = std::min<std::size_t>(
+                static_cast<std::size_t>(kPattern[k % std::size(kPattern)]), actual.size() - pos);
+            cascade.process(actual.data() + pos, block);
+            pos += block;
+        }
+        REQUIRE(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0);
+        // The block path wrote its state back: one more sample through each
+        // path still agrees.
+        float probe_chain = 0.25f;
+        for (auto& section : chain)
+            probe_chain = section.process(probe_chain);
+        CHECK(cascade.process(0.25f) == probe_chain);
+    }
+}
+
+TEST_CASE("SosCascade block path keeps preserved state across a coefficient install",
+          "[signal][sos][determinism]") {
+    const auto input = cascade_busy_signal(2048);
+    const auto first = peaking_bands(4);
+    auto second = peaking_bands(6);
+    SosCascadeT<float, 16> by_block;
+    SosCascadeT<float, 16> by_sample;
+    REQUIRE(by_block.prepare(16));
+    REQUIRE(by_sample.prepare(16));
+    by_block.set_coefficients(std::span<const BiquadCoefficients>(first));
+    by_sample.set_coefficients(std::span<const BiquadCoefficients>(first));
+    auto a = input;
+    auto b = input;
+    by_block.process(a.data(), 1000);
+    for (std::size_t i = 0; i < 1000; ++i) b[i] = by_sample.process(b[i]);
+    by_block.set_coefficients(std::span<const BiquadCoefficients>(second),
+                              SosCascadeTransition::preserve_state);
+    by_sample.set_coefficients(std::span<const BiquadCoefficients>(second),
+                               SosCascadeTransition::preserve_state);
+    by_block.process(a.data() + 1000, a.size() - 1000);
+    for (std::size_t i = 1000; i < b.size(); ++i) b[i] = by_sample.process(b[i]);
+    CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
+}
+
+TEST_CASE("SosCascade block path flushes a decaying tail without subnormal residency",
+          "[signal][sos][denormal]") {
+    using namespace pulp::test::denormal_tail;
+    if (flush_to_zero_active())
+        SKIP("this thread flushes subnormals to zero; the tail counts would be vacuous");
+    constexpr std::size_t kTotal = std::size_t{1} << 18;
+    Biquad design;
+    design.set_coefficients(Biquad::Type::lowpass, 20.0f, 0.7071f, 48000.0f);
+    const std::array<BiquadCoefficients, 3> sections{design.coefficients(), design.coefficients(),
+                                                     design.coefficients()};
+    for (std::size_t block : {std::size_t{64}, std::size_t{4096}, kTotal}) {
+        INFO("block " << block);
+        SosCascadeT<float, 4> cascade;
+        REQUIRE(cascade.prepare(4));
+        cascade.set_coefficients(std::span<const BiquadCoefficients>(sections));
+        const auto tail = impulse_tail(
+            [&](float* x, int n) { cascade.process(x, static_cast<std::size_t>(n)); }, kTotal, block);
+        REQUIRE(tail.subnormal_outputs == 0);
+        REQUIRE(tail.nonzero_end > 0);
+        REQUIRE(tail.nonzero_end < kTotal / 2);
+    }
 }
