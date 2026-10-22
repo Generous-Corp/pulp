@@ -224,7 +224,8 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
         bounce_path=(run_dir / bounce_name) if bounce_name else None,
         realtime_path=(run_dir / realtime_name) if realtime_name else None,
         render_frames=render_frames, nonce=nonce, host=host, hosting_mode=mode,
-        host_quiet=summary["quiet_host"] if live else None, listed=list(artifacts))
+        host_quiet=summary["quiet_host"] if live else None,
+        code_under_test=receipt.get("code_under_test"), listed=list(artifacts))
     for key in RECOMPUTED:
         _require(_close(receipt.get(key), recomputed.get(key)),
                  f"{key} does not re-derive from the artifacts")

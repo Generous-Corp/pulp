@@ -31,7 +31,7 @@ import re
 import statistics
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 _LIB_PATH = Path(__file__).resolve().parent / "gpu_fault_continuity.py"
 if "gpu_fault_continuity" in sys.modules:
@@ -94,6 +94,19 @@ DAW_EXECUTABLES = {
 
 
 REALTIME_PROVENANCE = "realtime_render.json"
+
+# Configurations with a known defect in the code under test. A row that ran
+# one is never evidence until the fix is in that code: it is INCONCLUSIVE with
+# the defect named. `fixed_by` is the fix's merge commit on main, None while
+# unmerged (every such row is then excluded). The row's configuration comes
+# from the plug-in's own `prepared` events; a node that does not report it is
+# the convolver this plug-in has always hosted.
+KNOWN_DEFECTS = (
+    {"id": "#10736",
+     "what": "provider WaveNet with staged storage and timestamps hangs after the first block",
+     "match": {"node": "wavenet", "storage": "staged", "timestamps": True},
+     "fixed_by": None},
+)
 # A realtime render cannot finish faster than the audio it renders; allow a
 # little clock slack, never an offline-speed render.
 REALTIME_MIN_WALL_FRACTION = 0.9
@@ -267,6 +280,38 @@ _PATH_NEGATIVE_REASONS = (NOT_SHARED_PATH, "path negative", "per-block delivery"
 REALTIME_NOT_COMPUTED = "host realtime render null not computed"
 
 
+def known_defect(events: Sequence[dict], code: dict | None,
+                 is_ancestor: Callable[[str, str], bool | None]) -> str:
+    """The known defect this row's configuration hits in its code under test,
+    or "". `is_ancestor(fix, commit)` answers whether the fix is in the code
+    (None when it cannot tell, which counts as not in it)."""
+    commit = str((code or {}).get("commit", ""))
+    for prepared in (e for e in events if e.get("event") == "prepared"):
+        config = {"node": prepared.get("node", "convolver"),
+                  "storage": prepared.get("storage"),
+                  "timestamps": bool(prepared.get("timestamps", False))}
+        for defect in KNOWN_DEFECTS:
+            if all(config.get(k) == v for k, v in defect["match"].items()):
+                fix = defect["fixed_by"]
+                if fix is None or is_ancestor(fix, commit) is not True:
+                    return (f"excluded: {defect['id']} ({defect['what']}) is not fixed in the "
+                            f"code under test")
+    return ""
+
+
+def git_is_ancestor(fix: str, commit: str) -> bool | None:
+    """Whether `fix` is in `commit`'s history in this checkout; None when git
+    cannot say (unknown objects, no repository)."""
+    import subprocess
+    try:
+        done = subprocess.run(["git", "-C", str(_LIB_PATH.parent), "merge-base",
+                               "--is-ancestor", fix, commit],
+                              capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return {0: True, 1: False}.get(done.returncode)
+
+
 def _took_effect(base: dict, fault: str, applied: dict | None) -> bool:
     """Fired, and for an audio fault applied by the interposer; for a render
     fault, the editor performed the loss; the control applies nothing."""
@@ -280,6 +325,8 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
                 tolerance: float, window_pre: int, window_post: int, host_alive: bool,
                 bounce_path: Path | None, realtime_path: Path | None, render_frames: int,
                 nonce: str, host: dict, hosting_mode: str, host_quiet: bool | None = None,
+                code_under_test: dict | None = None,
+                is_ancestor: Callable[[str, str], bool | None] = git_is_ancestor,
                 listed: Sequence[str] | None = None) -> dict[str, Any]:
     """The v2 evidence for one run. WP-h1's `evaluate_run` does the whole
     single-run analysis (the three nulls, per-block delivery, device binding,
@@ -327,6 +374,9 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         mismatches.append(binding["reason"])
     elif binding["outcome"] == "unbound":
         preconditions.append(binding["reason"])
+    defect = known_defect(events, code_under_test, is_ancestor)
+    if defect:
+        preconditions.append(defect)
     proc = binding["host_process"] or {}
     if proc and proc.get("config_source") not in ("env", "rendezvous"):
         preconditions.append(f"the plug-in had no run configuration "

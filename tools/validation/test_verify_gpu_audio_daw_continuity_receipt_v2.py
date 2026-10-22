@@ -184,7 +184,7 @@ def receipt_for(run: Path, *, kind: str, fault: str, mode: str, host_id: str = "
         realtime_path=(run / "realtime.wav") if realtime else None,
         render_frames=FRAMES + POST, nonce=NONCE, host=host, hosting_mode=mode,
         host_quiet=(preflight_quiet(run) if transport != "dry_run" else None),
-        listed=list(artifacts))
+        code_under_test={"commit": "b" * 40}, listed=list(artifacts))
     preflight = gfc.summarize_preflight(
         json.loads((run / "preflight.json").read_text(encoding="utf-8")))
     receipt = hosts.build_receipt_v2(
@@ -288,6 +288,41 @@ class V2Receipt(unittest.TestCase):
         run = self.run_dir("g2-stall")
         receipt = make_run(run, fault="worker_stall", loss_reported=False)
         self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
+
+    def _defect_run(self, name, **prepared_fields):
+        run = self.run_dir(name)
+        make_run(run)
+        _rewrite_events(run, lambda ev: [dict(e, **prepared_fields)
+                                         if e["event"] == "prepared" else e for e in ev])
+        return run, receipt_for(run, kind="fault", fault="force_loss_before",
+                                mode="auhostingservice_arrow")
+
+    def test_staged_timestamped_wavenet_rows_are_excluded_until_10736_is_in(self):
+        run, receipt = self._defect_run("wavenet-staged-ts", node="wavenet", storage="staged",
+                                        timestamps=True)
+        self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
+        self.assertTrue(any(r.startswith("excluded: #10736") for r in receipt["verdict_reasons"]))
+
+    def test_the_exclusion_lifts_only_when_the_fix_is_in_the_code(self):
+        events = [{"event": "prepared", "node": "wavenet", "storage": "staged",
+                   "timestamps": True}]
+        code = {"commit": "b" * 40}
+        saved = hosts.KNOWN_DEFECTS
+        hosts.KNOWN_DEFECTS = (dict(saved[0], fixed_by="f" * 40),)
+        self.addCleanup(setattr, hosts, "KNOWN_DEFECTS", saved)
+        self.assertEqual(hosts.known_defect(events, code, lambda fix, c: True), "")
+        self.assertTrue(hosts.known_defect(events, code, lambda fix, c: False))
+        # Unknown ancestry (no repository, unknown commit) is not "fixed".
+        self.assertTrue(hosts.known_defect(events, code, lambda fix, c: None))
+
+    def test_other_configurations_are_not_excluded(self):
+        for fields in ({}, dict(node="wavenet", storage="shared", timestamps=True),
+                       dict(node="wavenet", storage="staged", timestamps=False),
+                       dict(node="convolver", storage="staged", timestamps=True)):
+            with self.subTest(**fields):
+                run, receipt = self._defect_run("cfg-" + "-".join(map(str, fields.values())) or
+                                                "cfg-default", **fields)
+                self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
 
     def test_g3_the_applied_sample_comes_from_the_capture_clock(self):
         run = self.run_dir("g3")

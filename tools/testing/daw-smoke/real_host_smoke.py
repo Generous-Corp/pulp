@@ -680,7 +680,8 @@ def collect(run: Path, *, bounce: Path | None, host_evidence: Path, hosting_mode
         host_alive=host_alive, bounce_path=(out / "bounce.wav") if bounce else None,
         realtime_path=(out / "realtime.wav") if realtime else None,
         render_frames=render_frames, nonce=st["nonce"], host=host, hosting_mode=hosting_mode,
-        host_quiet=preflight_doc["quiet_host"], listed=list(artifacts))
+        host_quiet=preflight_doc["quiet_host"], code_under_test={"commit": code_commit},
+        listed=list(artifacts))
     receipt = hosts.build_receipt_v2(
         control_kind=st["control_kind"], trigger_transport="rendezvous_file",
         nonce=st["nonce"], host=host, hosting_mode=hosting_mode, host_settings=settings,
