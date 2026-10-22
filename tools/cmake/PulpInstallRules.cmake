@@ -791,6 +791,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFindPluginval.cmake"
 
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUiAssets.cmake"
+    # Included by PulpUtils.cmake: pulp_add_js_bytecode().
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpJsBytecode.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstall.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReload.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMidiTuning.cmake"
@@ -881,6 +883,9 @@ install(FILES
 # so find_package(Pulp) consumers can use the function.
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/encode_binary_data.py"
+    # pulp_add_js_bytecode() builds its generator from this source against
+    # the installed Pulp libraries, so the bytecode matches the product's engine.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_js_bytecode_main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_portable_binary.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_bundle_relocatable.py"
     # G3 universal-build arch/signature gate. pulp_validate_bundle_architectures
