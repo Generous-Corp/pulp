@@ -186,10 +186,9 @@ TEST_CASE("FixedIrConvolver crossover edges follow the measured per-block table"
     };
     // Non-power-of-two requests normalize up, so 9 shares the 16-frame row,
     // 17 the 32-frame row, 65 the 128-frame row, and 4096 the large-block row.
-    for (const Edge e :
-         {Edge{9, 576}, Edge{16, 576}, Edge{17, 128}, Edge{32, 128}, Edge{33, 128}, Edge{64, 128},
-          Edge{65, 64}, Edge{128, 64}, Edge{256, 64}, Edge{512, 64}, Edge{1024, 64},
-          Edge{4096, 64}}) {
+    for (const Edge e : {Edge{9, 576}, Edge{16, 576}, Edge{17, 128}, Edge{32, 128}, Edge{33, 128},
+                         Edge{64, 128}, Edge{65, 64}, Edge{128, 64}, Edge{256, 64}, Edge{512, 64},
+                         Edge{1024, 64}, Edge{4096, 64}}) {
         INFO("block " << e.block);
         REQUIRE(FixedIrConvolver::direct_fir_limit(e.block) == e.limit);
         REQUIRE(FixedIrConvolver::choose_backend(e.limit, e.block) == Backend::direct_fir);
