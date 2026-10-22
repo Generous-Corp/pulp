@@ -251,6 +251,32 @@ public:
             process_block<true>(buffer, num_samples);
     }
 
+    // Process two channels in place, each through its own filter, with the
+    // two recursions in the lanes of one vector so a stereo pair costs about
+    // as much as one channel. Each channel's output is bit-identical to
+    // calling that filter's block process(); the filters may have different
+    // coefficients. Both buffers must hold num_samples samples.
+    static void process_stereo(BiquadT& left, BiquadT& right, SampleType* left_buffer,
+                               SampleType* right_buffer, int num_samples) {
+#if defined(__GNUC__) || defined(__clang__)
+        // Below about 64 samples two separate calls already overlap in the
+        // out-of-order window and the lane path measured no faster.
+        if (num_samples >= kStereoLaneMinSamples &&
+            left.sample_path_order_in_block_ == right.sample_path_order_in_block_) {
+            if (left.sample_path_order_in_block_)
+                process_pair<false>(left, right, left_buffer, right_buffer, num_samples);
+            else
+                process_pair<true>(left, right, left_buffer, right_buffer, num_samples);
+            return;
+        }
+#endif
+        left.process(left_buffer, num_samples);
+        right.process(right_buffer, num_samples);
+    }
+
+    // Shortest call process_stereo() runs in vector lanes.
+    static constexpr int kStereoLaneMinSamples = 64;
+
     // Designs whose largest pole radius exceeds this run the block path in
     // the sample path's operation order (bit-identical to it while states
     // stay above 1e-15). Near the unit circle the feedback-last order's RMS
@@ -296,6 +322,48 @@ private:
         s1_ = s1;
         s2_ = s2;
     }
+
+#if defined(__GNUC__) || defined(__clang__)
+    // Two lanes of SampleType; element-wise arithmetic in each lane is the
+    // same scalar operation sequence as process_block(), so the lanes match
+    // the scalar block path bit for bit.
+    using Pair [[gnu::vector_size(2 * sizeof(SampleType))]] = SampleType;
+
+    template <bool FeedbackLast>
+    static void process_pair(BiquadT& l, BiquadT& r, SampleType* lb, SampleType* rb,
+                             int num_samples) {
+        const Pair b0 = {l.b0_, r.b0_}, b1 = {l.b1_, r.b1_}, b2 = {l.b2_, r.b2_};
+        const Pair a1 = {l.a1_, r.a1_}, neg_a1 = {-l.a1_, -r.a1_}, a2 = {l.a2_, r.a2_};
+        Pair s1 = {l.s1_, r.s1_}, s2 = {l.s2_, r.s2_};
+        for (int start = 0; start < num_samples; start += kStateSnapInterval) {
+            const int end = num_samples - start < kStateSnapInterval
+                ? num_samples : start + kStateSnapInterval;
+            for (int i = start; i < end; ++i) {
+                const Pair input = {lb[i], rb[i]};
+                const Pair output = b0 * input + s1;
+                if constexpr (FeedbackLast) {
+                    const Pair t1 = b1 * input + s2;
+                    const Pair t2 = b2 * input;
+                    s1 = neg_a1 * output + t1;
+                    s2 = t2 - a2 * output;
+                } else {
+                    s1 = b1 * input - a1 * output + s2;
+                    s2 = b2 * input - a2 * output;
+                }
+                lb[i] = output[0];
+                rb[i] = output[1];
+            }
+            for (int k = 0; k < 2; ++k) {
+                s1[k] = snap_to_zero(s1[k]);
+                s2[k] = snap_to_zero(s2[k]);
+            }
+        }
+        l.s1_ = s1[0];
+        l.s2_ = s2[0];
+        r.s1_ = s1[1];
+        r.s2_ = s2[1];
+    }
+#endif
 
     // Largest pole radius of z^2 + a1 z + a2, in double so the threshold
     // decision does not depend on the sample type.
