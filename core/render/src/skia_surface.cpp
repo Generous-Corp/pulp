@@ -724,7 +724,15 @@ private:
             return false;
         }
 
-        sk_sp<SkImage> snapshot = scene_surface_->makeImageSnapshot();
+        // AsImage shares the scene's texture instead of copying it (Graphite's
+        // makeImageSnapshot always copies). The view aliases a surface the
+        // next frame draws into, which is safe because the view lives only in
+        // this function: the blit is recorded into this frame's recording,
+        // ahead of every later scene draw in queue order. A scene that is not
+        // textureable has no view and is copied instead.
+        sk_sp<SkImage> snapshot = SkSurfaces::AsImage(scene_surface_);
+        if (!snapshot)
+            snapshot = scene_surface_->makeImageSnapshot();
         if (!snapshot) {
             runtime::log_error(
                 "SkiaSurface: retained scene produced no snapshot — nothing "

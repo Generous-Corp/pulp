@@ -34,6 +34,15 @@
 #include "include/gpu/graphite/Recorder.h"
 #include "include/gpu/graphite/Recording.h"
 #include "include/gpu/graphite/Surface.h"
+#include "include/gpu/graphite/BackendTexture.h"
+#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
+#include "dawn/dawn_proc.h"
+#include "dawn/native/DawnNative.h"
+#include "webgpu/webgpu_cpp.h"
+
+#include <atomic>
+#include <chrono>
+#include <thread>
 #endif
 
 using namespace pulp::render;
@@ -47,6 +56,186 @@ constexpr const char* kNoGpu =
     "no GPU compute device available (Skia/Dawn not built, or no adapter)";
 constexpr const char* kNoSkiaSurface =
     "SkiaSurface unavailable (Graphite context could not be created)";
+
+// A presentable GpuSurface whose "drawable" is a texture the test owns, so the
+// persistent-scene blit (which only runs when there is a drawable) can be
+// driven headless and each frame's drawable read back afterwards. Everything
+// else is the real Dawn device.
+class TextureDrawableGpu final : public GpuSurface {
+  public:
+    explicit TextureDrawableGpu(GpuSurface& inner) : inner_(inner) {}
+    void set_drawable(wgpu::Texture* texture) {
+        drawable_ = texture;
+    }
+
+    bool initialize(const Config&) override {
+        return inner_.is_initialized();
+    }
+    void resize(uint32_t w, uint32_t h) override {
+        inner_.resize(w, h);
+    }
+    bool begin_frame() override {
+        return inner_.begin_frame();
+    }
+    void end_frame() override {
+        inner_.end_frame();
+    }
+    bool is_initialized() const override {
+        return inner_.is_initialized();
+    }
+    bool has_surface() const override {
+        return true;
+    }
+    uint32_t width() const override {
+        return inner_.width();
+    }
+    uint32_t height() const override {
+        return inner_.height();
+    }
+    void* dawn_device_handle() const override {
+        return inner_.dawn_device_handle();
+    }
+    void* dawn_queue_handle() const override {
+        return inner_.dawn_queue_handle();
+    }
+    void* dawn_instance_handle() const override {
+        return inner_.dawn_instance_handle();
+    }
+    void* current_texture_handle() const override {
+        return drawable_;
+    }
+    AdapterInfo adapter_info() const override {
+        return inner_.adapter_info();
+    }
+
+  private:
+    GpuSurface& inner_;
+    wgpu::Texture* drawable_ = nullptr;
+};
+
+wgpu::Texture make_drawable_texture(GpuSurface& gpu, uint32_t w, uint32_t h) {
+    auto* device = static_cast<wgpu::Device*>(gpu.dawn_device_handle());
+    wgpu::TextureDescriptor desc{};
+    desc.size = {w, h, 1};
+    desc.format = wgpu::TextureFormat::RGBA8Unorm;
+    desc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding |
+                 wgpu::TextureUsage::CopySrc;
+    return device->CreateTexture(&desc);
+}
+
+// Read a Graphite-backed surface back to RGBA8 through the context, after
+// sending `recorder`'s pending work (the draws into `surface`) to the GPU.
+bool read_graphite_surface(skgpu::graphite::Context& context, skgpu::graphite::Recorder& recorder,
+                           SkSurface* surface, std::vector<uint8_t>& out) {
+    if (auto recording = recorder.snap()) {
+        skgpu::graphite::InsertRecordingInfo insert{};
+        insert.fRecording = recording.get();
+        if (context.insertRecording(insert) != skgpu::graphite::InsertStatus::kSuccess)
+            return false;
+    }
+    struct State {
+        std::atomic<bool> done{false};
+        bool ok = false;
+        std::vector<uint8_t>* out = nullptr;
+        int w = 0;
+        int h = 0;
+    } state;
+    state.out = &out;
+    state.w = surface->width();
+    state.h = surface->height();
+    const auto info =
+        SkImageInfo::Make(state.w, state.h, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+    context.asyncRescaleAndReadPixels(
+        surface, info, SkIRect::MakeWH(state.w, state.h), SkImage::RescaleGamma::kSrc,
+        SkImage::RescaleMode::kNearest,
+        [](void* ctx, std::unique_ptr<const SkImage::AsyncReadResult> result) {
+            auto* st = static_cast<State*>(ctx);
+            if (result && result->count() == 1) {
+                const size_t row = static_cast<size_t>(st->w) * 4u;
+                st->out->resize(row * static_cast<size_t>(st->h));
+                const auto* src = static_cast<const uint8_t*>(result->data(0));
+                for (int y = 0; y < st->h; ++y)
+                    std::memcpy(st->out->data() + row * y, src + result->rowBytes(0) * y, row);
+                st->ok = true;
+            }
+            st->done.store(true, std::memory_order_release);
+        },
+        &state);
+    context.submit(skgpu::graphite::SyncToCpu::kYes);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!state.done.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        context.checkAsyncWorkCompletion();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return state.done.load(std::memory_order_acquire) && state.ok;
+}
+
+bool read_drawable(skgpu::graphite::Context& context, wgpu::Texture& texture,
+                   std::vector<uint8_t>& out) {
+    auto recorder = context.makeRecorder();
+    if (!recorder)
+        return false;
+    auto surface = SkSurfaces::WrapBackendTexture(
+        recorder.get(), skgpu::graphite::BackendTextures::MakeDawn(texture.Get()),
+        kRGBA_8888_SkColorType, SkColorSpace::MakeSRGB(), nullptr);
+    if (!surface)
+        return false;
+    return read_graphite_surface(context, *recorder, surface.get(), out);
+}
+
+// Counts the textures Dawn creates and the texture-to-texture copies it
+// encodes while it is alive, by routing the process's Dawn proc table through
+// counting entry points. A per-frame Graphite snapshot copy is invisible to
+// the resource budget (the copy is recycled from the scratch pool), but it is
+// always one encoded copy.
+std::atomic<int> g_textures_created{0};
+std::atomic<int> g_texture_copies{0};
+WGPUProcDeviceCreateTexture g_create_texture = nullptr;
+WGPUProcCommandEncoderCopyTextureToTexture g_copy_texture = nullptr;
+
+WGPUTexture counting_create_texture(WGPUDevice device, const WGPUTextureDescriptor* desc) {
+    g_textures_created.fetch_add(1, std::memory_order_relaxed);
+    return g_create_texture(device, desc);
+}
+
+void counting_copy_texture(WGPUCommandEncoder encoder, const WGPUTexelCopyTextureInfo* source,
+                           const WGPUTexelCopyTextureInfo* destination, const WGPUExtent3D* size) {
+    g_texture_copies.fetch_add(1, std::memory_order_relaxed);
+    g_copy_texture(encoder, source, destination, size);
+}
+
+class GpuWorkCounter {
+  public:
+    GpuWorkCounter() {
+        g_textures_created.store(0, std::memory_order_relaxed);
+        g_texture_copies.store(0, std::memory_order_relaxed);
+        DawnProcTable procs = dawn::native::GetProcs();
+        g_create_texture = procs.deviceCreateTexture;
+        g_copy_texture = procs.commandEncoderCopyTextureToTexture;
+        procs.deviceCreateTexture = &counting_create_texture;
+        procs.commandEncoderCopyTextureToTexture = &counting_copy_texture;
+        dawnProcSetProcs(&procs);
+    }
+    ~GpuWorkCounter() {
+        dawnProcSetProcs(&dawn::native::GetProcs());
+    }
+    int textures_created() const {
+        return g_textures_created.load(std::memory_order_relaxed);
+    }
+    int texture_copies() const {
+        return g_texture_copies.load(std::memory_order_relaxed);
+    }
+};
+
+bool pixel_is(const std::vector<uint8_t>& px, uint32_t w, uint32_t x, uint32_t y, uint8_t r,
+              uint8_t g, uint8_t b) {
+    const size_t i = (static_cast<size_t>(y) * w + x) * 4u;
+    if (px.size() < i + 4)
+        return false;
+    auto near = [](uint8_t a, uint8_t e) { return std::abs(int(a) - int(e)) < 24; };
+    return near(px[i], r) && near(px[i + 1], g) && near(px[i + 2], b);
+}
 }  // namespace
 #endif
 
@@ -298,6 +487,242 @@ TEST_CASE("SkiaSurface readback fails when Graphite rejects the flushed recordin
     REQUIRE(skia->read_current_rgba(pixels, pixel_width, pixel_height));
     REQUIRE(skia->end_frame() == FrameOutcome::offscreen);
     gpu->end_frame();
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("SkiaSurface persistent-scene blit presents each frame's own scene",
+          "[render][skia][persistent-scene]") {
+#ifdef PULP_HAS_SKIA
+    constexpr uint32_t kSize = 64;
+    auto dawn = GpuSurface::create_dawn();
+    if (!dawn)
+        SKIP(kNoGpu);
+    if (!dawn->initialize({.width = kSize, .height = kSize}))
+        SKIP(kNoGpu);
+    if (dawn->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
+
+    TextureDrawableGpu gpu(*dawn);
+    auto skia = SkiaSurface::create(gpu, {.width = kSize, .height = kSize});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+    REQUIRE(skia->set_persistent_scene(true));
+
+    // Two drawables, as a swapchain rotates them: frame 1 presents into the
+    // first, frame 2 into the second.
+    wgpu::Texture drawable_1 = make_drawable_texture(*dawn, kSize, kSize);
+    wgpu::Texture drawable_2 = make_drawable_texture(*dawn, kSize, kSize);
+    REQUIRE(drawable_1);
+    REQUIRE(drawable_2);
+
+    // Frame 1 paints the whole scene red.
+    gpu.set_drawable(&drawable_1);
+    REQUIRE(gpu.begin_frame());
+    auto* frame_1 = skia->begin_frame();
+    REQUIRE(frame_1 != nullptr);
+    frame_1->set_fill_color(pulp::canvas::Color::rgba8(255, 0, 0));
+    frame_1->fill_rect(0.0f, 0.0f, 64.0f, 64.0f);
+    REQUIRE(skia->end_frame() == FrameOutcome::presented);
+    gpu.end_frame();
+
+    // Frame 2 repaints only the left half, blue: the right half is retained.
+    gpu.set_drawable(&drawable_2);
+    REQUIRE(gpu.begin_frame());
+    auto* frame_2 = skia->begin_frame();
+    REQUIRE(frame_2 != nullptr);
+    frame_2->set_fill_color(pulp::canvas::Color::rgba8(0, 0, 255));
+    frame_2->fill_rect(0.0f, 0.0f, 32.0f, 64.0f);
+    REQUIRE(skia->end_frame() == FrameOutcome::presented);
+    gpu.end_frame();
+    REQUIRE(skia->wait_for_submitted_work());
+
+    auto* context = skia->graphite_context();
+    REQUIRE(context != nullptr);
+    std::vector<uint8_t> px_1;
+    std::vector<uint8_t> px_2;
+    REQUIRE(read_drawable(*context, drawable_1, px_1));
+    REQUIRE(read_drawable(*context, drawable_2, px_2));
+
+    // Frame 1's drawable holds frame 1's scene: frame 2's later scene draws
+    // did not reach back into a blit that shares the scene's texture.
+    CHECK(pixel_is(px_1, kSize, 16, 32, 255, 0, 0));
+    CHECK(pixel_is(px_1, kSize, 48, 32, 255, 0, 0));
+    // Frame 2's drawable shows frame 2: its repaint plus the retained half.
+    CHECK(pixel_is(px_2, kSize, 16, 32, 0, 0, 255));
+    CHECK(pixel_is(px_2, kSize, 48, 32, 255, 0, 0));
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("Graphite AsImage view of a surface sees later draws into it",
+          "[render][skia][persistent-scene]") {
+#ifdef PULP_HAS_SKIA
+    // The control for the two-frame test above: a view kept past a write to
+    // its surface DOES change, so that test's frame-1 check can fail. If this
+    // stopped holding, the blit's ordering argument would be moot and the
+    // two-frame test would prove nothing about it.
+    auto dawn = GpuSurface::create_dawn();
+    if (!dawn)
+        SKIP(kNoGpu);
+    if (!dawn->initialize({.width = 16, .height = 16}))
+        SKIP(kNoGpu);
+    if (dawn->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
+    auto skia = SkiaSurface::create(*dawn, {.width = 16, .height = 16});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+    auto* context = skia->graphite_context();
+    REQUIRE(context != nullptr);
+    auto recorder = context->makeRecorder();
+    REQUIRE(recorder);
+
+    const auto info = SkImageInfo::MakeN32Premul(16, 16);
+    auto source = SkSurfaces::RenderTarget(recorder.get(), info);
+    auto target = SkSurfaces::RenderTarget(recorder.get(), info);
+    REQUIRE(source);
+    REQUIRE(target);
+
+    source->getCanvas()->clear(SK_ColorRED);
+    sk_sp<SkImage> view = SkSurfaces::AsImage(source);
+    sk_sp<SkImage> copy = source->makeImageSnapshot();
+    REQUIRE(view);
+    REQUIRE(copy);
+    source->getCanvas()->clear(SK_ColorBLUE);
+
+    std::vector<uint8_t> px;
+    target->getCanvas()->drawImage(view, 0, 0);
+    REQUIRE(read_graphite_surface(*context, *recorder, target.get(), px));
+    CHECK(pixel_is(px, 16, 8, 8, 0, 0, 255));
+
+    target->getCanvas()->drawImage(copy, 0, 0);
+    REQUIRE(read_graphite_surface(*context, *recorder, target.get(), px));
+    CHECK(pixel_is(px, 16, 8, 8, 255, 0, 0));
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("SkiaSurface persistent-scene frames do not copy the scene",
+          "[render][skia][persistent-scene]") {
+#ifdef PULP_HAS_SKIA
+    constexpr uint32_t kSize = 256;
+    auto dawn = GpuSurface::create_dawn();
+    if (!dawn)
+        SKIP(kNoGpu);
+    if (!dawn->initialize({.width = kSize, .height = kSize}))
+        SKIP(kNoGpu);
+    if (dawn->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
+
+    TextureDrawableGpu gpu(*dawn);
+    auto skia = SkiaSurface::create(gpu, {.width = kSize, .height = kSize});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+    REQUIRE(skia->set_persistent_scene(true));
+    wgpu::Texture drawable = make_drawable_texture(*dawn, kSize, kSize);
+    REQUIRE(drawable);
+    gpu.set_drawable(&drawable);
+    GpuWorkCounter work;
+
+    auto frame = [&](int i) {
+        REQUIRE(gpu.begin_frame());
+        auto* canvas = skia->begin_frame();
+        REQUIRE(canvas != nullptr);
+        canvas->set_fill_color(pulp::canvas::Color::rgba8(static_cast<uint8_t>(i * 4), 0, 0));
+        canvas->fill_rect(0.0f, 0.0f, 16.0f, 16.0f); // a small damaged rect
+        REQUIRE(skia->end_frame() == FrameOutcome::presented);
+        gpu.end_frame();
+        REQUIRE(skia->wait_for_submitted_work());
+    };
+
+    // The first frames pay for the scene, pipelines and atlases.
+    for (int i = 0; i < 3; ++i)
+        frame(i);
+    const int warm_textures = work.textures_created();
+    REQUIRE(warm_textures > 0); // control: the counter sees Graphite's allocations
+    const int warm_copies = work.texture_copies();
+    constexpr int kFrames = 60;
+    for (int i = 0; i < kFrames; ++i)
+        frame(i);
+    const int textures = work.textures_created() - warm_textures;
+    const int copies = work.texture_copies() - warm_copies;
+    INFO("over " << kFrames << " steady frames: " << textures << " textures created, " << copies
+                 << " texture copies (first 3 frames: " << warm_textures << " textures, "
+                 << warm_copies << " copies)");
+
+    // A blit through a snapshot copies the whole scene every frame; the
+    // shared-texture blit draws straight from the scene's own texture.
+    CHECK(copies == 0);
+    CHECK(textures == 0);
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("SkiaCanvas Graphite layer seal shares the layer texture",
+          "[render][skia][layer-cache]") {
+#ifdef PULP_HAS_SKIA
+    auto dawn = GpuSurface::create_dawn();
+    if (!dawn)
+        SKIP(kNoGpu);
+    if (!dawn->initialize({.width = 16, .height = 16}))
+        SKIP(kNoGpu);
+    if (dawn->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
+    auto skia = SkiaSurface::create(*dawn, {.width = 16, .height = 16});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+    auto* context = skia->graphite_context();
+    REQUIRE(context != nullptr);
+    auto recorder = context->makeRecorder();
+    REQUIRE(recorder);
+
+    constexpr int kTarget = 128;
+    constexpr int kLayer = 128;
+    auto target =
+        SkSurfaces::RenderTarget(recorder.get(), SkImageInfo::MakeN32Premul(kTarget, kTarget));
+    REQUIRE(target);
+    auto store = pulp::canvas::SkiaCanvas::create_retained_layer_store();
+    pulp::canvas::SkiaCanvas canvas(target->getCanvas(), recorder.get(), store);
+    REQUIRE(canvas.supports(pulp::canvas::CanvasCapability::retained_layer_cache));
+
+    auto seal = [&](pulp::canvas::Color color) {
+        canvas.begin_layer({0.0f, 0.0f, float(kLayer), float(kLayer)}, /*cacheable=*/true);
+        canvas.set_fill_color(color);
+        canvas.fill_rect(0.0f, 0.0f, float(kLayer), float(kLayer));
+        return canvas.end_layer();
+    };
+
+    // Each retained layer costs exactly one texture: the one it was recorded
+    // into. A seal that copies costs a second. Snapping the recording is what
+    // makes Graphite instantiate the textures.
+    const auto warmup = seal(pulp::canvas::Color::rgba8(0, 255, 0));
+    REQUIRE(warmup);
+    REQUIRE(recorder->snap());
+    GpuWorkCounter work;
+    constexpr int kSeals = 8;
+    std::vector<pulp::canvas::Canvas::LayerHandle> kept;
+    for (int i = 0; i < kSeals; ++i) {
+        kept.push_back(seal(pulp::canvas::Color::rgba8(0, 255, 0)));
+        REQUIRE(kept.back());
+    }
+    REQUIRE(recorder->snap());
+    INFO("textures created by " << kSeals << " retained seals: " << work.textures_created());
+    CHECK(work.textures_created() == kSeals);
+
+    // A later layer recorded after the red seal does not change the red one:
+    // the sealed image is the only owner of its texture.
+    const auto red = seal(pulp::canvas::Color::rgba8(255, 0, 0));
+    REQUIRE(red);
+    const auto blue = seal(pulp::canvas::Color::rgba8(0, 0, 255));
+    REQUIRE(blue);
+    canvas.draw_layer(red);
+    std::vector<uint8_t> px;
+    REQUIRE(read_graphite_surface(*context, *recorder, target.get(), px));
+    CHECK(pixel_is(px, kTarget, 64, 64, 255, 0, 0));
 #else
     REQUIRE(true);
 #endif
