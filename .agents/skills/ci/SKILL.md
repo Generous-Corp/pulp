@@ -6124,6 +6124,23 @@ an advisory lane can no longer strand a PR by being starved. Do not "simplify"
 one back to `ubuntu-latest` —
 `tools/scripts/test_windows_runner_policy.py` fails if you do.
 
+### GitHub-hosted Windows is opt-in on a push or a build.yml dispatch
+
+A plain `build.yml` dispatch or a push to `main` used to start the
+`Windows (x64) [github-hosted]` leg (and a dispatch the three `windows-latest`
+compile gates), so agents kept landing on hosted Windows without asking for it.
+Now none runs unless the dispatch sets `allow_hosted_windows=true` or a
+self-hosted `windows_runner_selector_json`, or the repository sets
+`PULP_ALLOW_HOSTED_WINDOWS=1`. `android.yml`'s windows row runs only on the
+nightly schedule unless that variable is set (pull requests, merge groups,
+pushes and dispatches leave it out). When adding a job that can run on a `windows-*` label in a
+push-triggered workflow, put `vars.PULP_ALLOW_HOSTED_WINDOWS == '1'` in its
+`if:` (or route it through a resolver and list it in
+`COMPUTED_WINDOWS_ROUTING`): `HostedWindowsOptInTests` in
+`tools/scripts/test_windows_runner_policy.py` scans every workflow and fails
+otherwise. `windows-cli-compile.yml` is the one listed exception, because
+`auto-release.yml`'s pre-tag check reads its push verdict.
+
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
 `.github/workflows/macos-cross-advisory.yml` is a path-scoped advisory
@@ -10767,6 +10784,21 @@ Key facts:
   version projection. Any missing script, API/signature error, nested/unknown
   topology, writer drift, extra byte, or ambiguous association retains the full
   native path. The verifier's own PR therefore cannot approve itself.
+- **The bump fast path mostly refused in merge groups, and nothing said why.**
+  On 2026-10-22 only 2 of 13 bump merge groups took it; the rest ran the full
+  `macos` gate (about 9 gate-hours a day). Main had usually moved more than one
+  queue entry past the bump's parent, so `classify` resolved no trusted base and
+  never asked the verifier. `classify` now leaves a `bump-fast-path` notice on
+  every bump run (`taken` or `refused: <reason>`), and
+  `tools/scripts/bump_fastpath_report.py` (weekly in `bump-fastpath-weekly.yml`)
+  counts them. Read that count before changing the verifier, so a fix targets
+  the refusal that actually happens.
+- **Advisory workflows skip the bump.** `coverage.yml`,
+  `control-shipping-native.yml`, `examples-validation.yml` and
+  `intel-portability.yml` AND `github.head_ref != 'release/version-bump'` into
+  every job's `if:`, so bump PRs no longer start hosted Windows, macOS, Linux and
+  coverage runs. A new job in one of them needs the same guard;
+  `test_bump_fastpath.py` fails without it.
 - **PR-event bump runs never fast-path unless `PULP_BUMP_FASTPATH_PR_MERGE_REF=1`.**
   `GITHUB_SHA` on a `pull_request` run is the synthesized `refs/pull/N/merge`
   commit, and a freshly opened bump PR's payload has a null/stale

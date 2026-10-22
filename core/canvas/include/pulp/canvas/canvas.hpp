@@ -1443,6 +1443,12 @@ public:
     /// `g.px` is one device pixel expressed in the same units as `g.d`, taken
     /// from `backing_scale()`, so `2.0 * g.px` is two device pixels at any
     /// backing scale rather than only at 1x.
+    ///
+    /// The shader is evaluated over the `w` x `h` rect grown by
+    /// `options.reach` on every side, so a feather or glow can paint past the
+    /// shape's box. A glow or outer feather whose reach is below
+    /// `sdf_feather_min_reach(style)` is refused (returns false, draws
+    /// nothing) rather than drawn with its falloff cut off at the rect edge.
     virtual bool draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
                                              float w, float h,
                                              const SDFStyle& style,
@@ -1681,6 +1687,19 @@ public:
     /// Compile an author chart shader against the geometry prelude used by
     /// draw_sdf_shape_with_shader. The author source must define shade(PulpChart).
     static std::string compile_sdf_chart_sksl(SDFShape shape, const std::string& sksl);
+
+    /// The smallest draw-rect reach that holds `style`'s feather: 3 sigma for
+    /// the glow (1) and outer (3) modes, whose coverage lives outside the
+    /// shape, and 0 for every other mode or a zero sigma. Beyond 3 sigma the
+    /// Gaussian falloff is under 0.15%, so a reach at or above this value never
+    /// shows a hard edge where the draw rect ends.
+    static float sdf_feather_min_reach(const SDFStyle& style) {
+        if (!(style.feather_sigma > 0.0f))
+            return 0.0f;
+        if (style.feather_mode != 1 && style.feather_mode != 3)
+            return 0.0f;
+        return 3.0f * style.feather_sigma;
+    }
 
     /// Whether an SkSL shader declares a uniform of the given name. Compiles via
     /// the same process-lifetime cache as `compile_sksl`, so repeat queries are

@@ -2542,6 +2542,7 @@
   "pulp-test-create-template-instrument",
   "pulp-test-cross-platform-audio-golden",
   "pulp-test-crossfade",
+  "pulp-test-css-gradient-dither-gpu",
   "pulp-test-css-gradient-render",
   "pulp-test-css-translator-gaps-1434",
   "pulp-test-data-display-link-floor",
@@ -3443,6 +3444,21 @@
     "core/view",
     "core/view/include/pulp/view/view.hpp",
     "tools/scripts/test_build_time_report.py"
+   ],
+   "kind": "python"
+  },
+  "bump-fastpath-selftest": {
+   "entry": "tools/scripts/test_bump_fastpath.py",
+   "inputs": [
+    ".github/rulesets/main-protection.json",
+    ".github/workflows/build.yml",
+    ".github/workflows/bump-fastpath-weekly.yml",
+    ".github/workflows/control-shipping-native.yml",
+    ".github/workflows/coverage.yml",
+    ".github/workflows/examples-validation.yml",
+    ".github/workflows/intel-portability.yml",
+    "tools/scripts/bump_fastpath_report.py",
+    "tools/scripts/test_bump_fastpath.py"
    ],
    "kind": "python"
   },
@@ -5093,6 +5109,14 @@
    ],
    "kind": "python"
   },
+  "gpu-audio-daw-continuity-receipt-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py",
+   "inputs": [
+    "tools/testing/daw-smoke/reaper_smoke.py",
+    "tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py"
+   ],
+   "kind": "python"
+  },
   "gpu-audio-p2-campaign-contract-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
    "inputs": [
@@ -6535,6 +6559,13 @@
    "inputs": [
     "tools/import-validation/test_verify_browser_fidelity_receipt.py",
     "tools/import-validation/verify_browser_fidelity_receipt.py"
+   ],
+   "kind": "python"
+  },
+  "import-validation-chrome-gradient-oracle-selftest": {
+   "entry": "tools/import-validation/test_chrome_gradient_oracle.py",
+   "inputs": [
+    "tools/import-validation/test_chrome_gradient_oracle.py"
    ],
    "kind": "python"
   },

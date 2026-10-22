@@ -16,7 +16,7 @@ single source of truth for that model.
 | **iOS compile gate** (inside `macos`'s Build step) | PRs + merge groups that touch an iOS-only surface (`ios_surface` in `classify_changes.py`: `apple/**`, iOS sources or sources branching on an iOS target, non-test CMake, dependency pins, the gate's own wiring); nightly on main; every release tag | yes when it runs on a PR or merge group; the nightly opens a tracking issue; the release publish requires it | iOS AUv3 GPU smoke example | the two-SDK iOS compile (`test/cmake/test_ios_compile_gate.sh`). Shared code is compiled for macOS by the same job, so it no longer runs the per-PR iOS gate |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including all five excluded label groups; results eyeballed, build failures file an issue |
 | **cross-platform-check** | nightly (07:17 UTC) on `main`, plus `workflow_dispatch`; x86-64 Linux, arm64 Linux, x86-64 Windows on GitHub-hosted runners | advisory (failures on `main` file a per-platform tracking issue; dispatches from other branches run in parallel, one concurrency group per ref) | no | core tests, excludes `validation` + `slow` **only** — so the timing group does run here, off the reference platform. **The only lane that runs the Windows ctest suite** |
-| **Windows on a PR** (`windows` check) | every PR | advisory | no | **nothing on Windows.** On `pull_request` the `windows` check is an Ubuntu aggregate job that exits green with "Windows runs in nightly/explicit validation, not on the PR head": no Windows compile, zero tests. The `build.yml` `Windows (x64)` build + ctest leg is skipped on `pull_request` and `merge_group` (it runs on a push to `main` and on `workflow_dispatch`), and the compile-only `Windows MSVC release-path gate`, `Windows MIDI Services SDK compile-gate` and `Windows BLE compile-gate` are skipped on `pull_request`, `merge_group` and push, running only on `workflow_dispatch` (`run_windows`, default on). The one PR-time Windows job is `Windows CLI compile (MSVC)` (`windows-cli-compile.yml`): compile-only, `pulp-cli` and `pulp-mcp` only, and only when `windows_cli_compile_scope.py` says the change can reach them. A green `windows` on a PR is not evidence that Windows compiles or passes tests |
+| **Windows on a PR** (`windows` check) | every PR | advisory | no | **nothing on Windows.** On `pull_request` the `windows` check is an Ubuntu aggregate job that exits green with "Windows runs in nightly/explicit validation, not on the PR head": no Windows compile, zero tests. The `build.yml` `Windows (x64)` build + ctest leg is skipped on `pull_request` and `merge_group` (it runs on a push to `main` and on `workflow_dispatch` only when GitHub-hosted Windows is opted in: `allow_hosted_windows=true`, a self-hosted `windows_runner_selector_json`, or `PULP_ALLOW_HOSTED_WINDOWS=1`), and the compile-only `Windows MSVC release-path gate`, `Windows MIDI Services SDK compile-gate` and `Windows BLE compile-gate` are skipped on `pull_request`, `merge_group` and push, running only on a `workflow_dispatch` that opts in to hosted Windows. The one PR-time Windows job is `Windows CLI compile (MSVC)` (`windows-cli-compile.yml`): compile-only, `pulp-cli` and `pulp-mcp` only, and only when `windows_cli_compile_scope.py` says the change can reach them. A green `windows` on a PR is not evidence that Windows compiles or passes tests |
 
 The required gate is **serialized on self-hosted macOS runners** and takes
 about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
@@ -344,6 +344,15 @@ developer's Homebrew build disagree on some diagnostics, so pinning this lane
 alone would make one runner image's version the contract while `docs-material.yml`
 and `docs-deploy.yml` drifted from it. If image drift ever does flip this check,
 pin all three together rather than just this one.
+
+**The release bot's bump skips the advisory lanes.** `control-shipping-native.yml`,
+`examples-validation.yml`, `intel-portability.yml` and `coverage.yml` AND
+`github.head_ref != 'release/version-bump'` into every job's condition. The
+bump's tree is main's plus version files, which those lanes already ran on, none
+of their contexts is required, and it keeps bump pull requests off hosted
+Windows, macOS and Linux runners. `tools/scripts/test_bump_fastpath.py` checks
+the guard on every job and that no skipped context is in
+`.github/rulesets/main-protection.json`.
 
 **Status: advisory until promoted.** Until `api-contracts` is added to `main`'s
 `required_status_checks`, this lane reports the same defect the old one did and is

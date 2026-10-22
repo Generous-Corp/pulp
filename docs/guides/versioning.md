@@ -281,6 +281,15 @@ without the flag and fail closed on an unverifiable pin, using the developer's
 own access. Granting this workflow a read-only token for pulp-planning and
 dropping `--ci-warn-only` makes CI enforce the ancestry too.
 
+### The bump skips the advisory coverage run
+
+`coverage.yml` ANDs `github.head_ref != 'release/version-bump'` into every job's
+condition, so the release bot's bump pull request no longer starts a coverage
+run (about 2.5 h of hosted runners for a tree that is main's plus version
+files). No coverage context is required; every other pull request, schedule
+and dispatch runs as before. `tools/scripts/test_bump_fastpath.py` checks the
+guard on every job.
+
 ### Action-major pins in the gate workflows
 
 The gate workflows (`version-skill-check.yml`, `coverage.yml`) run their scripts

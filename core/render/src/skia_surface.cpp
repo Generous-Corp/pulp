@@ -90,7 +90,14 @@ const char* wgpu_texture_format_name(wgpu::TextureFormat format) {
     }
 }
 
+// Installed by set_insert_outcome_hook_for_testing(); null in production.
+SkiaSurface::InsertOutcomeHook g_insert_outcome_hook = nullptr;
+
 }  // namespace
+
+void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook hook) {
+    g_insert_outcome_hook = hook;
+}
 
 class SkiaSurfaceImpl : public SkiaSurface {
 public:
@@ -297,9 +304,9 @@ public:
         if (!context_)
             return false;
         PULP_TRACE_SCOPE_NAMED("render", "first_frame_gpu_wait");
-        context_->submit(skgpu::graphite::SyncToCpu::kYes);
+        const bool submitted = context_->submit(skgpu::graphite::SyncToCpu::kYes);
         context_->checkAsyncWorkCompletion();
-        return true;
+        return submitted;
     }
 
     FrameOutcome end_frame() override {
@@ -363,8 +370,7 @@ public:
             }
 
             frames_in_flight_.on_submitted();
-            const auto status = context_->insertRecording(info);
-            insert_ok = (status == skgpu::graphite::InsertStatus::kSuccess);
+            insert_ok = insert_recording(info);
             if (!insert_ok) {
                 runtime::log_error(
                     "SkiaSurface: Graphite rejected this frame's recording — "
@@ -450,14 +456,25 @@ public:
         // end_frame() instead — MacGpuWindowHost::render_frame() does, between
         // the Skia submit and the Metal present — finds nothing pending here
         // and pays nothing for the guard.
+        //
+        // The flush is judged exactly as end_frame() judges its own insert: a
+        // recording Graphite rejects never reached the texture, so the readback
+        // would return whatever the texture held before this frame. Report the
+        // capture as failed, and leave frame_work_submitted_ unset so the
+        // following end_frame() reports the frame as failed too.
         if (canvas_ && recorder_ && context_) {
             canvas_.reset();
             auto recording = recorder_->snap();
             if (recording) {
                 skgpu::graphite::InsertRecordingInfo info;
                 info.fRecording = recording.get();
-                context_->insertRecording(info);
+                const bool inserted = insert_recording(info);
                 context_->submit({});
+                if (!inserted) {
+                    runtime::log_error("SkiaSurface: Graphite rejected the recording flushed "
+                                       "for readback; the capture does not hold this frame.");
+                    return false;
+                }
                 // end_frame()'s second snap() will legitimately find nothing
                 // left to record; remember that this frame's work DID reach the
                 // GPU so it is not misreported as a failed frame.
@@ -728,6 +745,15 @@ private:
         return outcome;
     }
 
+    /// Insert a recording and report whether Graphite accepted it. Every
+    /// insert goes through here so the frame path and the readback flush judge
+    /// the same InsertStatus, and the test seam sees both.
+    bool insert_recording(const skgpu::graphite::InsertRecordingInfo& info) {
+        const bool accepted =
+            context_->insertRecording(info) == skgpu::graphite::InsertStatus::kSuccess;
+        return g_insert_outcome_hook ? g_insert_outcome_hook(accepted) : accepted;
+    }
+
     /// Outcome of the frame in flight. begin_frame() seeds it so a caller that
     /// got a null canvas can still ask what went wrong.
     FrameOutcome last_outcome_ = FrameOutcome::offscreen;
@@ -753,6 +779,7 @@ namespace pulp::render {
 std::unique_ptr<SkiaSurface> SkiaSurface::create(GpuSurface&, const Config&) {
     return nullptr;
 }
+void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook) {}
 }
 
 #endif
