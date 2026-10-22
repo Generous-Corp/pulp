@@ -4,24 +4,31 @@
   "kind": "change",
   "created_at": "2026-10-22T06:42:44Z",
   "slices": [
+    "canvas-kernel",
     "retained-ui-kernel"
   ],
-  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); a data:image URI in any format but PNG never drew: the inline loader kept bytes only when a PNG IHDR parse found a size. AssetManager gains decode_data_uri_bytes, which returns the base64 payload of a data URI whatever the image format and leaves dimensions to a decoder; load_image_from_data_uri keeps its PNG-only contract on top of it. ImageView keeps those bytes, sizes them once per source through the new Canvas::measure_image_from_data (header only; the base reads a PNG IHDR, Skia and CoreGraphics read every format their decoders accept), and draws them through the content-keyed inline cache, so JPEG, WebP and GIF hit the cache like PNG. Undecodable bytes are tried once, logged, and paint a placeholder labelled with the media type. decode_data_uri_bytes follows RFC 2397: only a payload marked ;base64 (case-insensitive) is base64-decoded; any other payload is percent-decoded, and a malformed percent escape yields no bytes so the view takes the fail-once placeholder path. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); a data:image URI in any format but PNG never drew, and sprite strips held as encoded bytes decoded every paint and dropped frames past their encoded byte length. canvas-kernel: Canvas gains measure_image_from_data, a header-only intrinsic-size read appended after the existing virtuals; the base reads a PNG IHDR (IHDR chunk required, dimensions within 2^31 - 1), Skia uses a deferred image (orientation applied, matching its draw) and CoreGraphics reads ImageIO pixel-size properties. retained-ui-kernel: AssetManager::decode_data_uri_bytes returns a data URI payload whatever the image format, following RFC 2397: a payload marked ;base64 (case-insensitive) is percent-unescaped and then base64-decoded, any other payload is percent-decoded, and a malformed escape in a non-base64 payload yields no bytes. ImageView keeps those bytes, sizes them once per source through measure_image_from_data, and draws them through the content-keyed inline cache; undecodable bytes are tried once, logged, and paint a placeholder labelled with the media type. Knob and Fader sprite strips loaded from bytes hash them once (SpriteStrip::data_key) and draw through the keyed cache; once a canvas has measured the bytes as decodable (only a successful measure is recorded on the shared strip), every frame within the declared size draws, and raw RGBA bytes keep the byte-count bound. Backends without a cache or decoder draw as before. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",
+    "ctest --test-dir build -R 'A sprite strip one canvas cannot measure still draws on a canvas that can'",
     "ctest --test-dir build -R 'AssetManager data URI bytes are returned whatever the image format'",
     "ctest --test-dir build -R 'AssetManager data URI decodes PNG dimensions'",
     "ctest --test-dir build -R 'AssetManager data URI without ;base64 is percent-decoded'",
     "ctest --test-dir build -R 'Canvas default measure_image_from_data reads a PNG header only'",
     "ctest --test-dir build -R 'CoreGraphicsCanvas measures encoded bytes of any ImageIO format'",
+    "ctest --test-dir build -R 'Disabling the image cache decodes a sprite strip on every Graphite paint'",
     "ctest --test-dir build -R 'ImageView JPEG'",
     "ctest --test-dir build -R 'ImageView draws a percent-encoded data URI through the keyed entry'",
     "ctest --test-dir build -R 'ImageView fails a malformed percent-encoded data URI once'",
     "ctest --test-dir build -R 'ImageView fails an undecodable inline payload once'",
     "ctest --test-dir build -R 'ImageView percent-encoded PNG data URI draws and hits the cache'",
     "ctest --test-dir build -R 'ImageView sizes a non-PNG data URI from the decoder'",
-    "ctest --test-dir build -R 'ImageView with an undecodable inline payload attempts one decode'"
+    "ctest --test-dir build -R 'ImageView stretches an inline image the backend cannot measure'",
+    "ctest --test-dir build -R 'ImageView with an undecodable inline payload attempts one decode'",
+    "ctest --test-dir build -R 'Knob and Fader draw the last frame of a compressed sprite strip'",
+    "ctest --test-dir build -R 'Knob and Fader sprite strips decode their encoded bytes once across Graphite paints'",
+    "ctest --test-dir build -R 'Sprite strips draw every declared frame of decodable bytes'"
   ],
   "disposition": "pulp-only",
   "vellum_inherits": true
