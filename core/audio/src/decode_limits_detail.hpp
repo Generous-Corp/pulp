@@ -7,6 +7,7 @@
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/runtime/log.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -62,15 +63,21 @@ inline bool within_decode_limits(std::string_view format, std::uint64_t frames,
     return true;
 }
 
+// Frames reserved up front from a header claim. A claim is still untrusted
+// after the ceiling check, so a small file must not force a ceiling-sized
+// reservation; growth past this continues by resize per chunk.
+inline constexpr std::uint64_t kMaxReservedFrames = 16u * kDecodeChunkFrames;
+
 // Reserves planar storage for a header-claimed frame count that has already
-// passed within_decode_limits, so chunked appends do not regrow per chunk.
-// A zero claim (unknown length) reserves nothing.
+// passed within_decode_limits, capped at kMaxReservedFrames. A zero claim
+// (unknown length) reserves nothing.
 inline void reserve_planar(std::vector<std::vector<float>>& channels,
                            std::uint64_t claimed_frames) {
     if (claimed_frames == 0u)
         return;
+    const auto frames = static_cast<std::size_t>(std::min(claimed_frames, kMaxReservedFrames));
     for (auto& planar : channels)
-        planar.reserve(static_cast<std::size_t>(claimed_frames));
+        planar.reserve(frames);
 }
 
 // Appends `frames` interleaved samples to the planar channel vectors.

@@ -17,13 +17,25 @@ namespace pulp::audio {
 /// are untrusted: a reader checks the claimed size against these limits before
 /// allocating, then keeps checking as frames arrive, so a tiny file cannot
 /// request terabytes of output. A zero field means that ceiling is not
-/// enforced. The plain read(path) overloads apply these defaults; callers
-/// reading very long material pass larger limits explicitly. Field names
-/// match WavDecodeLimits.
+/// enforced. The plain read(path) overloads apply these defaults, which admit
+/// ordinary long recordings (2^30 frames is over three hours of stereo at
+/// 96 kHz within 4 GiB of float output); callers reading longer material pass
+/// larger limits explicitly, and trusted local-file callers whose path was
+/// chosen by the user or host pass unbounded(). Field names match
+/// WavDecodeLimits.
 struct DecodeLimits {
-    std::uint64_t max_frames = 268'435'456u;
+    std::uint64_t max_frames = 1ull << 30;
     std::uint32_t max_channels = 64u;
-    std::uint64_t max_output_bytes = 1024ull * 1024u * 1024u;
+    std::uint64_t max_output_bytes = 4ull * 1024u * 1024u * 1024u;
+
+    /// No ceilings at all: every field zero.
+    static DecodeLimits unbounded() {
+        DecodeLimits limits;
+        limits.max_frames = 0u;
+        limits.max_channels = 0u;
+        limits.max_output_bytes = 0u;
+        return limits;
+    }
 };
 
 /// Audio format reader interface

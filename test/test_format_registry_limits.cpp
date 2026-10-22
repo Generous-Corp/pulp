@@ -421,3 +421,46 @@ TEST_CASE("FormatRegistry decodes a small AIFF and refuses it beyond custom ceil
     byte_ceiling.max_output_bytes = 4u * 2u * sizeof(float) - 1u;
     REQUIRE_FALSE(registry.read(path, byte_ceiling).has_value());
 }
+
+TEST_CASE("FormatRegistry decodes a FLAC claiming a sixty-minute recording through the default "
+          "limits while a 36-bit claim is still refused",
+          "[audio][flac][decode-limits]") {
+    auto& registry = FormatRegistry::instance();
+    TempDir temp;
+    // Sixty minutes of stereo at 96 kHz, as a real session would claim.
+    constexpr uint64_t kHourAt96k = 345'600'000ull;
+    const auto long_path = (temp.path / "sixty-minutes.flac").string();
+    write_bytes(long_path, build_flac(kHourAt96k, true));
+
+    auto decoded = registry.read(long_path);
+    REQUIRE(decoded.has_value());
+    require_fixture_frame(*decoded);
+
+    const auto hostile_path = (temp.path / "huge-claim.flac").string();
+    write_bytes(hostile_path, build_flac(0xFFFFFFFFFull, true));
+    std::optional<AudioFileData> hostile;
+    REQUIRE_NOTHROW(hostile = registry.read(hostile_path));
+    REQUIRE_FALSE(hostile.has_value());
+}
+
+TEST_CASE("DecodeLimits::unbounded accepts a claim above a custom ceiling at the pre-check",
+          "[audio][flac][decode-limits]") {
+    auto& registry = FormatRegistry::instance();
+    TempDir temp;
+    constexpr uint64_t kHourAt96k = 345'600'000ull;
+    const auto path = (temp.path / "sixty-minutes.flac").string();
+    write_bytes(path, build_flac(kHourAt96k, true));
+
+    // Below the claimed output: the pre-check refuses before any frame decodes.
+    DecodeLimits below_claim;
+    below_claim.max_output_bytes = kHourAt96k * kFixtureChannels * sizeof(float) - 1u;
+    REQUIRE_FALSE(registry.read(path, below_claim).has_value());
+
+    const auto unbounded = DecodeLimits::unbounded();
+    REQUIRE(unbounded.max_frames == 0u);
+    REQUIRE(unbounded.max_channels == 0u);
+    REQUIRE(unbounded.max_output_bytes == 0u);
+    auto decoded = registry.read(path, unbounded);
+    REQUIRE(decoded.has_value());
+    require_fixture_frame(*decoded);
+}
