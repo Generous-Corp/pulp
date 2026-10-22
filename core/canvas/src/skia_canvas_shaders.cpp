@@ -509,8 +509,9 @@ PulpSdf pulpSmoothUnion(PulpSdf a, PulpSdf b, float k) {
 // the signed offset from it along the normal (tan.y, -tan.x) — outward for the
 // arcs, upward for the horizontal shapes — and d is the band's signed
 // distance, negative inside. Past an end t holds its end value; a flat cap
-// cuts d square there, and a rounded cap measures cross from the end point so
-// the cap is a half disc of the same band (d = |cross| - halfWidth).
+// cuts d square there, and a rounded cap is a dome about the end point: cross
+// is the (non-negative) distance from it and tan turns so the normal points
+// away from it, which keeps d = |cross| - halfWidth.
 PulpChart pulpChartAt(float2 p, float px) {
     float2 halfSize = resolution * 0.5 - float2(2.0);
     float radius = min(halfSize.x, halfSize.y);
@@ -545,7 +546,9 @@ PulpChart pulpChartAt(float2 p, float px) {
         return PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, float2(-sin(angle), cos(angle)), px,
                          ok ? 1.0 : 0.0, cross, halfWidth);
     }
-    if (shapeType > 7.5 && shapeType < 11.5) {
+    // Stadium (8), flat segment (10) and rounded segment (11). The cross
+    // (9) has no centre line and falls through to the invalid chart.
+    if ((shapeType > 7.5 && shapeType < 8.5) || (shapeType > 9.5 && shapeType < 11.5)) {
         float halfLen;
         float halfWidth;
         bool flatCaps = shapeType > 9.5 && shapeType < 10.5;
@@ -563,20 +566,29 @@ PulpChart pulpChartAt(float2 p, float px) {
         }
         float along = clamp(p.x, -halfLen, halfLen);
         float t = clamp((along + halfLen) / max(2.0 * halfLen, 0.0001), 0.0, 1.0);
-        float cross;
+        float cross = -p.y;
+        float2 tan = float2(1.0, 0.0);
         float d;
         if (flatCaps) {
-            cross = -p.y;
             float2 q = abs(p) - float2(halfLen, halfWidth);
             d = length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0);
         } else {
-            float2 off = p - float2(along, 0.0);
-            cross = (p.y > 0.0 ? -1.0 : 1.0) * length(off);
             d = abs(cross) - halfWidth;
+            float2 off = p - float2(along, 0.0);
+            float r = length(off);
+            if (p.x != along && r > 0.0) {
+                // A rounded cap is a dome about the end point: cross is the
+                // distance from it and the normal (tan.y, -tan.x) points
+                // straight away from it, so shading turns smoothly over the
+                // cap instead of flipping sign along the axis.
+                float2 n = off / r;
+                cross = r;
+                tan = float2(-n.y, n.x);
+                d = r - halfWidth;
+            }
         }
         bool ok = halfLen > 0.0 && halfWidth > 0.0;
-        return PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, float2(1.0, 0.0), px,
-                         ok ? 1.0 : 0.0, cross, halfWidth);
+        return PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, tan, px, ok ? 1.0 : 0.0, cross, halfWidth);
     }
     return PulpChart(0.0, 1.0, 1.0, float2(1.0, 0.0), px, 0.0, 0.0, 0.0);
 }

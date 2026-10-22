@@ -1070,6 +1070,10 @@ TEST_CASE("SDF chart: segments and stadium chart t along and cross across",
     CHECK(flat.t(1, 16) == Catch::Approx(0.0f).margin(kChartTol));
     CHECK(flat.d(1, 16) > 0.05f);
     CHECK(round.d(1, 16) == Catch::Approx(-7.0f / 8.0f).margin(kChartTol));
+    // A rounded cap is a dome about its end point: cross is the distance from
+    // it on both sides of the axis, so it does not flip sign there.
+    CHECK(round.cross(1, 15) == Catch::Approx(std::sqrt(2.0f) / 8.0f).margin(kChartTol));
+    CHECK(round.cross(1, 17) == Catch::Approx(std::sqrt(2.0f) / 8.0f).margin(kChartTol));
 #else
     SUCCEED("chart probes require PULP_HAS_SKIA");
 #endif

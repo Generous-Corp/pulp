@@ -4,7 +4,7 @@
   "slices": [
     "canvas-kernel"
   ],
-  "vellum_obligation": "A shape-chart shader draw must pad its draw rect by the declared reach and refuse a glow/outer feather whose reach is under 3 sigma; chart coordinates must be available for the flat arc, segments, stadium and ring. Concretely: PulpChart is derived for flat_arc, ring, flat_segment, rounded_segment and stadium with t along the centre line, cross the signed offset along (tan.y, -tan.x) and halfWidth; d includes flat caps on the flat arc and flat segment; quadratic_bezier stays refused; and a chart feather scales the premultiplied colour, not alpha alone.",
+  "vellum_obligation": "A shape-chart shader draw must pad its draw rect by the declared reach and refuse a glow/outer feather whose reach is under 3 sigma; chart coordinates must be available for the flat arc, segments, stadium and ring. Concretely: PulpChart is derived for flat_arc, ring, flat_segment, rounded_segment and stadium with t along the centre line, cross the signed offset along (tan.y, -tan.x) and halfWidth; d includes flat caps on the flat arc and flat segment; rounded caps are domes about their end point; quadratic_bezier stays refused; and a chart feather scales the premultiplied colour, not alpha alone.",
   "evidence": [
     ".github/vellum-change-events/20261022-canvas-chart-shapes.json",
     "ctest --test-dir build -R 'SDF chart feather keeps the colour premultiplied'",
