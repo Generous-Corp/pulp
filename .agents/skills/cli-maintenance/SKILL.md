@@ -3969,3 +3969,14 @@ after a successful delegated Shipyard arm/ship path, and deliberately skips
 `--no-arm`. Keep this hook after arming so advisory workflow dispatches bind to
 the approved head; direct `shipyard pr` remains an interim gap until Shipyard
 provides a native arm hook.
+
+## `pulp ship package` ships stripped copies; its shell-out tests need the test cwd
+
+`pulp ship package` stages a copy of each AU/VST3/CLAP bundle outside the
+build tree, strips local symbols from its main executable and re-signs it
+(`tools/cli/ship_bundle_strip.cpp`); the build output is never modified. A new
+package option that edits a bundle must work on that staged copy, before the
+copy is signed, never on the build output. `test_cli_ship_shellout.cpp` finds
+the CLI relative to its working directory (`../tools/cli/pulp-cpp`), so run the
+binary from `build/test` (ctest does). From the repo root every ship case
+SKIPs and the run still exits 0, which looks like a pass.
