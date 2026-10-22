@@ -104,6 +104,12 @@ struct PreparedParagraph {
     // the face's unrounded ascent, so offsetting by the reported value lands
     // the glyphs up to half a unit away from the requested y.
     float painted_baseline = 0;
+    // Space SkParagraph puts in front of the first glyph. It splits CSS
+    // letter-spacing evenly around every glyph, while CSS (and Chromium) add
+    // it after each glyph, so the run's leading edge sits half a spacing off
+    // the requested x. The total advance is the same either way. Measured
+    // for left-to-right text only, so right-to-left keeps zero.
+    float leading_spacing = 0;
 };
 
 PreparedParagraph make_paragraph(const std::string& text,
@@ -227,6 +233,7 @@ PreparedParagraph make_paragraph(const std::string& text,
     result.advance = std::max(paragraph->getLongestLine(),
                               paragraph->getMaxIntrinsicWidth());
     result.alphabetic_baseline = paragraph->getAlphabeticBaseline();
+    result.leading_spacing = ltr ? letter_spacing * 0.5f : 0.0f;
     result.painted_baseline = pstyle.hintingIsOn()
         ? std::round(result.alphabetic_baseline)
         : result.alphabetic_baseline;
@@ -585,7 +592,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
             // SkParagraph paint(canvas, x, y) places the paragraph TOP
             // at (x, y); Canvas2D fillText puts the alphabetic baseline
             // at y. Translate so the baseline lands on `y`.
-            prepared.paragraph->paint(canvas_, draw_x,
+            prepared.paragraph->paint(canvas_, draw_x - prepared.leading_spacing,
                                        y - prepared.painted_baseline);
             return;
         }
@@ -813,7 +820,7 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
             float draw_x = x;
             if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
             else if (text_align_ == TextAlign::right) draw_x -= prepared.advance;
-            prepared.paragraph->paint(canvas_, draw_x,
+            prepared.paragraph->paint(canvas_, draw_x - prepared.leading_spacing,
                                        y - prepared.painted_baseline);
             if (needs_restore) canvas_->restore();
             return;

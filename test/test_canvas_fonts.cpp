@@ -771,6 +771,65 @@ TEST_CASE("SkiaCanvas::fill_text rasterizes the baseline where it was asked",
     CHECK(mismatches == 0);
 }
 
+// ── letter-spacing goes after each glyph ───────────────────────────────────
+//
+// CSS letter-spacing adds space AFTER every typographic character, so the
+// first glyph of a run sits at the run's x whatever the spacing, and each
+// later glyph moves by one spacing per glyph before it. SkParagraph instead
+// splits the spacing evenly around every glyph, which slides a whole run by
+// half a spacing; fill_text has to take that back out.
+TEST_CASE("SkiaCanvas::fill_text adds letter-spacing after each glyph",
+          "[canvas][skia][text][letter-spacing]") {
+    SkImageInfo info = SkImageInfo::Make(400, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto first_ink_col = [](const SkPixmap& pm) {
+        for (int x = 0; x < pm.width(); ++x)
+            for (int y = 0; y < pm.height(); ++y)
+                if (SkColorGetR(pm.getColor(x, y)) < 160) return x;
+        return -1;
+    };
+    auto last_ink_col = [](const SkPixmap& pm) {
+        for (int x = pm.width() - 1; x >= 0; --x)
+            for (int y = 0; y < pm.height(); ++y)
+                if (SkColorGetR(pm.getColor(x, y)) < 160) return x;
+        return -1;
+    };
+    struct Ink { int first; int last; };
+    auto draw = [&](const char* text, float spacing) {
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        {
+            SkiaCanvas canvas(surface->getCanvas());
+            canvas.set_font_full("Inter", 32.0f, 400, /*slant=*/0, spacing);
+            canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_text(text, 100.0f, 40.0f);
+        }
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        return Ink{first_ink_col(pm), last_ink_col(pm)};
+    };
+
+    // Integer spacings keep both edges on the same pixel phase as the
+    // unspaced reference, so the expectations are exact.
+    for (float spacing : {-8.0f, 8.0f}) {
+        INFO("letter-spacing " << spacing);
+        const Ink plain_one = draw("H", 0.0f);
+        const Ink spaced_one = draw("H", spacing);
+        const Ink plain_two = draw("HH", 0.0f);
+        const Ink spaced_two = draw("HH", spacing);
+        REQUIRE(plain_one.first >= 0);
+        // The first glyph does not move.
+        CHECK(spaced_one.first == plain_one.first);
+        CHECK(spaced_one.last == plain_one.last);
+        CHECK(spaced_two.first == plain_two.first);
+        // The second glyph moves by exactly one spacing.
+        CHECK(spaced_two.last - plain_two.last ==
+              static_cast<int>(spacing));
+    }
+}
+
 // ── Variable-font weight instancing + SkParagraph bridge ────────────────────
 //
 // Root cause fixed here: imported designs register fonts via register_font,
