@@ -51,12 +51,12 @@ namespace pulp::signal {
 // `process_block()` do not allocate after construction/configuration as
 // long as the supplied callback is also allocation-free.
 //
-// `process_block()` runs each filter stage over a whole chunk of samples and
-// calls the callback for every oversampled sample of the chunk before any
-// decimation. The callback sees exactly the samples, in exactly the order,
-// that per-sample `process()` calls would hand it, and the output is
-// identical — every stage is causal and processes its input in time order
-// either way.
+// For the polyphase IIR and linear-phase lanes, `process_block()` runs each
+// filter stage over a whole chunk of samples and calls the callback for every
+// oversampled sample of the chunk before any decimation. The callback sees
+// exactly the samples, in exactly the order, that per-sample `process()`
+// calls would hand it, and the output is identical — every stage is causal
+// and processes its input in time order either way.
 //
 template <typename SampleType = float> class OversamplerT {
   public:
@@ -268,6 +268,11 @@ template <typename SampleType = float> class OversamplerT {
     template <typename Callback>
     void process_chunk(const SampleType* input, SampleType* output, std::size_t count,
                        Callback& callback) {
+        if (kind_ == Kind::fir_biquad) {
+            for (std::size_t i = 0; i < count; ++i)
+                output[i] = process_biquad_sample(input[i], callback);
+            return;
+        }
         const int stages = stage_count();
         SampleType* buffers[2] = {scratch_a_.data(), scratch_b_.data()};
         const SampleType* source = input;
@@ -293,42 +298,57 @@ template <typename SampleType = float> class OversamplerT {
 
     void upsample_stage(int stage, const SampleType* input, SampleType* output, std::size_t n) {
         const auto s = static_cast<std::size_t>(stage);
-        switch (kind_) {
-        case Kind::polyphase_iir:
+        if (kind_ == Kind::polyphase_iir) {
             iir_stages_[s].upsample(input, output, n);
             return;
-        case Kind::linear_phase_fir:
-            for (std::size_t i = 0; i < n; ++i)
-                fir_stages_[s].upsample(input[i], output[2 * i], output[2 * i + 1]);
-            return;
-        case Kind::fir_biquad:
-            for (std::size_t i = 0; i < n; ++i) {
-                output[2 * i] = biquad_up_stages_[s].process(SampleType{2} * input[i]);
-                output[2 * i + 1] = biquad_up_stages_[s].process(SampleType{0});
-            }
-            return;
         }
+        for (std::size_t i = 0; i < n; ++i)
+            fir_stages_[s].upsample(input[i], output[2 * i], output[2 * i + 1]);
     }
 
     void downsample_stage(int stage, const SampleType* input, SampleType* output, std::size_t n) {
         const auto s = static_cast<std::size_t>(stage);
-        switch (kind_) {
-        case Kind::polyphase_iir:
+        if (kind_ == Kind::polyphase_iir) {
             iir_stages_[s].downsample(input, output, n);
             return;
-        case Kind::linear_phase_fir:
-            for (std::size_t i = 0; i < n; ++i)
-                output[i] = fir_stages_[s].downsample(input[2 * i], input[2 * i + 1]);
-            return;
-        case Kind::fir_biquad:
-            for (std::size_t i = 0; i < n; ++i) {
-                const SampleType even = input[2 * i];
-                const SampleType odd = input[2 * i + 1];
-                output[i] = biquad_down_stages_[s].process(even);
-                static_cast<void>(biquad_down_stages_[s].process(odd));
-            }
-            return;
         }
+        for (std::size_t i = 0; i < n; ++i)
+            output[i] = fir_stages_[s].downsample(input[2 * i], input[2 * i + 1]);
+    }
+
+    // The biquad lane stays sample by sample. Each biquad is one serial
+    // recurrence, so running a stage over a whole chunk leaves the core waiting
+    // on a single dependency chain; interleaving every stage's up and down
+    // filters per input sample lets those independent chains overlap, and
+    // measured about twice as fast.
+    template <typename Callback>
+    SampleType process_biquad_sample(SampleType input, Callback& callback) {
+        constexpr auto kMax = static_cast<std::size_t>(Factor::x16);
+        std::array<SampleType, kMax> values; // only [0, count) is ever read
+        std::array<SampleType, kMax> expanded;
+        values[0] = input;
+        std::size_t count = 1;
+        const int stages = stage_count();
+        for (int stage = 0; stage < stages; ++stage) {
+            auto& up = biquad_up_stages_[static_cast<std::size_t>(stage)];
+            for (std::size_t i = 0; i < count; ++i) {
+                expanded[2 * i] = up.process(SampleType{2} * values[i]);
+                expanded[2 * i + 1] = up.process(SampleType{0});
+            }
+            count *= 2;
+            std::copy_n(expanded.begin(), count, values.begin());
+        }
+        for (std::size_t i = 0; i < count; ++i)
+            values[i] = callback(values[i]);
+        for (int stage = stages; stage-- > 0;) {
+            auto& down = biquad_down_stages_[static_cast<std::size_t>(stage)];
+            count /= 2;
+            for (std::size_t i = 0; i < count; ++i) {
+                values[i] = down.process(values[2 * i]);
+                static_cast<void>(down.process(values[2 * i + 1]));
+            }
+        }
+        return values[0];
     }
 
     static double biquad_group_delay(const BiquadCoefficientsT<SampleType>& c,
