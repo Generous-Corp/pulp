@@ -521,6 +521,17 @@ install(PROGRAMS
     "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
     DESTINATION "share/pulp/capability-control")
 
+# `pulp ship` in an SDK consumer project has no source checkout to take these
+# from: the unattended-signing preflight that `ship sign` and `ship doctor` run,
+# and the default codesign entitlements. The CLI resolves them from the
+# project's selected SDK under share/pulp/ship.
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/ensure_signing_ready.sh"
+    DESTINATION "share/pulp/ship")
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/ship/templates/entitlements.plist"
+    DESTINATION "share/pulp/ship")
+
 # Stable machine-readable GPU health contracts. Installed CLI and MCP
 # consumers need the exact versioned shapes selected by their SDK, not a
 # floating documentation URL or an inferred response.
