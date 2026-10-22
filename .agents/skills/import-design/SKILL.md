@@ -3803,9 +3803,10 @@ their siblings). Two traps:
 ### Shaded and double CSS borders, and themed form controls
 
 - `border-style: outset | inset | groove | ridge | double` are painted by View
-  in per-side bands (`View::border_shades` / `border_bands` /
-  `border_band_color`, pure and public). The native materializer maps all five
-  keywords; dropping one paints a flat solid frame. The shading rule was fitted
+  in per-side bands (`border_shades` / `border_bands` / `border_band_color` in
+  `pulp/view/border_style.hpp`, pure and public). Every lowering parses the
+  keyword through the one `border_style_from_css()` table there; dropping a
+  keyword paints a flat solid frame. The shading rule was fitted
   to Chrome 151 renders and checked on 189 colours — re-measure with a probe
   page before changing it, never from a fixture. Pure black is not special in
   the code: any colour no brighter than rgb(32,32,32) by relative luminance is

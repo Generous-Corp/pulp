@@ -445,7 +445,9 @@ target already compiles, so nothing looks missing — but the definition is in a
 TU the web source list may not name, and wasm-ld reports it only when something
 calls it. `press_reach.cpp` defines `View::simulate_context_click` and is listed
 in both files for this reason. The rule: if the symbol is `View::something`,
-grep the web list before assuming `view.cpp` carries it.
+grep the web list before assuming `view.cpp` carries it. The same holds for a
+free function `view_paint.cpp` calls: `border_style.cpp` (the border band and
+shade math `View::paint_border` uses) is listed in both.
 
 Same shape as the font list below: whenever a list is duplicated for the web
 target, the web copy is the one that silently rots.
