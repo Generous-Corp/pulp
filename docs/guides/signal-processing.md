@@ -1083,21 +1083,17 @@ os.process_block(input, output, num_samples, [&](float s) {
 |---|---|
 | `set_factor(Factor)` | `Factor::x2`, `Factor::x4`, `Factor::x8`, or `Factor::x16`. |
 | `set_sample_rate(float)` | Set base sample rate. Configures anti-aliasing filters. |
-| `set_kind(Kind)` | Select the minimum-phase polyphase IIR lane (default), the legacy Biquad lane, or the linear-phase FIR lane. |
-| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90%). Polyphase IIR lane: `standard` (94.8 dB from 0.58 Fs, flat to 0.42 Fs) or `pristine` (146 dB from 0.55 Fs, flat to 0.45 Fs). |
-| `group_delay_samples(double)` | Round-trip group delay in base samples at a frequency (cycles per base sample); constant for the linear-phase lane. |
-| `polyphase_stage_design(Quality, int)` | The elliptic half-band design (`HalfBandIirDesign`) a polyphase stage uses; evaluate it with `halfband_iir_response()` / `halfband_iir_group_delay()`. |
+| `set_kind(Kind)` | Select the legacy Biquad, minimum-phase polyphase IIR, or linear-phase FIR lane. |
+| `set_quality(Quality)` | Select `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist) for the linear-phase lane. |
 | `latency()` | Return host-rounded and exact base-rate latency plus whether the delay is constant. |
 | `latency_samples()` | Return the integer base-rate delay for `Processor::latency_samples()`. |
 | `process(float, callback)` | Upsample, process via callback, downsample. |
 | `process_block(const float*, float*, size_t, callback)` | Process a contiguous block; input and output may alias. |
 | `reset()` | Clear filter states. |
 
-The default lane, `Kind::polyphase_iir`, cascades elliptic half-band allpass stages derived in closed form by `design_halfband_iir()`; it is the cheapest lane at a given rejection. `Kind::fir_biquad` cascades one Butterworth Biquad pair per 2x stage, each cutting at `0.4 *` its own stage's input rate — the boundary that stage's decimation actually folds around. It was the default until the polyphase lane got a real elliptic design; switching the default bought 88 dB more alias rejection and a flat passband at roughly a sixth of the x2 cost, and costs about 1.7 more base samples of uncompensated delay near DC at x2 (2.66 against 0.97; 3.49 against 1.46 at x4). Near the passband edge the difference grows: 7.6 against 1.5 base samples at 0.4 Fs (x2). A caller that blends the oversampled path with a dry path, or that tuned around the biquad lane's duller top end, should set `Kind::fir_biquad` explicitly to keep the old behavior, or align the dry path with `group_delay_samples()`. See the [v0.997.0 migration note](../migrations/v0.997.0.md). Both are low-latency minimum-phase choices, but their group delay varies with frequency and therefore cannot truthfully expose one exact compensation value. `group_delay_samples(f)` evaluates the curve from the filter coefficients (the standard polyphase x2 round trip is 2.66 base samples near DC), or measure it: the offline Audio Doctor's `measure_group_delay()` (`test/support/audio_doctor.hpp`) reports unwrapped phase and group delay in samples or seconds per frequency, and reports a stopband as undefined instead of inventing a number for it. See the [`audio-harness`](../reference/skills.md) skill.
+The default anti-aliasing lane cascades one Butterworth Biquad pair per 2x stage, each cutting at `0.4 *` its own stage's input rate — the boundary that stage's decimation actually folds around. `Kind::polyphase_iir` uses cascaded half-band allpass stages. Both are low-latency minimum-phase choices, but their group delay varies with frequency and therefore cannot truthfully expose one exact compensation value. When you need the actual delay of a minimum-phase lane rather than a scalar it cannot honestly provide, measure the curve: the offline Audio Doctor's `measure_group_delay()` (`test/support/audio_doctor.hpp`) reports unwrapped phase and group delay in samples or seconds per frequency, and reports a stopband as undefined instead of inventing a number for it. See the [`audio-harness`](../reference/skills.md) skill.
 
 Be clear-eyed about what the Biquad lane buys you: a single biquad cannot reject much near the fold boundary, so its worst-case alias rejection is only about 7 dB (measured just above base Nyquist, improving to ~9 dB by 0.55 of the base rate), and its passband is already about -1.9 dB at 0.3 of the base rate. Those figures are the same at every factor — **raising the factor gives the callback's own harmonics more room before they fold, it does not give you a better filter.** (Nor should it cost you tone: a chain that lowpassed harder at each added stage would post a flattering rejection number while quietly muffling the top of the band, so the regression suite pins the passband and the rejection together.) When the anti-aliasing itself has to be good, use `polyphase_iir` or `linear_phase_fir` — not a higher factor on the Biquad lane.
-
-The polyphase IIR lane's transition is symmetric about base Nyquist, as every half-band's is: content the callback creates in (0.5, 0.58) Fs (standard) folds onto (0.42, 0.5) Fs with only partial rejection. That lands above the advertised passband, but if it matters, `linear_phase_fir` ends its transition at Nyquist instead.
 
 `Kind::linear_phase_fir` is the host-compensated quality lane. Its final decimation stage has a transition band ending at the base-rate Nyquist; `Quality::standard` uses a 96 dB prototype with a passband edge at 80% of Nyquist, while `Quality::pristine` uses a 140 dB prototype with a passband edge at 90%. The realized numeric floor also depends on `SampleType`: the regression suite requires at least 120 dB rejection from the default float alias and 130 dB from `Oversampler64` (measured on the reference stopband tone at about 141 dB and 161 dB respectively). Higher-rate filters preserve only the base band that can reach the final output, which keeps ×8/×16 practical without weakening the final decimator's measured rejection. The fixed tap counts make the exact delay integral at every supported factor:
 
@@ -1193,18 +1189,13 @@ fft.magnitude_db(freq.data(), magnitudes.data(), 512);
 | `size()` | FFT size. |
 | `forward(complex<float>*)` | In-place forward FFT. |
 | `inverse(complex<float>*)` | In-place inverse FFT (with 1/N scaling). |
-| `forward_real(float* in, complex<float>* out)` | Real input to all N bins, upper half mirrored. |
-| `real_bins()` | `size() / 2 + 1`: the independent bins of a real transform. |
-| `forward_real_half(float* in, complex<float>* out, float scale = 1)` | Real input to DC..Nyquist only, scaled in the same pass. Prefer this when you read no further than Nyquist. |
-| `inverse_real_half(complex<float>* in, float* out[, float scale])` | DC..Nyquist back to N real samples (default scale 1/N). `out` may reuse `in`'s storage. |
+| `forward_real(float* in, complex<float>* out)` | Real input to complex frequency domain. |
 | `magnitude_db(complex<float>*, float*, int)` | Compute magnitude spectrum in dB. |
 | `magnitude(complex<float>*, float*, int)` | Compute magnitude spectrum (linear). |
 
 **Sample rate dependency:** None (operates in sample domain). To convert bin index to frequency: `bin * sample_rate / fft_size`.
 
-**Caveat:** The constructor allocates twiddle factor storage. Create `Fft` objects in `prepare()`, not on the audio thread. `forward()`, `inverse()`, `forward_real()`, `forward_real_half()`, `inverse_real_half()`, and magnitude helpers are real-time safe after construction when callers provide output buffers.
-
-The half-spectrum pair moves N/2 + 1 bins through an N/2-point complex transform, so it is roughly a quarter faster than `forward_real()` and about twice as fast as a complex transform of the same real data; `PartitionedConvolver`, `Convolver`, the STFT, and the spectral frame engine all run on it.
+**Caveat:** The constructor allocates twiddle factor storage. Create `Fft` objects in `prepare()`, not on the audio thread. `forward()`, `inverse()`, `forward_real()`, and magnitude helpers are real-time safe after construction when callers provide output buffers.
 
 ---
 

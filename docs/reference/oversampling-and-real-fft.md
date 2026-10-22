@@ -1,0 +1,82 @@
+# Oversampling filters and the real-input FFT
+
+Reference for `<pulp/signal/oversampling.hpp>`, `<pulp/signal/halfband_iir.hpp>`
+and the real-input transforms in `<pulp/signal/fft.hpp>`.
+
+## `OversamplerT` filter kinds
+
+| Kind | Default | Rejection | Passband | Latency |
+|---|---|---|---|---|
+| `polyphase_iir` | yes | `standard`: 94.8 dB from 0.58 Fs. `pristine`: 146 dB from 0.55 Fs (about -143 dB in the float build) | flat (< 1e-8 dB) to 0.42 Fs / 0.45 Fs | minimum phase, frequency dependent |
+| `fir_biquad` | no | about 7 dB just above base Nyquist, ~9 dB at 0.55 Fs | -1.9 dB at 0.3 Fs | minimum phase, frequency dependent |
+| `linear_phase_fir` | no | `standard`: 96 dB, `pristine`: 140 dB | flat to 0.40 Fs / 0.45 Fs | constant, reported by `latency()` |
+
+`Kind::polyphase_iir` cascades elliptic half-band allpass stages whose
+coefficients `design_halfband_iir(count, passband_edge)` derives in closed
+form. It is the cheapest lane at a given rejection: on an M3 Ultra it costs
+2.6 ns per base sample at x2 and 7.2 ns at x4, against the biquad lane's 15.2
+and 27.9 ns. Stage 0 sets the base-band edge; each higher stage only keeps the
+same absolute band clean at twice the rate, so it uses a much shorter design.
+
+A half-band's transition is symmetric about base Nyquist, so content the
+callback creates in (0.5, 0.58) Fs (standard) folds onto (0.42, 0.5) Fs with
+only partial rejection. That lands above the advertised passband; if it
+matters, `linear_phase_fir` ends its transition at Nyquist instead.
+
+### Additional methods
+
+| Method | Description |
+|---|---|
+| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB, flat to 0.40 Fs) or `pristine` (140 dB, flat to 0.45 Fs). Polyphase lane: `standard` (94.8 dB from 0.58 Fs, flat to 0.42 Fs) or `pristine` (146 dB from 0.55 Fs, flat to 0.45 Fs). |
+| `group_delay_samples(double f)` | Round-trip group delay in base samples at `f` cycles per base sample; constant for the linear-phase lane. |
+| `polyphase_stage_design(Quality, int stage)` | The `HalfBandIirDesign` a polyphase stage uses; evaluate it with `halfband_iir_response()`, `halfband_iir_magnitude_db()`, `halfband_iir_group_delay()` or `halfband_iir_stopband_db()`. |
+
+### Delay of the minimum-phase lanes
+
+Both minimum-phase lanes report `latency().constant == false` and
+`latency_samples() == 0`; their delay is not host-compensated.
+
+| Round trip | Near DC | At 0.4 Fs |
+|---|---|---|
+| `polyphase_iir` standard, x2 | 2.66 base samples | 7.6 |
+| `polyphase_iir` standard, x4 | 3.49 | 8.6 |
+| `fir_biquad`, x2 | 0.97 | 1.5 |
+| `fir_biquad`, x4 | 1.46 | 2.1 |
+
+`group_delay_samples(f)` evaluates the curve from the filter coefficients. For
+the biquad lane it holds only below about 0.2 Fs: that lane rejects images so
+weakly that the decimator folds a tone's own image back onto it above there.
+A caller blending the oversampled path with a dry path can align the dry path
+with `group_delay_samples()`, or select `linear_phase_fir` for a constant,
+reportable latency.
+
+`polyphase_iir` became the default in v0.997.0; see the
+[migration note](../migrations/v0.997.0.md) for the consequences and how to
+keep `fir_biquad`.
+
+### Silence
+
+The polyphase stages zero any state below about 1e-30 (float) at the end of
+each processed block, so silence decays to exact zero (within 768 samples at
+standard quality, 1664 at pristine, in float) rather than a subnormal limit
+cycle. Per-sample `process()` flushes every sample, so block and per-sample
+output can differ by less than that threshold while a signal dies away.
+
+## Real-input FFT
+
+| Method | Description |
+|---|---|
+| `forward_real(in, out)` | N real samples to all N bins, upper half mirrored. |
+| `real_bins()` | `size() / 2 + 1`: the independent bins of a real transform. |
+| `forward_real_half(in, out, scale = 1)` | N real samples to DC..Nyquist only, scaled in the same pass. Nothing past Nyquist is written. |
+| `inverse_real_half(in, out[, scale])` | DC..Nyquist back to N real samples; the default scale 1/N recovers the input. Imaginary DC/Nyquist parts are ignored, and `out` may reuse `in`'s storage. |
+
+The half-spectrum pair runs an N/2-point complex transform, so it is roughly a
+quarter faster than `forward_real()` and about twice as fast as a complex
+transform of the same real data. `PartitionedConvolver`, `Convolver`, the
+STFT and the spectral frame engine run on it. All of these calls are realtime
+safe after construction; size must be at least 2.
+
+On Apple platforms the float transform pins where its vDSP split buffers sit
+relative to a 64-byte boundary, because vDSP's speed depends on it (up to 1.9x
+for a 512-point real transform on M5).
