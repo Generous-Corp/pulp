@@ -666,10 +666,13 @@ TEST_CASE("Convolver64 identity IR preserves double buffers",
     REQUIRE_THAT(output[9], WithinAbs(-0.5, 1e-12));
 }
 
-TEST_CASE("Convolver overlap-add nulls against a direct convolution for long IRs",
-          "[signal][convolver][null]") {
-    // An IR longer than the block leaves a tail reaching several blocks ahead;
-    // every block's tail must accumulate into the pending overlap. Output is
+TEST_CASE("Convolver overlap-add keeps the whole tail of an IR longer than one block",
+          "[signal][convolver][null][regression]") {
+    // Regression: an IR longer than the block leaves a tail reaching several
+    // blocks ahead, and every block's tail must accumulate into the pending
+    // overlap. Replacing the overlap with only the newest block's tail dropped
+    // the older tails, so any such IR convolved wrongly (about -0.2 to -37 dB
+    // null instead of -130). Every case here has ir.size() > block. Output is
     // delayed by exactly one block.
     std::vector<float> input(4096), ir(300);
     std::uint32_t state = 0x777u;
@@ -682,7 +685,8 @@ TEST_CASE("Convolver overlap-add nulls against a direct convolution for long IRs
         ir[i] = (static_cast<float>(state >> 8) / 8388608.0f - 1.0f) *
                 std::exp(-0.01f * static_cast<float>(i));
     }
-    for (const int block : {1, 64, 256, 512}) {
+    for (const int block : {1, 64, 256}) {
+        REQUIRE(ir.size() > static_cast<std::size_t>(block));
         Convolver conv;
         conv.load_ir(ir.data(), static_cast<int>(ir.size()), block);
         std::vector<float> out(input.size());
@@ -739,5 +743,39 @@ TEST_CASE("FFT transforms stay exact across every split placement",
         moved.forward_real_half(x.data(), bins.data());
         moved.inverse_real_half(bins.data(), again.data());
         REQUIRE(again == back);
+    }
+}
+
+TEST_CASE("Convolver overlap-add matches a direct convolution when the IR fits one block",
+          "[signal][convolver][null]") {
+    // The single-block case never needed the carried tail; it must keep nulling
+    // after the tail fix and the move to real transforms.
+    std::vector<float> input(2048), ir(50);
+    std::uint32_t state = 0x31u;
+    for (auto& v : input) {
+        state = state * 1664525u + 1013904223u;
+        v = static_cast<float>(state >> 8) / 8388608.0f - 1.0f;
+    }
+    for (auto& v : ir) {
+        state = state * 1664525u + 1013904223u;
+        v = static_cast<float>(state >> 8) / 8388608.0f - 1.0f;
+    }
+    for (const int block : {64, 512}) {
+        Convolver conv;
+        conv.load_ir(ir.data(), static_cast<int>(ir.size()), block);
+        std::vector<float> out(input.size());
+        conv.process(input.data(), out.data(), static_cast<int>(input.size()));
+        long double err = 0, ref = 0;
+        for (std::size_t n = 0; n + static_cast<std::size_t>(block) < input.size(); ++n) {
+            long double y = 0;
+            for (std::size_t k = 0; k < ir.size() && k <= n; ++k)
+                y += static_cast<long double>(ir[k]) * input[n - k];
+            const long double d = out[n + static_cast<std::size_t>(block)] - y;
+            err += d * d;
+            ref += y * y;
+        }
+        const double null_db = 10.0 * std::log10(static_cast<double>(err / ref));
+        INFO("block=" << block << " null=" << null_db << " dB");
+        REQUIRE(null_db < -120.0);
     }
 }
