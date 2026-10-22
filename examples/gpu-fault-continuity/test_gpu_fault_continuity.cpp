@@ -187,6 +187,10 @@ TEST_CASE("gpu fault plug-in output is conv(input) delayed by its reported PDC",
         REQUIRE(wait_for(dir.path / "events.jsonl", "\"event\":\"prepared\""));
         if (!on_shared_path(dir.path / "events.jsonl"))
             SKIP("no shared-I/O GPU provider on this host");
+        const auto prepared = read_text(dir.path / "events.jsonl");
+        CHECK(prepared.find("\"node\":\"convolver\"") != std::string::npos);
+        CHECK(prepared.find("\"storage\":\"shared\"") != std::string::npos);
+        CHECK(prepared.find("\"timestamps\":false") != std::string::npos);
         pdc = p.latency_samples();
         quantum = p.quantum();
         // Paced like a realtime host, so the GPU has time to deliver within
@@ -527,6 +531,9 @@ TEST_CASE("gpu_off puts the plug-in on the staged path", "[gpu-fault-continuity]
     }
     ::unsetenv("PULP_GPU_FAULT_PROVIDER");
     CHECK_FALSE(on_shared_path(dir.path / "events.jsonl"));
+    const auto prepared = read_text(dir.path / "events.jsonl");
+    CHECK(prepared.find("\"storage\":\"shared\"") == std::string::npos);
+    CHECK(prepared.find("\"node\":\"convolver\"") != std::string::npos);
 }
 
 TEST_CASE("run-directory files are not followed through a symlink", "[gpu-fault-continuity]") {

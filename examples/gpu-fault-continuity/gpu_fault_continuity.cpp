@@ -437,19 +437,29 @@ void GpuFaultContinuityProcessor::prepare_engine() {
     engine_ready_.store(transport_ok, std::memory_order_release);
 
     if (harness_) {
-        char line[768];
+        // node/storage/timestamps name the configuration a verifier may need
+        // to exclude; storage is the path the provider actually took.
+        const char* storage = "none";
+        if (capability.path == gpu_audio::GpuAudioExecutionPath::SharedMemory)
+            storage = "shared";
+        else if (capability.path == gpu_audio::GpuAudioExecutionPath::Staged)
+            storage = "staged";
+        const bool timestamps = transport_ok && transport_->status_snapshot().timestamps_available;
+        char line[896];
         std::snprintf(
             line, sizeof(line),
             "{\"event\":\"prepared\",\"ok\":%s,\"pdc_samples\":%d,\"quantum\":%u,"
             "\"lead_blocks\":%u,\"ir_taps\":%zu,\"provider\":\"%s\",\"path\":\"%s\","
             "\"sample_rate\":%u,\"max_block\":%u,\"audio_fault_seam\":%s,"
             "\"seam_detail\":\"%s\",\"nonce\":\"%s\",\"pid\":%d,"
-            "\"prepare_index\":%u,\"provider_device\":\"0x%llx\"}",
+            "\"prepare_index\":%u,\"provider_device\":\"0x%llx\",\"node\":\"convolver\","
+            "\"storage\":\"%s\",\"timestamps\":%s}",
             transport_ok ? "true" : "false", latency_samples(), quantum_,
             capability.prepared_lead_blocks, ir_.size(), provider_name_.c_str(), path_name_.c_str(),
             sample_rate_, max_block_, audio_fault_seam_available() ? "true" : "false",
             escape(interposer_detail).c_str(), escape(nonce_).c_str(), static_cast<int>(::getpid()),
-            prepare_index_ & 0xFFFFu, static_cast<unsigned long long>(target_device_));
+            prepare_index_ & 0xFFFFu, static_cast<unsigned long long>(target_device_), storage,
+            timestamps ? "true" : "false");
         emit(line);
     }
 }
