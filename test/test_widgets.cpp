@@ -973,7 +973,8 @@ TEST_CASE("Knob and Fader render loaded sprite strips",
     REQUIRE_THAT(fader_image.f[3], WithinAbs(4.0, 0.001));
 }
 
-TEST_CASE("Sprite strips bound encoded frames by decoded size and raw frames by byte count",
+TEST_CASE("Sprite strips draw every declared frame of decodable bytes and bound raw bytes by "
+          "byte count",
           "[view][widget][sprite]") {
     // A PNG signature and IHDR for a 16x48 image: three 16x16 frames. The
     // recording canvas sizes PNGs from IHDR, and these 33 bytes stand in for a
@@ -1003,14 +1004,17 @@ TEST_CASE("Sprite strips bound encoded frames by decoded size and raw frames by 
     fader.paint(fader_canvas);
     REQUIRE(fader_canvas.count(DrawCommand::Type::draw_image) == 1);
 
-    // A frame outside the decoded image is still refused: the strip claims
-    // four frames but the image holds three.
-    auto overclaimed = std::make_shared<SpriteStrip>();
-    overclaimed->load(png.data(), png.size(), 16, 64, 4);
-    knob.set_sprite_strip(overclaimed);
-    RecordingCanvas overclaimed_canvas;
-    knob.paint(overclaimed_canvas);
-    CHECK(overclaimed_canvas.count(DrawCommand::Type::draw_image) == 0);
+    // The draw scales the decoded image to the declared size, so a strip
+    // declared at twice the image's pixel size still draws its last frame.
+    auto doubled = std::make_shared<SpriteStrip>();
+    doubled->load(png.data(), png.size(), 32, 96, 3);
+    knob.set_sprite_strip(doubled);
+    RecordingCanvas doubled_canvas;
+    knob.paint(doubled_canvas);
+    REQUIRE(doubled_canvas.count(DrawCommand::Type::draw_image) == 1);
+    const auto doubled_image = commands_of(doubled_canvas, DrawCommand::Type::draw_image).front();
+    CHECK_THAT(doubled_image.f[2], WithinAbs(32.0, 0.001));
+    CHECK_THAT(doubled_image.f[3], WithinAbs(96.0, 0.001));
 
     // Raw RGBA bytes keep the byte-count bound: one frame short of the last.
     std::vector<uint8_t> raw(static_cast<size_t>(16) * 16 * 4 * 2, 0x7f);
@@ -1020,7 +1024,40 @@ TEST_CASE("Sprite strips bound encoded frames by decoded size and raw frames by 
     RecordingCanvas raw_canvas;
     knob.paint(raw_canvas);
     CHECK(raw_canvas.count(DrawCommand::Type::draw_image) == 0);
-    CHECK(truncated->decoded_width() == 0);
+    CHECK_FALSE(truncated->decoded_size_known());
+}
+
+TEST_CASE("A sprite strip one canvas cannot measure still draws on a canvas that can",
+          "[view][widget][sprite]") {
+    // 33 bytes of a format the recording canvas cannot size (it reads PNG
+    // only), standing in for a compressed JPEG, WebP or GIF strip of three
+    // 16x16 frames.
+    std::vector<uint8_t> bytes(33, 0x5a);
+    auto strip = std::make_shared<SpriteStrip>();
+    strip->load(bytes.data(), bytes.size(), 16, 48, 3);
+    Knob knob;
+    knob.set_bounds({0, 0, 32, 32});
+    knob.set_value(1.0f);
+    knob.set_sprite_strip(strip);
+
+    // A headless snapshot first: no decoder, so the byte bound refuses the
+    // last frame, and nothing is recorded on the shared strip.
+    RecordingCanvas snapshot;
+    knob.paint(snapshot);
+    CHECK(snapshot.count(DrawCommand::Type::draw_image) == 0);
+    CHECK_FALSE(strip->decoded_size_known());
+
+    // Then a decoding canvas: the strip measures and its last frame draws.
+    struct DecodingCanvas : RecordingCanvas {
+        bool measure_image_from_data(const uint8_t*, size_t, float& w, float& h) override {
+            w = 16.0f;
+            h = 48.0f;
+            return true;
+        }
+    } decoding;
+    knob.paint(decoding);
+    CHECK(decoding.count(DrawCommand::Type::draw_image) == 1);
+    CHECK(strip->decoded_size_known());
 }
 
 // ── RangeSlider (pulp issue-966) ────────────────────────────────────────────

@@ -103,10 +103,9 @@ public:
         return data_key_;
     }
 
-    /// Pixel size the canvas decoder reported for `data()`, recorded once by
-    /// the painting widget. Zero means the decoder did not recognise the bytes
-    /// as an encoded image (raw RGBA pixels). Unknown until recorded; `load`
-    /// forgets it.
+    /// Pixel size a canvas decoder reported for `data()`, recorded by the
+    /// painting widget on the first successful measure. Unknown (and treated
+    /// as raw RGBA pixels) until then; `load` forgets it.
     void set_decoded_size(int width, int height) {
         decoded_width_ = width;
         decoded_height_ = height;

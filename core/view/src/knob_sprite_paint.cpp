@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace pulp::view {
 
@@ -80,24 +81,26 @@ void draw_knob_captured_pointer(canvas::Canvas& canvas,
     canvas.stroke_line(ix, iy, ox, oy);
 }
 
-// Whether the frame at (fx, fy) of a byte-backed strip lies inside its pixels.
-// Encoded bytes (PNG, JPEG, ...) compress, so their byte count says nothing
-// about which frames exist: they are bounded by the decoded image size, read
-// from the header once per strip. Bytes the decoder does not recognise are raw
-// RGBA and are bounded by their byte count.
+// Whether the frame at (fx, fy) of a byte-backed strip can be drawn. The draw
+// scales the whole decoded image to the strip's declared size, so once the
+// bytes are known to decode, every frame inside the declared size draws,
+// whatever the encoded byte count or decoded pixel size. Bytes no decoder has
+// recognised are treated as raw RGBA and bounded by their byte count. Only a
+// successful measure is recorded on the (possibly shared) strip: a canvas that
+// cannot decode the format must not stop a later decoding canvas from drawing.
 bool byte_strip_frame_in_bounds(canvas::Canvas& canvas, SpriteStrip& strip, int fx, int fy) {
     if (!strip.decoded_size_known()) {
         float w = 0.0f, h = 0.0f;
-        if (canvas.measure_image_from_data(strip.data(), strip.data_size(), w, h))
+        if (canvas.measure_image_from_data(strip.data(), strip.data_size(), w, h) && w >= 1.0f &&
+            h >= 1.0f && w <= static_cast<float>(std::numeric_limits<int>::max()) &&
+            h <= static_cast<float>(std::numeric_limits<int>::max()))
             strip.set_decoded_size(static_cast<int>(w), static_cast<int>(h));
-        else
-            strip.set_decoded_size(0, 0);
     }
     const int fw = strip.frame_width();
     const int fh = strip.frame_height();
-    if (strip.decoded_width() > 0 && strip.decoded_height() > 0)
-        return fx >= 0 && fy >= 0 && fx + fw <= strip.decoded_width() &&
-               fy + fh <= strip.decoded_height();
+    if (strip.decoded_size_known())
+        return fx >= 0 && fy >= 0 && fx + fw <= strip.total_width() &&
+               fy + fh <= strip.total_height();
     const size_t frame_bytes = static_cast<size_t>(fw) * static_cast<size_t>(fh) * 4u;
     const size_t offset = static_cast<size_t>(fy) * static_cast<size_t>(strip.total_width()) * 4u +
                           static_cast<size_t>(fx) * 4u;
