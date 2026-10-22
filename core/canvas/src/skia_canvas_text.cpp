@@ -268,14 +268,28 @@ bool contains_variation_selector(std::string_view text) {
         || text.find(kEmojiPresentation) != std::string_view::npos;
 }
 
+// A face with AAT tracking is drawn through SkParagraph with that tracking
+// applied, so it has to be measured there too.
 bool needs_paragraph_for_text_metrics(
     std::string_view text,
     const std::vector<Canvas::FontFeature>& features,
-    float letter_spacing) {
+    float letter_spacing,
+    const SkTypeface* typeface,
+    float size) {
     return !features.empty()
         || letter_spacing != 0.0f
         || pulp::canvas::contains_emoji(text)
-        || contains_variation_selector(text);
+        || contains_variation_selector(text)
+        || aat_tracking_px(typeface, size) != 0.0f;
+}
+
+// SkParagraph paint(canvas, x, y) places the paragraph top at (x, y);
+// Canvas2D puts the alphabetic baseline at y and the first glyph's leading
+// edge at x.
+void paint_prepared(const PreparedParagraph& prepared, SkCanvas* canvas,
+                    float x, float y) {
+    prepared.paragraph->paint(canvas, x - prepared.leading_spacing,
+                              y - prepared.painted_baseline);
 }
 
 } // namespace
@@ -560,12 +574,9 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // which lacks Unicode arrows/dashes/etc.), partition the text into runs by
     // typeface and shape each separately. ASCII text bypasses the scan; it's
     // virtually always covered by any Latin typeface.
-    //
-    // A face with AAT tracking is drawn through SkParagraph with that
-    // tracking applied, so it has to be measured there too.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_) ||
-        aat_tracking_px(font.getTypeface(), font_size_) != 0.0f;
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
+                                         font.getTypeface(), font_size_);
 
     // For plain letter_spacing_ == 0 text only, route missing-glyph text
     // through SkShaper-based per-run fallback for best kerning / ligature
@@ -608,11 +619,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
             float draw_x = x;
             if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
             else if (text_align_ == TextAlign::right) draw_x -= prepared.advance;
-            // SkParagraph paint(canvas, x, y) places the paragraph TOP
-            // at (x, y); Canvas2D fillText puts the alphabetic baseline
-            // at y. Translate so the baseline lands on `y`.
-            prepared.paragraph->paint(canvas_, draw_x - prepared.leading_spacing,
-                                       y - prepared.painted_baseline);
+            paint_prepared(prepared, canvas_, draw_x, y);
             return;
         }
     }
@@ -828,11 +835,9 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
     // emoji typefaces typically have CBDT/COLR bitmaps with no outline
     // tables, so strokeText effectively leaves them unchanged (CSS
     // behavior). Latin text in mixed-emoji runs still gets the stroke.
-    // A face with AAT tracking is drawn through SkParagraph with that
-    // tracking applied, so it has to be measured there too.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_) ||
-        aat_tracking_px(font.getTypeface(), font_size_) != 0.0f;
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
+                                         font.getTypeface(), font_size_);
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
@@ -842,8 +847,7 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
             float draw_x = x;
             if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
             else if (text_align_ == TextAlign::right) draw_x -= prepared.advance;
-            prepared.paragraph->paint(canvas_, draw_x - prepared.leading_spacing,
-                                       y - prepared.painted_baseline);
+            paint_prepared(prepared, canvas_, draw_x, y);
             if (needs_restore) canvas_->restore();
             return;
         }
@@ -987,11 +991,9 @@ float SkiaCanvas::measure_text(const std::string& text) {
     // the same input. Anything emoji-bearing or feature-tagged still
     // goes through SkParagraph so the measured width matches what
     // fill_text actually draws.
-    // A face with AAT tracking is drawn through SkParagraph with that
-    // tracking applied, so it has to be measured there too.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_) ||
-        aat_tracking_px(font.getTypeface(), font_size_) != 0.0f;
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
+                                         font.getTypeface(), font_size_);
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
@@ -1108,11 +1110,9 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     // fill_text actually draws. ASCII / no-feature labels keep the
     // SkFont measurement above — same width fill_text emits via the
     // per-glyph fallback path.
-    // A face with AAT tracking is drawn through SkParagraph with that
-    // tracking applied, so it has to be measured there too.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_) ||
-        aat_tracking_px(font.getTypeface(), font_size_) != 0.0f;
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
+                                         font.getTypeface(), font_size_);
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
