@@ -585,10 +585,51 @@ TEST_CASE("design-import benchmark run_phase counts per-frame allocations",
           8u * static_cast<std::uint64_t>(busy_metrics.samples));
 }
 
+TEST_CASE("design-import benchmark excludes warmup frames from cumulative counters",
+          "[design-import][benchmark]") {
+    auto fixture = make_fixture("baked-cpp");
+    REQUIRE(fixture != nullptr);
+    // Per-frame cost of the idle panel, measured on one frame: its paint
+    // commands and how many layout passes one render asks for.
+    const auto layouts_before = View::layout_pass_count();
+    const auto commands = render_frame(fixture->root());
+    const auto layouts_per_frame = View::layout_pass_count() - layouts_before;
+    REQUIRE(commands > 0);
+    REQUIRE(layouts_per_frame > 0);
+
+    constexpr int kWarmup = 3;
+    const auto idle = run_phase(*fixture, 5, 10000, false, kWarmup);
+    REQUIRE(idle.samples > 0);
+    const auto sampled = static_cast<std::uint64_t>(idle.samples);
+    // Every frame repeats the same work, so a counter that included the
+    // warmup frames would read kWarmup frames high.
+    CHECK(idle.paint_calls == sampled);
+    CHECK(idle.paint_commands_total == sampled * commands);
+    CHECK(idle.layout_passes == sampled * layouts_per_frame);
+
+    // Control: without warmup every rendered frame is counted.
+    const auto all = run_phase(*fixture, 5, 10000, false, 0);
+    REQUIRE(all.samples > 0);
+    CHECK(all.paint_calls == static_cast<std::uint64_t>(all.samples));
+    CHECK(all.layout_passes == static_cast<std::uint64_t>(all.samples) * layouts_per_frame);
+
+    // A phase that never leaves warmup counts nothing.
+    const auto warmup_only = run_phase(*fixture, 1, 10000, false, 1000000);
+    CHECK(warmup_only.samples == 0);
+    CHECK(warmup_only.paint_calls == 0);
+    CHECK(warmup_only.paint_commands_total == 0);
+    CHECK(warmup_only.layout_passes == 0);
+}
+
 TEST_CASE("design-import benchmark reports a nonzero RSS high-water mark",
           "[design-import][benchmark]") {
 #if defined(__APPLE__) || defined(__linux__)
-    CHECK(rss_high_water_bytes() > 0);
+    // The high-water mark is a peak, so it can never sit below the resident
+    // set measured before it. A units slip (ru_maxrss is bytes on Apple and
+    // KiB on Linux) reads three orders of magnitude off and fails here.
+    const auto current = current_rss_bytes();
+    REQUIRE(current > 0);
+    CHECK(rss_high_water_bytes() >= current);
 #else
     SKIP("RSS high-water mark is not implemented on this platform");
 #endif

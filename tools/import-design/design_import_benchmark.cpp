@@ -831,10 +831,16 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     const auto phase_start = Clock::now();
     const auto cpu_start = std::clock();
     auto next_frame = phase_start;
-    const auto bridge_calls_start = fixture.bridge_call_count();
-    const auto layout_passes_start = View::layout_pass_count();
-    const auto invalidation_start = View::damage_request_count();
-    const auto unmarked_start = View::unmarked_paint_mutation_count();
+    // Cumulative counters are read from the start of the first sampled frame,
+    // so warmup work stays out of them exactly as it stays out of the
+    // per-frame statistics. A phase that never leaves warmup counts nothing.
+    struct CounterOrigin {
+        std::uint64_t bridge_calls = 0;
+        std::uint64_t layout_passes = 0;
+        std::uint64_t invalidation_requests = 0;
+        std::uint64_t unmarked_paint_mutations = 0;
+    };
+    std::optional<CounterOrigin> counters_from;
     std::vector<double> frame_ms;
     std::vector<double> frame_cpu_ms;
     std::vector<double> update_ms;
@@ -847,6 +853,12 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
         // per-frame statistic so first-touch cache and allocator effects do
         // not land in the median or tail.
         const bool sampled = frame >= warmup_frames;
+        if (sampled && !counters_from) {
+            counters_from = CounterOrigin{fixture.bridge_call_count(),
+                                          View::layout_pass_count(),
+                                          View::damage_request_count(),
+                                          View::unmarked_paint_mutation_count()};
+        }
         std::size_t allocations = 0;
         std::size_t allocated_bytes = 0;
         double update_elapsed = 0.0;
@@ -863,11 +875,11 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
             allocations = probe.allocation_count();
             allocated_bytes = probe.allocated_bytes();
         }
-        metrics.paint_commands_total += metrics.paint_commands_last;
-        ++metrics.paint_calls;
         const auto frame_cpu_end = std::clock();
         const auto frame_end = Clock::now();
         if (sampled) {
+            metrics.paint_commands_total += metrics.paint_commands_last;
+            ++metrics.paint_calls;
             if (interactive) update_ms.push_back(update_elapsed);
             frame_ms.push_back(elapsed_ms(frame_start, frame_end));
             frame_cpu_ms.push_back(cpu_clock_delta_ms(frame_cpu_start, frame_cpu_end));
@@ -912,10 +924,14 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     }
     const auto cpu_end = std::clock();
     metrics.cpu_ms = cpu_clock_delta_ms(cpu_start, cpu_end);
-    metrics.bridge_calls = fixture.bridge_call_count() - bridge_calls_start;
-    metrics.layout_passes = View::layout_pass_count() - layout_passes_start;
-    metrics.invalidation_requests = View::damage_request_count() - invalidation_start;
-    metrics.unmarked_paint_mutations = View::unmarked_paint_mutation_count() - unmarked_start;
+    if (counters_from) {
+        metrics.bridge_calls = fixture.bridge_call_count() - counters_from->bridge_calls;
+        metrics.layout_passes = View::layout_pass_count() - counters_from->layout_passes;
+        metrics.invalidation_requests =
+            View::damage_request_count() - counters_from->invalidation_requests;
+        metrics.unmarked_paint_mutations = View::unmarked_paint_mutation_count() -
+                                           counters_from->unmarked_paint_mutations;
+    }
     metrics.js_evaluations = fixture.js_evaluation_count();
     return metrics;
 }
