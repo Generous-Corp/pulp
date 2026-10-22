@@ -69,13 +69,48 @@ Offline processing fences provider work and continues the same aligned callback
 fallback. GPU delivery stays disabled after returning to realtime until explicit
 preparation. Do not reset CPU history merely because GPU output was fenced.
 
+## Deadlines, device loss and hung providers
+
+Every submitted block carries a completion deadline: the start of the callback
+that captured its input plus `completion_deadline_ns`. The default, zero, uses
+the lead window (`lead_blocks` block periods), the last instant at which the
+result can still reach its callback. A result observed after its deadline is
+retired as `LateRejected` with reason `DeadlineExceeded` and is never
+delivered; like any late record it leaves causal history intact. If the
+callback start time is unavailable, the worker's admission time anchors the
+deadline instead, which can only make it later. A deadline tighter than the lead
+window turns on-time results into misses, so raise it rather than lower it if a
+healthy provider reports late blocks.
+
+When a provider reports that its device is lost, the node latches
+`GpuAudioRecoveryReason::ProviderLost` at the oldest block still in flight,
+before any failed completion from the same service pass can latch
+`ProviderFailure`. Loss is checked when completions are collected and when a
+submission is refused.
+
+A watchdog on the worker latches `ProviderUnresponsive` when every in-flight
+slot stays occupied and no completion arrives while callback blocks keep
+arriving: after `watchdog_blocks` blocks (default `capacity - 1`), or as soon
+as the input ring has one free record left. The stall is measured in callback
+blocks, not worker pumps, because the worker wakes on a poll interval. A hung
+provider is therefore reported as unresponsive rather than as
+`InputSaturated`. The watchdog runs only while the worker is serviced; if the
+worker itself stops, the callback still latches `InputSaturated` when the ring
+fills.
+
+`status_snapshot()` reports `provider_state = Unavailable` for `ProviderLost`
+and `ProviderUnresponsive`: delivery cannot resume until the node is released
+and prepared with a new provider. Every other recovery reason reports
+`Degraded`.
+
 ## Evidence and limits
 
 `pulp-test-gpu-wavenet-realtime-node` uses private fake providers to force delayed,
 failed, mismatched and partially successful channel completions. It checks leads
 1/2/4/8, stale rejection, input loss, release retry, epoch replacement, callback
-allocation observation, callback-only shadow execution, and rejection of the
-legacy route. Fake paths report provider `Unknown`, never Dawn.
+allocation observation, callback-only shadow execution, rejection of the
+legacy route, device-loss precedence, the hung-provider watchdog, submitted
+deadlines and late retirement. Fake paths report provider `Unknown`, never Dawn.
 
 These tests prove sequencing and fallback contracts, not hardware deadline
 reliability. An authenticated installed SDK build, actual GPU delivery controls,

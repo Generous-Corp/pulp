@@ -2,6 +2,7 @@
 #include "detail/shared_io_stamped_bridge.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <stdexcept>
@@ -15,8 +16,9 @@ class SessionChannel final : public detail::WaveNetRealtimeChannel {
   public:
     explicit SessionChannel(std::unique_ptr<GpuWaveNetSession> session)
         : session_(std::move(session)) {}
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
-        return session_->submit_block(input, sequence);
+    bool submit(std::span<const float> input, std::uint64_t sequence,
+                std::uint64_t deadline_ns) noexcept override {
+        return session_->submit_block(input, sequence, deadline_ns);
     }
     void service(std::uint64_t now) noexcept override {
         session_->service(now);
@@ -29,6 +31,9 @@ class SessionChannel final : public detail::WaveNetRealtimeChannel {
     }
     bool release() noexcept override {
         return session_->release();
+    }
+    bool lost() const noexcept override {
+        return session_->device_lost();
     }
 
   private:
@@ -126,6 +131,23 @@ struct GpuWaveNetRealtimeNode::Impl {
         (void)trace->publish_worker(pending.trace_record);
         telemetry.record_retired(outcome == detail::SharedIoTraceOutcome::Success);
     }
+    static detail::SharedIoGpuTerminalDisposition
+    failed_terminal(detail::SharedIoTraceOutcome outcome) noexcept {
+        return outcome == detail::SharedIoTraceOutcome::DeviceLost
+                   ? detail::SharedIoGpuTerminalDisposition::DeviceLost
+                   : detail::SharedIoGpuTerminalDisposition::ProviderFailed;
+    }
+    static detail::SharedIoFallbackReason
+    failed_reason(detail::SharedIoTraceOutcome outcome) noexcept {
+        switch (outcome) {
+        case detail::SharedIoTraceOutcome::SubmissionRejected:
+            return detail::SharedIoFallbackReason::SubmissionRejected;
+        case detail::SharedIoTraceOutcome::DeviceLost:
+            return detail::SharedIoFallbackReason::DeviceLost;
+        default:
+            return detail::SharedIoFallbackReason::CompletionFailed;
+        }
+    }
     detail::SharedIoFallbackReason recovery_trace_reason() const noexcept {
         using Recovery = detail::SharedIoRecoveryReason;
         using Reason = detail::SharedIoFallbackReason;
@@ -157,11 +179,8 @@ struct GpuWaveNetRealtimeNode::Impl {
             if (!pending.occupied)
                 continue;
             if (pending.outcome != detail::SharedIoTraceOutcome::Success)
-                trace_terminal(pending, pending.outcome,
-                               detail::SharedIoGpuTerminalDisposition::ProviderFailed,
-                               pending.outcome == detail::SharedIoTraceOutcome::SubmissionRejected
-                                   ? detail::SharedIoFallbackReason::SubmissionRejected
-                                   : detail::SharedIoFallbackReason::CompletionFailed);
+                trace_terminal(pending, pending.outcome, failed_terminal(pending.outcome),
+                               failed_reason(pending.outcome));
             else
                 trace_terminal(pending, detail::SharedIoTraceOutcome::Cancelled,
                                detail::SharedIoGpuTerminalDisposition::CancelledTeardown,
@@ -195,6 +214,17 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::size_t pending_head = 0, pending_count = 0;
     std::uint64_t next_input = 0, sequence = 0, epoch = 0;
     std::uint64_t all_channels_mask = 0;
+    // Callback start time per ingress record, indexed by sequence % capacity,
+    // and the callback's next sequence. Written by the callback, read by the
+    // worker. A record overwritten by a later callback can only push its
+    // deadline later; nothing else depends on these values.
+    std::unique_ptr<std::atomic<std::uint64_t>[]> ingress_ns;
+    std::atomic<std::uint64_t> callback_next{0};
+    std::uint64_t deadline_window_ns = 0;
+    // Worker-only watchdog state. The stall is measured in callback blocks
+    // because the worker's pump rate is a poll interval, not an audio clock.
+    std::uint64_t watchdog_limit = 0, stall_backlog = 0;
+    bool stalled = false;
     bool prepared = false, production_provider = false;
     bool fallback_prepared = false;
 
@@ -247,6 +277,22 @@ struct GpuWaveNetRealtimeNode::Impl {
         pending_head = pending_count = 0;
         all_channels_mask = c.channels == 64 ? UINT64_MAX : (UINT64_C(1) << c.channels) - 1;
         next_input = sequence;
+        ingress_ns = std::make_unique<std::atomic<std::uint64_t>[]>(c.capacity);
+        for (std::uint32_t i = 0; i < c.capacity; ++i)
+            ingress_ns[i].store(0, std::memory_order_relaxed);
+        callback_next.store(sequence, std::memory_order_relaxed);
+        deadline_window_ns = c.completion_deadline_ns;
+        if (deadline_window_ns == 0) {
+            const auto window = static_cast<long double>(c.lead_blocks) *
+                                c.session.descriptor.block_size * 1.0e9L /
+                                c.session.descriptor.sample_rate;
+            deadline_window_ns = window >= static_cast<long double>(UINT64_MAX / 2)
+                                     ? UINT64_MAX / 2
+                                     : static_cast<std::uint64_t>(window);
+        }
+        watchdog_limit = c.watchdog_blocks != 0 ? c.watchdog_blocks : c.capacity - 1;
+        stalled = false;
+        stall_backlog = 0;
         telemetry.reset();
         if (trace_config.enabled) {
             if (!trace_engine)
@@ -280,19 +326,42 @@ struct GpuWaveNetRealtimeNode::Impl {
         prepared = true;
         return true;
     }
-    std::uint32_t service_and_collect(std::uint64_t service_now, std::uint64_t deadline) noexcept {
+    bool any_channel_lost() const noexcept {
+        return std::any_of(channels.begin(), channels.end(),
+                           [](const auto& channel) { return channel->lost(); });
+    }
+    // The block the provider will not deliver: the oldest one in flight, or the
+    // next to be admitted when nothing is in flight.
+    std::uint64_t first_undelivered() const noexcept {
+        return pending_count != 0 ? pending_ring[pending_head].stamp.sequence : next_input;
+    }
+    std::uint32_t service_and_collect(std::uint64_t service_now, std::uint64_t deadline,
+                                      bool* progressed = nullptr) noexcept {
         const auto n = config.session.descriptor.block_size;
-        for (std::size_t ch = 0; ch < channels.size(); ++ch) {
+        for (auto& channel : channels) {
             if (deadline != 0)
-                channels[ch]->service_until(service_now, deadline);
+                channel->service_until(service_now, deadline);
             else
-                channels[ch]->service(service_now);
+                channel->service(service_now);
+        }
+        // Device loss outranks the failed completions it causes, so it is
+        // latched before any of this pump's results can latch ProviderFailure.
+        const bool lost = any_channel_lost();
+        if (lost)
+            fail(detail::SharedIoRecoveryReason::ProviderLost, first_undelivered());
+        const auto failure = lost ? detail::SharedIoRecoveryReason::ProviderLost
+                                  : detail::SharedIoRecoveryReason::ProviderFailure;
+        const auto failed_outcome = lost ? detail::SharedIoTraceOutcome::DeviceLost
+                                         : detail::SharedIoTraceOutcome::CompletionFailed;
+        for (std::size_t ch = 0; ch < channels.size(); ++ch) {
             std::size_t received = 0;
             while (received < pending_count) {
                 auto result = channels[ch]->receive({worker_output.data() + ch * n, n});
                 if (!result)
                     break;
                 ++received;
+                if (progressed)
+                    *progressed = true;
                 Pending* pending = nullptr;
                 for (std::size_t offset = 0; offset < pending_count; ++offset) {
                     auto& candidate = pending_ring[(pending_head + offset) % pending_ring.size()];
@@ -302,21 +371,21 @@ struct GpuWaveNetRealtimeNode::Impl {
                     }
                 }
                 if (pending == nullptr) {
-                    fail(detail::SharedIoRecoveryReason::ProviderFailure, result->sequence);
+                    fail(failure, result->sequence);
                     continue;
                 }
                 const auto bit = UINT64_C(1) << ch;
                 if ((pending->completed_mask & bit) != 0) {
                     pending->outcome = detail::SharedIoTraceOutcome::CompletionFailed;
-                    fail(detail::SharedIoRecoveryReason::ProviderFailure, result->sequence);
+                    fail(failure, result->sequence);
                     continue;
                 }
                 pending->completed_mask |= bit;
                 pending->suppress = pending->suppress || result->late;
                 if (result->status != GpuWaveNetBlockStatus::GpuDelivered) {
                     if (pending->outcome == detail::SharedIoTraceOutcome::Success)
-                        pending->outcome = detail::SharedIoTraceOutcome::CompletionFailed;
-                    fail(detail::SharedIoRecoveryReason::ProviderFailure, result->sequence);
+                        pending->outcome = failed_outcome;
+                    fail(failure, result->sequence);
                 } else {
                     std::copy_n(worker_output.data() + ch * n, n, pending->output.data() + ch * n);
                 }
@@ -328,12 +397,8 @@ struct GpuWaveNetRealtimeNode::Impl {
             if (!pending.occupied || pending.completed_mask != all_channels_mask)
                 break;
             if (pending.outcome != detail::SharedIoTraceOutcome::Success) {
-                trace_terminal(pending, pending.outcome,
-                               detail::SharedIoGpuTerminalDisposition::ProviderFailed,
-                               pending.outcome == detail::SharedIoTraceOutcome::SubmissionRejected
-                                   ? detail::SharedIoFallbackReason::SubmissionRejected
-                                   : detail::SharedIoFallbackReason::CompletionFailed,
-                               true);
+                trace_terminal(pending, pending.outcome, failed_terminal(pending.outcome),
+                               failed_reason(pending.outcome), true);
             } else if (pending.suppress) {
                 trace_terminal(pending, detail::SharedIoTraceOutcome::LateRejected,
                                detail::SharedIoGpuTerminalDisposition::LateRejected,
@@ -363,6 +428,34 @@ struct GpuWaveNetRealtimeNode::Impl {
             --pending_count;
         }
         return produced;
+    }
+    // A provider is unresponsive when every in-flight slot stays occupied with
+    // no completion while callback blocks keep arriving. Requiring at least one
+    // elapsed block distinguishes a hung provider from a worker that was
+    // merely late to collect.
+    void watch_provider(bool progressed) noexcept {
+        if (progressed || pending_count < pending_ring.size() || bridge->delivery_epoch() == 0) {
+            stalled = false;
+            return;
+        }
+        const auto backlog = callback_next.load(std::memory_order_acquire) - next_input;
+        if (!stalled) {
+            stalled = true;
+            stall_backlog = backlog;
+            return;
+        }
+        if (backlog <= stall_backlog)
+            return;
+        if (backlog - stall_backlog >= watchdog_limit || backlog + 1 >= config.capacity)
+            fail(detail::SharedIoRecoveryReason::ProviderUnresponsive, first_undelivered());
+    }
+    std::uint64_t submit_deadline(std::uint64_t block, std::uint64_t admitted_ns) const noexcept {
+        // Without a callback timestamp, admission is the earliest instant the
+        // worker can vouch for; it can only make the deadline later.
+        auto anchor = ingress_ns[block % config.capacity].load(std::memory_order_relaxed);
+        if (anchor == 0 || anchor > admitted_ns)
+            anchor = admitted_ns;
+        return anchor > UINT64_MAX - deadline_window_ns ? UINT64_MAX : anchor + deadline_window_ns;
     }
     void fail(detail::SharedIoRecoveryReason reason,
               std::uint64_t sequence = std::numeric_limits<std::uint64_t>::max()) noexcept {
@@ -427,7 +520,7 @@ bool GpuWaveNetRealtimeNode::prepare() {
         std::vector<float> zero(s.config.session.descriptor.block_size, 0.f), output(zero.size());
         for (std::uint32_t block = 0; block < s.config.prewarm_blocks; ++block) {
             for (auto& channel : s.channels) {
-                if (!channel->submit(zero, s.sequence + block)) {
+                if (!channel->submit(zero, s.sequence + block, 0)) {
                     (void)release();
                     return false;
                 }
@@ -479,6 +572,7 @@ bool GpuWaveNetRealtimeNode::release() noexcept {
     s.bridge.reset();
     s.pending_ring.clear();
     s.pending_head = s.pending_count = 0;
+    s.stalled = false;
     return true;
 }
 void GpuWaveNetRealtimeNode::process_block(const audio::BufferView<const float>&,
@@ -546,8 +640,15 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     status.diagnostics_available = true;
     status.selected_engine =
         authenticated_provider() ? GpuAudioEngine::Gpu : GpuAudioEngine::Unknown;
-    status.provider_state = authenticated_provider() && !fenced() ? GpuAudioProviderState::Ready
-                                                                  : GpuAudioProviderState::Degraded;
+    // Loss and an unresponsive provider need a new provider before the GPU can
+    // deliver again; every other recovery reason leaves it recoverable.
+    if (status.recovery_reason == GpuAudioRecoveryReason::ProviderLost ||
+        status.recovery_reason == GpuAudioRecoveryReason::ProviderUnresponsive)
+        status.provider_state = GpuAudioProviderState::Unavailable;
+    else
+        status.provider_state = authenticated_provider() && !fenced()
+                                    ? GpuAudioProviderState::Ready
+                                    : GpuAudioProviderState::Degraded;
     return status;
 }
 bool GpuWaveNetRealtimeNode::ready() const noexcept {
@@ -576,7 +677,9 @@ std::uint8_t GpuWaveNetRealtimeNode::process(void* self,
         for (std::uint32_t ch = 0; ch < s.config.channels; ++ch)
             std::copy_n(input.channel_ptr(ch), n, s.callback_input.data() + ch * n);
     }
+    s.ingress_ns[sequence % s.config.capacity].store(start, std::memory_order_relaxed);
     s.callback = s.bridge->begin_callback(s.callback_input, sequence, start);
+    s.callback_next.store(s.bridge->next_sequence(), std::memory_order_release);
     const auto delivery = s.bridge->consume_output(s.callback, s.callback_output, nullptr, true);
     if (delivery == Bridge::Delivery::Ready) {
         for (std::uint32_t ch = 0; ch < s.config.channels; ++ch)
@@ -601,7 +704,9 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
             impl.drain_trace();
         }
     } drain{s};
-    auto produced = s.service_and_collect(pump_now, deadline);
+    bool progressed = false;
+    auto produced = s.service_and_collect(pump_now, deadline, &progressed);
+    s.watch_provider(progressed);
     if (!s.bridge->begin_worker_admission())
         return produced;
     bool all_submitted = false;
@@ -632,12 +737,18 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
         s.trace_stage(pending, detail::SharedIoTraceStage::EncodeEnd);
         s.trace_stage(pending, detail::SharedIoTraceStage::SubmitBegin);
         bool submission_ok = true;
+        const auto block_deadline = s.submit_deadline(stamp.sequence, now_ns());
         for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
-            if (!s.channels[ch]->submit(input->samples().subspan(ch * n, n), stamp.sequence)) {
+            if (!s.channels[ch]->submit(input->samples().subspan(ch * n, n), stamp.sequence,
+                                        block_deadline)) {
                 submission_ok = false;
                 pending.completed_mask |= UINT64_C(1) << ch;
-                pending.outcome = detail::SharedIoTraceOutcome::SubmissionRejected;
-                s.fail(detail::SharedIoRecoveryReason::ProviderFailure, stamp.sequence);
+                const bool lost = s.channels[ch]->lost();
+                pending.outcome = lost ? detail::SharedIoTraceOutcome::DeviceLost
+                                       : detail::SharedIoTraceOutcome::SubmissionRejected;
+                s.fail(lost ? detail::SharedIoRecoveryReason::ProviderLost
+                            : detail::SharedIoRecoveryReason::ProviderFailure,
+                       stamp.sequence);
             }
         }
         s.trace_stage(pending, detail::SharedIoTraceStage::SubmitEnd);
