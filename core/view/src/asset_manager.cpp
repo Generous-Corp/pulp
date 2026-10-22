@@ -235,12 +235,18 @@ std::vector<uint8_t> AssetManager::decode_data_uri_bytes(std::string_view uri) {
     auto comma = uri.find(',');
     if (comma == std::string_view::npos)
         return {};
-    const std::string_view encoded = uri.substr(comma + 1);
+    std::string_view encoded = uri.substr(comma + 1);
     std::string_view metadata = uri.substr(0, comma);
     if (metadata.starts_with("data:"))
         metadata.remove_prefix(5);
     if (!data_uri_metadata_is_base64(metadata))
         return percent_decode(encoded);
+    // A base64 payload may itself be URL-escaped (%2B, %2F, %3D); unescape it
+    // first, as browsers do. A malformed escape leaves the text as written.
+    const std::vector<uint8_t> unescaped = percent_decode(encoded);
+    if (!unescaped.empty() || encoded.empty())
+        encoded =
+            std::string_view(reinterpret_cast<const char*>(unescaped.data()), unescaped.size());
 
     // Lenient base64 decode: padding, line breaks and stray characters are skipped.
     static constexpr std::string_view chars =

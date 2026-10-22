@@ -568,6 +568,12 @@ TEST_CASE("AssetManager data URI without ;base64 is percent-decoded",
     // The base64 marker is case-insensitive.
     REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;BASE64,R0lGODdh") ==
             std::vector<uint8_t>{'G', 'I', 'F', '8', '7', 'a'});
+    // A base64 payload that is itself URL-escaped is unescaped first: "+/8="
+    // written as %2B%2F8%3D is the bytes 0xfb 0xff.
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;base64,%2B%2F8%3D") ==
+            std::vector<uint8_t>{0xfb, 0xff});
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;base64,R0lGODdh%0A") ==
+            std::vector<uint8_t>{'G', 'I', 'F', '8', '7', 'a'});
     // A malformed escape yields no bytes rather than a corrupted payload.
     REQUIRE(AssetManager::decode_data_uri_bytes("data:image/png,%89PNG%0").empty());
     REQUIRE(AssetManager::decode_data_uri_bytes("data:image/png,%zzPNG").empty());
