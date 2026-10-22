@@ -277,15 +277,19 @@ its result `lead_blocks` callbacks later, so `cpu_fallback_prepared()` is true
 for every prepared node and the miss policy is always `CpuFallback`. Only
 WaveNet has a GPU backend. TCN, SSM, LSTM and GRU run the same contract on the
 CPU only: their `capability_report()` reports the `Cpu` path and provider with
-`gpu_kernel_available` false, and `epoch()` stays zero because no GPU delivery epoch is ever
-opened. A WaveNet model whose provider cannot be prepared uses the same
+`gpu_kernel_available` false, and `epoch()` stays zero because no GPU delivery
+epoch is ever opened. A WaveNet model whose provider cannot be prepared uses the same
 CPU-only contract. Its status reports a GPU request that was degraded to the
 CPU, and preparation still succeeds. Models are built by Pulp's private,
 host-only model factory from a verified neural model manifest, and each model
 binds to one node. The shadow runs on the audio thread for every block, even
 when the GPU delivers, so measure its cost for the model size you ship.
-`GpuAudioTransport::status_snapshot()` does not yet consult the node, so for
-a CPU-only family read the node's own `status_snapshot()`.
+A transport hosting a CPU-only family reports the `Cpu` path and provider and
+a `Ready` state. Its `missed_blocks` counter still counts every CPU-only block,
+because the shadow is selected through the miss policy, so for those nodes read
+`fallback_blocks` instead. Any latched cause, including one invalid callback,
+fences GPU delivery until the host prepares the node again. The shadow carries
+the stream until then. `last_prepare_error()` reports why `prepare()` failed.
 
 When a host has already prepared a transport, pass its
 `GpuAudioCapabilityReport` to the two-argument overload of
