@@ -8,11 +8,14 @@
   "capability_families": [
     "render-assets-and-backends"
   ],
-  "rationale": "FindSkia links a copy of Skia's libskunicode_icu.a whose embedded ICU data keeps only the items Pulp's linked ICU code reads (break-iterator rules and dictionaries, normalization, properties, converter aliases, locale resolution); the Skia/Dawn render backends, design-import, Chromium and packaging authority are unchanged and no authority moves. Break-boundary and footprint tests hold the data that remains.",
+  "rationale": "FindSkia links a copy of Skia's libskunicode_icu.a whose embedded ICU data keeps only the items Pulp's linked ICU code reads (break-iterator rules and dictionaries, normalization, properties, converter aliases, locale resolution); the Skia/Dawn render backends, design-import, Chromium and packaging authority are unchanged and no authority moves. In the same range, the CoreGraphics canvas and the no-Skia TextShaper resolve fonts through one CoreText face registry (bundled fonts and register_font faces) instead of CTFontCreateWithName, which substituted Helvetica for the bundled Inter; paint and measurement change for CPU-painted text only. Break-boundary, footprint and text-metric tests hold both changes.",
   "tests": [
     "ctest --test-dir build -R pulp-test-icu-data-breaks",
     "python3 tools/cmake/scripts/test_icu_data_subset.py",
     "python3 tools/scripts/test_plugin_footprint_check.py",
+    "ctest --test-dir build -R pulp-test-auto-ui",
+    "ctest --test-dir build -R pulp-test-coretext-text",
+    "ctest --test-dir build -R pulp-test-font-options",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],
