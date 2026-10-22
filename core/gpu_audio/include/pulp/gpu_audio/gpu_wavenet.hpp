@@ -83,11 +83,16 @@ enum class GpuWaveNetBlockStatus : std::uint8_t {
     GpuDelivered = 0,
     ProviderFailed,
 };
-/// Completion servicing policy for the serialized, non-realtime dispatcher.
-/// These policies never authorize waiting or Dawn calls from an audio callback.
+/// How the serialized, non-realtime dispatcher services provider completions.
+/// No policy ever waits on, or calls into, the provider from an audio callback.
 enum class GpuWaveNetCompletionPolicy : std::uint8_t {
+    /// Let the provider deliver finished work through its event pump on each
+    /// service step.
     ProcessEvents,
+    /// Check the submitted work's completion handles directly, without
+    /// waiting.
     WaitAny,
+    /// As WaitAny, but wait on the handles up to the configured bound.
     TimedWaitAny,
 };
 
