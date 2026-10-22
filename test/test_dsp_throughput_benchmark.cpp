@@ -22,6 +22,7 @@
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/character_delay.hpp>
+#include <pulp/signal/classic_reverb.hpp>
 #include <pulp/signal/compressor.hpp>
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/convolver_non_uniform.hpp>
@@ -366,6 +367,18 @@ void run_processors(int B) {
             clobber(&m);
         });
     }
+    {
+        // Peak, RMS, and clips only: the like-for-like row against a plain
+        // peak + RMS block meter.
+        MultiChannelMeter m;
+        m.prepare(kSampleRate, 2, nullptr, MeterFeatures::levels);
+        bench("meter.multichannel stereo levels-only", B, [&](int n) {
+            fill_stereo();
+            const float* ch[2] = {left.data(), right.data()};
+            m.process(ch, 2, n);
+            clobber(&m);
+        });
+    }
 
     // Oversampling around a tanh waveshaper.
     for (auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir,
@@ -484,6 +497,16 @@ void run_processors(int B) {
         FdnReverb r;
         r.prepare(kSampleRate, B);
         bench("reverb.fdn stereo", B, [&](int n) {
+            fill_stereo();
+            r.process_block(left.data(), right.data(), out.data(), out2.data(), n);
+            clobber(out.data());
+            clobber(out2.data());
+        });
+    }
+    {
+        ClassicReverb r;
+        r.prepare(kSampleRate, B);
+        bench("reverb.classic stereo", B, [&](int n) {
             fill_stereo();
             r.process_block(left.data(), right.data(), out.data(), out2.data(), n);
             clobber(out.data());

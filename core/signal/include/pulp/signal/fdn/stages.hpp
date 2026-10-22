@@ -53,17 +53,49 @@ public:
         slow_ = snap_to_zero(slow_ + (magnitude - slow_) * slow_coeff_);
         fast_ = finite_or_zero(fast_);
         slow_ = finite_or_zero(slow_);
-        const double ratio = (fast_ - slow_) / std::max(slow_, 1e-9);
-        if (ratio <= 0.0) return 1.0;
-        const double t = std::min(ratio / kDuckKnee, 1.0);
-        const double smooth = t * t * (3.0 - 2.0 * t);
-        return 1.0 - kDuckAmount * smooth;
+        return gain_for(fast_, slow_);
+    }
+
+    // In place over a stereo block: each sample's gain from the mean of the
+    // two rails' magnitudes, applied to both. Returns the last gain. The
+    // block's input is finite (the engine sanitizes at its entry) and the
+    // envelopes follow non-negative magnitudes, so the recursion runs bare;
+    // the owner calls heal() on a fixed sample grid.
+    template <typename SampleType> double process_block(SampleType* l, SampleType* r, int n) {
+        double fast = fast_;
+        double slow = slow_;
+        double gain = 1.0;
+        for (int k = 0; k < n; ++k) {
+            const double magnitude =
+                0.5 * (std::abs(static_cast<double>(l[k])) + std::abs(static_cast<double>(r[k])));
+            fast += (magnitude - fast) * fast_coeff_;
+            slow += (magnitude - slow) * slow_coeff_;
+            gain = gain_for(fast, slow);
+            l[k] = static_cast<SampleType>(static_cast<double>(l[k]) * gain);
+            r[k] = static_cast<SampleType>(static_cast<double>(r[k]) * gain);
+        }
+        fast_ = fast;
+        slow_ = slow;
+        return gain;
+    }
+
+    // Snap and sanitize the envelopes, as process() does every sample.
+    void heal() {
+        fast_ = finite_or_zero(snap_to_zero(fast_));
+        slow_ = finite_or_zero(snap_to_zero(slow_));
     }
 
     double fast_envelope() const { return fast_; }
     double slow_envelope() const { return slow_; }
 
-private:
+  private:
+    static double gain_for(double fast, double slow) {
+        const double ratio = (fast - slow) / std::max(slow, 1e-9);
+        const double t = std::clamp(ratio / kDuckKnee, 0.0, 1.0);
+        const double smooth = t * t * (3.0 - 2.0 * t);
+        return 1.0 - kDuckAmount * smooth;
+    }
+
     static double coeff_for(double ms, double sample_rate) {
         const double n = std::max(1.0, ms * 0.001 * sample_rate);
         return 1.0 - std::exp(-1.0 / n);
@@ -78,13 +110,19 @@ private:
 // Six-LFO stereo ensemble. The L and R taps of each LFO sit 90 degrees apart,
 // which is what turns six modulated delays into a wide, soft gloss instead of
 // six audible chorus voices.
+//
+// The LFOs are a lockstep quadrature bank: the right rail's cosine tap is the
+// same oscillator's quadrature output, so a sample costs six rotations rather
+// than six sines and six cosines. process_block() pushes a whole span first
+// and then reads it back, which is exact because the shortest tap delay
+// (base minus depth) is longer than kMaxBlockSamples at every tank rate.
 template <typename SampleType = float>
 class EnsembleChorus {
 public:
     void prepare(double max_sample_rate) {
-        const int cap = static_cast<int>((kEnsembleBaseMs + kEnsembleDepthMs * 2.0) *
-                                         0.001 * max_sample_rate) +
-                        kHermiteGuard;
+        const int cap =
+            static_cast<int>((kEnsembleBaseMs + kEnsembleDepthMs * 2.0) * 0.001 * max_sample_rate) +
+            kHermiteGuard + kMaxBlockSamples;
         left_.prepare(cap);
         right_.prepare(cap);
     }
@@ -97,41 +135,62 @@ public:
                              static_cast<double>(kNumEnsembleLfos - 1);
             const double hz =
                 kEnsembleRateMinHz + t * (kEnsembleRateMaxHz - kEnsembleRateMinHz);
-            lfo_[i].set_rate(hz, sample_rate);
+            lfo_.set_rate(i, hz, sample_rate);
         }
     }
 
     void reset() {
         left_.reset();
         right_.reset();
+        lfo_.restart();
         for (int i = 0; i < kNumEnsembleLfos; ++i)
-            lfo_[i].reset(static_cast<double>(i) /
-                          static_cast<double>(kNumEnsembleLfos));
+            lfo_.reset(i, static_cast<double>(i) / static_cast<double>(kNumEnsembleLfos));
     }
 
     void process(SampleType& l, SampleType& r) {
-        left_.push(l);
-        right_.push(r);
-        double sum_l = 0.0;
-        double sum_r = 0.0;
-        for (int i = 0; i < kNumEnsembleLfos; ++i) {
-            const double s = lfo_[i].tick();
-            // 90 degrees of phase between the rails: sin -> cos.
-            const double c = std::cos(lfo_[i].phase() * 6.283185307179586);
-            sum_l += static_cast<double>(left_.read(base_samples_ + depth_samples_ * s));
-            sum_r += static_cast<double>(right_.read(base_samples_ + depth_samples_ * c));
+        process_block(&l, &r, 1);
+    }
+
+    // In place, n <= kMaxBlockSamples.
+    void process_block(SampleType* l, SampleType* r, int n) {
+        left_.push_block(l, n);
+        right_.push_block(r, n);
+        // Each tap's delays for the whole span, read back against each
+        // sample's own post-push position (n - 1 behind the span's end).
+        double sin_delay[kNumEnsembleLfos][kMaxBlockSamples];
+        double cos_delay[kNumEnsembleLfos][kMaxBlockSamples];
+        const double base = base_samples_;
+        for (int k = 0; k < n; ++k) {
+            lfo_.tick();
+            for (int i = 0; i < kNumEnsembleLfos; ++i) {
+                sin_delay[i][k] = base + depth_samples_ * lfo_.sin(i);
+                // 90 degrees of phase between the rails: sin -> cos.
+                cos_delay[i][k] = base + depth_samples_ * lfo_.cos(i);
+            }
         }
-        const double norm = 1.0 / static_cast<double>(kNumEnsembleLfos);
-        l = static_cast<SampleType>(static_cast<double>(l) * (1.0 - kEnsembleWetMix) +
-                                    sum_l * norm * kEnsembleWetMix);
-        r = static_cast<SampleType>(static_cast<double>(r) * (1.0 - kEnsembleWetMix) +
-                                    sum_r * norm * kEnsembleWetMix);
+        SampleType sum_l[kMaxBlockSamples] = {};
+        SampleType sum_r[kMaxBlockSamples] = {};
+        SampleType tap[kMaxBlockSamples];
+        for (int i = 0; i < kNumEnsembleLfos; ++i) {
+            left_.read_hermite_span(sin_delay[i], tap, n, n - 1);
+            for (int k = 0; k < n; ++k)
+                sum_l[k] += tap[k];
+            right_.read_hermite_span(cos_delay[i], tap, n, n - 1);
+            for (int k = 0; k < n; ++k)
+                sum_r[k] += tap[k];
+        }
+        constexpr auto dry = static_cast<SampleType>(1.0 - kEnsembleWetMix);
+        constexpr auto wet = static_cast<SampleType>(kEnsembleWetMix / kNumEnsembleLfos);
+        for (int k = 0; k < n; ++k) {
+            l[k] = l[k] * dry + sum_l[k] * wet;
+            r[k] = r[k] * dry + sum_r[k] * wet;
+        }
     }
 
 private:
     FracDelayT<SampleType> left_;
     FracDelayT<SampleType> right_;
-    std::array<PhaseOsc, kNumEnsembleLfos> lfo_{};
+    QuadratureBank<kNumEnsembleLfos> lfo_{};
     double base_samples_ = 0.0;
     double depth_samples_ = 0.0;
 };
@@ -154,6 +213,27 @@ inline void apply_width(double& l, double& r, double width) {
 // matters more than the 1-Lipschitz property the loop needs.
 inline double soft_limit(double x) {
     return kWetLimiterHeadroom * std::tanh(x / kWetLimiterHeadroom);
+}
+
+// tanh in single precision as a [9/8] odd rational, fitted to tanh on
+// |x| <= 9 with the slope pinned to 1 at the origin: relative error below
+// 4e-7 everywhere in float, and the result is clamped to [-1, 1] so the curve
+// stays bounded. Branch-free, so a block of it vectorizes.
+inline float tanh_rational(float x) {
+    const float c = std::clamp(x, -9.0f, 9.0f);
+    const float s = c * c;
+    const float p =
+        (((1.3810137e-08f * s + 2.0946818e-05f) * s + 3.5165233e-03f) * s + 1.3398798e-01f) * s +
+        1.0f;
+    const float q =
+        (((7.9656114e-07f * s + 3.3195784e-04f) * s + 2.5957071e-02f) * s + 4.6732125e-01f) * s +
+        1.0f;
+    return std::clamp(c * p / q, -1.0f, 1.0f);
+}
+
+inline float soft_limit(float x) {
+    constexpr auto headroom = static_cast<float>(kWetLimiterHeadroom);
+    return headroom * tanh_rational(x / headroom);
 }
 
 }  // namespace pulp::signal::fdn

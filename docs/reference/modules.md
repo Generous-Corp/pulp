@@ -971,7 +971,8 @@ a working convolution and would hide the bug. Assert
 | Lo-Fi Chain | `lofi_chain.hpp` | Bit-depth reduction, sample-and-hold rate reduction, and dead-zone saturation; dither/noise shaping are opt-in so the legacy default remains exact |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
-| FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only |
+| FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only. Processes a 32-sample control period at a time with vectorized cross-line stages; `set_tier(fdn::Tier::classic)` swaps in the classic tier behind the same controls |
+| Classic Reverb | [`classic_reverb.hpp`](../guides/fdn-reverb.md#tiers) | Parallel lowpass-feedback combs into series allpasses at the host rate, driven by the FDN reverb's `fdn::Param` controls (decay as T60, size, predelay, high damping, diffusion, width); wet-only, zero latency, block-processed |
 | Reverb | `reverb.hpp` | Algorithmic stereo reverb with room size, damping, and width controls |
 | Transfer Curve | `transfer_curve.hpp` | Fixed-capacity arbitrary piecewise transfer curve using shared modulation shapes and transactional RT publication |
 | Waveshaper | `waveshaper.hpp` | Static nonlinear distortion with five built-in curve formulas |
@@ -996,7 +997,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | ADSR | `adsr.hpp` | Attack-decay-sustain-release envelope generator for amplitude or filter modulation |
 | FFT | `fft.hpp` | Fast Fourier Transform — uses vDSP on Apple, fallback on other platforms |
-| Multi-Channel Meter | `multi_channel_meter.hpp` | Sample peak, RMS, stereo correlation, and channel-based BS.1770-5 K-weighted momentary plus gated integrated loudness; not true-peak, short-term, LRA, or a complete EBU Mode meter |
+| Multi-Channel Meter | `multi_channel_meter.hpp` | Sample peak, RMS, stereo correlation, and channel-based BS.1770-5 K-weighted momentary, gated integrated, EBU short-term, and loudness-range readings; not true-peak or a complete EBU Mode meter. Measures a block at a time with vector reductions; `MeterFeatures` leaves out correlation and loudness when nothing reads them |
 | Oscillator | `oscillator.hpp` | Legacy polyBLEP oscillator with sine, saw, square, triangle waveforms (float phase, integrated triangle) |
 | Oscillator suite (`osc/`) | `osc/va.hpp`, `osc/vco.hpp`, `osc/dco.hpp`, `osc/wt.hpp`, `osc/wt_lofi.hpp`, `osc/minblep.hpp` | Newer VA/VCO/DCO/wavetable family plus shared phase, polynomial BLEP/BLAMP, and fixed-capacity causal minBLEP primitives — see the [oscillators guide](../guides/oscillators.md) |
 | Velvet Noise Grid | `velvet_noise.hpp` | Coordinate-keyed jitter/sign draws for sparse velvet-noise tap grids; full and incremental builders produce identical draws |

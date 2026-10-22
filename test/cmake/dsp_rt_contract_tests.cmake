@@ -82,7 +82,8 @@ pulp_add_test_suite(pulp-test-signal-mod-rt-safety GROUP pulp-test-group-dsp-rt-
     LIBRARIES pulp::signal)
 
 pulp_add_test_suite(pulp-test-multi-channel-meter
-    SOURCES test_multi_channel_meter.cpp harness/rt_allocation_probe.cpp
+    SOURCES test_multi_channel_meter.cpp test_multi_channel_meter_block.cpp
+            harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::audio)
 
 pulp_add_test_suite(pulp-test-signal-sub-oscillator GROUP pulp-test-group-dsp-rt-signal

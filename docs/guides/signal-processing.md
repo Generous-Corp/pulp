@@ -1031,6 +1031,27 @@ Include `<pulp/signal/fdn_reverb.hpp>` directly. See the
 [Multirate FDN Reverb guide](fdn-reverb.md) for controls, lifecycle rules,
 module ownership, finite-state recovery, and focused validation.
 
+### ClassicReverb
+
+`ClassicReverb` (`<pulp/signal/classic_reverb.hpp>`) is the conventional tier:
+eight lowpass-feedback combs per rail in parallel, then four allpasses in
+series, all at the host rate. It takes the same `fdn::Param` controls and
+`fdn::Mode` presets as `FdnReverb` and produces wet-only stereo, so it can stand
+in wherever the FDN's cost is not wanted — directly, or through
+`FdnReverb::set_tier(fdn::Tier::classic)`.
+
+```cpp
+signal::ClassicReverb reverb;
+reverb.prepare(sample_rate, max_block_size);
+reverb.set_parameter(signal::fdn::Param::decay, 1.5);  // T60, seconds
+reverb.process_block(in_left, in_right, wet_left, wet_right, num_samples);
+```
+
+Every comb's feedback gain follows the absorptive law, so `decay` is a real
+T60 rather than a feedback amount. `damp_lo`, `mod`, `shimmer`, `drive`, `bloom`,
+and `tank_rate` are accepted and ignored — the tier has none of that machinery.
+See [Tiers](fdn-reverb.md#tiers) for the full control mapping.
+
 ---
 
 ### WaveShaper
@@ -1343,6 +1364,32 @@ This is single-thread DSP history, not a producer/consumer queue. Do not use it
 for communication between the audio, UI, or worker threads; use the runtime
 SPSC publication primitives for those ownership boundaries. After `prepare()`,
 `push()`, `window()`, and `reset()` are allocation-free.
+
+---
+
+### MultiChannelMeter
+
+`MultiChannelMeter` (`<pulp/signal/multi_channel_meter.hpp>`) measures sample
+peak, RMS, clips, stereo correlation, and channel-based BS.1770 loudness
+(momentary, gated integrated, EBU short-term, loudness range) on the audio
+thread, and publishes a `MultiChannelMeterData` snapshot about every 10 ms.
+
+```cpp
+signal::MultiChannelMeter meter;
+meter.prepare(sample_rate, 2);                      // everything
+// or: meter.prepare(sample_rate, 2, nullptr, signal::MeterFeatures::levels);
+meter.process(channels, 2, num_samples);
+const auto& snapshot = meter.snapshot();
+```
+
+`process()` works a block at a time: peak, energy, and correlation come from
+vector reductions, and the K-weighting runs channel pairs as one two-lane
+recursion. A block holding a non-finite or out-of-range sample is measured
+sample by sample under the same sanitizing rules, so the readings do not depend
+on which path ran. Prepare with `MeterFeatures::levels` (or
+`MeterFeatures::correlation`) when only peak/RMS bars are drawn: loudness is
+most of the per-sample cost, and leaving it out makes the meter cost about as
+much as a plain peak + RMS pass.
 
 ---
 

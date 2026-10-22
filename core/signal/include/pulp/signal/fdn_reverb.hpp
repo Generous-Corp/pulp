@@ -23,11 +23,19 @@
 // Output is WET ONLY. Dry/wet belongs to whatever graph or host hosts this
 // block, so the block never has to guess what "dry" means for its caller.
 //
+// TIERS. set_tier(fdn::Tier::classic) swaps the network for ClassicReverbT —
+// parallel combs into series allpasses at the host rate — behind the same
+// parameters, modes, and wet-only output. The parameters that describe
+// machinery the classic tier does not have are kept but have no effect there;
+// see classic_reverb.hpp. A tier change is a clean flush, like a tank-rate
+// change: the newly active engine starts from silence at the next block.
+//
 // RT contract: prepare() allocates for the worst case (96 kHz tank at the
-// maximum block size). Every setter, process_block(), reset(), and a live
-// tank-rate change allocate nothing.
+// maximum block size) for both tiers. Every setter, process_block(), reset(),
+// a live tank-rate change, and a tier change allocate nothing.
 
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/classic_reverb.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/fdn/config.hpp>
 #include <pulp/signal/fdn/diffusion.hpp>
@@ -55,10 +63,12 @@ public:
         max_block_ = std::max(max_block_size, 1);
         bridge_.prepare(host_rate_, max_block_);
 
+        // Room for a whole block to be pushed ahead of its reads.
         const int predelay_cap =
-            static_cast<int>(0.001 * fdn::kParamSpecs[static_cast<std::size_t>(Param::predelay)]
-                                         .max * fdn::kMaxTankRate) +
-            fdn::kHermiteGuard;
+            static_cast<int>(0.001 *
+                             fdn::kParamSpecs[static_cast<std::size_t>(Param::predelay)].max *
+                             fdn::kMaxTankRate) +
+            fdn::kHermiteGuard + fdn::kMaxBlockSamples;
         for (auto& line : predelay_) line.prepare(predelay_cap);
         for (auto& cascade : pre_diffusion_)
             cascade.prepare(fdn::kPreDiffusionBaseMs, fdn::kMaxTankRate,
@@ -71,6 +81,7 @@ public:
             smoothed_[p] = target_[p];
         }
         apply_tank_rate(rate_index());
+        classic_.prepare(host_rate_, max_block_);
         reset();
     }
 
@@ -93,6 +104,7 @@ public:
         double v = std::clamp(value, spec.min, spec.max);
         if (spec.stepped) v = std::floor(v + 0.5);
         target_[index] = v;
+        classic_.set_parameter(p, v);
     }
 
     double parameter(Param p) const { return target_[static_cast<std::size_t>(p)]; }
@@ -107,6 +119,7 @@ public:
         // the new rate. Clear once more after that derivation so a snapped rate
         // change starts from the same stochastic/control phase as a cold reset.
         if (rate_changed) reset_rate_domain_state();
+        classic_.snap_parameters();
     }
 
     // Authored EQ. Not a baked param: the in-loop EQ is a voicing decision
@@ -125,9 +138,20 @@ public:
     void set_flux_depth_db(double db) { tank_.set_flux_depth_db(db); }
     void set_flutter(bool on) { controls_.flutter = on; }
 
+    // Select the engine. Takes effect at the start of the next process_block()
+    // call, which flushes the engine it switches to.
+    void set_tier(fdn::Tier tier) {
+        requested_tier_ = tier;
+    }
+    fdn::Tier tier() const {
+        return requested_tier_;
+    }
+
     void reset() {
         snap_parameters();
         reset_rate_domain_state();
+        classic_.reset();
+        active_tier_ = requested_tier_;
     }
 
     // Zero. The engine introduces no block-scale buffering; what it does have
@@ -155,6 +179,17 @@ public:
     void process_block(const SampleType* in_left, const SampleType* in_right,
                        SampleType* out_left, SampleType* out_right, int n) {
         if (n <= 0) return;
+        if (requested_tier_ != active_tier_) {
+            active_tier_ = requested_tier_;
+            if (active_tier_ == fdn::Tier::classic)
+                classic_.reset();
+            else
+                reset_rate_domain_state();
+        }
+        if (active_tier_ == fdn::Tier::classic) {
+            classic_.process_block(in_left, in_right, out_left, out_right, n);
+            return;
+        }
         int offset = 0;
         while (offset < n) {
             const int chunk = std::min(n - offset, max_block_);
@@ -180,8 +215,8 @@ private:
         tank_.reset();
         ensemble_.reset();
         ducker_.reset();
-        for (auto& f : input_lp_) f.reset();
-        for (auto& f : output_lp_) f.reset();
+        input_lp_.reset();
+        output_lp_.reset();
         duck_gain_ = 1.0;
         control_countdown_ = 0;
     }
@@ -213,6 +248,8 @@ private:
                                         c == 0 ? 3 : 7);
         }
         design_input_lp(rate);
+        smoothing_coeff_ = 1.0 - std::exp(-static_cast<double>(fdn::kControlRateSamples) /
+                                          std::max(1.0, fdn::kSmoothingMs * 0.001 * rate));
         makeup_gain_ = std::pow(
             10.0, fdn::kRateMakeupDb[static_cast<std::size_t>(index)] / 20.0);
         reset_rate_domain_state();
@@ -230,8 +267,7 @@ private:
         designer.set_coefficients(BiquadT<double>::Type::lowpass,
                                   fdn::kTankInputLpFraction * tank_rate,
                                   0.7071067811865476, tank_rate);
-        const auto c = designer.coefficients();
-        input_lp_coefficients_.fill(c);
+        input_lp_coefficients_ = fdn::StereoSection::from(designer.coefficients());
     }
 
     // The per-mode wet lowpass runs at the HOST rate, after reconstruction: it
@@ -242,8 +278,7 @@ private:
         designer.set_coefficients(BiquadT<double>::Type::lowpass,
                                   std::min(output_lp_hz_, 0.45 * host_rate_),
                                   0.7071067811865476, host_rate_);
-        const auto c = designer.coefficients();
-        output_lp_coefficients_.fill(c);
+        output_lp_coefficients_ = fdn::StereoSection::from(designer.coefficients());
     }
 
     void push_controls() {
@@ -266,15 +301,15 @@ private:
             smoothed_[static_cast<std::size_t>(Param::diffusion)] *
             fdn::kPreDiffusionG);
         width_ = smoothed_[static_cast<std::size_t>(Param::width)];
-        drive_makeup_gain_ = std::pow(
-            10.0, smoothed_[static_cast<std::size_t>(Param::drive)] *
-                      fdn::kDriveMakeupDb / 20.0);
+        const double drive = smoothed_[static_cast<std::size_t>(Param::drive)];
+        if (drive != makeup_drive_) {
+            makeup_drive_ = drive;
+            drive_makeup_gain_ = std::pow(10.0, drive * fdn::kDriveMakeupDb / 20.0);
+        }
     }
 
     void tick_controls() {
-        const double coeff =
-            1.0 - std::exp(-static_cast<double>(fdn::kControlRateSamples) /
-                           std::max(1.0, fdn::kSmoothingMs * 0.001 * bridge_.tank_rate()));
+        const double coeff = smoothing_coeff_;
         for (int p = 0; p < fdn::kNumParams; ++p) {
             if (fdn::kParamSpecs[static_cast<std::size_t>(p)].stepped)
                 smoothed_[p] = target_[p];
@@ -294,64 +329,89 @@ private:
         SampleType* ol = bridge_.tank_output(0);
         SampleType* or_ = bridge_.tank_output(1);
 
-        for (int i = 0; i < tank_n; ++i) {
+        // Tank-rate work runs in segments that never cross a control tick, so
+        // every stage inside a segment sees constant controls. The ticks fall
+        // on the same tank samples however the host divides its blocks.
+        int done = 0;
+        while (done < tank_n) {
             if (control_countdown_ <= 0) {
                 tick_controls();
                 control_countdown_ = fdn::kControlRateSamples;
             }
-            --control_countdown_;
-
-            // Predelay, then the transient ducker, then the low-rate input
-            // lowpass — all inside the tank domain.
-            predelay_[0].push(tl[i]);
-            predelay_[1].push(tr[i]);
-            SampleType l = predelay_[0].read(predelay_samples_);
-            SampleType r = predelay_[1].read(predelay_samples_);
-
-            const double duck = ducker_.process(
-                0.5 * (std::abs(static_cast<double>(l)) + std::abs(static_cast<double>(r))));
-            duck_gain_ = duck;
-            l = static_cast<SampleType>(static_cast<double>(l) * duck);
-            r = static_cast<SampleType>(static_cast<double>(r) * duck);
-
-            if (input_lp_active_) {
-                l = static_cast<SampleType>(
-                    input_lp_[0].process(input_lp_coefficients_[0], l));
-                r = static_cast<SampleType>(
-                    input_lp_[1].process(input_lp_coefficients_[1], r));
-            }
-
-            // Pre-diffusion with the coefficient's sign alternated between the
-            // rails, so left and right decorrelate from the first reflection.
-            l = pre_diffusion_[0].process(l, pre_g_);
-            r = pre_diffusion_[1].process(r, static_cast<SampleType>(-pre_g_));
-
-            SampleType wet_l = 0;
-            SampleType wet_r = 0;
-            tank_.process(l, r, wet_l, wet_r);
-
-            double dl = static_cast<double>(wet_l) * drive_makeup_gain_;
-            double dr = static_cast<double>(wet_r) * drive_makeup_gain_;
-            fdn::apply_width(dl, dr, width_);
-            SampleType el = static_cast<SampleType>(dl);
-            SampleType er = static_cast<SampleType>(dr);
-            ensemble_.process(el, er);
-
-            ol[i] = static_cast<SampleType>(fdn::soft_limit(static_cast<double>(el)));
-            or_[i] = static_cast<SampleType>(fdn::soft_limit(static_cast<double>(er)));
+            const int segment = std::min(tank_n - done, control_countdown_);
+            control_countdown_ -= segment;
+            process_segment(tl + done, tr + done, ol + done, or_ + done, segment);
+            done += segment;
+            // The ducker's envelopes are cleaned on the control grid, which
+            // falls on the same tank samples however the host splits blocks.
+            if (control_countdown_ == 0)
+                ducker_.heal();
         }
 
         bridge_.tank_to_host(tank_n, out_left, out_right, n);
 
         // Host-rate tail: the per-mode wet lowpass, then the rate-step makeup
         // gain — the last multiply before the output buffer.
+        const auto makeup = fdn::lanes::splat(makeup_gain_);
         for (int i = 0; i < n; ++i) {
-            out_left[i] = static_cast<SampleType>(
-                output_lp_[0].process(output_lp_coefficients_[0], out_left[i]) *
-                makeup_gain_);
-            out_right[i] = static_cast<SampleType>(
-                output_lp_[1].process(output_lp_coefficients_[1], out_right[i]) *
-                makeup_gain_);
+            const auto y = output_lp_.process(&output_lp_coefficients_,
+                                              fdn::lanes::make(static_cast<double>(out_left[i]),
+                                                               static_cast<double>(out_right[i])));
+            const auto scaled = y * makeup;
+            out_left[i] = static_cast<SampleType>(fdn::lanes::lane(scaled, 0));
+            out_right[i] = static_cast<SampleType>(fdn::lanes::lane(scaled, 1));
+        }
+    }
+
+    // One segment of at most a control period, all in the tank domain.
+    void process_segment(const SampleType* tl, const SampleType* tr, SampleType* ol,
+                         SampleType* or_, int n) {
+        SampleType l[fdn::kMaxBlockSamples];
+        SampleType r[fdn::kMaxBlockSamples];
+
+        // Predelay, then the transient ducker, then the low-rate input
+        // lowpass. The predelay pushes the whole segment first and reads each
+        // sample back relative to its own push.
+        // The whole segment is pushed first; each sample is read back against
+        // its own post-push position, n - 1 behind the segment's end.
+        predelay_[0].push_block(tl, n);
+        predelay_[1].push_block(tr, n);
+        predelay_[0].read_hermite_span(predelay_samples_, l, n, n - 1);
+        predelay_[1].read_hermite_span(predelay_samples_, r, n, n - 1);
+        duck_gain_ = ducker_.process_block(l, r, n);
+        if (input_lp_active_) {
+            for (int k = 0; k < n; ++k) {
+                const auto y = input_lp_.process(
+                    &input_lp_coefficients_,
+                    fdn::lanes::make(static_cast<double>(l[k]), static_cast<double>(r[k])));
+                l[k] = static_cast<SampleType>(fdn::lanes::lane(y, 0));
+                r[k] = static_cast<SampleType>(fdn::lanes::lane(y, 1));
+            }
+        }
+
+        // Pre-diffusion with the coefficient's sign alternated between the
+        // rails, so left and right decorrelate from the first reflection.
+        pre_diffusion_[0].process_block(l, n, pre_g_);
+        pre_diffusion_[1].process_block(r, n, static_cast<SampleType>(-pre_g_));
+
+        SampleType wet_l[fdn::kMaxBlockSamples];
+        SampleType wet_r[fdn::kMaxBlockSamples];
+        tank_.process_block(l, r, wet_l, wet_r, n);
+
+        const auto makeup = static_cast<SampleType>(drive_makeup_gain_);
+        const auto width = static_cast<SampleType>(width_);
+        for (int k = 0; k < n; ++k) {
+            const SampleType dl = wet_l[k] * makeup;
+            const SampleType dr = wet_r[k] * makeup;
+            const SampleType mid = SampleType{0.5} * (dl + dr);
+            const SampleType side = SampleType{0.5} * (dl - dr) * width;
+            wet_l[k] = mid + side;
+            wet_r[k] = mid - side;
+        }
+        ensemble_.process_block(wet_l, wet_r, n);
+        for (int k = 0; k < n; ++k) {
+            ol[k] = fdn::soft_limit(wet_l[k]);
+            or_[k] = fdn::soft_limit(wet_r[k]);
         }
     }
 
@@ -363,10 +423,12 @@ private:
     fdn::FdnTank<SampleType> tank_{};
     fdn::TransientDucker ducker_{};
     fdn::EnsembleChorus<SampleType> ensemble_{};
-    std::array<fdn::SanitizedBiquadState, kNumRails> input_lp_{};
-    std::array<fdn::SanitizedBiquadState, kNumRails> output_lp_{};
-    std::array<BiquadCoefficientsT<double>, kNumRails> input_lp_coefficients_{};
-    std::array<BiquadCoefficientsT<double>, kNumRails> output_lp_coefficients_{};
+    // Both rails share each design; the state runs them as one two-lane
+    // vector, snapped and sanitized once per block.
+    fdn::StereoBiquadState<1> input_lp_{};
+    fdn::StereoBiquadState<1> output_lp_{};
+    fdn::StereoSection input_lp_coefficients_{};
+    fdn::StereoSection output_lp_coefficients_{};
 
     std::array<double, fdn::kNumParams> target_{};
     std::array<double, fdn::kNumParams> smoothed_{};
@@ -377,12 +439,17 @@ private:
     double width_ = 1.0;
     double makeup_gain_ = 1.0;
     double drive_makeup_gain_ = 1.0;
+    double makeup_drive_ = 0.0;
+    double smoothing_coeff_ = 1.0;
     double duck_gain_ = 1.0;
     double output_lp_hz_ = 14000.0;
     SampleType pre_g_ = 0;
     int max_block_ = 512;
     int control_countdown_ = 0;
     int active_rate_index_ = -1;
+    ClassicReverbT<SampleType> classic_{};
+    fdn::Tier requested_tier_ = fdn::Tier::network;
+    fdn::Tier active_tier_ = fdn::Tier::network;
     bool input_lp_active_ = false;
 };
 
