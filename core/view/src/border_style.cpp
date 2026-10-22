@@ -64,9 +64,9 @@ float shade_channel(float channel, float multiplier) {
 
 // `c` with every channel scaled by `multiplier` onto the 8-bit grid.
 Color scaled_shade(Color c, float multiplier) {
-    return Color::rgba(
-        shade_channel(c.r, multiplier), // token-lint:allow derived from the author's colour
-        shade_channel(c.g, multiplier), shade_channel(c.b, multiplier), c.a);
+    return Color::rgba( // token-lint:allow derived from the author's colour
+        shade_channel(c.r, multiplier), shade_channel(c.g, multiplier),
+        shade_channel(c.b, multiplier), c.a);
 }
 
 // A neutral grey at `level` (0..1), keeping `alpha`.
