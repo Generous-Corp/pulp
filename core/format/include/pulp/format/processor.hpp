@@ -1223,9 +1223,6 @@ private:
     const midi::MpeBuffer* mpe_input_ = nullptr;
     const midi::UmpBuffer* ump_input_ = nullptr;
     const state::ParameterEventQueue* param_events_ = nullptr;
-    bool param_events_block_rate_ = false;
-    mutable std::atomic<bool> param_events_read_while_block_rate_{false};
-    bool param_events_misuse_reported_ = false;
     const state::ModulationEventQueue* modulation_events_ = nullptr;
     state::ParameterEventQueue* output_param_events_ = nullptr;
     audio::Buffer<float> f64_fallback_input_scratch_;
@@ -1240,6 +1237,12 @@ private:
     std::atomic<bool> tail_changed_{false};
     std::atomic<bool> note_names_changed_{false};
     std::atomic<bool> state_dirty_{false};
+    // Appended after every existing member, so no earlier member moves and the
+    // three bytes fit in the tail padding after the flags above: sizeof stays
+    // the same for binaries built against an earlier header.
+    bool param_events_block_rate_ = false;
+    mutable std::atomic<bool> param_events_read_while_block_rate_{false};
+    bool param_events_misuse_reported_ = false;
 };
 
 /// Factory function type — plugins provide this to create processor instances.
