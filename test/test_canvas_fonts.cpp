@@ -708,13 +708,11 @@ TEST_CASE("a missing glyph does not move the rest of the run",
 // down by ~0.4 snaps to 41; at 40.75 a correct baseline snaps to 41 and one
 // pulled up by ~0.4 snaps to 40. 'H' has flat stems ending on the baseline,
 // so the stems must fill row round(y) - 1 and leave row round(y) empty.
-TEST_CASE("fill_text places the alphabetic baseline at y",
-          "[canvas][skia][text][baseline]") {
+TEST_CASE("fill_text places the alphabetic baseline at y", "[canvas][skia][text][baseline]") {
     constexpr int kW = 96;
     constexpr int kH = 64;
-    SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
-                                         kPremul_SkAlphaType,
-                                         SkColorSpace::MakeSRGB());
+    SkImageInfo info =
+        SkImageInfo::Make(kW, kH, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
     for (const float size : {13.0f, 18.0f, 22.0f}) {
         for (const float y : {40.25f, 40.75f}) {
             auto surface = SkSurfaces::Raster(info);
@@ -738,9 +736,8 @@ TEST_CASE("fill_text places the alphabetic baseline at y",
             };
             const int edge = static_cast<int>(std::lround(y));
             const int stem = darkness(edge - 3);
-            INFO("size " << size << " y " << y << " row edge-3 " << stem
-                 << " row edge-1 " << darkness(edge - 1) << " row edge "
-                 << darkness(edge));
+            INFO("size " << size << " y " << y << " row edge-3 " << stem << " row edge-1 "
+                         << darkness(edge - 1) << " row edge " << darkness(edge));
             REQUIRE(stem > 0);
             CHECK(darkness(edge - 1) >= stem * 9 / 10);
             CHECK(darkness(edge) <= stem / 20);

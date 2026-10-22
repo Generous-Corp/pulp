@@ -764,8 +764,7 @@ TEST_CASE("Label honors Chromium captured vertical line positions",
     adjusted.set_font_family("Inter");
     adjusted.set_font_size(12.0f);
     adjusted.set_bounds({0, 0, 100, 40});
-    adjusted.set_cached_line_boxes(
-        {{7, 1, 58, 18, 0, 8}}, 100.0f, face, false);
+    adjusted.set_cached_line_boxes({{7, 1, 58, 18, 0, 8}}, 100.0f, face, false);
     RecordingCanvas adjusted_canvas;
     adjusted.paint(adjusted_canvas);
     const auto adjusted_fills = commands_of(adjusted_canvas, DrawCommand::Type::fill_text);

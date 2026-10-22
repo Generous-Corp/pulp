@@ -77,7 +77,8 @@ void translate_to_page_space(pulp::view::IRNode& root, float dx, float dy) {
     }
     const auto shift = [](pulp::view::IRNode& node, const char* key, double by) {
         auto it = node.attributes.find(key);
-        if (it == node.attributes.end()) return;
+        if (it == node.attributes.end())
+            return;
         try {
             it->second = std::to_string(std::stod(it->second) + by);
         } catch (const std::exception&) {
@@ -87,8 +88,12 @@ void translate_to_page_space(pulp::view::IRNode& root, float dx, float dy) {
     // Device pixels at the DPR the capture recorded beside them.
     const auto dpr_of = [](const pulp::view::IRNode& node, const char* key) {
         auto it = node.attributes.find(key);
-        if (it == node.attributes.end()) return 0.0;
-        try { return std::stod(it->second); } catch (const std::exception&) {}
+        if (it == node.attributes.end())
+            return 0.0;
+        try {
+            return std::stod(it->second);
+        } catch (const std::exception&) {
+        }
         return 0.0;
     };
     const auto visit = [&](auto& self, pulp::view::IRNode& node) -> void {
@@ -98,7 +103,8 @@ void translate_to_page_space(pulp::view::IRNode& root, float dx, float dy) {
             shift(node, "browser_box_paint_top_px", dy * dpr);
             shift(node, "browser_box_paint_bottom_px", dy * dpr);
         }
-        for (auto& child : node.children) self(self, child);
+        for (auto& child : node.children)
+            self(self, child);
     };
     visit(visit, root);
 }
@@ -451,10 +457,9 @@ struct ViewCounterSnapshot {
     std::uint64_t unmarked = pulp::view::View::unmarked_paint_mutation_count();
 };
 
-RenderReport::Phase phase_between(const ViewCounterSnapshot& from,
-                                  const ViewCounterSnapshot& to) {
-    return {to.layout_passes - from.layout_passes,
-            to.damage_requests - from.damage_requests, to.unmarked - from.unmarked};
+RenderReport::Phase phase_between(const ViewCounterSnapshot& from, const ViewCounterSnapshot& to) {
+    return {to.layout_passes - from.layout_passes, to.damage_requests - from.damage_requests,
+            to.unmarked - from.unmarked};
 }
 
 choc::value::Value phase_json(const RenderReport::Phase& phase) {
@@ -463,9 +468,8 @@ choc::value::Value phase_json(const RenderReport::Phase& phase) {
                   choc::value::createInt64(static_cast<std::int64_t>(phase.layout_passes)));
     out.addMember("damage_requests",
                   choc::value::createInt64(static_cast<std::int64_t>(phase.damage_requests)));
-    out.addMember("unmarked_paint_mutations",
-                  choc::value::createInt64(
-                      static_cast<std::int64_t>(phase.unmarked_paint_mutations)));
+    out.addMember("unmarked_paint_mutations", choc::value::createInt64(static_cast<std::int64_t>(
+                                                  phase.unmarked_paint_mutations)));
     return out;
 }
 
@@ -641,13 +645,13 @@ std::string render_receipt_json(const RenderReport& report) {
         // The observer materializes DesignIR as native views; no script
         // context is created, so there is no bridge traffic to count.
         counters.addMember("script_bridge", choc::value::createString("not-instantiated"));
-        counters.addMember("views_constructed",
-                           choc::value::createInt64(static_cast<std::int64_t>(c.views_constructed)));
+        counters.addMember("views_constructed", choc::value::createInt64(static_cast<std::int64_t>(
+                                                    c.views_constructed)));
         counters.addMember("views_destroyed",
                            choc::value::createInt64(static_cast<std::int64_t>(c.views_destroyed)));
-        counters.addMember("live_views_after_teardown",
-                           choc::value::createInt64(
-                               static_cast<std::int64_t>(c.live_views_after_teardown)));
+        counters.addMember(
+            "live_views_after_teardown",
+            choc::value::createInt64(static_cast<std::int64_t>(c.live_views_after_teardown)));
         counters.addMember("build", phase_json(c.build));
         counters.addMember("first_frame", phase_json(c.first_frame));
         counters.addMember("readback", phase_json(c.readback));
@@ -690,8 +694,8 @@ int main(int argc, char** argv) {
             text_diagnostics_path = value;
         else if (arg == "--width" && parse_positive(value, width)) {}
         else if (arg == "--height" && parse_positive(value, height)) {}
-        else if (arg == "--scale" && parse_positive(value, scale)) {}
-        else if (arg == "--origin") {
+        else if (arg == "--scale" && parse_positive(value, scale)) {
+        } else if (arg == "--origin") {
             auto point = parse_point(value);
             if (!point) {
                 std::cerr << "Error: --origin expects <x>,<y>\n";
@@ -700,11 +704,9 @@ int main(int argc, char** argv) {
             origin_x = point->x;
             origin_y = point->y;
             has_origin = true;
-        }
-        else if (arg == "--page-background" && *value != '\0') {
+        } else if (arg == "--page-background" && *value != '\0') {
             page_background = value;
-        }
-        else if (arg == "--set-value") {
+        } else if (arg == "--set-value") {
             auto parsed = parse_value_override(value);
             if (!parsed) {
                 std::cerr << "Error: --set-value expects "
@@ -801,8 +803,7 @@ int main(int argc, char** argv) {
         // already carries the document canvas must agree with it; two
         // authorities disagreeing is evidence of a binding error, not a
         // choice for the observer to make.
-        if (ir.root.style.background_color &&
-            *ir.root.style.background_color != page_background) {
+        if (ir.root.style.background_color && *ir.root.style.background_color != page_background) {
             std::cerr << "Error: --page-background " << page_background
                       << " disagrees with the imported document canvas "
                       << *ir.root.style.background_color << "\n";
@@ -867,7 +868,8 @@ int main(int argc, char** argv) {
     pulp::view::Label::reset_line_break_path_counts();
     const ViewCounterSnapshot before_render;
     RenderReport report;
-    if (has_origin) report.origin = std::make_pair(origin_x, origin_y);
+    if (has_origin)
+        report.origin = std::make_pair(origin_x, origin_y);
     report.page_background = page_background;
     report.requested = backend == Backend::gpu ? "gpu" : "skia";
     report.fault = gpu_fault_name(gpu_fault);
@@ -947,8 +949,7 @@ int main(int argc, char** argv) {
     counters.views_constructed = after_teardown.constructed - before_build.constructed;
     counters.views_destroyed = after_teardown.destroyed - before_build.destroyed;
     counters.live_views_after_teardown =
-        counters.views_constructed - std::min(counters.views_constructed,
-                                              counters.views_destroyed);
+        counters.views_constructed - std::min(counters.views_constructed, counters.views_destroyed);
     report.counters = counters;
     if (!write_receipt()) {
         std::cerr << "Error: could not write render receipt\n";

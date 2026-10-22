@@ -65,8 +65,12 @@ public:
     /// declared ascent (Arial Bold, Inter) reports a smaller number here.
     /// Use these to reproduce a browser's baseline; use `ascent()` to size a
     /// box that must contain every glyph.
-    float typographic_ascent()  const { return typographic_ascent_; }
-    float typographic_descent() const { return typographic_descent_; }
+    float typographic_ascent() const {
+        return typographic_ascent_;
+    }
+    float typographic_descent() const {
+        return typographic_descent_;
+    }
 
     /// The CSS numeric weight these segments were measured at.
     ///

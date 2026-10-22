@@ -17,7 +17,7 @@ Config lane_config(std::string lane) {
     config.lane = std::move(lane);
     return config;
 }
-}  // namespace
+} // namespace
 #undef main
 
 namespace {
@@ -520,7 +520,7 @@ std::filesystem::path write_slot_ir(const std::string& name) {
     std::ofstream(path) << serialize_design_ir(ir);
     return path;
 }
-}  // namespace
+} // namespace
 
 TEST_CASE("design-import benchmark IR-bound retained lane keeps keyed slots",
           "[design-import][benchmark][retained]") {
@@ -581,8 +581,7 @@ TEST_CASE("design-import benchmark IR binding and teardown fail closed",
 
     // Planted negative: a view leaked past teardown fails the run.
     REQUIRE(run_benchmark_main({"bench", "--lane=baked-native", "--ir=" + path.string(),
-                                "--frames=1", "--plant-leak",
-                                "--output=" + output.string()}) == 3);
+                                "--frames=1", "--plant-leak", "--output=" + output.string()}) == 3);
     // A plant that cannot be placed fails rather than reporting a clean run.
     DesignIR lone;
     lone.root.type = "text";
@@ -591,8 +590,7 @@ TEST_CASE("design-import benchmark IR binding and teardown fail closed",
     const auto lone_path = std::filesystem::temp_directory_path() / "pulp-bench-lone.ir.json";
     std::ofstream(lone_path) << serialize_design_ir(lone);
     CHECK(run_benchmark_main({"bench", "--lane=baked-native", "--ir=" + lone_path.string(),
-                              "--frames=1", "--plant-leak",
-                              "--output=" + output.string()}) == 2);
+                              "--frames=1", "--plant-leak", "--output=" + output.string()}) == 2);
     std::filesystem::remove(lone_path);
     std::filesystem::remove(output);
     std::filesystem::remove(path);

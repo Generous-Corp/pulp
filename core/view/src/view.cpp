@@ -101,8 +101,8 @@ std::uint64_t next_clock_walk_token() noexcept {
 
 View::View()
     : import_binding_instance_id_(next_import_binding_instance_id()),
-      import_binding_lifetime_token_(std::make_shared<const std::uint64_t>(
-          import_binding_instance_id_)) {
+      import_binding_lifetime_token_(
+          std::make_shared<const std::uint64_t>(import_binding_instance_id_)) {
     constructed_count_.fetch_add(1, std::memory_order_relaxed);
 }
 

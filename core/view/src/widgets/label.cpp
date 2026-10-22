@@ -1983,14 +1983,13 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         // Without real face metrics, fall back to centring the ink in the box
         // (unclamped: negative leading lets glyphs overflow evenly).
         const auto& first_line = shaped_layout->lines.front();
-        const auto fm = has_attributed_
-            ? FaceMetrics{}
-            : face_metrics(family, effective_font_size, effective_font_weight(), font_style_);
+        const auto fm = has_attributed_ ? FaceMetrics{}
+                                        : face_metrics(family, effective_font_size,
+                                                       effective_font_weight(), font_style_);
         if (fm.real) {
             baseline_y = first_line.y + first_line.height - std::round(fm.typographic_descent);
         } else {
-            const float half_leading =
-                (first_line.height - single_line_text_height) * 0.5f;
+            const float half_leading = (first_line.height - single_line_text_height) * 0.5f;
             baseline_y = first_line.y + half_leading + first_line_ascent;
         }
     }

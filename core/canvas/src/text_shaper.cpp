@@ -738,8 +738,8 @@ struct TextShaper::Impl {
             const float bottom = m.fBottom > m.fDescent ? m.fBottom : m.fDescent;
             box.ascent  = -top;           // worst-case distance above baseline (positive)
             box.descent =  bottom;        // worst-case distance below baseline (positive)
-            box.typographic_ascent  = -m.fAscent;
-            box.typographic_descent =  m.fDescent;
+            box.typographic_ascent = -m.fAscent;
+            box.typographic_descent = m.fDescent;
             box.leading =  m.fLeading > 0 ? m.fLeading : 0;
             // Raw fTop/fBottom is now the default line box. The legacy
             // empirical `0.5 * font_size` safety margin was a stopgap for
@@ -1127,7 +1127,7 @@ PreparedText TextShaper::prepare(
     result.descent_      = box.descent;
     result.leading_      = box.leading;
     // From the face alone: shaping a string widens only the worst-case extents.
-    result.typographic_ascent_  = box.typographic_ascent;
+    result.typographic_ascent_ = box.typographic_ascent;
     result.typographic_descent_ = box.typographic_descent;
     result.metrics_real_ = box.real;
 
@@ -1221,10 +1221,10 @@ PreparedText TextShaper::prepare(
         result.ascent_ = std::max(result.ascent_, span_prepared.ascent_);
         result.descent_ = std::max(result.descent_, span_prepared.descent_);
         result.leading_ = std::max(result.leading_, span_prepared.leading_);
-        result.typographic_ascent_ = std::max(result.typographic_ascent_,
-                                              span_prepared.typographic_ascent_);
-        result.typographic_descent_ = std::max(result.typographic_descent_,
-                                               span_prepared.typographic_descent_);
+        result.typographic_ascent_ =
+            std::max(result.typographic_ascent_, span_prepared.typographic_ascent_);
+        result.typographic_descent_ =
+            std::max(result.typographic_descent_, span_prepared.typographic_descent_);
         result.metrics_real_ = result.metrics_real_ || span_prepared.metrics_real_;
         fallback_line_height = std::max(fallback_line_height,
                                         span_prepared.line_height_);

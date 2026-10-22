@@ -263,8 +263,7 @@ TEST_CASE("lifetime counters advance once per view constructed and destroyed",
     // Destroying the root takes its whole subtree, and nothing else.
     root.reset();
     CHECK(View::destroyed_count() - destroyed == 4);
-    CHECK(View::constructed_count() - View::destroyed_count() ==
-          constructed - destroyed + 1);
+    CHECK(View::constructed_count() - View::destroyed_count() == constructed - destroyed + 1);
 
     survivor.reset();
     CHECK(View::destroyed_count() - destroyed == 5);
