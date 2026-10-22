@@ -40,6 +40,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include "../examples/pulp-gain/pulp_gain.hpp"
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -1109,6 +1110,71 @@ TEST_CASE("AU v2 effect preserves scheduled offsets and ramps for processors",
     REQUIRE(output_samples[47] == Catch::Approx(31.0f / 32.0f));
     for (UInt32 n = 48; n < kFrames; ++n) REQUIRE(output_samples[n] == 1.0f);
 
+    effect.DoCleanup();
+}
+
+TEST_CASE("AU v2 PulpGain at 0 dB is bit-transparent, including after a round trip",
+          "[au][au-v2][null-test]") {
+    const auto previous = pulp::format::registered_factory();
+    pulp::format::register_plugin(pulp::examples::create_pulp_gain);
+    struct RestoreFactory {
+        pulp::format::ProcessorFactory value;
+        ~RestoreFactory() {
+            pulp::format::register_plugin(value);
+        }
+    } restore{previous};
+
+    constexpr UInt32 kFrames = 256;
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    std::uint32_t seed = 7;
+    for (UInt32 i = 0; i < kFrames; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        in_l[i] = static_cast<float>(seed >> 8) / 16777216.0f - 0.5f;
+        in_r[i] = in_l[i] * -0.613f;
+    }
+    struct TwoBufferList {
+        AudioBufferList bl;
+        AudioBuffer second;
+    } input{}, output{};
+    const auto render = [&] {
+        input.bl.mNumberBuffers = 2;
+        input.bl.mBuffers[0] = {1, kFrames * sizeof(float), in_l.data()};
+        input.bl.mBuffers[1] = {1, kFrames * sizeof(float), in_r.data()};
+        output.bl.mNumberBuffers = 2;
+        output.bl.mBuffers[0] = {1, kFrames * sizeof(float), out_l.data()};
+        output.bl.mBuffers[1] = {1, kFrames * sizeof(float), out_r.data()};
+        AudioUnitRenderActionFlags flags = 0;
+        REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+    };
+    const auto require_null = [&] {
+        for (UInt32 i = 0; i < kFrames; ++i) {
+            REQUIRE(out_l[i] == in_l[i]);
+            REQUIRE(out_r[i] == in_r[i]);
+        }
+    };
+    const auto set_both = [&](float db) {
+        for (const auto id : {pulp::examples::kInputGain, pulp::examples::kOutputGain})
+            REQUIRE(effect.SetParameter(id, kAudioUnitScope_Global, 0, db, 0) == noErr);
+    };
+
+    render();
+    require_null();
+    set_both(6.0f);
+    render();
+    REQUIRE(out_l[1] != in_l[1]);
+    set_both(0.0f);
+    render();
+    require_null();
     effect.DoCleanup();
 }
 

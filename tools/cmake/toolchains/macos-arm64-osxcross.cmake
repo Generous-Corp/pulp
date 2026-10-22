@@ -36,7 +36,7 @@ endif()
 set(CMAKE_OSX_SYSROOT "$ENV{PULP_MACOS_SDK_ROOT}" CACHE PATH "macOS SDK sysroot" FORCE)
 set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING "macOS architectures" FORCE)
 
-# The selected chrome/m153 universal Skia/Dawn asset encodes macOS 13.0 as its
+# The selected chrome/m157 universal Skia/Dawn asset encodes macOS 13.0 as its
 # minimum OS. Honor the env override
 # when set explicitly so a host can target a different deployment OS
 # for non-GPU prototype builds.

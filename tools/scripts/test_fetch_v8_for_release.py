@@ -198,6 +198,61 @@ class EmbeddedPairManifest(unittest.TestCase):
                 fetch_v8.validate_embedded_manifest(
                     zf, manifest, manifest["dependencies"][1], "mac-arm64")
 
+    def _advanced_skia_fixture(self, **advance_overrides):
+        manifest, pair = _matched_pair_fixture()
+        skia = manifest["dependencies"][0]
+        skia["version"] = "chrome/m157"
+        skia["determinism"] = {"skia_commit": "7" * 40, "built_dawn": "8" * 40}
+        advance = {"skia_release": "chrome/m157", "skia_commit": "7" * 40,
+                   "built_dawn": "8" * 40, "reason": "matched V8 fails Pulp's gate"}
+        advance.update(advance_overrides)
+        manifest["dependencies"][1]["determinism"]["independent_skia_advance"] = advance
+        embedded = {"v8_version": "15.3.76.5", "platform": "mac", "arch": "arm64",
+                    "lib": "lib/libv8.dylib", "shared": True, "sealed": True,
+                    "i18n": True, "pair": pair}
+        return manifest, embedded
+
+    def test_declared_independent_skia_advance_passes(self):
+        manifest, embedded = self._advanced_skia_fixture()
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), embedded) as zf:
+            fetch_v8.validate_embedded_manifest(
+                zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
+    def test_skia_advance_without_declaration_fails_closed(self):
+        manifest, embedded = self._advanced_skia_fixture()
+        del manifest["dependencies"][1]["determinism"]["independent_skia_advance"]
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), embedded) as zf:
+            with self.assertRaisesRegex(ValueError, "active validated_skia_release"):
+                fetch_v8.validate_embedded_manifest(
+                    zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
+    def test_stale_independent_skia_advance_fails_closed(self):
+        manifest, embedded = self._advanced_skia_fixture(built_dawn="9" * 40)
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), embedded) as zf:
+            with self.assertRaisesRegex(ValueError, "independent_skia_advance built_dawn"):
+                fetch_v8.validate_embedded_manifest(
+                    zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
+    def test_independent_skia_advance_needs_a_reason(self):
+        manifest, embedded = self._advanced_skia_fixture(reason=" ")
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), embedded) as zf:
+            with self.assertRaisesRegex(ValueError, "must be an object with a reason"):
+                fetch_v8.validate_embedded_manifest(
+                    zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
+    def test_independent_skia_advance_still_binds_the_v8_pair(self):
+        manifest, embedded = self._advanced_skia_fixture()
+        embedded["pair"]["built_skia"] = "9" * 40
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), embedded) as zf:
+            with self.assertRaisesRegex(ValueError, "built_skia"):
+                fetch_v8.validate_embedded_manifest(
+                    zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
     def test_top_level_artifact_identity_drift_fails_closed(self):
         manifest, pair = _matched_pair_fixture()
         embedded = {"v8_version": "15.3.76.5", "platform": "mac",

@@ -9,6 +9,42 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v010050"></a>
+## [0.1005.0] - 2026-10-22
+
+- release/version bump ([#10700](https://github.com/Generous-Corp/pulp/pull/10700))
+- fix/sdk screenshot design import off ([#10405](https://github.com/Generous-Corp/pulp/pull/10405))
+- feature/render toolchain m157 ([#10671](https://github.com/Generous-Corp/pulp/pull/10671))
+- build/pin mise 2026.10.17 ([#10678](https://github.com/Generous-Corp/pulp/pull/10678))
+
+<a id="v010040"></a>
+## [0.1004.0] - 2026-10-22
+
+- release/version bump ([#10697](https://github.com/Generous-Corp/pulp/pull/10697))
+- fix/script test inputs root vars ([#10695](https://github.com/Generous-Corp/pulp/pull/10695))
+- perf/filters dynamics ship 20261021 ([#10638](https://github.com/Generous-Corp/pulp/pull/10638))
+- fix/vst3 exact host values ([#10684](https://github.com/Generous-Corp/pulp/pull/10684))
+- fix/worker pool receipt keep hot ([#10691](https://github.com/Generous-Corp/pulp/pull/10691))
+- release/version bump ([#10693](https://github.com/Generous-Corp/pulp/pull/10693))
+- feature/windows proxmox ephemeral runner ([#10648](https://github.com/Generous-Corp/pulp/pull/10648))
+
+<a id="v010030"></a>
+## [0.1003.0] - 2026-10-22
+
+- feature/deps patch bumps 20261022 ([#10687](https://github.com/Generous-Corp/pulp/pull/10687))
+- release/version bump ([#10689](https://github.com/Generous-Corp/pulp/pull/10689))
+- perf/build time 20261022 ([#10656](https://github.com/Generous-Corp/pulp/pull/10656))
+- perf/template catch2 fetch 20261022 ([#10677](https://github.com/Generous-Corp/pulp/pull/10677))
+- ci/run concurrency tests 20261022 ([#10680](https://github.com/Generous-Corp/pulp/pull/10680))
+- perf/gpu audio 20261021 ([#10661](https://github.com/Generous-Corp/pulp/pull/10661))
+
+<a id="v010020"></a>
+## [0.1002.0] - 2026-10-22
+
+- release/version bump ([#10685](https://github.com/Generous-Corp/pulp/pull/10685))
+- codex/forge sequencing impl extract ([#10666](https://github.com/Generous-Corp/pulp/pull/10666))
+- fix/gpu audio shared io session probe 20261022 ([#10679](https://github.com/Generous-Corp/pulp/pull/10679))
+
 <a id="v010010"></a>
 ## [0.1001.0] - 2026-10-22
 
@@ -11233,6 +11269,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.1005.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1005.0
+[0.1004.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1004.0
+[0.1003.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1003.0
+[0.1002.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1002.0
 [0.1001.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1001.0
 [0.1000.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1000.0
 [0.999.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.999.0

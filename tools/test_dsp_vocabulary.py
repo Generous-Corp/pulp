@@ -181,33 +181,31 @@ class CharacterAdjacent {
         print(f"FAIL: adjacent character literal corrupted the class body: {methods!r}")
         return 1
 
-    tom_fixture = """
-class TomVoice {
-  public:
-    void a();
-    void b();
-    void c();
-    void d();
-    void e();
-    void f();
-    void g();
-    void h();
-    void i();
-    void j();
-    void k();
-    void l();
-    void apply_preset();
-    void body_lofi();
-    void set_ladder_math_profile();
-    void ladder_math_profile();
-    void crowded_out();
-};
-"""
-    methods = extractor.public_methods(tom_fixture, "TomVoice")
-    if len(methods) != 16 or methods[-4:] != [
-            "apply_preset()", "body_lofi()",
-            "set_ladder_math_profile()", "ladder_math_profile()"]:
-        print(f"FAIL: Tom compatibility extension displaced established APIs: {methods!r}")
+    # No class loses methods to a size limit. The list is the vocabulary's
+    # authority (Forge's exporter validates against it), so a method cut
+    # from the end of a long class is a valid call reported as invalid. A
+    # per-class cap once did exactly that, silently, to FastMath's last two
+    # methods. Forty methods covers the widest class with room to spare and
+    # would have been cut to fourteen.
+    wide_fixture = "class WideClass {\n  public:\n" + "".join(
+        f"    void method_{index:02d}();\n" for index in range(40)) + "};\n"
+    methods = extractor.public_methods(wide_fixture, "WideClass")
+    expected_wide = [f"method_{index:02d}()" for index in range(40)]
+    if methods != expected_wide:
+        print(f"FAIL: a wide class lost methods ({len(methods)} of 40): {methods[-3:]!r}")
+        return 1
+
+    with open(os.path.join(HERE, "..", "core", "signal", "include", "pulp", "signal",
+                           "fast_math.hpp"), encoding="utf-8") as fast_math_header:
+        fast_math = extractor.public_methods(fast_math_header.read(), "FastMath")
+    required_fast_math = [
+        "tanh_accurate(float x)", "log10_accurate(float x)", "exp10_accurate(float x)",
+        "gain_to_db_accurate(float gain)", "db_to_gain_accurate(float db)",
+        "clamp_unit(float x)", "soft_clip(float x)",
+    ]
+    missing_fast_math = [m for m in required_fast_math if m not in fast_math]
+    if missing_fast_math:
+        print(f"FAIL: FastMath vocabulary is missing {missing_fast_math!r}")
         return 1
 
     r = subprocess.run([sys.executable, EXTRACTOR, "--json"],

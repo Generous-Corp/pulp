@@ -2019,7 +2019,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 V8 is an optional JS engine backend (selected with `PULP_JS_ENGINE=v8`;
 default is QuickJS; JSC is opt-in on Apple). Pulp ships a sealed, embeddable
-prebuilt `libv8` (version 15.3.76.5, matched to the active Skia/Dawn M153
+prebuilt `libv8` (version 15.7.112.5, matched to the active Skia/Dawn M157
 provider generation) produced by the
 [danielraffel/v8-builder](https://github.com/danielraffel/v8-builder)
 fork. The shared library exports only the `v8::`/`cppgc::` API surface,

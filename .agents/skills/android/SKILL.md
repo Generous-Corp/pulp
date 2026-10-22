@@ -81,7 +81,7 @@ Kotlin (Android UI)          C++ (Pulp core)
 The Android Skia builder reads the shared `tools/deps/manifest.json` provider
 lock by default. It checks out the pinned Skia revision, verifies the Dawn
 revision after `git-sync-deps`, and copies the `skunicode` module headers;
-never treat a mutable `chrome/m153` branch checkout or an old `SkUnicode.h`
+never treat a mutable `chrome/mNNN` branch checkout or an old `SkUnicode.h`
 artifact as a valid Android build.
 
 The source builder negotiates one governed host lease per ABI around both the
