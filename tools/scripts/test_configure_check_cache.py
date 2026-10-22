@@ -10,6 +10,10 @@ the module wrapped around it the way PulpDependencies.cmake wraps SDL3:
   3. Editing the dependency's CMake source changes the key, so nothing replays.
   4. A -D on the command line beats a recorded value.
   5. PULP_CONFIGURE_CHECK_CACHE=OFF records and replays nothing.
+  6. The cache directory can be shared with untrusted jobs, so a results file
+     is parsed, never include()d: one line the writer would not emit (CMake
+     code, a non-boolean value, a CMAKE_* name) makes the whole file ignored,
+     nothing in it runs, and the configure runs its checks uncached.
 
 Exit 77 (ctest SKIP) off Apple, where the module is deliberately inert.
 """
@@ -150,6 +154,52 @@ def main() -> int:
         subprocess.run(["cmake", str(root / "b1")], env=env, check=True, capture_output=True)
         expect(cache_values(root / "b1").get("FD_HAS_ATAN") == "kept",
                "re-configuring an existing build dir never overwrites its cached results")
+
+        # A planted results file must never run. Each variant keeps the
+        # recorded lines and adds one line the writer would not emit.
+        results = recorded[0]
+        good_body = results.read_text(encoding="utf-8")
+        marker = root / "planted-ran"
+        planted = {
+            "execute_process": f'execute_process(COMMAND touch "{marker.as_posix()}")\n',
+            "set() of a check": 'set(FD_HAS_ATAN "planted" CACHE INTERNAL "Have symbol atan" FORCE)\n',
+            "code after a seed": f'pulp_configure_check_cache_seed(FD_X "1" "Have symbol x")\n'
+                                 f'file(TOUCH "{marker.as_posix()}")\n',
+            "non-boolean value": 'pulp_configure_check_cache_seed(FD_X "$(touch planted)" "Have symbol x")\n',
+            "CMAKE_ name": 'pulp_configure_check_cache_seed(CMAKE_C_COMPILER "1" "Have symbol x")\n',
+            "non-check help": 'pulp_configure_check_cache_seed(FD_X "1" "not a configure check")\n',
+            "unknown escape": 'pulp_configure_check_cache_seed(FD_X "1" "Have symbol \\t")\n',
+        }
+        for i, (what, line) in enumerate(planted.items()):
+            marker.unlink(missing_ok=True)
+            results.write_text(good_body + line, encoding="utf-8")
+            out = configure(src, root / f"bp{i}", cache_dir)
+            expect(not marker.exists(), f"planted file ({what}): nothing in it runs")
+            expect("replayed configure checks" not in out and "ignoring configure-check cache" in out,
+                   f"planted file ({what}): the whole file is ignored, with a status line")
+            expect(dep_try_compiles(root / f"bp{i}") == 5,
+                   f"planted file ({what}): the configure runs its checks uncached")
+            values = cache_values(root / f"bp{i}")
+            expect(values.get("FD_HAS_ATAN") == first.get("FD_HAS_ATAN") and "FD_X" not in values,
+                   f"planted file ({what}): no planted value reaches the build")
+            expect(results.read_text(encoding="utf-8") == good_body,
+                   f"planted file ({what}): the uncached configure re-records clean results")
+        results.write_text(good_body, encoding="utf-8")
+
+        # Control: a help string using every escape the writer emits replays
+        # verbatim, and `${...}` in it stays text.
+        tricky = 'Have include a.h;b.h "q" \\ ${FD_HAS_ATAN} $ENV{HOME}'
+        escaped = (tricky.replace("\\", "\\\\").replace('"', '\\"')
+                   .replace("$", "\\$").replace(";", "\\;"))
+        results.write_text(good_body + f'pulp_configure_check_cache_seed(FD_X "ON" "{escaped}")\n', encoding="utf-8")
+        out = configure(src, root / "bq", cache_dir)
+        expect("replayed configure checks" in out and dep_try_compiles(root / "bq") == 0,
+               "control: a file using every writer escape still replays")
+        expect(cache_values(root / "bq").get("FD_X") == "ON", "control: the escaped entry is seeded")
+        help_line = next((l for l in (root / "bq" / "CMakeCache.txt").read_text(encoding="utf-8").splitlines()
+                          if l.startswith("//") and "a.h;b.h" in l), "")
+        expect(help_line == "//" + tricky, f"control: its help string round-trips verbatim ({help_line!r})")
+        results.write_text(good_body, encoding="utf-8")
 
         (src / "fakedep" / "CMakeLists.txt").write_text(DEP_CMAKE + "# edited\n")
         out4 = configure(src, root / "b4", cache_dir)

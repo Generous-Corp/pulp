@@ -111,6 +111,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
+      # release-build's legs: both, or linux-x64 alone for a fork pull
+      # request with no isolated PR-gate selector (see the resolve step).
+      matrix_include: ${{ steps.resolve.outputs.matrix_include }}
     steps:
       # Only the resolver is needed; it owns the opt-in class-label rewrite so
       # the three release workflows share one tested implementation.
@@ -128,8 +131,28 @@ jobs:
           # Opt-in (exactly `1`/`true`): append `pulp-release-pr-gate` to a
           # self-hosted selector. Unset = the selector below, verbatim.
           PULP_RELEASE_CLASS_TOKENS: ${{ vars.PULP_RELEASE_CLASS_TOKENS }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           set -euo pipefail
+          linux='{"os":"ubuntu-24.04","platform":"linux-x64"}'
+          darwin='{"os":"macos-15","platform":"darwin-arm64"}'
+          # Repo variables resolve for fork runs. A fork pull request may use
+          # only the isolated PR-gate selector; without one its macOS leg is
+          # skipped, never sent down the chain below to persistent or
+          # release-tier hosts.
+          fork_route="$(python3 tools/scripts/resolve_release_runners.py --fork-pr-gate-route)"
+          if [ "$fork_route" = "skip" ]; then
+            echo "matrix_include=[${linux}]" >> "$GITHUB_OUTPUT"
+            echo 'runs_on_json=[]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "matrix_include=[${linux},${darwin}]" >> "$GITHUB_OUTPUT"
+          if [ "$fork_route" != "same-repo" ]; then
+            selector="$(python3 tools/scripts/resolve_release_runners.py \
+              --apply-class-label pulp-release-pr-gate --selector "$fork_route")"
+            echo "runs_on_json=${selector}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -n "${PR_GATE_JSON:-}" ]; then
             selector="${PR_GATE_JSON}"
             echo "Routing macOS release-path PR gate via PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON: ${PR_GATE_JSON}"
@@ -157,11 +180,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            platform: linux-x64
-          - os: macos-15
-            platform: darwin-arm64
+        include: ${{ fromJSON(needs.resolve-macos-runner.outputs.matrix_include) }}
 
     runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
 
