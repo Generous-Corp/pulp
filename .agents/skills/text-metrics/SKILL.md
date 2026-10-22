@@ -64,7 +64,13 @@ Two rules that look equivalent are not:
 | `bottom - round(fDescent)` | right | right |
 
 The rounding is in CSS px even at DPR 2 (Arial Bold 24px gives a 27px rect;
-device-px rounding would give 26.5). The native (uncaptured) branch is
+device-px rounding would give 26.5). Known limits, all measured on macOS
+Chromium: Linux Blink moves a unit from ascent to descent when the descent
+rounds down under subpixel positioning; an `@font-face` with
+`descent-override`/`size-adjust` makes Chromium's descent the override value
+while the label still reads the file's `fDescent`; and a run rect with a
+fractional top stays fractional through this rule while Chromium may snap the
+baseline to a whole pixel. Measure before extending the rule to those cases. The native (uncaptured) branch is
 different: it has no box from Chromium and still centres the real ink.
 
 **Negative half-leading is legal and must not be clamped.** A face whose ink

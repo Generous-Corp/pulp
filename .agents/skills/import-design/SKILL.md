@@ -577,17 +577,19 @@ knowing before you touch that file:
   **Page-space gotcha:** a browser-backed native import is panel-local, while
   Chromium's screenshot and DOM snapshot are page-space. The lab passes the
   signed authored-frame origin to `pulp-design-ir-observe --origin`, which
-  must move the panel RIGIDLY: the captured `browser_box_paint_*_px` rects and
-  `captured_raster_origin_*_px` are absolute device-pixel coordinates the
-  painters validate against a view's position, so shifting only the children
-  makes them reject every snapped paint rect (fractional box edges reappear)
-  and draws captured knob sprites at the old origin. The page outside the
-  panel is not part of the import: its colour comes from the verified DOM
-  snapshot by CSS canvas propagation (html, else body, else the UA canvas for
-  the captured color-scheme) via `--page-background`, and is reported
-  `unresolved` rather than borrowed from a descendant when that rule cannot
-  say. Never translate the browser nodes as well; that registers the panel
-  twice.
+  wraps the importer's panel root, untouched, in an observer-only page node and
+  positions it there. The captured `browser_box_paint_*_px` rects move with it
+  (the painter validates them against a view's absolute position, so leaving
+  them behind makes it reject every snapped rect and fractional edges
+  reappear). `captured_raster_origin_*_px` does NOT move: the sprite pass crops
+  it from the full-page screenshot, so it is page-space already. The page node,
+  never the panel root, carries `--page-background`, which the lab resolves
+  from the verified DOM snapshot by CSS canvas propagation (html, else body;
+  both transparent is `unresolved`, since the UA colour follows a
+  color-scheme the capture does not record) and supplies only for a panel with
+  page around it. A whole-page panel owns its canvas: the importer stamps it on
+  the root, and filling underneath would hide a dropped stamp. Never translate
+  the browser nodes as well; that registers the panel twice.
 
   **Counter gotcha:** the observer's render receipt carries its own work
   counters (`pulp-design-ir-observer-counters-v1`), phased as `build`,
