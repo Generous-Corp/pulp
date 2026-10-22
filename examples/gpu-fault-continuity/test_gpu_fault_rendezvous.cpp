@@ -295,3 +295,33 @@ TEST_CASE("the claiming instance does not follow a planted capture symlink",
     CHECK(text == "keep");
     CHECK_FALSE(fs::exists(root.run / "events.jsonl"));
 }
+
+TEST_CASE("the prepared event names the node, its storage and timestamps",
+          "[gpu-fault-continuity][rendezvous]") {
+    // The configuration WP-K's known-defect table matches on (node, storage,
+    // timestamps) comes from this event. Printed whole so it can be checked
+    // against the verifier's fixture.
+    Root root;
+    ::setenv("PULP_GPU_FAULT_RUN_DIR", root.run.c_str(), 1);
+    {
+        pulp::examples::gpu_fault::GpuFaultContinuityProcessor p;
+        pulp::format::PrepareContext ctx;
+        ctx.sample_rate = 48000;
+        ctx.max_buffer_size = 512;
+        p.prepare(ctx);
+    }
+    ::unsetenv("PULP_GPU_FAULT_RUN_DIR");
+    std::ifstream in(root.run / "events.jsonl");
+    std::string line, prepared;
+    while (std::getline(in, line))
+        if (line.find("\"event\":\"prepared\"") != std::string::npos)
+            prepared = line;
+    REQUIRE_FALSE(prepared.empty());
+    // Regenerates the verifier's fixture of this event, when asked to.
+    if (const char* out = std::getenv("PULP_GPU_FAULT_PREPARED_OUT"))
+        std::ofstream(out) << prepared << "\n";
+    CHECK(prepared.find("\"node\":\"convolver\"") != std::string::npos);
+    CHECK(prepared.find("\"timestamps\":") != std::string::npos);
+    const bool shared = prepared.find("\"path\":\"shared_memory\"") != std::string::npos;
+    CHECK(prepared.find(shared ? "\"storage\":\"shared\"" : "\"storage\":\"") != std::string::npos);
+}

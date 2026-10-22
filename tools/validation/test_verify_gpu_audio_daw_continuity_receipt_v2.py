@@ -315,6 +315,24 @@ class V2Receipt(unittest.TestCase):
         # Unknown ancestry (no repository, unknown commit) is not "fixed".
         self.assertTrue(hosts.known_defect(events, code, lambda fix, c: None))
 
+    def test_the_rule_reads_the_fields_the_plugin_actually_emits(self):
+        # A prepared event written by the plug-in itself (regenerate with
+        # PULP_GPU_FAULT_PREPARED_OUT=<this file> gpu-fault-continuity-test
+        # "the prepared event names*"): the rule must key on its real fields.
+        fixture = HERE / "fixtures" / "gpu_fault_prepared_event.jsonl"
+        real = json.loads(fixture.read_text(encoding="utf-8"))
+        self.assertEqual(real["event"], "prepared")
+        for key in hosts.KNOWN_DEFECTS[0]["match"]:
+            self.assertIn(key, real, f"the plug-in no longer emits {key!r}")
+        code = {"commit": "b" * 40}
+        self.assertEqual(hosts.known_defect([real], code, lambda fix, c: None), "")
+        bad = dict(real, node="wavenet", storage="staged", timestamps=True)
+        self.assertTrue(hosts.known_defect([bad], code, lambda fix, c: None)
+                        .startswith("excluded: #10736"))
+        run, receipt = self._defect_run("real-prepared-wavenet",
+                                        **{k: bad[k] for k in ("node", "storage", "timestamps")})
+        self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
+
     def test_other_configurations_are_not_excluded(self):
         for fields in ({}, dict(node="wavenet", storage="shared", timestamps=True),
                        dict(node="wavenet", storage="staged", timestamps=False),
