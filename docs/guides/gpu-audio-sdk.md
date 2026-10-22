@@ -596,19 +596,29 @@ is `Degraded`, the callback continues on the prepared CPU fallback, or emits
 silence for a node that declared no fallback. A lost provider (`ProviderLost`, or
 `ProviderUnresponsive`) is `Unavailable`, because nothing in the current
 preparation can bring it back. A node that also latched an earlier cause still
-reports `Unavailable` and keeps the first cause. `epoch`,
+reports `Unavailable` and keeps the first cause. Whenever the state is not
+`Ready`, `selected_engine` names the engine that actually delivers. That is
+`Cpu` for a node with a CPU fallback, and `Unknown` for a node that emits
+silence; it is never `Gpu`. `provider` still names the provider that was
+prepared. `epoch`,
 `delivery_epoch_active` and `terminal_counts` come from the node when it
-supplies them. Today the convolver's shared path supplies the epoch, and no
-node yet supplies per-disposition terminal counts.
+supplies them. The shared `GpuConvolver` path supplies the epoch and counts one
+terminal disposition per admitted GPU block. A refused or failed block is counted
+as `CpuFallback`, because that is what the callback delivers for it.
 
-The read is allocation-free and safe from a UI thread. For `GpuWaveNetRealtimeNode`
-and the shared `GpuConvolver` path, the transport worker samples node health
-after every service step, and after `prepare()` and the offline fence. Each
-sample is republished as one coherent copy, so a snapshot can trail the node by
-up to one worker pump but never mixes two samples. If no stable copy is
-available, the status is never reported as `Ready`. Staged nodes are asked for
-their own `GpuAudioNode::status_snapshot()`. The base default carries no health,
-so the transport's staged `Degraded` stands.
+The read is allocation-free and safe from a UI thread. `status_snapshot()` and
+`capability_report()` read only the transport's own copies: the configuration
+captured at `prepare()`, and the last health sample. They never touch the node,
+so a host may re-prepare or destroy the node while a UI thread reads status.
+The transport worker takes the samples. For `GpuWaveNetRealtimeNode` and the
+shared `GpuConvolver` path, it calls the node's private health hook after every
+service step. For a staged node, it calls the node's own
+`GpuAudioNode::status_snapshot()` after every pump. `prepare()` and the offline
+fence sample as well. Each sample is republished as one coherent copy, so a
+snapshot can trail the node by up to one worker pump but never mixes two
+samples. If no stable copy is available for a realtime node, the status is never
+reported as `Ready`. A staged node whose status keeps the base default carries
+no health, so the transport's staged `Degraded` stands.
 
 The convolver family reports the same status directly. `GpuConvolver`,
 `GpuMultiConvolver` and `GpuConvolutionReverb` each gain `status_snapshot()`,

@@ -566,6 +566,9 @@ class RealtimeHookNode : public GpuAudioNode {
     bool claims_provider = false;
     bool health_read_ok = true;
     std::uint32_t health_calls = 0;
+    // Hook contract: never called from a host/UI reader thread.
+    std::thread::id forbidden_health_thread{};
+    std::atomic<std::uint32_t> health_calls_from_forbidden_thread{0};
     detail::RealtimeGpuHealth health = [] {
         detail::RealtimeGpuHealth initial;
         initial.epoch = 1;
@@ -577,6 +580,8 @@ class RealtimeHookNode : public GpuAudioNode {
     static bool health_realtime(const void* self, detail::RealtimeGpuHealth& out) noexcept {
         auto* node = const_cast<RealtimeHookNode*>(static_cast<const RealtimeHookNode*>(self));
         ++node->health_calls;
+        if (std::this_thread::get_id() == node->forbidden_health_thread)
+            node->health_calls_from_forbidden_thread.fetch_add(1, std::memory_order_relaxed);
         if (!node->health_read_ok)
             return false;
         out = node->health;
@@ -1718,6 +1723,14 @@ TEST_CASE("GpuAudioTransport delivery snapshot supports concurrent diagnostic re
 
 namespace {
 
+// Every status a health test observes must satisfy the v3 invariants.
+GpuAudioStatus validated(const GpuAudioStatus& status) {
+    const auto validation = validate_gpu_audio_status(status);
+    INFO("status error " << static_cast<int>(validation.error));
+    CHECK(validation.accepted());
+    return status;
+}
+
 constexpr std::size_t slot(GpuAudioTerminalDisposition disposition) noexcept {
     return static_cast<std::size_t>(disposition);
 }
@@ -1750,40 +1763,44 @@ TEST_CASE("GpuAudioTransport status reports a lost provider as Unavailable after
 
     // Positive control: the healthy authenticated stand-in is Ready, and the
     // health sampled at prepare() is already visible.
-    auto status = h.transport.status_snapshot();
+    auto status = validated(h.transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
     CHECK(status.recovery_sequence == UINT64_MAX);
     CHECK(status.epoch == 1);
     CHECK(status.delivery_epoch_active);
 
-    h.node.health.terminal_counts[slot(GpuAudioTerminalDisposition::GpuDelivered)] = 5;
+    // Within the 3 blocks the hook reports produced per pump, as the
+    // validator requires GPU deliveries never to exceed produced blocks.
+    h.node.health.terminal_counts[slot(GpuAudioTerminalDisposition::GpuDelivered)] = 3;
     h.callback();
     h.transport.pump();
-    status = h.transport.status_snapshot();
+    status = validated(h.transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Ready);
-    CHECK(status.terminal_counts[slot(GpuAudioTerminalDisposition::GpuDelivered)] == 5);
+    CHECK(status.terminal_counts[slot(GpuAudioTerminalDisposition::GpuDelivered)] == 3);
 
     h.node.inject_recovery(GpuAudioRecoveryReason::ProviderLost, 7);
     h.node.health.terminal_counts[slot(GpuAudioTerminalDisposition::DeviceLost)] = 1;
     // The worker samples health after its service step; until then the
     // snapshot is the previous coherent copy, never a half-applied one.
-    CHECK(h.transport.status_snapshot().provider_state == GpuAudioProviderState::Ready);
+    CHECK(validated(h.transport.status_snapshot()).provider_state == GpuAudioProviderState::Ready);
     h.transport.pump();
 
-    status = h.transport.status_snapshot();
+    status = validated(h.transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
     CHECK(status.recovery_sequence == 7);
     CHECK(status.epoch == 1);
     CHECK_FALSE(status.delivery_epoch_active);
     CHECK(status.terminal_counts[slot(GpuAudioTerminalDisposition::DeviceLost)] == 1);
-    // The provider identity is unchanged; the state says it cannot deliver.
+    // The provider identity is unchanged, but the GPU no longer delivers: the
+    // engine names the CPU fallback that produces the audio.
     CHECK(status.provider == GpuAudioProvider::Dawn);
-    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
 
     h.transport.release();
-    status = h.transport.status_snapshot();
+    status = validated(h.transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
 }
@@ -1795,18 +1812,22 @@ TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unav
         bool device_lost;
         GpuAudioProviderState expected;
     };
-    const std::array<Case, 9> cases{{
+    const std::array<Case, 11> cases{{
         {GpuAudioRecoveryReason::SequenceGap, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::InputSaturated, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::ProviderFailure, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::OfflineFence, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::InvalidCallback, false, GpuAudioProviderState::Degraded},
+        // A slow but alive GPU: the breaker trips and the fallback carries.
+        {GpuAudioRecoveryReason::SustainedDeadlineMisses, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::ProviderLost, false, GpuAudioProviderState::Unavailable},
         {GpuAudioRecoveryReason::ProviderUnresponsive, false, GpuAudioProviderState::Unavailable},
         // A loss observed after an earlier latched cause still makes the
         // provider unavailable; the first cause is preserved.
         {GpuAudioRecoveryReason::ProviderFailure, true, GpuAudioProviderState::Unavailable},
         {GpuAudioRecoveryReason::None, true, GpuAudioProviderState::Unavailable},
+        // Sustained misses describe a live GPU; a later loss is the loss.
+        {GpuAudioRecoveryReason::SustainedDeadlineMisses, true, GpuAudioProviderState::Unavailable},
     }};
     for (const auto& c : cases) {
         HealthHarness h;
@@ -1814,10 +1835,14 @@ TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unav
             h.node.inject_recovery(c.reason, 11);
         h.node.health.device_lost = c.device_lost;
         h.transport.pump();
-        const auto status = h.transport.status_snapshot();
+        const auto status = validated(h.transport.status_snapshot());
         INFO("reason=" << static_cast<int>(c.reason) << " device_lost=" << c.device_lost);
         CHECK(status.provider_state == c.expected);
-        CHECK(status.recovery_reason == c.reason);
+        const bool loss_replaces_misses =
+            c.device_lost && c.reason == GpuAudioRecoveryReason::SustainedDeadlineMisses;
+        CHECK(status.recovery_reason ==
+              (loss_replaces_misses ? GpuAudioRecoveryReason::ProviderLost : c.reason));
+        CHECK(status.selected_engine == GpuAudioEngine::Cpu);
     }
 
     // A fenced node with no latched cause (for example between epochs) is
@@ -1825,7 +1850,8 @@ TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unav
     HealthHarness h;
     h.node.health.fenced = true;
     h.transport.pump();
-    CHECK(h.transport.status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+    CHECK(validated(h.transport.status_snapshot()).provider_state ==
+          GpuAudioProviderState::Degraded);
 }
 
 TEST_CASE("GpuAudioTransport status without a node health hook cannot see a fence",
@@ -1836,7 +1862,7 @@ TEST_CASE("GpuAudioTransport status without a node health hook cannot see a fenc
     HealthHarness h(true, false);
     h.node.inject_recovery(GpuAudioRecoveryReason::ProviderLost, 3);
     h.transport.pump();
-    const auto status = h.transport.status_snapshot();
+    const auto status = validated(h.transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Ready);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
     CHECK(h.node.health_calls == 0);
@@ -1853,7 +1879,7 @@ TEST_CASE("GpuAudioTransport status never reports Ready without a health sample"
     REQUIRE(t.prepare(&node, {8}));
     t.pump();
     CHECK(node.health_calls >= 2);
-    const auto status = t.status_snapshot();
+    const auto status = validated(t.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
 }
@@ -1870,7 +1896,7 @@ TEST_CASE("GpuAudioTransport status reflects the offline fence without a worker 
     h.transport.process_offline(in, out, 32);
     CHECK(h.node.fence_calls == 1);
     CHECK(h.node.health_calls == calls_before + 1);
-    const auto status = h.transport.status_snapshot();
+    const auto status = validated(h.transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::OfflineFence);
 }
@@ -1885,7 +1911,7 @@ TEST_CASE("GpuAudioTransport health sampling and status reads do not allocate",
         pulp::test::RtAllocationProbe probe;
         h.callback();
         h.transport.pump();
-        status = h.transport.status_snapshot();
+        status = validated(h.transport.status_snapshot());
         allocations = probe.allocation_count();
     }
     CHECK(allocations == 0);
@@ -1905,40 +1931,57 @@ TEST_CASE("GpuAudioTransport health sampling and status reads do not allocate",
 TEST_CASE("GpuAudioTransport status reads stay coherent while the worker republishes health",
           "[gpu_audio][transport][status][health][concurrency]") {
     HealthHarness h;
+    std::atomic<bool> reader_started{false};
+    std::atomic<bool> writing{false};
     std::atomic<bool> done{false};
     std::atomic<std::uint64_t> torn{0};
-    std::atomic<std::uint64_t> reads{0};
+    std::atomic<std::uint64_t> sampled_reads_during_writes{0};
+    std::atomic<std::uint64_t> invalid{0};
     std::thread reader([&] {
+        reader_started.store(true, std::memory_order_release);
         const auto deadline = std::chrono::steady_clock::now() + pulp::test::kProgressDeadline;
         while (!done.load(std::memory_order_acquire) &&
                std::chrono::steady_clock::now() < deadline) {
+            const bool during_writes = writing.load(std::memory_order_acquire);
             const auto status = h.transport.status_snapshot();
+            if (!validate_gpu_audio_status(status).accepted())
+                invalid.fetch_add(1, std::memory_order_relaxed);
+            // Unsampled reads keep the default sequence; they prove nothing.
+            if (status.recovery_sequence == UINT64_MAX)
+                continue;
             // Every published sample keeps epoch, sequence and the terminal
             // count equal. Any mix of two samples breaks that invariant.
             const auto lost = status.terminal_counts[slot(GpuAudioTerminalDisposition::DeviceLost)];
-            if (status.recovery_sequence != UINT64_MAX &&
-                (status.epoch != status.recovery_sequence || lost != status.recovery_sequence))
+            if (status.epoch != status.recovery_sequence || lost != status.recovery_sequence)
                 torn.fetch_add(1, std::memory_order_relaxed);
-            reads.fetch_add(1, std::memory_order_relaxed);
+            if (during_writes && writing.load(std::memory_order_acquire))
+                sampled_reads_during_writes.fetch_add(1, std::memory_order_relaxed);
         }
     });
-    for (std::uint64_t i = 1; i <= 20000; ++i) {
+    // Start barrier: the reader is running before the first write.
+    REQUIRE(pulp::test::wait_for_condition(
+        [&] { return reader_started.load(std::memory_order_acquire); }));
+    writing.store(true, std::memory_order_release);
+    for (std::uint64_t i = 1; i <= 20000 || sampled_reads_during_writes.load() == 0; ++i) {
         h.node.health.recovery_reason = (i & 1U) != 0U ? GpuAudioRecoveryReason::ProviderLost
                                                        : GpuAudioRecoveryReason::SequenceGap;
         h.node.health.recovery_sequence = i;
         h.node.health.epoch = i;
         h.node.health.terminal_counts[slot(GpuAudioTerminalDisposition::DeviceLost)] = i;
         h.transport.pump();
+        if (i > 2'000'000)
+            break; // bounded: the CHECK below reports a reader that never overlapped
     }
-    CHECK(pulp::test::wait_for_condition(
-        [&] { return reads.load(std::memory_order_relaxed) >= 1000; }));
+    writing.store(false, std::memory_order_release);
     done.store(true, std::memory_order_release);
     reader.join();
+    // The reads that count were taken while writes were in flight.
+    CHECK(sampled_reads_during_writes.load() > 0);
     CHECK(torn.load() == 0);
-    const auto status = h.transport.status_snapshot();
-    CHECK(status.epoch == 20000);
-    CHECK(status.recovery_sequence == 20000);
-    CHECK(status.recovery_reason == GpuAudioRecoveryReason::SequenceGap);
+    CHECK(invalid.load() == 0);
+    const auto status = validated(h.transport.status_snapshot());
+    CHECK(status.recovery_sequence >= 20000);
+    CHECK(status.epoch == status.recovery_sequence);
 }
 
 namespace {
@@ -1976,14 +2019,17 @@ TEST_CASE("GpuAudioTransport status folds in a staged node's own status",
     REQUIRE(t.prepare(&node, {8}));
 
     // Base default (Uninitialized) carries no health: the staged status holds.
-    auto status = t.status_snapshot();
+    auto status = validated(t.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
 
     node.reported.provider_state = GpuAudioProviderState::Unavailable;
     node.reported.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
     node.reported.recovery_sequence = 4;
-    status = t.status_snapshot();
+    // The worker samples the staged node's own status after each pump.
+    CHECK(validated(t.status_snapshot()).provider_state == GpuAudioProviderState::Degraded);
+    t.pump();
+    status = validated(t.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
     CHECK(status.recovery_sequence == 4);
@@ -1991,7 +2037,9 @@ TEST_CASE("GpuAudioTransport status folds in a staged node's own status",
     // A node's own Ready never upgrades the unauthenticated staged path.
     node.reported = {};
     node.reported.provider_state = GpuAudioProviderState::Ready;
-    CHECK(t.status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+    t.pump();
+    CHECK(validated(t.status_snapshot()).provider_state == GpuAudioProviderState::Degraded);
+    CHECK(validated(t.status_snapshot()).recovery_reason == GpuAudioRecoveryReason::None);
 }
 
 TEST_CASE("Least-healthy lane selection prefers the worse state, then a latched cause",
@@ -2017,4 +2065,182 @@ TEST_CASE("Least-healthy lane selection prefers the worse state, then a latched 
     // Ties keep the first lane.
     GpuAudioStatus degraded_too = degraded;
     CHECK(pick({&degraded, &degraded_too}) == &degraded);
+}
+
+TEST_CASE("Least-healthy lane selection ranks an unprepared lane worst",
+          "[gpu_audio][transport][status][health]") {
+    GpuAudioStatus ready;
+    ready.provider_state = GpuAudioProviderState::Ready;
+    GpuAudioStatus lost;
+    lost.provider_state = GpuAudioProviderState::Unavailable;
+    lost.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+    GpuAudioStatus unprepared;
+    const std::array<const GpuAudioStatus*, 2> ready_then_unprepared{&ready, &unprepared};
+    CHECK(detail::least_healthy_status(ready_then_unprepared.data(), 2) == &unprepared);
+    const std::array<const GpuAudioStatus*, 2> lost_then_unprepared{&lost, &unprepared};
+    CHECK(detail::least_healthy_status(lost_then_unprepared.data(), 2) == &unprepared);
+}
+
+TEST_CASE("GpuAudioTransport status maps a loss after an earlier cause from the node status",
+          "[gpu_audio][transport][status][health]") {
+    // A node that latched SequenceGap and then lost its provider keeps the
+    // first cause but reports Unavailable; the projection must keep both.
+    GpuAudioStatus status;
+    status.provider_state = GpuAudioProviderState::Unavailable;
+    status.recovery_reason = GpuAudioRecoveryReason::SequenceGap;
+    auto health = detail::health_from_status(status);
+    CHECK(health.device_lost);
+    CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Unavailable);
+    CHECK(health.recovery_reason == GpuAudioRecoveryReason::SequenceGap);
+
+    // Positive control: the same cause without a loss stays Degraded.
+    status.provider_state = GpuAudioProviderState::Degraded;
+    health = detail::health_from_status(status);
+    CHECK_FALSE(health.device_lost);
+    CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Degraded);
+
+    // A latched loss reason is loss even when the node reports Degraded.
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderUnresponsive;
+    CHECK(detail::health_from_status(status).device_lost);
+}
+
+namespace {
+
+// Staged node whose status_snapshot() records the calling thread and fails a
+// sentinel once destroyed, so a reader that reaches into it is visible.
+class SentinelNode final : public GpuAudioNode {
+  public:
+    explicit SentinelNode(std::atomic<std::uint32_t>& reader_calls, std::thread::id& reader)
+        : reader_calls_(reader_calls), reader_(reader) {}
+    ~SentinelNode() override {
+        alive_ = 0;
+    }
+    GpuAudioNodeDescriptor descriptor() const override {
+        GpuAudioNodeDescriptor d;
+        d.name = "sentinel";
+        d.input_channels = 1;
+        d.output_channels = 1;
+        d.block_size = 32;
+        d.sample_rate = 48000;
+        d.latency_blocks = 2;
+        return d;
+    }
+    bool prepare() override {
+        ++prepares;
+        return true;
+    }
+    void process_block(const BufferView<const float>&, BufferView<float>& out, uint32_t) override {
+        out.clear();
+    }
+    GpuAudioStatus status_snapshot() const noexcept override {
+        if (std::this_thread::get_id() == reader_ || alive_ != kAlive)
+            reader_calls_.fetch_add(1, std::memory_order_relaxed);
+        GpuAudioStatus status;
+        status.provider_state = GpuAudioProviderState::Unavailable;
+        status.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+        status.recovery_sequence = 0;
+        status.sample_rate = 48000;
+        status.block_size = 32;
+        return status;
+    }
+    std::uint32_t prepares = 0;
+
+  private:
+    static constexpr std::uint32_t kAlive = 0xa11fe;
+    std::atomic<std::uint32_t>& reader_calls_;
+    std::thread::id& reader_;
+    volatile std::uint32_t alive_ = kAlive;
+};
+
+} // namespace
+
+TEST_CASE("GpuAudioTransport status never touches the node while it is re-prepared or destroyed",
+          "[gpu_audio][transport][status][health][concurrency]") {
+    std::atomic<std::uint32_t> node_calls_from_reader{0};
+    std::thread::id reader_id{};
+    GpuAudioTransport t;
+    auto node = std::make_unique<SentinelNode>(node_calls_from_reader, reader_id);
+    REQUIRE(t.prepare(node.get(), {8}));
+
+    std::atomic<bool> reader_started{false};
+    std::atomic<bool> done{false};
+    std::atomic<std::uint64_t> unavailable_reads{0};
+    std::atomic<std::uint64_t> invalid{0};
+    std::thread reader([&] {
+        reader_id = std::this_thread::get_id();
+        reader_started.store(true, std::memory_order_release);
+        const auto deadline = std::chrono::steady_clock::now() + pulp::test::kProgressDeadline;
+        while (!done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            const auto status = t.status_snapshot();
+            (void)t.capability_report();
+            if (!validate_gpu_audio_status(status).accepted())
+                invalid.fetch_add(1, std::memory_order_relaxed);
+            if (status.provider_state == GpuAudioProviderState::Unavailable &&
+                status.recovery_reason == GpuAudioRecoveryReason::ProviderLost)
+                unavailable_reads.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+    REQUIRE(pulp::test::wait_for_condition(
+        [&] { return reader_started.load(std::memory_order_acquire); }));
+    REQUIRE(pulp::test::wait_for_condition(
+        [&] { return unavailable_reads.load(std::memory_order_relaxed) > 0; }));
+
+    // The host's usual sequence re-prepares the node under a prepared
+    // transport, then destroys it before the transport.
+    for (int i = 0; i < 2000; ++i)
+        REQUIRE(node->prepare());
+    node.reset();
+    for (int i = 0; i < 2000; ++i)
+        (void)t.status_snapshot();
+    t.release();
+    done.store(true, std::memory_order_release);
+    reader.join();
+
+    CHECK(node_calls_from_reader.load() == 0);
+    CHECK(unavailable_reads.load() > 0);
+    CHECK(invalid.load() == 0);
+    CHECK(validated(t.status_snapshot()).provider_state == GpuAudioProviderState::Uninitialized);
+}
+
+TEST_CASE("GpuAudioTransport status never calls the node health hook from a reader",
+          "[gpu_audio][transport][status][health][concurrency]") {
+    HealthHarness h;
+    h.node.inject_recovery(GpuAudioRecoveryReason::ProviderLost, 2);
+    h.transport.pump();
+    std::thread reader([&] {
+        h.node.forbidden_health_thread = std::this_thread::get_id();
+        for (int i = 0; i < 1000; ++i)
+            (void)h.transport.status_snapshot();
+    });
+    reader.join();
+    CHECK(h.node.health_calls_from_forbidden_thread.load() == 0);
+    // Positive control: the same detector fires when the hook is called on
+    // the forbidden thread.
+    h.node.forbidden_health_thread = std::this_thread::get_id();
+    h.transport.pump();
+    CHECK(h.node.health_calls_from_forbidden_thread.load() == 1);
+}
+
+TEST_CASE("GpuAudioTransport status names the engine that delivers after a fence",
+          "[gpu_audio][transport][status][health]") {
+    for (const auto policy : {MissPolicy::CpuFallback, MissPolicy::Silence}) {
+        RealtimeHookNode node(1, 32, policy);
+        node.claims_provider = true;
+        node.expose_health = true;
+        REQUIRE(node.prepare());
+        GpuAudioTransport t;
+        REQUIRE(t.prepare(&node, {8}));
+        INFO("policy=" << static_cast<int>(policy));
+        // Positive control: an unfenced authenticated provider delivers GPU blocks.
+        CHECK(validated(t.status_snapshot()).selected_engine == GpuAudioEngine::Gpu);
+
+        node.inject_recovery(GpuAudioRecoveryReason::SequenceGap, 1);
+        t.pump();
+        const auto status = validated(t.status_snapshot());
+        CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+        // Degraded never names the GPU: the fallback (or silence) is delivering.
+        CHECK(status.selected_engine ==
+              (policy == MissPolicy::CpuFallback ? GpuAudioEngine::Cpu : GpuAudioEngine::Unknown));
+    }
 }

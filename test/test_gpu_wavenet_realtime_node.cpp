@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/gpu_audio/gpu_audio_program.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <string_view>
@@ -1145,6 +1146,14 @@ TEST_CASE("WaveNet failed destructor release discloses unresolved physical owner
     }
 }
 
+// Every status a health test observes must satisfy the v3 invariants.
+pulp::gpu_audio::GpuAudioStatus validated(const pulp::gpu_audio::GpuAudioStatus& status) {
+    const auto validation = pulp::gpu_audio::validate_gpu_audio_status(status);
+    INFO("status error " << static_cast<int>(validation.error));
+    CHECK(validation.accepted());
+    return status;
+}
+
 TEST_CASE("WaveNet transport status reports the latched recovery cause after a fence",
           "[gpu_audio][wavenet][status][health]") {
     using Recovery = detail::SharedIoRecoveryReason;
@@ -1154,7 +1163,7 @@ TEST_CASE("WaveNet transport status reports the latched recovery cause after a f
     REQUIRE(transport.prepare(&h.node, {8}));
     // Positive control: the unfenced test node has no authenticated provider,
     // so it is Degraded with no latched cause, never Unavailable.
-    auto status = transport.status_snapshot();
+    auto status = validated(transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
     CHECK_FALSE(h.node.fenced());
@@ -1162,7 +1171,7 @@ TEST_CASE("WaveNet transport status reports the latched recovery cause after a f
     // This tests the node's device-loss seam, not a real lost GPU.
     detail::WaveNetRealtimeTestAccess::request_recovery(h.node, Recovery::ProviderLost, 21);
     transport.pump();
-    status = transport.status_snapshot();
+    status = validated(transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
     CHECK(status.recovery_sequence == 21);
@@ -1177,9 +1186,43 @@ TEST_CASE("WaveNet transport status reports a recoverable cause as Degraded",
     REQUIRE(transport.prepare(&h.node, {8}));
     detail::WaveNetRealtimeTestAccess::request_recovery(h.node, Recovery::InputSaturated, 4);
     transport.pump();
-    const auto status = transport.status_snapshot();
+    const auto status = validated(transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::InputSaturated);
     CHECK(status.recovery_sequence == 4);
+    transport.release();
+}
+
+// Hidden until GpuWaveNetRealtimeNode::status_snapshot() fills the v3 epoch,
+// delivery-epoch and terminal-count fields that the transport republishes;
+// remove the `[.]` tag once it does.
+TEST_CASE("WaveNet transport status carries the node epoch and terminal counts",
+          "[.][pending-wp-b][gpu_audio][wavenet][status][health]") {
+    Harness h;
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&h.node, {8}));
+    constexpr auto delivered = static_cast<std::size_t>(GpuAudioTerminalDisposition::GpuDelivered);
+    // Drive the node the way its own tests do (unclocked callbacks), then let
+    // one transport pump republish the node's status.
+    for (int block = 0; block < 6; ++block) {
+        h.callback(float(block + 1));
+        h.service();
+        h.service();
+    }
+    transport.pump();
+    auto status = validated(transport.status_snapshot());
+    CHECK(status.terminal_counts[delivered] > 0);
+    CHECK(status.epoch != 0);
+    CHECK(status.delivery_epoch_active);
+    const auto epoch = status.epoch;
+
+    detail::WaveNetRealtimeTestAccess::request_recovery(
+        h.node, detail::SharedIoRecoveryReason::SequenceGap, 3);
+    transport.pump();
+    status = validated(transport.status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::SequenceGap);
+    CHECK(status.epoch == epoch);
+    CHECK_FALSE(status.delivery_epoch_active);
     transport.release();
 }
