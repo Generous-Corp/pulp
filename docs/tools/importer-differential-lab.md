@@ -561,6 +561,22 @@ metadata shift, native `html` rect shift, +/-3 px on the farthest node, -10%
 width). This supersedes the earlier decision to keep raw page-space geometry
 canonical; raw remains reported in every receipt.
 
+**Paint-oracle correction (2026-10-21).** Under
+`Emulation.setDeviceMetricsOverride` with a device scale factor of 2, which
+both the production capture and the lab's Chromium reference use, Chromium
+snaps text baselines to whole CSS pixels (`2 * round(L)` device px). Real
+Chrome launched with `--force-device-scale-factor=2` and no override snaps in
+device pixels (`round(2L)`), which is what Pulp's painter does. A 48-run
+sub-pixel baseline sweep shows the emulated line pitch alternating 80/82 device
+px while native Chrome and Pulp step 81 at the quarter phases. The emulated
+capture therefore remains the layout oracle (DOM snapshot, geometry,
+typography), but it is a miscalibrated paint reference for text. Fable ruled
+against snapping native text to whole CSS pixels to match it, because that
+would fit the instrument while moving the product away from real HiDPI
+output. The visual gate is moving to a native-DPR Chromium reference, with the
+emulated paint score still reported; visual scores taken against the emulated
+reference are not comparable with native-reference scores.
+
 ### Stop and continuation rules
 
 Do not expand compiler or retained-plan production work when an instrument
