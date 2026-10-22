@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-importer-p3c-parity-watch",
+  "created_at": "2026-10-22T01:29:47Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Watch-only: the change makes the differential lab compare the native import in Chromium page space (rigid observer placement, snapshot-resolved page canvas, single geometry registration), binds observer work counters and a teardown readback into the render receipt, gates promotion on them, adds an IR-bound retained/rebuild benchmark lane, and places captured text baselines the way Chromium's run rect does. Production native promotion stays disabled; Chromium remains the oracle; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-browser-capture-ir",
+    "ctest --test-dir build -R pulp-test-canvas-fonts",
+    "ctest --test-dir build -R pulp-test-design-import-benchmark-contracts",
+    "ctest --test-dir build -R pulp-test-design-import-codegen-layout-text",
+    "python3 test/test_importer_differential_lab.py",
+    "ctest --test-dir build -R pulp-test-view-lifecycle-contract",
+    "ctest --test-dir build -R pulp-test-widgets-label",
+    "python3 tools/import-validation/test_diff_against_reference.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
