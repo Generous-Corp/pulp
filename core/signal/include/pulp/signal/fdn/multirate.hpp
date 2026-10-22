@@ -393,21 +393,25 @@ public:
         const StereoSectionLanes sections[2] = {StereoSectionLanes::from(sections_[0]),
                                                 StereoSectionLanes::from(sections_[1])};
         int produced = 0;
+        // The filter state as a local for the loop: the stores to the tank
+        // buffers would otherwise force it through memory every sample.
+        StereoBiquadState<2> aa = aa_in_;
         for (int i = 0; i < n; ++i) {
             const lanes::D2 x = lanes::make(static_cast<double>(finite_or_zero(left[i])),
                                             static_cast<double>(finite_or_zero(right[i])));
-            in_ring_.push(downsampling ? aa_in_.process(sections, x) : x);
+            in_ring_.push(downsampling ? aa.process(sections, x) : x);
             const double limit = in_ring_.readable_through();
             while (next_tank_pos_ <= limit && produced < max_tank_samples_) {
                 lanes::D2 v = in_ring_.read(next_tank_pos_);
                 if (!downsampling)
-                    v = aa_in_.process(sections, v);
+                    v = aa.process(sections, v);
                 tl[produced] = static_cast<SampleType>(lanes::lane(v, 0));
                 tr[produced] = static_cast<SampleType>(lanes::lane(v, 1));
                 ++produced;
                 next_tank_pos_ += host_per_tank_;
             }
         }
+        aa_in_ = aa;
         return produced;
     }
 
@@ -427,19 +431,23 @@ public:
         const bool downsampling = tank_rate_ < host_rate_;
         const StereoSectionLanes sections[2] = {StereoSectionLanes::from(sections_[0]),
                                                 StereoSectionLanes::from(sections_[1])};
+        StereoBiquadState<2> aa = aa_out_;
         for (int i = 0; i < tank_n; ++i) {
             const lanes::D2 v = lanes::make(static_cast<double>(finite_or_zero(tl[i])),
                                             static_cast<double>(finite_or_zero(tr[i])));
-            out_ring_.push(downsampling ? v : aa_out_.process(sections, v));
+            out_ring_.push(downsampling ? v : aa.process(sections, v));
         }
+        double position = next_host_pos_;
         for (int i = 0; i < host_n; ++i) {
-            lanes::D2 v = out_ring_.read(next_host_pos_);
+            lanes::D2 v = out_ring_.read(position);
             if (downsampling)
-                v = aa_out_.process(sections, v);
+                v = aa.process(sections, v);
             left[i] = static_cast<SampleType>(lanes::lane(v, 0));
             right[i] = static_cast<SampleType>(lanes::lane(v, 1));
-            next_host_pos_ += tank_per_host_;
+            position += tank_per_host_;
         }
+        next_host_pos_ = position;
+        aa_out_ = aa;
     }
 
   private:

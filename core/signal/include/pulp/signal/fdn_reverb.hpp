@@ -354,14 +354,16 @@ private:
         // gain — the last multiply before the output buffer.
         const auto makeup = fdn::lanes::splat(makeup_gain_);
         const auto output_lp = fdn::StereoSectionLanes::from(output_lp_coefficients_);
+        auto output_state = output_lp_;
         for (int i = 0; i < n; ++i) {
-            const auto y = output_lp_.process(&output_lp,
+            const auto y = output_state.process(&output_lp,
                                               fdn::lanes::make(static_cast<double>(out_left[i]),
                                                                static_cast<double>(out_right[i])));
             const auto scaled = y * makeup;
             out_left[i] = static_cast<SampleType>(fdn::lanes::lane(scaled, 0));
             out_right[i] = static_cast<SampleType>(fdn::lanes::lane(scaled, 1));
         }
+        output_lp_ = output_state;
     }
 
     // One segment of at most a control period, all in the tank domain.
@@ -382,13 +384,15 @@ private:
         duck_gain_ = ducker_.process_block(l, r, n);
         if (input_lp_active_) {
             const auto input_lp = fdn::StereoSectionLanes::from(input_lp_coefficients_);
+            auto input_state = input_lp_;
             for (int k = 0; k < n; ++k) {
-                const auto y = input_lp_.process(
+                const auto y = input_state.process(
                     &input_lp,
                     fdn::lanes::make(static_cast<double>(l[k]), static_cast<double>(r[k])));
                 l[k] = static_cast<SampleType>(fdn::lanes::lane(y, 0));
                 r[k] = static_cast<SampleType>(fdn::lanes::lane(y, 1));
             }
+            input_lp_ = input_state;
         }
 
         // Pre-diffusion with the coefficient's sign alternated between the
