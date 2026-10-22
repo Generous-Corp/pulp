@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 namespace pulp::audio::buffer_ops {
@@ -95,12 +96,21 @@ float find_magnitude(const BufferView<const float>& buffer, std::size_t channel)
 
 namespace {
 
+// Running-peak update. A compare-select rather than std::fmax: fmax (and the
+// FMAXNM instruction it lowers to) returns NaN for a signaling-NaN operand,
+// while a comparison with any NaN is false, so the running peak survives both
+// quiet and signaling NaNs. Peaks start at 0 and so are never NaN themselves.
+inline float fold_peak_scalar(float peak, float v) noexcept {
+    const float a = std::fabs(v);
+    return a > peak ? a : peak;
+}
+
 // Folds the 16 partials (peak[k], sum[k]) pairwise in the documented order and
 // finishes the reading. Shared by both kernels so they agree bit for bit.
 PeakRms finish_peak_rms(float* peak, float* sum, std::size_t n) noexcept {
     for (std::size_t width = kPeakRmsLanes / 2; width > 0; width /= 2) {
         for (std::size_t k = 0; k < width; ++k) {
-            peak[k] = std::fmax(peak[k], peak[k + width]);
+            peak[k] = peak[k + width] > peak[k] ? peak[k + width] : peak[k];
             sum[k] += sum[k + width];
         }
     }
@@ -123,17 +133,19 @@ PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
     float sum[L] = {};
     std::size_t i = 0;
 
-#if defined(__has_builtin)
-#if __has_builtin(__builtin_elementwise_max) && __has_builtin(__builtin_elementwise_abs)
-#define PULP_PEAK_RMS_VECTOR_KERNEL 1
-#endif
-#endif
-#if defined(PULP_PEAK_RMS_VECTOR_KERNEL)
+#if defined(__GNUC__) || defined(__clang__)
     // Same lanes and same per-lane operations as the portable loop below, held
-    // in registers: the array form spills its accumulators to the stack.
-    // elementwise_max is IEEE maxNum, which (like std::fmax) returns the
-    // non-NaN operand.
+    // in registers through the GCC/Clang vector extension: the array form
+    // spills its accumulators to the stack. abs clears the sign bit and the
+    // peak update is a compare-select, exactly as in the scalar form.
     using V4 = float __attribute__((vector_size(16)));
+    using M4 = std::int32_t __attribute__((vector_size(16)));
+    const M4 magnitude_bits = {0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff};
+    const auto fold_peak = [magnitude_bits](V4 peak4, V4 v) {
+        const V4 a = (V4)((M4)v & magnitude_bits);
+        const M4 larger = a > peak4;  // false for any NaN, quiet or signaling
+        return (V4)(((M4)a & larger) | ((M4)peak4 & ~larger));
+    };
     V4 p0{}, p1{}, p2{}, p3{}, s0{}, s1{}, s2{}, s3{};
     for (; i + L <= n; i += L) {
         V4 a, b, c, d;
@@ -141,10 +153,10 @@ PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
         std::memcpy(&b, x + i + 4, sizeof b);
         std::memcpy(&c, x + i + 8, sizeof c);
         std::memcpy(&d, x + i + 12, sizeof d);
-        p0 = __builtin_elementwise_max(p0, __builtin_elementwise_abs(a));
-        p1 = __builtin_elementwise_max(p1, __builtin_elementwise_abs(b));
-        p2 = __builtin_elementwise_max(p2, __builtin_elementwise_abs(c));
-        p3 = __builtin_elementwise_max(p3, __builtin_elementwise_abs(d));
+        p0 = fold_peak(p0, a);
+        p1 = fold_peak(p1, b);
+        p2 = fold_peak(p2, c);
+        p3 = fold_peak(p3, d);
         s0 += a * a;
         s1 += b * b;
         s2 += c * c;
@@ -158,21 +170,18 @@ PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
     std::memcpy(sum + 4, &s1, sizeof s1);
     std::memcpy(sum + 8, &s2, sizeof s2);
     std::memcpy(sum + 12, &s3, sizeof s3);
-#undef PULP_PEAK_RMS_VECTOR_KERNEL
 #else
-    // std::fmax returns the non-NaN operand, so a NaN sample never replaces
-    // the running peak (peak itself starts at 0 and is never NaN).
     for (; i + L <= n; i += L) {
         for (std::size_t k = 0; k < L; ++k) {
             const float v = x[i + k];
-            peak[k] = std::fmax(peak[k], std::fabs(v));
+            peak[k] = fold_peak_scalar(peak[k], v);
             sum[k] += v * v;
         }
     }
 #endif
     for (std::size_t k = 0; i < n; ++i, ++k) {
         const float v = x[i];
-        peak[k] = std::fmax(peak[k], std::fabs(v));
+        peak[k] = fold_peak_scalar(peak[k], v);
         sum[k] += v * v;
     }
     return finish_peak_rms(peak, sum, n);

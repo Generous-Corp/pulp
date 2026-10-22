@@ -74,7 +74,7 @@ template <std::size_t... Counts, typename Fn>
 inline void with_channel_count(std::size_t channels, Fn&& fn) {
     const bool matched =
         ((channels == Counts
-              ? (fn(std::integral_constant<std::size_t, Counts>{}), true)
+              ? (static_cast<void>(fn(std::integral_constant<std::size_t, Counts>{})), true)
               : false) || ...);
     if (!matched) fn(channels);
 }
@@ -140,8 +140,10 @@ struct PeakRms {
 /// is accumulated into partial `i % kPeakRmsLanes`; the partials are then
 /// combined pairwise (lane k with lane k + 8, then k with k + 4, k + 2, and
 /// finally 0 with 1). The order is fixed rather than tied to the host's SIMD
-/// width, so the result is identical on every platform that agrees on FMA
-/// contraction.
+/// width, so builds that make the same FMA-contraction choice for
+/// `sum + x * x` agree bit for bit. Builds that do not contract it (Pulp's
+/// GCC builds use -ffp-contract=off) can differ from contracting builds in
+/// the last bit of `rms`; `peak` is always identical.
 inline constexpr std::size_t kPeakRmsLanes = 16;
 
 /// Measure the peak absolute value and RMS of a block in one pass.
@@ -151,10 +153,10 @@ inline constexpr std::size_t kPeakRmsLanes = 16;
 /// partial sums break the serial add chain a naive `sum += x * x` loop
 /// forms. RMS is `sqrt(sum_of_squares / size)`.
 ///
-/// Non-finite input: a NaN sample is ignored by `peak` (the same result as
-/// folding with `std::max(peak, std::abs(x))`) but propagates to `rms`, so a
-/// NaN in the block still shows up in the reading. An infinite sample makes
-/// both values infinite.
+/// Non-finite input: a NaN sample, quiet or signaling, is ignored by `peak`
+/// (the same result as folding with `std::max(peak, std::abs(x))`) but
+/// propagates to `rms`, so a NaN in the block still shows up in the reading.
+/// An infinite sample makes both values infinite.
 PeakRms measure_peak_rms(std::span<const float> samples) noexcept;
 
 /// Measure one channel of a multi-channel buffer.

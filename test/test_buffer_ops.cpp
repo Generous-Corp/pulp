@@ -315,16 +315,23 @@ TEST_CASE("buffer_ops::measure_peak_rms matches a double-precision reference",
 
 TEST_CASE("buffer_ops::measure_peak_rms keeps NaN out of peak but not out of RMS",
           "[audio][buffer_ops][meter][nan]") {
-    const float nan = std::numeric_limits<float>::quiet_NaN();
-    // NaN in the first lane of the vector body, and NaN in the scalar tail.
-    for (std::size_t at : {0u, 3u, 18u}) {
-        std::vector<float> v(19, 0.5f);
-        v[11] = -0.75f;
-        v[at] = nan;
-        const auto level = ops::measure_peak_rms(std::span<const float>{v});
-        INFO("NaN at " << at);
-        REQUIRE(level.peak == 0.75f);
-        REQUIRE(std::isnan(level.rms));
+    // Quiet and signaling NaNs, in the vector body and in the scalar tail.
+    // A signaling NaN matters separately: IEEE maxNum (std::fmax, FMAXNM)
+    // returns NaN for it, so only a compare-select keeps it out of the peak.
+    for (const float nan : {std::numeric_limits<float>::quiet_NaN(),
+                            std::numeric_limits<float>::signaling_NaN()}) {
+        // 16 is the first tail sample, which lands in partial 0: the partial
+        // every combine step keeps, so a NaN there cannot be hidden by the
+        // combine and has to be rejected by the per-sample fold itself.
+        for (std::size_t at : {0u, 3u, 16u, 18u}) {
+            std::vector<float> v(19, 0.5f);
+            v[11] = -0.75f;
+            v[at] = nan;
+            const auto level = ops::measure_peak_rms(std::span<const float>{v});
+            INFO("NaN at " << at);
+            REQUIRE(level.peak == 0.75f);
+            REQUIRE(std::isnan(level.rms));
+        }
     }
 }
 
