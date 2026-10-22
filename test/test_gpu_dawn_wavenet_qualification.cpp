@@ -4,11 +4,11 @@
 #include "detail/nam_tcn_artifact.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/shared_io_compute_plan.hpp"
-#include "detail/shared_io_program_session.hpp"
 #include "detail/shared_io_wavenet_spec.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
 #include "support/dawn_transfer_call_counter.hpp"
 #include "support/physical_qualification_outcome.hpp"
+#include "support/wavenet_program_session_channel.hpp"
 
 #include <algorithm>
 #include <array>
@@ -256,67 +256,6 @@ std::string_view recovery_name(pulp::gpu_audio::GpuAudioRecoveryReason reason) {
     return "unknown";
 }
 
-// The node's private channel seam over a physical provider session. This
-// mirrors GpuWaveNetSession, which cannot take a provider fault.
-class PhysicalChannel final : public WaveNetRealtimeChannel {
-  public:
-    explicit PhysicalChannel(std::unique_ptr<SharedIoProgramSession> session)
-        : session_(std::move(session)) {}
-    bool submit(std::span<const float> input, std::uint64_t sequence,
-                std::uint64_t deadline_ns) noexcept override {
-        auto lease = session_->acquire_input(sequence, deadline_ns);
-        if (!lease || lease->bytes.size() != input.size_bytes())
-            return false;
-        std::copy(input.begin(), input.end(), reinterpret_cast<float*>(lease->bytes.data()));
-        const SharedIoProgramSession::SubmitToken token{lease->token, deadline_ns};
-        if (session_->submit(token))
-            return true;
-        (void)session_->cancel(token);
-        return false;
-    }
-    void service(std::uint64_t now) noexcept override {
-        session_->service(now);
-    }
-    void service_until(std::uint64_t now, std::uint64_t deadline) noexcept override {
-        session_->service_until(now, deadline);
-    }
-    std::optional<pulp::gpu_audio::GpuWaveNetBlockResult>
-    receive(std::span<float> output) noexcept override {
-        const auto completion = session_->pop_completion();
-        if (!completion)
-            return std::nullopt;
-        pulp::gpu_audio::GpuWaveNetBlockResult result{
-            .sequence = completion->token.slot.stream_sequence,
-            .status = pulp::gpu_audio::GpuWaveNetBlockStatus::ProviderFailed,
-            .late = completion->late};
-        if (completion->status != SharedIoArena::CompletionStatus::RetiredSuccess) {
-            (void)session_->discard_completion(*completion);
-            return result;
-        }
-        auto lease = session_->acquire_output(*completion);
-        if (!lease || lease->bytes.size() < output.size_bytes()) {
-            if (lease)
-                (void)session_->release_output({lease->token});
-            return result;
-        }
-        std::copy_n(reinterpret_cast<const float*>(lease->bytes.data()), output.size(),
-                    output.begin());
-        if (session_->release_output({lease->token}))
-            result.status = pulp::gpu_audio::GpuWaveNetBlockStatus::GpuDelivered;
-        return result;
-    }
-    bool release() noexcept override {
-        return session_->release();
-    }
-    bool lost() const noexcept override {
-        const auto* provider = session_->owned_provider();
-        return provider != nullptr && provider->device_lost();
-    }
-
-  private:
-    std::unique_ptr<SharedIoProgramSession> session_;
-};
-
 struct NodeFaultRun {
     bool ran = false;
     pulp::gpu_audio::GpuAudioRecoveryReason reason = pulp::gpu_audio::GpuAudioRecoveryReason::None;
@@ -381,7 +320,7 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
         .max_inflight = 1};
     ga::GpuWaveNetRealtimeNode node(config);
     std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels;
-    channels.push_back(std::make_unique<PhysicalChannel>(std::move(session)));
+    channels.push_back(std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)));
     if (!WaveNetRealtimeTestAccess::prepare(node, std::move(channels))) {
         run.reason_text = "node_prepare_failed";
         return run;
