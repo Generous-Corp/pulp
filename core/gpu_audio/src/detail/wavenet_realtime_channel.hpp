@@ -1,4 +1,5 @@
 #pragma once
+#include "shared_io_completion_notifier.hpp"
 #include "shared_io_stamped_bridge.hpp"
 #include "shared_io_execution_contract.hpp"
 #include "shared_io_provider_identity.hpp"
@@ -14,6 +15,9 @@ namespace pulp::gpu_audio::detail {
 // Private access to the provider a GpuWaveNetSession prepared.
 struct GpuWaveNetSessionAccess {
     static SharedIoProviderIdentity provider_identity(const GpuWaveNetSession&) noexcept;
+    // Host only, while no service call runs. False when the session's provider
+    // has no completion event source.
+    static bool set_completion_notifier(GpuWaveNetSession&, SharedIoCompletionNotifier) noexcept;
 };
 // Private access to a session's provider-pool path.
 struct GpuWaveNetSessionPoolAccess {
@@ -66,6 +70,13 @@ class WaveNetRealtimeChannel {
     // Non-RT: the identity the channel's provider reports for itself.
     virtual SharedIoProviderIdentity provider_identity() const noexcept {
         return {};
+    }
+    // Host only, while no service call runs: route this channel's provider
+    // completion events to `notifier`, or clear with {} (see
+    // SharedIoArenaProvider::set_completion_notifier). False when the channel
+    // has no completion event source.
+    virtual bool set_completion_notifier(SharedIoCompletionNotifier) noexcept {
+        return false;
     }
 };
 
@@ -142,6 +153,13 @@ class GpuWaveNetSessionChannel final : public WaveNetRealtimeChannel {
             return GpuWaveNetSessionAccess::provider_identity(*session_);
         else
             return {};
+    }
+    // A scripted session has no completion event source.
+    bool set_completion_notifier(SharedIoCompletionNotifier notifier) noexcept override {
+        if constexpr (std::is_same_v<Session, GpuWaveNetSession>)
+            return GpuWaveNetSessionAccess::set_completion_notifier(*session_, notifier);
+        else
+            return false;
     }
 
   private:

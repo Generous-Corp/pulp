@@ -133,6 +133,9 @@ class SharedIoComputePlan {
     bool prepared() const noexcept {
         return arena_.prepared();
     }
+    bool set_completion_notifier(SharedIoCompletionNotifier notifier) noexcept {
+        return arena_.set_completion_notifier(notifier);
+    }
     std::uint64_t preparation_epoch() const noexcept {
         return arena_.preparation_epoch();
     }

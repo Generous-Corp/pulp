@@ -87,6 +87,23 @@ ProviderUnderTest fake_provider(Violation violation = Violation::None,
     return provider;
 }
 
+// A fake with a spontaneous completion source: it installs a notifier and,
+// unless `fires` is false, wakes it when each terminal is published.
+ProviderUnderTest notifying_fake_provider(bool supported, bool fires, bool expected) {
+    auto provider = fake_provider();
+    provider.name = "fake-notifying";
+    provider.expects_completion_notifier = expected;
+    provider.make = [supported, fires](Fault fault) {
+        auto fake = std::make_unique<FakeSharedIoProvider>();
+        configure(*fake, conformance::ProgramSpec{});
+        fake->fault = fake_fault(fault);
+        fake->notifier_supported = supported;
+        fake->notify_on_terminal = fires;
+        return conformance::CreateOutcome{std::move(fake), {}};
+    };
+    return provider;
+}
+
 // One non-conformant provider per contract rule, and the scenarios that must
 // fail against it with the stated reason.
 struct Mutant {
@@ -204,6 +221,14 @@ TEST_CASE("fake shared IO provider passes the provider conformance kit",
     CHECK(pair.max_abs_error == 0.0);
     receipt.capacity += 1;
     receipt.add(pair);
+
+    // Optional row: a provider with an event source proves the notifier fires.
+    const auto notified = conformance::run_completion_notifier(
+        notifying_fake_provider(true, true, true), spec);
+    INFO(notified.reason);
+    CHECK(notified.verdict == Verdict::Passed);
+    receipt.capacity += 1;
+    receipt.add(notified);
 
     CHECK(receipt.kind() == ProviderKind::Fake);
     CHECK(receipt.identity_admissible());
@@ -462,4 +487,30 @@ TEST_CASE("conformance fake provider prepared path allocates nothing",
     CHECK(terminals.count == 8);
     CHECK(allocations == 0);
     REQUIRE(arena.release());
+}
+
+TEST_CASE("completion notifier scenario proves a provider's wakes",
+          "[gpu_audio][shared_io][conformance][wake]") {
+    const conformance::ProgramSpec spec;
+    // Positive control: installed, fires per submission, silent after clear.
+    auto result =
+        conformance::run_completion_notifier(notifying_fake_provider(true, true, true), spec);
+    INFO(result.reason);
+    CHECK(result.verdict == Verdict::Passed);
+    CHECK(result.reason == "notifier_fires_per_submission_and_never_after_clear");
+
+    // A provider without a source conforms by refusing, unless it claims one.
+    result = conformance::run_completion_notifier(fake_provider(), spec);
+    CHECK(result.verdict == Verdict::Passed);
+    CHECK(result.reason == "no_spontaneous_completion_source");
+    result =
+        conformance::run_completion_notifier(notifying_fake_provider(false, true, true), spec);
+    CHECK(result.verdict == Verdict::Failed);
+    CHECK(result.reason == "notifier_not_installed");
+
+    // A provider that installs the notifier but never fires it fails.
+    result =
+        conformance::run_completion_notifier(notifying_fake_provider(true, false, true), spec);
+    CHECK(result.verdict == Verdict::Failed);
+    CHECK(result.reason == "notify_missing_for_submission");
 }

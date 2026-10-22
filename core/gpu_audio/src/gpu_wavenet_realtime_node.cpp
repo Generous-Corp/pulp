@@ -979,12 +979,32 @@ bool GpuWaveNetRealtimeNode::bind_realtime_path(detail::RealtimeGpuNodeBinding& 
                                 out.fenced = out.fenced || node->fenced();
                                 return true;
                             },
-                        .reprepare = &GpuWaveNetRealtimeNode::reprepare};
+                        .reprepare = &GpuWaveNetRealtimeNode::reprepare,
+                        .set_completion_notifier = &GpuWaveNetRealtimeNode::set_notifier};
     }
     return true;
 }
 bool GpuWaveNetRealtimeNode::reprepare(void* self, std::uint64_t budget_ns) noexcept {
     return static_cast<GpuWaveNetRealtimeNode*>(self)->impl_->reacquire(budget_ns);
+}
+bool GpuWaveNetRealtimeNode::set_notifier(void* self,
+                                          detail::SharedIoCompletionNotifier notifier) noexcept {
+    auto& s = *static_cast<GpuWaveNetRealtimeNode*>(self)->impl_;
+    if (notifier.notify == nullptr) {
+        for (auto& channel : s.channels)
+            (void)channel->set_completion_notifier({});
+        return true;
+    }
+    // All or nothing: one channel without an event source would otherwise
+    // lose its completions to the transport's longer event-driven fallback.
+    for (std::size_t i = 0; i < s.channels.size(); ++i) {
+        if (!s.channels[i]->set_completion_notifier(notifier)) {
+            for (std::size_t j = 0; j < i; ++j)
+                (void)s.channels[j]->set_completion_notifier({});
+            return false;
+        }
+    }
+    return !s.channels.empty();
 }
 std::uint64_t GpuWaveNetRealtimeNode::next_sequence(void* self) noexcept {
     return static_cast<GpuWaveNetRealtimeNode*>(self)->impl_->bridge->next_sequence();

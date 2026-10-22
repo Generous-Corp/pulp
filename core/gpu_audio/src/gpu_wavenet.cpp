@@ -183,6 +183,18 @@ std::size_t GpuWaveNetSession::service(std::uint64_t now_ns) noexcept {
     return 0;
 }
 
+bool detail::GpuWaveNetSessionAccess::set_completion_notifier(
+    GpuWaveNetSession& session, SharedIoCompletionNotifier notifier) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    return session.impl_ && session.impl_->session &&
+           session.impl_->session->set_completion_notifier(notifier);
+#else
+    (void)session;
+    (void)notifier;
+    return false;
+#endif
+}
+
 std::size_t GpuWaveNetSession::service_until(std::uint64_t deadline_ns) noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (prepared()) {

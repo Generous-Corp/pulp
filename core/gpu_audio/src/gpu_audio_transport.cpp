@@ -5,9 +5,15 @@
 #include "detail/worker_pipeline_hosting.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/worker_wake.hpp"
 
 #include <algorithm>
 #include <chrono>
+
+#if defined(__APPLE__)
+#include <pthread.h>
+#include <pthread/qos.h>
+#endif
 
 namespace pulp::gpu_audio {
 namespace {
@@ -72,8 +78,19 @@ struct GpuAudioTransportDiagnostics {
 } // namespace detail
 
 GpuAudioTransport::GpuAudioTransport()
-    : diagnostics_(std::make_unique<detail::GpuAudioTransportDiagnostics>()) {
+    : wake_(std::make_unique<detail::WorkerWake>()),
+      diagnostics_(std::make_unique<detail::GpuAudioTransportDiagnostics>()) {
     (void)diagnostics_->configuration.publish({});
+}
+
+namespace {
+// Wake posts one worker iteration consumes at most before it pumps again.
+constexpr int kMaxCoalescedWakes = 1024;
+} // namespace
+
+void GpuAudioTransport::notify_worker(void* self) noexcept {
+    // Provider callback thread: a counting-semaphore post only.
+    static_cast<GpuAudioTransport*>(self)->wake_->post();
 }
 
 GpuAudioTransport::~GpuAudioTransport() {
@@ -247,6 +264,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         realtime_gpu_health_ = realtime_path.health;
         realtime_gpu_offline_render_ = realtime_path.offline_render;
         realtime_gpu_reprepare_ = realtime_path.reprepare;
+        realtime_gpu_set_notifier_ = realtime_path.set_completion_notifier;
         callback_sequence_ = realtime_path.next_sequence(realtime_path.context);
     }
     sample_staged_health_ = !realtime_path.active();
@@ -319,20 +337,30 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     reacquire_successes_.store(0, std::memory_order_relaxed);
     last_reacquire_to_gpu_ns_.store(0, std::memory_order_relaxed);
     resume_pending_from_ns_.store(0, std::memory_order_relaxed);
+    worker_interactive_qos_.store(false, std::memory_order_relaxed);
     prepared_ = true;
     // Quiescent host reads: neither the callback nor the worker has started.
     refresh_node_health();
     publish_prepared_configuration();
 
     if (config.run_worker_thread) {
-        // Poll a few times per block so the worker reliably keeps the output
-        // ring filled within the latency budget; clamp to a sane range.
+        // The poll interval is a fallback only. Without wake-on-write it is
+        // the worker's sole clock, so it runs a few times per block. With
+        // wake-on-write every callback posts the semaphore, so the interval
+        // only bounds a missed or coalesced post and a completion that has no
+        // event source: a quarter block, capped, with no lower floor.
         const double block_us = (desc.sample_rate > 0)
                                     ? (1.0e6 * static_cast<double>(block_size_) / desc.sample_rate)
                                     : 800.0;
-        long iv = static_cast<long>(block_us / 4.0);
-        if (iv < 50)
-            iv = 50;
+        // A provider with a completion event source wakes the worker itself,
+        // so the fallback then only covers a missed callback post: one block.
+        completion_notifier_installed_ =
+            wake_on_write_ && realtime_gpu_set_notifier_ != nullptr &&
+            realtime_gpu_set_notifier_(realtime_gpu_context_,
+                                       {&GpuAudioTransport::notify_worker, this});
+        long iv = static_cast<long>(completion_notifier_installed_ ? block_us : block_us / 4.0);
+        if (iv < 1)
+            iv = 1;
         if (iv > 2000)
             iv = 2000;
         poll_interval_ = std::chrono::microseconds(iv);
@@ -361,10 +389,25 @@ void GpuAudioTransport::worker_loop() noexcept {
             worker_workgroup_join_failures_.fetch_add(1, std::memory_order_relaxed);
         }
     }
+    // Outside a host workgroup, run the worker at the interactive QoS class so
+    // a saturated host does not park it behind default-priority work.
+    if (!joined_workgroup)
+        worker_interactive_qos_.store(
+            pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) == 0,
+            std::memory_order_release);
 #else
     (void)joined_workgroup;
 #endif
     while (worker_running_.load(std::memory_order_acquire)) {
+        // Consume the posts this pump will cover. A post that lands during the
+        // pump stays pending and wakes the next wait at once, so coalesced
+        // posts never make the worker spin and a late one is never lost. The
+        // drain is bounded: a provider posting faster than the drain cannot
+        // keep the worker from seeing a stop request.
+        if (wake_on_write_) {
+            for (int drained = 0; drained < kMaxCoalescedWakes && wake_->try_consume(); ++drained) {
+            }
+        }
         // Yield while an offline (synchronous) render owns the node — process_offline
         // pumps inline. The mutex serializes node access for the brief window where
         // the flag flips after this check.
@@ -376,7 +419,7 @@ void GpuAudioTransport::worker_loop() noexcept {
         // missed/coalesced post (or offline mode, which posts nothing) still
         // makes progress. Falls back to a plain sleep when wake-on-write is off.
         if (wake_on_write_) {
-            (void)wake_sem_.try_acquire_for(poll_interval_);
+            (void)wake_->wait_for(poll_interval_);
         } else {
             std::this_thread::sleep_for(poll_interval_);
         }
@@ -385,6 +428,7 @@ void GpuAudioTransport::worker_loop() noexcept {
     pump(); // final drain of any input left at stop
     if (joined_workgroup)
         worker_workgroup_joined_.store(false, std::memory_order_release);
+    worker_interactive_qos_.store(false, std::memory_order_release);
 }
 
 void GpuAudioTransport::reset_staged_transport_state() noexcept {
@@ -411,6 +455,12 @@ void GpuAudioTransport::release() noexcept {
     worker_running_.store(false, std::memory_order_release);
     if (worker_.joinable())
         worker_.join();
+    // No service step runs now. After the clearing call returns the provider
+    // never invokes notify_worker() for this transport again.
+    if (completion_notifier_installed_ && realtime_gpu_set_notifier_ != nullptr)
+        (void)realtime_gpu_set_notifier_(realtime_gpu_context_, {});
+    completion_notifier_installed_ = false;
+    realtime_gpu_set_notifier_ = nullptr;
 
     input_ring_.release();
     output_ring_.release();
@@ -503,7 +553,7 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
         // of at the next poll tick. RT-safe: a counting-semaphore post neither
         // allocates nor blocks. No-op when wake-on-write is off.
         if (wake_on_write_)
-            wake_sem_.release();
+            wake_->post();
     } else {
         input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -635,7 +685,7 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
     if (count_delivery)
         record_delivery(static_cast<std::uint8_t>(delivered), false);
     if (wake_on_write_)
-        wake_sem_.release();
+        wake_->post();
 }
 
 void GpuAudioTransport::process_offline(const audio::BufferView<const float>& input,
@@ -860,6 +910,7 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     s.worker_workgroup_joined = worker_workgroup_joined_.load(std::memory_order_acquire);
     s.worker_workgroup_join_failures =
         worker_workgroup_join_failures_.load(std::memory_order_relaxed);
+    s.worker_interactive_qos = worker_interactive_qos_.load(std::memory_order_acquire);
     return s;
 }
 

@@ -150,6 +150,16 @@ bool expected_dawn_revision_available() noexcept {
     return PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER && !value.empty() &&
            value != "unknown";
 }
+
+// Bounded completion wait for each shared-path service step: a quarter block,
+// at most 1 ms. The worker can then pick up a completion already in flight
+// within the same pump instead of on its next wake.
+std::uint64_t completion_service_wait_ns(std::uint32_t block, std::uint32_t sample_rate) noexcept {
+    if (block == 0 || sample_rate == 0)
+        return 0;
+    const auto quarter_block_ns = std::uint64_t(block) * 250'000'000ull / sample_rate;
+    return std::min<std::uint64_t>(quarter_block_ns, 1'000'000ull);
+}
 } // namespace
 #endif
 
@@ -592,7 +602,9 @@ bool GpuConvolver::prepare() {
                               .calibration_source_revision =
                                   state->trial_config
                                       ? state->trial_config->calibration_source_revision
-                                      : std::string{}},
+                                      : std::string{},
+                              .completion_service_wait_ns =
+                                  completion_service_wait_ns(block_, sample_rate_)},
                          .normalized_ir_spectrum = state->normalized_ir_spectrum});
                     // A failed preparation may still own physically live
                     // storage. Retain that session even when it cannot run.
@@ -813,7 +825,8 @@ bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) n
                         .fence = &GpuConvolver::fence_realtime_shared_io,
                         .delivered = &GpuConvolver::complete_realtime_shared_io,
                         .next_sequence = &GpuConvolver::next_realtime_shared_io_sequence,
-                        .health = &GpuConvolver::realtime_shared_io_health};
+                        .health = &GpuConvolver::realtime_shared_io_health,
+                        .set_completion_notifier = &GpuConvolver::set_realtime_shared_io_notifier};
 #endif
     return true;
 }
@@ -843,6 +856,19 @@ GpuAudioRecoveryReason public_recovery_reason(detail::SharedIoRecoveryReason rea
 }
 } // namespace
 #endif
+
+bool GpuConvolver::set_realtime_shared_io_notifier(
+    void* self, detail::SharedIoCompletionNotifier notifier) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    auto* convolver = static_cast<GpuConvolver*>(self);
+    return convolver != nullptr && convolver->shared_io_ && convolver->shared_io_->session &&
+           convolver->shared_io_->session->set_completion_notifier(notifier);
+#else
+    (void)self;
+    (void)notifier;
+    return false;
+#endif
+}
 
 bool GpuConvolver::realtime_shared_io_health(const void* self,
                                              detail::RealtimeGpuHealth& out) noexcept {

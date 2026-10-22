@@ -61,6 +61,10 @@ struct Control {
     bool tail_only = false, in_tail = false;
     int slow_every = 0, completion_lag = 0;
     int first_pass_completions = 0, tail_pass_completions = 0;
+    // Completion events: whether the channel has a source, and what is set.
+    bool notifier_supported = false;
+    detail::SharedIoCompletionNotifier notifier{};
+    int notifier_installs = 0, notifier_clears = 0;
     int submits = 0, services = 0, wait_services = 0, receives = 0, releases = 0;
     // Provider pool: a recyclable channel parks under `pool_key`. The last
     // bounded release budget is recorded.
@@ -149,6 +153,13 @@ class Channel final : public detail::WaveNetRealtimeChannel {
     }
     bool lost() const noexcept override {
         return control_.lost;
+    }
+    bool set_completion_notifier(detail::SharedIoCompletionNotifier notifier) noexcept override {
+        if (!control_.notifier_supported)
+            return false;
+        (notifier.notify != nullptr ? control_.notifier_installs : control_.notifier_clears) += 1;
+        control_.notifier = notifier;
+        return true;
     }
     bool release() noexcept override {
         ++control_.releases;
@@ -2973,4 +2984,44 @@ TEST_CASE("Transport re-acquire is reachable only while the transport is prepare
     transport.pump();
     CHECK(factory.created == 1);
     transport.release();
+}
+TEST_CASE("WaveNet watchdog ignores worker wakes that complete nothing",
+          "[gpu_audio][wavenet][realtime][hang][wake]") {
+    // An event-driven worker may wake many times per callback (completion
+    // notifications, coalesced posts). A wake that consumes no completion is
+    // not progress: the budget still trips after exactly its callback blocks.
+    for (const std::uint32_t pumps : {1u, 16u, 64u}) {
+        CAPTURE(pumps);
+        const auto run = run_hang({.capacity = 16, .watchdog_blocks = 5}, 1, pumps);
+        CHECK(run.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
+        CHECK(run.blocks_after_hang == 5);
+    }
+}
+
+TEST_CASE("WaveNet transport routes completion events from every channel or none",
+          "[gpu_audio][wavenet][wake]") {
+    struct Case {
+        bool first_supported, second_supported;
+        int expected_installs;
+    };
+    for (const auto c : {Case{true, true, 1}, Case{true, false, 0}, Case{false, true, 0}}) {
+        CAPTURE(c.first_supported, c.second_supported);
+        Harness h(Tweak{.channels = 2});
+        h.controls[0].notifier_supported = c.first_supported;
+        h.controls[1].notifier_supported = c.second_supported;
+        GpuAudioTransport transport;
+        GpuAudioTransport::Config config;
+        config.ring_blocks = 8;
+        config.run_worker_thread = true;
+        REQUIRE(transport.prepare(&h.node, config));
+        for (const auto& control : h.controls) {
+            // All or nothing: a partial install is rolled back.
+            CHECK((control.notifier.notify != nullptr) == (c.expected_installs == 1));
+            if (c.expected_installs == 1)
+                CHECK(control.notifier_installs == 1);
+        }
+        transport.release();
+        for (const auto& control : h.controls)
+            CHECK(control.notifier.notify == nullptr);
+    }
 }

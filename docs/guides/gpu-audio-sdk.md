@@ -207,6 +207,18 @@ fills the block — `Silence` by default (a bounded, obvious dropout), or
 `latency_blocks * block_size`, and a host that is not told leaves your track
 shifted late against every other track in the session.
 
+An owned worker (`Config::run_worker_thread`) is event-driven by default.
+`Config::wake_on_write` is on, so each callback posts a semaphore after it
+writes its input. A provider that can signal completion events wakes the worker
+too. Today that is the shared convolution session, once its provider supports
+them. The poll interval is only a fallback: a quarter block without a
+completion event source, one block with one, never more than 2 ms, and with no
+lower floor. A wake that completes nothing is never counted as progress, so
+`produced_blocks` and WaveNet's unresponsive-provider watchdog are unchanged.
+Set `wake_on_write = false` to keep the plain polling worker. Outside a host
+workgroup, the worker runs at `QOS_CLASS_USER_INTERACTIVE` on macOS, which
+`Stats::worker_interactive_qos` reports.
+
 The transport also has an opt-in macOS scheduling experiment for an owned
 worker. Set `Config::join_audio_workgroup` and pass a borrowed
 `Config::audio_workgroup` handle when the host has a valid `os_workgroup_t`.

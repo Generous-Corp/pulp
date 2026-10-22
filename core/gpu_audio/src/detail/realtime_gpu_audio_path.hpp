@@ -5,6 +5,7 @@
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 #include <pulp/gpu_audio/gpu_audio_status.hpp>
 
+#include "shared_io_completion_notifier.hpp"
 #include "shared_io_provider_identity.hpp"
 
 #include <array>
@@ -72,6 +73,10 @@ using RealtimeGpuReprepareFn = bool (*)(void*, std::uint64_t budget_ns) noexcept
 // thread at the first realtime callback after the run, before that callback
 // touches the node, so it must not allocate, lock or wait.
 using RealtimeGpuOfflineRenderFn = void (*)(void*, bool offline) noexcept;
+// Host only, while no service step runs: route the node's provider completion
+// events to `notifier`, or clear with {}. False when the provider has no event
+// source; the transport then relies on its timed poll.
+using RealtimeGpuNotifierFn = bool (*)(void*, SharedIoCompletionNotifier) noexcept;
 
 struct RealtimeGpuNodePath {
     void* context = nullptr;
@@ -88,6 +93,8 @@ struct RealtimeGpuNodePath {
     RealtimeGpuHealthFn health = nullptr;
     RealtimeGpuReprepareFn reprepare = nullptr;
     RealtimeGpuOfflineRenderFn offline_render = nullptr;
+    // Optional, not part of active(): provider completion events.
+    RealtimeGpuNotifierFn set_completion_notifier = nullptr;
 
     bool active() const noexcept {
         return context != nullptr && process != nullptr && service != nullptr && fence != nullptr &&

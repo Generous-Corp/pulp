@@ -1,5 +1,6 @@
 #pragma once
 
+#include "shared_io_completion_notifier.hpp"
 #include "shared_io_slot_ledger.hpp"
 #include "shared_io_provider_identity.hpp"
 
@@ -221,6 +222,19 @@ class SharedIoArenaProvider {
         return false;
     }
 
+    // Host only, while no service call runs: install a completion notifier, or
+    // clear it with {}. Never call it from a backend callback or from inside
+    // a notify. The provider invokes the notifier when backend work finishes
+    // (see SharedIoCompletionNotifier for the meaning). Once a clearing call
+    // returns, no invocation of the previous notifier is still running or can
+    // start; providers implement this with an in-flight counter that the clear
+    // waits out, and keep that state alive for late or cancelled callbacks.
+    // False means the provider has no spontaneous completion source; the
+    // caller keeps its timed poll.
+    virtual bool set_completion_notifier(SharedIoCompletionNotifier) noexcept {
+        return false;
+    }
+
     // Host/quiescent provider-owned identity and semantic capabilities.  The
     // default is intentionally unknown so fake and future providers do not
     // accidentally inherit Dawn/Metal claims.
@@ -362,6 +376,10 @@ class SharedIoArena {
 
     bool prepared() const noexcept {
         return prepared_;
+    }
+    // Host only, while no service call runs (see the provider hook).
+    bool set_completion_notifier(SharedIoCompletionNotifier notifier) noexcept {
+        return provider_ != nullptr && provider_->set_completion_notifier(notifier);
     }
     bool retiring() const noexcept {
         return ledger_.retiring();

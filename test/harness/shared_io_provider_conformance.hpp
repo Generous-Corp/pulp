@@ -19,6 +19,7 @@
 #include "detail/shared_io_provider_identity.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -146,6 +147,9 @@ struct ProviderUnderTest {
     // provider (its identity derives kind real): without it every loss
     // scenario fails. A fake may omit it.
     std::function<LossRecord(const SharedIoArenaProvider&)> loss_record;
+    // The provider has a spontaneous completion source, so the completion
+    // notifier scenario requires it to install and fire.
+    bool expects_completion_notifier = false;
     std::chrono::milliseconds completion_timeout{15000};
     // How long withheld or lost work is serviced before the drain boundary.
     std::chrono::milliseconds quiet_window{30};
@@ -180,6 +184,8 @@ enum class Scenario : std::uint8_t {
     DrainAfterLoss,
     StaleGenerationReplay,
     DifferentialCpuReference,
+    // Optional, not in kProviderScenarios: run through run_completion_notifier().
+    CompletionNotifier,
 };
 
 inline constexpr std::array<Scenario, 12> kProviderScenarios = {
@@ -225,6 +231,8 @@ inline std::string_view scenario_name(Scenario scenario) noexcept {
         return "stale_generation_replay";
     case Scenario::DifferentialCpuReference:
         return "differential_cpu_reference";
+    case Scenario::CompletionNotifier:
+        return "completion_notifier";
     }
     return "unknown";
 }
@@ -306,6 +314,10 @@ class RecordingProvider final : public SharedIoArenaProvider {
     }
     bool can_resume_after_drain() const noexcept override {
         return inner_.can_resume_after_drain();
+    }
+    bool set_completion_notifier(
+        pulp::gpu_audio::detail::SharedIoCompletionNotifier notifier) noexcept override {
+        return inner_.set_completion_notifier(notifier);
     }
     SharedIoProviderIdentity provider_identity() const noexcept override {
         return inner_.provider_identity();
@@ -1144,6 +1156,73 @@ inline std::string Receipt::to_json() const {
     return out.str();
 }
 
+namespace detail {
+
+// A provider that installs a completion notifier wakes it for every accepted
+// submission, by the time that submission's output is serviceable, and never
+// after the notifier is cleared. A provider without a spontaneous source
+// refuses the install, which conforms unless the provider claims one.
+inline ScenarioResult completion_notifier(const ProviderUnderTest& provider,
+                                          const ProgramSpec& spec) {
+    Run run(provider, spec, Scenario::CompletionNotifier);
+    if (!run.create(Fault::None) || !run.prepare(spec.slots))
+        return run.result;
+    struct Counter {
+        std::atomic<std::uint64_t> wakes{0};
+    } counter;
+    const pulp::gpu_audio::detail::SharedIoCompletionNotifier notifier{
+        [](void* context) noexcept {
+            static_cast<Counter*>(context)->wakes.fetch_add(1, std::memory_order_relaxed);
+        },
+        &counter};
+    if (!run.arena.set_completion_notifier(notifier)) {
+        if (provider.expects_completion_notifier)
+            return run.failed("notifier_not_installed");
+        run.finish_counts();
+        if (!run.release_and_verify_quiescence())
+            return run.result;
+        run.pass("no_spontaneous_completion_source");
+        return run.result;
+    }
+    const auto blocks = std::max<std::uint32_t>(spec.slots * 2, 4);
+    for (std::uint32_t block = 0; block < blocks; ++block) {
+        bool accepted = false;
+        const auto token = run.submit_block(block + 1, block, accepted);
+        if (!token || !accepted)
+            return run.failed("submit_failed");
+        if (!run.await_output(*token, block))
+            return run.failed("completion_missing");
+        // The wake may trail the inbox by the backend's callback hop; bound it.
+        const auto deadline = Clock::now() + provider.completion_timeout;
+        while (counter.wakes.load(std::memory_order_relaxed) < block + 1 &&
+               Clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        if (counter.wakes.load(std::memory_order_relaxed) < block + 1)
+            return run.failed("notify_missing_for_submission");
+    }
+    if (!run.arena.set_completion_notifier({}))
+        return run.failed("notifier_clear_refused");
+    const auto wakes_at_clear = counter.wakes.load(std::memory_order_relaxed);
+    bool accepted = false;
+    const auto token = run.submit_block(blocks + 1, blocks, accepted);
+    if (!token || !accepted)
+        return run.failed("submit_failed_after_clear");
+    if (!run.await_output(*token, blocks))
+        return run.failed("completion_missing_after_clear");
+    (void)run.observe_quiet(*token);
+    if (counter.wakes.load(std::memory_order_relaxed) != wakes_at_clear)
+        return run.failed("notify_after_clear");
+    if (run.terminals.failures() != 0)
+        return run.failed("unexpected_failed_terminal");
+    run.finish_counts();
+    if (!run.release_and_verify_quiescence())
+        return run.result;
+    run.pass("notifier_fires_per_submission_and_never_after_clear");
+    return run.result;
+}
+
+} // namespace detail
+
 // ---------------------------------------------------------------------------
 // Entry points
 
@@ -1172,6 +1251,8 @@ inline ScenarioResult run_scenario(Scenario scenario, const ProviderUnderTest& p
         return detail::stale_generation_replay(provider, spec);
     case Scenario::DifferentialCpuReference:
         return detail::differential_cpu(provider, spec);
+    case Scenario::CompletionNotifier:
+        return detail::completion_notifier(provider, spec);
     }
     return {};
 }
@@ -1280,6 +1361,13 @@ inline ScenarioResult run_differential_pair(const ProviderUnderTest& first,
         result.reason = first.name + "_and_" + second.name + "_null_against_cpu_and_each_other";
     }
     return result;
+}
+
+// The optional completion-notifier scenario, for providers that may have a
+// spontaneous completion source. Add its row to a receipt explicitly.
+inline ScenarioResult run_completion_notifier(const ProviderUnderTest& provider,
+                                              const ProgramSpec& spec) {
+    return detail::completion_notifier(provider, spec);
 }
 
 // Runs every provider scenario and binds the results, with the provider's own

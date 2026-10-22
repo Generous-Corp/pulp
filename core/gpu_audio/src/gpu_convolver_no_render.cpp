@@ -171,6 +171,11 @@ bool GpuConvolver::realtime_shared_io_health(const void*, detail::RealtimeGpuHea
     return false;
 }
 
+bool GpuConvolver::set_realtime_shared_io_notifier(void*,
+                                                   detail::SharedIoCompletionNotifier) noexcept {
+    return false;
+}
+
 render::GpuCompute*
 detail::GpuConvolverTestAccess::staged_compute(GpuConvolver& convolver) noexcept {
     return convolver.gpu_.get(); // always null: no staged device in this build

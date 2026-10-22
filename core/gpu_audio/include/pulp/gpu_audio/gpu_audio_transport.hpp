@@ -21,6 +21,8 @@ namespace pulp::gpu_audio {
 namespace detail {
 struct RealtimeGpuHealth;
 struct GpuAudioTransportDiagnostics;
+struct SharedIoCompletionNotifier;
+class WorkerWake;
 } // namespace detail
 
 /// Fixed-latency real-time transport between the audio thread and a non-RT
@@ -47,14 +49,13 @@ class GpuAudioTransport {
         // and lock-free. When false, the caller drives pump() (deterministic
         // tests / custom worker integration).
         bool run_worker_thread = false;
-        // Opt-in: the RT process() posts a semaphore after each input write and
-        // the worker waits on it (with the poll interval as a fallback timeout)
-        // instead of always sleeping the full quantum. Cuts the worker's
-        // reaction latency — and thus the miss probability at low latency_blocks
-        // — without a busy loop. Signaling a semaphore is RT-safe (no alloc, no
-        // block); default OFF keeps the pure-polling RT path byte-identical.
-        // Only meaningful when run_worker_thread is true.
-        bool wake_on_write = false;
+        // The RT process() posts a semaphore after each input write, and a
+        // provider with an event source posts it when a completion is ready.
+        // The worker waits on it, with the poll interval as a fallback timeout
+        // only, instead of sleeping a full quantum. Signaling a semaphore is
+        // RT-safe (no alloc, no block). Default ON; false keeps the
+        // pure-polling worker. Only meaningful when run_worker_thread is true.
+        bool wake_on_write = true;
         // Optional macOS Audio Workgroup for the owned submission worker. The
         // handle is borrowed by the transport and must remain valid until
         // release(). This is an experiment switch: Dawn encode/submit still
@@ -102,6 +103,9 @@ class GpuAudioTransport {
         double avg_block_us = 0.0;
         bool worker_workgroup_joined = false;
         std::uint64_t worker_workgroup_join_failures = 0;
+        // Appended: the owned worker runs at QOS_CLASS_USER_INTERACTIVE
+        // (macOS; false when it joined a host workgroup instead, or off Apple).
+        bool worker_interactive_qos = false;
     };
 
     /// Selected output for prepared process() calls, not worker completions or
@@ -290,16 +294,23 @@ class GpuAudioTransport {
     bool join_audio_workgroup_ = false;
     std::atomic<bool> worker_workgroup_joined_{false};
     std::atomic<std::uint64_t> worker_workgroup_join_failures_{0};
+    std::atomic<bool> worker_interactive_qos_{false};
 
-    // Opt-in wake-on-write (Config::wake_on_write). The RT process() posts
-    // `wake_sem_` after each input write; the worker waits on it (bounded by
-    // poll_interval_) instead of always sleeping the full quantum, cutting its
-    // reaction latency without a busy loop. release() on a counting semaphore is
-    // non-blocking and allocation-free, so posting it stays RT-safe. Default
-    // OFF: worker_loop() falls back to a plain sleep so the polling path is
-    // unchanged.
+    // Wake-on-write (Config::wake_on_write, default on). The RT process()
+    // posts `wake_` after each input write, and an installed completion
+    // notifier posts it from the provider's callback thread; the worker waits
+    // on it (bounded by poll_interval_) instead of always sleeping the full
+    // quantum. release() on a counting semaphore is non-blocking and
+    // allocation-free, so posting it stays RT-safe. When off, worker_loop()
+    // sleeps the poll interval.
     bool wake_on_write_ = false;
-    std::counting_semaphore<> wake_sem_{0};
+    std::unique_ptr<detail::WorkerWake> wake_; // allocated at construction
+    // Provider completion events, routed to `wake_` while the owned worker
+    // runs. Installed at prepare(), cleared in release() after the join.
+    bool (*realtime_gpu_set_notifier_)(void*,
+                                       detail::SharedIoCompletionNotifier) noexcept = nullptr;
+    bool completion_notifier_installed_ = false;
+    static void notify_worker(void* self) noexcept;
 
     // Private callback-side GPU path captured at prepare() from the concrete
     // node. These are plain function pointers so the RT process path does not

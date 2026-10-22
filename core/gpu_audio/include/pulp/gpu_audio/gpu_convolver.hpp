@@ -47,6 +47,7 @@ class GpuConvolver;
 
 namespace detail {
 struct RealtimeGpuHealth;
+struct SharedIoCompletionNotifier;
 struct GpuConvolverTestAccess;
 struct SharedIoProviderIdentity;
 struct GpuConvolverTrialConfig;
@@ -329,6 +330,10 @@ class GpuConvolver : public GpuAudioNode {
     // Serialized non-RT (transport worker or quiescent host). Also republishes
     // the sample for status_snapshot() readers on other threads.
     static bool realtime_shared_io_health(const void* self, detail::RealtimeGpuHealth&) noexcept;
+    // Host only, while no service step runs: route the shared session's
+    // provider completion events to the transport worker.
+    static bool set_realtime_shared_io_notifier(void* self,
+                                                detail::SharedIoCompletionNotifier) noexcept;
     // Host-thread safe: the staged GpuCompute loss query is atomic.
     GpuAudioRecoveryReason staged_recovery_reason() const noexcept;
     bool has_realtime_shared_io() const noexcept;

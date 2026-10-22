@@ -13,6 +13,9 @@
 #include "support/thread_progress.hpp"
 
 #include <algorithm>
+#if !defined(_WIN32)
+#include <sys/resource.h>
+#endif
 #include <array>
 #include <chrono>
 #include <initializer_list>
@@ -601,7 +604,9 @@ class RealtimeHookNode : public GpuAudioNode {
                 .fence = &RealtimeHookNode::fence_realtime,
                 .delivered = &RealtimeHookNode::delivered_realtime,
                 .next_sequence = &RealtimeHookNode::get_next_sequence,
-                .health = expose_health ? &RealtimeHookNode::health_realtime : nullptr};
+                .health = expose_health ? &RealtimeHookNode::health_realtime : nullptr,
+                .set_completion_notifier =
+                    expose_notifier ? &RealtimeHookNode::set_notifier_realtime : nullptr};
     }
 
     // Private test hook: latch a recovery cause as the node's worker would.
@@ -622,7 +627,7 @@ class RealtimeHookNode : public GpuAudioNode {
     std::uint32_t service_return_blocks = 3;
     bool fence_result = true;
     std::uint32_t realtime_calls = 0;
-    std::uint32_t service_calls = 0;
+    std::atomic<std::uint32_t> service_calls{0};
     std::uint32_t fence_calls = 0;
     std::uint32_t process_block_calls = 0;
     std::uint32_t prime_fallback_calls = 0;
@@ -640,6 +645,28 @@ class RealtimeHookNode : public GpuAudioNode {
     const float* external_output_sample = nullptr;
     bool external_output_silent_on_rejection = true;
     bool expose_health = false;
+    // Worker wake-latency probe (benchmarks): set by a test thread, consumed
+    // by the worker's service step. Reserve capacity before the worker runs.
+    std::atomic<std::uint64_t> completion_ready_ns{0};
+    std::vector<std::uint64_t> wake_latencies_ns;
+    // Provider side of the completion-notifier seam: what a backend callback
+    // thread would call after pushing a terminal record.
+    void notify_completion() noexcept {
+        // Same discipline a provider uses: count the call in flight so a
+        // clearing call can wait it out, then read the installed pair.
+        notify_in_flight.fetch_add(1, std::memory_order_acq_rel);
+        const auto notify = installed_notify.load(std::memory_order_acquire);
+        if (notify != nullptr)
+            notify(installed_context.load(std::memory_order_acquire));
+        notify_in_flight.fetch_sub(1, std::memory_order_acq_rel);
+    }
+    bool expose_notifier = false;
+    bool notifier_supported = true;
+    std::atomic<detail::SharedIoCompletionNotifyFn> installed_notify{nullptr};
+    std::atomic<void*> installed_context{nullptr};
+    std::atomic<std::uint32_t> notify_in_flight{0};
+    std::uint32_t notifier_installs = 0;
+    std::uint32_t notifier_clears = 0;
     bool claims_provider = false;
     // The provider kind this node's identity reports; it counts as a GPU
     // provider only when claims_provider also authenticates it.
@@ -657,6 +684,28 @@ class RealtimeHookNode : public GpuAudioNode {
     }();
 
   private:
+    static bool set_notifier_realtime(void* self,
+                                      detail::SharedIoCompletionNotifier notifier) noexcept {
+        auto* node = static_cast<RealtimeHookNode*>(self);
+        if (!node->notifier_supported)
+            return false;
+        (notifier.notify != nullptr ? node->notifier_installs : node->notifier_clears) += 1;
+        if (notifier.notify == nullptr) {
+            node->installed_notify.store(nullptr, std::memory_order_release);
+            // The clear-time guarantee: no invocation outlives this call. Each
+            // notify in flight is one semaphore post, so this waits out a few
+            // instructions; it models the provider contract.
+            while (node->notify_in_flight.load(std::memory_order_acquire) !=
+                   0) // unbounded-wait: allow a notify is one semaphore post
+                std::this_thread::yield();
+            node->installed_context.store(nullptr, std::memory_order_release);
+        } else {
+            node->installed_context.store(notifier.context, std::memory_order_release);
+            node->installed_notify.store(notifier.notify, std::memory_order_release);
+        }
+        return true;
+    }
+
     static bool health_realtime(const void* self, detail::RealtimeGpuHealth& out) noexcept {
         auto* node = const_cast<RealtimeHookNode*>(static_cast<const RealtimeHookNode*>(self));
         ++node->health_calls;
@@ -732,6 +781,16 @@ class RealtimeHookNode : public GpuAudioNode {
     static std::uint32_t service_realtime(void* self, std::uint64_t) noexcept {
         auto* node = static_cast<RealtimeHookNode*>(self);
         ++node->service_calls;
+        // Wake-latency probe: a completion "became ready" at this time; the
+        // worker observes it here, in its service step.
+        if (const auto ready = node->completion_ready_ns.exchange(0, std::memory_order_acq_rel);
+            ready != 0 && node->wake_latencies_ns.size() < node->wake_latencies_ns.capacity()) {
+            const auto now =
+                static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now().time_since_epoch())
+                                               .count());
+            node->wake_latencies_ns.push_back(now > ready ? now - ready : 0);
+        }
         return node->service_return_blocks;
     }
 
@@ -2453,3 +2512,268 @@ TEST_CASE("GpuAudioTransport reports no GPU provider for an unauthenticated iden
     CHECK(transport.capability_report().provider == GpuAudioProvider::Unknown);
     transport.release();
 }
+namespace {
+
+std::uint64_t steady_now_ns() {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+
+struct WakeLatencyResult {
+    std::uint64_t p50_ns = 0;
+    std::uint64_t p99_ns = 0;
+    std::size_t samples = 0;
+};
+
+// Worker wake latency: a completion becomes ready mid-block (between callback
+// posts) and the transport worker must notice it in a service step. Callbacks
+// run at the block period on their own thread, as an audio device would.
+WakeLatencyResult measure_worker_wake_latency(bool notify_on_completion) {
+    constexpr std::uint32_t kBlock = 128;
+    constexpr std::uint32_t kSampleRate = 48000;
+    constexpr int kCompletions = 400;
+    RealtimeHookNode node(1, kBlock, MissPolicy::CpuFallback);
+    node.service_return_blocks = 0;
+    node.expose_notifier = notify_on_completion;
+    node.wake_latencies_ns.reserve(kCompletions);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    GpuAudioTransport::Config config;
+    config.ring_blocks = 8;
+    config.run_worker_thread = true;
+    config.wake_on_write = true;
+    REQUIRE(t.prepare(&node, config));
+    std::atomic<bool> running{true};
+    const auto period = std::chrono::nanoseconds(1'000'000'000ull * kBlock / kSampleRate);
+    std::thread callback([&] {
+        Block input(1, kBlock), output(1, kBlock);
+        auto next = std::chrono::steady_clock::now();
+        while (running.load(std::memory_order_acquire)) {
+            auto in = input.cview();
+            auto out = output.view();
+            t.process(in, out, kBlock);
+            next += period;
+            std::this_thread::sleep_until(next);
+        }
+    });
+    for (int i = 0; i < kCompletions; ++i) {
+        // Land between callback posts: a fixed fraction of the period after
+        // an arbitrary point, so the poll phase is sampled uniformly.
+        std::this_thread::sleep_for(period * (1 + (i % 7)) / 5);
+        node.completion_ready_ns.store(steady_now_ns(), std::memory_order_release);
+        if (notify_on_completion)
+            node.notify_completion();
+        (void)pulp::test::wait_for_condition(
+            [&] { return node.completion_ready_ns.load(std::memory_order_acquire) == 0; });
+    }
+    running.store(false, std::memory_order_release);
+    callback.join();
+    t.release();
+    auto samples = node.wake_latencies_ns;
+    std::sort(samples.begin(), samples.end());
+    WakeLatencyResult result;
+    result.samples = samples.size();
+    if (!samples.empty()) {
+        result.p50_ns = samples[samples.size() / 2];
+        result.p99_ns = samples[std::min(samples.size() - 1, samples.size() * 99 / 100)];
+    }
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("GpuAudioTransport worker wake latency benchmark",
+          "[.][benchmark][gpu_audio][transport]") {
+    for (const bool notify : {false, true}) {
+        const auto r = measure_worker_wake_latency(notify);
+        WARN("worker wake latency, completion notifier "
+             << (notify ? "on" : "off") << ": p50 " << r.p50_ns / 1000.0 << " us, p99 "
+             << r.p99_ns / 1000.0 << " us over " << r.samples << " completions");
+        CHECK(r.samples > 0);
+    }
+}
+
+#if !defined(_WIN32)
+TEST_CASE("GpuAudioTransport idle worker CPU benchmark", "[.][benchmark][gpu_audio][transport]") {
+    for (const bool notifier : {false, true}) {
+        // No callbacks and no completions: whatever CPU the process uses over the
+        // window is the worker's idle wake cost.
+        constexpr std::uint32_t kBlock = 128;
+        constexpr auto kWindow = std::chrono::seconds(2);
+        RealtimeHookNode node(1, kBlock, MissPolicy::CpuFallback);
+        node.service_return_blocks = 0;
+        node.expose_notifier = notifier;
+        REQUIRE(node.prepare());
+        GpuAudioTransport t;
+        GpuAudioTransport::Config config;
+        config.ring_blocks = 8;
+        config.run_worker_thread = true;
+        config.wake_on_write = true;
+        REQUIRE(t.prepare(&node, config));
+        const auto cpu_us = [] {
+            rusage usage{};
+            getrusage(RUSAGE_SELF, &usage);
+            return static_cast<double>(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) * 1e6 +
+                   static_cast<double>(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
+        };
+        const std::uint32_t services_before = node.service_calls.load();
+        const auto cpu_before = cpu_us();
+        std::this_thread::sleep_for(kWindow);
+        const auto cpu_after = cpu_us();
+        const auto services = node.service_calls - services_before;
+        t.release();
+        const double block_periods = 2.0 * 48000.0 / kBlock;
+        WARN("idle worker, completion notifier "
+             << (notifier ? "on" : "off") << ": " << services << " service wakes, "
+             << (cpu_after - cpu_before) / block_periods << " us CPU per block period over 2 s");
+        CHECK(services > 0);
+    }
+}
+#endif
+
+TEST_CASE("GpuAudioTransport installs the completion notifier only for a waking owned worker",
+          "[gpu_audio][transport][wake]") {
+    struct Case {
+        bool run_worker;
+        bool wake_on_write;
+        bool supported;
+        std::uint32_t expected_installs;
+    };
+    for (const auto c : {Case{true, true, true, 1}, Case{true, false, true, 0},
+                         Case{false, true, true, 0}, Case{true, true, false, 0}}) {
+        RealtimeHookNode node(1, 32, MissPolicy::CpuFallback);
+        node.expose_notifier = true;
+        node.notifier_supported = c.supported;
+        REQUIRE(node.prepare());
+        GpuAudioTransport t;
+        GpuAudioTransport::Config config;
+        config.ring_blocks = 8;
+        config.run_worker_thread = c.run_worker;
+        config.wake_on_write = c.wake_on_write;
+        REQUIRE(t.prepare(&node, config));
+        INFO("worker=" << c.run_worker << " wake=" << c.wake_on_write
+                       << " supported=" << c.supported);
+        CHECK(node.notifier_installs == c.expected_installs);
+        CHECK((node.installed_notify.load() != nullptr) == (c.expected_installs == 1));
+        t.release();
+        // Cleared after the worker joined, so no later wake reaches a released
+        // transport.
+        CHECK(node.notifier_clears == c.expected_installs);
+        CHECK(node.installed_notify.load() == nullptr);
+    }
+}
+
+TEST_CASE("GpuAudioTransport defaults to wake-on-write without a poll floor",
+          "[gpu_audio][transport][wake]") {
+    CHECK(GpuAudioTransport::Config{}.wake_on_write);
+}
+
+TEST_CASE("GpuAudioTransport completion wakes never count as progress",
+          "[gpu_audio][transport][wake]") {
+    RealtimeHookNode node(1, 32, MissPolicy::CpuFallback);
+    node.expose_notifier = true;
+    node.expose_health = true;
+    node.service_return_blocks = 0; // the provider completes nothing
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    GpuAudioTransport::Config config;
+    config.ring_blocks = 8;
+    config.run_worker_thread = true;
+    REQUIRE(t.prepare(&node, config));
+    REQUIRE(node.notifier_installs == 1);
+    const std::uint32_t services_before = node.service_calls.load();
+    for (int i = 0; i < 1000; ++i)
+        node.notify_completion();
+    // The wakes do run service steps...
+    CHECK(pulp::test::wait_for_condition([&] { return node.service_calls > services_before + 1; }));
+    t.release();
+    // ...but a wake with no completion produces nothing: progress is only
+    // what a service step consumed.
+    CHECK(t.stats().produced_blocks == 0);
+    const auto status = validated(t.status_snapshot());
+    CHECK(status.produced_blocks == 0);
+}
+
+TEST_CASE("GpuAudioTransport coalesces completion wakes instead of spinning",
+          "[gpu_audio][transport][wake]") {
+    RealtimeHookNode node(1, 128, MissPolicy::CpuFallback);
+    node.expose_notifier = true;
+    node.service_return_blocks = 0;
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    GpuAudioTransport::Config config;
+    config.ring_blocks = 8;
+    config.run_worker_thread = true;
+    REQUIRE(t.prepare(&node, config));
+    // Let the worker settle into its wait.
+    REQUIRE(pulp::test::wait_for_condition([&] { return node.service_calls > 0; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const std::uint32_t services_before = node.service_calls.load();
+    // A burst of posts that lands while the worker waits once.
+    for (int i = 0; i < 1000; ++i)
+        node.notify_completion();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const auto services = node.service_calls - services_before;
+    t.release();
+    // One pump consumes every post it covers; 1000 posts must not become 1000
+    // service steps. The bound leaves room for the fallback timer (one block,
+    // 2.67 ms here) on a slow host.
+    INFO("service steps after 1000 posts: " << services);
+    CHECK(services >= 1);
+    CHECK(services < 200);
+}
+
+TEST_CASE("GpuAudioTransport survives completion events racing release",
+          "[gpu_audio][transport][wake][concurrency]") {
+    // A provider callback thread keeps notifying while the host releases the
+    // transport. Release clears the notifier after the worker joins; after the
+    // clear no notify may reach the transport.
+    for (int round = 0; round < 20; ++round) {
+        RealtimeHookNode node(1, 32, MissPolicy::CpuFallback);
+        node.expose_notifier = true;
+        node.service_return_blocks = 0;
+        REQUIRE(node.prepare());
+        GpuAudioTransport t;
+        GpuAudioTransport::Config config;
+        config.ring_blocks = 8;
+        config.run_worker_thread = true;
+        REQUIRE(t.prepare(&node, config));
+        std::atomic<bool> stop{false};
+        std::atomic<std::uint64_t> notifies{0};
+        std::thread provider([&] {
+            while (!stop.load(std::memory_order_acquire)) {
+                node.notify_completion();
+                notifies.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+        REQUIRE(pulp::test::wait_for_condition(
+            [&] { return notifies.load(std::memory_order_relaxed) > 100; }));
+        t.release();
+        CHECK(node.installed_notify.load() == nullptr);
+        stop.store(true, std::memory_order_release);
+        provider.join();
+    }
+}
+
+#if defined(__APPLE__)
+TEST_CASE("GpuAudioTransport runs its owned worker at interactive QoS",
+          "[gpu_audio][transport][wake]") {
+    RealtimeHookNode node(1, 32, MissPolicy::CpuFallback);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    GpuAudioTransport::Config config;
+    config.ring_blocks = 8;
+    config.run_worker_thread = true;
+    REQUIRE(t.prepare(&node, config));
+    CHECK(pulp::test::wait_for_condition([&] { return t.stats().worker_interactive_qos; }));
+    t.release();
+    CHECK_FALSE(t.stats().worker_interactive_qos);
+
+    // Positive control: a caller-driven pump has no owned worker to promote.
+    GpuAudioTransport manual;
+    REQUIRE(manual.prepare(&node, {8}));
+    manual.pump();
+    CHECK_FALSE(manual.stats().worker_interactive_qos);
+}
+#endif

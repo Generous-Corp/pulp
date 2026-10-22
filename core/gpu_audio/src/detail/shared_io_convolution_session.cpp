@@ -490,11 +490,13 @@ std::optional<std::uint64_t> SharedIoConvolutionSession::callback_deadline_ns(
     return callback_start_ns + budget_ns;
 }
 
-bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
-                                                   ServiceResult& result) noexcept {
+bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns, ServiceResult& result,
+                                                   std::uint64_t service_deadline_ns) noexcept {
     if (!prepared_)
         return false;
-    plan_.drain(now_ns); // plan drain polls the one owned provider first.
+    // The plan drain services the one owned provider first, bounded by the
+    // deadline (zero: a nonblocking poll).
+    plan_.drain_until(now_ns, service_deadline_ns);
     if (provider_->device_lost())
         pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost);
     while (const auto completion = plan_.pop_completion()) {
@@ -711,7 +713,17 @@ SharedIoConvolutionSession::service(std::uint64_t now_ns) noexcept {
     }
     // Deterministic fakes may retire synchronously; one second drain turns
     // those exact terminals into pipeline records without another callback.
-    (void)drain_completions(now_ns, result);
+    // Only this drain waits: the first must not delay submitting new ingress.
+    // The budget starts now, after the submit, on the steady clock the plan
+    // uses for a bounded drain. An idle provider (nothing in flight) returns
+    // from the wait at once.
+    const auto wait_ns = config_.completion_service_wait_ns;
+    const auto submitted_ns = wait_ns == 0 ? 0 : trace_now_ns();
+    const auto deadline_ns =
+        wait_ns == 0 || submitted_ns > std::numeric_limits<std::uint64_t>::max() - wait_ns
+            ? 0
+            : submitted_ns + wait_ns;
+    (void)drain_completions(now_ns, result, deadline_ns);
     drain_trace_to_retention();
     result.fenced = fenced();
     return result;

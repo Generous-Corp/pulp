@@ -10,6 +10,7 @@ namespace pulp::gpu_audio {
 class GpuAudioProviderPool;
 namespace detail {
 struct WaveNetRealtimeTestAccess;
+struct SharedIoCompletionNotifier;
 } // namespace detail
 
 /// Experimental stamped WaveNet bridge. Provider work runs only on the transport
@@ -105,6 +106,9 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
                           std::uint64_t) noexcept;
     static std::uint64_t next_sequence(void*) noexcept;
     static bool reprepare(void*, std::uint64_t) noexcept;
+    // Host only, while no service step runs: route every channel's provider
+    // completion events to the transport worker, or clear them.
+    static bool set_notifier(void*, detail::SharedIoCompletionNotifier) noexcept;
     bool ready() const noexcept;
 };
 } // namespace pulp::gpu_audio
