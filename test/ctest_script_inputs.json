@@ -4826,6 +4826,15 @@
    ],
    "kind": "python"
   },
+  "fold-migration-notes-selftest": {
+   "entry": "tools/scripts/test_fold_migration_notes.py",
+   "inputs": [
+    "tools/scripts/build_migration_index.py",
+    "tools/scripts/fold_migration_notes.py",
+    "tools/scripts/test_fold_migration_notes.py"
+   ],
+   "kind": "python"
+  },
   "forced-restore-lint": {
    "entry": "tools/scripts/forced_restore_lint.py",
    "inputs": [
@@ -12210,7 +12219,9 @@
     ".github/workflows",
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/status/pulp-tooling-disposition.json",
+    "tools/scripts/build_migration_index.py",
     "tools/scripts/connected_git_history.py",
+    "tools/scripts/fold_migration_notes.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/gate_test_support.py",
     "tools/scripts/gpu_handoff_provenance.py",

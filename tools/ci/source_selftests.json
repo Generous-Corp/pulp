@@ -1089,6 +1089,12 @@
       ]
     },
     {
+      "name": "fold-migration-notes-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_fold_migration_notes.py"
+      ]
+    },
+    {
       "name": "version-at-land-selftest",
       "argv": [
         "{repo}/tools/scripts/test_version_at_land.py"

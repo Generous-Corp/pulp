@@ -919,8 +919,10 @@
         "tools/cli/migration_index.hpp",
         "tools/cli/migration_runtime.cpp",
         "tools/scripts/build_migration_index.py",
+        "tools/scripts/fold_migration_notes.py",
         "tools/scripts/cli_version_check.sh",
-        "docs/migrations/**",
+        "docs/migrations/README.md",
+        "docs/migrations/unreleased/README.md",
         ".claude/commands/upgrade.md"
       ]
     },
