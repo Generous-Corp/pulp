@@ -4106,17 +4106,36 @@ must be hash-verified even when it is excluded from authored-source linting.
 
 ## SDK profiles compile the shell exec JS bridge out
 
-Every SDK configure the CLI emits — `cli_sdk.cpp` (checkout SDK) and
-`local_sdk_profile.cpp` (forge-dev and trace profiles) — passes
-`-DPULP_DEV_BRIDGE_EXEC=OFF`. Tests OFF already implies it, but the flag is
-explicit because `validate_staged_install` asserts the cache key is PRESENT and
-off: a missing key means a source tree that predates the option and compiled
-the `/bin/sh` bridge in unconditionally, so absence is not safety. The profile
+Every SDK configure the CLI emits compiles the bridge out: `cli_sdk.cpp`
+(checkout SDK) through `-DPULP_PROFILE=release`, and `local_sdk_profile.cpp`
+(forge-dev and trace profiles) through an explicit `-DPULP_DEV_BRIDGE_EXEC=OFF`.
+Tests OFF already implies it, but the flag is explicit in the local profile
+because `validate_staged_install` asserts the cache key is PRESENT and off: a
+missing key means a source tree that predates the option and compiled the
+`/bin/sh` bridge in unconditionally, so absence is not safety. The profile
 provenance records `features.bridge_exec: false`, and adding a feature key
 changes that exact text, which is why `kForgeProfileRevision` and
 `kTraceProfileRevision` moved with it — a prefix built under the old contract
 keeps its own fingerprint. Bump the revision again whenever the feature object
 changes; never edit an installed `sdk-provenance.json` to match.
+
+## SDK configures name their `PULP_PROFILE`
+
+`pulp sdk install` (`cli_sdk.cpp`, `ensure_checkout_sdk`) configures with
+`-DPULP_PROFILE=release` and nothing from the profile's enforced list (tests,
+examples, audio probes, the exec bridge, tracing, fuzzing, benchmark, RT work
+counters); its site-specific `PULP_ENABLE_INSPECTOR=OFF`,
+`PULP_ENABLE_DESIGN_IMPORT=OFF` and `PULP_ENABLE_GPU=OFF` stay beside it. The
+forge-dev and trace profiles are development SDKs (design import and the GPU
+stay on, never distributable), so `configure_arguments` passes
+`-DPULP_PROFILE=dev` explicitly and `serialize_provenance` records
+`build_profile: "dev"`; `validate_staged_install` requires the cache to say
+exactly that (missing = a source tree older than the profile; `release` = a
+different SDK). That key is part of the exact provenance text, so it moved
+`kForgeProfileRevision` to 4 and `kTraceProfileRevision` to 3. Do not switch
+the local profiles to `release` to "harden" them: the release profile would
+seed `PULP_BUILD_EXAMPLES` and friends OFF (fine) but their provenance and
+validator contract is `dev`, and a traced SDK can never be a release build.
 
 ## Advisory lane dispatch
 

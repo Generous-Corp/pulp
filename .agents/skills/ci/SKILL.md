@@ -12915,9 +12915,9 @@ first.
 bridge (a `/bin/sh` for scripted UIs) into `pulp-view-script`. It defaults to
 `PULP_BUILD_TESTS`, so tests OFF already implies it, but every release
 configure — `release-cli.yml` (CLI build and both SDK builds) and
-`sign-and-release.yml` — passes `-DPULP_DEV_BRIDGE_EXEC=OFF` explicitly and
-`sdk_provenance.py` refuses to mint a release marker from a cache where it is
-ON or missing. The marker records it as `features.bridge_exec: false`;
+`sign-and-release.yml` — pins it OFF through `-DPULP_PROFILE=release` (see
+the next section) and `sdk_provenance.py` refuses to mint a release marker
+from a cache where it is ON or missing. The marker records it as `features.bridge_exec: false`;
 `PulpSdkProvenance.cmake` fails a release SDK whose marker claims `true`. When
 adding a release configure site, carry the flag; when a release leg fails on
 `bridge_exec=OFF`, the leg dropped the flag or configured from a source tree
@@ -12928,6 +12928,30 @@ The TSan workflow's focused SignalGraph selector must retain exact-name entries
 for mailbox and retirement-reader race cases when those cases are extracted or
 renamed. Validate the selected names with `ctest -N` before changing the regex;
 do not broaden the selector to the entire graph suite.
+
+## Release configures pass only `-DPULP_PROFILE=release`
+
+`tools/cmake/PulpProfiles.cmake` is the one statement of the shipped option
+set. `-DPULP_PROFILE=release` seeds `PULP_BUILD_TESTS`, `PULP_BUILD_EXAMPLES`,
+`PULP_ENABLE_AUDIO_PROBES`, `PULP_DEV_BRIDGE_EXEC`, `PULP_TRACING`,
+`PULP_ENABLE_FUZZING`, `PULP_BENCHMARK` and `PULP_RT_WORK_COUNTERS` OFF, and
+the configure FATAL_ERRORs if any of them is ON from a `-D` or a stale cache.
+Every release site (`release-cli.yml` CLI + both SDK configures,
+`sign-and-release.yml`, `release-cli-local.sh`, `pulp sdk install`) passes the
+profile and nothing from that list; do not add one of those flags back, and
+do not add a new release configure without the profile. Site-specific flags
+(`PULP_ENABLE_INSPECTOR` on the tag version, `PULP_ENABLE_DESIGN_IMPORT`,
+GPU, SCENE3D, WEBVIEW) stay beside it: the profile records those two but does
+not enforce them. A release leg that fails with `PULP_PROFILE=release requires
+these options OFF` configured into a warm build dir that an earlier dev
+configure left ON — pass the option OFF or use a fresh dir; never pass
+`PULP_PROFILE_ALLOW_OVERRIDE=ON` on a release lane, it is the loud escape
+hatch for a development build only. `sdk_provenance.py` records
+`build_profile: release` and refuses a cache whose `PULP_PROFILE` is anything
+else or missing, so a `workflow_dispatch` backfill of a tag older than the
+profile is refused the same way the bridge-exec rule refuses it. The
+`cmake-build-profile-contract` ctest drives the module through a fixture
+project; run it after touching the enforced list.
 
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
 native matrix are scheduled nightly and dispatched on an approved PR head. The

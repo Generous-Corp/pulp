@@ -373,13 +373,23 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             self.text,
         )
 
-    def test_cli_and_sdk_build_disable_audio_probes(self) -> None:
+    def test_cli_and_sdk_builds_configure_through_the_release_profile(self) -> None:
+        # One CLI configure plus the Linux and macOS/Windows SDK configures.
         self.assertGreaterEqual(
-            self.text.count("-DPULP_ENABLE_AUDIO_PROBES=OFF"),
-            2,
-            "release-cli.yml must keep audio probes disabled for both the "
-            "CLI and SDK release configure steps.",
+            self.text.count("-DPULP_PROFILE=release"),
+            3,
+            "release-cli.yml must configure the CLI and both SDK release "
+            "steps with -DPULP_PROFILE=release.",
         )
+        # The profile owns these; a copy drifting back here would silently
+        # shadow PulpProfiles.cmake as the source of truth.
+        for flag in (
+            "-DPULP_ENABLE_AUDIO_PROBES=OFF",
+            "-DPULP_BUILD_TESTS=OFF",
+            "-DPULP_BUILD_EXAMPLES=OFF",
+            "-DPULP_DEV_BRIDGE_EXEC=OFF",
+        ):
+            self.assertNotIn(flag, self.text)
 
     def test_arm64_sdk_exports_gpu_convolution_catalog(self) -> None:
         """The Apple-Silicon GPU SDK must advertise its opt-in host route."""
@@ -601,9 +611,11 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
             self.text,
         )
 
-    def test_windows_release_gate_disables_audio_probes(self) -> None:
+    def test_windows_release_gate_configures_through_the_release_profile(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
-        self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
+        self.assertIn("-DPULP_PROFILE=release", run_block)
+        self.assertNotIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
+        self.assertNotIn("-DPULP_BUILD_TESTS=OFF", run_block)
 
     def test_windows_release_gate_keeps_scene3d_off_without_gpu_assets(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")

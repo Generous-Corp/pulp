@@ -3614,9 +3614,8 @@ jobs:
         run: |
           cmake -S . -B build `
             -DCMAKE_BUILD_TYPE=Release `
-            -DPULP_BUILD_TESTS=OFF `
+            -DPULP_PROFILE=release `
             -DPULP_ENABLE_SCENE3D=OFF `
-            -DPULP_ENABLE_AUDIO_PROBES=OFF `
             -DPULP_ENABLE_INSPECTOR=ON `
             -DPULP_BUILD_WEBVIEW=ON
         shell: pwsh

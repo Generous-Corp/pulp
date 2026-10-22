@@ -110,9 +110,13 @@ class CompileLane(unittest.TestCase):
         }
         # Control: the parse must find the release's fixed flags, or every
         # comparison below passes vacuously.
-        for expected in ("CMAKE_BUILD_TYPE", "PULP_SKIA_AUTOFETCH", "PULP_BUILD_TESTS",
-                         "PULP_BUILD_EXAMPLES", "PULP_ENABLE_AUDIO_PROBES"):
+        for expected in ("CMAKE_BUILD_TYPE", "PULP_SKIA_AUTOFETCH", "PULP_PROFILE"):
             self.assertIn(expected, literal, "release configure parse is broken")
+        # The profile owns the stripped-build flags; a literal copy here would
+        # shadow PulpProfiles.cmake as the source of truth.
+        for stale in ("PULP_BUILD_TESTS", "PULP_BUILD_EXAMPLES", "PULP_ENABLE_AUDIO_PROBES"):
+            self.assertNotIn(stale, literal)
+            self.assertNotIn(stale, define_flags(self.configure))
         ours = define_flags(self.configure)
         for key, value in literal.items():
             with self.subTest(flag=key):

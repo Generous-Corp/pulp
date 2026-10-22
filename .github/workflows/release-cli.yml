@@ -911,20 +911,18 @@ jobs:
           # runner cannot stamp a 15.0 floor that would lock out macOS 13/14 Intel
           # Macs. Passing 13.0 here would only trip PulpMinOs's "below the floor,
           # raising it" warning.
-          # PULP_BUILD_EXAMPLES=OFF: the release ships no example binaries —
-          # nothing in package_cli.py, the SDK staging, or the product-matrix
-          # member lists references one — yet the option defaults ON and this
-          # build has no --target, so every leg was compiling ~89 example
-          # executables and discarding them. CMakeLists.txt names
-          # `-DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF` as the intended
-          # stripped-build pairing; the release had only taken half of it.
+          # PULP_PROFILE=release (tools/cmake/PulpProfiles.cmake) is the one
+          # statement of the shipped option set: tests, examples, audio probes,
+          # the shell exec JS bridge, tracing, fuzzing, benchmark and RT work
+          # counters are OFF, and the configure refuses any flag or cache
+          # that disagrees. Examples matter here because this build has no
+          # --target: with them ON every leg compiled ~89 example executables
+          # and discarded them. The inspector is version-gated above and
+          # stays a per-site choice.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_SKIA_AUTOFETCH=OFF \
-            -DPULP_BUILD_TESTS=OFF \
-            -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_AUDIO_PROBES=OFF \
-            -DPULP_DEV_BRIDGE_EXEC=OFF \
+            -DPULP_PROFILE=release \
             -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             $INSPECTOR \
             $REQUIRE_GPU \
@@ -1162,10 +1160,7 @@ jobs:
           fi
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
-            -DPULP_BUILD_TESTS=OFF \
-            -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_AUDIO_PROBES=OFF \
-            -DPULP_DEV_BRIDGE_EXEC=OFF \
+            -DPULP_PROFILE=release \
             -DPULP_ENABLE_SCENE3D=OFF \
             -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             $INSPECTOR \
@@ -1227,10 +1222,7 @@ jobs:
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_SKIA_AUTOFETCH=OFF \
-            -DPULP_BUILD_TESTS=OFF \
-            -DPULP_BUILD_EXAMPLES=OFF \
-            -DPULP_ENABLE_AUDIO_PROBES=OFF \
-            -DPULP_DEV_BRIDGE_EXEC=OFF \
+            -DPULP_PROFILE=release \
             -DPULP_ENABLE_SCENE3D=OFF \
             -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             -DPULP_REQUIRE_GPU_FOR_SDK=ON \
