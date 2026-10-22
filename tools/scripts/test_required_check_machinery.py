@@ -23,6 +23,42 @@ WORKFLOW = ROOT / ".github" / "workflows" / "required-check-machinery.yml"
 CONTEXT = "Required-check machinery (advisory)"
 
 
+# `git commit` and `git fetch` start `git maintenance run --auto --detach`. That
+# background process can still be writing into a fixture's .git (a repack
+# refreshes .git/info/refs) while tearDown deletes the directory, which fails
+# cleanup with "Directory not empty". Fixture repositories never need
+# maintenance, so every git this suite starts, directly or through the CLI and
+# workflow-step scripts it runs, has it switched off.
+NO_AUTO_MAINTENANCE = (("maintenance.auto", "false"), ("gc.auto", "0"))
+
+
+def without_auto_maintenance(env: dict[str, str]) -> dict[str, str]:
+    """A copy of env whose git processes never start background maintenance,
+    keeping any GIT_CONFIG_COUNT entries it already carries."""
+    out = dict(env)
+    count = int(out.get("GIT_CONFIG_COUNT", "0") or "0")
+    for key, value in NO_AUTO_MAINTENANCE:
+        out[f"GIT_CONFIG_KEY_{count}"] = key
+        out[f"GIT_CONFIG_VALUE_{count}"] = value
+        count += 1
+    out["GIT_CONFIG_COUNT"] = str(count)
+    return out
+
+
+_ORIGINAL_ENV: dict[str, str] = {}
+
+
+def setUpModule() -> None:
+    _ORIGINAL_ENV.update(os.environ)
+    os.environ.clear()
+    os.environ.update(without_auto_maintenance(_ORIGINAL_ENV))
+
+
+def tearDownModule() -> None:
+    os.environ.clear()
+    os.environ.update(_ORIGINAL_ENV)
+
+
 def git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True,
                           capture_output=True, text=True).stdout.strip()
@@ -81,6 +117,31 @@ class DiffFixtureTest(unittest.TestCase):
         result = self.report(head)
         self.assertEqual(result["flagged"], {})
         self.assertEqual(result["description"], "touches no required-check machinery")
+
+
+class FixtureGitMaintenanceTest(unittest.TestCase):
+    """The fixture repositories must not start detached maintenance, or their
+    cleanup races it."""
+
+    def maintenance_spawns(self, env: dict[str, str]) -> int:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        repo = Path(temp.name) / "repo"
+        repo.mkdir()
+        trace = Path(temp.name) / "trace.txt"
+        run_env = dict(env, GIT_TRACE2=str(trace))
+        for args in (("init", "-q"), ("-c", "user.email=ci@example.invalid", "-c", "user.name=CI",
+                                      "commit", "-q", "--allow-empty", "-m", "x")):
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=run_env)
+        text = trace.read_text(encoding="utf-8") if trace.exists() else ""
+        return text.count("maintenance run --auto")
+
+    def test_fixture_commits_start_no_background_maintenance(self) -> None:
+        # Control: the same commit with git's defaults must show the spawn the
+        # trace is looking for, or the instrument cannot see it at all.
+        if self.maintenance_spawns(_ORIGINAL_ENV) == 0:
+            self.skipTest("this git does not start maintenance after a commit")
+        self.assertEqual(self.maintenance_spawns(dict(os.environ)), 0)
 
 
 class ClassificationTest(unittest.TestCase):
