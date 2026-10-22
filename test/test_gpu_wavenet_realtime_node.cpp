@@ -1248,6 +1248,23 @@ TEST_CASE("WaveNet transport status reports a recoverable cause as Degraded",
 
 TEST_CASE("WaveNet transport status carries the node epoch and terminal counts",
           "[gpu_audio][wavenet][status][health]") {
+    // Driven directly, outside any transport, the node's own status must
+    // already be coherent: its terminal counts stay within its own delivery
+    // counters. Only a transport that was bypassed would lag them.
+    {
+        Harness direct;
+        for (int block = 0; block < 6; ++block) {
+            direct.callback(float(block + 1));
+            direct.service();
+            direct.service();
+        }
+        const auto node_status = direct.node.status_snapshot();
+        INFO(
+            "node status error " << static_cast<int>(validate_gpu_audio_status(node_status).error));
+        CHECK(validate_gpu_audio_status(node_status).accepted());
+        CHECK(node_status.terminal_counts[static_cast<std::size_t>(
+                  GpuAudioTerminalDisposition::GpuDelivered)] > 0);
+    }
     Harness h;
     GpuAudioTransport transport;
     REQUIRE(transport.prepare(&h.node, {8}));
