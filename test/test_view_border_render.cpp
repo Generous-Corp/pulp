@@ -25,10 +25,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/border_style.hpp>
 #include <pulp/view/view.hpp>
 
 #include <cstdlib>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace pulp::view;
@@ -524,7 +526,7 @@ TEST_CASE("3D border shades match Chrome's per-colour shading",
         {{255, 255, 255}, {255, 255, 255}, {171, 171, 171}},
     };
     for (const auto& c : cases) {
-        const auto shades = View::border_shades(paint(c.base));
+        const auto shades = border_shades(paint(c.base));
         INFO("base " << c.base.r << "," << c.base.g << "," << c.base.b
              << " light " << rgb8(shades.light).r << ","
              << rgb8(shades.light).g << "," << rgb8(shades.light).b
@@ -535,7 +537,7 @@ TEST_CASE("3D border shades match Chrome's per-colour shading",
     }
     // Alpha is the side colour's own; only the channels are shaded.
     const auto translucent =
-        View::border_shades(pulp::canvas::Color::rgba(0.0f, 0.0f, 1.0f, 0.5f));
+        border_shades(pulp::canvas::Color::rgba(0.0f, 0.0f, 1.0f, 0.5f));
     CHECK(translucent.light.a == 0.5f);
     CHECK(translucent.dark.a == 0.5f);
     CHECK(exactly(rgb8(translucent.dark), Rgb{0, 0, 171}));
@@ -543,13 +545,13 @@ TEST_CASE("3D border shades match Chrome's per-colour shading",
 
 TEST_CASE("each 3D style shades the sides it should",
           "[view][border][border-shading]") {
-    using S = View::BorderEdge;
+    using S = BorderEdge;
     using B = View::BorderStyle;
     const auto black = paint(Rgb{0, 0, 0});
     const Rgb light{168, 168, 168};
     const Rgb dark{84, 84, 84};
     const auto band = [&](B style, S side, bool outer) {
-        return rgb8(View::border_band_color(style, side, outer, black, 6.0f));
+        return rgb8(border_band_color(style, side, outer, black, 6.0f));
     };
     // Outset lights the top and left, inset the bottom and right.
     CHECK(exactly(band(B::outset, S::top, true), light));
@@ -567,7 +569,7 @@ TEST_CASE("each 3D style shades the sides it should",
     CHECK(exactly(band(B::ridge, S::top, true), light));
     CHECK(exactly(band(B::ridge, S::right, false), light));
     // A 1px groove is not split, and paints the unshaded colour.
-    CHECK(exactly(rgb8(View::border_band_color(B::groove, S::top, true, black,
+    CHECK(exactly(rgb8(border_band_color(B::groove, S::top, true, black,
                                                1.0f)),
                   Rgb{0, 0, 0}));
     // Solid and double are never shaded.
@@ -577,7 +579,7 @@ TEST_CASE("each 3D style shades the sides it should",
 
 TEST_CASE("groove and double split a side into Chrome's bands",
           "[view][border][border-shading]") {
-    using S = View::BorderEdge;
+    using S = BorderEdge;
     using B = View::BorderStyle;
     // {width, top outer, bottom outer} for a groove, read off Chrome's render:
     // the top and left take the odd pixel on the outside.
@@ -585,8 +587,8 @@ TEST_CASE("groove and double split a side into Chrome's bands",
                                {9, 5, 4}, {12, 6, 6}};
     for (const auto& g : groove) {
         INFO("groove width " << g[0]);
-        const auto top = View::border_bands(B::groove, S::top, g[0]);
-        const auto bottom = View::border_bands(B::groove, S::bottom, g[0]);
+        const auto top = border_bands(B::groove, S::top, g[0]);
+        const auto bottom = border_bands(B::groove, S::bottom, g[0]);
         CHECK(top.outer == g[1]);
         CHECK(top.outer + top.gap + top.inner == g[0]);
         CHECK(bottom.outer == g[2]);
@@ -597,7 +599,7 @@ TEST_CASE("groove and double split a side into Chrome's bands",
                             {7, 2, 3}, {8, 3, 2}, {11, 4, 3}, {12, 4, 4}};
     for (const auto& d : dbl) {
         INFO("double width " << d[0]);
-        const auto bands = View::border_bands(B::double_, S::right, d[0]);
+        const auto bands = border_bands(B::double_, S::right, d[0]);
         CHECK(bands.outer == d[1]);
         CHECK(bands.gap == d[2]);
         CHECK(bands.inner == (d[0] < 3 ? 0.0f : d[1]));
@@ -675,4 +677,24 @@ TEST_CASE("a double border paints two lines with a gap",
     CHECK(runs[1].start == 12);
     CHECK(runs[1].length == 6);
     CHECK(same(px.at(8, kDevH / 2), kPlate));
+}
+
+TEST_CASE("border_style_from_css names every CSS line style and nothing else",
+          "[view][border][css]") {
+    using B = View::BorderStyle;
+    const std::pair<const char*, B> keywords[] = {
+        {"solid", B::solid},   {"dashed", B::dashed}, {"dotted", B::dotted},
+        {"double", B::double_}, {"groove", B::groove}, {"ridge", B::ridge},
+        {"inset", B::inset},   {"outset", B::outset}, {"none", B::none},
+        {"hidden", B::hidden},
+    };
+    for (const auto& [keyword, style] : keywords) {
+        INFO(keyword);
+        const auto parsed = border_style_from_css(keyword);
+        REQUIRE(parsed.has_value());
+        CHECK(*parsed == style);
+    }
+    CHECK_FALSE(border_style_from_css("").has_value());
+    CHECK_FALSE(border_style_from_css("wavy").has_value());
+    CHECK_FALSE(border_style_from_css("Dashed").has_value());
 }

@@ -4,6 +4,7 @@
 #include "design_binding_metadata.hpp"
 #include "design_import_document_checks.hpp"
 
+#include <pulp/view/border_style.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
@@ -1635,24 +1636,11 @@ void apply_visual_style(View& view, const IRStyle& style,
             if (auto color = parse_any_css_color(*style.border_left_color))
                 view.set_border_left_color(*color);
         }
-        // CSS border-style keyword → View::BorderStyle, same table the bridge's
-        // setBorderStyle uses. A Figma dashPattern lowers to "dashed" at the
-        // producers; without this the native materializer painted it solid
-        // while the JS-bridge lane dashed it. The shaded and double styles
-        // are painted by View in per-side bands; a user-agent button's
-        // `2px outset` drew as a flat black frame while they were dropped
-        // here. Unknown keywords keep the solid default.
+        // The same keyword table the bridge's setBorderStyle uses; an unknown
+        // keyword keeps the solid default.
         if (style.border_style) {
-            const std::string& bs = *style.border_style;
-            if (bs == "dashed")      view.set_border_style(View::BorderStyle::dashed);
-            else if (bs == "dotted") view.set_border_style(View::BorderStyle::dotted);
-            else if (bs == "double") view.set_border_style(View::BorderStyle::double_);
-            else if (bs == "groove") view.set_border_style(View::BorderStyle::groove);
-            else if (bs == "ridge")  view.set_border_style(View::BorderStyle::ridge);
-            else if (bs == "inset")  view.set_border_style(View::BorderStyle::inset);
-            else if (bs == "outset") view.set_border_style(View::BorderStyle::outset);
-            else if (bs == "none")   view.set_border_style(View::BorderStyle::none);
-            else if (bs == "hidden") view.set_border_style(View::BorderStyle::hidden);
+            if (auto bs = border_style_from_css(*style.border_style))
+                view.set_border_style(*bs);
         }
     }
     if (style.border_top_left_radius) view.set_corner_radius_tl(*style.border_top_left_radius);

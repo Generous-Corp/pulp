@@ -207,6 +207,7 @@ set(_PULP_WEBUI_VIEW_SOURCES
     # view.cpp does not link without it.
     ${_PULP_WEBUI_ROOT}/core/view/src/view_lifecycle.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/view_paint.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/border_style.cpp
     # FU-2 partial-repaint damage model — pure, no platform deps. Kept in the
     # web source set so the view lib links identically across native + wasm.
     ${_PULP_WEBUI_ROOT}/core/view/src/repaint_damage.cpp
