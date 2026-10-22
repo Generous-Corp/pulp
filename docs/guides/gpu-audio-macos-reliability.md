@@ -152,10 +152,10 @@ node's health after every service step or pump, so a snapshot can trail the
 node by one pump.
 
 The transport projects the lifecycle, the recovery reason and sequence, the
-epoch, the delivery counters, `terminal_counts` and the `shadow_*` fields. It
-does not fill `gpu_kernel_available`, `completion_mode` or
-`timestamps_available`; read those from the node's own `status_snapshot()`, on
-the host thread, while the node is not being prepared or released.
+epoch, the delivery counters, `terminal_counts`, the `shadow_*` fields,
+`gpu_kernel_available`, `completion_mode`, `timestamps_available` and
+`last_delivery_ns` from the node's health sample. A field the node does not
+report stays at its default.
 
 ### Provider state and recovery reason
 
@@ -174,19 +174,15 @@ latched (`UINT64_MAX` when nothing has latched).
 | `SustainedDeadlineMisses` | `Degraded` | the staged `GpuConvolver`'s circuit breaker |
 | `ProviderReacquired` | informational | reserved; nothing produces it. **Coming** with automatic re-acquire |
 
-The first cause wins, with two exceptions where a loss outranks the failures it
-caused:
-
-- On `GpuWaveNetRealtimeNode` and the GPU path of `GpuNeuralRealtimeNode`,
-  once `ProviderLost` is observed it replaces an earlier `ProviderFailure` or
-  `ProviderUnresponsive`. An independent earlier
-  cause, such as `InputSaturated`, stays the reported reason, and the state is
-  still `Unavailable`.
-- On the staged `GpuConvolver`, `ProviderLost` replaces any other cause.
-
-On the other nodes the first latched reason stays. A shared `GpuConvolver` that
-latched `ProviderFailure` before observing the loss reports `Unavailable` with
-`ProviderFailure`.
+The first cause wins, except that a device loss outranks the failures it
+causes. When a node reports its device lost after it latched
+`ProviderFailure`, `ProviderUnresponsive` or `SustainedDeadlineMisses`, the
+reported reason is `ProviderLost`. `recovery_sequence` still marks where
+delivery first stopped. An independent earlier cause (`SequenceGap`,
+`InputSaturated`, `InvalidCallback` or `OfflineFence`) stays the reported
+reason, and the state is still `Unavailable`. This applies to the transport's
+status for every hosted node and to the shared `GpuConvolver`'s own status. On
+the staged `GpuConvolver`, `ProviderLost` replaces any other cause.
 
 On the staged `GpuConvolver` and `GpuMultiConvolver`, `recovery_sequence` is
 the worker block at which the reason latched. A loss the worker has not reached
@@ -234,11 +230,16 @@ a valid combination.
   `status_snapshot()` fills them only while trace recording is enabled.
 - `epoch` and `delivery_epoch_active` identify the GPU delivery epoch. A
   CPU-only node stays at epoch 0.
-- `gpu_kernel_available` is false for a family with no GPU kernel (node read).
-- `completion_mode` and `timestamps_available` are filled by
-  `GpuWaveNetRealtimeNode` (node read). This provider path records no GPU
-  timestamps.
-- `last_delivery_ns` is reserved; no node fills it.
+- `gpu_kernel_available` is true for `GpuWaveNetRealtimeNode`, for the shared
+  `GpuConvolver`, for a staged `GpuConvolver` that has a device, and for
+  `GpuNeuralRealtimeNode` while its GPU backend is prepared. It is false for a
+  family with no GPU kernel.
+- `completion_mode` and `timestamps_available` are reported only by
+  `GpuWaveNetRealtimeNode`; other nodes leave `Unknown` and `false`. This
+  provider path records no GPU timestamps, so `timestamps_available` is always
+  false today.
+- `last_delivery_ns` is reserved: the transport passes it through, but no node
+  fills it.
 
 ### Shadow fields
 

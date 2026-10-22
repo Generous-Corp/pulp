@@ -753,8 +753,11 @@ first latched `recovery_reason` and `recovery_sequence`, for example
 is `Degraded`, the callback continues on the prepared CPU fallback, or emits
 silence for a node that declared no fallback. A lost provider (`ProviderLost`, or
 `ProviderUnresponsive`) is `Unavailable`, because nothing in the current
-preparation can bring it back. A node that also latched an earlier cause still
-reports `Unavailable` and keeps the first cause. Whenever the state is not
+preparation can bring it back. A loss observed after the `ProviderFailure`,
+`ProviderUnresponsive` or `SustainedDeadlineMisses` it caused is reported as
+`ProviderLost`, with `recovery_sequence` still marking where delivery first
+stopped. A node that latched an independent earlier cause, such as
+`InputSaturated`, still reports `Unavailable` and keeps that cause. Whenever the state is not
 `Ready`, `selected_engine` names the engine that actually delivers. That is
 `Cpu` for a node with a CPU fallback, and `Unknown` for a node that emits
 silence; it is never `Gpu`. `provider` still names the provider that was
