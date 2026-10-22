@@ -6124,6 +6124,23 @@ an advisory lane can no longer strand a PR by being starved. Do not "simplify"
 one back to `ubuntu-latest` —
 `tools/scripts/test_windows_runner_policy.py` fails if you do.
 
+### GitHub-hosted Windows is opt-in on a push or a build.yml dispatch
+
+A plain `build.yml` dispatch or a push to `main` used to start the
+`Windows (x64) [github-hosted]` leg (and a dispatch the three `windows-latest`
+compile gates), so agents kept landing on hosted Windows without asking for it.
+Now none runs unless the dispatch sets `allow_hosted_windows=true` or a
+self-hosted `windows_runner_selector_json`, or the repository sets
+`PULP_ALLOW_HOSTED_WINDOWS=1`. `android.yml`'s windows row runs only on the
+nightly schedule unless that variable is set (pull requests, merge groups,
+pushes and dispatches leave it out). When adding a job that can run on a `windows-*` label in a
+push-triggered workflow, put `vars.PULP_ALLOW_HOSTED_WINDOWS == '1'` in its
+`if:` (or route it through a resolver and list it in
+`COMPUTED_WINDOWS_ROUTING`): `HostedWindowsOptInTests` in
+`tools/scripts/test_windows_runner_policy.py` scans every workflow and fails
+otherwise. `windows-cli-compile.yml` is the one listed exception, because
+`auto-release.yml`'s pre-tag check reads its push verdict.
+
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
 `.github/workflows/macos-cross-advisory.yml` is a path-scoped advisory
