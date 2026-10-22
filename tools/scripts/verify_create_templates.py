@@ -30,6 +30,9 @@ This script is the structural guard:
      requestAnimationFrame or repeating-timer callback). New projects copy
      these files verbatim, so a slow pattern here is a slow pattern in every
      scaffolded plugin.
+  4. Every standalone CMakeLists template takes an installed Catch2 3 when
+     CMake finds one and otherwise downloads the hash-pinned release archive
+     (`check_catch2_fetch`), since that fetch is paid on every first configure.
 
 It does NOT build anything. It does NOT need the CLI binary. It runs
 in seconds on every supported platform (Linux x86_64, Linux arm64,
@@ -245,6 +248,38 @@ def check_template_dir(type_name: str, dir_path: Path) -> list[str]:
     return failures
 
 
+_CATCH2_DECLARE = re.compile(r"FetchContent_Declare\(\s*Catch2\b(?P<body>[^)]*)\)", re.S)
+
+
+def check_catch2_fetch(type_name: str, dir_path: Path) -> list[str]:
+    """Every generated project builds its tests against Catch2, so how a
+    template fetches it is paid on every first configure. A template must
+    take an installed Catch2 3 when CMake finds one (FIND_PACKAGE_ARGS) and
+    otherwise download the release archive pinned by hash, not git-clone the
+    whole history. `catch2_SOURCE_DIR` is empty when the installed package is
+    used, so the template must not append `extras/` unconditionally."""
+    failures: list[str] = []
+    for template_file in sorted(dir_path.rglob("CMakeLists.txt.template")):
+        text = template_file.read_text(encoding="utf-8")
+        rel = template_file.relative_to(dir_path)
+        for m in _CATCH2_DECLARE.finditer(text):
+            body = m.group("body")
+            if "GIT_REPOSITORY" in body:
+                failures.append(f"[{type_name}] {rel}: Catch2 is fetched with git; "
+                                "use the release archive URL with URL_HASH")
+            if not re.search(r"\bURL_HASH\s+SHA256=[0-9a-f]{64}\b", body):
+                failures.append(f"[{type_name}] {rel}: Catch2 download is not pinned "
+                                "by URL_HASH SHA256=<64 hex>")
+            if not re.search(r"\bFIND_PACKAGE_ARGS\b", body):
+                failures.append(f"[{type_name}] {rel}: Catch2 declare lacks FIND_PACKAGE_ARGS, "
+                                "so an installed Catch2 is never used")
+            if ("${catch2_SOURCE_DIR}" in text
+                    and not re.search(r"\bif\(\s*catch2_SOURCE_DIR\s*\)", text)):
+                failures.append(f"[{type_name}] {rel}: appends ${{catch2_SOURCE_DIR}}/extras "
+                                "unconditionally; guard it with if(catch2_SOURCE_DIR)")
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Structural smoke for pulp create templates",
@@ -294,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     for type_dir in type_dirs:
         all_failures.extend(check_template_dir(type_dir.name, type_dir))
         all_failures.extend(check_realtime_patterns(type_dir.name, type_dir))
+        all_failures.extend(check_catch2_fetch(type_dir.name, type_dir))
 
     if all_failures:
         for line in all_failures:

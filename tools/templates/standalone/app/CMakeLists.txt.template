@@ -8,13 +8,25 @@ find_package(Pulp {{SDK_VERSION}} REQUIRED)
 
 # Tests
 include(FetchContent)
+# Populate dependencies in this configure rather than in a nested sub-build.
+if(POLICY CMP0168)
+    cmake_policy(SET CMP0168 NEW)
+endif()
+# An installed Catch2 3 (for example `brew install catch2`) is used as-is, which
+# skips both the download and compiling its ~100 sources. Otherwise the pinned
+# release archive is fetched and checked against its hash, which is quicker
+# than a git clone of the whole history.
 FetchContent_Declare(Catch2
-    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG v3.7.1
+    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz
+    URL_HASH SHA256=c991b247a1a0d7bb9c39aa35faf0fe9e19764213f28ffba3109388e62ee0269c
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    FIND_PACKAGE_ARGS 3 CONFIG
 )
 FetchContent_MakeAvailable(Catch2)
 include(CTest)
-list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+if(catch2_SOURCE_DIR)
+    list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+endif()
 include(Catch)
 
 pulp_add_app({{TARGET_NAME}}
