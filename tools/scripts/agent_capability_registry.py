@@ -9,6 +9,7 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    "pulp/audio/impulse_response.hpp": "Pulp::audio",
     "pulp/audio/format_registry.hpp": "Pulp::audio",
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
@@ -168,6 +169,17 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/audio/impulse_response.hpp",
+        "fingerprint": "sha256:740702d0bf9e54f8584de49999cfcf91c7c9b71c84c355b46a6a686e283bbe69",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Impulse-response loading is host infrastructure consumed by the "
+            "convolution and offline-render capabilities; it is not an independently "
+            "selected generator-facing capability in the installed contract."
+        ),
+    },
     {
         "include": "pulp/audio/format_registry.hpp",
         "fingerprint": "sha256:caedada7e925bc78317407961d313052ce4e92c14ec12ca51477e567823ac128",
