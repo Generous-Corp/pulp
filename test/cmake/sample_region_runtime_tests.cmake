@@ -15,7 +15,8 @@ pulp_add_test_suite(pulp-test-sample-region-runtime
         pulp::format
         pulp::graph
         pulp::audio
-        pulp::audio-analysis)
+        pulp::audio-analysis
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 
 if(Python3_EXECUTABLE)
     add_test(NAME sample-region-i2-rt02-process-contract

@@ -502,6 +502,22 @@ file, but only the first names it in its arguments; the second reaches it
 through a verifier that hardcodes the path. Excluding only the obvious one
 leaves a permanent red.
 
+### Suites that start a realtime worker pool
+
+`GraphRuntimeWorkerPool` workers join the realtime-priority fallback on their
+first batch and spin between batches. Realtime threads starve every
+normal-priority thread on the machine, the ctest scheduler included, so two
+pool-starting suites running side by side can freeze a parallel run for
+seconds and fail timing assertions in unrelated suites. Every suite that drives
+the pool directly or enables SignalGraph's parallel executor therefore
+registers with `PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool`;
+`tools/scripts/test_realtime_pool_resource_locks.py` (ctest
+`realtime-pool-resource-locks`) fails a new one that does not. The lock only
+serializes those suites with each other, so it costs no wall time on the
+required gate. A test that deliberately oversubscribes far past the core count
+should keep its workers at normal priority (`set_fallback_join_hook_for_test`)
+instead of relying on the lock.
+
 ## Grouped test executables (one binary, many suites)
 
 Every Catch2 executable statically links the whole `pulp::view` stack, so a

@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,7 @@ NAMES = {
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
     "cmake-ios-auv3-control-shipping": set(),
     "pulp-test-cli-migration-index": set(),
+    "pulp-rust-cli-cargo-tests": set(), "pulp-rust-cli-doc-tests": set(),
     "TripleBuffer hammer: writer + reader for 500ms": set(),
     "SeqLock hammer: 1 writer + 2 readers for 500ms": set(),
     "SpscQueue hammer: producer + consumer for 500ms": set(),
@@ -139,6 +141,40 @@ class SelectionTests(unittest.TestCase):
                           "core/audio/src/buffer.cpp"], selection("focused", ["unit-a"]))
         self.assertEqual(plan["merge_only"], [])
         self.assertEqual(plan["tests"], ["unit-a"])
+
+    PULP_RS_TESTS = ["pulp-rust-cli-cargo-tests", "pulp-rust-cli-doc-tests"]
+
+    def test_a_pulp_rs_edit_runs_the_cargo_tests_first(self) -> None:
+        # The crate owns no CMake sources, so the projection selects nothing.
+        for path in ("experimental/pulp-rs/src/main.rs", "experimental/pulp-rs/Cargo.toml",
+                     "experimental/pulp-rs/tests/cli_smoke.rs",
+                     # Markdown fixtures that tests/phase6d_parity_test.rs reads.
+                     "experimental/pulp-rs/tests/fixtures/docs/mini_docs_tree/docs/reference/cli.md",
+                     *step.PULP_RS_EXTERNAL_INPUTS, *step.PULP_RS_TEST_TIME_INPUTS):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", ["unit-a"]))
+                self.assertEqual(sorted(plan["merge_only"]), self.PULP_RS_TESTS)
+                self.assertEqual(sorted(plan["tests"][:2]), self.PULP_RS_TESTS)
+                # A diff of skills or Markdown alone is never projected.
+                projected = [] if step.is_non_test_path(path) else ["unit-a"]
+                self.assertEqual(plan["tests"][2:], projected)
+
+    def test_the_pulp_rs_family_names_the_tests_the_crate_registers(self) -> None:
+        # A rename of either ctest would leave the family selecting less.
+        registered = re.findall(r"add_test\(NAME\s+(\S+)",
+                                (REPO / "experimental/pulp-rs/CMakeLists.txt").read_text(encoding="utf-8"))
+        test_re = next(t for f, _, t in step.PATH_FAMILIES if f == "pulp-rs-cargo")
+        self.assertEqual(sorted(n for n in registered if test_re.search(n)), self.PULP_RS_TESTS)
+
+    def test_control_non_pulp_rs_paths_do_not_run_the_cargo_tests(self) -> None:
+        for path in ("tools/cli/src/main.cpp", "experimental/other/src/main.rs",
+                     "experimental/pulp-rs/README.md", "experimental/pulp-rs/UPSTREAM_SYNC.md",
+                     "docs/reference/pulp-rs/cli.rs", "tools/packages/other.json",
+                     ".agents/skills/trace-sql/other.sql"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", ["unit-a"]))
+                self.assertNotIn("pulp-rust-cli-cargo-tests", plan["tests"])
+                self.assertNotIn("pulp-rs-cargo", plan["families"])
 
     def test_no_editor_fixture_reaches_its_artifact_probe(self) -> None:
         plan = self.plan(["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],
@@ -287,6 +323,94 @@ endif()
 """
 
 
+class PulpRsEmbeddedInputTests(unittest.TestCase):
+    """Files the crate compiles in from outside experimental/pulp-rs.
+
+    include_str!/include_bytes! targets and the build script's
+    cargo:rerun-if-changed inputs become part of the binaries the cargo tests
+    run, so an edit to one must select them too.
+    """
+
+    CRATE = "experimental/pulp-rs"
+    MACRO = re.compile(r"\binclude_(?:str|bytes)!\s*\(")
+    LITERAL = re.compile(r"\binclude_(?:str|bytes)!\s*\(\s*\"([^\"]+)\"\s*[,)]")
+    # build.rs paths resolve against CARGO_MANIFEST_DIR, the crate root.
+    BUILD_SCRIPT = f"{CRATE}/build.rs"
+    RERUN = re.compile(r"cargo:rerun-if-changed=([^\"]*)\"")
+    JOIN = re.compile(r"\.join\(\s*\"([^\"]+)\"\s*\)")
+
+    def crate_sources(self) -> dict[str, str]:
+        root = REPO / self.CRATE
+        return {f.relative_to(REPO).as_posix(): f.read_text(encoding="utf-8")
+                for f in sorted(root.rglob("*.rs")) if "target" not in f.relative_to(root).parts}
+
+    def external_inputs(self, sources: dict[str, str]) -> set[str]:
+        found: set[str] = set()
+        for rel, text in sources.items():
+            # A computed path (concat!, env!) cannot be checked statically.
+            self.assertEqual(len(self.MACRO.findall(text)), len(self.LITERAL.findall(text)),
+                             f"{rel}: an include_str!/include_bytes! without a literal path")
+            literals = [os.path.join(os.path.dirname(rel), lit) for lit in self.LITERAL.findall(text)]
+            if rel == self.BUILD_SCRIPT:
+                literals += self.build_script_inputs(text)
+            for literal in literals:
+                path = os.path.normpath(literal)
+                if not path.startswith(self.CRATE + "/"):
+                    found.add(path.replace(os.sep, "/"))
+        return found
+
+    def build_script_inputs(self, text: str) -> list[str]:
+        """The crate-root-relative paths build.rs watches."""
+        reruns = self.RERUN.findall(text)
+        literal = [r for r in reruns if "{" not in r]
+        joined = self.JOIN.findall(text)
+        # An interpolated rerun-if-changed path must come from a .join("...")
+        # literal; anything else is computed and cannot be checked statically.
+        self.assertLessEqual(len(reruns) - len(literal), len(joined),
+                             "build.rs watches a path that is not a .join() literal")
+        return [os.path.join(self.CRATE, p) for p in literal + joined]
+
+    def test_the_build_script_matrix_is_found(self) -> None:
+        self.assertIn("tools/scripts/release_product_matrix.json",
+                      self.external_inputs(self.crate_sources()))
+
+    def test_every_external_embedded_file_selects_the_family(self) -> None:
+        found = self.external_inputs(self.crate_sources())
+        self.assertEqual(found, set(step.PULP_RS_EXTERNAL_INPUTS))
+        for path in found:
+            self.assertTrue((REPO / path).is_file(), path)
+            self.assertIn("pulp-rs-cargo", step.family_tests([path], ["pulp-rust-cli-cargo-tests"]))
+
+    def test_planted_new_embedded_file_is_detected(self) -> None:
+        # Negative control: a new embed outside the crate must not pass unseen.
+        sources = self.crate_sources()
+        sources[f"{self.CRATE}/src/planted.rs"] = (
+            'const X: &str = include_str!("../../../tools/scripts/planted.json");\n')
+        found = self.external_inputs(sources)
+        self.assertNotEqual(found, set(step.PULP_RS_EXTERNAL_INPUTS))
+        self.assertIn("tools/scripts/planted.json", found)
+        self.assertNotIn("pulp-rs-cargo", step.family_tests(["tools/scripts/planted.json"],
+                                                            ["pulp-rust-cli-cargo-tests"]))
+
+    def test_planted_new_build_script_input_is_detected(self) -> None:
+        # Negative control: a new file build.rs reads with std::fs and watches.
+        sources = self.crate_sources()
+        sources[self.BUILD_SCRIPT] += (
+            'fn planted(m: &std::path::Path) {\n'
+            '    let p = m.join("../../tools/scripts/planted_build.json");\n'
+            '    println!("cargo:rerun-if-changed={}", p.display());\n}\n')
+        found = self.external_inputs(sources)
+        self.assertIn("tools/scripts/planted_build.json", found)
+        self.assertNotEqual(found, set(step.PULP_RS_EXTERNAL_INPUTS))
+
+    def test_the_test_time_inputs_exist_and_select_the_family(self) -> None:
+        for path in step.PULP_RS_TEST_TIME_INPUTS:
+            with self.subTest(path=path):
+                self.assertTrue((REPO / path).is_file(), path)
+                self.assertIn("pulp-rs-cargo",
+                              step.family_tests([path], ["pulp-rust-cli-cargo-tests"]))
+
+
 class RequiredFamilyTests(unittest.TestCase):
     """The required families against the real test sources, not a fixture."""
 
@@ -300,11 +424,17 @@ class RequiredFamilyTests(unittest.TestCase):
             if rename:
                 text = text.replace(*rename)
             names.extend(name for _line, name in step.catch_case_names(text))
+        # The Rust CLI's tests are CMake add_test registrations, not Catch2 cases.
+        cmake = (REPO / "experimental/pulp-rs/CMakeLists.txt").read_text(encoding="utf-8")
+        if rename:
+            cmake = cmake.replace(*rename)
+        names.extend(re.findall(r"add_test\(NAME\s+(\S+)", cmake))
         return names
 
     def resolve(self, names: list[str]) -> dict[str, list[str]]:
         paths = {"runtime-sync-hammers": "core/runtime/include/pulp/runtime/seqlock.hpp",
-                 "audio-buffer-ops": "core/audio/include/pulp/audio/buffer_ops.hpp"}
+                 "audio-buffer-ops": "core/audio/include/pulp/audio/buffer_ops.hpp",
+                 "pulp-rs-cargo": "experimental/pulp-rs/src/main.rs"}
         out = {}
         for family, path in paths.items():
             out.update({k: v for k, v in step.family_tests([path], names).items()
@@ -319,6 +449,12 @@ class RequiredFamilyTests(unittest.TestCase):
         for primitive in ("TripleBuffer", "SeqLock", "SpscQueue"):
             self.assertTrue(any(h.startswith(primitive) for h in hammers), (primitive, hammers))
         self.assertGreaterEqual(len(resolved["audio-buffer-ops"]), 1)
+        self.assertEqual(sorted(resolved["pulp-rs-cargo"]),
+                         ["pulp-rust-cli-cargo-tests", "pulp-rust-cli-doc-tests"])
+
+    def test_planted_rename_of_the_pulp_rs_tests_is_detected(self) -> None:
+        resolved = self.resolve(self.real_case_names(rename=("pulp-rust-cli-", "pulp-rs-cli-")))
+        self.assertEqual(step.empty_required_families(resolved), ["pulp-rs-cargo"])
 
     def test_planted_rename_of_the_hammers_is_detected(self) -> None:
         # Negative control: rename every hammer case the way a refactor might.

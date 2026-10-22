@@ -2260,6 +2260,56 @@ TEST_CASE("compile_sksl reports each shader's own error under concurrent compile
     REQUIRE(mismatches.load() == 0);     // no cross-thread error attribution
 }
 
+// Graphite names a runtime shader's coordinate parameter `pos` and keeps the
+// author's locals, so a local `pos` in main() breaks only on the GPU. The
+// raster compiler accepts these sources as written, which is why the refusal
+// has to come from Pulp's cache and is checked here without a GPU.
+TEST_CASE("compile_sksl refuses a local named pos in main on every backend",
+          "[canvas][shader][compile][runtime-effect]") {
+    const char* refused[] = {
+        "half4 main(float2 xy) { float2 pos = xy; return half4(half(pos.x), 0, 0, 1); }",
+        "half4 main(float2 xy) { half r = 0; { float2 pos = float2(0); r = half(xy.x); } "
+        "return half4(r, 0, 0, 1); }",
+        "half4 main(float2 xy) { half r = 0; for (float pos = 0; pos < 2; pos += 1) "
+        "{ r += half(xy.x); } return half4(r); }",
+        "half4 main(float2 xy) { float a = 1, pos = 2; return half4(half(a + pos)); }",
+        "half4 main(float2 xy) {\n  // a comment\n  float2 pos[2];\n  return half4(1);\n}",
+        "half4 main(float2 xy) { float a, pos; pos = a; return half4(half(pos)); }",
+        "half4 main(float2 xy) { float2 a, pos[2]; return half4(1); }",
+        "half4 main(float2 xy) { float a = 1, pos, b; return half4(half(a)); }",
+        "half4 main(float2 xy) { half r = 0; for (int i = 0, pos = 2; i < pos; ++i) "
+        "{ r += 1; } return half4(r); }",
+    };
+    for (const char* src : refused) {
+        INFO(src);
+        const std::string error = Canvas::compile_sksl(src);
+        CHECK(error.find("'pos'") != std::string::npos);
+    }
+    // The diagnostic names the line, so an author can find the local.
+    CHECK(Canvas::compile_sksl(refused[4]).rfind("line 3:", 0) == 0);
+
+    const char* accepted[] = {
+        "half4 main(float2 xy) { float2 q = xy; return half4(half(q.x), 0, 0, 1); }",
+        "half4 main(float2 pos) { { float2 q = pos; } return half4(half(pos.x)); }",
+        "const float2 pos = float2(1); half4 main(float2 xy) { return half4(half(pos.x)); }",
+        "half4 f(float2 p) { float2 pos = p; return half4(half(pos.x)); } "
+        "half4 main(float2 xy) { return f(xy); }",
+        "struct S { float2 pos; }; half4 main(float2 xy) { S s; s.pos = xy; "
+        "return half4(half(s.pos.x)); }",
+        "half4 main(float2 xy) { half4 inColor = half4(1); half4 destColor = inColor; "
+        "return destColor; }",
+        "half4 main(float2 xy) { /* float2 pos = xy; */ return half4(1); }",
+        // A global passed as a call or constructor argument is not a declarator.
+        "const float2 pos = float2(1); half4 f(float2 a, float2 b, float c) "
+        "{ return half4(half(a.x + b.x + c)); } "
+        "half4 main(float2 xy) { return f(xy, pos, 1) + half4(float4(xy.x, pos, 0.0)); }",
+        "uniform float2 pos; half4 main(float2 xy) { return half4(half(xy.x + pos.x)); }",
+    };
+    for (const char* src : accepted) {
+        INFO(src);
+        CHECK(Canvas::compile_sksl(src).empty());
+    }
+}
 
 TEST_CASE("unusable text geometry is refused rather than reaching the glyph stroker",
           "[canvas][skia][text][robustness]") {

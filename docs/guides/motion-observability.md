@@ -73,6 +73,7 @@ paths see the dedicated sections below.
 | "Scroll restore lands at the wrong content offset" | `motion::trace(...).scroll_geometry(name, scroll_view, props)` — reads `ScrollView`'s offset, visible rect, content size, and scrollable max directly |
 | "An imported Figma animation looks subtly off" | Record a fixture, assert against the imported intent (timing, monotonicity, settling time) |
 | "Frames look fine, the value series is correct, but the rendered effect is wrong" | Capture frames, run `tools/motion/visual/analyze_sequence.py` |
+| "Did update N actually reach the screen, or is a retained scene stale?" | Paint `pulp::test_support::FrameStampView` (`test/support/frame_stamp.hpp`) into the frame, capture, run `tools/motion/visual/frame_stamp_decode.py` |
 
 ## Visual analysis outputs
 

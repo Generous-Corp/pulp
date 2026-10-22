@@ -1,0 +1,54 @@
+{
+  "id": "realtime-worker-pool-test-lock",
+  "title": "Timeline suites that enable the parallel executor serialize on the realtime worker-pool ctest lock",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "14f4a718-8071-445e-a1ec-da3e4f39c327",
+  "owned_paths": [
+    "test/cmake/timeline_tests.cmake",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/realtime-worker-pool-test-lock.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/cmake/timeline_tests.cmake",
+      "needles": [
+        "PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "## A test that enables SignalGraph's parallel executor takes the realtime pool lock"
+      ]
+    },
+    {
+      "path": "tools/scripts/test_realtime_pool_resource_locks.py",
+      "needles": [
+        "LOCK = \"RESOURCE_LOCK pulp_realtime_worker_pool\""
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "Test registration only: a ctest RESOURCE_LOCK property on existing suites. No header, target, or installed artifact changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler, or document shape changes; only how ctest schedules existing timeline suites."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema entry, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged; serializing pool-starting ctests is CI test topology, not a design-time capability."
+    }
+  }
+}

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <thread>
@@ -206,82 +207,177 @@ TEST_CASE("shared IO telemetry completion timing snapshots stay coherent under c
     // Normal samples satisfy submit == 2 * pre + 1 (odd); overflow samples carry
     // pre == max and an even submit; reset() publishes all zeros. A snapshot
     // that mixes fields from different updates matches none of these shapes.
-    constexpr int kSnapshots = 200000;
-    constexpr std::uint64_t kMinOverlappingUpdates = 1000;
+    //
+    // Overlap is measured, not hoped for. Each writer bumps `started` before
+    // every update call and `finished` after it returns, so a read overlapped an
+    // update in flight exactly when `started`, loaded after the snapshot,
+    // exceeds `finished`, loaded before it. The reader drives two phases:
+    // recorder only, then recorder and reset() contending for the guard. In the
+    // contended phase it counts overlaps with each writer separately. Each
+    // phase keeps reading until every watched writer has kTargetOverlappedReads
+    // overlapped reads. That count gives the test its power against torn
+    // reads, and unloaded or sanitizer-slowed hosts reach it. A starved host may
+    // stop at kMinimumOverlappedReads per writer once the phase's soft budget has
+    // passed, with a WARN carrying the counts. The test fails only if even that
+    // minimum is not reached by the shared hard deadline. Progress is counted
+    // only from samples that won the guard and were published.
+    constexpr std::uint64_t kTargetOverlappedReads = 100000;
+    constexpr std::uint64_t kMinimumOverlappedReads = 1000;
+    constexpr auto kPhaseSoftBudget = pulp::test::kProgressDeadline;
+    constexpr auto kHardDeadline = 12 * pulp::test::kProgressDeadline;
+    constexpr std::uint32_t kReadsBeforeBackoff = 1024;
     constexpr auto kMax = std::numeric_limits<std::uint64_t>::max();
+    enum Phase : int { Idle = 0, RecorderOnly = 1, Both = 2, Stop = 3 };
+    struct WriterProgress {
+        std::atomic<std::uint64_t> started{0};
+        std::atomic<std::uint64_t> finished{0};
+        std::atomic<std::uint64_t> published{0};
+    };
     SharedIoTelemetry telemetry;
-    std::atomic<std::uint64_t> published{0};
-    std::atomic<std::uint64_t> resets{0};
-    std::atomic<bool> stop{false};
+    std::atomic<int> phase{Idle};
+    WriterProgress recorder_progress;
+    WriterProgress reset_progress;
+    // Writers sleep briefly every kUpdatesPerBurst updates. A thread that never
+    // blocks loses scheduling priority on a saturated host and can go
+    // unscheduled for a whole phase; the wakeup keeps it competitive.
+    constexpr std::uint64_t kUpdatesPerBurst = 4096;
+    const auto writer_pause = [] { std::this_thread::sleep_for(std::chrono::microseconds(20)); };
+    const auto idle_pause = [] { std::this_thread::sleep_for(std::chrono::microseconds(100)); };
     std::thread recorder([&] {
         std::uint64_t i = 0;
-        while (!stop.load(std::memory_order_relaxed)) {
-            ++i;
+        for (int p = phase.load(std::memory_order_acquire); p != Stop;
+             p = phase.load(std::memory_order_acquire)) {
+            if (p != RecorderOnly && p != Both) {
+                idle_pause();
+                continue;
+            }
+            if (++i % kUpdatesPerBurst == 0)
+                writer_pause();
+            recorder_progress.started.fetch_add(1, std::memory_order_seq_cst);
             const bool sample_published = i % 8 == 0
                                               ? telemetry.record_completion_timing(kMax, 2 * i)
                                               : telemetry.record_completion_timing(i, 2 * i + 1);
+            recorder_progress.finished.fetch_add(1, std::memory_order_seq_cst);
             if (sample_published)
-                published.fetch_add(1, std::memory_order_relaxed);
+                recorder_progress.published.fetch_add(1, std::memory_order_relaxed);
         }
     });
     std::thread resetter([&] {
-        while (!stop.load(std::memory_order_relaxed)) {
+        std::uint64_t i = 0;
+        for (int p = phase.load(std::memory_order_acquire); p != Stop;
+             p = phase.load(std::memory_order_acquire)) {
+            if (p != Both) {
+                idle_pause();
+                continue;
+            }
+            reset_progress.started.fetch_add(1, std::memory_order_seq_cst);
             telemetry.reset();
-            resets.fetch_add(1, std::memory_order_relaxed);
-            std::this_thread::yield();
+            reset_progress.finished.fetch_add(1, std::memory_order_seq_cst);
+            reset_progress.published.fetch_add(1, std::memory_order_relaxed);
+            if (++i % kUpdatesPerBurst == 0)
+                writer_pause();
+            // reset() waits for the guard; yielding lets the recorder win it
+            // too, so the phase races both kinds of update.
+            else
+                std::this_thread::yield();
         }
-    });
-    // Require a publication that actually won the guard while reset() was
-    // contending for it, not merely a recorder call that dropped its sample.
-    const bool writers_started = pulp::test::wait_for_condition([&] {
-        return published.load(std::memory_order_relaxed) != 0 &&
-               resets.load(std::memory_order_relaxed) != 0;
     });
 
     std::uint64_t incoherent = 0;
-    const auto check_snapshot = [&] {
-        const auto s = telemetry.snapshot();
+    const auto coherent = [&](const SharedIoTelemetrySnapshot& s) {
         const bool zero = s.pre_submit_delay_ns == 0 && s.submit_to_completion_ns == 0 &&
                           s.scheduled_to_completion_ns == 0;
-        bool coherent = false;
-        if (s.completion_timing_valid) {
-            coherent = zero || (s.submit_to_completion_ns == 2 * s.pre_submit_delay_ns + 1 &&
-                                s.scheduled_to_completion_ns ==
-                                    s.pre_submit_delay_ns + s.submit_to_completion_ns);
-        } else {
-            // Invalid is either an overflow sample or the fail-closed contended
-            // read, which carries no timing values.
-            coherent =
-                zero || (s.pre_submit_delay_ns == kMax && s.scheduled_to_completion_ns == 0 &&
-                         s.submit_to_completion_ns != 0 && s.submit_to_completion_ns % 2 == 0);
-        }
-        if (!coherent)
-            ++incoherent;
+        if (s.completion_timing_valid)
+            return zero || (s.submit_to_completion_ns == 2 * s.pre_submit_delay_ns + 1 &&
+                            s.scheduled_to_completion_ns ==
+                                s.pre_submit_delay_ns + s.submit_to_completion_ns);
+        // Invalid is either an overflow sample or the fail-closed contended
+        // read, which carries no timing values.
+        return zero || (s.pre_submit_delay_ns == kMax && s.scheduled_to_completion_ns == 0 &&
+                        s.submit_to_completion_ns != 0 && s.submit_to_completion_ns % 2 == 0);
     };
-    const auto published_before = published.load(std::memory_order_relaxed);
-    const auto resets_before = resets.load(std::memory_order_relaxed);
-    for (int n = 0; writers_started && n < kSnapshots; ++n)
-        check_snapshot();
-    // Keep reading until both writers have advanced during the read phase, so
-    // the coherence check cannot pass without overlapping concurrent updates.
-    // Each predicate evaluation takes a snapshot first, so overlap is never
-    // accepted without a checked read taken after the baseline.
-    const bool overlapped =
-        writers_started && pulp::test::pump_until(
-                               [&] {
-                                   check_snapshot();
-                                   return published.load(std::memory_order_relaxed) >
-                                              published_before + kMinOverlappingUpdates &&
-                                          resets.load(std::memory_order_relaxed) >
-                                              resets_before + kMinOverlappingUpdates;
-                               },
-                               [] { std::this_thread::yield(); });
-    stop.store(true, std::memory_order_relaxed);
+    struct PhaseResult {
+        std::uint64_t reads = 0;
+        std::uint64_t recorder_overlaps = 0;
+        std::uint64_t reset_overlaps = 0;
+        std::uint64_t recorder_published = 0;
+        std::uint64_t resets_published = 0;
+        bool met = false;
+        bool reached_target = false;
+    };
+    const auto hard_deadline = std::chrono::steady_clock::now() + kHardDeadline;
+    const auto run_phase = [&](Phase active) {
+        PhaseResult result;
+        const bool watch_resets = active == Both;
+        const auto reached = [&](std::uint64_t quota) {
+            return result.recorder_overlaps >= quota &&
+                   (!watch_resets || result.reset_overlaps >= quota);
+        };
+        const auto recorder_published_before =
+            recorder_progress.published.load(std::memory_order_relaxed);
+        const auto resets_published_before =
+            reset_progress.published.load(std::memory_order_relaxed);
+        phase.store(active, std::memory_order_release);
+        const auto soft_budget = std::chrono::steady_clock::now() + kPhaseSoftBudget;
+        std::uint32_t reads_without_overlap = 0;
+        while (!reached(kTargetOverlappedReads)) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= hard_deadline || (now >= soft_budget && reached(kMinimumOverlappedReads)))
+                break;
+            const auto recorder_finished =
+                recorder_progress.finished.load(std::memory_order_seq_cst);
+            const auto reset_finished = reset_progress.finished.load(std::memory_order_seq_cst);
+            const auto snapshot = telemetry.snapshot();
+            const auto recorder_started = recorder_progress.started.load(std::memory_order_seq_cst);
+            const auto reset_started = reset_progress.started.load(std::memory_order_seq_cst);
+            ++result.reads;
+            if (!coherent(snapshot))
+                ++incoherent;
+            // An update was in flight during this read: it started before the
+            // read ended and had not finished when the read began.
+            const bool raced_recorder = recorder_started > recorder_finished;
+            const bool raced_reset = watch_resets && reset_started > reset_finished;
+            result.recorder_overlaps += raced_recorder ? 1 : 0;
+            result.reset_overlaps += raced_reset ? 1 : 0;
+            if (raced_recorder || raced_reset) {
+                reads_without_overlap = 0;
+            } else if (++reads_without_overlap == kReadsBeforeBackoff) {
+                // The writers are not getting scheduled. Give up this core
+                // briefly instead of spinning the reader against its own
+                // writers; a host where they do run never reaches this.
+                reads_without_overlap = 0;
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            }
+        }
+        phase.store(Idle, std::memory_order_release);
+        result.recorder_published =
+            recorder_progress.published.load(std::memory_order_relaxed) - recorder_published_before;
+        result.resets_published =
+            reset_progress.published.load(std::memory_order_relaxed) - resets_published_before;
+        result.met = reached(kMinimumOverlappedReads) && result.recorder_published > 0 &&
+                     (!watch_resets || result.resets_published > 0);
+        result.reached_target = reached(kTargetOverlappedReads);
+        return result;
+    };
+    const auto recorder_only = run_phase(RecorderOnly);
+    const auto both = run_phase(Both);
+    phase.store(Stop, std::memory_order_release);
     recorder.join();
     resetter.join();
 
-    REQUIRE(writers_started);
-    REQUIRE(overlapped);
+    INFO("recorder-only phase: " << recorder_only.recorder_overlaps << " overlapped of "
+                                 << recorder_only.reads << " reads, "
+                                 << recorder_only.recorder_published << " published");
+    INFO("contended phase: " << both.recorder_overlaps << " recorder / " << both.reset_overlaps
+                             << " reset overlapped of " << both.reads << " reads, "
+                             << both.recorder_published << " published, " << both.resets_published
+                             << " resets");
+    INFO("target " << kTargetOverlappedReads << ", minimum " << kMinimumOverlappedReads
+                   << " overlapped reads per watched writer");
+    if (!recorder_only.reached_target || !both.reached_target)
+        WARN("a phase stopped below its overlap target after the soft budget (starved host)");
+    REQUIRE(recorder_only.met);
+    REQUIRE(both.met);
     REQUIRE(incoherent == 0);
 
     REQUIRE(telemetry.record_completion_timing(5, 11));
