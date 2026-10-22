@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <vector>
 #include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
@@ -134,6 +135,50 @@ TEST_CASE("FastMath tanh_minimax is odd, unit-slope, and seamless at its clamp",
     // The Lambert form's seam, for contrast: a 6.7e-4 jump across x = 4.
     REQUIRE(FastMath::tanh(4.0001f) - FastMath::tanh(3.9999f) > 6.0e-4f);
     REQUIRE(FastMath::tanh_minimax(4.0001f) - FastMath::tanh_minimax(3.9999f) < 1.0e-6f);
+}
+
+TEST_CASE("FastMath tanh_minimax block form agrees with the scalar form",
+          "[signal][fast_math]") {
+    // Lengths straddle the 16-sample vector step so both the vector body and
+    // the scalar tail run; the in-place call exercises output == input.
+    for (std::size_t count : {std::size_t{1}, std::size_t{15}, std::size_t{16}, std::size_t{37},
+                              std::size_t{1000}}) {
+        std::vector<float> input(count);
+        for (std::size_t i = 0; i < count; ++i)
+            input[i] = 12.0f * std::sin(0.7f * static_cast<float>(i) + 0.3f);
+        std::vector<float> output(count, 0.0f);
+        FastMath::tanh_minimax(input.data(), output.data(), count);
+        std::vector<float> in_place = input;
+        FastMath::tanh_minimax(in_place.data(), in_place.data(), count);
+        for (std::size_t i = 0; i < count; ++i) {
+            const float x = input[i];
+            INFO("count " << count << " x " << x);
+            REQUIRE(in_place[i] == output[i]);
+            REQUIRE(std::abs(output[i]) <= 1.0f);
+            REQUIRE(std::abs(static_cast<double>(output[i]) - std::tanh(static_cast<double>(x))) <
+                    3.8e-6);
+            // Inside the clamp the two forms evaluate the same rational.
+            if (std::abs(x) <= 7.0f)
+                REQUIRE(output[i] == FastMath::tanh_minimax(x));
+            else
+                REQUIRE(std::abs(output[i] - FastMath::tanh_minimax(x)) < 5e-7f);
+        }
+    }
+    // Every float in [0, 8] by stride, through the vector body.
+    std::vector<float> xs;
+    for (std::uint32_t bits = 0;; bits += 4099u) {
+        const float x = std::bit_cast<float>(bits);
+        if (!(x <= 8.0f)) break;
+        xs.push_back(x);
+        xs.push_back(-x);
+    }
+    std::vector<float> ys(xs.size());
+    FastMath::tanh_minimax(xs.data(), ys.data(), xs.size());
+    double worst = 0.0;
+    for (std::size_t i = 0; i < xs.size(); ++i)
+        worst = std::max(worst, std::abs(static_cast<double>(ys[i]) -
+                                         std::tanh(static_cast<double>(xs[i]))));
+    REQUIRE(worst < 3.8e-6);
 }
 
 TEST_CASE("FastMath sin approximation", "[signal][fast_math]") {
