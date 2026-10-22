@@ -4009,6 +4009,27 @@ re-tokenizing the raw string. **Gotcha:** the bridge takes one drop shadow, so
 multi-layer stacks render only their first layer natively even though the IR now
 preserves them all.
 
+### An initial-value style must install nothing natively
+
+`IRStyle` keeps string properties as authored, so `clip-path: none`,
+`filter: none` and friends arrive at `apply_visual_style` as non-empty
+optionals. A property whose handler passes "anything unparsed" straight
+through is the trap: the native materializer stored `clip-path: none` as SVG
+path data, and every paint recorded `clip_path_svg "none"`. Skia's path parser
+rejects it, so the raster was unchanged and no pixel scorer saw it; a backend
+that treats an unparseable path as an empty clip would erase the node. The JS
+lane had always cleared on `none`, so the lanes disagreed silently.
+
+`test/test_design_import_inert_styles.cpp` builds one scene through the IR JSON
+reader with and without each inert declaration and requires an identical
+drawlist, an identical drawlist from the next sibling on (headed by its open
+save depth, so a leaked save is named as a leak) and an identical Skia raster.
+When you add a style property to the materializer, add its inert value AND a
+live value to that table: the live value is what proves the property reaches
+the paint path at all, since a dropped property passes the inert check.
+`background-image` has no live value there because the native materializer
+does not paint it.
+
 ### Figma effects: blurs lower for real; new families are diagnosed
 
 All three Figma producers lower the **ordered effect stack**, honoring
