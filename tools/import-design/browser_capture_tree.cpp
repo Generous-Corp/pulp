@@ -647,6 +647,29 @@ bool contains(const ClipRect& outer, const ClipRect& inner) {
            outer.bottom >= inner.bottom - kGrid;
 }
 
+/// Why a node's captured box cannot be snapped to Chromium's CSS-pixel grid as
+/// a local paint rect: `"transform"` when the node itself is transformed,
+/// `"transformed-ancestor"` when an ancestor is, and empty when neither is.
+/// DOMSnapshot boxes are post-transform for the whole transformed subtree, so
+/// a snapped absolute rect cannot be turned back into a local one. Both the
+/// box paint rect and an overflow clip taken from a clipper's box are snapped
+/// only when this is empty, so a clipper and the clip it imposes always land
+/// on the same pixels.
+std::string transformed_ancestry(const CapturedStyleIndex& index,
+                                 int node_index) {
+    for (int cursor = node_index, steps = 0;
+         cursor >= 0 && steps < index.node_count();
+         cursor = index.parent_of(cursor), ++steps) {
+        const auto styles = index.styles_for_node(cursor);
+        const auto transform = styles.find("transform");
+        if (transform == styles.end() || transform->second.empty() ||
+            transform->second == "none")
+            continue;
+        return cursor == node_index ? "transform" : "transformed-ancestor";
+    }
+    return {};
+}
+
 /// Where a browser would actually clip a node, resolved from the snapshot.
 ///
 /// A pure function of the captured document — it holds no opinion about the
@@ -666,6 +689,10 @@ public:
         ClipRect rect;              ///< intersection of every rect clipper
         bool clipped = false;       ///< at least one rect clipper applies
         bool inexpressible = false; ///< a shape clipper this model cannot carry
+        /// Every rect clipper's own box paint is snapped to the CSS-pixel
+        /// grid (`transformed_ancestry` is empty for each), so the clip may be
+        /// snapped the same way.
+        bool clippers_snap = true;
     };
 
     explicit CssClipChain(const CapturedStyleIndex& index) : index_(index) {
@@ -707,6 +734,8 @@ public:
             if (facts_of(ancestor).clips) {
                 out.rect = intersect(out.rect, clip_box_of(ancestor));
                 out.clipped = true;
+                if (!transformed_ancestry(index_, ancestor).empty())
+                    out.clippers_snap = false;
             }
             current = ancestor;
         }
@@ -1276,19 +1305,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         // own, so exclude the entire transformed ancestry from local paint
         // rect adjustment. It is not safe to turn an absolute captured rect
         // back into a local untransformed background/border extent.
-        std::string rect_ineligible;
-        for (int cursor = node.node_index, steps = 0;
-             cursor >= 0 && steps < index.node_count();
-             cursor = index.parent_of(cursor), ++steps) {
-            const auto ancestor_styles = index.styles_for_node(cursor);
-            const auto transform = ancestor_styles.find("transform");
-            if (transform == ancestor_styles.end() || transform->second.empty() ||
-                transform->second == "none")
-                continue;
-            rect_ineligible = cursor == node.node_index ? "transform"
-                                                         : "transformed-ancestor";
-            break;
-        }
+        auto rect_ineligible = transformed_ancestry(index, node.node_index);
         if (!rect_ineligible.empty())
             lowered.attributes["browser_box_paint_rect_ineligible"] =
                 std::move(rect_ineligible);
@@ -1806,8 +1823,10 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         // half-pixel offset lands one device row away from its own track.
         // Snapped here, before the clip is judged or stored, so the fidelity
         // audit in `place()` compares the same rectangle the node carries.
+        // A clipper whose box paint is not snapped (a transformed clipper or
+        // one inside a transformed ancestor) leaves its clip unsnapped too.
         if (device_scale > 0.0 && std::isfinite(device_scale) &&
-            !slots[i].rotated) {
+            !slots[i].rotated && css_clip[i].clippers_snap) {
             const auto snap = [](double edge, double shift) {
                 return std::floor(edge + shift + 0.5) - shift;
             };

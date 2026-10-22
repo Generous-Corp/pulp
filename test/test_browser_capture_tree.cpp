@@ -2984,6 +2984,51 @@ TEST_CASE("a clip lands on the snapped edges its clipper is painted on",
     CHECK(raw->style.clip_rect->y == Catch::Approx(0.0));
 }
 
+TEST_CASE("a transformed clipper's clip stays off the grid its paint is not on",
+          "[browser-capture][native-lowering][clip-model]") {
+    // The snapped-clip case above with a 2x scale on the track. A transformed
+    // box's captured rect is post-transform, so its own box paint is not
+    // snapped; the clip it imposes must not be either, or the fill's corners
+    // land half a pixel away from the track they belong to.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV#track (scaled), 4 DIV#fill
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[50,52,11,11,55,55,55,55,55],"
+                  "[50,52,11,11,55,55,55,55,55],"
+                  "[50,52,11,11,55,55,55,55,55],"
+                  "[51,52,48,11,55,55,55,55,59],"
+                  "[50,52,11,11,55,55,55,55,55]]",
+        .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                  "[20.25,206.5,180,24],[20.25,206.5,115,24]]",
+        .paint_orders = "[0,1,1,2,3]",
+        .computed_names = std::string(kClipRadiusProperties),
+    };
+    const auto lowered = lower_snapshot(spec, "clip-transformed-clipper", {},
+                                        false, 2.0);
+    const auto* track = find_node(lowered.root, [](const IRNode& node) {
+        return node.style.width && *node.style.width == 180.0f;
+    });
+    const auto* fill = find_node(lowered.root, [](const IRNode& node) {
+        return node.style.width && *node.style.width == 115.0f;
+    });
+    REQUIRE(track != nullptr);
+    REQUIRE(fill != nullptr);
+    // The clipper's paint is not snapped...
+    CHECK(attribute(*track, "browser_box_paint_dpr").empty());
+    CHECK(attribute(*track, "browser_box_paint_rect_ineligible") == "transform");
+    // ...so neither is its clip: it sits on the solved layout edges.
+    REQUIRE(fill->style.clip_rect.has_value());
+    CHECK(fill->style.clip_rect->x == Catch::Approx(0.0));
+    CHECK(fill->style.clip_rect->y == Catch::Approx(0.0));
+    CHECK(fill->style.clip_rect->width == Catch::Approx(180.0));
+    CHECK(fill->style.clip_rect->height == Catch::Approx(24.0));
+}
+
 TEST_CASE("a clip that really does apply is carried, and a no-op one is not",
           "[browser-capture][native-lowering][clip-model]") {
     // Without this, the model could simply be "never clip anything" and both
