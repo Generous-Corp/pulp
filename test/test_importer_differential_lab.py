@@ -1025,6 +1025,25 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertTrue(result["threshold_eligible"])
         self.assertFalse(result["production_promotion_enabled"])
 
+    def test_promotion_thresholds_are_pinned(self) -> None:
+        # Every other test reads PROMOTION_THRESHOLDS symbolically, so a lowered
+        # threshold would pass them all. The values are policy: changing one
+        # must be a deliberate edit here, not a side effect.
+        self.assertEqual(LAB.PROMOTION_THRESHOLDS, {
+            "structural": 0.99,
+            "geometry": 0.98,
+            "typography": 0.98,
+            "visual": 0.995,
+        })
+        perfect = {"score": 1.0}
+        counted = {"status": "pass", "failures": []}
+        just_below = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, {"score": 0.994999}, counted)
+        self.assertFalse(just_below["threshold_eligible"])
+        at_threshold = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, {"score": 0.995}, counted)
+        self.assertTrue(at_threshold["threshold_eligible"])
+
     def test_work_counters_gate_threshold_eligibility(self) -> None:
         perfect = {"score": 1.0}
         clean = {"schema": LAB.OBSERVER_COUNTER_SCHEMA, "views_constructed": 9,
