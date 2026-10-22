@@ -309,8 +309,8 @@ coverage, for example `clamp(0.5 - g.d / g.px, 0.0, 1.0)`.
 | `flat_arc` | arc of radius `(outer + inner) / 2` from `arc_start`, sweeping `arc_sweep` | 0 at `arc_start` | flat caps |
 | `ring` | full circle starting at `arc_start` | wraps from 1 to 0 at `arc_start` | no caps |
 | `flat_segment` | horizontal line through the centre, `halfSize.x` each side | 0 at the left end | band half width `stroke_width / 2`, flat caps |
-| `rounded_segment` | as `flat_segment` | as `flat_segment` | rounded caps; `cross` is measured from the end point |
-| `stadium` | horizontal line between the two cap centres | 0 at the left cap | half width is half the height; a square stadium is a circle and reports `valid = 0` |
+| `rounded_segment` | as `flat_segment` | as `flat_segment` | rounded caps, each a dome about its end point: `cross` is the distance from the end point and `tan` turns so the normal points away from it |
+| `stadium` | horizontal line between the two cap centres | 0 at the left cap | half width is half the height; caps are domes as for `rounded_segment`; a stadium whose width does not exceed its height is a circle and reports `valid = 0` |
 
 Every chart matches the shape `draw_sdf_shape` draws for the same
 `SDFStyle`. The horizontal shapes are horizontal in the canvas's local space;
@@ -321,8 +321,10 @@ no closed form, so it has no `t`.
 
 From JS, `setWidgetShaderChart(id, source)` installs a chart shader on a knob,
 whose arc is the `flat_arc` from `Knob::start_angle` to `Knob::end_angle`. A
-chart shader alone paints the knob's body; a body shader is optional and paints
-whenever the chart draw is refused.
+chart shader alone paints the knob's body and the knob draws its rotating value
+pointer over it, since the chart is the same full arc at every value; a body
+shader is optional, replaces that pointer, and paints whenever the chart draw is
+refused.
 
 ### Feather modes and the `reach` rule
 
@@ -364,7 +366,7 @@ it works on every charted shape and can be printed, copied and edited.
 | `tube` | a solid rail with a specular highlight | `color`, `light`, `elevation`, `profile`, `intensity` |
 | `light-pipe` | an emissive LED pipe, brightest where it is thickest, with a glint | `accent`, `light`, `elevation`, `profile`, `intensity` |
 | `centre-highlight` | a bright line along the centre of the band (`center-highlight` also accepted) | `color`, `accent`, `intensity` |
-| `glow` | an opaque core with a Gaussian halo outside the band | `accent`, `intensity`, `sigma` |
+| `glow` | an opaque core with a Gaussian halo outside the band | `accent`, `intensity`, `sigma` (at most 256) |
 
 `profile` is the cross-section: `round` (a cylinder), `flat` (a flat face with
 narrow rounded rims) or `chamfer` (a flat centre with 45 degree chamfers).
@@ -374,8 +376,8 @@ from the right (90 is above, 270 below; default 120, upper left) and
 strings.
 
 ```js
-// Install on a knob. Raises the knob's reach if the preset needs it, so call it
-// after setWidgetShader, which sets the reach it computes.
+// Install on a knob. A glow's extra reach belongs to the chart: it pads only the
+// chart draw and is replaced when another chart or preset is installed.
 setWidgetShaderChartPreset('drive', 'light-pipe', { accent: '#5ab0ff', profile: 'round' });
 
 // Or get the source to inspect or edit.
