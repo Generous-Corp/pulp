@@ -91,6 +91,14 @@ panel that covers the whole page owns its canvas (`importer-owned`), so a
 dropped document colour shows up as a residual instead of being supplied.
 The render receipt records the placement it applied, and the lab rejects a
 receipt whose placement differs from what it requested.
+`comparison.visual.full_frame_classification` names a full-frame score below
+0.995. `panel-translation` means the residual is exactly an unplaced panel's
+offset, and it is the only class that excuses one.
+`page-background-unresolved` means pixels outside the frame differ while the
+page colour is `unresolved`, so the observer left the page unpainted.
+`unexplained` covers everything else, including an outside-frame residual
+under a resolved or importer-owned colour. The second and third classes both
+block promotion.
 `comparison.work_counters` judges the observer's own counters from the
 digest-bound render receipt: a tree that outlives its teardown, or a paint
 mutation after the first frame that requested no repaint, makes the fixture

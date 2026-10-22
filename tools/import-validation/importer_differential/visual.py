@@ -117,6 +117,7 @@ def outside_frame_ink(image: Any, own_frame: tuple[int, int, int, int]) -> dict[
 def classify_full_frame(
     full: dict[str, Any], reference: Any, candidate: Any,
     registration: dict[str, Any], artifacts_dir: Path, registered: bool,
+    page_background_status: str | None = None,
 ) -> dict[str, Any]:
     """Say whether a full-frame residual is exactly the panel translation.
 
@@ -128,6 +129,12 @@ def classify_full_frame(
     translation, the shifted render reproduces the browser PNG and no
     outside-frame pixel differs. A render the observer already placed at the
     authored origin has no translation left to explain a residual.
+
+    When the lab could not resolve the page colour Chromium paints
+    (`page_background_status == "unresolved"`), the observer leaves the page
+    around the panel unpainted, so a residual outside the frame is named
+    `page-background-unresolved` instead of `unexplained`. Both block
+    promotion; only `panel-translation` excuses a full-frame residual.
     """
     from PIL import Image, ImageChops
 
@@ -145,14 +152,32 @@ def classify_full_frame(
         if not (native_box[0] <= index % candidate.width < native_box[2]
                 and native_box[1] <= index // candidate.width < native_box[3])]
     if offset == (0, 0) or not outside_native:
-        return {"classification": "unexplained", "threshold": threshold,
+        frame_box = registration["browser_crop_px"]
+        diff = ImageChops.difference(reference, candidate)
+        outside_differing = sum(
+            1 for index, pixel in enumerate(diff.get_flattened_data())
+            if not (frame_box[0] <= index % diff.width < frame_box[2]
+                    and frame_box[1] <= index // diff.width < frame_box[3])
+            and (sum(pixel[:3]) > 2 or pixel[3] > 2))
+        locus = []
+        if outside_differing:
+            locus.append("outside-frame")
+        if full["registered_visual"]["score"] < threshold:
+            locus.append("in-frame")
+        unresolved = page_background_status == "unresolved" and outside_differing > 0
+        return {"classification": ("page-background-unresolved" if unresolved
+                                   else "unexplained"),
+                "threshold": threshold,
                 "offset_px": list(offset),
-                "residual_locus": (
-                    ["in-frame"] if full["registered_visual"]["score"] < threshold
-                    else ["outside-frame"]),
-                "reason": "residual is not a panel translation: the native "
-                          "render already draws the panel at the authored "
-                          "origin, or there is no outside-frame area"}
+                "outside_frame_differing_pixel_count": outside_differing,
+                "page_background_status": page_background_status,
+                "residual_locus": locus or ["outside-frame"],
+                "reason": (
+                    "the page colour around the panel could not be resolved, "
+                    "so the observer left it unpainted" if unresolved else
+                    "residual is not a panel translation: the native render "
+                    "already draws the panel at the authored origin, or there "
+                    "is no outside-frame area")}
     fill = Counter(outside_native).most_common(1)[0][0]
     shifted = Image.new("RGBA", candidate.size, fill)
     shifted.paste(candidate, offset)
@@ -211,6 +236,7 @@ def visual_metrics(
     authored_frame: dict[str, Any] | None = None,
     device_scale_factor: float = 1.0,
     native_origin: tuple[float, float] = (0.0, 0.0),
+    page_background_status: str | None = None,
 ) -> dict[str, Any]:
     """Score the full frame and the authored frame cropped from both renders.
 
@@ -326,7 +352,7 @@ def visual_metrics(
     full["registration"] = registration
     full["full_frame_classification"] = classify_full_frame(
         full, reference, candidate, registration, artifacts_dir,
-        registered_reference is not None)
+        registered_reference is not None, page_background_status)
     return full
 
 

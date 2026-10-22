@@ -2386,6 +2386,43 @@ class FullFrameClassificationTests(unittest.TestCase):
                          "unexplained")
         self.assertFalse(LAB.full_frame_ok(visual))
 
+    def placed(self, status):
+        # The observer placed the panel at the authored origin but left the
+        # page around it unpainted: only the outside of the frame differs.
+        browser = Image.new("RGBA", (40, 30), self.PAGE)
+        self.panel(browser, 6, 4)
+        native = Image.new("RGBA", (40, 30), (0, 0, 0, 0))
+        self.panel(native, 6, 4)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            browser.save(root / "browser.png")
+            native.save(root / "native.png")
+            return LAB.visual_metrics(
+                root / "browser.png", root / "native.png", root / "overlays",
+                (40, 30), self.FRAME, 1.0, (6, 4), status)
+
+    def test_unresolved_page_background_names_the_outside_residual(self) -> None:
+        visual = self.placed("unresolved")
+        classification = visual["full_frame_classification"]
+        self.assertEqual(classification["classification"], "page-background-unresolved")
+        self.assertEqual(classification["residual_locus"], ["outside-frame"])
+        self.assertEqual(visual["registered_visual"]["score"], 1.0)
+        # Named, not excused: it still blocks promotion.
+        self.assertFalse(LAB.full_frame_ok(visual))
+        result = self.promote(visual)
+        self.assertFalse(result["threshold_eligible"])
+        self.assertIn("classified page-background-unresolved", " ".join(result["reasons"]))
+
+    def test_resolved_page_background_outside_residual_stays_unexplained(self) -> None:
+        # Control: the same outside residual with a resolved page colour is a
+        # real page defect, not a missing input.
+        for status in ("resolved", "importer-owned", None):
+            with self.subTest(status=status):
+                visual = self.placed(status)
+                self.assertEqual(visual["full_frame_classification"]["classification"],
+                                 "unexplained")
+                self.assertFalse(LAB.full_frame_ok(visual))
+
     def test_low_full_frame_without_classification_fails_closed(self) -> None:
         self.assertFalse(LAB.full_frame_ok({"score": 0.9}))
         self.assertFalse(LAB.full_frame_ok({"score": 0.9, "full_frame_classification": {

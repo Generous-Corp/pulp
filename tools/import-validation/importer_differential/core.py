@@ -1269,6 +1269,7 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
         authored_frame,
         scale,
         lanes.placement_origin,
+        lanes.page_background.get("status"),
     )
     visual["registration"]["native_layout"] = native_frame_registration
     if visual.get("registered_visual"):
