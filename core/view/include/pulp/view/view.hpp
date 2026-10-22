@@ -99,15 +99,12 @@ public:
     LayoutMode layout_mode() const { return layout_mode_; }
 
     /// Opt this view's layout pass out of Yoga's whole-pixel grid rounding.
-    /// Per-node rounding keeps flowed UI seam-free, but a replayed design
-    /// arrives with SOLVED fractional geometry, and rounding moves siblings
-    /// RELATIVE to each other by up to ~0.7px per axis (a knob's value ring
-    /// drifts off its body). Honored when ANY view in a layout pass sets it,
-    /// since one Yoga pass has one config; imported-design roots set it.
+    /// A replayed design arrives with solved fractional geometry that per-node
+    /// rounding would shift by up to ~0.7px per axis. Honored when ANY view in
+    /// a layout pass sets it (one Yoga pass has one config).
     void set_subpixel_layout(bool v) { subpixel_layout_ = v; }
     bool subpixel_layout() const { return subpixel_layout_; }
-    /// The root of a captured (imported) frame: captured text snaps its
-    /// baselines to this frame's grid. Import lanes set it on their root.
+    /// Root of an imported frame: captured text snaps baselines to its grid.
     void set_captured_frame_root(bool v) {
         captured_frame_root_ = v;
     }
