@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-cpp-lane-initial-keyword-notes",
+  "created_at": "2026-10-22T06:29:13Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The baked C++ lane's fidelity report no longer notes mix-blend-mode normal or filter, backdrop-filter, clip-path and transform none as unlowered; it changes diagnostics only, not lowering, rendering or authority.",
+  "tests": [
+    "ctest --test-dir build -R 'generate_pulp_cpp does not report a style property set to its initial keyword'",
+    "ctest --test-dir build -R 'generate_pulp_cpp reports the style properties it cannot lower'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
