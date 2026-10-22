@@ -822,3 +822,137 @@ test('state switches reconcile pseudo planes and hide stale bindings', () => {
   assert.ok(calls.some(call => call[0] === 'create' && call[1] === id));
   assert.ok(calls.some(call => call[0] === 'visible' && call[1] === id && call[2] === false));
 });
+
+// ── Layout reads batched ahead of layout writes ─────────────────────────
+// getLayoutBoxMetrics runs a whole-root layout pass whenever any geometry or
+// typography write has landed since the previous read. A pass that alternates
+// read, write, read, write therefore lays the whole tree out once per binding.
+// The trace model below counts exactly those flushes: a read is a flush when a
+// write precedes it with no read in between.
+const LAYOUT_READS = new Set(['getLayoutBoxMetrics']);
+const LAYOUT_WRITES = new Set(['setPosition', 'setLeft', 'setTop', 'setFlex',
+  'setFontFamily', 'setFontSize', 'setFontWeight', 'setFontStyle',
+  'setLetterSpacing', 'setCapturedLineBoxes', 'clearCapturedLineBoxes']);
+
+function layoutFlushes(trace) {
+  let dirty = false;
+  let flushes = 0;
+  for (const verb of trace) {
+    if (LAYOUT_WRITES.has(verb)) dirty = true;
+    else if (LAYOUT_READS.has(verb) && dirty) {
+      ++flushes;
+      dirty = false;
+    }
+  }
+  return flushes;
+}
+
+// `count` captured buttons, each an absolute layout binding whose text paints
+// through a generated Label child, so the pass reads metrics for both the
+// layout binding and the text target.
+function buttonDocument(count) {
+  const root = { tagName: 'DIV', __pulpId: 'root', id: 'root', parentElement: null,
+    textContent: '', _children: [] };
+  const nodes = [root];
+  const layoutBindings = [];
+  const textBindings = [];
+  for (let index = 0; index < count; ++index) {
+    const button = { tagName: 'BUTTON', __pulpId: `b${index}`, id: `b${index}`,
+      parentElement: root, textContent: `Button ${index}`, _children: [],
+      __pulpTextTargetId: `b${index}-text` };
+    root._children.push(button);
+    nodes.push(button);
+    const path = [{ index: 0, tag: 'div' }, { index, tag: 'button' }];
+    layoutBindings.push({ index, tag: 'button', path,
+      box: { left: index * 30, top: 0, width: 28, height: 20 } });
+    textBindings.push({ text: `Button ${index}`, path,
+      boxes: [{ left: 4, top: 2, width: 20, height: 14 }],
+      basis: { width: 28, resolved_face: 'Mono', requested: {
+        font_family: 'Mono', font_size: 11, font_weight: 400, font_slant: 0,
+        letter_spacing: 0 } } });
+  }
+  return { nodes, layoutBindings, textBindings };
+}
+
+function traceApply(doc) {
+  const trace = [];
+  const metrics = { localX: 4, localY: 2, offsetWidth: 20, offsetHeight: 14,
+    borderLeftWidth: 1, borderTopWidth: 1, borderRightWidth: 1,
+    marginLeft: 0, marginTop: 0 };
+  const bridge = {};
+  for (const verb of LAYOUT_WRITES) bridge[verb] = () => { trace.push(verb); };
+  bridge.getLayoutBoxMetrics = () => { trace.push('getLayoutBoxMetrics'); return metrics; };
+  const sandbox = evaluateEntry({ registryNodes: doc.nodes,
+    layoutBindings: doc.layoutBindings, textBindings: doc.textBindings, bridge });
+  trace.length = 0;
+  const applied = sandbox.__pulpApplyMaterializedImportMetadata__();
+  return { trace, applied, sandbox };
+}
+
+test('the trace model counts one flush per read that follows a write', () => {
+  // The planted negative for the model itself: an interleaved pass must read
+  // as N flushes, and a phased one as one, or the cases below prove nothing.
+  const interleaved = [];
+  for (let index = 0; index < 8; ++index)
+    interleaved.push('getLayoutBoxMetrics', 'setLeft', 'setTop');
+  assert.equal(layoutFlushes(interleaved), 7);
+  const phased = [...Array(8).fill('getLayoutBoxMetrics'),
+    ...Array(8).fill('setLeft'), 'getLayoutBoxMetrics'];
+  assert.equal(layoutFlushes(phased), 1);
+});
+
+test('one application flushes layout a bounded number of times', () => {
+  const small = traceApply(buttonDocument(4));
+  const large = traceApply(buttonDocument(40));
+  // CONTROL: every layout and text binding was applied, and each one read
+  // metrics, so the flush count below is measured over a full pass.
+  assert.equal(small.applied, 8);
+  assert.equal(large.applied, 80);
+  assert.equal(large.trace.filter(verb => verb === 'getLayoutBoxMetrics').length,
+    40 * 2 + 40 * 2);
+  // Metrics for layout bindings are read before any of their writes, and text
+  // targets are measured once after every geometry and typography write.
+  assert.ok(layoutFlushes(large.trace) <= 1,
+    `saw ${layoutFlushes(large.trace)} layout flushes for 40 bindings`);
+  assert.equal(layoutFlushes(large.trace), layoutFlushes(small.trace),
+    'layout flushes grow with the binding count');
+});
+
+test('no layout metric read follows a captured-geometry write', () => {
+  const { trace } = traceApply(buttonDocument(6));
+  const firstLineBoxes = trace.indexOf('setCapturedLineBoxes');
+  const lastRead = trace.lastIndexOf('getLayoutBoxMetrics');
+  assert.ok(firstLineBoxes > 0 && lastRead > 0, 'trace is missing a phase');
+  assert.ok(lastRead < firstLineBoxes,
+    'a text metric read follows a captured line-box write');
+  const firstLeft = trace.indexOf('setLeft');
+  const layoutReads = trace.slice(0, firstLeft)
+    .filter(verb => verb === 'getLayoutBoxMetrics').length;
+  assert.equal(layoutReads, 6 * 2,
+    'a layout-binding metric read follows a layout write');
+});
+
+test('phased reads translate every binding by its own parent and margins', () => {
+  // Batching reads must not shift which metrics feed which binding.
+  const doc = buttonDocument(3);
+  const lefts = [];
+  const lineBoxes = [];
+  const sandbox = evaluateEntry({ registryNodes: doc.nodes,
+    layoutBindings: doc.layoutBindings, textBindings: doc.textBindings,
+    bridge: {
+      setLeft: (id, value) => lefts.push([id, value]),
+      setCapturedLineBoxes: (id, boxes, width) => lineBoxes.push([id, boxes[0].left, width]),
+      getLayoutBoxMetrics: (id) => ({
+        localX: id.endsWith('-text') ? 3 : 0, localY: 1, offsetWidth: 20,
+        borderLeftWidth: id === 'root' ? 2 : 1, borderTopWidth: 0,
+        borderRightWidth: 1, marginLeft: Number(id.slice(1, 2)) || 0,
+        marginTop: 0 }),
+    } });
+  lefts.length = 0;
+  sandbox.__pulpApplyMaterializedImportMetadata__();
+  // left = captured - parent border (root: 2) - own margin (index).
+  assert.deepEqual(lefts, [['b0', -2], ['b1', 27], ['b2', 56]]);
+  // Text boxes move by the target's local offset; basis drops owner borders.
+  assert.deepEqual(lineBoxes, [['b0-text', 1, 26], ['b1-text', 1, 26],
+    ['b2-text', 1, 26]]);
+});
