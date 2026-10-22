@@ -875,7 +875,9 @@ TEST_CASE("FastMath::tanh_accurate stays within its pinned bound of std::tanh",
     CHECK(FastMath::tanh_accurate(-1.0e30f) == -1.0f);
     CHECK(FastMath::tanh_accurate(std::numeric_limits<float>::infinity()) == 1.0f);
     CHECK(FastMath::tanh_accurate(-std::numeric_limits<float>::infinity()) == -1.0f);
-    CHECK(std::isfinite(FastMath::tanh_accurate(std::numeric_limits<float>::quiet_NaN())));
+    // A NaN must propagate, not turn into a full-scale constant.
+    CHECK(std::isnan(FastMath::tanh_accurate(std::numeric_limits<float>::quiet_NaN())));
+    CHECK(std::isnan(FastMath::tanh_accurate(-std::numeric_limits<float>::quiet_NaN())));
     CHECK(std::signbit(FastMath::tanh_accurate(-0.0f)));
 }
 
