@@ -244,6 +244,29 @@ void emit_common_layout(std::ostringstream& out,
                   "flex.dim_min_height = {100.0f, pulp::view::DimensionUnit::percent};");
 }
 
+namespace {
+
+// CSS keywords match ASCII case-insensitively and ignore surrounding whitespace.
+bool is_css_keyword(std::string_view value, std::string_view keyword) {
+    const auto is_space = [](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; };
+    while (!value.empty() && is_space(value.front()))
+        value.remove_prefix(1);
+    while (!value.empty() && is_space(value.back()))
+        value.remove_suffix(1);
+    return std::equal(value.begin(), value.end(), keyword.begin(), keyword.end(),
+                      [](char a, char b) {
+                          return std::tolower(static_cast<unsigned char>(a)) ==
+                                 std::tolower(static_cast<unsigned char>(b));
+                      });
+}
+
+// An empty value or the property's initial keyword declares nothing to lower.
+bool declares_effect(const std::optional<std::string>& value, std::string_view initial) {
+    return value && !value->empty() && !is_css_keyword(*value, initial);
+}
+
+} // namespace
+
 void report_unlowered_visual_style(const EmitContext& ctx,
                                    const IRNode& node,
                                    const IRStyle& style);
@@ -429,19 +452,18 @@ void report_unlowered_visual_style(const EmitContext& ctx,
 
     if (!style.box_shadow.empty())
         note("box-shadow", "the node paints flat");
-    if (style.mix_blend_mode && !style.mix_blend_mode->empty())
+    if (declares_effect(style.mix_blend_mode, "normal"))
         note("mix-blend-mode", "the node composites as an opaque fill");
-    if (style.filter && !style.filter->empty())
+    if (declares_effect(style.filter, "none"))
         note("filter", "the node renders unfiltered");
-    if (style.backdrop_filter && !style.backdrop_filter->empty())
+    if (declares_effect(style.backdrop_filter, "none"))
         note("backdrop-filter", "the backdrop renders opaque");
-    if (style.clip_path && !style.clip_path->empty())
+    if (declares_effect(style.clip_path, "none"))
         note("clip-path", "the node paints its full rectangle");
     // Rotation lowers above. A transform that carries anything else (scale,
     // skew, translate, matrix) still does not, so report only that remainder
     // rather than claiming the whole property was dropped.
-    if (style.transform && !style.transform->empty() &&
-        !css_transform_rotation(*style.transform))
+    if (declares_effect(style.transform, "none") && !css_transform_rotation(*style.transform))
         note("transform", "the node renders untransformed");
     if (style.border_style && !style.border_style->empty())
         note("border-style", "the border renders solid");

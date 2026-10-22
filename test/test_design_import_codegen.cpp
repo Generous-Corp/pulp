@@ -221,6 +221,54 @@ TEST_CASE("generate_pulp_cpp reports the style properties it cannot lower",
     REQUIRE(reported("transform"));
 }
 
+TEST_CASE("generate_pulp_cpp does not report a style property set to its initial keyword",
+          "[view][import][cpp-codegen][fidelity]") {
+    // `none` (and `normal` for blending) is the initial value: nothing is
+    // dropped, so a note claiming the node renders unfiltered or untransformed
+    // would send someone hunting a gap that does not exist.
+    const auto unlowered_notes = [](const IRStyle& style) {
+        DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.name = "Panel";
+        ir.root.style = style;
+        std::vector<FidelityIssue> report;
+        CppExportOptions opts;
+        opts.fidelity_report = &report;
+        generate_pulp_cpp(ir, ir.asset_manifest, opts);
+        std::vector<std::string> details;
+        for (const auto& issue : report)
+            if (issue.kind == "cpp-unlowered-style")
+                details.push_back(issue.detail);
+        return details;
+    };
+
+    IRStyle initial;
+    initial.mix_blend_mode = "normal";
+    initial.filter = "none";
+    initial.backdrop_filter = " NONE ";
+    initial.clip_path = "None";
+    initial.transform = "none";
+    CHECK(unlowered_notes(initial).empty());
+
+    IRStyle live;
+    live.mix_blend_mode = "screen";
+    live.filter = "blur(2px)";
+    live.backdrop_filter = "blur(8px)";
+    live.clip_path = "circle(50%)";
+    live.transform = "scale(2)";
+    const auto notes = unlowered_notes(live);
+    const auto noted = [&](std::string_view property) {
+        return std::any_of(notes.begin(), notes.end(), [&](const std::string& detail) {
+            return detail.rfind(std::string(property) + " is set", 0) == 0;
+        });
+    };
+    CHECK(noted("mix-blend-mode"));
+    CHECK(noted("filter"));
+    CHECK(noted("backdrop-filter"));
+    CHECK(noted("clip-path"));
+    CHECK(noted("transform"));
+}
+
 TEST_CASE("generate_pulp_cpp lowers a rotation instead of reporting it",
           "[view][import][cpp-codegen]") {
     // The native-bridge JS lane reads rotation through the same parser the
