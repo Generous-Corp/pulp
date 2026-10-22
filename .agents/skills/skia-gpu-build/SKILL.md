@@ -200,6 +200,19 @@ shipping artifact.
 
 ## Gotchas (each cost real time)
 
+- **Apple builds link a trimmed copy of `libskunicode_icu.a`.** The archive's
+  embedded ICU data is 10.9 MB; `PulpSkiaIcuData.cmake` (called from FindSkia,
+  `PULP_ICU_DATA_SUBSET=ON` by default) rewrites the `libicu.icudtl_dat.o`
+  member into `build/pulp-skia-icu-subset/<key>/` with only the data the linked
+  ICU code reads (4.9 MB). A Skia bump that changes the data object's layout
+  makes the rewrite refuse and fall back to the full archive with a configure
+  WARNING, and then `icu-data-subset-linked` / `plugin-footprint-PulpGain` fail:
+  read the warning, do not just raise the budget. ICU fails **silently** when an
+  item is missing (a Thai or CJK word break collapses to one segment, no
+  error), which is why `pulp-test-icu-data-breaks` pins the full-data
+  boundaries; a new ICU consumer (collation, time zones, number formatting)
+  needs the policy in `tools/cmake/scripts/icu_data_subset.py` widened first.
+
 - **Windows ARM64 keeps its `arm64/` slice; never flatten it.** FindSkia.cmake
   selects `build/win-gpu/lib/Release/arm64/` for an arm64-win target and refuses
   the flat path, so an ARM64 configure cannot link x64 archives.

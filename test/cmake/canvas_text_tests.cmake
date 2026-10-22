@@ -90,6 +90,24 @@ pulp_add_test_suite(pulp-test-text-run-planner-parallel GROUP pulp-test-group-ca
 pulp_add_test_suite(pulp-test-text-run-planner-icu GROUP pulp-test-group-canvas-text
     LIBRARIES pulp::canvas)
 
+# Break iteration through the trimmed ICU data Pulp links (FindSkia,
+# PulpSkiaIcuData.cmake). Expectations are the untrimmed data's boundaries.
+pulp_add_test_suite(pulp-test-icu-data-breaks GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
+
+# The binary above must actually carry the trimmed ICU data; without this the
+# break tests would pass just as well against the full package.
+if(APPLE AND PULP_HAS_SKIA AND PULP_ICU_DATA_SUBSET AND Python3_EXECUTABLE)
+    add_test(NAME icu-data-subset-linked
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/plugin_footprint_check.py"
+            --profile icu-data "$<TARGET_FILE:pulp-test-group-canvas-text>")
+    set_tests_properties(icu-data-subset-linked PROPERTIES
+        LABELS "footprint"
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77)
+endif()
+
 # Async font lifecycle (register_font_url).
 pulp_add_test_suite(pulp-test-font-async-lifecycle GROUP pulp-test-group-canvas-text
     LIBRARIES pulp::canvas)

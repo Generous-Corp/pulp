@@ -31,6 +31,31 @@ pulp_add_plugin(PulpGain
     AAX_NATIVE_CODE "PGan"
 )
 
+# PulpGain built without an editor: the UI-less reference for footprint.
+add_subdirectory(headless)
+
+# ── Footprint ─────────────────────────────────────────────────────────────
+# PulpGain carries the default editor, so it links the full view, canvas,
+# Skia/Dawn and JavaScript stack. This holds the size that stack costs per
+# format (mapped segments, excluding the symbol table) and the trimmed ICU
+# data (tools/scripts/plugin_footprint_budget.json, profile "editor").
+if(APPLE AND Python3_EXECUTABLE AND PULP_HAS_SKIA AND PULP_ICU_DATA_SUBSET)
+    set(_pulp_gain_footprint_binaries "")
+    foreach(_fmt VST3 CLAP AU)
+        if(TARGET PulpGain_${_fmt})
+            list(APPEND _pulp_gain_footprint_binaries "$<TARGET_FILE:PulpGain_${_fmt}>")
+        endif()
+    endforeach()
+    add_test(NAME plugin-footprint-PulpGain
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/plugin_footprint_check.py"
+            --profile editor ${_pulp_gain_footprint_binaries})
+    set_tests_properties(plugin-footprint-PulpGain PROPERTIES
+        LABELS "packaging;footprint"
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77)
+endif()
+
 # ── Validation Tests ──────────────────────────────────────────────────────
 
 # CLAP dlopen test
