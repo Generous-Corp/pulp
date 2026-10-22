@@ -150,7 +150,7 @@ class SelectionTests(unittest.TestCase):
                      "experimental/pulp-rs/tests/cli_smoke.rs",
                      # Markdown fixtures that tests/phase6d_parity_test.rs reads.
                      "experimental/pulp-rs/tests/fixtures/docs/mini_docs_tree/docs/reference/cli.md",
-                     *step.PULP_RS_EXTERNAL_INPUTS):
+                     *step.PULP_RS_EXTERNAL_INPUTS, *step.PULP_RS_TEST_TIME_INPUTS):
             with self.subTest(path=path):
                 plan = self.plan([path], selection("focused", ["unit-a"]))
                 self.assertEqual(sorted(plan["merge_only"]), self.PULP_RS_TESTS)
@@ -326,13 +326,18 @@ endif()
 class PulpRsEmbeddedInputTests(unittest.TestCase):
     """Files the crate compiles in from outside experimental/pulp-rs.
 
-    include_str!/include_bytes! make such a file part of the binaries the cargo
-    tests run, so an edit to it must select them too.
+    include_str!/include_bytes! targets and the build script's
+    cargo:rerun-if-changed inputs become part of the binaries the cargo tests
+    run, so an edit to one must select them too.
     """
 
     CRATE = "experimental/pulp-rs"
     MACRO = re.compile(r"\binclude_(?:str|bytes)!\s*\(")
     LITERAL = re.compile(r"\binclude_(?:str|bytes)!\s*\(\s*\"([^\"]+)\"\s*[,)]")
+    # build.rs paths resolve against CARGO_MANIFEST_DIR, the crate root.
+    BUILD_SCRIPT = f"{CRATE}/build.rs"
+    RERUN = re.compile(r"cargo:rerun-if-changed=([^\"]*)\"")
+    JOIN = re.compile(r"\.join\(\s*\"([^\"]+)\"\s*\)")
 
     def crate_sources(self) -> dict[str, str]:
         root = REPO / self.CRATE
@@ -345,11 +350,29 @@ class PulpRsEmbeddedInputTests(unittest.TestCase):
             # A computed path (concat!, env!) cannot be checked statically.
             self.assertEqual(len(self.MACRO.findall(text)), len(self.LITERAL.findall(text)),
                              f"{rel}: an include_str!/include_bytes! without a literal path")
-            for literal in self.LITERAL.findall(text):
-                path = os.path.normpath(os.path.join(os.path.dirname(rel), literal))
+            literals = [os.path.join(os.path.dirname(rel), lit) for lit in self.LITERAL.findall(text)]
+            if rel == self.BUILD_SCRIPT:
+                literals += self.build_script_inputs(text)
+            for literal in literals:
+                path = os.path.normpath(literal)
                 if not path.startswith(self.CRATE + "/"):
                     found.add(path.replace(os.sep, "/"))
         return found
+
+    def build_script_inputs(self, text: str) -> list[str]:
+        """The crate-root-relative paths build.rs watches."""
+        reruns = self.RERUN.findall(text)
+        literal = [r for r in reruns if "{" not in r]
+        joined = self.JOIN.findall(text)
+        # An interpolated rerun-if-changed path must come from a .join("...")
+        # literal; anything else is computed and cannot be checked statically.
+        self.assertLessEqual(len(reruns) - len(literal), len(joined),
+                             "build.rs watches a path that is not a .join() literal")
+        return [os.path.join(self.CRATE, p) for p in literal + joined]
+
+    def test_the_build_script_matrix_is_found(self) -> None:
+        self.assertIn("tools/scripts/release_product_matrix.json",
+                      self.external_inputs(self.crate_sources()))
 
     def test_every_external_embedded_file_selects_the_family(self) -> None:
         found = self.external_inputs(self.crate_sources())
@@ -368,6 +391,24 @@ class PulpRsEmbeddedInputTests(unittest.TestCase):
         self.assertIn("tools/scripts/planted.json", found)
         self.assertNotIn("pulp-rs-cargo", step.family_tests(["tools/scripts/planted.json"],
                                                             ["pulp-rust-cli-cargo-tests"]))
+
+    def test_planted_new_build_script_input_is_detected(self) -> None:
+        # Negative control: a new file build.rs reads with std::fs and watches.
+        sources = self.crate_sources()
+        sources[self.BUILD_SCRIPT] += (
+            'fn planted(m: &std::path::Path) {\n'
+            '    let p = m.join("../../tools/scripts/planted_build.json");\n'
+            '    println!("cargo:rerun-if-changed={}", p.display());\n}\n')
+        found = self.external_inputs(sources)
+        self.assertIn("tools/scripts/planted_build.json", found)
+        self.assertNotEqual(found, set(step.PULP_RS_EXTERNAL_INPUTS))
+
+    def test_the_test_time_inputs_exist_and_select_the_family(self) -> None:
+        for path in step.PULP_RS_TEST_TIME_INPUTS:
+            with self.subTest(path=path):
+                self.assertTrue((REPO / path).is_file(), path)
+                self.assertIn("pulp-rs-cargo",
+                              step.family_tests([path], ["pulp-rust-cli-cargo-tests"]))
 
 
 class RequiredFamilyTests(unittest.TestCase):

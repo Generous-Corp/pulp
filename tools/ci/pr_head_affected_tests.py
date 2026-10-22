@@ -79,9 +79,11 @@ PR_FAST_LABEL = "pr-fast"
 NON_TEST_PREFIXES = (".agents/", ".claude", ".codex", ".github/", "docs/", "planning")
 NON_TEST_SUFFIXES = (".md",)
 
-# Files outside experimental/pulp-rs that the crate compiles in with
-# include_str!/include_bytes!. A test checks this list against the crate's
-# sources, so a new embedded file cannot be missed.
+# Files outside experimental/pulp-rs that the crate compiles in: the
+# include_str!/include_bytes! targets and the build script's
+# cargo:rerun-if-changed inputs. A test derives this set from the crate's
+# sources and requires an exact match, so a new compile-time input cannot be
+# missed.
 PULP_RS_EXTERNAL_INPUTS = (
     ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
     ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
@@ -89,6 +91,19 @@ PULP_RS_EXTERNAL_INPUTS = (
     "tools/import-design/browser_capture/runtime_manifest.txt",
     "tools/packages/pulp-packages-verify.cmake",
     "tools/packages/tool-registry.json",
+    "tools/scripts/release_product_matrix.json",
+)
+
+# Files outside the crate that its cargo tests open at run time through
+# CARGO_MANIFEST_DIR. These are listed by hand: run-time path arithmetic cannot
+# be enumerated statically, so this list is the coverage boundary. A test that
+# reads some other repository file at run time (pkg_pin_test and the trace
+# tool tests compute a repo root and join paths under it) is not selected by an
+# edit to that file; add the file here when such a read is introduced.
+PULP_RS_TEST_TIME_INPUTS = (
+    "tools/ci/record_build_metric.sh",
+    "tools/packages/chrome-for-testing-verification.md",
+    "tools/packages/packages.lock.schema.json",
 )
 
 # Paths the build graph cannot connect to the tests that read them.
@@ -123,13 +138,14 @@ PATH_FAMILIES = (
      re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
     # The Rust CLI is built and tested by cargo, not by CMake targets, so the
     # crate owns no CMake sources and the projection never reaches its cargo
-    # tests. Without this an edit to the crate, or to a file it embeds, runs
+    # tests. Without this an edit to the crate, or to a file it reads, runs
     # them only in the merge group, where a failure ejects the whole batch.
     # Only the crate's top-level prose selects nothing; Markdown under
     # tests/fixtures is test input.
     ("pulp-rs-cargo",
      re.compile(r"^(experimental/pulp-rs/(?!(README|UPSTREAM_SYNC)\.md$)"
-                r"|(" + "|".join(re.escape(p) for p in PULP_RS_EXTERNAL_INPUTS) + r")$)"),
+                r"|(" + "|".join(re.escape(p) for p in
+                                 PULP_RS_EXTERNAL_INPUTS + PULP_RS_TEST_TIME_INPUTS) + r")$)"),
      re.compile(r"^pulp-rust-cli-(cargo|doc)-tests$")),
     # The sync primitives are included by most of the tree, so an edit to one
     # selects thousands of tests and the budget reaches their own concurrency
