@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-audio-provider-conformance-v1.schema.json",
+  "title": "Pulp GPU-audio shared-I/O provider conformance receipt v1",
+  "description": "Written by test/harness/shared_io_provider_conformance.hpp. The shape is fixed here; tools/validation/verify_gpu_audio_provider_conformance.py is the authority for cross-field rules this schema cannot express: each required scenario exactly once, row_count equal to the rows, a passed differential row within program.tolerance, a real provider carrying an authenticated identity with a non-fake backend, and the writer verdict agreeing with the rows. A receipt is contract-conformance evidence under injected faults, not a real device-loss trigger or DAW result.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kit_version", "provider", "program", "required_scenarios", "scenarios", "row_count", "capacity", "truncated", "dropped_rows", "verdict"],
+  "properties": {
+    "schema": { "const": "pulp.gpu-audio.provider-conformance.v1" },
+    "kit_version": { "const": 1 },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "identity", "capabilities"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["fake", "real"] },
+        "identity": {
+          "description": "SharedIoProviderIdentity as reported by the provider itself.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authenticated", "provider_revision", "adapter_name", "adapter_backend", "adapter_vendor_id", "adapter_device_id", "native_runtime_authenticated", "native_runtime_name", "native_runtime_backend"],
+          "properties": {
+            "authenticated": { "type": "boolean" },
+            "provider_revision": { "type": "string" },
+            "adapter_name": { "type": "string" },
+            "adapter_backend": { "type": "string" },
+            "adapter_vendor_id": { "type": "integer", "minimum": 0 },
+            "adapter_device_id": { "type": "integer", "minimum": 0 },
+            "native_runtime_authenticated": { "type": "boolean" },
+            "native_runtime_name": { "type": "string" },
+            "native_runtime_backend": { "type": "string" }
+          }
+        },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["imported_host_pointer", "ordered_causal_state", "completion_service", "device_loss_recovery", "gpu_timestamps"],
+          "properties": {
+            "imported_host_pointer": { "type": "boolean" },
+            "ordered_causal_state": { "type": "boolean" },
+            "completion_service": { "type": "boolean" },
+            "device_loss_recovery": { "type": "boolean" },
+            "gpu_timestamps": { "type": "boolean" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "real" } } },
+          "then": { "properties": { "identity": { "properties": { "authenticated": { "const": true } } } } }
+        }
+      ]
+    },
+    "program": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scale", "bias", "frames", "slots", "blocks", "tolerance"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "scale": { "type": "number" },
+        "bias": { "type": "number" },
+        "frames": { "type": "integer", "minimum": 1 },
+        "slots": { "type": "integer", "minimum": 1 },
+        "blocks": { "type": "integer", "minimum": 1 },
+        "tolerance": { "type": "number", "minimum": 0, "maximum": 0.001 }
+      }
+    },
+    "required_scenarios": {
+      "const": ["nominal", "force_loss_before_submit", "force_loss_between_submit_and_registration", "force_loss_after_registration", "late_completion", "missing_completion", "refused_submission", "terminal_busy_retry", "teardown_quiescence", "drain_after_loss", "stale_generation_replay", "receipt_truncation", "differential_cpu_reference"]
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "verdict", "reason", "submissions", "retired_success", "retired_failure", "rejected_callbacks", "max_abs_error"],
+        "properties": {
+          "name": { "enum": ["nominal", "force_loss_before_submit", "force_loss_between_submit_and_registration", "force_loss_after_registration", "late_completion", "missing_completion", "refused_submission", "terminal_busy_retry", "teardown_quiescence", "drain_after_loss", "stale_generation_replay", "receipt_truncation", "differential_cpu_reference", "differential_provider_pair"] },
+          "verdict": { "enum": ["passed", "failed", "skipped"] },
+          "reason": { "type": "string", "minLength": 1 },
+          "submissions": { "type": "integer", "minimum": 0 },
+          "retired_success": { "type": "integer", "minimum": 0 },
+          "retired_failure": { "type": "integer", "minimum": 0 },
+          "rejected_callbacks": { "type": "integer", "minimum": 0 },
+          "max_abs_error": { "type": ["number", "null"], "minimum": 0 }
+        }
+      }
+    },
+    "row_count": { "type": "integer", "minimum": 1 },
+    "capacity": { "type": "integer", "minimum": 1 },
+    "truncated": { "const": false },
+    "dropped_rows": { "const": 0 },
+    "verdict": { "enum": ["passed", "failed"] }
+  }
+}
