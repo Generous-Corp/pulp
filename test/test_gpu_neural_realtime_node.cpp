@@ -406,6 +406,8 @@ TEST_CASE("offline rendering fences the GPU and keeps the shadow timeline",
     Rig rig(c);
     REQUIRE(rig.prepare());
     rig.render(6);
+    const auto submissions = rig.plan.submissions;
+    const auto gpu_blocks = rig.transport.delivery_snapshot().gpu_blocks;
     const auto n = kBlock;
     std::array<std::vector<float>, kChannels> in, out;
     std::array<const float*, kChannels> in_ptrs{};
@@ -429,6 +431,12 @@ TEST_CASE("offline rendering fences the GPU and keeps the shadow timeline",
     const auto reference = direct_reference(c, 16ull * kBlock);
     CHECK(max_abs_difference(rig.output, reference) == 0.0f);
     CHECK(rig.node->fenced());
+    // The fake provider computes the same function as the shadow, so the null
+    // alone cannot tell them apart: the offline blocks never reached it.
+    CHECK(rig.plan.submissions == submissions);
+    CHECK(rig.transport.delivery_snapshot().gpu_blocks == gpu_blocks);
+    CHECK_FALSE(rig.node->gpu_kernel_available());
+    CHECK_FALSE(rig.node->capability_report().gpu_kernel_available);
 }
 
 TEST_CASE("an unpublished CPU shadow makes prepare fail", "[gpu_audio][neural][negative]") {
@@ -734,5 +742,63 @@ TEST_CASE("neural shadow per-block CPU cost", "[.][neural-shadow-cost]") {
             std::printf("  block %3u  %-36s median %8.2f us  p99 %8.2f us  %6.2f%%\n", block,
                         cost.name.c_str(), median, p99, 100.0 * median / period_us);
         }
+    }
+}
+
+TEST_CASE("node in-flight depth may not exceed the backend's", "[gpu_audio][neural][negative]") {
+    for (const std::uint32_t backend_inflight : {2u, 1u}) {
+        CAPTURE(backend_inflight);
+        FamilyFixture fixture(NeuralFamily::WaveNet, kChannels, kBlock);
+        ChannelPlan plan;
+        WaveNetShape shape;
+        auto request = fixture.request();
+        request.backend =
+            make_fake_wavenet_backend(plan, shape, kChannels, kBlock, backend_inflight);
+        auto build = detail::make_neural_model(std::move(request));
+        REQUIRE(build);
+        GpuNeuralRealtimeNode node({.family = NeuralFamily::WaveNet,
+                                    .model = build.model,
+                                    .channels = kChannels,
+                                    .lead_blocks = kLead,
+                                    .capacity = kLead + 3,
+                                    .max_inflight = 2});
+        // Positive control: matching depths prepare.
+        CHECK(node.prepare() == (backend_inflight == 2));
+    }
+}
+
+TEST_CASE("a failed GPU prewarm degrades to the CPU-only contract",
+          "[gpu_audio][neural][negative]") {
+    Rig rig(kWaveNetGpu, kBlock, false, false, /*prewarm=*/1);
+    rig.plan.starve = true; // the prewarm block never completes
+    REQUIRE(rig.prepare());
+    CHECK_FALSE(rig.node->gpu_kernel_available());
+    CHECK(rig.node->epoch() == 0);
+    CHECK(rig.plan.releases >= kChannels);
+    CHECK(rig.node->status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+    rig.plan.starve = false;
+    rig.render(8);
+    CHECK(max_abs_difference(rig.output, direct_reference(kWaveNetGpu, 8ull * kBlock, kBlock, 1)) ==
+          0.0f);
+}
+
+TEST_CASE("a node whose release fails keeps its model bound", "[gpu_audio][neural][negative]") {
+    for (const bool release_ok : {true, false}) {
+        CAPTURE(release_ok);
+        Rig rig(kWaveNetGpu);
+        REQUIRE(rig.prepare());
+        rig.render(4);
+        rig.transport.release();
+        rig.plan.release_ok = release_ok;
+        rig.node.reset();
+        CHECK(rig.model->bound.load() == !release_ok);
+        GpuNeuralRealtimeNode adopter({.family = NeuralFamily::WaveNet,
+                                       .model = rig.model,
+                                       .channels = kChannels,
+                                       .lead_blocks = kLead,
+                                       .capacity = kLead + 3});
+        // Positive control: a clean release hands the model on.
+        CHECK(adopter.prepare() == release_ok);
+        rig.plan.release_ok = true;
     }
 }
