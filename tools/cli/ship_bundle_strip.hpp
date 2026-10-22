@@ -2,11 +2,13 @@
 //
 // A plug-in's first load after install costs time in proportion to the size of
 // its module, and local symbols are a large share of a Release module that no
-// host, crash reporter or dyld needs. `pulp ship package` therefore ships a
-// copy of each bundle whose main executable has had `strip -x` applied, and
-// re-signs that copy the way the original was signed. The bundle in the build
-// directory keeps its symbols, so debugging and the nm-based packaging checks
-// keep working against it.
+// host or dyld needs. `pulp ship package` therefore ships a copy of each bundle
+// whose main executable has had `strip -x` applied, and re-signs that copy the
+// way the original was signed. Before stripping it writes a dSYM of the
+// unstripped executable; the dSYM carries the full symbol table under the same
+// UUID, so crash reports from the shipped binary still symbolicate against it.
+// The bundle in the build directory keeps its symbols, so debugging and the
+// nm-based packaging checks keep working against it.
 #pragma once
 
 #include <filesystem>
@@ -21,6 +23,9 @@ struct ShipStripOptions {
     // with one. Empty means a Developer-ID-signed bundle ships unstripped.
     std::string identity;
     std::string entitlements;
+    // Where the dSYM of each stripped executable is written, as
+    // <symbols_dir>/<format directory>/<bundle>.dSYM. Empty writes none.
+    std::filesystem::path symbols_dir;
     // Runs the unattended signing preflight before the first identity signing;
     // returns false to refuse.
     std::function<bool()> signing_preflight;

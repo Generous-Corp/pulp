@@ -53,6 +53,10 @@ class NotarizationHeartbeatTest(unittest.TestCase):
             path.chmod(0o755)
 
         tool("codesign", "exit 0\n")
+        tool("dsymutil", 'out=""; want=0\n'
+                         'for a in "$@"; do [[ $want == 1 ]] && out="$a"; want=0;'
+                         ' [[ "$a" == "-o" ]] && want=1; done\n'
+                         'mkdir -p "$out"\n')
         tool("file", 'case "${!#}" in\n'
                      '  */Contents/MacOS/*) echo "Mach-O 64-bit executable";;\n'
                      '  *) /usr/bin/file "$@";;\n'
@@ -274,6 +278,7 @@ class CombinedInstallerTest(unittest.TestCase):
             productsign_argv_capture = tmp / "productsign-argv.txt"
             wraptool_argv_capture = tmp / "wraptool-argv.txt"
             strip_argv_capture = tmp / "strip-argv.txt"
+            symbol_order_capture = tmp / "symbol-order.txt"
             output = tmp / "out"
             wraptool_path = tmp / "pace" / "wraptool"
             if wraptool != "absent":
@@ -394,7 +399,21 @@ class CombinedInstallerTest(unittest.TestCase):
                 "strip",
                 'printf "%s\\n" "$*" >> "$CAPTURE_STRIP_ARGV"\n'
                 'last=""\nfor arg in "$@"; do last="$arg"; done\n'
+                'printf "strip %s\\n" "$last" >> "$CAPTURE_SYMBOL_ORDER"\n'
                 'printf "stripped" >> "$last"\n',
+            )
+            # Records the executable each dSYM is made from, in the same log as
+            # the strips, and creates the -o bundle.
+            self._write_tool(
+                fake_bin,
+                "dsymutil",
+                'out=""\nwant=0\n'
+                'for arg in "$@"; do\n'
+                '  if [[ "$want" == 1 ]]; then out="$arg"; want=0; fi\n'
+                '  [[ "$arg" == "-o" ]] && want=1\n'
+                'done\n'
+                'printf "dsymutil %s -> %s\\n" "$1" "$out" >> "$CAPTURE_SYMBOL_ORDER"\n'
+                'mkdir -p "$out/Contents/Resources/DWARF"\n',
             )
 
             args = [
@@ -543,6 +562,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 "PULP_AAX_WRAPTOOL": str(wraptool_path),
                 "CAPTURE_WRAPTOOL_ARGV": str(wraptool_argv_capture),
                 "CAPTURE_STRIP_ARGV": str(strip_argv_capture),
+                "CAPTURE_SYMBOL_ORDER": str(symbol_order_capture),
             }
             Path(env["PULP_SIGN_KEYCHAIN"]).touch()
             Path(env["PULP_SIGN_P12"]).touch()
@@ -625,6 +645,11 @@ class CombinedInstallerTest(unittest.TestCase):
             self._last_strip_argv = (
                 strip_argv_capture.read_text(encoding="utf-8") if strip_argv_capture.is_file() else ""
             )
+            self._last_symbol_order = (
+                symbol_order_capture.read_text(encoding="utf-8")
+                if symbol_order_capture.is_file() else ""
+            )
+            self._last_output_dir = output
             self._last_plugin_mains_unmodified = all(
                 not (bundle / "Contents" / "MacOS" / bundle.stem)
                 .read_bytes().endswith(b"stripped")
@@ -726,10 +751,29 @@ class CombinedInstallerTest(unittest.TestCase):
             self.assertIn(staged_bundle, pkg_args, msg=self._last_pkgbuild_argv)
             self.assertEqual(pkg_args[pkg_args.index(staged_bundle) - 1], "--component")
 
+    def test_a_dsym_of_the_unstripped_module_is_written_before_stripping(self) -> None:
+        self._run_installer([("Kick", "au"), ("Kick", "clap")], macho_plugins=True)
+
+        order = self._last_symbol_order.splitlines()
+        for kind, bundle in (("au", "Kick.component"), ("clap", "Kick.clap")):
+            dsym_at = [i for i, l in enumerate(order)
+                       if l.startswith("dsymutil ") and f"/{bundle}/" in l]
+            strip_at = [i for i, l in enumerate(order)
+                        if l.startswith("strip ") and f"/{bundle}/" in l]
+            self.assertEqual(len(dsym_at), 1, msg=self._last_symbol_order)
+            self.assertEqual(len(strip_at), 1, msg=self._last_symbol_order)
+            # Made from the build output, which still has its symbols, and
+            # before the staged copy is stripped.
+            self.assertLess(dsym_at[0], strip_at[0], msg=self._last_symbol_order)
+            self.assertNotIn("/plugins/", order[dsym_at[0]].split(" -> ")[0])
+            dsym = self._last_output_dir / "symbols" / kind / f"{bundle}.dSYM"
+            self.assertTrue(order[dsym_at[0]].endswith(str(dsym)), msg=order[dsym_at[0]])
+
     def test_keep_symbols_ships_the_build_output_unstripped(self) -> None:
         self._run_installer([("Kick", "au")], macho_plugins=True, keep_symbols=True)
 
         self.assertEqual(self._last_strip_argv, "")
+        self.assertEqual(self._last_symbol_order, "")
         self.assertNotIn("/plugins/", self._last_pkgbuild_argv)
 
     def test_distinct_names_with_the_same_lossy_slug_do_not_collide(self) -> None:

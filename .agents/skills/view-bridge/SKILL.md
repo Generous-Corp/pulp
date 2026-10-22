@@ -3577,3 +3577,8 @@ plug-in; `plugin-module-no-script-runtime-PulpGain-*` (packaging label) fails
 when that happens, and `-Wl,-why_load` on the module link names the caller.
 A processor that builds its own `ScriptedUiSession` needs no opt-in: its
 constructor call links the runtime, and that also installs the prewarm runner.
+That is also how a plug-in that loads a script at run time without declaring
+`UI_SCRIPT` opts back in; there is deliberately no CMake switch, because the
+link follows the reference. Reaching the runtime only by name (`dlsym`) cannot
+work: nothing links it. `docs/reference/cmake.md` "Shipped Module Size" is the
+user-facing version.

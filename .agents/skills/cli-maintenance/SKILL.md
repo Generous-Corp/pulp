@@ -3973,8 +3973,10 @@ provides a native arm hook.
 ## `pulp ship package` ships stripped copies; its shell-out tests need the test cwd
 
 `pulp ship package` stages a copy of each AU/VST3/CLAP bundle outside the
-build tree, strips local symbols from its main executable and re-signs it
-(`tools/cli/ship_bundle_strip.cpp`); the build output is never modified. A new
+build tree, writes a dSYM of the unstripped executable to
+`artifacts/symbols/`, strips local symbols from the copy's main executable and
+re-signs it (`tools/cli/ship_bundle_strip.cpp`); the build output is never
+modified. A new
 package option that edits a bundle must work on that staged copy, before the
 copy is signed, never on the build output. `test_cli_ship_shellout.cpp` finds
 the CLI relative to its working directory (`../tools/cli/pulp-cpp`), so run the

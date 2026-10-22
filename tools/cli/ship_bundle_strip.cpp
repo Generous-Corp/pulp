@@ -83,6 +83,23 @@ std::optional<fs::path> stage_stripped_bundle(const fs::path& bundle, const fs::
         return std::nullopt;
     }
     const auto binary = staged / "Contents" / "MacOS" / exec_name;
+    // The dSYM comes from the unstripped executable, so it keeps every symbol
+    // strip removes, under the UUID the stripped copy still carries.
+    if (!options.symbols_dir.empty()) {
+        const auto dsym = options.symbols_dir / bundle.parent_path().filename() /
+                          (bundle.filename().string() + ".dSYM");
+        fs::remove_all(dsym, ec);
+        fs::create_directories(dsym.parent_path(), ec);
+        if (ec ||
+            run("/usr/bin/xcrun dsymutil " +
+                shell_quote(bundle / "Contents" / "MacOS" / exec_name) + " -o " +
+                shell_quote(dsym) + " >/dev/null 2>&1") != 0 ||
+            !fs::is_directory(dsym)) {
+            std::cerr << "  FAILED to write a dSYM for " << bundle.filename().string()
+                      << " before stripping it\n";
+            return std::nullopt;
+        }
+    }
     // strip warns that the existing signature is invalidated; the copy is
     // re-signed below.
     if (run("/usr/bin/strip -x " + shell_quote(binary) + " 2>/dev/null") != 0) {
@@ -104,7 +121,11 @@ std::optional<fs::path> stage_stripped_bundle(const fs::path& bundle, const fs::
         return std::nullopt;
     }
     std::cout << "  stripped local symbols from " << bundle.filename().string()
-              << " (shipped copy; the build output keeps them)\n";
+              << " (shipped copy; the build output keeps them";
+    if (!options.symbols_dir.empty())
+        std::cout << "; dSYM in "
+                  << (options.symbols_dir / bundle.parent_path().filename()).string();
+    std::cout << ")\n";
     return staged;
 }
 

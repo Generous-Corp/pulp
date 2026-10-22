@@ -1247,6 +1247,22 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     CHECK_FALSE(has_local_fixture_symbol(shipped));
     // The build output keeps its symbols for debugging and nm-based checks.
     CHECK(has_local_fixture_symbol(build_binary));
+    // A dSYM of the unstripped executable is written before stripping: it
+    // keeps the local symbol under the UUID the shipped binary carries, so a
+    // crash report from the shipped copy still symbolicates.
+    const auto dsym = root / "artifacts" / "symbols" / "CLAP" / "StripMe.clap.dSYM";
+    const auto dsym_binary = dsym / "Contents" / "Resources" / "DWARF" / "StripMe";
+    REQUIRE(fs::is_regular_file(dsym_binary));
+    CHECK(has_local_fixture_symbol(dsym_binary));
+    auto uuid_of = [](const fs::path& binary) {
+        auto u = ChildProcess::run("/usr/bin/xcrun", {"dwarfdump", "--uuid", binary.string()},
+                                   ProcessOptions{});
+        REQUIRE(u.exit_code == 0);
+        const auto at = u.stdout_output.find("UUID: ");
+        REQUIRE(at != std::string::npos);
+        return u.stdout_output.substr(at + 6, 36);
+    };
+    CHECK(uuid_of(dsym_binary) == uuid_of(shipped));
     // The stripped copy carries a valid (ad hoc) signature, so it still loads.
     auto verify = ChildProcess::run(
         "/usr/bin/codesign",

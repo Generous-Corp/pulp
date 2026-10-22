@@ -959,6 +959,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
         strip_options.identity =
             ship_config(identity, "PULP_SIGN_IDENTITY", "signing.apple", "identity");
         strip_options.entitlements = entitlements;
+        strip_options.symbols_dir = artifacts / "symbols";
         bool preflight_passed = false;
         strip_options.signing_preflight = [&] {
             if (!preflight_passed)

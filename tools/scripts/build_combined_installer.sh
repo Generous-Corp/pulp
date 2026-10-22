@@ -503,8 +503,11 @@ done
 
 # Ship a copy of an au/vst3/clap bundle whose main executable has its local
 # symbols stripped, so the build output keeps them for debugging and nm-based
-# checks. Stripping precedes signing: deep_sign then seals the copy. An aax is
-# already PACE-wrapped and is never modified.
+# checks. A dSYM of the unstripped executable is written to $OUT/symbols/<kind>
+# first; it keeps every stripped symbol under the UUID the shipped copy carries,
+# so crash reports from the installed plug-in still symbolicate. Stripping
+# precedes signing: deep_sign then seals the copy. An aax is already
+# PACE-wrapped and is never modified.
 stage_stripped_plugin() {  # $1=kind  $2=bundle; prints the path to package
   local b="$2" exe dest
   exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
@@ -517,6 +520,10 @@ stage_stripped_plugin() {  # $1=kind  $2=bundle; prints the path to package
   dest="$STAGE/plugins/$1/$(basename "$b")"
   mkdir -p "$(dirname "$dest")"
   ditto "$b" "$dest" || { echo "error: could not stage $b" >&2; return 2; }
+  local dsym="$OUT/symbols/$1/$(basename "$b").dSYM"
+  rm -rf "$dsym"; mkdir -p "$(dirname "$dsym")"
+  dsymutil "$b/Contents/MacOS/$exe" -o "$dsym" >/dev/null 2>&1 && [[ -d "$dsym" ]] ||
+    { echo "error: dsymutil failed on $b; refusing to ship it stripped without a dSYM" >&2; return 2; }
   strip -x "$dest/Contents/MacOS/$exe" 2>/dev/null ||
     { echo "error: strip -x failed on $dest" >&2; return 2; }
   echo "  stripped local symbols: $(basename "$b") (shipped copy)" >&2

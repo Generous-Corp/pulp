@@ -27,13 +27,28 @@ endif()
 
 # Plug-in modules are loaded by hosts through a handful of exported entry
 # points, so everything a module does not reach from them is dead weight in the
-# shipped binary. On Apple, link optimized builds with -dead_strip; static
-# initializers, exported symbols and Objective-C metadata stay live, so format
-# registration and bundled resources are unaffected.
+# shipped binary. On Apple, optimized builds link with -dead_strip. The linker
+# keeps everything reachable from an exported symbol, every static initializer
+# (and what it reaches, so self-registering factories survive), Objective-C
+# class and category metadata, and anything marked __attribute__((used)). Code
+# reached ONLY by a runtime name lookup the linker cannot see -- dlsym() of a
+# symbol that is not exported, or an Objective-C class looked up by name whose
+# object file nothing references -- must be exported or marked used.
+#
+# Opt out for every plug-in with -DPULP_DEAD_STRIP_PLUGINS=OFF, or for one
+# module by setting its PULP_DEAD_STRIP target property to OFF after
+# pulp_add_plugin(), e.g.
+#   set_target_properties(MyPlugin_VST3 PROPERTIES PULP_DEAD_STRIP OFF)
+if(NOT DEFINED PULP_DEAD_STRIP_PLUGINS)
+    set(PULP_DEAD_STRIP_PLUGINS ON CACHE BOOL
+        "Link Apple plug-in modules with -dead_strip in non-Debug configurations")
+endif()
 function(_pulp_plugin_module_link_hygiene module_target)
     if(APPLE)
+        set_target_properties(${module_target} PROPERTIES
+            PULP_DEAD_STRIP "${PULP_DEAD_STRIP_PLUGINS}")
         target_link_options(${module_target} PRIVATE
-            "$<$<NOT:$<CONFIG:Debug>>:LINKER:-dead_strip>")
+            "$<$<AND:$<NOT:$<CONFIG:Debug>>,$<BOOL:$<TARGET_PROPERTY:${module_target},PULP_DEAD_STRIP>>>:LINKER:-dead_strip>")
     endif()
 endfunction()
 
