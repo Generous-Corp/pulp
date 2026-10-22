@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
 #include <type_traits>
 
 using namespace pulp::gpu_audio;
@@ -44,8 +45,8 @@ void observe_before_publish(SharedIoExecutionController& controller, std::uint64
     auto& probe = *static_cast<PublicationProbe*>(context);
     probe.called = true;
     probe.observed_in_flight = controller.in_flight_for_testing();
-    probe.completion_rejected =
-        !controller.record_completion(sequence, SharedIoCompletion::Success);
+    probe.completion_rejected = !controller.record_completion(controller.generation(), sequence,
+                                                              SharedIoCompletion::Success);
 }
 
 void observe_before_reuse(SharedIoExecutionController& controller, std::uint32_t remaining,
@@ -68,7 +69,7 @@ TEST_CASE("execution controller reserves occupancy before publishing admission",
     REQUIRE(probe.called);
     REQUIRE(probe.observed_in_flight == 1);
     REQUIRE(probe.completion_rejected);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Priming);
     REQUIRE(controller.deliver(2).path == SharedIoDeliveryPath::Gpu);
@@ -87,8 +88,8 @@ TEST_CASE("execution controller keeps a retiring slot unavailable until it is pu
     REQUIRE(controller.prepare(minimum_capacity, &telemetry));
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
-    REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 1, SharedIoCompletion::Success));
     REQUIRE(controller.in_flight_for_testing() == 0);
     REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
@@ -118,12 +119,12 @@ TEST_CASE("execution controller releases the in-flight budget at completion",
     REQUIRE(controller.prepare(single));
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::CapacityFull);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
     REQUIRE(controller.in_flight_for_testing() == 0);
     // Sequence 0 still waits out the lead in its table slot, yet the provider
     // is idle, so the next submission is admitted.
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(1, SharedIoCompletion::Failed));
+    REQUIRE(controller.record_completion(controller.generation(), 1, SharedIoCompletion::Failed));
     REQUIRE(controller.in_flight_for_testing() == 0);
 }
 
@@ -136,7 +137,7 @@ TEST_CASE("execution controller tracks lead separately from logical pipeline dep
     REQUIRE(controller.algorithmic_lead_blocks() == 2);
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
 
     const auto priming = controller.deliver(0);
     REQUIRE(priming.path == SharedIoDeliveryPath::Priming);
@@ -200,7 +201,8 @@ TEST_CASE("execution controller sustains one submission per callback with a free
                     callback_sequence - exact_depth.algorithmic_lead_blocks);
         }
         REQUIRE(controller.admit_submission(callback_sequence) == SharedIoAdmission::Accepted);
-        REQUIRE(controller.record_completion(callback_sequence, SharedIoCompletion::Success));
+        REQUIRE(controller.record_completion(controller.generation(), callback_sequence,
+                                             SharedIoCompletion::Success));
     }
 }
 
@@ -220,7 +222,7 @@ TEST_CASE("execution controller requires exact sequences and reports typed fallb
     REQUIRE(miss.path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(miss.fallback_reason == SharedIoFallbackReason::DeadlineExceeded);
 
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
     const auto late = controller.deliver(3);
     REQUIRE(late.path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(late.resynced);
@@ -237,14 +239,15 @@ TEST_CASE("execution controller maps provider failure to the declared CPU fallba
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(contract()));
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Failed,
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Failed,
                                          SharedIoFallbackReason::DeviceLost));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Priming);
     const auto delivery = controller.deliver(2);
     REQUIRE(delivery.path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(delivery.fallback_reason == SharedIoFallbackReason::DeviceLost);
-    REQUIRE_FALSE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE_FALSE(
+        controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
 }
 
 TEST_CASE("device-loss fallback preserves callback continuity and receipt accounting",
@@ -263,25 +266,25 @@ TEST_CASE("device-loss fallback preserves callback continuity and receipt accoun
     // GPU result or the declared CPU replacement; no callback may silently
     // fall through to silence.
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
 
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(1, SharedIoCompletion::Failed,
+    REQUIRE(controller.record_completion(controller.generation(), 1, SharedIoCompletion::Failed,
                                          SharedIoFallbackReason::DeviceLost));
     const auto gpu = controller.deliver(1);
     REQUIRE(gpu.path == SharedIoDeliveryPath::Gpu);
     REQUIRE(gpu.expected_sequence == 0);
 
     REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(2, SharedIoCompletion::Failed,
+    REQUIRE(controller.record_completion(controller.generation(), 2, SharedIoCompletion::Failed,
                                          SharedIoFallbackReason::DeviceLost));
     const auto first_fallback = controller.deliver(2);
     REQUIRE(first_fallback.path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(first_fallback.fallback_reason == SharedIoFallbackReason::DeviceLost);
 
     REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(3, SharedIoCompletion::Failed,
+    REQUIRE(controller.record_completion(controller.generation(), 3, SharedIoCompletion::Failed,
                                          SharedIoFallbackReason::DeviceLost));
     const auto second_fallback = controller.deliver(3);
     REQUIRE(second_fallback.path == SharedIoDeliveryPath::CpuFallback);
@@ -322,8 +325,9 @@ TEST_CASE("execution controller bounds admission and rejects stale completion id
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(3) == SharedIoAdmission::CapacityFull);
-    REQUIRE_FALSE(controller.record_completion(99, SharedIoCompletion::Success));
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE_FALSE(
+        controller.record_completion(controller.generation(), 99, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Priming);
     REQUIRE(controller.deliver(2).path == SharedIoDeliveryPath::Gpu);
@@ -339,14 +343,15 @@ TEST_CASE("execution controller resynchronizes admission after a callback gap",
     REQUIRE(controller.prepare(contract(), &telemetry));
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
 
     const auto gap = controller.deliver(4);
     REQUIRE(gap.fallback_reason == SharedIoFallbackReason::SequenceGap);
     REQUIRE(gap.resynced);
-    REQUIRE_FALSE(controller.record_completion(0, SharedIoCompletion::Success));
-    REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
+    REQUIRE_FALSE(
+        controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 1, SharedIoCompletion::Success));
     REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(4) == SharedIoAdmission::Accepted);
     const auto resumed = controller.deliver(5);
@@ -369,7 +374,7 @@ TEST_CASE("callback gap preserves ready results that are still ahead of the lead
     REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(3, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 3, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
 
     const auto gap = controller.deliver(4);
@@ -394,9 +399,9 @@ TEST_CASE("callback gap preserves a retryable admission that is still due",
     REQUIRE(gap.fallback_reason == SharedIoFallbackReason::SequenceGap);
     REQUIRE(gap.resynced);
     REQUIRE(controller.admit_submission(3) == SharedIoAdmission::CapacityFull);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
-    REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
-    REQUIRE(controller.record_completion(2, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 1, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 2, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(5).path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
 }
@@ -415,8 +420,8 @@ TEST_CASE("execution controller counts every late completion removed by one call
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(controller.deliver(2).path == SharedIoDeliveryPath::CpuFallback);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
-    REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 1, SharedIoCompletion::Success));
 
     const auto delivery = controller.deliver(3);
     REQUIRE(delivery.path == SharedIoDeliveryPath::CpuFallback);
@@ -484,12 +489,194 @@ TEST_CASE("duplicate callbacks fail closed without rewinding the sequence epoch"
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Priming);
 }
 
+TEST_CASE("completion deferred across re-prepare cannot retire the next generation",
+          "[gpu_audio][shared_io][controller][fault-injection][negative]") {
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.generation() == 0);
+    REQUIRE(controller.prepare(contract(), &telemetry));
+    const auto lost_generation = controller.generation();
+    REQUIRE(lost_generation == 1);
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+
+    // Teardown while sequence 0 is still pending with the provider: every
+    // entry point fails closed until the owner prepares again.
+    controller.release();
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::NotPrepared);
+    REQUIRE_FALSE(controller.record_completion(lost_generation, 0, SharedIoCompletion::Success));
+    const auto torn_down = controller.deliver(0);
+    REQUIRE(torn_down.path == SharedIoDeliveryPath::Silence);
+    REQUIRE(torn_down.fallback_reason == SharedIoFallbackReason::Teardown);
+
+    telemetry.reset();
+    REQUIRE(controller.prepare(contract(), &telemetry));
+    REQUIRE(controller.generation() == lost_generation + 1);
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+
+    // The deferred provider callback names the same sequence number as the
+    // new stream's first block but a stale generation.
+    REQUIRE_FALSE(controller.record_completion(lost_generation, 0, SharedIoCompletion::Success));
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+    REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Priming);
+    const auto miss = controller.deliver(2);
+    REQUIRE(miss.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(miss.fallback_reason == SharedIoFallbackReason::DeadlineExceeded);
+
+    // Positive control: the current generation's completion is accepted and
+    // delivered through the GPU path.
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(controller.generation(), 1, SharedIoCompletion::Success));
+    const auto delivered = controller.deliver(3);
+    REQUIRE(delivered.path == SharedIoDeliveryPath::Gpu);
+    REQUIRE(delivered.expected_sequence == 1);
+
+    const auto receipt = telemetry.snapshot();
+    REQUIRE(receipt.retired_success == 1);
+    REQUIRE(receipt.retired_failure == 0);
+    REQUIRE(receipt.late_completions == 0);
+    REQUIRE(receipt.resync_drops == 1);
+}
+
+TEST_CASE("execution controller refuses to wrap the preparation generation",
+          "[gpu_audio][shared_io][controller][fault-injection][negative]") {
+    SharedIoExecutionController controller;
+    controller.set_generation_for_testing(std::numeric_limits<std::uint64_t>::max() - 1);
+    REQUIRE(controller.prepare(contract()));
+    REQUIRE(controller.generation() == std::numeric_limits<std::uint64_t>::max());
+    controller.release();
+
+    REQUIRE_FALSE(controller.prepare(contract()));
+    REQUIRE_FALSE(controller.prepared());
+    REQUIRE(controller.generation() == std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::NotPrepared);
+}
+
+TEST_CASE("execution controller refuses to wrap the sequence epoch",
+          "[gpu_audio][shared_io][controller][fault-injection][negative]") {
+    constexpr auto last = std::numeric_limits<std::uint64_t>::max();
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(contract(), &telemetry));
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+
+    // A forward gap moves both timelines next to the end of the sequence
+    // space; lead 2 makes last - 3 the first block still due.
+    const auto gap = controller.deliver(last - 2);
+    REQUIRE(gap.fallback_reason == SharedIoFallbackReason::SequenceGap);
+    REQUIRE(gap.resynced);
+
+    // Positive control: in-range sequences still admit and deliver on GPU.
+    REQUIRE(controller.admit_submission(last - 3) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(controller.generation(), last - 3,
+                                         SharedIoCompletion::Success));
+    const auto in_range = controller.deliver(last - 1);
+    REQUIRE(in_range.path == SharedIoDeliveryPath::Gpu);
+    REQUIRE(in_range.expected_sequence == last - 3);
+    REQUIRE(controller.admit_submission(last - 2) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(last - 1) == SharedIoAdmission::Accepted);
+
+    REQUIRE(controller.admit_submission(last) == SharedIoAdmission::SequenceExhausted);
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::SequenceGap);
+
+    const auto terminal = controller.deliver(last);
+    REQUIRE(terminal.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(terminal.fallback_reason == SharedIoFallbackReason::SequenceGap);
+    REQUIRE_FALSE(terminal.resynced);
+
+    // Without the guard the callback epoch would wrap and this would prime.
+    const auto wrapped = controller.deliver(0);
+    REQUIRE(wrapped.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(wrapped.fallback_reason == SharedIoFallbackReason::SequenceGap);
+
+    const auto receipt = telemetry.snapshot();
+    REQUIRE(receipt.callback_blocks == 5);
+    REQUIRE(receipt.delivered_blocks == 5);
+    REQUIRE(receipt.fallback_blocks == 3);
+}
+
+TEST_CASE("lost provider callbacks keep their budget while callbacks stay continuous",
+          "[gpu_audio][shared_io][controller][continuity][fault-injection]") {
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(contract(), &telemetry));
+
+    // Scripted provider: sequences 0..2 are submitted and their completion
+    // callbacks are withheld. The in-flight budget stays reserved because the
+    // provider may still own those slots.
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::CapacityFull);
+
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+    REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Priming);
+    for (std::uint64_t callback = 2; callback < 5; ++callback) {
+        const auto miss = controller.deliver(callback);
+        REQUIRE(miss.path == SharedIoDeliveryPath::CpuFallback);
+        REQUIRE(miss.fallback_reason == SharedIoFallbackReason::DeadlineExceeded);
+        REQUIRE(controller.admit_submission(3) == SharedIoAdmission::CapacityFull);
+    }
+    REQUIRE(controller.in_flight_for_testing() == 3);
+
+    // Positive control: one withheld callback finally arrives. It is retired
+    // as late, which returns exactly one unit of budget to admission.
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
+    REQUIRE(controller.in_flight_for_testing() == 2);
+    const auto after_late = controller.deliver(5);
+    REQUIRE(after_late.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(after_late.resynced);
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(4) == SharedIoAdmission::CapacityFull);
+
+    const auto receipt = telemetry.snapshot();
+    REQUIRE(receipt.callback_blocks == 6);
+    REQUIRE(receipt.delivered_blocks == 6);
+    REQUIRE(receipt.fallback_blocks == 4);
+    REQUIRE(receipt.deadline_misses == 4);
+    REQUIRE(receipt.late_completions == 1);
+    REQUIRE(receipt.in_flight_high_water == 3);
+}
+
+TEST_CASE("replayed provider completion cannot rewrite a ready outcome",
+          "[gpu_audio][shared_io][controller][fault-injection][negative]") {
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(contract(), &telemetry));
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Failed,
+                                         SharedIoFallbackReason::DeviceLost));
+    REQUIRE(controller.record_completion(controller.generation(), 1, SharedIoCompletion::Success));
+
+    // A replayed callback flips each ready outcome before the audio callback
+    // claims it; both must be refused.
+    REQUIRE_FALSE(
+        controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
+    REQUIRE_FALSE(controller.record_completion(controller.generation(), 1,
+                                               SharedIoCompletion::Failed,
+                                               SharedIoFallbackReason::DeviceLost));
+
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+    REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Priming);
+    const auto failed = controller.deliver(2);
+    REQUIRE(failed.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(failed.fallback_reason == SharedIoFallbackReason::DeviceLost);
+    const auto succeeded = controller.deliver(3);
+    REQUIRE(succeeded.path == SharedIoDeliveryPath::Gpu);
+    REQUIRE(succeeded.fallback_reason == SharedIoFallbackReason::None);
+
+    const auto receipt = telemetry.snapshot();
+    REQUIRE(receipt.retired_success == 1);
+    REQUIRE(receipt.retired_failure == 1);
+    REQUIRE(receipt.resync_drops == 2);
+}
+
 TEST_CASE("controller callback delivery performs no allocation",
           "[gpu_audio][shared_io][controller][allocation]") {
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(contract()));
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
 
     bool callback_ok = false;
     std::size_t allocations = 1;
