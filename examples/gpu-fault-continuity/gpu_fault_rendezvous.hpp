@@ -18,9 +18,13 @@
 // app's container, so the root comes from the account database, not HOME.
 //
 // The environment, when set, always wins. The rendezvous is accepted only if
-// it is unexpired, carries a nonce, and names a run directory under
-// <root>/runs/ that holds the request and the impulse response, so a stale or
-// hand-edited file cannot point the plug-in at an arbitrary path.
+// it is unexpired (and not valid for more than an hour), carries a nonce, and
+// names a run directory under <root>/runs/ that holds the request and the
+// impulse response. The root, runs/ and the run directory must not be
+// symlinks, and the request and IR must resolve inside the run directory, so
+// a stale or hand-edited file cannot point the plug-in at an arbitrary path. Files opened later inside the run directory
+// are not re-checked: this guards against mistakes and stale files, not
+// against another process of the same user racing the harness.
 //
 // Test-only: compiled only into the fault-continuity plug-in, which is built
 // only with -DPULP_GPU_AUDIO_FAULT_HOOKS=ON.
@@ -33,16 +37,15 @@
 namespace pulp::examples::gpu_fault {
 
 inline constexpr const char* kRendezvousSchema = "pulp.gpu-fault.rendezvous.v1";
+// A rendezvous may not claim to stay valid longer than this, so a file left
+// behind by a crashed harness cannot configure instances in later sessions.
+inline constexpr std::int64_t kMaxRendezvousLifetimeSeconds = 3600;
 
 struct RunConfig {
     std::filesystem::path run_dir;
     std::filesystem::path request;
     std::filesystem::path ir;
     std::string nonce;
-    // The plug-in processes its own deterministic stimulus (gpu_fault_stimulus.hpp)
-    // and never reads or stores the host's input. Fixed before the first
-    // callback, so a live input is never captured even briefly.
-    bool internal_stimulus = false;
     std::string source = "none"; // "env", "rendezvous" or "none"
     std::string detail;          // why the rendezvous was refused, when it was
 };
@@ -69,8 +72,9 @@ RunConfig resolve_run_config();
 struct HostProcess {
     int pid = 0;
     int ppid = 0;
-    int responsible_pid = -1; // -1: unknown
-    int sandboxed = -1;       // -1: unknown, 0: no, 1: yes
+    int responsible_pid = -1;     // -1: unknown
+    std::string responsible_path; // executable of the responsible process, when readable
+    int sandboxed = -1;           // -1: unknown, 0: no, 1: yes
     // When the process started and when this instance claimed the run, both
     // wall-clock microseconds: a receipt requires host launch <= start <= claim,
     // so a plug-in process left over from before the host launched cannot

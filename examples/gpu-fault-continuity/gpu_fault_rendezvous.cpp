@@ -47,6 +47,11 @@ bool is_hex(const std::string& s) {
     return true;
 }
 
+bool no_follow_is_link(const fs::path& path) {
+    std::error_code ec;
+    return fs::is_symlink(fs::symlink_status(path, ec));
+}
+
 // True when `path` resolves (symlinks included) to somewhere strictly inside `dir`.
 bool strictly_inside(const fs::path& path, const fs::path& dir) {
     std::error_code ec;
@@ -93,21 +98,27 @@ RunConfig from_rendezvous(const fs::path& root, std::int64_t now_unix) {
     const std::int64_t expires = json_int(body, "expires_unix");
     if (expires <= now_unix)
         return refuse("expired");
+    if (expires > now_unix + kMaxRendezvousLifetimeSeconds)
+        return refuse("expiry is more than " + std::to_string(kMaxRendezvousLifetimeSeconds) +
+                      " s away");
     const std::string nonce = json_string(body, "nonce");
     if (nonce.size() < 16 || !is_hex(nonce))
         return refuse("nonce missing or not lowercase hex");
     const fs::path run_dir = json_string(body, "run_dir");
     const fs::path request = json_string(body, "request");
     const fs::path ir = json_string(body, "ir");
+    if (no_follow_is_link(root) || no_follow_is_link(root / "runs") || no_follow_is_link(run_dir))
+        return refuse("the root, runs/ and run_dir must not be symlinks");
     if (!strictly_inside(run_dir, root / "runs") || !fs::is_directory(run_dir, ec))
         return refuse("run_dir is not a directory under " + (root / "runs").string());
+    // Containment resolves symlinks, so a link from inside the run dir to
+    // anywhere outside it is refused here too.
     if (!strictly_inside(request, run_dir) || !strictly_inside(ir, run_dir))
-        return refuse("request and ir must be inside run_dir");
+        return refuse("request and ir must resolve inside run_dir");
     config.run_dir = run_dir;
     config.request = request;
     config.ir = ir;
     config.nonce = nonce;
-    config.internal_stimulus = json_string(body, "stimulus") == "internal";
     config.source = "rendezvous";
     return config;
 }
@@ -117,10 +128,14 @@ RunConfig from_rendezvous(const fs::path& root, std::int64_t now_unix) {
 fs::path default_rendezvous_root() {
     if (const char* override_root = std::getenv("PULP_GPU_FAULT_RENDEZVOUS_ROOT"))
         return override_root;
-    const passwd* account = ::getpwuid(::getuid());
-    if (account == nullptr || account->pw_dir == nullptr)
+    // getpwuid_r: hosts may construct several instances concurrently.
+    passwd account{};
+    passwd* found = nullptr;
+    char buffer[4096];
+    if (::getpwuid_r(::getuid(), &account, buffer, sizeof(buffer), &found) != 0 ||
+        found == nullptr || account.pw_dir == nullptr)
         return {};
-    return fs::path(account->pw_dir) / "Library" / "Application Support" / "Pulp" /
+    return fs::path(account.pw_dir) / "Library" / "Application Support" / "Pulp" /
            "gpu-fault-continuity";
 }
 
@@ -135,7 +150,6 @@ RunConfig resolve_run_config(const RunConfigSources& sources) {
         config.request = env("PULP_GPU_FAULT_REQUEST");
         config.ir = env("PULP_GPU_FAULT_IR");
         config.nonce = env("PULP_GPU_FAULT_NONCE").string();
-        config.internal_stimulus = env("PULP_GPU_FAULT_INPUT") == "internal";
         config.source = "env";
         return config;
     }
@@ -165,6 +179,10 @@ HostProcess current_host_process() {
     if (auto fn = reinterpret_cast<ResponsibleFn>(
             ::dlsym(RTLD_DEFAULT, "responsibility_get_pid_responsible_for_pid")))
         process.responsible_pid = static_cast<int>(fn(process.pid));
+    char responsible[PROC_PIDPATHINFO_MAXSIZE] = {};
+    if (process.responsible_pid > 0 &&
+        ::proc_pidpath(process.responsible_pid, responsible, sizeof(responsible)) > 0)
+        process.responsible_path = responsible;
     proc_bsdinfo info{};
     if (::proc_pidinfo(process.pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) ==
         static_cast<int>(sizeof(info)))
@@ -190,12 +208,12 @@ std::string host_process_event(const HostProcess& process, const RunConfig& conf
     return "{\"event\":\"host_process\",\"pid\":" + std::to_string(process.pid) +
            ",\"ppid\":" + std::to_string(process.ppid) +
            ",\"responsible_pid\":" + std::to_string(process.responsible_pid) +
+           ",\"responsible_path\":\"" + escape(process.responsible_path) + "\"" +
            ",\"sandboxed\":" + std::to_string(process.sandboxed) +
            ",\"start_unix_us\":" + std::to_string(process.start_unix_us) +
            ",\"claimed_unix_us\":" + std::to_string(process.claimed_unix_us) +
            ",\"process_path\":\"" + escape(process.path) + "\",\"config_source\":\"" +
-           escape(config.source) + "\",\"nonce\":\"" + escape(config.nonce) + "\",\"input\":\"" +
-           (config.internal_stimulus ? "internal" : "host") + "\"}";
+           escape(config.source) + "\",\"nonce\":\"" + escape(config.nonce) + "\"}";
 }
 
 } // namespace pulp::examples::gpu_fault

@@ -72,7 +72,11 @@ BURST_GAP_FRACTION = 0.25
 BURSTY_FRACTION = 0.05
 
 _AUHOSTING = re.compile(
-    r"/AUHostingServiceXPC(_arrow)?\.xpc/Contents/MacOS/AUHostingServiceXPC(_arrow)?$")
+    r"^/System/Library/Frameworks/AudioToolbox\.framework/(?:Versions/A/)?XPCServices/"
+    r"AUHostingServiceXPC(_arrow)?\.xpc/Contents/MacOS/AUHostingServiceXPC(_arrow)?$")
+# Modes where the plug-in runs in a process the host does not own by pid, so
+# the responsible process is the only link back to the host and is required.
+OUT_OF_PROCESS_MODES = ("auhostingservice", "auhostingservice_arrow", "bitwig_plugin_host")
 _BITWIG_HOST = re.compile(r"/Bitwig Studio\.app/Contents/MacOS/Bitwig Plug-in Host [^/]+\.app/")
 _BITWIG_ENGINE = re.compile(r"/Bitwig Studio\.app/Contents/MacOS/Bitwig Audio Engine [^/]+\.app/")
 # Executables of known hosts, to tell evidence from another DAW (FAIL) from
@@ -183,14 +187,20 @@ def host_binding(events: Sequence[dict], *, claim_text: str | None, host: dict,
     else:
         mark("responsible_pid", host_resp == resp)
     if host.get("id") == "bitwig" and hosting_mode == "bitwig_plugin_host":
-        owners = {host.get("pid"), *host.get("engine_pids", [])}
-        mark("bitwig_owner", proc.get("ppid") in owners or resp in owners)
+        owners = {p for p in (host.get("pid"), *host.get("engine_pids", [])) if p}
+        mark("bitwig_owner", bool(owners) and (proc.get("ppid") in owners or resp in owners))
     else:
         c["bitwig_owner"] = "not_applicable"
 
+    # Another DAW's executable as the plug-in process, or as the process
+    # responsible for it (an out-of-process plug-in serving another DAW).
+    responsible_path = str(proc.get("responsible_path", ""))
     other_daw = next((name for name, pattern in DAW_EXECUTABLES.items()
-                      if name != host.get("id") and pattern.search(path)), None)
+                      if name != host.get("id") and (pattern.search(path) or
+                                                     pattern.search(responsible_path))), None)
     required = ("nonce", "claim_pid", "process_path", "start_time")
+    if hosting_mode in OUT_OF_PROCESS_MODES:
+        required += ("responsible_pid",)
     if other_daw:
         outcome, why = "wrong_daw", f"the plug-in evidence comes from {other_daw} ({path!r})"
     elif all(c[k] == "held" for k in required) and "failed" not in (c["responsible_pid"],
@@ -384,6 +394,16 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
     # M1: the host's own realtime render of the track, nulled like the bounce.
     nulls = dict(base["nulls"])
     realtime_null = None
+    if realtime_path is not None and bounce_path is not None and (
+            realtime_path.name == bounce_path.name or
+            (_usable(run_dir, realtime_path.name, listed) and
+             _usable(run_dir, bounce_path.name, listed) and
+             gfc.sha256_file(realtime_path) == gfc.sha256_file(bounce_path))):
+        # A realtime pass delivers GPU blocks before the fault, which round
+        # differently from the offline CPU path: identical bytes mean the
+        # "realtime render" is the bounce, not a second artifact.
+        preconditions.append("the host realtime render is the offline bounce itself")
+        realtime_path = None
     if realtime_path is not None and _usable(run_dir, realtime_path.name, listed):
         _, rendered = gfc.read_wav(realtime_path)
         _, stimulus = gfc.read_wav(run_dir / "stimulus.wav")
@@ -411,17 +431,28 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
 
     negative_proved = None
     if control_kind == "planted_negative":
+        # A negative proves something only on an otherwise sound run: the
+        # fault took effect in a process bound to this host, and nothing
+        # else about the run was off.
+        bound = binding["outcome"] == "bound" and not mismatches
         if PLANTED_NEGATIVES.get(planted) == "fail":
+            sound = bound and took_effect
             # Proved only by a plug-in null that fails, and not before the
             # fault: what these negatives corrupt is the fallback.
             plugin = nulls["plugin"]
             negative_proved = bool(
-                verdict == "fail" and not mismatches and plugin is not None and
+                sound and not preconditions and verdict == "fail" and plugin is not None and
                 not plugin["passed"] and plugin["first_deviating_sample"] is not None and
                 plugin["first_deviating_sample"] >= fault_sample)
         else:
-            negative_proved = bool(verdict == "inconclusive" and not mismatches and
-                                   any(NOT_SHARED_PATH in r for r in reasons))
+            # gpu_off: the GPU path is off, so a provider fault may be refused;
+            # the proof is that the path precondition, and only it (plus that
+            # refusal), kept the run from passing.
+            negative_proved = bool(
+                bound and verdict == "inconclusive" and
+                any(NOT_SHARED_PATH in p for p in preconditions) and
+                all(NOT_SHARED_PATH in p or p.startswith("the plug-in refused the request")
+                    for p in preconditions))
     return {
         "fault": base["fault"],
         "pdc_samples": base["pdc_samples"],

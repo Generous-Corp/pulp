@@ -16,6 +16,11 @@ meant to ship, or to be the base for one:
    checked only as a parsed AudioComponents subtype: as raw bytes it would
    match unrelated binary data.
 
+`--extra-dir` adds directories outside the build to scan the same way, such
+as an install prefix or ~/Library/Audio/Plug-Ins. Archives (.zip, .pkg,
+.dmg, .tar.*) are compressed and are not looked inside: scan the staged tree
+they are made from.
+
 Exit codes: 0 clean, 1 a hook was found, 2 the build directory is unusable.
 """
 from __future__ import annotations
@@ -45,6 +50,17 @@ TARGET = re.compile(r"\bPulpGpuFaultContinuity_\w+|\bgpu-fault-continuity-test\b
 BINARY_SUFFIXES = (".a", ".dylib", ".so", ".o", ".dll", ".lib", ".exe")
 BUNDLES = (".clap", ".vst3", ".component", ".appex", ".app", ".aaxplugin", ".lv2")
 SKIP_DIRS = {"CMakeFiles", "_deps", "Testing", ".cmake"}
+
+
+def _cmake_true(value: str) -> bool:
+    """CMake's if() truth for a cache value: ON/YES/TRUE/Y or a non-zero number."""
+    v = value.strip().upper()
+    if v in ("ON", "YES", "TRUE", "Y"):
+        return True
+    try:
+        return float(v) != 0.0
+    except ValueError:
+        return False
 
 
 def _cache_value(cache: Path, key: str) -> str | None:
@@ -105,39 +121,54 @@ def _scan(path: Path) -> list[str]:
     return [needle.decode() for needle in FORBIDDEN if needle in data]
 
 
+def scan_tree(root: Path) -> list[str]:
+    """Binary and bundle-metadata findings under `root`, relative to it."""
+    findings: list[str] = []
+    for path in _candidates(root):
+        hits = _scan(path)
+        if hits:
+            findings.append(f"{path.relative_to(root)} contains {', '.join(hits)}")
+    for path in _bundle_metadata(root):
+        hits = _metadata_findings(path)
+        if hits:
+            findings.append(f"{path.relative_to(root)} names {', '.join(hits)}")
+    return findings
+
+
 def check(build: Path) -> list[str]:
     """Return every finding; empty means clean."""
     findings: list[str] = []
     cache = build / "CMakeCache.txt"
     value = _cache_value(cache, "PULP_GPU_AUDIO_FAULT_HOOKS")
-    if value is not None and value.upper() in ("ON", "1", "TRUE", "YES"):
+    if value is not None and _cmake_true(value):
         findings.append(f"configure enabled PULP_GPU_AUDIO_FAULT_HOOKS={value}")
-    for manifest in ("build.ninja", "Makefile"):
-        path = build / manifest
-        if path.is_file():
-            match = TARGET.search(path.read_text(encoding="utf-8", errors="replace"))
-            if match:
-                findings.append(f"{manifest} declares the test target {match.group(0)}")
-    for path in _candidates(build):
-        hits = _scan(path)
-        if hits:
-            findings.append(f"{path.relative_to(build)} contains {', '.join(hits)}")
-    for path in _bundle_metadata(build):
-        hits = _metadata_findings(path)
-        if hits:
-            findings.append(f"{path.relative_to(build)} names {', '.join(hits)}")
-    return findings
+    # Every generator's top-level manifest: Ninja (incl. Multi-Config
+    # build-<Config>.ninja), Makefiles, Xcode and Visual Studio projects.
+    manifests = sorted({*build.glob("*.ninja"), *build.glob("Makefile"),
+                        *build.glob("*.xcodeproj/project.pbxproj"), *build.glob("*.sln"),
+                        *build.glob("*.vcxproj")})
+    for path in manifests:
+        match = TARGET.search(path.read_text(encoding="utf-8", errors="replace"))
+        if match:
+            findings.append(f"{path.relative_to(build)} declares the test target "
+                            f"{match.group(0)}")
+    return findings + scan_tree(build)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--build-dir", type=Path, required=True)
+    ap.add_argument("--extra-dir", type=Path, action="append", default=[],
+                    help="Another tree to scan (an install prefix, a plug-in folder).")
     args = ap.parse_args(argv)
     build = args.build_dir.resolve()
     if not (build / "CMakeCache.txt").is_file():
         print(f"gpu-fault-hooks-release-gate: {build} is not a configured build directory")
         return 2
     findings = check(build)
+    for extra in args.extra_dir:
+        if extra.is_dir():
+            findings += [f"{extra}: {f}" for f in scan_tree(extra.resolve())]
     for finding in findings:
         print(f"gpu-fault-hooks-release-gate: FOUND {finding}")
     if findings:

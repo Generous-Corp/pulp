@@ -129,7 +129,11 @@ TEST_CASE("a rendezvous that fails any check is refused", "[gpu-fault-continuity
         refused("run_dir");
     }
     SECTION("run dir escaping runs/ through ..") {
-        root.write_active((root.path / "runs" / ".." / "x").string(), req, ir);
+        // The target exists, so only the containment check can refuse it.
+        fs::create_directories(root.path / "x");
+        root.write_active((root.path / "runs" / ".." / "x").string(),
+                          (root.path / "x" / "r.json").string(),
+                          (root.path / "x" / "ir.f32").string());
         refused("run_dir");
     }
     SECTION("run dir escaping runs/ through a symlink") {
@@ -138,7 +142,27 @@ TEST_CASE("a rendezvous that fails any check is refused", "[gpu-fault-continuity
         const auto link = root.path / "runs" / "link";
         fs::create_directory_symlink(outside, link);
         root.write_active(link.string(), (link / "r.json").string(), (link / "ir.f32").string());
-        refused("run_dir");
+        refused("symlinks");
+    }
+    SECTION("runs/ itself a symlink to somewhere else") {
+        const auto outside = root.path.parent_path() / (root.path.filename().string() + "-out");
+        fs::create_directories(outside / "r1");
+        fs::remove_all(root.path / "runs");
+        fs::create_directory_symlink(outside, root.path / "runs");
+        const auto run = root.path / "runs" / "r1";
+        root.write_active(run.string(), (run / "r.json").string(), (run / "ir.f32").string());
+        refused("symlinks");
+        fs::remove_all(outside);
+    }
+    SECTION("request is a symlink out of the run dir") {
+        fs::create_symlink("/etc/passwd", root.run / "fault-request.json");
+        root.write_active(root.run.string(), req, ir);
+        refused("resolve inside run_dir");
+    }
+    SECTION("expiry too far away") {
+        root.write_active(root.run.string(), req, ir, kNonce,
+                          kNow + kMaxRendezvousLifetimeSeconds + 1);
+        refused("expiry");
     }
     SECTION("run dir is runs/ itself") {
         root.write_active((root.path / "runs").string(), req, ir);
@@ -146,7 +170,11 @@ TEST_CASE("a rendezvous that fails any check is refused", "[gpu-fault-continuity
     }
     SECTION("request outside the run dir") {
         root.write_active(root.run.string(), "/etc/passwd", ir);
-        refused("inside run_dir");
+        refused("resolve inside run_dir");
+    }
+    SECTION("ir outside the run dir") {
+        root.write_active(root.run.string(), req, "/etc/passwd");
+        refused("resolve inside run_dir");
     }
 }
 
@@ -175,6 +203,7 @@ TEST_CASE("the host-process event names this process", "[gpu-fault-continuity][r
     // A plain test process is responsible for itself or its launcher, and is
     // not sandboxed; -1 would mean the lookup is missing on this OS.
     CHECK(process.responsible_pid > 0);
+    CHECK_FALSE(process.responsible_path.empty());
     CHECK(process.sandboxed == 0);
     RunConfig config;
     config.source = "rendezvous";

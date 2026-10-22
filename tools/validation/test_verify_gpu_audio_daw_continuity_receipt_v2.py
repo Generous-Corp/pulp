@@ -57,7 +57,8 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
              process_path: str = AUHOSTING, responsible: int = HOST_RESPONSIBLE,
              plugin_pid: int = PLUGIN_PID, planted: str | None = None,
              host_id: str = "logic", fmt: str = "au", realtime: bool = True,
-             start: int = START, claim_pid: int | None = None) -> dict:
+             start: int = START, claim_pid: int | None = None,
+             responsible_path: str | None = None) -> dict:
     """Synthesize one run directory and its v2 receipt."""
     synth_fault = "render_force_loss" if fault == hosts.POSITIVE_CONTROL else fault
     gfc.synthesize_run(run, fault=synth_fault, fault_sample=FAULT, frames=FRAMES,
@@ -69,6 +70,8 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
     def edit(events):
         out = [{"event": "host_process", "pid": plugin_pid, "ppid": 1,
                 "responsible_pid": responsible,
+                "responsible_path": responsible_path if responsible_path is not None else
+                (GARAGEBAND if host_id == "garageband" else LOGIC),
                 "sandboxed": 1 if "AUHosting" in process_path else 0,
                 "start_unix_us": start, "claimed_unix_us": CLAIMED,
                 "process_path": process_path, "config_source": "rendezvous",
@@ -89,17 +92,32 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
     (run / "claim").write_text(f"{claim_pid or plugin_pid}\n{CLAIMED}\n", encoding="utf-8")
     (run / "preflight.json").write_text(json.dumps(
         {"status": "ok", "quiet_host": False, "reasons": ["load"]}) + "\n", encoding="utf-8")
-    (run / "host_evidence.json").write_text(json.dumps(
-        {"insert_slot_1": NAME}) + "\n", encoding="utf-8")
+    write_host_evidence(run, host_id)
     if realtime:
-        # The host's realtime render of the fault pass: the synthesized bounce
-        # is exactly what the host would render (or, broken, what it heard).
-        shutil.copyfile(run / "bounce.wav", run / "realtime.wav")
+        write_realtime_from(run / "bounce.wav", run / "realtime.wav")
     return receipt_for(run, kind=kind, fault=fault, mode=mode, host_id=host_id, fmt=fmt,
                        realtime=realtime)
 
 
 GARAGEBAND = "/Applications/GarageBand.app/Contents/MacOS/GarageBand"
+
+
+def write_host_evidence(run: Path, host_id: str = "logic", plugin: str = NAME,
+                        pid: int = HOST_PID) -> None:
+    (run / "host_evidence.json").write_text(json.dumps(
+        {"plugins": [plugin], "host_pid": pid,
+         "host_executable": GARAGEBAND if host_id == "garageband" else LOGIC}) + "\n",
+        encoding="utf-8")
+
+
+def write_realtime_from(source: Path, target: Path) -> None:
+    """The host's realtime render of the fault pass. A real one differs from
+    the offline bounce in rounding (GPU blocks before the fault); one ulp-scale
+    change keeps it a distinct artifact that still nulls."""
+    _, channels = gfc.read_wav(source)
+    channels = [list(ch) for ch in channels]
+    channels[0][0] += 1e-7
+    gfc.write_wav_f32(target, channels)
 
 
 def host_block(host_id: str = "logic") -> dict:
@@ -195,6 +213,21 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
         self.assertIn("no host realtime render of the fault pass (M1)", receipt["verdict_reasons"])
 
+    def test_m1_the_bounce_cannot_stand_in_for_the_realtime_render(self):
+        run = self.run_dir("realtime-is-bounce")
+        make_run(run)
+        receipt = receipt_for(run, kind="fault", fault="force_loss_before",
+                              mode="auhostingservice_arrow")
+        receipt["host_realtime_artifact"] = "bounce.wav"
+        with self.assertRaisesRegex(V2.ReceiptError, "re-derive"):
+            self.verify(resign(receipt), run)
+        shutil.copyfile(run / "bounce.wav", run / "realtime.wav")
+        receipt = receipt_for(run, kind="fault", fault="force_loss_before",
+                              mode="auhostingservice_arrow")
+        self.assertEqual(self.verify(receipt, run)[0], "inconclusive")
+        self.assertIn("the host realtime render is the offline bounce itself",
+                      receipt["verdict_reasons"])
+
     def test_m1_a_failing_host_realtime_render_is_a_fail(self):
         run = self.run_dir("realtime-broken")
         make_run(run)
@@ -202,7 +235,7 @@ class V2Receipt(unittest.TestCase):
         gfc.synthesize_run(bad, fault="force_loss_before", fault_sample=FAULT, frames=FRAMES,
                            break_fallback=True, nonce=NONCE, pid=PLUGIN_PID, tail=POST,
                            window_post=POST)
-        shutil.copyfile(bad / "bounce.wav", run / "realtime.wav")
+        write_realtime_from(bad / "bounce.wav", run / "realtime.wav")
         receipt = receipt_for(run, kind="fault", fault="force_loss_before",
                               mode="auhostingservice_arrow")
         self.assertEqual(self.verify(receipt, run)[0], "fail")
@@ -321,6 +354,20 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT - 500)
         self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
 
+    def test_a_planted_negative_that_never_fired_proves_nothing(self):
+        run = self.run_dir("negative-never-fired")
+        make_run(run, kind="planted_negative", break_fallback=True)
+        _rewrite_events(run, lambda ev: [e for e in ev if e["event"] not in (
+            "fault_fired", "provider_fault_applied")])
+        receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
+                              mode="auhostingservice_arrow")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+    def test_a_planted_negative_in_an_unbound_process_proves_nothing(self):
+        run = self.run_dir("negative-unbound")
+        receipt = make_run(run, kind="planted_negative", break_fallback=True, responsible=999)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
     def test_a_planted_negative_that_passes_means_the_harness_has_no_teeth(self):
         run = self.run_dir("negative-passes")
         receipt = make_run(run, kind="planted_negative", break_fallback=False)
@@ -372,11 +419,24 @@ class V2Receipt(unittest.TestCase):
                 self.assertEqual(receipt["binding"]["outcome"], "unbound")
                 self.assertEqual(self.verify(receipt, run)[0], "inconclusive")
 
-    def test_an_unavailable_responsible_pid_is_bindable_but_recorded(self):
-        run = self.run_dir("no-responsible")
-        receipt = make_run(run, responsible=-1)
+    def test_an_unavailable_responsible_pid_is_bindable_only_in_process(self):
+        run = self.run_dir("no-responsible-inproc")
+        receipt = make_run(run, responsible=-1, mode="in_process", plugin_pid=HOST_PID,
+                           process_path=LOGIC)
         self.assertEqual(receipt["binding"]["conjuncts"]["responsible_pid"], "unavailable")
         self.assertEqual(receipt["binding"]["outcome"], "bound")
+        # Out of process it is the only link back to the host, so it is required.
+        run2 = self.run_dir("no-responsible-oop")
+        receipt2 = make_run(run2, responsible=-1)
+        self.assertEqual(receipt2["binding"]["outcome"], "unbound")
+        self.assertEqual(self.verify(receipt2, run2)[0], "inconclusive")
+
+    def test_an_out_of_process_plugin_serving_another_daw_is_a_fail(self):
+        run = self.run_dir("oop-other-daw")
+        receipt = make_run(run, responsible=777,
+                           responsible_path="/Applications/REAPER.app/Contents/MacOS/REAPER")
+        self.assertEqual(receipt["binding"]["outcome"], "wrong_daw")
+        self.assertEqual(self.verify(receipt, run)[0], "fail")
 
     def test_evidence_from_another_daw_is_a_fail(self):
         run = self.run_dir("wrong-daw")
@@ -457,11 +517,14 @@ class V2Receipt(unittest.TestCase):
         run = self.run_dir("evidence")
         receipt = make_run(run)
         receipt["trigger_transport"] = "rendezvous_file"
-        (run / "host_evidence.json").write_text('{"insert_slot_1": "Channel EQ"}\n',
-                                                encoding="utf-8")
-        receipt["artifacts"]["host_evidence.json"] = gfc.sha256_file(run / "host_evidence.json")
-        with self.assertRaisesRegex(V2.ReceiptError, "never shows the plug-in"):
-            V2.verify(resign(receipt), run)
+        for kw, needle in ((dict(plugin="Channel EQ"), "never shows the plug-in"),
+                           (dict(pid=HOST_PID + 1), "different host process")):
+            with self.subTest(needle):
+                write_host_evidence(run, **kw)
+                receipt["artifacts"]["host_evidence.json"] = gfc.sha256_file(
+                    run / "host_evidence.json")
+                with self.assertRaisesRegex(V2.ReceiptError, needle):
+                    V2.verify(resign(copy.deepcopy(receipt)), run)
 
     def test_a_live_receipt_needs_the_live_window_floor(self):
         run = self.run_dir("floor")

@@ -106,6 +106,37 @@ class ReleaseGate(unittest.TestCase):
                         encoding="utf-8")
         self.assertEqual(self.run_gate(), 1)
 
+    def test_every_cmake_true_spelling_of_the_option_is_caught(self):
+        base = (self.build / "CMakeCache.txt").read_text(encoding="utf-8")
+        for value in ("ON", "on", "Y", "yes", "TRUE", "1", "2"):
+            with self.subTest(value=value):
+                (self.build / "CMakeCache.txt").write_text(
+                    base + f"PULP_GPU_AUDIO_FAULT_HOOKS:BOOL={value}\n", encoding="utf-8")
+                self.assertEqual(self.run_gate(), 1)
+        for value in ("OFF", "0", "NO", "FALSE", "N", ""):
+            with self.subTest(value=value):
+                (self.build / "CMakeCache.txt").write_text(
+                    base + f"PULP_GPU_AUDIO_FAULT_HOOKS:BOOL={value}\n", encoding="utf-8")
+                self.assertEqual(self.run_gate(), 0)
+
+    def test_other_generators_manifests_are_read(self):
+        for name in ("build-Release.ninja", "Pulp.sln"):
+            with self.subTest(name=name):
+                path = self.build / name
+                path.write_text("PulpGpuFaultContinuity_CLAP\n", encoding="utf-8")
+                self.assertEqual(self.run_gate(), 1)
+                path.unlink()
+        self.assertEqual(self.run_gate(), 0)
+
+    def test_an_extra_directory_is_scanned(self):
+        with tempfile.TemporaryDirectory() as extra:
+            plugin = Path(extra) / "Components/X.component/Contents/MacOS/X"
+            plugin.parent.mkdir(parents=True)
+            plugin.write_bytes(b"\xcf\xfa\xed\xfe arm_provider_fault")
+            self.assertEqual(self.run_gate(), 0)
+            self.assertEqual(GATE.main(["--build-dir", str(self.build), "--extra-dir", extra]),
+                             1)
+
     def test_not_a_build_directory(self):
         (self.build / "CMakeCache.txt").unlink()
         self.assertEqual(self.run_gate(), 2)

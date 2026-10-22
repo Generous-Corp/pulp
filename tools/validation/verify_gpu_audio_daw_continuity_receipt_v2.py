@@ -152,8 +152,21 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     if require_quiet_host:
         _require(summary["quiet_host"], "quiet host required; preflight was not quiet")
     if live:
-        evidence = (run_dir / "host_evidence.json").read_text(encoding="utf-8", errors="replace")
-        _require(plugin["name"] in evidence, "host_evidence.json never shows the plug-in")
+        # Host-side evidence (an AX snapshot of the insert slot, or REAPER's
+        # log summary) must name the plug-in and the same host process the
+        # receipt declares. Like the rest of the receipt it is self-attested;
+        # binding it to the host block means editing one requires editing both
+        # consistently with the plug-in's own host_process event.
+        try:
+            evidence = json.loads((run_dir / "host_evidence.json").read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise ReceiptError(f"host_evidence.json unreadable: {exc}") from exc
+        _require(isinstance(evidence, dict), "host_evidence.json is not an object")
+        _require(plugin["name"] in json.dumps(evidence.get("plugins", [])),
+                 "host_evidence.json never shows the plug-in")
+        _require(evidence.get("host_pid") == host.get("pid") and
+                 evidence.get("host_executable") == host.get("executable"),
+                 "host_evidence.json names a different host process")
 
     analysis = receipt.get("analysis") or {}
     tolerance = analysis.get("tolerance")
