@@ -1,7 +1,5 @@
 ---
-version = "0.1006.0"
 breaking = true
-applies_if = "cli_version_from < 0.1006.0 && cli_version_to >= 0.1006.0"
 summary = "The FDN reverb's block engine changes its output; LadderSaturation::realtime_efficient uses a minimax tanh in place of the Lambert form; the linear-phase oversampler and the meter's K-weighting shift output by float round-off; new opt-in decoupled compressor ballistics, classic reverb tier, meter feature sets and second-order ADAA"
 ---
 
