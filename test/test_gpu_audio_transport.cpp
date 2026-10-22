@@ -73,8 +73,8 @@ TEST_CASE("GpuAudioStatus preserves provider, delivery, and fallback meanings",
 
 TEST_CASE("GpuAudioStatus v3 fields default to unreported", "[gpu_audio][status]") {
     const GpuAudioStatus status;
-    CHECK(GpuAudioStatus::kSchemaVersion == 3);
-    CHECK(status.schema_version == 3);
+    CHECK(GpuAudioStatus::kSchemaVersion == 4);
+    CHECK(status.schema_version == 4);
     CHECK(status.provider == GpuAudioProvider::Unknown);
     CHECK(status.fallback_policy == MissPolicy::Silence);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
@@ -167,7 +167,7 @@ GpuAudioStatusError status_error(const GpuAudioStatus& status) {
 
 } // namespace
 
-TEST_CASE("validate_gpu_audio_status accepts coherent v3 states", "[gpu_audio][status]") {
+TEST_CASE("validate_gpu_audio_status accepts coherent v3 and v4 states", "[gpu_audio][status]") {
     STATIC_REQUIRE(validate_gpu_audio_status(GpuAudioStatus{}).accepted());
     CHECK(validate_gpu_audio_status(ready_gpu_status()).accepted());
 
@@ -203,6 +203,23 @@ TEST_CASE("validate_gpu_audio_status accepts coherent v3 states", "[gpu_audio][s
     shadowed.shadow_double_miss_blocks = 1;
     shadowed.shadow_inline_cost_pct = 4.5f;
     CHECK(validate_gpu_audio_status(shadowed).accepted());
+
+    // v4: a successful re-acquire, delivering again, measured and counted.
+    auto reacquired = ready_gpu_status();
+    reacquired.recovery_reason = GpuAudioRecoveryReason::ProviderReacquired;
+    reacquired.recovery_sequence = 40;
+    reacquired.epoch = 2;
+    reacquired.reacquire_attempts = 2;
+    reacquired.reacquire_successes = 1;
+    reacquired.last_reacquire_to_gpu_ns = 51'000'000;
+    CHECK(validate_gpu_audio_status(reacquired).accepted());
+    reacquired.provider_state = GpuAudioProviderState::Degraded;
+    reacquired.selected_engine = GpuAudioEngine::Cpu;
+    CHECK(validate_gpu_audio_status(reacquired).accepted());
+    // Failed attempts alone are coherent.
+    auto failing = ready_gpu_status();
+    failing.reacquire_attempts = 3;
+    CHECK(validate_gpu_audio_status(failing).accepted());
 }
 
 TEST_CASE("validate_gpu_audio_status rejects each planted v3 violation", "[gpu_audio][status]") {
@@ -307,6 +324,30 @@ TEST_CASE("validate_gpu_audio_status rejects each planted v3 violation", "[gpu_a
     status = ready_gpu_status();
     status.fallback_available = false;
     CHECK(status_error(status) == Error::FallbackUnavailable);
+
+    // A v3 snapshot is not a v4 one.
+    status = ready_gpu_status();
+    status.schema_version = 3;
+    CHECK(status_error(status) == Error::SchemaVersionMismatch);
+
+    // Re-acquire accounting.
+    status = ready_gpu_status();
+    status.reacquire_attempts = 1;
+    status.reacquire_successes = 2;
+    CHECK(status_error(status) == Error::ReacquireSuccessesExceedAttempts);
+    status = ready_gpu_status();
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderReacquired;
+    status.recovery_sequence = 5;
+    status.reacquire_attempts = 1;
+    CHECK(status_error(status) == Error::ReacquiredWithoutSuccess);
+    status.reacquire_successes = 1;
+    status.provider_state = GpuAudioProviderState::Unavailable;
+    status.selected_engine = GpuAudioEngine::Unknown;
+    CHECK(status_error(status) == Error::ReacquiredNotDelivering);
+    status = ready_gpu_status();
+    status.reacquire_attempts = 1;
+    status.last_reacquire_to_gpu_ns = 10;
+    CHECK(status_error(status) == Error::ReacquireTimingWithoutSuccess);
 }
 
 TEST_CASE("GPU audio contract enums append without renumbering", "[gpu_audio][status]") {

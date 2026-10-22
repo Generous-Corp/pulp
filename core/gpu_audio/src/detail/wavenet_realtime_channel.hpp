@@ -6,6 +6,7 @@
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <algorithm>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -13,6 +14,12 @@ namespace pulp::gpu_audio::detail {
 // Private access to the provider a GpuWaveNetSession prepared.
 struct GpuWaveNetSessionAccess {
     static SharedIoProviderIdentity provider_identity(const GpuWaveNetSession&) noexcept;
+};
+// Private access to a session's provider-pool path.
+struct GpuWaveNetSessionPoolAccess {
+    static bool recycle(GpuWaveNetSession&, std::uint64_t budget_ns) noexcept;
+    static std::string provider_key(const GpuWaveNetSession&);
+    static std::string requested_provider_key();
 };
 
 // A provider completion and the admission ticket of the block it completes.
@@ -34,6 +41,23 @@ class WaveNetRealtimeChannel {
     virtual void service_until(std::uint64_t now_ns, std::uint64_t deadline_ns) noexcept = 0;
     virtual std::optional<WaveNetChannelCompletion> receive(std::span<float>) noexcept = 0;
     virtual bool release() noexcept = 0;
+    // Host or serialized worker: release within `budget_ns`. On expiry the
+    // provider abandons to quarantine and this returns false, keeping
+    // ownership for a later release().
+    virtual bool release_bounded(std::uint64_t budget_ns) noexcept {
+        (void)budget_ns;
+        return release();
+    }
+    // Provider pool hooks: drain within `budget_ns` (zero: the provider's
+    // default) and reopen for a later stream, and name the provider's kind and
+    // revision. A channel that cannot be kept warm returns false / empty.
+    virtual bool recycle(std::uint64_t budget_ns) noexcept {
+        (void)budget_ns;
+        return false;
+    }
+    virtual std::string provider_key() const {
+        return {};
+    }
     // Serialized worker diagnostic: the provider's device is gone, so nothing
     // submitted to this channel will complete successfully again.
     virtual bool lost() const noexcept {
@@ -84,6 +108,31 @@ class GpuWaveNetSessionChannel final : public WaveNetRealtimeChannel {
         std::fill(tickets_.begin(), tickets_.end(), SharedIoSubmissionTicket{});
         return session_->release();
     }
+    // A scripted session has no bounded release and is never pooled.
+    bool release_bounded(std::uint64_t budget_ns) noexcept override {
+        std::fill(tickets_.begin(), tickets_.end(), SharedIoSubmissionTicket{});
+        if constexpr (std::is_same_v<Session, GpuWaveNetSession>)
+            return session_->release_bounded(budget_ns);
+        else
+            return session_->release();
+    }
+    bool recycle(std::uint64_t budget_ns) noexcept override {
+        if constexpr (std::is_same_v<Session, GpuWaveNetSession>) {
+            if (!GpuWaveNetSessionPoolAccess::recycle(*session_, budget_ns))
+                return false;
+            // Nothing admitted before the recycle can complete into a later stream.
+            std::fill(tickets_.begin(), tickets_.end(), SharedIoSubmissionTicket{});
+            return true;
+        } else {
+            return false;
+        }
+    }
+    std::string provider_key() const override {
+        if constexpr (std::is_same_v<Session, GpuWaveNetSession>)
+            return GpuWaveNetSessionPoolAccess::provider_key(*session_);
+        else
+            return {};
+    }
     bool lost() const noexcept override {
         return session_->device_lost();
     }
@@ -115,5 +164,13 @@ struct WaveNetRealtimeTestAccess {
     static bool prepare(GpuWaveNetRealtimeNode&,
                         std::vector<std::unique_ptr<WaveNetRealtimeChannel>>,
                         std::uint64_t first_sequence = 0);
+    // Channels a re-acquire creates in place of the production sessions.
+    using ChannelFactory = std::unique_ptr<WaveNetRealtimeChannel> (*)(void*) noexcept;
+    static void set_channel_factory(GpuWaveNetRealtimeNode&, ChannelFactory, void*) noexcept;
+    static std::size_t quarantined_channels(const GpuWaveNetRealtimeNode&) noexcept;
+    static std::uint32_t warmup_blocks(const GpuWaveNetRealtimeNode&) noexcept;
+    // Places a channel in the re-acquire quarantine, as if it failed to drain.
+    static void quarantine_for_testing(GpuWaveNetRealtimeNode&,
+                                       std::unique_ptr<WaveNetRealtimeChannel>);
 };
 } // namespace pulp::gpu_audio::detail

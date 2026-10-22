@@ -103,6 +103,16 @@ struct Result {
     std::uint64_t neural_hang_sequence = 0;
     std::uint64_t neural_loss_blocks = 0;
     std::uint64_t neural_hang_blocks = 0;
+    // Re-acquire after the same faults: a new physical provider replaces the
+    // faulted one while the stream continues, and GPU delivery resumes.
+    bool reacquire_loss_receipt = false;
+    bool reacquire_hang_receipt = false;
+    std::uint64_t reacquire_loss_resume_ns = 0;
+    std::uint64_t reacquire_hang_resume_ns = 0;
+    std::uint64_t reacquire_loss_reprepare_ns = 0;
+    std::uint64_t reacquire_hang_reprepare_ns = 0;
+    std::string reacquire_loss_reason = "not_run";
+    std::string reacquire_hang_reason = "not_run";
     std::uint64_t submissions = 0;
     std::uint64_t gpu_delivered = 0;
     std::uint64_t cpu_fallback = 0;
@@ -148,12 +158,23 @@ void emit(const Result& result, std::string_view status) {
               << R"(,"neural_hang_receipt":)" << (result.neural_hang_receipt ? "true" : "false")
               << R"(,"neural_hang_reason":")" << result.neural_hang_reason
               << R"(","neural_hang_sequence":)" << result.neural_hang_sequence
-              << R"(,"neural_hang_blocks":)" << result.neural_hang_blocks << R"(,"submissions":)"
-              << result.submissions << R"(,"gpu_delivered":)" << result.gpu_delivered
-              << R"(,"cpu_fallback_blocks":)" << result.cpu_fallback << R"(,"late_blocks":)"
-              << result.late << R"(,"resident_state_copies":)" << result.resident_state_copies
-              << R"(,"generation":)" << result.generation << R"(,"reprime_generation":)"
-              << result.reprime_generation << R"(,"reason":")" << result.reason << "\"}" << '\n';
+              << R"(,"neural_hang_blocks":)" << result.neural_hang_blocks
+              << R"(,"reacquire_loss_receipt":)"
+              << (result.reacquire_loss_receipt ? "true" : "false")
+              << R"(,"reacquire_loss_reason":")" << result.reacquire_loss_reason
+              << R"(","reacquire_loss_reprepare_ns":)" << result.reacquire_loss_reprepare_ns
+              << R"(,"reacquire_loss_resume_ns":)" << result.reacquire_loss_resume_ns
+              << R"(,"reacquire_hang_receipt":)"
+              << (result.reacquire_hang_receipt ? "true" : "false")
+              << R"(,"reacquire_hang_reason":")" << result.reacquire_hang_reason
+              << R"(","reacquire_hang_reprepare_ns":)" << result.reacquire_hang_reprepare_ns
+              << R"(,"reacquire_hang_resume_ns":)" << result.reacquire_hang_resume_ns
+              << R"(,"submissions":)" << result.submissions << R"(,"gpu_delivered":)"
+              << result.gpu_delivered << R"(,"cpu_fallback_blocks":)" << result.cpu_fallback
+              << R"(,"late_blocks":)" << result.late << R"(,"resident_state_copies":)"
+              << result.resident_state_copies << R"(,"generation":)" << result.generation
+              << R"(,"reprime_generation":)" << result.reprime_generation << R"(,"reason":")"
+              << result.reason << "\"}" << '\n';
 }
 
 bool compare_block(std::span<const float> actual, std::span<const float> expected) {
@@ -286,13 +307,49 @@ struct NodeFaultRun {
     std::uint64_t blocks = 0;
     bool status_valid = false;
     std::string reason_text;
+    // Re-acquire, when requested.
+    bool reacquired = false;
+    bool resumed_with_parity = false;
+    std::uint64_t reprepare_ns = 0;
+    std::uint64_t resume_ns = 0;
+    std::uint64_t epoch = 0;
+};
+
+// Builds a session over a fresh, healthy physical provider for a re-acquire.
+struct PhysicalChannelFactory {
+    const Fixture* fixture = nullptr;
+    const void* proc_table = nullptr;
+    int created = 0;
+    static std::unique_ptr<WaveNetRealtimeChannel> make(void* context) noexcept {
+        auto& self = *static_cast<PhysicalChannelFactory*>(context);
+        auto created = DawnSharedIoProvider::create(
+            {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+             .proc_table_override_for_testing = self.proc_table,
+             .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
+        if (!created.provider)
+            return nullptr;
+        auto program = DawnSharedIoWavenetProgram::create(*created.provider, self.fixture->spec());
+        if (!program)
+            return nullptr;
+        const auto bytes = self.fixture->spec().block_size * sizeof(float);
+        auto session = std::make_unique<SharedIoProgramSession>();
+        if (!session->prepare(
+                {std::move(created.provider), std::move(program)},
+                {.slots = 2,
+                 .input_bytes_per_slot = bytes,
+                 .output_bytes_per_slot = bytes,
+                 .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer}))
+            return nullptr;
+        ++self.created;
+        return std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session));
+    }
 };
 
 // Drives the stamped node over a physical provider with `fault` until a
 // recovery reason latches. Callbacks and worker pumps alternate on this thread
 // with a short real wait, so the provider sees real device time.
 NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
-                            DawnSharedIoProvider::Fault fault) {
+                            DawnSharedIoProvider::Fault fault, bool reacquire = false) {
     namespace ga = pulp::gpu_audio;
     NodeFaultRun run;
     auto created = DawnSharedIoProvider::create(
@@ -347,6 +404,10 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
         run.reason_text = "node_prepare_failed";
         return run;
     }
+    PhysicalChannelFactory factory{.fixture = &fixture, .proc_table = proc_table};
+    if (reacquire)
+        WaveNetRealtimeTestAccess::set_channel_factory(node, &PhysicalChannelFactory::make,
+                                                       &factory);
     auto path = realtime_gpu_node_path(&node);
     std::array<float, 2> input{}, output{};
     const float* in_ptr = input.data();
@@ -354,7 +415,16 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
     pulp::audio::BufferView<const float> in(&in_ptr, 1, 2);
     pulp::audio::BufferView<float> out(&out_ptr, 1, 2);
     run.ran = true;
-    for (std::uint64_t sequence = 0; sequence < 64; ++sequence) {
+    // The fixture computes y[n] = tanh(0.5 x[n-1]); block B's input is
+    // {B, B + 0.25}, so a delivered block has a closed-form expectation.
+    const auto expected_block = [](std::uint64_t block) {
+        const float previous = block == 0 ? 0.0f : static_cast<float>(block - 1) + 0.25f;
+        return std::array<float, 2>{std::tanh(0.5f * previous),
+                                    std::tanh(0.5f * static_cast<float>(block))};
+    };
+    std::uint64_t fence_ns = 0, resumed_blocks = 0;
+    bool parity = true;
+    for (std::uint64_t sequence = 0; sequence < 256; ++sequence) {
         input = {static_cast<float>(sequence), static_cast<float>(sequence) + 0.25f};
         const auto status = path.process(path.context, in, out, 2, sequence, true, now_ns());
         const auto disposition =
@@ -363,19 +433,42 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
                                             : SharedIoDeliveryDisposition::SilenceDelivered;
         path.delivered(path.context, sequence, static_cast<std::uint8_t>(disposition), 0, 0);
         ++run.blocks;
+        if (run.reacquired && status == kRealtimeGpuReady) {
+            if (resumed_blocks++ == 0)
+                run.resume_ns = now_ns() - fence_ns;
+            parity = parity && compare_block(output, expected_block(sequence - 1));
+            if (resumed_blocks == 8)
+                break;
+        }
         for (int pump = 0; pump < 4; ++pump) {
             (void)path.service(path.context, 0);
             std::this_thread::sleep_for(std::chrono::microseconds(250));
         }
-        if (node.recovery_reason() != ga::GpuAudioRecoveryReason::None)
-            break;
+        if (!run.reacquired && node.recovery_reason() != ga::GpuAudioRecoveryReason::None) {
+            run.reason = node.recovery_reason();
+            run.sequence = node.recovery_sequence();
+            const auto fenced = node.status_snapshot();
+            run.state = fenced.provider_state;
+            run.status_valid = ga::validate_gpu_audio_status(fenced).accepted() &&
+                               fenced.selected_engine != ga::GpuAudioEngine::Gpu;
+            if (!reacquire)
+                break;
+            fence_ns = now_ns();
+            run.reacquired = path.reprepare(path.context, 250'000'000);
+            run.reprepare_ns = now_ns() - fence_ns;
+            if (!run.reacquired)
+                break;
+        }
     }
-    run.reason = node.recovery_reason();
-    run.sequence = node.recovery_sequence();
+    run.resumed_with_parity = run.reacquired && resumed_blocks == 8 && parity;
+    if (run.reacquired)
+        run.epoch = node.status_snapshot().epoch;
     const auto status = node.status_snapshot();
-    run.state = status.provider_state;
-    run.status_valid = ga::validate_gpu_audio_status(status).accepted() &&
-                       status.selected_engine != ga::GpuAudioEngine::Gpu;
+    if (reacquire)
+        run.status_valid = run.status_valid && ga::validate_gpu_audio_status(status).accepted() &&
+                           status.recovery_reason == ga::GpuAudioRecoveryReason::ProviderReacquired;
+    else
+        run.state = status.provider_state;
     run.reason_text = std::string(recovery_name(run.reason));
     if (!node.release())
         run.reason_text += ":release_retained";
@@ -576,6 +669,23 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
     result.node_hang_reason = hang.reason_text;
     result.node_hang_sequence = hang.sequence;
     result.node_hang_blocks = hang.blocks;
+    const auto reacquire_loss =
+        run_node_fault(fixture, proc_table,
+                       DawnSharedIoProvider::Fault::ForceLossAfterCompletionRegistration, true);
+    result.reacquire_loss_reason = reacquire_loss.reason_text;
+    result.reacquire_loss_reprepare_ns = reacquire_loss.reprepare_ns;
+    result.reacquire_loss_resume_ns = reacquire_loss.resume_ns;
+    result.reacquire_loss_receipt = reacquire_loss.reason == ga_reason::ProviderLost &&
+                                    reacquire_loss.resumed_with_parity &&
+                                    reacquire_loss.epoch == 2 && reacquire_loss.status_valid;
+    const auto reacquire_hang =
+        run_node_fault(fixture, proc_table, DawnSharedIoProvider::Fault::DelayCompletion, true);
+    result.reacquire_hang_reason = reacquire_hang.reason_text;
+    result.reacquire_hang_reprepare_ns = reacquire_hang.reprepare_ns;
+    result.reacquire_hang_resume_ns = reacquire_hang.resume_ns;
+    result.reacquire_hang_receipt = reacquire_hang.reason == ga_reason::ProviderUnresponsive &&
+                                    reacquire_hang.resumed_with_parity &&
+                                    reacquire_hang.epoch == 2 && reacquire_hang.status_valid;
     result.node_hang_receipt = hang.ran && hang.reason == ga_reason::ProviderUnresponsive &&
                                hang.sequence == 0 && hang.state == ga_state::Unavailable &&
                                hang.status_valid;
@@ -861,7 +971,8 @@ int main(int argc, char** argv) {
         result.late_result_rejected && result.retired && result.reprimed &&
         result.immutable_provenance && result.device_loss_negative && result.device_loss_receipt &&
         result.node_loss_receipt && result.node_hang_receipt && result.neural_loss_receipt &&
-        result.neural_hang_receipt;
+        result.neural_hang_receipt && result.reacquire_loss_receipt &&
+        result.reacquire_hang_receipt;
     emit(result, passed ? "passed" : "failed");
     return passed ? 0 : 1;
 }

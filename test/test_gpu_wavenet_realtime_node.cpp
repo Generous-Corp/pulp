@@ -1,14 +1,19 @@
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/gpu_audio_provider_pool_test_access.hpp"
+#include "detail/provider_pool_key.hpp"
+#include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/wavenet_program_session_channel.hpp"
 #include <algorithm>
+#include <climits>
 #include <array>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/gpu_audio/gpu_audio_program.hpp>
+#include <pulp/gpu_audio/gpu_audio_provider_pool.hpp>
 #include <chrono>
 #include <thread>
 #include <pulp/gpu_audio/gpu_audio_program.hpp>
@@ -57,6 +62,13 @@ struct Control {
     int slow_every = 0, completion_lag = 0;
     int first_pass_completions = 0, tail_pass_completions = 0;
     int submits = 0, services = 0, wait_services = 0, receives = 0, releases = 0;
+    // Provider pool: a recyclable channel parks under `pool_key`. The last
+    // bounded release budget is recorded.
+    bool recyclable = false;
+    std::string pool_key;
+    int recycles = 0;
+    std::uint64_t last_release_budget = 0;
+    bool hang_release = false;
     std::uint64_t last_wait_deadline = 0;
     std::array<std::uint64_t, 8> wait_deadlines{}, wait_starts{};
 };
@@ -141,6 +153,22 @@ class Channel final : public detail::WaveNetRealtimeChannel {
     bool release() noexcept override {
         ++control_.releases;
         return control_.release;
+    }
+    bool release_bounded(std::uint64_t budget_ns) noexcept override {
+        control_.last_release_budget = budget_ns;
+        if (control_.hang_release) {
+            // A provider that never drains: it uses its whole budget and fails.
+            std::this_thread::sleep_for(std::chrono::nanoseconds(budget_ns));
+            return false;
+        }
+        return release();
+    }
+    bool recycle(std::uint64_t) noexcept override {
+        ++control_.recycles;
+        return control_.recyclable;
+    }
+    std::string provider_key() const override {
+        return control_.pool_key;
     }
 
   private:
@@ -1710,11 +1738,28 @@ class SlowProvider final : public detail::SharedIoArenaProvider {
         deferred_count_ = kept;
     }
     bool drain() noexcept override {
+        ++drains;
+        if (hang_drain) {
+            // A provider whose work never retires: wait out the budget, then
+            // fail closed so the caller keeps ownership (quarantine).
+            const auto budget =
+                std::chrono::nanoseconds(drain_budget_ns != 0 ? drain_budget_ns : 2'000'000'000);
+            const auto until = std::chrono::steady_clock::now() + budget;
+            while (std::chrono::steady_clock::now() < until)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return false;
+        }
         for (std::size_t i = 0; i < deferred_count_; ++i)
             (void)deferred_[i].inbox->push(deferred_[i].token, CompletionStatus::RetiredSuccess);
         deferred_count_ = 0;
         return true;
     }
+    void set_drain_budget_ns(std::uint64_t budget_ns) noexcept override {
+        drain_budget_ns = budget_ns;
+    }
+    bool hang_drain = false;
+    std::uint64_t drain_budget_ns = 0;
+    int drains = 0;
 
   private:
     std::vector<std::unique_ptr<Slot>> slots_;
@@ -1866,7 +1911,7 @@ TEST_CASE("WaveNet status reports schema v3 epoch, terminals and provider facts"
     h.service();
     // Delivering: blocks 0-3 retired as delivered, block 4 in flight.
     auto status = checked_status(h.node);
-    CHECK(status.schema_version == 3);
+    CHECK(status.schema_version == GpuAudioStatus::kSchemaVersion);
     CHECK(status.epoch == 1);
     CHECK(status.delivery_epoch_active);
     CHECK(count(status, GpuAudioTerminalDisposition::GpuDelivered) == 4);
@@ -2120,4 +2165,812 @@ TEST_CASE("WaveNet starved worker is not mistaken for an unresponsive provider",
         CHECK(h.node.recovery_reason() != GpuAudioRecoveryReason::ProviderUnresponsive);
         CHECK(checked_status(h.node).provider_state != GpuAudioProviderState::Unavailable);
     }
+}
+
+namespace {
+// A re-acquire's replacement channels: every one shares `control`.
+struct ChannelFactory {
+    Control* control = nullptr;
+    int created = 0;
+    bool fail = false;
+    // Optional: the first `first_count` replacements use `first_control`, and
+    // the first creation waits `first_delay` (inside the re-acquire).
+    Control* first_control = nullptr;
+    int first_count = 0;
+    std::chrono::milliseconds first_delay{0};
+    static std::unique_ptr<detail::WaveNetRealtimeChannel> make(void* context) noexcept {
+        auto& self = *static_cast<ChannelFactory*>(context);
+        if (self.fail)
+            return nullptr;
+        if (self.created == 0 && self.first_delay.count() > 0)
+            std::this_thread::sleep_for(self.first_delay);
+        const bool first = self.first_control != nullptr && self.created < self.first_count;
+        ++self.created;
+        return std::make_unique<Channel>(first ? *self.first_control : *self.control);
+    }
+    void install(GpuWaveNetRealtimeNode& node) {
+        detail::WaveNetRealtimeTestAccess::set_channel_factory(node, &ChannelFactory::make, this);
+    }
+};
+} // namespace
+
+TEST_CASE("WaveNet re-acquire replaces a lost provider in a new epoch on the same stream",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    Harness h;
+    ChannelFactory factory{.control = &h.controls[1]};
+    factory.install(h.node);
+    REQUIRE(detail::WaveNetRealtimeTestAccess::warmup_blocks(h.node) == 1);
+    for (int block = 0; block < 3; ++block) {
+        h.callback(float(h.sequence + 1));
+        h.service();
+        h.service();
+    }
+    h.controls[0].lost = true;
+    h.service();
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(h.callback(float(h.sequence + 1)) == detail::kRealtimeGpuMissed);
+    const auto old_receives = h.controls[0].receives;
+
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000'000));
+    CHECK(factory.created == 1);
+    // The callback adopts the new epoch at its next block.
+    const auto adopted = h.sequence;
+    std::vector<std::uint8_t> statuses;
+    for (int block = 0; block < 6; ++block) {
+        const auto status = h.callback(float(h.sequence + 1));
+        statuses.push_back(status);
+        if (status == detail::kRealtimeGpuReady)
+            CHECK(h.outa[0] == float(h.sequence - 1 - 1 + 1)); // the block one lead earlier
+        h.service();
+        h.service();
+    }
+    // Adoption block (due: old epoch) and the warmup block miss; then the GPU.
+    CHECK(statuses[0] == detail::kRealtimeGpuMissed);
+    CHECK(statuses[1] == detail::kRealtimeGpuMissed);
+    for (std::size_t i = 2; i < statuses.size(); ++i)
+        CHECK(statuses[i] == detail::kRealtimeGpuReady);
+    CHECK(h.controls[0].receives == old_receives); // the old provider is never serviced again
+    CHECK(h.controls[1].submits >= 4);
+    const auto status = checked_status(h.node);
+    CHECK(status.epoch == 2);
+    CHECK(status.delivery_epoch_active);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    CHECK(status.recovery_sequence == adopted + 1);
+    CHECK(status.provider_state != GpuAudioProviderState::Unavailable);
+    CHECK(
+        status.terminal_counts[static_cast<std::size_t>(GpuAudioTerminalDisposition::Cancelled)] >=
+        1);
+}
+
+TEST_CASE("WaveNet re-acquire quarantines a provider that cannot drain",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    Harness h;
+    ChannelFactory factory{.control = &h.controls[1]};
+    factory.install(h.node);
+    h.callback(1);
+    h.service();
+    h.controls[0].hang = true;
+    h.controls[0].release = false;
+    for (int block = 0; block < 4 && h.node.recovery_reason() == GpuAudioRecoveryReason::None;
+         ++block) {
+        h.callback(float(block));
+        h.service();
+    }
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderUnresponsive);
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000));
+    CHECK(detail::WaveNetRealtimeTestAccess::quarantined_channels(h.node) == 1);
+    for (int block = 0; block < 4; ++block) {
+        h.callback(float(block));
+        h.service();
+        h.service();
+    }
+    CHECK(checked_status(h.node).recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    // Teardown keeps retrying the quarantined provider; ownership is kept until
+    // it drains.
+    CHECK_FALSE(h.node.release());
+    h.controls[0].release = true;
+    CHECK(h.node.release());
+    CHECK(detail::WaveNetRealtimeTestAccess::quarantined_channels(h.node) == 0);
+}
+
+TEST_CASE("WaveNet re-acquire is refused unless a live provider fault fenced the node",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    {
+        Harness h;
+        ChannelFactory factory{.control = &h.controls[1]};
+        factory.install(h.node);
+        h.callback(1);
+        h.service();
+        CHECK_FALSE(h.path.reprepare(h.path.context, 1'000'000)); // not fenced
+        REQUIRE(h.path.fence(h.path.context));
+        CHECK_FALSE(h.path.reprepare(h.path.context, 1'000'000)); // offline fence
+        CHECK(factory.created == 0);
+    }
+    {
+        Harness h;
+        ChannelFactory factory{.control = &h.controls[1], .fail = true};
+        factory.install(h.node);
+        h.callback(1);
+        h.service();
+        h.controls[0].lost = true;
+        h.service();
+        CHECK_FALSE(h.path.reprepare(h.path.context, 1'000'000)); // no new provider
+        CHECK(h.node.fenced());
+        factory.fail = false;
+        CHECK(h.path.reprepare(h.path.context, 1'000'000)); // a later attempt succeeds
+    }
+}
+
+TEST_CASE("Stamped bridge live epoch handoff keeps the stream and refuses stale work",
+          "[gpu_audio][wavenet][reacquire]") {
+    using Bridge = detail::SharedIoStampedBridge;
+    const auto drive = [](Bridge& bridge, std::uint64_t sequence) {
+        std::array<float, 2> input{float(sequence), float(sequence)}, output{};
+        auto callback = bridge.begin_callback(input, sequence, 0);
+        (void)bridge.consume_output(callback, output);
+        return callback;
+    };
+    SECTION("the callback adopts the requested epoch at its next block") {
+        Bridge bridge;
+        REQUIRE(
+            bridge.prepare({.capacity = 4, .channels = 1, .block_size = 2, .lead_blocks = 1}, 1));
+        CHECK(drive(bridge, 0).stamp == Bridge::Stamp{1, 0});
+        bridge.request_recovery(detail::SharedIoRecoveryReason::ProviderLost, 0);
+        CHECK(drive(bridge, 1).stamp.epoch == 0);
+        // A completion from the old epoch can never be published.
+        const std::array<float, 2> stale{9, 9};
+        CHECK(bridge.publish_output({1, 0}, stale) == Bridge::Publication::Invalid);
+        REQUIRE(bridge.request_epoch(2));
+        CHECK(bridge.recovery_reason() == detail::SharedIoRecoveryReason::None);
+        CHECK(bridge.delivery_epoch() == 0); // nothing opens until the callback adopts
+        CHECK(drive(bridge, 2).stamp == Bridge::Stamp{2, 2});
+        CHECK(bridge.delivery_epoch() == 2);
+        CHECK(bridge.publish_output({1, 1}, stale) == Bridge::Publication::Invalid);
+        CHECK_FALSE(bridge.request_epoch(3)); // only while delivery is suspended
+    }
+    SECTION("a recovery request before adoption wins") {
+        Bridge bridge;
+        REQUIRE(
+            bridge.prepare({.capacity = 4, .channels = 1, .block_size = 2, .lead_blocks = 1}, 1));
+        bridge.request_recovery(detail::SharedIoRecoveryReason::ProviderLost, 0);
+        REQUIRE(bridge.request_epoch(2));
+        bridge.request_recovery(detail::SharedIoRecoveryReason::ProviderFailure, 1);
+        CHECK(drive(bridge, 0).stamp.epoch == 0);
+        CHECK(bridge.delivery_epoch() == 0);
+        CHECK(bridge.recovery_reason() == detail::SharedIoRecoveryReason::ProviderFailure);
+    }
+}
+
+TEST_CASE("WaveNet bounded release returns within budget against a provider that never drains",
+          "[gpu_audio][wavenet][realtime][teardown]") {
+    Shape shape;
+    GpuWaveNetRealtimeNode node(shape.config(1));
+    auto provider = std::make_unique<SlowProvider>();
+    auto* hung = provider.get();
+    auto session = std::make_unique<detail::SharedIoProgramSession>();
+    REQUIRE(session->prepare({std::move(provider), std::make_unique<PassthroughProgram>()},
+                             {.slots = 2,
+                              .input_bytes_per_slot = 2 * sizeof(float),
+                              .output_bytes_per_slot = 2 * sizeof(float)}));
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> channels;
+    channels.push_back(std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(channels)));
+    hung->hang_drain = true;
+    const auto started = std::chrono::steady_clock::now();
+    CHECK_FALSE(node.release_bounded(250'000'000));
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    CHECK(elapsed <= std::chrono::milliseconds(500));
+    CHECK(elapsed >= std::chrono::milliseconds(200));
+    // Ownership is kept; once the provider can drain, release completes.
+    hung->hang_drain = false;
+    CHECK(node.release());
+}
+
+namespace {
+// Identity model on both sides: the fake GPU channel returns its input, and
+// the CPU shadow returns the input one block late, as the GPU path delivers it.
+class IdentityShadowNode final : public GpuWaveNetRealtimeNode {
+  public:
+    using GpuWaveNetRealtimeNode::GpuWaveNetRealtimeNode;
+    bool cpu_fallback_prepared() const noexcept override {
+        return true;
+    }
+    void prime_fallback(const pulp::audio::BufferView<const float>& in,
+                        std::uint32_t n) noexcept override {
+        due = previous;
+        std::copy_n(in.channel_ptr(0), n, previous.data());
+    }
+    void process_cpu_fallback(const pulp::audio::BufferView<const float>&,
+                              pulp::audio::BufferView<float>& out,
+                              std::uint32_t n) noexcept override {
+        std::copy_n(due.data(), n, out.channel_ptr(0));
+    }
+    std::array<float, 2> previous{}, due{};
+};
+enum class ReacquireFault { Lose, Hang };
+struct ReacquireRun {
+    GpuAudioStatus status;
+    GpuAudioTransport::DeliverySnapshot delivery;
+    std::size_t discontinuities = 0, allocations = 0;
+    int created = 0;
+};
+struct ReacquireOptions {
+    bool factory_fails = false;
+    // Replacements that are lost from the start: their epochs fail before
+    // delivering. `lost_replacements` < 0 means every replacement.
+    int lost_replacements = 0;
+    std::uint64_t backoff_ns = 0;
+    std::chrono::milliseconds first_replacement_delay{0};
+};
+ReacquireRun run_reacquire(ReacquireFault fault, GpuAudioRecoveryPolicy policy,
+                           bool factory_fails = false, ReacquireOptions options = {}) {
+    options.factory_fails = options.factory_fails || factory_fails;
+    Shape shape;
+    auto config = shape.config(1);
+    config.miss_policy = MissPolicy::CpuFallback;
+    config.supports_cpu_fallback = true;
+    // Declared first: the node's destructor releases channels that use them.
+    std::array<Control, 3> controls{};
+    controls[2].lost = true;
+    IdentityShadowNode node(config);
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(controls[0]));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
+    ChannelFactory factory{.control = &controls[1],
+                           .fail = options.factory_fails,
+                           .first_control = &controls[2],
+                           .first_count =
+                               options.lost_replacements < 0 ? INT_MAX : options.lost_replacements,
+                           .first_delay = options.first_replacement_delay};
+    factory.install(node);
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(
+        &node, {.recovery_policy = policy, .reacquire_backoff_ns = options.backoff_ns}));
+    std::array<float, 2> input{}, output{};
+    const float* ip = input.data();
+    float* op = output.data();
+    pulp::audio::BufferView<const float> in(&ip, 1, 2);
+    pulp::audio::BufferView<float> out(&op, 1, 2);
+    ReacquireRun run;
+    for (int block = 0; block < 40; ++block) {
+        if (block == 10) {
+            controls[0].lost = fault == ReacquireFault::Lose;
+            controls[0].hang = fault == ReacquireFault::Hang;
+        }
+        input.fill(float(block + 1));
+        {
+            pulp::test::RtAllocationProbe probe;
+            transport.process(in, out, 2);
+            run.allocations += probe.allocation_count();
+        }
+        // Continuity null: every block after priming is the input one block
+        // earlier, whether the GPU, the fallback, or the re-acquired GPU made it.
+        if (block > 0 && output[0] != float(block))
+            ++run.discontinuities;
+        transport.pump();
+        transport.pump();
+    }
+    run.status = transport.status_snapshot();
+    INFO("validate_gpu_audio_status error "
+         << static_cast<int>(validate_gpu_audio_status(run.status).error));
+    CHECK(validate_gpu_audio_status(run.status).accepted());
+    run.delivery = transport.delivery_snapshot();
+    run.created = factory.created;
+    transport.release();
+    return run;
+}
+} // namespace
+
+TEST_CASE("Transport AutoReacquire returns a lost or hung provider to GPU delivery",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    for (const auto fault : {ReacquireFault::Lose, ReacquireFault::Hang}) {
+        CAPTURE(static_cast<int>(fault));
+        const auto run = run_reacquire(fault, GpuAudioRecoveryPolicy::AutoReacquire);
+        CHECK(run.discontinuities == 0);
+        CHECK(run.allocations == 0);
+        CHECK(run.created == 1);
+        CHECK(run.status.reacquire_attempts == 1);
+        CHECK(run.status.reacquire_successes == 1);
+        CHECK(run.status.last_reacquire_to_gpu_ns > 0);
+        CHECK(run.status.recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+        CHECK(run.status.epoch == 2);
+        CHECK(run.status.delivery_epoch_active);
+        CHECK(run.delivery.silence_blocks == 0);
+        CHECK(run.delivery.cpu_fallback_blocks > 0);
+        // GPU blocks after the outage: the run ends well past the warmup.
+        CHECK(run.delivery.gpu_blocks > 20);
+    }
+}
+
+TEST_CASE("Transport recovery stays on the fallback under Manual or a failing re-acquire",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    const auto manual = run_reacquire(ReacquireFault::Lose, GpuAudioRecoveryPolicy::Manual);
+    CHECK(manual.discontinuities == 0);
+    CHECK(manual.status.reacquire_attempts == 0);
+    CHECK(manual.status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(manual.status.provider_state == GpuAudioProviderState::Unavailable);
+
+    const auto failing =
+        run_reacquire(ReacquireFault::Lose, GpuAudioRecoveryPolicy::AutoReacquire, true);
+    CHECK(failing.discontinuities == 0);
+    CHECK(failing.status.reacquire_attempts == 3); // the configured maximum
+    CHECK(failing.status.reacquire_successes == 0);
+    CHECK(failing.status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(failing.delivery.silence_blocks == 0);
+}
+
+TEST_CASE("A re-acquire is informational in node health", "[gpu_audio][wavenet][reacquire]") {
+    GpuAudioStatus status;
+    status.provider_state = GpuAudioProviderState::Ready;
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderReacquired;
+    status.recovery_sequence = 12;
+    status.epoch = 2;
+    status.delivery_epoch_active = true;
+    const auto health = detail::health_from_status(status);
+    CHECK_FALSE(health.fenced);
+    CHECK_FALSE(health.device_lost);
+    CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Ready);
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderFailure;
+    CHECK(detail::provider_state_for_health(detail::health_from_status(status)) ==
+          GpuAudioProviderState::Degraded);
+}
+
+TEST_CASE("Provider pool keys come from provider identity and never cross provider kinds",
+          "[gpu_audio][wavenet][pool]") {
+    const auto identity = [](GpuAudioProvider kind, const char* backend, const char* revision) {
+        detail::SharedIoProviderIdentity id;
+        id.provider = kind;
+        id.authenticated = true;
+        id.adapter_backend = backend;
+        id.provider_revision = revision;
+        return id;
+    };
+    const auto dawn_key =
+        detail::provider_pool_key(identity(GpuAudioProvider::Dawn, "metal", "ada56770"));
+    // Same backend and revision, different provider kind.
+    const auto cpu_key =
+        detail::provider_pool_key(identity(GpuAudioProvider::Cpu, "metal", "ada56770"));
+    const auto dawn_unpinned =
+        detail::provider_pool_key(identity(GpuAudioProvider::Dawn, "metal", ""));
+    const auto dawn_other =
+        detail::provider_pool_key(identity(GpuAudioProvider::Dawn, "metal", "0000000"));
+    CHECK(detail::provider_pool_key_matches(dawn_key, dawn_key));
+    // A different kind never matches, pinned or not.
+    CHECK_FALSE(detail::provider_pool_key_matches(cpu_key, dawn_key));
+    CHECK_FALSE(detail::provider_pool_key_matches(cpu_key, dawn_unpinned));
+    // A pinned revision must match exactly; an unpinned request takes any.
+    CHECK_FALSE(detail::provider_pool_key_matches(dawn_key, dawn_other));
+    CHECK(detail::provider_pool_key_matches(dawn_key, dawn_unpinned));
+    // Unauthenticated or unknown-kind providers have no key and are never lent.
+    auto unauthenticated = identity(GpuAudioProvider::Dawn, "metal", "ada56770");
+    unauthenticated.authenticated = false;
+    CHECK(detail::provider_pool_key(unauthenticated).empty());
+    CHECK(detail::provider_pool_key(identity(GpuAudioProvider::Unknown, "metal", "x")).empty());
+    CHECK_FALSE(detail::provider_pool_key_matches("", dawn_unpinned));
+}
+
+TEST_CASE("Transport capability reports the recovery policy in effect, not the configured one",
+          "[gpu_audio][wavenet][reacquire]") {
+    struct StagedNode final : GpuAudioNode {
+        GpuAudioNodeDescriptor descriptor() const override {
+            return {.name = "staged",
+                    .input_channels = 1,
+                    .output_channels = 1,
+                    .block_size = 2,
+                    .sample_rate = 48000,
+                    .latency_blocks = 1};
+        }
+        bool prepare() override {
+            return true;
+        }
+        void process_block(const pulp::audio::BufferView<const float>&,
+                           pulp::audio::BufferView<float>& out, std::uint32_t) override {
+            out.clear();
+        }
+    };
+    const GpuAudioTransport::Config automatic{.recovery_policy =
+                                                  GpuAudioRecoveryPolicy::AutoReacquire};
+    {
+        // No re-acquire hook: AutoReacquire is configured but not in effect.
+        StagedNode node;
+        GpuAudioTransport transport;
+        REQUIRE(transport.prepare(&node, automatic));
+        CHECK(transport.capability_report().recovery_policy == GpuAudioRecoveryPolicy::Manual);
+    }
+    {
+        Harness h;
+        GpuAudioTransport transport;
+        REQUIRE(transport.prepare(&h.node, automatic));
+        CHECK(transport.capability_report().recovery_policy ==
+              GpuAudioRecoveryPolicy::AutoReacquire);
+        transport.release();
+        REQUIRE(transport.prepare(&h.node, {}));
+        CHECK(transport.capability_report().recovery_policy == GpuAudioRecoveryPolicy::Manual);
+    }
+}
+
+TEST_CASE("WaveNet re-acquire after an input stall delivers GPU blocks again",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    Harness h;
+    ChannelFactory factory{.control = &h.controls[1]};
+    factory.install(h.node);
+    // No worker for longer than the ring: the callback saturates the input.
+    for (int block = 0; block < 8; ++block)
+        h.callback(float(h.sequence + 1));
+    h.service();
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000));
+    int ready = 0;
+    for (int block = 0; block < 8; ++block) {
+        ready += h.callback(float(h.sequence + 1)) == detail::kRealtimeGpuReady ? 1 : 0;
+        h.service();
+        h.service();
+    }
+    CHECK(ready >= 5);
+    CHECK(checked_status(h.node).recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+}
+
+TEST_CASE("Transport re-acquire backs off and caps when a new epoch fails before delivering",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    // Every replacement is lost at once. A long backoff allows one attempt in
+    // the run; no backoff still stops at the configured maximum.
+    const auto slow = run_reacquire(ReacquireFault::Lose, GpuAudioRecoveryPolicy::AutoReacquire,
+                                    false, {.lost_replacements = -1, .backoff_ns = 10'000'000'000});
+    CHECK(slow.status.reacquire_attempts == 1);
+    CHECK(slow.discontinuities == 0);
+    const auto capped = run_reacquire(ReacquireFault::Lose, GpuAudioRecoveryPolicy::AutoReacquire,
+                                      false, {.lost_replacements = -1});
+    CHECK(capped.status.reacquire_attempts == 3);
+    CHECK(capped.status.reacquire_successes == 3);
+    CHECK(capped.created == 3);
+    CHECK(capped.discontinuities == 0);
+}
+
+TEST_CASE("Transport time to GPU counts from the first outage across a failed new epoch",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    // The first replacement is lost and takes 30 ms to create; the second is
+    // healthy. The measured outage must include the failed epoch.
+    const auto run = run_reacquire(
+        ReacquireFault::Lose, GpuAudioRecoveryPolicy::AutoReacquire, false,
+        {.lost_replacements = 1, .first_replacement_delay = std::chrono::milliseconds(30)});
+    REQUIRE(run.status.reacquire_successes == 2);
+    CHECK(run.status.recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    CHECK(run.status.last_reacquire_to_gpu_ns >= 30'000'000);
+    CHECK(run.discontinuities == 0);
+}
+
+TEST_CASE("WaveNet bounded release and re-acquire stay within budget across hung channels",
+          "[gpu_audio][wavenet][realtime][teardown]") {
+    const auto hung_node = [](Shape& shape, GpuWaveNetRealtimeNode& node,
+                              std::array<SlowProvider*, 2>& providers) {
+        (void)shape;
+        std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> channels;
+        for (auto& slot : providers) {
+            auto provider = std::make_unique<SlowProvider>();
+            slot = provider.get();
+            auto session = std::make_unique<detail::SharedIoProgramSession>();
+            REQUIRE(session->prepare({std::move(provider), std::make_unique<PassthroughProgram>()},
+                                     {.slots = 2,
+                                      .input_bytes_per_slot = 2 * sizeof(float),
+                                      .output_bytes_per_slot = 2 * sizeof(float)}));
+            channels.push_back(
+                std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)));
+        }
+        REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(channels)));
+        for (auto* provider : providers)
+            provider->hang_drain = true;
+    };
+    {
+        Shape shape;
+        GpuWaveNetRealtimeNode node(shape.config(1, 2));
+        std::array<SlowProvider*, 2> providers{};
+        hung_node(shape, node, providers);
+        const auto started = std::chrono::steady_clock::now();
+        CHECK_FALSE(node.release_bounded(250'000'000));
+        CHECK(std::chrono::steady_clock::now() - started <= std::chrono::milliseconds(500));
+        for (auto* provider : providers)
+            provider->hang_drain = false;
+        CHECK(node.release());
+    }
+    {
+        Shape shape;
+        GpuWaveNetRealtimeNode node(shape.config(1, 2));
+        std::array<SlowProvider*, 2> providers{};
+        hung_node(shape, node, providers);
+        std::array<Control, 2> healthy{};
+        ChannelFactory factory{.control = &healthy[0]};
+        factory.install(node);
+        detail::WaveNetRealtimeTestAccess::request_recovery(
+            node, detail::SharedIoRecoveryReason::ProviderLost, 0);
+        auto path = detail::realtime_gpu_node_path(&node);
+        const auto started = std::chrono::steady_clock::now();
+        CHECK(path.reprepare(path.context, 250'000'000));
+        CHECK(std::chrono::steady_clock::now() - started <= std::chrono::milliseconds(500));
+        CHECK(detail::WaveNetRealtimeTestAccess::quarantined_channels(node) == 2);
+        for (auto* provider : providers)
+            provider->hang_drain = false;
+        CHECK(node.release());
+    }
+}
+
+TEST_CASE("Stamped bridge refuses an epoch adoption that a racing recovery reached",
+          "[gpu_audio][wavenet][reacquire]") {
+    using Bridge = detail::SharedIoStampedBridge;
+    const auto drive = [](Bridge& bridge, std::uint64_t sequence) {
+        std::array<float, 2> input{}, output{};
+        auto callback = bridge.begin_callback(input, sequence, 0);
+        (void)bridge.consume_output(callback, output);
+    };
+    // A recovery inside request_epoch, between its snapshot and its clearing
+    // of the old cause. The clearing erases this cause too; the adoption must
+    // still be refused and the cause restored, so the owner can try again.
+    Bridge bridge;
+    REQUIRE(bridge.prepare({.capacity = 4, .channels = 1, .block_size = 2, .lead_blocks = 1}, 1));
+    bridge.request_recovery(detail::SharedIoRecoveryReason::ProviderLost, 0);
+    bridge.set_request_epoch_hook_for_testing(
+        [](void* context) {
+            static_cast<Bridge*>(context)->request_recovery(
+                detail::SharedIoRecoveryReason::SequenceGap, 7);
+        },
+        &bridge);
+    REQUIRE(bridge.request_epoch(2));
+    bridge.set_request_epoch_hook_for_testing(nullptr, nullptr);
+    drive(bridge, 0);
+    CHECK(bridge.delivery_epoch() == 0);
+    CHECK(bridge.recovery_reason() == detail::SharedIoRecoveryReason::SequenceGap);
+    CHECK(bridge.recovery_sequence() == 7);
+    // Positive control: the same request with no racing recovery is adopted.
+    Bridge clean;
+    REQUIRE(clean.prepare({.capacity = 4, .channels = 1, .block_size = 2, .lead_blocks = 1}, 1));
+    clean.request_recovery(detail::SharedIoRecoveryReason::ProviderLost, 0);
+    REQUIRE(clean.request_epoch(2));
+    drive(clean, 0);
+    CHECK(clean.delivery_epoch() == 2);
+    CHECK(clean.recovery_reason() == detail::SharedIoRecoveryReason::None);
+}
+
+TEST_CASE("WaveNet release drops a parked channel while a quarantined one keeps it owned",
+          "[gpu_audio][wavenet][realtime][pool]") {
+    GpuAudioProviderPool pool;
+    std::array<Control, 2> controls{}; // declared before the node that uses them
+    controls[0].recyclable = true;
+    controls[0].pool_key = "fake:1";
+    controls[1].release = false;
+    Shape shape;
+    auto config = shape.config(1);
+    config.provider_pool = &pool;
+    GpuWaveNetRealtimeNode node(config);
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(controls[0]));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
+    detail::WaveNetRealtimeTestAccess::quarantine_for_testing(
+        node, std::make_unique<Channel>(controls[1]));
+    CHECK_FALSE(node.release()); // the live channel parks; the quarantine stays
+    CHECK(pool.stats().warm_entries == 1);
+    CHECK_FALSE(node.release()); // must not touch the parked channel again
+    CHECK(controls[0].recycles == 1);
+    controls[1].release = true;
+    CHECK(node.release());
+    pool.clear();
+}
+
+TEST_CASE("Provider pool evicts a lost provider within the caller's budget and checks the "
+          "program exactly",
+          "[gpu_audio][wavenet][realtime][pool]") {
+    using Access = detail::GpuAudioProviderPoolTestAccess;
+    Shape shape;
+    const auto config = shape.config(1).session;
+    {
+        Control control;
+        control.pool_key = "fake:1";
+        GpuAudioProviderPool pool;
+        std::unique_ptr<detail::WaveNetRealtimeChannel> channel =
+            std::make_unique<Channel>(control);
+        REQUIRE(Access::give(pool, config, "fake:1", channel));
+        control.lost = true; // the device was lost while parked
+        CHECK(Access::acquire(pool, config, "fake:1", 12'345) == nullptr);
+        CHECK(control.last_release_budget >= 1);
+        CHECK(control.last_release_budget <= 12'345);
+        CHECK(pool.stats().evictions == 1);
+        CHECK(pool.stats().warm_entries == 0);
+    }
+    {
+        // Every program hashes alike; the exact check must refuse other
+        // weights. Positive control: the same program is lent.
+        Control control;
+        GpuAudioProviderPool pool;
+        Access::set_key_hash(
+            pool, [](const GpuWaveNetSession::Config&) noexcept { return std::uint64_t{42}; });
+        std::unique_ptr<detail::WaveNetRealtimeChannel> channel =
+            std::make_unique<Channel>(control);
+        REQUIRE(Access::give(pool, config, "fake:1", channel));
+        std::array<float, 9> other_weights{};
+        other_weights[0] = 1.0f;
+        auto other = config;
+        other.weights = other_weights;
+        CHECK(Access::acquire(pool, other, "fake:1", 0) == nullptr);
+        CHECK(Access::acquire(pool, config, "fake:2", 0) == nullptr); // other provider
+        CHECK(Access::acquire(pool, config, "fake:1", 0) != nullptr);
+    }
+}
+
+TEST_CASE("Transport re-acquire count resets once the new epoch delivered, even if a fault "
+          "followed before the next pump",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    Shape shape;
+    auto config = shape.config(1);
+    config.miss_policy = MissPolicy::CpuFallback;
+    config.supports_cpu_fallback = true;
+    std::array<Control, 3> controls{};
+    IdentityShadowNode node(config);
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(controls[0]));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
+    ChannelFactory factory{
+        .control = &controls[2], .first_control = &controls[1], .first_count = 1};
+    factory.install(node);
+    GpuAudioTransport transport;
+    // A long backoff: a second attempt in this run only happens if the first
+    // re-acquire's GPU delivery reset the count.
+    REQUIRE(transport.prepare(&node, {.recovery_policy = GpuAudioRecoveryPolicy::AutoReacquire,
+                                      .reacquire_backoff_ns = 10'000'000'000}));
+    std::array<float, 2> input{}, output{};
+    const float* ip = input.data();
+    float* op = output.data();
+    pulp::audio::BufferView<const float> in(&ip, 1, 2);
+    pulp::audio::BufferView<float> out(&op, 1, 2);
+    bool second_fault = false;
+    for (int block = 0; block < 40; ++block) {
+        if (block == 5)
+            controls[0].lost = true;
+        input.fill(float(block + 1));
+        const auto gpu_before = transport.delivery_snapshot().gpu_blocks;
+        transport.process(in, out, 2);
+        // The re-acquired provider's first GPU block: fault it before any pump.
+        if (!second_fault && transport.status_snapshot().reacquire_successes == 1 &&
+            transport.delivery_snapshot().gpu_blocks > gpu_before) {
+            controls[1].lost = true;
+            second_fault = true;
+        }
+        transport.pump();
+        transport.pump();
+    }
+    REQUIRE(second_fault);
+    const auto status = transport.status_snapshot();
+    CHECK(status.reacquire_attempts == 2);
+    CHECK(status.reacquire_successes == 2);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    CHECK(validate_gpu_audio_status(status).accepted());
+    transport.release();
+}
+
+TEST_CASE("Stamped bridge withdraws a request whose adoption the callback refused first",
+          "[gpu_audio][wavenet][reacquire]") {
+    using Bridge = detail::SharedIoStampedBridge;
+    struct Race {
+        Bridge* bridge;
+        std::uint64_t sequence;
+        static void callback(void* context) {
+            auto& race = *static_cast<Race*>(context);
+            std::array<float, 2> input{}, output{};
+            auto block = race.bridge->begin_callback(input, race.sequence, 0);
+            (void)race.bridge->consume_output(block, output);
+        }
+    };
+    for (const bool refused : {true, false}) {
+        CAPTURE(refused);
+        Bridge bridge;
+        REQUIRE(
+            bridge.prepare({.capacity = 4, .channels = 1, .block_size = 2, .lead_blocks = 1}, 1));
+        bridge.request_recovery(detail::SharedIoRecoveryReason::ProviderLost, 0);
+        REQUIRE(bridge.request_epoch(2));
+        if (refused) // a new fault after the request: the callback refuses it
+            bridge.request_recovery(detail::SharedIoRecoveryReason::ProviderLost, 0);
+        // The callback claims the request between the worker's load and its
+        // withdrawal.
+        Race race{&bridge, 0};
+        bridge.set_cancel_epoch_hook_for_testing(&Race::callback, &race);
+        const bool withdrawn = bridge.cancel_requested_epoch();
+        bridge.set_cancel_epoch_hook_for_testing(nullptr, nullptr);
+        // Refused: nothing pending and delivery closed, so the worker may
+        // replace it. Adopted: delivery is open and the worker must not.
+        CHECK(withdrawn == refused);
+        CHECK(bridge.delivery_epoch() == (refused ? 0u : 2u));
+    }
+}
+
+TEST_CASE("Provider pool releases several lost providers within one shared budget",
+          "[gpu_audio][wavenet][realtime][pool]") {
+    using Access = detail::GpuAudioProviderPoolTestAccess;
+    Shape shape;
+    const auto config = shape.config(1).session;
+    // Static: providers that never drain stay quarantined for the process,
+    // and must not outlive what they reference.
+    static std::array<Control, 4> controls{};
+    GpuAudioProviderPool pool;
+    for (auto& control : controls) {
+        control = Control{};
+        std::unique_ptr<detail::WaveNetRealtimeChannel> channel =
+            std::make_unique<Channel>(control);
+        REQUIRE(Access::give(pool, config, "fake:1", channel));
+        control.lost = true;
+        control.hang_release = true;
+    }
+    const auto started = std::chrono::steady_clock::now();
+    CHECK(Access::acquire(pool, config, "fake:1", 100'000'000) == nullptr);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    // Four providers, each willing to wait its whole budget: one deadline
+    // keeps the total near one budget, not four.
+    CHECK(elapsed <= std::chrono::milliseconds(200));
+    CHECK(pool.stats().evictions == 4);
+    for (const auto& control : controls)
+        CHECK(control.last_release_budget >= 1);
+}
+
+TEST_CASE("WaveNet drops a completion from the epoch a re-acquire replaced",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    Harness h;
+    ChannelFactory factory{.control = &h.controls[1]};
+    factory.install(h.node);
+    h.callback(1);
+    h.service();
+    h.service();
+    h.controls[0].lost = true;
+    h.service();
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000));
+    // The callback adopts the new epoch; the worker admits its first block.
+    h.callback(2);
+    h.service();
+    const auto stale_before = detail::WaveNetRealtimeTestAccess::stale_completions(h.node);
+    // That block's completion arrives carrying the replaced epoch's ticket.
+    h.controls[1].stale_generation = true;
+    h.service();
+    h.controls[1].stale_generation = false;
+    CHECK(detail::WaveNetRealtimeTestAccess::stale_completions(h.node) == stale_before + 1);
+    // Dropped and counted, not a provider fault, and never delivered.
+    CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK(checked_status(h.node).recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    for (int block = 0; block < 2; ++block)
+        CHECK(h.callback(float(10 + block)) != detail::kRealtimeGpuReady);
+}
+
+TEST_CASE("Transport re-acquire is reachable only while the transport is prepared",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    Shape shape;
+    auto config = shape.config(1);
+    config.miss_policy = MissPolicy::CpuFallback;
+    config.supports_cpu_fallback = true;
+    std::array<Control, 2> controls{};
+    IdentityShadowNode node(config);
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(controls[0]));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
+    ChannelFactory factory{.control = &controls[1]};
+    factory.install(node);
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.recovery_policy = GpuAudioRecoveryPolicy::AutoReacquire,
+                                      .reacquire_backoff_ns = 0}));
+    std::array<float, 2> input{1, 1}, output{};
+    const float* ip = input.data();
+    float* op = output.data();
+    pulp::audio::BufferView<const float> in(&ip, 1, 2);
+    pulp::audio::BufferView<float> out(&op, 1, 2);
+    transport.process(in, out, 2);
+    transport.pump();
+    transport.release();
+    // Fenced after release: neither release() nor a later pump re-acquires.
+    detail::WaveNetRealtimeTestAccess::request_recovery(
+        node, detail::SharedIoRecoveryReason::ProviderLost, 0);
+    transport.pump();
+    transport.pump();
+    CHECK(factory.created == 0);
+    CHECK(transport.status_snapshot().reacquire_attempts == 0);
+    CHECK(transport.capability_report().recovery_policy == GpuAudioRecoveryPolicy::Manual);
+    // Positive control: prepared again, the same fence is re-acquired.
+    REQUIRE(transport.prepare(&node, {.recovery_policy = GpuAudioRecoveryPolicy::AutoReacquire,
+                                      .reacquire_backoff_ns = 0}));
+    transport.pump();
+    CHECK(factory.created == 1);
+    transport.release();
 }

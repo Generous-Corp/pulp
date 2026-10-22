@@ -1,5 +1,7 @@
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
 
+#include "detail/gpu_audio_provider_pool_test_access.hpp"
+#include "detail/provider_pool_key.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
@@ -20,6 +22,7 @@ struct GpuWaveNetSession::Impl {
 #endif
     std::uint32_t block_size = 0;
     std::uint64_t outstanding = 0;
+    bool lost_for_testing = false;
     GpuWaveNetCompletionPolicy completion_policy = GpuWaveNetCompletionPolicy::ProcessEvents;
     bool completion_policy_supported = true;
 };
@@ -247,7 +250,83 @@ bool GpuWaveNetSession::release() noexcept {
 #endif
 }
 
+bool GpuWaveNetSession::release_bounded(std::uint64_t budget_ns) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (!impl_ || !impl_->session)
+        return true;
+    if (auto* provider = impl_->session->owned_provider())
+        provider->set_drain_budget_ns(budget_ns);
+    if (release())
+        return true;
+    // Still owned: later releases use the provider's default budget.
+    if (auto* provider = impl_->session->owned_provider())
+        provider->set_drain_budget_ns(0);
+    return false;
+#else
+    (void)budget_ns;
+    return true;
+#endif
+}
+
+bool GpuWaveNetSession::recycle(std::uint64_t budget_ns) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (!prepared())
+        return false;
+    auto& session = *impl_->session;
+    auto* provider = session.owned_provider();
+    if (provider == nullptr || provider->device_lost())
+        return false;
+    provider->set_drain_budget_ns(budget_ns);
+    const bool drained = provider->drain();
+    provider->set_drain_budget_ns(0);
+    if (!drained)
+        return false;
+    // Retire whatever the drain made terminal; nothing will receive it.
+    const auto now =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now().time_since_epoch())
+                                       .count());
+    (void)session.service(now);
+    while (const auto completion = session.pop_completion())
+        (void)session.discard_completion(*completion);
+    if (!provider->can_resume_after_drain() || !session.reprime_when_quiescent())
+        return false;
+    impl_->outstanding = 0;
+    return true;
+#else
+    (void)budget_ns;
+    return false;
+#endif
+}
+
+std::string GpuWaveNetSession::provider_key() const {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (impl_ && impl_->session)
+        if (const auto* provider = impl_->session->owned_provider()) {
+            return detail::provider_pool_key(provider->provider_identity());
+        }
+#endif
+    return {};
+}
+
+std::string GpuWaveNetSession::requested_provider_key() {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    // The Dawn WaveNet factory admits only an authenticated Metal adapter at
+    // the build's pinned revision (empty when the build pins none).
+    detail::SharedIoProviderIdentity requested;
+    requested.provider = GpuAudioProvider::Dawn;
+    requested.authenticated = true;
+    requested.adapter_backend = "metal";
+    requested.provider_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA;
+    return detail::provider_pool_key(requested);
+#else
+    return {};
+#endif
+}
+
 bool GpuWaveNetSession::device_lost() const noexcept {
+    if (impl_ && impl_->lost_for_testing)
+        return true;
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (impl_ && impl_->session)
         if (const auto* provider = impl_->session->owned_provider())
@@ -270,6 +349,22 @@ detail::GpuWaveNetSessionAccess::provider_identity(const GpuWaveNetSession& sess
 
 std::uint64_t GpuWaveNetSession::outstanding_blocks() const noexcept {
     return impl_ ? impl_->outstanding : 0;
+}
+
+void detail::GpuWaveNetSessionTestAccess::mark_device_lost(GpuWaveNetSession& session) noexcept {
+    if (session.impl_)
+        session.impl_->lost_for_testing = true;
+}
+
+bool detail::GpuWaveNetSessionPoolAccess::recycle(GpuWaveNetSession& session,
+                                                  std::uint64_t budget_ns) noexcept {
+    return !session.device_lost() && session.recycle(budget_ns);
+}
+std::string detail::GpuWaveNetSessionPoolAccess::provider_key(const GpuWaveNetSession& session) {
+    return session.provider_key();
+}
+std::string detail::GpuWaveNetSessionPoolAccess::requested_provider_key() {
+    return GpuWaveNetSession::requested_provider_key();
 }
 
 } // namespace pulp::gpu_audio

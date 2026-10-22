@@ -1275,6 +1275,7 @@ pulp_add_test_suite(pulp-test-gpu-audio-header-standalone
             test_gpu_audio_header_standalone_capability.cpp
             test_gpu_audio_header_standalone_node.cpp
             test_gpu_audio_header_standalone_program.cpp
+            test_gpu_audio_header_standalone_provider_pool.cpp
     GROUP pulp-test-group-core-gpu-audio-private)
 
 # Host-memory shared-I/O provider: lifecycle, terminal contract, and the

@@ -61,6 +61,25 @@ class GpuAudioTransport {
         // runs on the worker and is not claimed to be realtime-safe.
         void* audio_workgroup = nullptr;
         bool join_audio_workgroup = false;
+        /// AutoReacquire lets the worker replace a fenced node's provider while
+        /// the callback stays on its prepared fallback: it releases the old
+        /// provider within `reacquire_release_budget_ns`, prepares a new one,
+        /// and opens a new delivery epoch on the same stream. An offline fence
+        /// is never re-acquired. Only nodes with a realtime GPU path that can
+        /// re-acquire honour it; capability_report().recovery_policy reports
+        /// the policy in effect for the prepared node.
+        GpuAudioRecoveryPolicy recovery_policy = GpuAudioRecoveryPolicy::Manual;
+        /// Budget for releasing the old provider. One that cannot drain in
+        /// time has its device destroyed and stays owned (quarantined) until a
+        /// later release completes it.
+        std::uint64_t reacquire_release_budget_ns = 250'000'000;
+        /// Attempts per outage. After the last failed attempt the transport
+        /// stays on the CPU fallback until the host prepares it again.
+        std::uint32_t reacquire_max_attempts = 3;
+        /// Wait after the first failed attempt; each further failure waits
+        /// five times longer (100 ms, 500 ms, 2.5 s by default). The first
+        /// attempt is immediate.
+        std::uint64_t reacquire_backoff_ns = 100'000'000;
     };
 
     struct Stats {
@@ -302,6 +321,27 @@ class GpuAudioTransport {
     std::unique_ptr<detail::GpuAudioTransportDiagnostics> diagnostics_;
     void refresh_node_health() noexcept;
     void publish_prepared_configuration() noexcept;
+
+    // Worker-only re-acquire steward (Config::recovery).
+    void steward_reacquire() noexcept;
+    bool (*realtime_gpu_reprepare_)(void*, std::uint64_t) noexcept = nullptr;
+    GpuAudioRecoveryPolicy recovery_policy_ = GpuAudioRecoveryPolicy::Manual;
+    std::uint64_t reacquire_budget_ns_ = 0;
+    std::uint32_t reacquire_max_attempts_ = 0;
+    std::uint64_t reacquire_backoff_ns_ = 0;
+    std::uint32_t reacquire_round_ = 0;   // failed attempts in this outage
+    std::uint64_t outage_started_ns_ = 0; // worker's first sight of the fence
+    std::uint64_t next_reacquire_ns_ = 0;
+    // A success armed resume_pending_from_ns_; once the callback clears it the
+    // re-acquired epoch has delivered GPU audio, even if a new fault latched
+    // before the worker saw the healthy state.
+    bool resume_armed_ = false;
+    std::atomic<std::uint64_t> reacquire_attempts_{0};
+    std::atomic<std::uint64_t> reacquire_successes_{0};
+    std::atomic<std::uint64_t> last_reacquire_to_gpu_ns_{0};
+    // Outage start of a successful re-acquire whose first GPU block the
+    // callback has not delivered yet; the callback measures and clears it.
+    std::atomic<std::uint64_t> resume_pending_from_ns_{0};
     std::uint64_t callback_sequence_ = 0; // one monotonic RT/offline callback timeline
     bool realtime_gpu_fenced_for_offline_ = false;
     // Optional node hook bracketing each offline run; `realtime_gpu_offline_`

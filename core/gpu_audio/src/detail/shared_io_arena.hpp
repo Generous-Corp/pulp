@@ -249,6 +249,12 @@ class SharedIoArenaProvider {
     // False preserves every backing allocation and makes arena release fail;
     // a deadline is never evidence that callbacks or GPU access have ended.
     virtual bool drain() noexcept = 0;
+    // Serialized non-RT: bound the next drain() calls to `budget_ns` (zero
+    // restores the provider's default). A drain that runs out of budget must
+    // still fail closed, abandoning to quarantine rather than retiring.
+    virtual void set_drain_budget_ns(std::uint64_t budget_ns) noexcept {
+        (void)budget_ns;
+    }
 };
 
 // Private backend-neutral owner for a prepared compute program. The arena

@@ -69,6 +69,22 @@ Offline processing fences provider work and continues the same aligned callback
 fallback. GPU delivery stays disabled after returning to realtime until explicit
 preparation. Do not reset CPU history merely because GPU output was fenced.
 
+With `GpuAudioTransport::Config::recovery_policy = AutoReacquire`, a provider fault
+other than an offline fence is recovered on the live stream: the worker releases
+the old sessions within `reacquire_release_budget_ns` (quarantining any that
+cannot drain), creates new ones, and asks the bridge for a new epoch that the
+callback adopts at its next block. Records the callback queued in the old epoch
+are discarded, and no completion from the old provider can publish. Because a
+fresh provider has no history, the first `ceil(receptive_field / block_size)`
+blocks of the new epoch are submitted only to refill it and are retired as
+`Cancelled`; the callback delivers its CPU fallback for them. Delivery after
+that matches an uninterrupted provider. `release_bounded(budget_ns)` bounds a
+host teardown the same way.
+
+`Config::provider_pool` keeps released sessions warm in a host-owned
+`GpuAudioProviderPool`. A borrowed session carries another stream's history, so
+the node refills it the same way before its first delivered block.
+
 ## Late results, device loss and hung providers
 
 A result is late only when the callback that would consume it has already

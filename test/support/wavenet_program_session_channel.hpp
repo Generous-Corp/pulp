@@ -88,6 +88,15 @@ class ProgramSessionChannel final : public pulp::gpu_audio::detail::WaveNetRealt
     bool release() noexcept override {
         return session_->release();
     }
+    bool release_bounded(std::uint64_t budget_ns) noexcept override {
+        if (auto* provider = session_->owned_provider())
+            provider->set_drain_budget_ns(budget_ns);
+        if (session_->release())
+            return true;
+        if (auto* provider = session_->owned_provider())
+            provider->set_drain_budget_ns(0);
+        return false;
+    }
     bool lost() const noexcept override {
         const auto* provider = session_->owned_provider();
         return provider != nullptr && provider->device_lost();

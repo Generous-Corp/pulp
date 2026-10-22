@@ -111,7 +111,9 @@ inline bool provider_loss_reason(GpuAudioRecoveryReason reason) noexcept {
 inline GpuAudioProviderState provider_state_for_health(const RealtimeGpuHealth& health) noexcept {
     if (health.device_lost || provider_loss_reason(health.recovery_reason))
         return GpuAudioProviderState::Unavailable;
-    if (health.fenced || health.recovery_reason != GpuAudioRecoveryReason::None)
+    // A re-acquire is informational: the new provider's own state applies.
+    if (health.fenced || (health.recovery_reason != GpuAudioRecoveryReason::None &&
+                          health.recovery_reason != GpuAudioRecoveryReason::ProviderReacquired))
         return GpuAudioProviderState::Degraded;
     return GpuAudioProviderState::Ready;
 }
@@ -154,7 +156,9 @@ inline RealtimeGpuHealth health_from_status(const GpuAudioStatus& status) noexce
     health.delivery_epoch_active = status.delivery_epoch_active;
     health.device_lost = provider_loss_reason(status.recovery_reason) ||
                          status.provider_state == GpuAudioProviderState::Unavailable;
-    health.fenced = health.device_lost || status.recovery_reason != GpuAudioRecoveryReason::None;
+    health.fenced = health.device_lost ||
+                    (status.recovery_reason != GpuAudioRecoveryReason::None &&
+                     status.recovery_reason != GpuAudioRecoveryReason::ProviderReacquired);
     for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
         health.terminal_counts[i] = status.terminal_counts[i];
     health.shadow_mode = status.shadow_mode;

@@ -11,6 +11,9 @@
 
 namespace pulp::gpu_audio {
 namespace {
+// Each failed re-acquire attempt waits this many times longer than the last.
+constexpr std::uint64_t kReacquireBackoffGrowth = 5;
+
 std::uint64_t monotonic_now_ns() noexcept {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                           std::chrono::steady_clock::now().time_since_epoch())
@@ -50,6 +53,7 @@ struct GpuAudioTransportConfiguration {
     std::uint32_t sample_rate = 0;
     std::uint32_t block_size = 0;
     std::uint32_t latency_blocks = 0;
+    GpuAudioRecoveryPolicy recovery_policy = GpuAudioRecoveryPolicy::Manual;
 };
 
 struct GpuAudioTransportDiagnostics {
@@ -91,6 +95,59 @@ void GpuAudioTransport::refresh_node_health() noexcept {
         (void)diagnostics_->health.publish(detail::health_from_status(status));
 }
 
+void GpuAudioTransport::steward_reacquire() noexcept {
+    if (recovery_policy_ != GpuAudioRecoveryPolicy::AutoReacquire ||
+        realtime_gpu_reprepare_ == nullptr || realtime_gpu_health_ == nullptr ||
+        realtime_gpu_fenced_for_offline_)
+        return;
+    detail::RealtimeGpuHealth health;
+    if (!realtime_gpu_health_(realtime_gpu_context_, health))
+        return;
+    const auto reason = health.recovery_reason;
+    const bool outage = !health.delivery_epoch_active && reason != GpuAudioRecoveryReason::None &&
+                        reason != GpuAudioRecoveryReason::OfflineFence &&
+                        reason != GpuAudioRecoveryReason::ProviderReacquired;
+    const auto now = monotonic_now_ns();
+    // Only GPU audio from a re-acquired epoch ends an outage: the callback
+    // clears the pending resume on its first GPU block. Until then attempts
+    // keep counting toward the cap and backing off. A delivery that happened
+    // between pumps still ends it, even if a new fault has latched since.
+    const bool resumed =
+        resume_armed_ && resume_pending_from_ns_.load(std::memory_order_acquire) == 0;
+    if (resumed || (!outage && health.delivery_epoch_active &&
+                    resume_pending_from_ns_.load(std::memory_order_acquire) == 0)) {
+        resume_armed_ = false;
+        reacquire_round_ = 0;
+        next_reacquire_ns_ = 0;
+        outage_started_ns_ = 0;
+    }
+    if (!outage)
+        return;
+    if (outage_started_ns_ == 0)
+        outage_started_ns_ = now;
+    if (reacquire_round_ >= reacquire_max_attempts_ || now < next_reacquire_ns_)
+        return;
+    reacquire_attempts_.fetch_add(1, std::memory_order_relaxed);
+    // Every attempt counts and backs off, successful or not: a new epoch that
+    // fails before delivering must not be replaced on every pump.
+    std::uint64_t wait = reacquire_backoff_ns_;
+    for (std::uint32_t i = 0; i < reacquire_round_ && wait <= UINT64_MAX / kReacquireBackoffGrowth;
+         ++i)
+        wait *= kReacquireBackoffGrowth;
+    ++reacquire_round_;
+    next_reacquire_ns_ = wait > UINT64_MAX - now ? UINT64_MAX : now + wait;
+    if (realtime_gpu_reprepare_(realtime_gpu_context_, reacquire_budget_ns_)) {
+        reacquire_successes_.fetch_add(1, std::memory_order_relaxed);
+        // Keep the earliest outage start: an epoch that failed before
+        // delivering does not restart the time to GPU.
+        auto expected = std::uint64_t{0};
+        (void)resume_pending_from_ns_.compare_exchange_strong(expected, outage_started_ns_,
+                                                              std::memory_order_acq_rel);
+        resume_armed_ = true;
+        refresh_node_health();
+    }
+}
+
 void GpuAudioTransport::publish_prepared_configuration() noexcept {
     detail::GpuAudioTransportConfiguration configuration;
     if (prepared_ && node_ != nullptr) {
@@ -106,6 +163,9 @@ void GpuAudioTransport::publish_prepared_configuration() noexcept {
         configuration.sample_rate = sample_rate_;
         configuration.block_size = block_size_;
         configuration.latency_blocks = latency_blocks_;
+        // Only a node that can re-acquire honours AutoReacquire.
+        configuration.recovery_policy =
+            realtime_gpu_reprepare_ != nullptr ? recovery_policy_ : GpuAudioRecoveryPolicy::Manual;
     }
     diagnostics_->cpu_primary = configuration.provider == GpuAudioProvider::Cpu;
     // Host-only writer, while neither the worker nor a pump caller runs.
@@ -184,6 +244,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         realtime_gpu_delivered_ = realtime_path.delivered;
         realtime_gpu_health_ = realtime_path.health;
         realtime_gpu_offline_render_ = realtime_path.offline_render;
+        realtime_gpu_reprepare_ = realtime_path.reprepare;
         callback_sequence_ = realtime_path.next_sequence(realtime_path.context);
     }
     sample_staged_health_ = !realtime_path.active();
@@ -245,6 +306,17 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     join_audio_workgroup_ = config.join_audio_workgroup && config.run_worker_thread;
     worker_workgroup_joined_.store(false, std::memory_order_relaxed);
     worker_workgroup_join_failures_.store(0, std::memory_order_relaxed);
+    recovery_policy_ = config.recovery_policy;
+    reacquire_budget_ns_ = config.reacquire_release_budget_ns;
+    reacquire_max_attempts_ = config.reacquire_max_attempts;
+    reacquire_backoff_ns_ = config.reacquire_backoff_ns;
+    reacquire_round_ = 0;
+    outage_started_ns_ = next_reacquire_ns_ = 0;
+    resume_armed_ = false;
+    reacquire_attempts_.store(0, std::memory_order_relaxed);
+    reacquire_successes_.store(0, std::memory_order_relaxed);
+    last_reacquire_to_gpu_ns_.store(0, std::memory_order_relaxed);
+    resume_pending_from_ns_.store(0, std::memory_order_relaxed);
     prepared_ = true;
     // Quiescent host reads: neither the callback nor the worker has started.
     refresh_node_health();
@@ -359,6 +431,8 @@ void GpuAudioTransport::release() noexcept {
     realtime_gpu_delivered_ = nullptr;
     realtime_gpu_health_ = nullptr;
     realtime_gpu_offline_render_ = nullptr;
+    realtime_gpu_reprepare_ = nullptr;
+    recovery_policy_ = GpuAudioRecoveryPolicy::Manual;
     sample_staged_health_ = false;
     diagnostics_->health.reset();
     trial_observer_context_ = nullptr;
@@ -546,6 +620,14 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
         delivered = SharedIoDeliveryDisposition::InvalidRejected;
     }
     const auto result_visible_ns = monotonic_now_ns();
+    // The first GPU block after a re-acquire ends the outage it measures.
+    if (delivered == SharedIoDeliveryDisposition::GpuDelivered) {
+        auto from = resume_pending_from_ns_.load(std::memory_order_relaxed);
+        if (from != 0 &&
+            resume_pending_from_ns_.compare_exchange_strong(from, 0, std::memory_order_acq_rel))
+            last_reacquire_to_gpu_ns_.store(result_visible_ns > from ? result_visible_ns - from : 0,
+                                            std::memory_order_relaxed);
+    }
     realtime_gpu_delivered_(realtime_gpu_context_, sequence, static_cast<std::uint8_t>(delivered),
                             callback_end_ns, result_visible_ns);
     if (count_delivery)
@@ -663,6 +745,7 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
         // The service step is where a node observes provider loss or failure;
         // publish what it saw before the next host/UI read.
         refresh_node_health();
+        steward_reacquire();
         if (produced != detail::kRealtimeGpuServiceInactive) {
             const auto block_ns =
                 static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -801,6 +884,7 @@ capability_from(const detail::GpuAudioTransportConfiguration& configuration) noe
     report.prepared = true;
     report.fallback_available = configuration.miss_policy == MissPolicy::CpuFallback;
     report.diagnostics_available = true;
+    report.recovery_policy = configuration.recovery_policy;
     return report;
 }
 
@@ -900,6 +984,9 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
     }
     status.selected_engine = detail::delivering_engine(
         status.provider_state, status.selected_engine, status.fallback_policy);
+    status.reacquire_attempts = reacquire_attempts_.load(std::memory_order_relaxed);
+    status.reacquire_successes = reacquire_successes_.load(std::memory_order_relaxed);
+    status.last_reacquire_to_gpu_ns = last_reacquire_to_gpu_ns_.load(std::memory_order_relaxed);
     return status;
 }
 

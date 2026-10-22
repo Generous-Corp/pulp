@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <pulp/gpu_audio/gpu_audio_program.hpp>
+#include <pulp/gpu_audio/gpu_audio_provider_pool.hpp>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <stdexcept>
 #include <thread>
@@ -254,6 +255,11 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::vector<std::vector<std::uint32_t>> dilations;
     std::vector<float> weights;
     std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> channels;
+    // Channels whose provider could not drain within its budget during a
+    // re-acquire. They stay owned, and release() retries them.
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> quarantine;
+    detail::WaveNetRealtimeTestAccess::ChannelFactory channel_factory = nullptr;
+    void* channel_factory_context = nullptr;
     std::unique_ptr<Bridge> bridge;
     std::vector<float> callback_input, callback_output, worker_output;
     std::vector<Pending> pending_ring;
@@ -279,6 +285,21 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::atomic<bool> device_lost{false};
     std::array<std::atomic<std::uint64_t>, GpuAudioStatus::kTerminalDispositionCount>
         terminal_counts{};
+    // Re-acquire. A fresh provider's causal history is empty (or, for a
+    // recycled one, stale), so the first `warmup_blocks` of an epoch opened by
+    // a re-acquire are submitted only to fill it and are never delivered. The
+    // worker learns the epoch's first sequence from its first ingress record.
+    std::uint32_t warmup_blocks = 0;
+    std::uint64_t warmup_until = 0;
+    bool awaiting_epoch = false;
+    // A provider borrowed warm from the pool carries another stream's history.
+    bool warm_start = false;
+    // First sequence the re-acquired epoch can deliver, or UINT64_MAX before
+    // any re-acquire. Written by the worker, read by status_snapshot().
+    std::atomic<std::uint64_t> reacquired_sequence{UINT64_MAX};
+    // `epoch` for status readers on another thread; the worker may advance it.
+    std::atomic<std::uint64_t> published_epoch{0};
+    std::atomic<std::uint64_t> reacquire_attempts{0}, reacquire_successes{0};
     bool prepared = false, production_provider = false;
     // Reported by the prepared provider itself; empty for injected channels.
     detail::SharedIoProviderIdentity provider_identity;
@@ -334,11 +355,19 @@ struct GpuWaveNetRealtimeNode::Impl {
         stale_completions = 0;
         all_channels_mask = c.channels == 64 ? UINT64_MAX : (UINT64_C(1) << c.channels) - 1;
         next_input = sequence;
+        published_epoch.store(epoch, std::memory_order_release);
         callback_next.store(sequence, std::memory_order_relaxed);
         delivered_next.store(sequence, std::memory_order_relaxed);
         deferred_fallbacks = deferred_until = 0;
         watchdog_limit = c.watchdog_blocks != 0 ? c.watchdog_blocks : c.capacity - 1;
         completion_mark = sequence;
+        warmup_blocks = history_warmup_blocks();
+        warmup_until = warm_start ? sequence + warmup_blocks : sequence;
+        warm_start = false;
+        awaiting_epoch = false;
+        reacquired_sequence.store(UINT64_MAX, std::memory_order_relaxed);
+        reacquire_attempts.store(0, std::memory_order_relaxed);
+        reacquire_successes.store(0, std::memory_order_relaxed);
         device_lost.store(false, std::memory_order_relaxed);
         for (auto& count : terminal_counts)
             count.store(0, std::memory_order_relaxed);
@@ -469,6 +498,11 @@ struct GpuWaveNetRealtimeNode::Impl {
             if (pending.outcome != detail::SharedIoTraceOutcome::Success) {
                 trace_terminal(pending, pending.outcome, failed_terminal(pending.outcome),
                                failed_reason(pending.outcome), true);
+            } else if (current && pending.ticket.sequence < warmup_until) {
+                // History warmup after a re-acquire: computed, never delivered.
+                trace_terminal(pending, detail::SharedIoTraceOutcome::Cancelled,
+                               detail::SharedIoGpuTerminalDisposition::CancelledTeardown,
+                               detail::SharedIoFallbackReason::None, true);
             } else if (pending.suppress || (current && consumer_passed)) {
                 trace_terminal(pending, detail::SharedIoTraceOutcome::LateRejected,
                                detail::SharedIoGpuTerminalDisposition::LateRejected,
@@ -518,11 +552,147 @@ struct GpuWaveNetRealtimeNode::Impl {
         if (silent >= watchdog_limit)
             fail(detail::SharedIoRecoveryReason::ProviderUnresponsive, first_undelivered());
     }
+    // Blocks of input that fully refill every layer's causal history.
+    std::uint32_t history_warmup_blocks() const noexcept {
+        std::uint64_t reach = 0;
+        for (const auto& layer : layers) {
+            const auto kernel_reach = static_cast<std::uint64_t>(layer.kernel - 1u);
+            if (layer.dilations.empty())
+                reach += kernel_reach * layer.dilation;
+            for (const auto dilation : layer.dilations)
+                reach += kernel_reach * dilation;
+        }
+        const auto block = config.session.descriptor.block_size;
+        const auto blocks = (reach + block - 1) / block;
+        return blocks > UINT32_MAX ? UINT32_MAX : static_cast<std::uint32_t>(blocks);
+    }
+    std::unique_ptr<detail::WaveNetRealtimeChannel> make_channel(std::uint64_t budget_ns) noexcept;
+    // Keeps a healthy channel warm in the configured pool instead of
+    // releasing it; on success `channel` is left empty. `budget_ns` bounds the
+    // recycle drain (zero: the provider's default).
+    bool park(std::unique_ptr<detail::WaveNetRealtimeChannel>& channel,
+              std::uint64_t budget_ns) noexcept {
+        if (config.provider_pool == nullptr || !channel || channel->lost() ||
+            !channel->recycle(budget_ns))
+            return false;
+        try {
+            return config.provider_pool->give(config.session, channel->provider_key(), channel);
+        } catch (...) {
+            return false;
+        }
+    }
+    // A warm channel for this program, or null. Providers the pool finds lost
+    // on the way release within `budget_ns`.
+    std::unique_ptr<detail::WaveNetRealtimeChannel> borrow(std::uint64_t budget_ns) noexcept {
+        if (config.provider_pool == nullptr)
+            return nullptr;
+        try {
+            return config.provider_pool->acquire(
+                config.session, detail::GpuWaveNetSessionPoolAccess::requested_provider_key(),
+                budget_ns);
+        } catch (...) {
+            return nullptr;
+        }
+    }
+    // Worker only, fenced, callback running. Replaces the provider and opens a
+    // new epoch the callback adopts at its next block. Old channels release
+    // within `budget_ns`; one that cannot is quarantined, never destroyed.
+    bool reacquire(std::uint64_t budget_ns) noexcept {
+        // A fault can fence the previous re-acquire's provider before the
+        // callback adopts its epoch; withdraw that request and replace it.
+        if (!prepared || !bridge || bridge->delivery_epoch() != 0 ||
+            bridge->recovery_reason() == detail::SharedIoRecoveryReason::OfflineFence ||
+            epoch == UINT64_MAX || !bridge->cancel_requested_epoch())
+            return false;
+        reacquire_attempts.fetch_add(1, std::memory_order_relaxed);
+        // The new epoch clears the latched cause; keep it in the trace.
+        const auto cause = recovery_trace_reason();
+        // Nothing in flight can retire into the new epoch: the old provider is
+        // being released, so close every admitted block now.
+        close_pending_trace();
+        for (auto& pending : pending_ring)
+            pending.reset();
+        pending_head = pending_count = 0;
+        settle_fallbacks();
+        // Reserve before releasing anything: nothing below may throw.
+        std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> fresh;
+        try {
+            fresh.reserve(config.channels);
+            quarantine.reserve(quarantine.size() + channels.size() + 2u * config.channels);
+        } catch (...) {
+            return false;
+        }
+        const auto deadline = budget_ns > UINT64_MAX - now_ns() ? UINT64_MAX : now_ns() + budget_ns;
+        // Never zero: a provider reads a zero budget as "use the default".
+        const auto remaining = [&] {
+            const auto now = now_ns();
+            return now >= deadline ? std::uint64_t{1} : deadline - now;
+        };
+        for (auto& channel : channels)
+            if (!channel->release_bounded(remaining()))
+                quarantine.push_back(std::move(channel));
+        channels.clear();
+        for (std::uint32_t ch = 0; ch < config.channels; ++ch) {
+            auto channel = make_channel(remaining());
+            if (!channel) {
+                for (auto& created : fresh)
+                    if (!created->release_bounded(remaining()))
+                        quarantine.push_back(std::move(created));
+                return false;
+            }
+            fresh.push_back(std::move(channel));
+        }
+        channels = std::move(fresh);
+        // An input stall leaves the ring full of old-epoch records that
+        // nothing else retires; the new epoch's first block needs the room.
+        while (const auto stale = bridge->acquire_input())
+            (void)bridge->release_input(*stale);
+        if (!bridge->request_epoch(epoch + 1))
+            return false;
+        if (trace) {
+            detail::SharedIoTraceRecord record;
+            record.kind = detail::SharedIoTraceKind::Recovery;
+            record.generation = epoch;
+            record.next_generation = epoch + 1;
+            record.sequence = callback_next.load(std::memory_order_acquire);
+            record.reason = record.gpu_reason = cause;
+            (void)trace->publish_worker(record);
+        }
+        ++epoch;
+        published_epoch.store(epoch, std::memory_order_release);
+        reacquire_successes.fetch_add(1, std::memory_order_relaxed);
+        awaiting_epoch = true;
+        device_lost.store(false, std::memory_order_release);
+        completion_mark = callback_next.load(std::memory_order_acquire);
+        return true;
+    }
     void fail(detail::SharedIoRecoveryReason reason,
               std::uint64_t sequence = std::numeric_limits<std::uint64_t>::max()) noexcept {
         bridge->request_recovery(reason, sequence);
     }
 };
+
+std::unique_ptr<detail::WaveNetRealtimeChannel>
+GpuWaveNetRealtimeNode::Impl::make_channel(std::uint64_t budget_ns) noexcept {
+    if (auto warm = borrow(budget_ns))
+        return warm;
+    if (channel_factory != nullptr)
+        return channel_factory(channel_factory_context);
+    try {
+        auto result = GpuWaveNetSession::create(config.session);
+        if (!result) {
+            // A partially prepared session may still hold provider memory.
+            if (result.session && !result.session->release())
+                quarantine.push_back(std::make_unique<detail::GpuWaveNetSessionChannel<>>(
+                    std::move(result.session), config.session.slots));
+            return nullptr;
+        }
+        return std::make_unique<detail::GpuWaveNetSessionChannel<>>(std::move(result.session),
+                                                                    config.session.slots);
+    } catch (...) {
+        return nullptr;
+    }
+}
 
 GpuWaveNetRealtimeNode::GpuWaveNetRealtimeNode(const Config& config)
     : impl_(std::make_unique<Impl>(config)) {}
@@ -565,6 +735,12 @@ bool GpuWaveNetRealtimeNode::prepare() {
         if (!s.valid_config())
             return false;
         for (std::uint32_t ch = 0; ch < s.config.channels; ++ch) {
+            // Host thread: the pool's own release budget applies.
+            if (auto warm = s.borrow(0)) {
+                s.warm_start = true;
+                s.channels.push_back(std::move(warm));
+                continue;
+            }
             auto result = GpuWaveNetSession::create(s.config.session);
             if (!result) {
                 // Retain a partially prepared session if its physical drain needs retry.
@@ -618,6 +794,9 @@ bool GpuWaveNetRealtimeNode::prepare() {
     return false;
 }
 bool GpuWaveNetRealtimeNode::release() noexcept {
+    return release_bounded(UINT64_MAX);
+}
+bool GpuWaveNetRealtimeNode::release_bounded(std::uint64_t budget_ns) noexcept {
     auto& s = *impl_;
     s.prepared = false;
     s.production_provider = false;
@@ -627,10 +806,29 @@ bool GpuWaveNetRealtimeNode::release() noexcept {
         s.sequence = s.bridge->next_sequence();
         s.bridge->request_recovery(detail::SharedIoRecoveryReason::OfflineFence);
     }
+    // UINT64_MAX keeps each channel's own unbounded release.
+    const bool bounded = budget_ns != UINT64_MAX;
+    const auto deadline =
+        !bounded || budget_ns > UINT64_MAX - now_ns() ? UINT64_MAX : now_ns() + budget_ns;
+    // Never zero once bounded: a provider reads zero as "use the default".
+    const auto remaining = [&] {
+        const auto now = now_ns();
+        return now >= deadline ? std::uint64_t{1} : deadline - now;
+    };
+    const auto release_one = [&](detail::WaveNetRealtimeChannel& channel) {
+        return bounded ? channel.release_bounded(remaining()) : channel.release();
+    };
     s.unresolved_channel_count = 0;
-    for (auto& channel : s.channels)
-        if (!channel->release())
+    // A parked channel's session now belongs to the pool; drop the channel.
+    std::erase_if(s.channels, [&](auto& channel) {
+        if (s.park(channel, bounded ? remaining() : 0))
+            return true;
+        if (!release_one(*channel))
             ++s.unresolved_channel_count;
+        return false;
+    });
+    std::erase_if(s.quarantine, [&](auto& channel) { return release_one(*channel); });
+    s.unresolved_channel_count += static_cast<std::uint32_t>(s.quarantine.size());
     if (s.unresolved_channel_count != 0)
         return false;
     s.close_trace();
@@ -702,8 +900,17 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     status.provider = authenticated_provider() ? GpuAudioProvider::Dawn : GpuAudioProvider::Unknown;
     status.recovery_reason = recovery_reason();
     status.recovery_sequence = recovery_sequence();
+    // A re-acquire clears the latched cause; report it, at the first block
+    // the new provider can deliver, until something else latches.
+    if (const auto reacquired = impl_->reacquired_sequence.load(std::memory_order_acquire);
+        status.recovery_reason == GpuAudioRecoveryReason::None && reacquired != UINT64_MAX) {
+        status.recovery_reason = GpuAudioRecoveryReason::ProviderReacquired;
+        status.recovery_sequence = reacquired;
+    }
     status.diagnostics_available = true;
-    status.epoch = impl_->epoch;
+    status.epoch = impl_->published_epoch.load(std::memory_order_acquire);
+    status.reacquire_attempts = impl_->reacquire_attempts.load(std::memory_order_relaxed);
+    status.reacquire_successes = impl_->reacquire_successes.load(std::memory_order_relaxed);
     status.delivery_epoch_active = impl_->bridge->delivery_epoch() != 0;
     for (std::size_t i = 0; i < impl_->terminal_counts.size(); ++i)
         status.terminal_counts[i] = impl_->terminal_counts[i].load(std::memory_order_relaxed);
@@ -765,14 +972,19 @@ bool GpuWaveNetRealtimeNode::bind_realtime_path(detail::RealtimeGpuNodeBinding& 
                         .next_sequence = &GpuWaveNetRealtimeNode::next_sequence,
                         // Serialized non-RT read; the status projection is
                         // allocation-free and carries the first latched cause.
-                        .health = [](const void* self, detail::RealtimeGpuHealth& out) noexcept {
-                            const auto* node = static_cast<const GpuWaveNetRealtimeNode*>(self);
-                            out = detail::health_from_status(node->status_snapshot());
-                            out.fenced = out.fenced || node->fenced();
-                            return true;
-                        }};
+                        .health =
+                            [](const void* self, detail::RealtimeGpuHealth& out) noexcept {
+                                const auto* node = static_cast<const GpuWaveNetRealtimeNode*>(self);
+                                out = detail::health_from_status(node->status_snapshot());
+                                out.fenced = out.fenced || node->fenced();
+                                return true;
+                            },
+                        .reprepare = &GpuWaveNetRealtimeNode::reprepare};
     }
     return true;
+}
+bool GpuWaveNetRealtimeNode::reprepare(void* self, std::uint64_t budget_ns) noexcept {
+    return static_cast<GpuWaveNetRealtimeNode*>(self)->impl_->reacquire(budget_ns);
 }
 std::uint64_t GpuWaveNetRealtimeNode::next_sequence(void* self) noexcept {
     return static_cast<GpuWaveNetRealtimeNode*>(self)->impl_->bridge->next_sequence();
@@ -831,6 +1043,18 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
         auto input = s.bridge->acquire_input();
         if (!input)
             break;
+        // Records the callback queued before the epoch was replaced belong to
+        // no admission; discard them.
+        if (input->stamp().epoch < s.epoch) {
+            (void)s.bridge->release_input(*input);
+            continue;
+        }
+        if (s.awaiting_epoch && input->stamp().epoch == s.epoch) {
+            s.awaiting_epoch = false;
+            s.next_input = input->stamp().sequence;
+            s.warmup_until = s.next_input + s.warmup_blocks;
+            s.reacquired_sequence.store(s.warmup_until, std::memory_order_release);
+        }
         auto& pending = s.pending_ring[(s.pending_head + s.pending_count) % s.pending_ring.size()];
         pending.reset();
         pending.occupied = true;
@@ -962,6 +1186,24 @@ detail::WaveNetRealtimeTestAccess::trace_engine(const GpuWaveNetRealtimeNode& no
     return node.impl_->trace_engine;
 }
 
+void detail::WaveNetRealtimeTestAccess::set_channel_factory(GpuWaveNetRealtimeNode& node,
+                                                            ChannelFactory factory,
+                                                            void* context) noexcept {
+    node.impl_->channel_factory = factory;
+    node.impl_->channel_factory_context = context;
+}
+std::size_t detail::WaveNetRealtimeTestAccess::quarantined_channels(
+    const GpuWaveNetRealtimeNode& node) noexcept {
+    return node.impl_->quarantine.size();
+}
+std::uint32_t
+detail::WaveNetRealtimeTestAccess::warmup_blocks(const GpuWaveNetRealtimeNode& node) noexcept {
+    return node.impl_->history_warmup_blocks();
+}
+void detail::WaveNetRealtimeTestAccess::quarantine_for_testing(
+    GpuWaveNetRealtimeNode& node, std::unique_ptr<WaveNetRealtimeChannel> channel) {
+    node.impl_->quarantine.push_back(std::move(channel));
+}
 bool detail::WaveNetRealtimeTestAccess::prepare(
     GpuWaveNetRealtimeNode& node, std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels,
     std::uint64_t first_sequence) {

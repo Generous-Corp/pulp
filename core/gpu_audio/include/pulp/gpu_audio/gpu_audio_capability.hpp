@@ -61,6 +61,9 @@ struct GpuAudioCapabilityReport {
     // Appended: whether this node family has a GPU kernel at all. False for
     // CPU-only families, which report the Cpu path rather than a GPU miss.
     bool gpu_kernel_available = false;
+    /// The recovery policy in effect, not the one configured: a transport
+    /// configured for AutoReacquire reports Manual when its prepared node
+    /// cannot re-acquire a provider.
     GpuAudioRecoveryPolicy recovery_policy = GpuAudioRecoveryPolicy::Manual;
 };
 
@@ -90,6 +93,11 @@ enum class GpuAudioStatusError : std::uint8_t {
     ShadowCountsWithoutShadow = 13,
     TerminalCountsInconsistent = 14,
     FallbackUnavailable = 15,
+    // Schema v4: automatic re-acquire accounting.
+    ReacquireSuccessesExceedAttempts = 16,
+    ReacquiredWithoutSuccess = 17,
+    ReacquiredNotDelivering = 18,
+    ReacquireTimingWithoutSuccess = 19,
 };
 
 struct GpuAudioStatusValidation {
@@ -193,6 +201,17 @@ validate_gpu_audio_status(const GpuAudioStatus& status) noexcept {
         return {Error::SustainedMissesNotDegraded};
     if (status.fallback_policy == MissPolicy::CpuFallback && !status.fallback_available)
         return {Error::FallbackUnavailable};
+    // A re-acquire is a counted success that left a provider able to deliver.
+    if (status.reacquire_successes > status.reacquire_attempts)
+        return {Error::ReacquireSuccessesExceedAttempts};
+    if (status.last_reacquire_to_gpu_ns != 0 && status.reacquire_successes == 0)
+        return {Error::ReacquireTimingWithoutSuccess};
+    if (status.recovery_reason == Reason::ProviderReacquired) {
+        if (status.reacquire_successes == 0)
+            return {Error::ReacquiredWithoutSuccess};
+        if (status.provider_state == State::Unavailable)
+            return {Error::ReacquiredNotDelivering};
+    }
     return {};
 }
 

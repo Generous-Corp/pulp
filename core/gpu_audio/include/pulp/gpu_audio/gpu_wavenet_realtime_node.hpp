@@ -7,6 +7,7 @@
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
 
 namespace pulp::gpu_audio {
+class GpuAudioProviderPool;
 namespace detail {
 struct WaveNetRealtimeTestAccess;
 } // namespace detail
@@ -48,6 +49,11 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
         /// saturates while the worker keeps up with the callback. A provider
         /// that keeps completing, however late, is never unresponsive.
         std::uint32_t watchdog_blocks = 0;
+        /// Optional host-owned pool that keeps this node's providers warm
+        /// across release() and prepare(). The pool must outlive every node
+        /// bound to it. A borrowed provider re-fills its causal history before
+        /// it delivers, as a re-acquired one does.
+        GpuAudioProviderPool* provider_pool = nullptr;
     };
     /// Copies all descriptors, dilation arrays and weights. Host thread only.
     explicit GpuWaveNetRealtimeNode(const Config&);
@@ -65,6 +71,11 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
     bool configure_trace(const GpuWaveNetTraceConfig&) noexcept;
     /// Stop/join callback and worker first. False retains provider owners for retry.
     bool release() noexcept;
+    /// release() within `budget_ns` per call: a provider that cannot drain in
+    /// time abandons to quarantine (its device is destroyed, its memory stays
+    /// owned) and this returns false. The node keeps ownership on false, and
+    /// the host must still call release() later to complete it.
+    bool release_bounded(std::uint64_t budget_ns) noexcept override;
     /// Diagnostic snapshot: true before preparation or after delivery was fenced.
     /// This is not a completion count or a guarantee about the next callback.
     bool fenced() const noexcept;
@@ -93,6 +104,7 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
     static void delivered(void*, std::uint64_t, std::uint8_t, std::uint64_t,
                           std::uint64_t) noexcept;
     static std::uint64_t next_sequence(void*) noexcept;
+    static bool reprepare(void*, std::uint64_t) noexcept;
     bool ready() const noexcept;
 };
 } // namespace pulp::gpu_audio
