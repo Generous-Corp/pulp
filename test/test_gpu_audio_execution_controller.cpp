@@ -80,6 +80,27 @@ TEST_CASE("execution controller reserves occupancy before publishing admission",
     REQUIRE(controller.in_flight_for_testing() == 0);
 }
 
+TEST_CASE("execution controller telemetry records admission and submission boundaries",
+          "[gpu_audio][shared_io][controller][telemetry]") {
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(contract(), &telemetry));
+    const auto ticket_0 = controller.admit_submission(0);
+    REQUIRE(ticket_0.accepted());
+    REQUIRE(controller.admit_submission(1).accepted());
+    REQUIRE(controller.record_completion(ticket_0, SharedIoCompletion::Success));
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+    REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Priming);
+    REQUIRE(controller.deliver(2).path == SharedIoDeliveryPath::Gpu);
+
+    const auto snapshot = telemetry.snapshot();
+    REQUIRE(snapshot.admitted_blocks == 2);
+    REQUIRE(snapshot.submitted_blocks == 2);
+    REQUIRE(snapshot.retired_success == 1);
+    REQUIRE(snapshot.delivered_blocks == 3);
+    REQUIRE(validate_shared_io_telemetry(snapshot).accepted());
+}
+
 TEST_CASE("execution controller keeps a retiring slot unavailable until it is published",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto minimum_capacity = contract();

@@ -70,23 +70,28 @@ struct GpuWaveNetRealtimeNode::Impl {
     detail::SharedIoTelemetry telemetry;
     detail::SharedIoTraceStats closed_trace_stats;
     detail::SharedIoTraceDrainObserver trace_observer;
+    detail::SharedIoTraceDrainResult last_trace_drain;
     std::uint32_t unresolved_channel_count = 0;
     detail::SharedIoTraceRecord trace_record;
 
-    void drain_trace() noexcept {
+    // Pass telemetry_quiescent only once the callback and the transport worker
+    // are stopped; the live worker drain cannot exclude concurrent callbacks.
+    void drain_trace(bool telemetry_quiescent = false) noexcept {
         if (trace) {
             const auto* observer =
                 (trace_observer.record || trace_observer.admission || trace_observer.ownership)
                     ? &trace_observer
                     : nullptr;
-            (void)detail::drain_shared_io_trace(
+            last_trace_drain = detail::drain_shared_io_trace(
                 *trace, telemetry.snapshot(),
-                static_cast<std::uint32_t>(detail::SharedIoTraceRecorder::capacity), observer);
+                static_cast<std::uint32_t>(detail::SharedIoTraceRecorder::capacity), observer,
+                telemetry_quiescent);
         }
     }
     void trace_admit(Pending& pending, const Bridge::Lease& input) noexcept {
         if (!trace)
             return;
+        telemetry.record_admission();
         pending.trace_record = {};
         pending.trace_record.generation = epoch;
         pending.trace_record.sequence = input.stamp().sequence;
@@ -164,9 +169,12 @@ struct GpuWaveNetRealtimeNode::Impl {
         if (!trace)
             return;
         close_pending_trace();
-        // Producers are quiescent; a bounded number of drains covers all queues.
+        // release() requires the callback and worker to be stopped and joined,
+        // and this point is reached only after every channel released, so the
+        // telemetry has no remaining producer and its final receipt can be
+        // validated. A bounded number of drains covers all queues.
         for (int i = 0; i < 4; ++i)
-            drain_trace();
+            drain_trace(true);
         closed_trace_stats = trace->stats();
         if (bridge)
             bridge->set_trace(nullptr);
@@ -365,8 +373,10 @@ GpuWaveNetRealtimeNode::~GpuWaveNetRealtimeNode() {
     if (!release() && impl_->trace) {
         // Callers are quiescent. Preserve real records, but do not manufacture
         // retirement for channels whose physical release was not established.
+        // Unresolved channels cannot update telemetry: only the stopped worker
+        // collects their completions.
         for (int i = 0; i < 4; ++i)
-            impl_->drain_trace();
+            impl_->drain_trace(true);
         detail::emit_shared_io_unresolved_ownership(
             {impl_->trace_engine, impl_->epoch, false, impl_->unresolved_channel_count},
             &impl_->trace_observer);
@@ -690,6 +700,10 @@ detail::WaveNetRealtimeTestAccess::trace_stats(const GpuWaveNetRealtimeNode& nod
 detail::SharedIoTelemetrySnapshot
 detail::WaveNetRealtimeTestAccess::telemetry(const GpuWaveNetRealtimeNode& node) noexcept {
     return node.impl_->telemetry.snapshot();
+}
+detail::SharedIoTraceDrainResult
+detail::WaveNetRealtimeTestAccess::last_trace_drain(const GpuWaveNetRealtimeNode& node) noexcept {
+    return node.impl_->last_trace_drain;
 }
 detail::SharedIoTraceRecord
 detail::WaveNetRealtimeTestAccess::last_terminal(const GpuWaveNetRealtimeNode& node) noexcept {

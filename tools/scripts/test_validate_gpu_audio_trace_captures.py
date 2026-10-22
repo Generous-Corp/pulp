@@ -46,6 +46,8 @@ positive = {
     'delivery_rows': 2,
     'recovery_rows': 0,
     'capture_issue_rows': 0,
+    'invalid_telemetry_issue_rows': 0,
+    'validated_telemetry_rows': 1,
     'full_lifecycle_issue_rows': 0,
     'full_lifecycle_generation_rows': 1,
     'lifecycle_violation_rows': 0,
@@ -58,6 +60,7 @@ positive = {
 }
 negative = {
     'queue_dropped_issue_rows': 1,
+    'invalid_telemetry_issue_rows': 1,
     'full_lifecycle_issue_rows': 2,
     'lifecycle_violation_rows': 2,
     'missing_gpu_terminal_rows': 1,
@@ -74,6 +77,12 @@ metrics = positive if Path(sys.argv[4]).name.startswith('positive') else negativ
 if os.environ.get('GPU_AUDIO_TRACE_FAKE_BAD_POSITIVE') and metrics is positive:
     metrics = dict(metrics)
     metrics['session_rows'] = 0
+override = os.environ.get('GPU_AUDIO_TRACE_FAKE_OVERRIDE')
+if override:
+    kind, name, value = override.split(':')
+    if (kind == 'positive') == (metrics is positive):
+        metrics = dict(metrics)
+        metrics[name] = int(value)
 for name, value in metrics.items():
     print(f'pulp_gpu_audio_validation:{name}={value}')
 """
@@ -111,6 +120,21 @@ class ValidateGpuAudioTraceCapturesTests(unittest.TestCase):
         self.assertIn("-- checked-in definitions remain immutable", combined)
         self.assertIn("pulp_gpu_audio_validation:session_rows=", combined)
         self.assertIn("pulp_gpu_audio_validation:queue_dropped_issue_rows=", combined)
+
+    def test_telemetry_receipt_controls_fail_closed(self) -> None:
+        # Each override breaks exactly one telemetry expectation that the
+        # passing fake controls above satisfy.
+        for override, message in (
+            ("positive:invalid_telemetry_issue_rows:1", "invalid_telemetry_issue_rows=1"),
+            ("positive:validated_telemetry_rows:0", "validated_telemetry_rows=0"),
+            ("negative:invalid_telemetry_issue_rows:0", "invalid_telemetry_issue_rows=0"),
+        ):
+            with self.subTest(override=override):
+                with mock.patch.dict(os.environ, {"GPU_AUDIO_TRACE_FAKE_OVERRIDE": override}):
+                    with self.assertRaisesRegex(MODULE.ValidationError, message):
+                        MODULE.validate_captures(
+                            self.processor, self.definitions, self.positive, self.negative,
+                        )
 
     def test_positive_control_mismatch_fails_closed(self) -> None:
         with mock.patch.dict(os.environ, {"GPU_AUDIO_TRACE_FAKE_BAD_POSITIVE": "1"}):
@@ -335,6 +359,33 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
         self.add("counters", **dict(fields, drained=5))
         self.assertIn("queue_not_drained", [row[0] for row in self.rows("capture_issues")])
         self.require_unqualified()
+
+    def test_counters_telemetry_receipt_classification(self) -> None:
+        # The setUp counters row is a legacy producer without telemetry fields:
+        # both values are SQL NULL and the capture stays clean.
+        self.assertIsNone(self.arguments[self.counter].get("debug.telemetry_error"))
+        self.assertEqual(self.rows("capture_issues"), [])
+        fields = {key.removeprefix("debug."): value for key, value in
+                  self.arguments[self.counter].items()
+                  if key not in ("debug.schema", "debug.engine_id", "debug.generation")}
+        # (telemetry_valid, telemetry_error) -> flagged. 0 = None, 12 =
+        # RetirementsExceedSubmissions, 13 = TelemetryValidationDeferred,
+        # 14 = CompletionTimingInvalid.
+        # An inconsistent pair is flagged even when its error code alone is
+        # acceptable: (0, 0) claims no error yet is not valid, (1, 13) claims
+        # validity for a deferred snapshot.
+        cases = {(1, 0): False, (0, 13): False, (0, 12): True, (0, 14): True, (0, 0): True,
+                 (1, 13): True, (1, None): True, (None, 0): True}
+        for (valid, error), flagged in cases.items():
+            with self.subTest(valid=valid, error=error):
+                row = self.add("counters", **fields)
+                for key, value in (("telemetry_valid", valid), ("telemetry_error", error)):
+                    if value is not None:
+                        self.arguments[row][f"debug.{key}"] = value
+                issues = [issue for issue, *_ in self.rows("capture_issues")]
+                self.assertEqual("invalid_telemetry" in issues, flagged)
+                self.db.execute("DELETE FROM slice WHERE id = ?", (row,))
+                del self.arguments[row]
 
     def test_loss_and_legacy_schema_fail_closed(self) -> None:
         self.arguments[4]["debug.schema"] = 1
