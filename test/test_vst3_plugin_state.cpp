@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <array>
+#include "../examples/pulp-gain/pulp_gain.hpp"
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -1188,6 +1189,91 @@ TEST_CASE("VST3 stores a host's exact value for a continuous parameter with a st
     data.inputParameterChanges = &input_params;
     REQUIRE(processor.process(data) == Steinberg::kResultOk);
     REQUIRE_THAT(test_processor->state().get_value(kGainParamId), WithinAbs(kQueued, 1e-3));
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 PulpGain at 0 dB is bit-transparent, including after a round trip",
+          "[vst3][param][null-test]") {
+    // Evaluators null-test a gain plug-in at unity. A host-normalized 0 dB
+    // that lands a hair off zero (a 0.1 dB step snap left 2.4e-6 dB) makes the
+    // gain 1 + 2 ulp and the null fails.
+    constexpr int kFrames = 256;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    std::uint32_t seed = 1;
+    for (int i = 0; i < kFrames; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        in_l[static_cast<std::size_t>(i)] = static_cast<float>(seed >> 8) / 16777216.0f - 0.5f;
+        in_r[static_cast<std::size_t>(i)] = -in_l[static_cast<std::size_t>(i)] * 0.731f;
+    }
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = inputs;
+    Steinberg::Vst::AudioBusBuffers output_bus{};
+    output_bus.numChannels = 2;
+    output_bus.channelBuffers32 = outputs;
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(pulp::examples::create_pulp_gain);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = kFrames;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    const auto render = [&](Steinberg::Vst::ParameterChanges* changes) {
+        Steinberg::Vst::ProcessData data{};
+        data.symbolicSampleSize = Steinberg::Vst::kSample32;
+        data.numSamples = kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = &input_bus;
+        data.outputs = &output_bus;
+        data.inputParameterChanges = changes;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    };
+    const auto require_null = [&](const char* stage) {
+        INFO(stage);
+        for (int i = 0; i < kFrames; ++i) {
+            REQUIRE(out_l[static_cast<std::size_t>(i)] == in_l[static_cast<std::size_t>(i)]);
+            REQUIRE(out_r[static_cast<std::size_t>(i)] == in_r[static_cast<std::size_t>(i)]);
+        }
+    };
+    // A host's own normalized value for a dB reading on the -60..24 range.
+    const auto normalized_db = [](double db) { return (db + 60.0) / 84.0; };
+    const auto write_both_gains = [&](double normalized) {
+        Steinberg::Vst::ParameterChanges changes(2);
+        Steinberg::int32 queue_index = 0, point_index = 0;
+        for (const auto id : {pulp::examples::kInputGain, pulp::examples::kOutputGain}) {
+            auto* queue = changes.addParameterData(id, queue_index);
+            REQUIRE(queue != nullptr);
+            REQUIRE(queue->addPoint(0, normalized, point_index) == Steinberg::kResultTrue);
+        }
+        render(&changes);
+    };
+
+    render(nullptr);
+    require_null("untouched defaults");
+
+    write_both_gains(normalized_db(6.0));
+    REQUIRE(out_l[1] != in_l[1]);
+    write_both_gains(normalized_db(0.0));
+    require_null("back to 0 dB through automation");
+
+    ParameterInfo info{};
+    REQUIRE(processor.getParameterInfo(0, info) == Steinberg::kResultOk);
+    write_both_gains(normalized_db(-12.0));
+    for (const auto id : {pulp::examples::kInputGain, pulp::examples::kOutputGain})
+        REQUIRE(processor.setParamNormalized(id, info.defaultNormalizedValue) ==
+                Steinberg::kResultOk);
+    render(nullptr);
+    require_null("the reported default written back by the host");
 
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);

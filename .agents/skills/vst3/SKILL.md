@@ -1439,3 +1439,16 @@ value-to-string display) goes through `state::value_from_host_normalized`,
 which drops the step for continuous kinds and still snaps discrete ones. A new
 normalized write path must use it too; `[vst3][param][host]` in
 `test_vst3_plugin_state.cpp` pins both write paths.
+
+The mapping is done in double precision for a linear range, and every value
+the adapter reports back (the default, output parameters, editor edits, the
+post-restore sync) goes through its inverse, `state::host_normalized_from_value`.
+In single precision, with fused multiply-add, a host's own 0 dB on a -60..24
+range came back as 1.4e-6 dB: a gain of 1 + 1 ulp, and a failed null test.
+Two more rules keep unity bit-exact. `setParamNormalized` skips the store write
+when the value is an echo of what the store already holds, because the double
+round trip can differ from it in the last bit. `setState` syncs only the VST3
+parameter objects (`SingleComponentEffect::setParamNormalized`), never
+rewriting the restored store. `[null-test]` cases in
+`test_vst3_plugin_state.cpp`, `test_au_v2_effect.cpp` and PulpGain's own tests
+null PulpGain at 0 dB through all three formats.

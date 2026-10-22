@@ -5,6 +5,7 @@
 #include <pulp/format/validation_assertions.hpp>
 #include <array>
 #include <cmath>
+#include <vector>
 
 using namespace pulp;
 using namespace pulp::examples;
@@ -295,4 +296,72 @@ TEST_CASE("PulpGain state round-trip", "[pulpgain]") {
     REQUIRE_THAT(fx2.store.get_value(kInputGain), WithinAbs(-12.5, 0.01));
     REQUIRE_THAT(fx2.store.get_value(kOutputGain), WithinAbs(3.0, 0.01));
     REQUIRE_THAT(fx2.store.get_value(kBypass), WithinAbs(1.0, 0.01));
+}
+
+TEST_CASE("PulpGain CLAP at 0 dB is bit-transparent, including after a round trip",
+          "[pulpgain][clap][null-test]") {
+    ClapGainFixture fx;
+    std::array<float, ClapGainFixture::kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    std::uint32_t seed = 3;
+    for (std::size_t i = 0; i < in_l.size(); ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        in_l[i] = static_cast<float>(seed >> 8) / 16777216.0f - 0.5f;
+        in_r[i] = in_l[i] * 0.377f;
+    }
+    float* ins[2] = {in_l.data(), in_r.data()};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    clap_audio_buffer_t audio_in{};
+    audio_in.data32 = ins;
+    audio_in.channel_count = 2;
+    clap_audio_buffer_t audio_out{};
+    audio_out.data32 = outs;
+    audio_out.channel_count = 2;
+
+    struct Events {
+        std::vector<clap_event_param_value_t> values;
+        static uint32_t size(const clap_input_events_t* list) {
+            return static_cast<uint32_t>(static_cast<Events*>(list->ctx)->values.size());
+        }
+        static const clap_event_header_t* get(const clap_input_events_t* list, uint32_t i) {
+            return &static_cast<Events*>(list->ctx)->values[i].header;
+        }
+    } events;
+    const clap_input_events_t in_events{&events, &Events::size, &Events::get};
+    const auto run = [&](std::initializer_list<double> db_per_gain) {
+        events.values.clear();
+        for (const double db : db_per_gain) {
+            for (const auto id : {kInputGain, kOutputGain}) {
+                clap_event_param_value_t ev{};
+                ev.header.size = sizeof(ev);
+                ev.header.type = CLAP_EVENT_PARAM_VALUE;
+                ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+                ev.param_id = id;
+                ev.note_id = -1; ev.port_index = -1; ev.channel = -1; ev.key = -1;
+                ev.value = db;
+                events.values.push_back(ev);
+            }
+        }
+        clap_process_t proc{};
+        proc.frames_count = ClapGainFixture::kFrames;
+        proc.audio_inputs = &audio_in;
+        proc.audio_inputs_count = 1;
+        proc.audio_outputs = &audio_out;
+        proc.audio_outputs_count = 1;
+        proc.in_events = &in_events;
+        REQUIRE(format::clap_adapter::clap_process(&fx.plugin->plugin, &proc) ==
+                CLAP_PROCESS_CONTINUE);
+    };
+    const auto require_null = [&] {
+        for (std::size_t i = 0; i < in_l.size(); ++i) {
+            REQUIRE(out_l[i] == in_l[i]);
+            REQUIRE(out_r[i] == in_r[i]);
+        }
+    };
+
+    run({});
+    require_null();
+    run({6.0});
+    REQUIRE(out_l[1] != in_l[1]);
+    run({0.0});
+    require_null();
 }
