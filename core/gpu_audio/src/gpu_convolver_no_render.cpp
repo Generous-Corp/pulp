@@ -65,6 +65,20 @@ GpuConvolverStagedBreaker GpuConvolver::staged_breaker() const noexcept {
     return staged_readback_->breaker;
 }
 
+// No staged device exists in this build: the staged GPU path never runs, so
+// its helpers have nothing to do and nothing is ever latched.
+bool GpuConvolver::wait_staged_readback(StagedReadbackState&, float*) {
+    return false;
+}
+
+void GpuConvolver::submit_staged_readback(StagedReadbackState&, std::size_t) {}
+
+void GpuConvolver::configure_staged_pipeline() {}
+
+void GpuConvolver::latch_staged_recovery(GpuAudioRecoveryReason) noexcept {}
+
+void GpuConvolver::update_staged_breaker(StagedReadbackState&, bool) noexcept {}
+
 GpuConvolver::~GpuConvolver() = default;
 
 bool GpuConvolver::gpu_available() const {
