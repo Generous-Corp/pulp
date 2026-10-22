@@ -39,6 +39,7 @@
   "common_cli_members": [
     "browser_capture/browser_process.mjs",
     "browser_capture/capture.mjs",
+    "browser_capture/form_control_theme.mjs",
     "browser_capture/health.mjs",
     "browser_capture/interaction_executor.mjs",
     "browser_capture/interaction_plan.mjs",
