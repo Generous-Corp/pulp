@@ -7700,6 +7700,21 @@ metadata. What Pulp now does by default, and what the document must not undo:
   reconciler is created.
 - **Identical font bytes register once** — several `@font-face` weight rules
   of one variable font no longer decode and append the same face per binding.
+- **The metadata pass reads before it writes** (runtime revision 4). Any
+  `getLayoutBoxMetrics` that follows a geometry or typography write lays out
+  the whole root, so a per-binding read-then-write loop costs one Yoga pass
+  per binding: 78 passes for Spectr's first apply, 2 phased. Keep new reads in
+  the applier inside the read phases; `materialized_runtime_commit_cost.test.mjs`
+  counts flushes with a trace model and fails when a read lands after a write.
+  To measure the native count, wrap `applyMaterializedImportMetadata` in a
+  copy of the emitted bundle and read `View::layout_pass_count()` through a
+  scratch bridge function; pulp-screenshot has no built-in counter.
+  The Spectr panel is a blind instrument for the text-target half of that pass:
+  forcing `materializedTextTargetGeometry` to null changes 0 pixels there (the
+  layout-inset half changes ~24k), so text-target translation is proved by the
+  unit test, not by a Spectr render. Older Spectr captures also fail today's
+  text-binding validation (a box running past the text's end) and need their
+  boxes trimmed before the transform accepts them.
 
 What the document's own code must do (this is the app's cost, not Pulp's):
 
