@@ -296,6 +296,15 @@ TEST_CASE("bounded tanh stays within 3e-7 of std::tanh and saturates cleanly",
     ns::DefaultIsa::store(out, ns::DefaultIsa::tanh(ns::DefaultIsa::load(in)));
     for (int i = 0; i < 4; ++i)
         CHECK(out[i] == ns::tanh_bounded(in[i]));
+
+    // A NaN breaches the finite-input contract; both paths keep it visible
+    // rather than turning it into a full-scale constant.
+    alignas(16) float nan_in[4] = {NAN, 0.5f, -NAN, 2.0f};
+    ns::DefaultIsa::store(out, ns::DefaultIsa::tanh(ns::DefaultIsa::load(nan_in)));
+    CHECK(std::isnan(ns::tanh_bounded(NAN)));
+    CHECK(std::isnan(out[0]));
+    CHECK(std::isnan(out[2]));
+    CHECK(out[1] == ns::tanh_bounded(0.5f));
 }
 
 TEST_CASE("NAM WaveNet block engine nulls scalar against SIMD and the per-sample reference",
@@ -845,6 +854,94 @@ TEST_CASE("SIMD family kernels run behind the private adapters without allocatin
              .tensor_schema_version = 1},
             bind_neural_cpu_kernel<CompactSsmCpuKernel>(kernel));
         adapter_matches_direct(adapter, direct);
+    }
+}
+
+TEST_CASE("SIMD family kernels fail closed on inconsistent construction",
+          "[gpu_audio][neural][simd][adapter]") {
+    const StreamingPrepareContext unused{};
+    std::array<float, 8> in{0.5f, -0.25f, 0.1f, 0.0f, 0.3f, -0.7f, 0.2f, 0.9f};
+    const auto silent = [&](auto& kernel) {
+        std::array<float, 8> out;
+        out.fill(7.0f);
+        kernel.process(in.data(), out.data(), static_cast<std::uint32_t>(out.size()));
+        return std::all_of(out.begin(), out.end(), [](float v) { return v == 0.0f; });
+    };
+    SECTION("TCN: tap count must equal kernel_size") {
+        const TcnCpuShape shape{.channels = 1, .kernel_size = 4, .dilation = 2, .layers = 1};
+        const std::vector<float> five(5, 0.1f), four(4, 0.1f);
+        TcnSimdKernel<> bad(shape, five, 0.0f), good(shape, four, 0.0f);
+        CHECK_FALSE(bad.valid());
+        CHECK_FALSE(bad.prepare(unused));
+        CHECK(silent(bad));
+        CHECK(good.valid());
+        CHECK(good.prepare(unused));
+        TcnSimdKernel<> bad_shape({.channels = 2, .kernel_size = 4, .dilation = 2, .layers = 1},
+                                  four, 0.0f);
+        CHECK_FALSE(bad_shape.valid());
+    }
+    SECTION("NAM-TCN: dilations non-empty and spans long enough") {
+        NamTcnRef ref(4, 3, {1, 2}, 3);
+        auto w = ref.weights();
+        NamTcnSimdKernel<> good(w);
+        CHECK(good.valid());
+        CHECK_FALSE(silent(good));
+        auto no_dilations = w;
+        no_dilations.dilations = {};
+        auto short_conv = w;
+        short_conv.conv_w = short_conv.conv_w.first(short_conv.conv_w.size() - 1);
+        auto short_head = w;
+        short_head.head_w = short_head.head_w.first(2);
+        const std::array<std::uint32_t, 2> zero_dilation{1, 0};
+        auto bad_dilation = w;
+        bad_dilation.dilations = zero_dilation;
+        for (const auto& bad_weights : {no_dilations, short_conv, short_head, bad_dilation}) {
+            NamTcnSimdKernel<> bad(bad_weights);
+            CHECK_FALSE(bad.valid());
+            CHECK_FALSE(bad.prepare(unused));
+            CHECK(silent(bad));
+        }
+    }
+    SECTION("recurrent: shape and spans") {
+        const RecurrentCpuShape shape{.family = RecurrentFamily::Lstm,
+                                      .input_size = 1,
+                                      .hidden_size = 8,
+                                      .layers = 1,
+                                      .directions = 1,
+                                      .output_size = 1};
+        RecurrentRef ref(RecurrentFamily::Lstm, 8, 3);
+        auto w = ref.weights();
+        RecurrentSimdKernel<> good(shape, w);
+        CHECK(good.valid());
+        auto short_hh = w;
+        short_hh.w_hh = short_hh.w_hh.first(short_hh.w_hh.size() - 1);
+        RecurrentSimdKernel<> bad(shape, short_hh);
+        CHECK_FALSE(bad.valid());
+        CHECK_FALSE(bad.prepare(unused));
+        CHECK(silent(bad));
+        auto two_layers = shape;
+        two_layers.layers = 2;
+        RecurrentSimdKernel<> bad_shape(two_layers, w);
+        CHECK_FALSE(bad_shape.valid());
+        // The adapter refuses to prepare over a kernel that failed closed.
+        RecurrentCpuAdapter adapter(
+            family_spec(recurrent_state_bytes(shape), recurrent_state_schema(shape.family)),
+            shape, bind_neural_cpu_kernel<RecurrentCpuKernel>(bad));
+        CHECK_FALSE(adapter.prepare({.spec = &adapter.spec(),
+                                     .artifact_id = "simd.weights",
+                                     .artifact_hash = kSha,
+                                     .max_frames = 256}));
+    }
+    SECTION("SSM: matching non-empty spans") {
+        SsmRef ref(16, 3);
+        SsmSimdKernel<> good(ref.a, ref.b, ref.c, ref.d);
+        CHECK(good.valid());
+        const std::span<const float> short_c(ref.c.data(), 15);
+        SsmSimdKernel<> bad(ref.a, ref.b, short_c, ref.d);
+        CHECK_FALSE(bad.valid());
+        CHECK(silent(bad));
+        SsmSimdKernel<> empty({}, {}, {}, 0.0f);
+        CHECK_FALSE(empty.valid());
     }
 }
 

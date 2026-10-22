@@ -164,6 +164,7 @@ class NamWaveNetBlockEngine {
     /// given input stream does not depend on how it is split into calls.
     template <class Isa = neural_simd::DefaultIsa>
     void process(const float* input, float* output, std::uint32_t frames) noexcept {
+        neural_simd::assert_finite(input, frames);
         while (frames > 0) {
             const auto n = std::min(frames, kChunk);
             process_chunk<Isa>(input, output, n);

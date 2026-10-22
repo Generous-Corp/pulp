@@ -11,6 +11,11 @@
 // state. process() is allocation-free, takes any frame count, and carries
 // causal state across calls. bind_neural_cpu_kernel() fills any of the
 // adapters' six-function kernel structs.
+//
+// Construction fails closed: if the shape or a weight span is inconsistent,
+// the kernel keeps no weights, valid() is false, prepare() returns false (so
+// the owning adapter refuses to prepare), and process() writes silence.
+// Inputs are finite by contract (see neural_simd.hpp).
 
 #include "neural_simd.hpp"
 #include "recurrent_cpu_adapter.hpp"
@@ -98,20 +103,35 @@ template <class Isa = neural_simd::DefaultIsa> class TcnSimdKernel {
   public:
     static constexpr std::uint32_t kChunk = 64;
 
-    TcnSimdKernel(TcnCpuShape shape, std::span<const float> taps, float bias)
-        : taps_(taps.begin(), taps.end()), bias_(bias), dilation_(shape.dilation),
-          reach_((shape.kernel_size - 1) * shape.dilation), size_(reach_ + kChunk),
-          ring_(2 * static_cast<std::size_t>(size_), 0.0f) {}
+    TcnSimdKernel(TcnCpuShape shape, std::span<const float> taps, float bias) {
+        if (!valid_tcn_cpu_shape(shape) || taps.size() != shape.kernel_size)
+            return;
+        taps_.assign(taps.begin(), taps.end());
+        bias_ = bias;
+        dilation_ = shape.dilation;
+        reach_ = (shape.kernel_size - 1) * shape.dilation;
+        size_ = reach_ + kChunk;
+        ring_.assign(2 * static_cast<std::size_t>(size_), 0.0f);
+        valid_ = true;
+    }
 
+    bool valid() const noexcept {
+        return valid_;
+    }
     bool prepare(const StreamingPrepareContext&) noexcept {
         reset();
-        return true;
+        return valid_;
     }
     void reset() noexcept {
         std::fill(ring_.begin(), ring_.end(), 0.0f);
         head_ = 0;
     }
     void process(const float* in, float* out, std::uint32_t frames) noexcept {
+        if (!valid_) {
+            std::fill(out, out + frames, 0.0f);
+            return;
+        }
+        neural_simd::assert_finite(in, frames);
         while (frames > 0) {
             const auto n = std::min(frames, kChunk);
             chunk(in, out, n);
@@ -173,6 +193,7 @@ template <class Isa = neural_simd::DefaultIsa> class TcnSimdKernel {
         return pos >= back ? wrap(pos - back) : pos + size_ - back;
     }
 
+    bool valid_ = false;
     std::vector<float> taps_;
     float bias_ = 0.0f;
     std::uint32_t dilation_ = 1, reach_ = 0, size_ = 0, head_ = 0;
@@ -195,8 +216,24 @@ template <class Isa = neural_simd::DefaultIsa> class NamTcnSimdKernel {
         std::span<const float> in_w, conv_w, conv_b, mix_w, head_w;
     };
 
-    explicit NamTcnSimdKernel(const Weights& w)
-        : channels_(w.channels), cpad_(neural_simd::pad_lanes(w.channels)), kernel_(w.kernel) {
+    static bool valid_weights(const Weights& w) noexcept {
+        if (w.channels == 0 || w.channels > 64 || w.kernel == 0 || w.kernel > 64 ||
+            w.dilations.empty())
+            return false;
+        for (const auto d : w.dilations)
+            if (d == 0 || d > 65536)
+                return false;
+        const std::size_t c = w.channels, k = w.kernel, l = w.dilations.size();
+        return w.in_w.size() >= c && w.conv_w.size() >= l * c * c * k &&
+               w.conv_b.size() >= l * c && w.mix_w.size() >= l * c * c && w.head_w.size() >= c;
+    }
+
+    explicit NamTcnSimdKernel(const Weights& w) {
+        if (!valid_weights(w))
+            return;
+        channels_ = w.channels;
+        cpad_ = neural_simd::pad_lanes(w.channels);
+        kernel_ = w.kernel;
         const auto c = channels_, k = kernel_;
         in_w_.assign(static_cast<std::size_t>(neural_simd::kLanes) * cpad_, 0.0f);
         std::copy(w.in_w.begin(), w.in_w.end(), in_w_.begin());
@@ -227,11 +264,15 @@ template <class Isa = neural_simd::DefaultIsa> class NamTcnSimdKernel {
         act_.assign(static_cast<std::size_t>(kChunk) * cpad_, 0.0f);
         last_.assign(static_cast<std::size_t>(kChunk) * cpad_, 0.0f);
         head_out_.assign(static_cast<std::size_t>(kChunk) * neural_simd::kLanes, 0.0f);
+        valid_ = true;
     }
 
+    bool valid() const noexcept {
+        return valid_;
+    }
     bool prepare(const StreamingPrepareContext&) noexcept {
         reset();
-        return true;
+        return valid_;
     }
     void reset() noexcept {
         for (auto& l : layers_) {
@@ -240,6 +281,11 @@ template <class Isa = neural_simd::DefaultIsa> class NamTcnSimdKernel {
         }
     }
     void process(const float* in, float* out, std::uint32_t frames) noexcept {
+        if (!valid_) {
+            std::fill(out, out + frames, 0.0f);
+            return;
+        }
+        neural_simd::assert_finite(in, frames);
         while (frames > 0) {
             const auto n = std::min(frames, kChunk);
             chunk(in, out, n);
@@ -322,6 +368,7 @@ template <class Isa = neural_simd::DefaultIsa> class NamTcnSimdKernel {
             out[t] = head_out_[static_cast<std::size_t>(t) * lanes];
     }
 
+    bool valid_ = false;
     std::uint32_t channels_ = 0, cpad_ = 0, kernel_ = 0;
     std::vector<float> in_w_, head_w_;
     std::vector<Layer> layers_;
@@ -348,6 +395,12 @@ template <class Isa = neural_simd::DefaultIsa> class RecurrentSimdKernel {
           hpad_(neural_simd::pad_lanes(shape.hidden_size)),
           gates_(static_cast<std::uint32_t>(recurrent_gate_count(shape.family))),
           rows_(gates_ * hpad_), head_bias_(w.head_bias) {
+        const std::size_t g = gates_, h = hidden_;
+        if (!valid_recurrent_cpu_shape(shape) || w.w_ih.size() < g * h ||
+            w.w_hh.size() < g * h * h || w.bias.size() < g * h || w.head.size() < h) {
+            hidden_ = hpad_ = rows_ = 0;
+            return;
+        }
         w_t_.assign(static_cast<std::size_t>(hpad_) * rows_, 0.0f);
         seed_bias_.assign(rows_, 0.0f);
         seed_wih_.assign(rows_, 0.0f);
@@ -373,11 +426,15 @@ template <class Isa = neural_simd::DefaultIsa> class RecurrentSimdKernel {
         h_.assign(hpad_, 0.0f);
         cell_.assign(hpad_, 0.0f);
         gate_values_.assign(rows_, 0.0f);
+        valid_ = true;
     }
 
+    bool valid() const noexcept {
+        return valid_;
+    }
     bool prepare(const StreamingPrepareContext&) noexcept {
         reset();
-        return true;
+        return valid_;
     }
     void reset() noexcept {
         std::fill(h_.begin(), h_.end(), 0.0f);
@@ -386,6 +443,11 @@ template <class Isa = neural_simd::DefaultIsa> class RecurrentSimdKernel {
     void process(const float* in, float* out, std::uint32_t frames) noexcept {
         using V = typename Isa::V;
         namespace ns = neural_simd;
+        if (!valid_) {
+            std::fill(out, out + frames, 0.0f);
+            return;
+        }
+        ns::assert_finite(in, frames);
         for (std::uint32_t n = 0; n < frames; ++n) {
             const float x = in[n];
             const V xv = Isa::splat(x);
@@ -425,6 +487,7 @@ template <class Isa = neural_simd::DefaultIsa> class RecurrentSimdKernel {
     }
 
   private:
+    bool valid_ = false;
     bool lstm_ = true;
     std::uint32_t hidden_ = 0, hpad_ = 0, gates_ = 0, rows_ = 0;
     float head_bias_ = 0.0f;
@@ -436,17 +499,27 @@ template <class Isa = neural_simd::DefaultIsa> class RecurrentSimdKernel {
 template <class Isa = neural_simd::DefaultIsa> class SsmSimdKernel {
   public:
     SsmSimdKernel(std::span<const float> a, std::span<const float> b, std::span<const float> c,
-                  float d)
-        : spad_(neural_simd::pad_lanes(static_cast<std::uint32_t>(a.size()))), d_(d),
-          a_(spad_, 0.0f), b_(spad_, 0.0f), c_(spad_, 0.0f), h_(spad_, 0.0f) {
+                  float d) {
+        if (a.empty() || a.size() > 256 || b.size() != a.size() || c.size() != a.size())
+            return;
+        spad_ = neural_simd::pad_lanes(static_cast<std::uint32_t>(a.size()));
+        d_ = d;
+        a_.assign(spad_, 0.0f);
+        b_.assign(spad_, 0.0f);
+        c_.assign(spad_, 0.0f);
+        h_.assign(spad_, 0.0f);
+        valid_ = true;
         std::copy(a.begin(), a.end(), a_.begin());
         std::copy(b.begin(), b.end(), b_.begin());
         std::copy(c.begin(), c.end(), c_.begin());
     }
 
+    bool valid() const noexcept {
+        return valid_;
+    }
     bool prepare(const StreamingPrepareContext&) noexcept {
         reset();
-        return true;
+        return valid_;
     }
     void reset() noexcept {
         std::fill(h_.begin(), h_.end(), 0.0f);
@@ -454,6 +527,11 @@ template <class Isa = neural_simd::DefaultIsa> class SsmSimdKernel {
     void process(const float* in, float* out, std::uint32_t frames) noexcept {
         using V = typename Isa::V;
         constexpr auto lanes = neural_simd::kLanes;
+        if (!valid_) {
+            std::fill(out, out + frames, 0.0f);
+            return;
+        }
+        neural_simd::assert_finite(in, frames);
         for (std::uint32_t n = 0; n < frames; ++n) {
             const V x = Isa::splat(in[n]);
             // Four partial sums keep the reduction off one dependency chain.
@@ -470,6 +548,7 @@ template <class Isa = neural_simd::DefaultIsa> class SsmSimdKernel {
     }
 
   private:
+    bool valid_ = false;
     std::uint32_t spad_ = 0;
     float d_ = 0.0f;
     std::vector<float> a_, b_, c_, h_;
