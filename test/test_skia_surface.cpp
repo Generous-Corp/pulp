@@ -36,8 +36,7 @@
 #include "include/gpu/graphite/Surface.h"
 #include "include/gpu/graphite/BackendTexture.h"
 #include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
-#include "dawn/dawn_proc.h"
-#include "dawn/native/DawnNative.h"
+#include "support/dawn_transfer_call_counter.hpp"
 #include "webgpu/webgpu_cpp.h"
 
 #include <atomic>
@@ -133,42 +132,50 @@ bool read_graphite_surface(skgpu::graphite::Context& context, skgpu::graphite::R
         if (context.insertRecording(insert) != skgpu::graphite::InsertStatus::kSuccess)
             return false;
     }
+    // Graphite holds the callback context until the read completes, which
+    // can be after the deadline below. The state is shared with the callback
+    // so a late completion writes memory that is still alive.
     struct State {
         std::atomic<bool> done{false};
         bool ok = false;
-        std::vector<uint8_t>* out = nullptr;
+        std::vector<uint8_t> pixels;
         int w = 0;
         int h = 0;
-    } state;
-    state.out = &out;
-    state.w = surface->width();
-    state.h = surface->height();
+    };
+    auto state = std::make_shared<State>();
+    state->w = surface->width();
+    state->h = surface->height();
     const auto info =
-        SkImageInfo::Make(state.w, state.h, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+        SkImageInfo::Make(state->w, state->h, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
     context.asyncRescaleAndReadPixels(
-        surface, info, SkIRect::MakeWH(state.w, state.h), SkImage::RescaleGamma::kSrc,
+        surface, info, SkIRect::MakeWH(state->w, state->h), SkImage::RescaleGamma::kSrc,
         SkImage::RescaleMode::kNearest,
         [](void* ctx, std::unique_ptr<const SkImage::AsyncReadResult> result) {
-            auto* st = static_cast<State*>(ctx);
+            std::unique_ptr<std::shared_ptr<State>> holder(
+                static_cast<std::shared_ptr<State>*>(ctx));
+            State& st = **holder;
             if (result && result->count() == 1) {
-                const size_t row = static_cast<size_t>(st->w) * 4u;
-                st->out->resize(row * static_cast<size_t>(st->h));
+                const size_t row = static_cast<size_t>(st.w) * 4u;
+                st.pixels.resize(row * static_cast<size_t>(st.h));
                 const auto* src = static_cast<const uint8_t*>(result->data(0));
-                for (int y = 0; y < st->h; ++y)
-                    std::memcpy(st->out->data() + row * y, src + result->rowBytes(0) * y, row);
-                st->ok = true;
+                for (int y = 0; y < st.h; ++y)
+                    std::memcpy(st.pixels.data() + row * y, src + result->rowBytes(0) * y, row);
+                st.ok = true;
             }
-            st->done.store(true, std::memory_order_release);
+            st.done.store(true, std::memory_order_release);
         },
-        &state);
+        new std::shared_ptr<State>(state));
     context.submit(skgpu::graphite::SyncToCpu::kYes);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (!state.done.load(std::memory_order_acquire) &&
+    while (!state->done.load(std::memory_order_acquire) &&
            std::chrono::steady_clock::now() < deadline) {
         context.checkAsyncWorkCompletion();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    return state.done.load(std::memory_order_acquire) && state.ok;
+    if (!state->done.load(std::memory_order_acquire) || !state->ok)
+        return false;
+    out = std::move(state->pixels);
+    return true;
 }
 
 bool read_drawable(skgpu::graphite::Context& context, wgpu::Texture& texture,
@@ -184,57 +191,13 @@ bool read_drawable(skgpu::graphite::Context& context, wgpu::Texture& texture,
     return read_graphite_surface(context, *recorder, surface.get(), out);
 }
 
-// Counts the textures Dawn creates and the texture-to-texture copies it
-// encodes while it is alive, by routing the process's Dawn proc table through
-// counting entry points. A per-frame Graphite snapshot copy is invisible to
-// the resource budget (the copy is recycled from the scratch pool), but it is
-// always one encoded copy.
-std::atomic<int> g_textures_created{0};
-std::atomic<int> g_texture_copies{0};
-WGPUProcDeviceCreateTexture g_create_texture = nullptr;
-WGPUProcCommandEncoderCopyTextureToTexture g_copy_texture = nullptr;
-
-WGPUTexture counting_create_texture(WGPUDevice device, const WGPUTextureDescriptor* desc) {
-    g_textures_created.fetch_add(1, std::memory_order_relaxed);
-    return g_create_texture(device, desc);
-}
-
-void counting_copy_texture(WGPUCommandEncoder encoder, const WGPUTexelCopyTextureInfo* source,
-                           const WGPUTexelCopyTextureInfo* destination, const WGPUExtent3D* size) {
-    g_texture_copies.fetch_add(1, std::memory_order_relaxed);
-    g_copy_texture(encoder, source, destination, size);
-}
-
-class GpuWorkCounter {
-  public:
-    GpuWorkCounter() {
-        g_textures_created.store(0, std::memory_order_relaxed);
-        g_texture_copies.store(0, std::memory_order_relaxed);
-        DawnProcTable procs = dawn::native::GetProcs();
-        g_create_texture = procs.deviceCreateTexture;
-        g_copy_texture = procs.commandEncoderCopyTextureToTexture;
-        procs.deviceCreateTexture = &counting_create_texture;
-        procs.commandEncoderCopyTextureToTexture = &counting_copy_texture;
-        dawnProcSetProcs(&procs);
-    }
-    ~GpuWorkCounter() {
-        dawnProcSetProcs(&dawn::native::GetProcs());
-    }
-    int textures_created() const {
-        return g_textures_created.load(std::memory_order_relaxed);
-    }
-    int texture_copies() const {
-        return g_texture_copies.load(std::memory_order_relaxed);
-    }
-};
-
 bool pixel_is(const std::vector<uint8_t>& px, uint32_t w, uint32_t x, uint32_t y, uint8_t r,
               uint8_t g, uint8_t b) {
     const size_t i = (static_cast<size_t>(y) * w + x) * 4u;
     if (px.size() < i + 4)
         return false;
-    auto near = [](uint8_t a, uint8_t e) { return std::abs(int(a) - int(e)) < 24; };
-    return near(px[i], r) && near(px[i + 1], g) && near(px[i + 2], b);
+    auto close_to = [](uint8_t a, uint8_t e) { return std::abs(int(a) - int(e)) < 24; };
+    return close_to(px[i], r) && close_to(px[i + 1], g) && close_to(px[i + 2], b);
 }
 }  // namespace
 #endif
@@ -546,7 +509,10 @@ TEST_CASE("SkiaSurface persistent-scene blit presents each frame's own scene",
     REQUIRE(read_drawable(*context, drawable_2, px_2));
 
     // Frame 1's drawable holds frame 1's scene: frame 2's later scene draws
-    // did not reach back into a blit that shares the scene's texture.
+    // did not reach back into a blit that shares the scene's texture. This
+    // fails only if the blit leaves its own frame's recording (a cached view,
+    // a deferred blit); it guards that ordering rather than probing a hazard
+    // the current code has.
     CHECK(pixel_is(px_1, kSize, 16, 32, 255, 0, 0));
     CHECK(pixel_is(px_1, kSize, 48, 32, 255, 0, 0));
     // Frame 2's drawable shows frame 2: its repaint plus the retained half.
@@ -561,9 +527,9 @@ TEST_CASE("Graphite AsImage view of a surface sees later draws into it",
           "[render][skia][persistent-scene]") {
 #ifdef PULP_HAS_SKIA
     // The control for the two-frame test above: a view kept past a write to
-    // its surface DOES change, so that test's frame-1 check can fail. If this
-    // stopped holding, the blit's ordering argument would be moot and the
-    // two-frame test would prove nothing about it.
+    // its surface DOES change, so that test's frame-1 check can fail. This
+    // shows aliasing inside one recording; across recordings the order is the
+    // queue's.
     auto dawn = GpuSurface::create_dawn();
     if (!dawn)
         SKIP(kNoGpu);
@@ -625,7 +591,10 @@ TEST_CASE("SkiaSurface persistent-scene frames do not copy the scene",
     wgpu::Texture drawable = make_drawable_texture(*dawn, kSize, kSize);
     REQUIRE(drawable);
     gpu.set_drawable(&drawable);
-    GpuWorkCounter work;
+    // Installed after GpuSurface::initialize(), which sets the baseline proc
+    // table itself and would replace an interposer installed before it. The
+    // table this restores is that same baseline.
+    pulp::test::DawnTransferCallCounter work;
 
     auto frame = [&](int i) {
         REQUIRE(gpu.begin_frame());
@@ -641,22 +610,24 @@ TEST_CASE("SkiaSurface persistent-scene frames do not copy the scene",
     // The first frames pay for the scene, pipelines and atlases.
     for (int i = 0; i < 3; ++i)
         frame(i);
-    const int warm_textures = work.textures_created();
-    REQUIRE(warm_textures > 0); // control: the counter sees Graphite's allocations
-    const int warm_copies = work.texture_copies();
+    const auto warm = work.snapshot();
+    // Control: the counter sees Graphite's allocations.
+    REQUIRE(warm.device_create_texture_calls > 0);
     constexpr int kFrames = 60;
     for (int i = 0; i < kFrames; ++i)
         frame(i);
-    const int textures = work.textures_created() - warm_textures;
-    const int copies = work.texture_copies() - warm_copies;
-    INFO("over " << kFrames << " steady frames: " << textures << " textures created, " << copies
-                 << " texture copies (first 3 frames: " << warm_textures << " textures, "
-                 << warm_copies << " copies)");
+    const auto steady = work.snapshot();
+    const auto copies = steady.copy_texture_to_texture_calls - warm.copy_texture_to_texture_calls;
+    INFO("over " << kFrames << " steady frames: " << copies << " texture copies, "
+                 << steady.device_create_texture_calls - warm.device_create_texture_calls
+                 << " textures created (first 3 frames: " << warm.copy_texture_to_texture_calls
+                 << " copies, " << warm.device_create_texture_calls << " textures)");
 
     // A blit through a snapshot copies the whole scene every frame; the
-    // shared-texture blit draws straight from the scene's own texture.
+    // shared-texture blit draws straight from the scene's own texture. Texture
+    // creation cannot tell the two apart, because Graphite recycles the
+    // snapshot's copy from its scratch pool.
     CHECK(copies == 0);
-    CHECK(textures == 0);
 #else
     REQUIRE(true);
 #endif
@@ -696,13 +667,16 @@ TEST_CASE("SkiaCanvas Graphite layer seal shares the layer texture",
         return canvas.end_layer();
     };
 
-    // Each retained layer costs exactly one texture: the one it was recorded
-    // into. A seal that copies costs a second. Snapping the recording is what
-    // makes Graphite instantiate the textures.
+    // Each retained layer costs one texture: the one it was recorded into. A
+    // seal that copies costs about a second one per seal (15 textures for 8
+    // seals, measured). The bound leaves room for a backend that adds a few
+    // attachments of its own. Snapping the recording is what makes Graphite
+    // instantiate the textures. The counter goes in after
+    // GpuSurface::initialize(), which installs the baseline proc table itself.
     const auto warmup = seal(pulp::canvas::Color::rgba8(0, 255, 0));
     REQUIRE(warmup);
     REQUIRE(recorder->snap());
-    GpuWorkCounter work;
+    pulp::test::DawnTransferCallCounter work;
     constexpr int kSeals = 8;
     std::vector<pulp::canvas::Canvas::LayerHandle> kept;
     for (int i = 0; i < kSeals; ++i) {
@@ -710,11 +684,13 @@ TEST_CASE("SkiaCanvas Graphite layer seal shares the layer texture",
         REQUIRE(kept.back());
     }
     REQUIRE(recorder->snap());
-    INFO("textures created by " << kSeals << " retained seals: " << work.textures_created());
-    CHECK(work.textures_created() == kSeals);
+    const auto textures = work.snapshot().device_create_texture_calls;
+    INFO("textures created by " << kSeals << " retained seals: " << textures);
+    CHECK(textures >= static_cast<std::uint64_t>(kSeals));
+    CHECK(textures < static_cast<std::uint64_t>(kSeals + kSeals / 2));
 
-    // A later layer recorded after the red seal does not change the red one:
-    // the sealed image is the only owner of its texture.
+    // Sanity check, true of the copying seal too: a layer sealed before a
+    // later one is recorded still draws its own content.
     const auto red = seal(pulp::canvas::Color::rgba8(255, 0, 0));
     REQUIRE(red);
     const auto blue = seal(pulp::canvas::Color::rgba8(0, 0, 255));

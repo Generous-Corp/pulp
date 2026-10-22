@@ -477,8 +477,8 @@ Canvas::LayerHandle SkiaCanvas::end_layer() {
         // a scoped save_layer/restore pair can never hand back to a caller.
         // On Graphite the image shares the surface's texture rather than
         // copying it; that is safe because the surface is released on the
-        // next line and nothing draws into it again, so the image is the
-        // texture's only owner. A surface that is not textureable is copied.
+        // next line and nothing draws into it again. The image keeps the
+        // layer's device alive. A surface that is not textureable is copied.
         // Ganesh and raster snapshots are already copy-on-write.
         if (recorder_ != nullptr)
             open.layer.image = SkSurfaces::AsImage(open.layer.surface);
