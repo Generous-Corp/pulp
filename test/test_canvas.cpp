@@ -1229,6 +1229,42 @@ TEST_CASE("SDF operator trees shade union subtract and intersect",
 #endif
 }
 
+TEST_CASE("SDF chart feather keeps the colour premultiplied", "[canvas][sdf][shader][feather]") {
+#ifdef PULP_HAS_SKIA
+    // A white chart with a glow: 3 units outside the arc the feather leaves
+    // partial coverage. The surface stores premultiplied bytes, so a channel
+    // above alpha there means the feather scaled alpha and not the colour.
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+    SkiaCanvas canvas(surface->getCanvas());
+    Canvas::SDFStyle style;
+    style.arc_start = 0.0f;
+    style.arc_sweep = 6.28318530718f;
+    style.feather_sigma = 4.0f;
+    style.feather_mode = 1; // glow
+    Canvas::ShaderDrawOptions options;
+    options.reach = 12.0f;
+    REQUIRE(canvas.draw_sdf_shape_with_shader(
+        Canvas::SDFShape::flat_arc, 8, 8, 48, 48, style,
+        "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }", options));
+    SkPixmap pixels;
+    REQUIRE(surface->peekPixels(&pixels));
+    // The arc's outer edge is at x = 8 + 46 = 54; sample 3 units beyond it.
+    const auto* px = static_cast<const uint8_t*>(pixels.addr(57, 32));
+    const int a = px[3];
+    INFO("premultiplied bytes " << int(px[0]) << "," << int(px[1]) << "," << int(px[2]) << " alpha "
+                                << a);
+    REQUIRE(a > 0);
+    REQUIRE(a < 255);
+    REQUIRE(int(px[0]) <= a + 1);
+    REQUIRE(int(px[1]) <= a + 1);
+    REQUIRE(int(px[2]) <= a + 1);
+#else
+    SUCCEED("Skia feather probes require PULP_HAS_SKIA");
+#endif
+}
+
 TEST_CASE("analytic SDF feather modes render finite chart coverage",
           "[canvas][sdf][shader][feather]") {
 #ifdef PULP_HAS_SKIA

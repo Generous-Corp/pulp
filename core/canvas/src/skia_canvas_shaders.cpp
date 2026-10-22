@@ -591,7 +591,9 @@ half4 main(float2 coord) {
         float feather = pulpFeather(g, featherSigma,
                                     int(featherCurve + 0.5),
                                     int(featherMode + 0.5));
-        shaded.a *= half(feather);
+        // shade() returns premultiplied colour, so coverage scales all four
+        // channels; scaling alpha alone leaves colour brighter than its alpha.
+        shaded *= half(feather);
     }
     return shaded;
 }
