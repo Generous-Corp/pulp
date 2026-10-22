@@ -435,24 +435,24 @@ TEST_CASE("Speaker rejects non-finite controls and audio without poisoning state
     REQUIRE(a == b);
 }
 
-TEST_CASE("Float and double instantiations agree", "[signal][speaker]") {
-    // The shipping type is float; the measurements above run in double. They
-    // have to describe the same filter or the acceptance numbers do not apply
-    // to what ships.
+namespace {
+
+struct FloatDoubleDelta {
+    double worst_db;
+    double rms_db;
+};
+
+// Renders the same seeded noise through the shipping float model and a
+// double twin prepared at twin_fs, and reports how far apart they land.
+FloatDoubleDelta float_vs_double_delta(double twin_fs) {
     SpeakerModel single;
     SpeakerModel64 twin;
-    for (auto* configure : {+[](SpeakerModel& m) { m.set_compression_amount(0.0); }}) {
-        (void)configure;
-    }
     single.set_compression_amount(0.0);
     twin.set_compression_amount(0.0);
     single.set_box_type(SpeakerBoxType::sealed);
     twin.set_box_type(SpeakerBoxType::sealed);
     single.prepare(kFs);
-    twin.prepare(kFs);
-
-    REQUIRE_THAT(static_cast<double>(single.resonance_fc_hz()),
-                 Catch::Matchers::WithinRel(twin.resonance_fc_hz(), 1e-12));
+    twin.prepare(twin_fs);
 
     constexpr int kN = 8192;
     std::vector<float> in_f(kN), out_f(kN);
@@ -477,8 +477,30 @@ TEST_CASE("Float and double instantiations agree", "[signal][speaker]") {
         worst = std::max(worst, std::abs(d));
         sum_sq += d * d;
     }
-    const double rms_db = 10.0 * std::log10(std::max(sum_sq / kN, 1e-300));
-    INFO("float-vs-double difference: worst " << amplitude_db(worst) << " dBFS, rms " << rms_db
+    return {amplitude_db(worst), 10.0 * std::log10(std::max(sum_sq / kN, 1e-300))};
+}
+
+// Agreement bounds shared by the agreement check and its negative control.
+constexpr double kFloatDoubleRmsBoundDb = -100.0;
+constexpr double kFloatDoubleWorstBoundDb = -90.3;
+
+} // namespace
+
+TEST_CASE("Float and double instantiations agree", "[signal][speaker]") {
+    // The shipping type is float; the measurements above run in double. They
+    // have to describe the same filter or the acceptance numbers do not apply
+    // to what ships.
+    SpeakerModel single;
+    SpeakerModel64 twin;
+    single.set_box_type(SpeakerBoxType::sealed);
+    twin.set_box_type(SpeakerBoxType::sealed);
+    single.prepare(kFs);
+    twin.prepare(kFs);
+    REQUIRE_THAT(static_cast<double>(single.resonance_fc_hz()),
+                 Catch::Matchers::WithinRel(twin.resonance_fc_hz(), 1e-12));
+
+    const auto delta = float_vs_double_delta(kFs);
+    INFO("float-vs-double difference: worst " << delta.worst_db << " dBFS, rms " << delta.rms_db
                                               << " dBFS");
     // The float build's deviation is rounding noise, so it is bounded by its
     // RMS, with the single worst sample held to one signed 16-bit step. On
@@ -488,6 +510,18 @@ TEST_CASE("Float and double instantiations agree", "[signal][speaker]") {
     // dBFS (arm64: worst near -102, RMS near -112.7). The worst sample of a
     // noise process moves by a few dB with the seed and the length, so it
     // cannot carry a tight bound; the RMS can.
-    REQUIRE(rms_db < -100.0);
-    REQUIRE(amplitude_db(worst) < -90.3);
+    REQUIRE(delta.rms_db < kFloatDoubleRmsBoundDb);
+    REQUIRE(delta.worst_db < kFloatDoubleWorstBoundDb);
+}
+
+TEST_CASE("Float and double agreement bounds reject a detuned twin", "[signal][speaker]") {
+    // Negative control: a double twin prepared 0.01% off the shipping sample
+    // rate is a genuinely different filter, by far less than any coefficient
+    // bug would move it. Both agreement bounds must flag it, or they are too
+    // loose to see a real float/double divergence.
+    const auto delta = float_vs_double_delta(kFs * 1.0001);
+    INFO("detuned difference: worst " << delta.worst_db << " dBFS, rms " << delta.rms_db
+                                      << " dBFS");
+    REQUIRE(delta.rms_db > kFloatDoubleRmsBoundDb);
+    REQUIRE(delta.worst_db > kFloatDoubleWorstBoundDb);
 }
