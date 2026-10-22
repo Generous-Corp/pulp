@@ -429,11 +429,15 @@ public:
     /// `latency_samples()` / `tail_samples` to the host by that
     /// format's sanctioned route (see `flag_latency_changed` above —
     /// for CLAP that is a restart request, not a direct push).
+    // Polled by the adapters every block; a plain load keeps the common
+    // nothing-changed case free of read-modify-write traffic.
     bool consume_latency_changed_flag() noexcept {
-        return latency_changed_.exchange(false, std::memory_order_acq_rel);
+        return latency_changed_.load(std::memory_order_relaxed) &&
+               latency_changed_.exchange(false, std::memory_order_acq_rel);
     }
     bool consume_tail_changed_flag() noexcept {
-        return tail_changed_.exchange(false, std::memory_order_acq_rel);
+        return tail_changed_.load(std::memory_order_relaxed) &&
+               tail_changed_.exchange(false, std::memory_order_acq_rel);
     }
 
     /// Non-mutating peek used by adapters that need to decide whether

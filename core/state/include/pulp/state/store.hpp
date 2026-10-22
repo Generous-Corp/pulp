@@ -174,8 +174,12 @@ public:
     void add_group(const ParamGroup& group);
 
     /// Read a parameter's base value (lock-free).
-    /// @note Safe to call from the audio thread.
-    float get_value(ParamID id) const;
+    /// @note Safe to call from the audio thread. Defined inline: processors
+    /// call this for every parameter they read on every block.
+    float get_value(ParamID id) const {
+        const std::size_t i = index_of(id);
+        return i == kNoIndex ? 0.0f : values_[i].get();
+    }
 
     /// Resolve a read handle for a parameter's base value. Call off the
     /// audio thread (e.g. in prepare()); the returned handle's get() is
@@ -666,7 +670,7 @@ public:
     std::vector<std::uint32_t> dense_index_;
     bool dense_index_usable_ = true;
     static constexpr std::size_t kNoIndex = static_cast<std::size_t>(-1);
-    std::size_t index_of(ParamID id) const noexcept {
+    [[gnu::always_inline]] std::size_t index_of(ParamID id) const noexcept {
         if (id < dense_index_.size()) {
             const std::uint32_t i = dense_index_[id];
             return i == kNoDenseIndex ? kNoIndex : i;

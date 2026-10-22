@@ -424,12 +424,6 @@ void StateStore::add_group(const ParamGroup& group) {
     groups_.push_back(group);
 }
 
-float StateStore::get_value(ParamID id) const {
-    const std::size_t i = index_of(id);
-    if (i == kNoIndex) return 0.0f;
-    return values_[i].get();
-}
-
 ParamReader StateStore::param_reader(ParamID id) const {
     auto it = id_to_index_.find(id);
     if (it == id_to_index_.end())
