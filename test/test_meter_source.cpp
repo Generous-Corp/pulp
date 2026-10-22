@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <thread>
 
@@ -50,6 +51,33 @@ TEST_CASE("MeterSource publishes the latest frame", "[view][meter-source]") {
 
     src.publish(stereo(0.1f, 0.9f));  // latest wins
     CHECK(src.read().peak[0] == Catch::Approx(0.9f));
+}
+
+TEST_CASE("MeterSource publish copies every field and advances the publish counter by one",
+          "[view][meter-source]") {
+    MeterSource src;
+    const auto before = src.publish_seq();
+    MeterFrame frame;
+    frame.channels = MeterFrame::kMaxChannels;
+    for (int ch = 0; ch < MeterFrame::kMaxChannels; ++ch) {
+        frame.rms[ch] = 0.01f * static_cast<float>(ch + 1);
+        frame.peak[ch] = 0.1f * static_cast<float>(ch + 1);
+    }
+    for (int i = 1; i <= 5; ++i) {
+        frame.peak[0] = static_cast<float>(i);
+        src.publish(frame);
+        REQUIRE(src.publish_seq() == before + static_cast<std::uint32_t>(i));
+    }
+    const MeterFrame got = src.read();
+    REQUIRE(got.channels == MeterFrame::kMaxChannels);
+    REQUIRE(got.peak[0] == 5.0f);
+    for (int ch = 1; ch < MeterFrame::kMaxChannels; ++ch) {
+        REQUIRE(got.rms[ch] == frame.rms[ch]);
+        REQUIRE(got.peak[ch] == frame.peak[ch]);
+    }
+    REQUIRE(got.rms[0] == frame.rms[0]);
+    // Reading does not count as a publish.
+    REQUIRE(src.publish_seq() == before + 5u);
 }
 
 TEST_CASE("ScalarSource publishes the latest value", "[view][meter-source]") {
