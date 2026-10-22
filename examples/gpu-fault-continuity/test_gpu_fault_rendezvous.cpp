@@ -2,6 +2,7 @@
 // cannot pass it environment variables (WP-K): the rendezvous file, its
 // refusals, and the environment's precedence over it.
 
+#include "gpu_fault_continuity.hpp"
 #include "gpu_fault_rendezvous.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -78,7 +79,7 @@ TEST_CASE("a valid rendezvous configures the run", "[gpu-fault-continuity][rende
     CHECK_FALSE(config.provider_staged);
 }
 
-TEST_CASE("the staged provider is selected by rendezvous or environment",
+TEST_CASE("the staged provider and internal stimulus are selected by rendezvous or environment",
           "[gpu-fault-continuity][rendezvous]") {
     Root root;
     root.write_valid();
@@ -88,10 +89,14 @@ TEST_CASE("the staged provider is selected by rendezvous or environment",
             std::ifstream in(root.path / "active.json");
             std::getline(in, body);
         }
-        body.insert(body.size() - 1, ",\"provider\":\"staged\"");
+        body.insert(body.size() - 1, ",\"provider\":\"staged\",\"stimulus\":\"internal\"");
         std::ofstream(root.path / "active.json") << body << "\n";
     }
     CHECK(resolve_run_config(sources_for(root)).provider_staged);
+    CHECK(resolve_run_config(sources_for(root)).internal_stimulus);
+    CHECK(resolve_run_config(sources_for(root, {{"PULP_GPU_FAULT_RUN_DIR", "/env/run"},
+                                                {"PULP_GPU_FAULT_INPUT", "internal"}}))
+              .internal_stimulus);
     CHECK(resolve_run_config(sources_for(root, {{"PULP_GPU_FAULT_RUN_DIR", "/env/run"},
                                                 {"PULP_GPU_FAULT_PROVIDER", "staged"}}))
               .provider_staged);
@@ -266,4 +271,27 @@ TEST_CASE("the host process reports a start time before its claim",
           std::string::npos);
     CHECK(line.find("\"claimed_unix_us\":" + std::to_string(process.claimed_unix_us)) !=
           std::string::npos);
+}
+
+TEST_CASE("the claiming instance does not follow a planted capture symlink",
+          "[gpu-fault-continuity][rendezvous]") {
+    Root root;
+    const auto outside = root.path / "outside.bin";
+    std::ofstream(outside) << "keep";
+    fs::create_symlink(outside, root.run / "capture.bin");
+    ::setenv("PULP_GPU_FAULT_RUN_DIR", root.run.c_str(), 1);
+    {
+        pulp::examples::gpu_fault::GpuFaultContinuityProcessor p;
+        pulp::format::PrepareContext ctx;
+        ctx.sample_rate = 48000;
+        ctx.max_buffer_size = 512;
+        p.prepare(ctx);
+    }
+    ::unsetenv("PULP_GPU_FAULT_RUN_DIR");
+    std::ifstream in(outside);
+    std::string text;
+    std::getline(in, text);
+    // The link target is untouched, and no event log was started.
+    CHECK(text == "keep");
+    CHECK_FALSE(fs::exists(root.run / "events.jsonl"));
 }

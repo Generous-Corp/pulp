@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import math
 import re
 import statistics
 import sys
@@ -94,56 +93,10 @@ DAW_EXECUTABLES = {
 }
 
 
-_MASK64 = (1 << 64) - 1
 REALTIME_PROVENANCE = "realtime_render.json"
 # A realtime render cannot finish faster than the audio it renders; allow a
 # little clock slack, never an offline-speed render.
 REALTIME_MIN_WALL_FRACTION = 0.9
-
-
-# ── Internal stimulus (mirror of the plug-in's generator, WP-h1) ──────────
-
-def _splitmix64(x: int) -> int:
-    x = (x + 0x9E3779B97F4A7C15) & _MASK64
-    x = ((x ^ (x >> 30)) * 0xBF58476D1CE4E5B9) & _MASK64
-    x = ((x ^ (x >> 27)) * 0x94D049BB133111EB) & _MASK64
-    return x ^ (x >> 31)
-
-
-def internal_stimulus(n: int, rate: int = gfc.SAMPLE_RATE) -> float:
-    """Sample n of the plug-in's internal stimulus, keyed to the project
-    position and rounded to float32 as the plug-in stores it:
-    0.15*sin(2*pi*((220*n) mod rate)/rate) + a(n)*(2*u(n) - 1), where
-    a(n) = 0.125 if (n // 2400) is even else 0.025 and u(n) is the top 53
-    bits of splitmix64(n) as a uniform in [0, 1)."""
-    n &= _MASK64
-    u = (_splitmix64(n) >> 11) * (1.0 / 9007199254740992.0)
-    noise = 0.125 if (n // 2400) % 2 == 0 else 0.025
-    phase = ((220 * n) & _MASK64) % rate / rate
-    value = 0.15 * math.sin(2.0 * math.pi * phase) + noise * (2.0 * u - 1.0)
-    return gfc.struct.unpack("<f", gfc.struct.pack("<f", value))[0]
-
-
-def internal_stimulus_span(start: int, frames: int, rate: int = gfc.SAMPLE_RATE) -> list[float]:
-    return [internal_stimulus(start + i, rate) for i in range(frames)]
-
-
-def live_input_violations(capture: Any) -> int:
-    """Played samples whose captured input is neither the internal stimulus
-    nor exact digital silence. A live-template row runs with the track input
-    on "No Input" (host input is exact zeros by construction) AND the
-    plug-in's internal stimulus; anything else means host input (possibly a
-    microphone) reached the capture. Whether the signal is non-trivial is the
-    null's reference-RMS floor, not this check."""
-    if capture is None:
-        return -1
-    bad = 0
-    for c in range(capture.channels):
-        for i, pos in enumerate(capture.positions):
-            value = capture.inputs[c][i]
-            if pos >= 0 and value != 0.0 and value != internal_stimulus(pos, capture.sample_rate):
-                bad += 1
-    return bad
 
 
 # ── Calling pattern ───────────────────────────────────────────────────────
@@ -302,7 +255,7 @@ REALTIME_NOT_COMPUTED = "host realtime render null not computed"
 def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: int,
                 tolerance: float, window_pre: int, window_post: int, host_alive: bool,
                 bounce_path: Path | None, realtime_path: Path | None, render_frames: int,
-                nonce: str, host: dict, hosting_mode: str, live_template: bool = False,
+                nonce: str, host: dict, hosting_mode: str, host_quiet: bool | None = None,
                 listed: Sequence[str] | None = None) -> dict[str, Any]:
     """The v2 evidence for one run. WP-h1's `evaluate_run` does the whole
     single-run analysis (the three nulls, per-block delivery, device binding,
@@ -339,7 +292,7 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
                             window_post=window_post, host_alive=host_alive,
                             bounce_path=bounce_path, render_frames=render_frames,
                             nonce=nonce, reaper_pid=None, listed=listed,
-                            realtime_path=realtime_path)
+                            realtime_path=realtime_path, host_quiet=host_quiet)
     events = (gfc.load_events(run_dir / "events.jsonl")
               if _usable(run_dir, "events.jsonl", listed) else [])
     claim_text = ((run_dir / "claim").read_text(encoding="utf-8")
@@ -385,16 +338,6 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
             capture = gfc.read_capture(run_dir / "capture.bin")
         except ValueError:
             capture = None
-    live_violations = None
-    if live_template or controls.get("input") == "internal":
-        # The plug-in generated its input; WP-h1's stimulus check covers
-        # input=host. Any played sample that is neither the internal stimulus
-        # nor exact silence ("No Input") is host input in capture.bin.
-        live_violations = live_input_violations(capture)
-        if live_violations != 0:
-            mismatches.append(f"captured input that is not the internal stimulus "
-                              f"({live_violations} samples): host input reached capture.bin")
-
     # The stricter of WP-h1's verdict and this one.
     base_verdict, base_reasons = base["verdict"], list(base["verdict_reasons"])
     capture_only = (host.get("id") not in REALTIME_RENDER_HOSTS and
@@ -462,7 +405,6 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         "verdict_reasons": reasons,
         "planted_negative": planted,
         "negative_proved": negative_proved,
-        "live_input_violations": live_violations,
     }
 
 

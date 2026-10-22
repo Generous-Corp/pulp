@@ -50,6 +50,10 @@ struct RunConfig {
     // the staged rows): env PULP_GPU_FAULT_PROVIDER=staged or rendezvous
     // "provider":"staged".
     bool provider_staged = false;
+    // The plug-in processes its own deterministic stimulus and never reads
+    // host input (live-template rows): env PULP_GPU_FAULT_INPUT=internal or
+    // rendezvous "stimulus":"internal". Read once, before the first callback.
+    bool internal_stimulus = false;
     std::string source = "none"; // "env", "rendezvous" or "none"
     std::string detail;          // why the rendezvous was refused, when it was
 };

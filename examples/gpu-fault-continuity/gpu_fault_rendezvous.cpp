@@ -166,6 +166,7 @@ RunConfig from_rendezvous(const fs::path& root, std::int64_t now_unix) {
     config.ir = ir;
     config.nonce = nonce;
     config.provider_staged = json_string(body, "provider") == "staged";
+    config.internal_stimulus = json_string(body, "stimulus") == "internal";
     config.source = "rendezvous";
     return config;
 }
@@ -198,6 +199,7 @@ RunConfig resolve_run_config(const RunConfigSources& sources) {
         config.ir = env("PULP_GPU_FAULT_IR");
         config.nonce = env("PULP_GPU_FAULT_NONCE").string();
         config.provider_staged = env("PULP_GPU_FAULT_PROVIDER") == "staged";
+        config.internal_stimulus = env("PULP_GPU_FAULT_INPUT") == "internal";
         config.source = "env";
         return config;
     }

@@ -307,7 +307,8 @@ void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
     if (harness_ || run_dir_.empty())
         return;
     const auto claim = run_dir_ / "claim";
-    const int fd = ::open(claim.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
+    // O_EXCL refuses an existing path, a symlink included.
+    const int fd = ::open(claim.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0644);
     if (fd < 0)
         return;
     // The claim records which process won and when; a receipt binds both to
@@ -315,15 +316,24 @@ void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
     HostProcess process = current_host_process();
     process.claimed_unix_us = unix_now_us();
     const std::string record = claim_record(process);
-    (void)::write(fd, record.data(), record.size());
+    write_all(fd, record.data(), record.size());
     ::close(fd);
+    // Start the capture and the event log without following a planted link.
+    const int capture = open_nofollow(run_dir_ / "capture.bin", O_WRONLY | O_CREAT | O_TRUNC);
+    if (capture < 0)
+        return;
+    const int events = open_nofollow(run_dir_ / "events.jsonl", O_WRONLY | O_CREAT | O_TRUNC);
+    if (events < 0) {
+        ::close(capture);
+        return;
+    }
+    const std::uint32_t header[4] = {kCaptureVersion, sample_rate, kChannels, 0u};
+    write_all(capture, kCaptureMagic, 4);
+    write_all(capture, header, sizeof(header));
+    ::close(capture);
+    ::close(events);
     harness_ = true;
     ring_.reset(kRingBytes);
-    std::ofstream capture(run_dir_ / "capture.bin", std::ios::binary | std::ios::trunc);
-    const std::uint32_t header[4] = {kCaptureVersion, sample_rate, kChannels, 0u};
-    capture.write(kCaptureMagic, 4);
-    capture.write(reinterpret_cast<const char*>(header), sizeof(header));
-    std::ofstream(run_dir_ / "events.jsonl", std::ios::trunc);
     RunConfig config;
     config.source = config_source_;
     config.nonce = nonce_;

@@ -84,8 +84,7 @@ REQUIRED_ARTIFACTS = ("stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "
 LIVE_ARTIFACTS = ("host_evidence.json",)
 RECOMPUTED = ("fault", "pdc_samples", "plugin_identity", "binding", "plugin_process", "capture",
               "calling_pattern", "delivery", "controls", "offline_path", "nulls", "health",
-              "host_alive", "verdict", "verdict_reasons", "planted_negative", "negative_proved",
-              "live_input_violations")
+              "host_alive", "verdict", "verdict_reasons", "planted_negative", "negative_proved")
 FULL_OUTCOMES = ("pass", "control_passed", "negative_proved")
 
 ReceiptError = v1.ReceiptError
@@ -196,13 +195,12 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     _require(analysis.get("render_frames") == render_frames,
              "analysis.render_frames does not match the bound stimulus")
 
-    # M6: no host input may reach the capture. The input mode comes from the
-    # plug-in's own digest-bound fault_armed event, never from the receipt.
-    # input=host (the track item feeds the plug-in): the captured input must BE
-    # the bound stimulus wherever the plug-in played (WP-h1's check).
-    # input=internal (live templates: track input "No Input", the plug-in
-    # generates its stimulus): every played sample must be that stimulus or
-    # exact silence. Anything else may be a microphone: the receipt is invalid.
+    # M6: no host input may reach the capture. WP-h1's check covers the whole
+    # run and every channel: the bound stimulus (input=host) or the plug-in's
+    # internal stimulus (input=internal) wherever the transport played, exact
+    # silence everywhere else. The input mode comes from the plug-in's own
+    # digest-bound fault_armed, never from the receipt; a live-template row
+    # (track input "No Input", monitoring off) must run on the internal one.
     armed = gfc.first_event(gfc.load_events(run_dir / "events.jsonl"), "fault_armed") or {}
     input_mode = armed.get("input", "host")
     if (receipt.get("host_settings") or {}).get("template") == "live":
@@ -212,14 +210,11 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
         capture = gfc.read_capture(run_dir / "capture.bin")
     except ValueError as exc:
         raise ReceiptError(f"capture.bin unreadable: {exc}") from exc
-    if input_mode == "host":
-        foreign = gfc.captured_input_matches_stimulus(capture, stimulus[0])
-        _require(foreign is None, f"captured input is not the bound stimulus (first difference "
-                                  f"at project sample {foreign}); it may hold host input")
-    else:
-        violations = hosts.live_input_violations(capture)
-        _require(violations == 0, f"captured input is neither the internal stimulus nor "
-                                  f"silence at {violations} samples; it may hold host input")
+    foreign = gfc.captured_input_matches_stimulus(
+        capture, stimulus[0] if input_mode == "host" else None)
+    _require(foreign is None, f"captured input is not the expected {input_mode} stimulus "
+                              f"(first difference at stream index {foreign}); it may hold "
+                              "host input")
 
     recomputed = hosts.evaluate_v2(
         run_dir, control_kind=kind, fault=fault_kind,
@@ -229,8 +224,7 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
         bounce_path=(run_dir / bounce_name) if bounce_name else None,
         realtime_path=(run_dir / realtime_name) if realtime_name else None,
         render_frames=render_frames, nonce=nonce, host=host, hosting_mode=mode,
-        live_template=(receipt.get("host_settings") or {}).get("template") == "live",
-        listed=list(artifacts))
+        host_quiet=summary["quiet_host"] if live else None, listed=list(artifacts))
     for key in RECOMPUTED:
         _require(_close(receipt.get(key), recomputed.get(key)),
                  f"{key} does not re-derive from the artifacts")

@@ -59,16 +59,14 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
              host_id: str = "logic", fmt: str = "au", realtime: bool = True,
              start: int = START, claim_pid: int | None = None,
              responsible_path: str | None = None, template: str = "playback",
-             internal: bool = False) -> dict:
-    """Synthesize one run directory and its v2 receipt. `internal` makes the
-    plug-in's captured input the internal stimulus (a live-template row)."""
+             internal: bool = False, quiet: bool = True) -> dict:
+    """Synthesize one run directory and its v2 receipt. `internal` marks the
+    run input=internal and makes every played captured input sample the
+    plug-in's internal stimulus (outputs are left as synthesized)."""
     synth_fault = fault
     if planted is None and kind == "planted_negative":
         planted = "no_fallback"
-    saved = gfc.make_stimulus
-    if internal:
-        gfc.make_stimulus = lambda frames, *a, **k: hosts.internal_stimulus_span(0, frames)
-    try:
+    if True:
         # WP-h1's planted shapes (dropout, misaligned, stale, gpu_off) when the
         # run is a planted negative; `break_fallback` alone is a dropout.
         gfc.synthesize_run(run, fault=synth_fault, fault_sample=FAULT, frames=FRAMES,
@@ -76,8 +74,6 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
                            tail=POST, window_post=POST,
                            planted=planted if (break_fallback or planted == "gpu_off")
                            else None)
-    finally:
-        gfc.make_stimulus = saved
     def edit(events):
         out = [{"event": "host_process", "pid": plugin_pid, "ppid": 1,
                 "responsible_pid": responsible,
@@ -99,9 +95,12 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
         return out
 
     _rewrite_events(run, edit)
+    if internal:
+        rewrite_capture(run, inputs=lambda pos, v: gfc.internal_stimulus(pos))
     (run / "claim").write_text(f"{claim_pid or plugin_pid}\n{CLAIMED}\n", encoding="utf-8")
     (run / "preflight.json").write_text(json.dumps(
-        {"status": "ok", "quiet_host": False, "reasons": ["load"]}) + "\n", encoding="utf-8")
+        {"status": "ok", "quiet_host": quiet, "reasons": [] if quiet else ["load"]}) + "\n",
+        encoding="utf-8")
     write_host_evidence(run, host_id)
     if realtime:
         # The synthesized realtime render (which carries a planted negative's
@@ -168,7 +167,8 @@ def receipt_for(run: Path, *, kind: str, fault: str, mode: str, host_id: str = "
         window_pre=PRE, window_post=POST, host_alive=True, bounce_path=run / "bounce.wav",
         realtime_path=(run / "realtime.wav") if realtime else None,
         render_frames=FRAMES + POST, nonce=NONCE, host=host, hosting_mode=mode,
-        live_template=template == "live", listed=list(artifacts))
+        host_quiet=(preflight_quiet(run) if transport != "dry_run" else None),
+        listed=list(artifacts))
     preflight = gfc.summarize_preflight(
         json.loads((run / "preflight.json").read_text(encoding="utf-8")))
     receipt = hosts.build_receipt_v2(
@@ -212,6 +212,11 @@ def rewrite_capture(run: Path, *, inputs=None, outputs=None) -> None:
                        "counters": (rec["gpu"], rec["fallback"], rec["silence"],
                                     rec["priming"])})
     gfc.write_capture(run / "capture.bin", cap.sample_rate, blocks)
+
+
+def preflight_quiet(run: Path) -> bool:
+    return gfc.summarize_preflight(
+        json.loads((run / "preflight.json").read_text(encoding="utf-8")))["quiet_host"]
 
 
 def resign(receipt: dict) -> dict:
@@ -655,11 +660,20 @@ class V2Receipt(unittest.TestCase):
 
     # ── M6: live-template rows never capture host input ────────────────
 
-    def test_a_live_row_with_the_internal_stimulus_passes(self):
+    def test_the_input_check_accepts_the_internal_stimulus(self):
+        # A live-template capture whose input is exactly the internal stimulus
+        # passes the M6 gate (the receipt is not invalid). Its outputs are the
+        # synthesized ones, so the nulls themselves are not the point here.
         run = self.run_dir("live-internal")
         receipt = make_run(run, template="live", internal=True)
-        self.assertEqual(receipt["live_input_violations"], 0)
-        self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
+        self.assertEqual(receipt["controls"]["input"], "internal")
+        self.assertIn(self.verify(receipt, run)[0], ("pass", "fail", "inconclusive"))
+
+    def test_a_host_that_is_not_quiet_is_inconclusive(self):
+        run = self.run_dir("noisy")
+        receipt = make_run(run, quiet=False)
+        self.assertEqual(self.verify(receipt, run)[0], "inconclusive")
+        self.assertTrue(any(r.startswith("host_not_quiet") for r in receipt["verdict_reasons"]))
 
     def test_a_live_row_must_run_on_the_internal_stimulus(self):
         run = self.run_dir("live-host-input")
