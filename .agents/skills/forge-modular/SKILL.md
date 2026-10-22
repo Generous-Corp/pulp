@@ -58,6 +58,18 @@ never holds on the notice, so CI, agents and the CLI keep following
 `auto_download` as before. `patch.py install <slug>` is an explicit request
 and is never held. `test_download_consent.py` holds the matrix.
 
+## The Claude pass runs with no tools and no MCP servers
+
+`patch.ask_model` is the only `claude -p` builder; `generate.ask_model` calls
+it. It passes `--strict-mcp-config` (no `--mcp-config`, so no MCP server loads)
+and `--disallowedTools Write Edit NotebookEdit Bash WebFetch WebSearch`. The
+answer is the JSON on stdout, and the prompt carries network-fetched library
+text and a base patch, so any tool left on is a prompt-injection channel that
+depends only on the user's own permission settings. Keep both when the argv
+changes. The exact argv is pinned in `test_generate_model.py` and
+`test_patch.py`, and the effort test requires `--effort` to stay last, so new
+flags go before `--model`.
+
 ## One generation per output directory, held by an OS lock
 
 `patch.py build` and `generate.py` take `generation_lock.acquire_or_exit()` on
