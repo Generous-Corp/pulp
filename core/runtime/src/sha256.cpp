@@ -6,13 +6,70 @@
 #include <cstring>
 #include <fstream>
 
+#if defined(__ARM_FEATURE_SHA2)
+#include <arm_neon.h>
+#endif
+
 namespace pulp::runtime {
 namespace {
+
+constexpr std::array<std::uint32_t, 64> kRoundConstants{
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+    0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+
+#if defined(__ARM_FEATURE_SHA2)
+// The ARMv8 SHA-2 instructions: each SHA256H/SHA256H2 pair runs four rounds
+// on the {a,b,c,d}/{e,f,g,h} halves of the state, and SHA256SU0/SU1 extend
+// the message schedule four words at a time.
+void compress_blocks_armv8(std::array<std::uint32_t, 8>& state, const std::uint8_t* data,
+                           std::size_t blocks) noexcept {
+    uint32x4_t abcd = vld1q_u32(state.data());
+    uint32x4_t efgh = vld1q_u32(state.data() + 4);
+    for (; blocks > 0; --blocks, data += 64) {
+        const uint32x4_t abcd_in = abcd;
+        const uint32x4_t efgh_in = efgh;
+        uint32x4_t msg[4];
+        for (int i = 0; i < 4; ++i)
+            msg[i] = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data + 16 * i)));
+        for (int group = 0; group < 16; ++group) {
+            auto& w = msg[group % 4];
+            const uint32x4_t schedule =
+                vaddq_u32(w, vld1q_u32(kRoundConstants.data() + 4 * group));
+            const uint32x4_t abcd_prev = abcd;
+            abcd = vsha256hq_u32(abcd, efgh, schedule);
+            efgh = vsha256h2q_u32(efgh, abcd_prev, schedule);
+            if (group < 12)
+                w = vsha256su1q_u32(vsha256su0q_u32(w, msg[(group + 1) % 4]),
+                                    msg[(group + 2) % 4], msg[(group + 3) % 4]);
+        }
+        abcd = vaddq_u32(abcd, abcd_in);
+        efgh = vaddq_u32(efgh, efgh_in);
+    }
+    vst1q_u32(state.data(), abcd);
+    vst1q_u32(state.data() + 4, efgh);
+}
+#endif
 
 class Sha256 {
 public:
     void update(const std::uint8_t* data, std::size_t size) noexcept {
         total_bits_ += static_cast<std::uint64_t>(size) * 8;
+        if (buffered_ == 0 && size >= buffer_.size()) {
+            // Whole blocks straight from the input, without staging them.
+            const auto blocks = size / buffer_.size();
+            compress_blocks(data, blocks);
+            data += blocks * buffer_.size();
+            size -= blocks * buffer_.size();
+        }
         while (size > 0) {
             const auto count = std::min(buffer_.size() - buffered_, size);
             std::memcpy(buffer_.data() + buffered_, data, count);
@@ -20,7 +77,7 @@ public:
             data += count;
             size -= count;
             if (buffered_ == buffer_.size()) {
-                compress(buffer_.data());
+                compress_blocks(buffer_.data(), 1);
                 buffered_ = 0;
             }
         }
@@ -32,7 +89,7 @@ public:
         if (buffered_ > 56) {
             std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffered_),
                       buffer_.end(), 0);
-            compress(buffer_.data());
+            compress_blocks(buffer_.data(), 1);
             buffered_ = 0;
         }
         std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffered_),
@@ -41,7 +98,7 @@ public:
             buffer_[56 + byte] =
                 static_cast<std::uint8_t>(message_bits >> ((7 - byte) * 8));
         }
-        compress(buffer_.data());
+        compress_blocks(buffer_.data(), 1);
 
         std::array<std::uint8_t, 32> digest{};
         for (std::size_t word = 0; word < state_.size(); ++word) {
@@ -58,19 +115,16 @@ private:
         return (value >> bits) | (value << (32 - bits));
     }
 
-    void compress(const std::uint8_t* block) noexcept {
-        static constexpr std::array<std::uint32_t, 64> constants{
-            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
-            0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-            0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
-            0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
-            0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-            0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-            0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
-            0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-            0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    void compress_blocks(const std::uint8_t* data, std::size_t blocks) noexcept {
+#if defined(__ARM_FEATURE_SHA2)
+        compress_blocks_armv8(state_, data, blocks);
+#else
+        for (; blocks > 0; --blocks, data += buffer_.size()) compress(data);
+#endif
+    }
+
+    [[maybe_unused]] void compress(const std::uint8_t* block) noexcept {
+        const auto& constants = kRoundConstants;
         std::array<std::uint32_t, 64> words{};
         for (std::size_t index = 0; index < 16; ++index) {
             const auto offset = index * 4;
