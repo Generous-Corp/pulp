@@ -852,7 +852,7 @@ TEST_CASE("WorkerPool started on one thread, run() driven from another, is race-
     // the ctest timeout reports.
     GraphRuntimeWorkerPool pool;
     REQUIRE(pool.start(8));
-    constexpr std::uint32_t kMinBlocks = 50;
+    constexpr std::uint32_t kMinBlocks = 1000;
     // 500 spreads over every participant; 5 and 3 leave several ranges empty.
     LevelledBatches batches({500, 5, 3});
     std::atomic<bool> revalidated{false};
