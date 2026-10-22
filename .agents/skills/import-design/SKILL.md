@@ -7210,6 +7210,15 @@ any new direct Chrome launcher must too. Chrome honours only one
 flag, and do not append one to Playwright's `launch()` args, which carry their
 own list.
 
+**Headless `--screenshot` can exit non-zero after a good capture.** Chrome 156
+on macOS writes the complete PNG, prints `Teardown watchdog expired; recording
+dump and terminating.` and exits 2. A launcher that runs it with `check=True`
+(or treats any non-zero status as failure) rejects every good capture, so the
+oracle looked broken while its pixels were fine. Judge a direct
+`--screenshot` launch by its output instead: the PNG exists, decodes and has
+the requested size, as `chrome_gradient_oracle.load_screenshot` does. Report
+the exit status only when the output is missing or wrong.
+
 ## Scoring a native panel — the instrument lies in two specific ways
 
 ### Chromium state matrix -> computed DesignIR -> native proof

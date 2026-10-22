@@ -59,6 +59,7 @@
 
 #include "runtime_effect_cache.hpp"
 #include "skia_canvas_filter.hpp"  // parse_filter_chain — CSS `filter` parser
+#include "skia_gradient_compat.hpp"
 #if PULP_CANVAS_GRAPHITE
 #include "include/gpu/graphite/Image.h"
 #endif
@@ -507,7 +508,7 @@ SkPaint SkiaCanvas::current_fill_paint() const {
     paint.setAntiAlias(true);
     paint.setBlendMode(blend_mode_);
     if (has_gradient_ && gradient_shader_) {
-        paint.setShader(gradient_shader_);
+        skia_gradient::set_paint_shader(paint, gradient_shader_);
     } else {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
@@ -667,7 +668,7 @@ void SkiaCanvas::apply_stroke_state(SkPaint& paint) const {
     // Canvas2D ctx.createPattern on strokeStyle wins over the solid stroke
     // color when present.
     if (stroke_shader_) {
-        paint.setShader(stroke_shader_);
+        skia_gradient::set_paint_shader(paint, stroke_shader_);
     }
 }
 
@@ -1270,7 +1271,7 @@ void SkiaCanvas::fill_current_path(FillRule rule) {
     SkPaint paint;
     paint.setAntiAlias(true);
     if (has_gradient_ && gradient_shader_) {
-        paint.setShader(gradient_shader_);
+        skia_gradient::set_paint_shader(paint, gradient_shader_);
     } else {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }

@@ -1991,6 +1991,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-native-metal-audio-comparator": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_metal_native_audio_comparator.mm"
+   ],
+   "inputs": [
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_metal_native_audio_comparator.mm"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-node-pack": {
    "data": "none",
    "inputs": [],
@@ -2529,6 +2543,7 @@
   "pulp-test-create-template-instrument",
   "pulp-test-cross-platform-audio-golden",
   "pulp-test-crossfade",
+  "pulp-test-css-gradient-dither-gpu",
   "pulp-test-css-gradient-render",
   "pulp-test-css-translator-gaps-1434",
   "pulp-test-data-display-link-floor",
@@ -5071,6 +5086,15 @@
    ],
    "kind": "shell"
   },
+  "gpu-audio-comparator-v2-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_comparator_v2.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_comparator_v2.py",
+    "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/scripts/test_gpu_audio_comparator_v2.py"
+   ],
+   "kind": "python"
+  },
   "gpu-audio-p2-campaign-contract-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
    "inputs": [
@@ -6516,6 +6540,13 @@
    ],
    "kind": "python"
   },
+  "import-validation-chrome-gradient-oracle-selftest": {
+   "entry": "tools/import-validation/test_chrome_gradient_oracle.py",
+   "inputs": [
+    "tools/import-validation/test_chrome_gradient_oracle.py"
+   ],
+   "kind": "python"
+  },
   "import-validation-diff-against-reference-regions-selftest": {
    "entry": "tools/import-validation/test_diff_against_reference_regions.py",
    "inputs": [
@@ -7651,6 +7682,14 @@
    "inputs": [
     "test/CMakeLists.txt",
     "tools/scripts/test_pulp_test_data_cmake.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-test-native-metal-audio-comparator": {
+   "entry": "tools/scripts/gpu_audio_comparator_v2.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_comparator_v2.py",
+    "tools/scripts/gpu_audio_p2_host_preflight.py"
    ],
    "kind": "python"
   },

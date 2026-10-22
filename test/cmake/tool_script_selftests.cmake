@@ -90,6 +90,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME import-validation-diff-against-reference-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_diff_against_reference.py")
     set_tests_properties(import-validation-diff-against-reference-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME import-validation-chrome-gradient-oracle-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_chrome_gradient_oracle.py")
+    set_tests_properties(import-validation-chrome-gradient-oracle-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120 SKIP_RETURN_CODE 77)
     add_test(NAME import-validation-diff-against-reference-regions-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_diff_against_reference_regions.py")
     set_tests_properties(import-validation-diff-against-reference-regions-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

@@ -17,6 +17,7 @@
 #include <mutex>
 #include <numeric>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(__APPLE__)
@@ -118,12 +119,6 @@ void square_task(void* ctx, std::uint32_t i) noexcept {
 // bound is a failsafe against a worker that never parks, so it is sized for
 // that contention rather than for an idle machine.
 constexpr auto kParkTimeout = std::chrono::seconds(30);
-// A loaded gate VM (12 cores, two VMs per host) can take seconds to schedule
-// the first batch, and a tight bound turns that scheduling delay into a failed
-// race assertion on unrelated pull requests. The bound is a failsafe against a
-// pool that never progresses, which no timeout length rescues, so it is sized
-// for the slowest machine rather than the fastest.
-constexpr auto kFirstBatchTimeout = std::chrono::seconds(30);
 // A pool that can park does so within a few milliseconds, so this bounds a wait
 // that must NOT be satisfied by one that easily could have been.
 constexpr auto kNoParkTimeout = std::chrono::milliseconds(250);
@@ -143,6 +138,12 @@ public:
             published_ = true;
         }
         condition_.notify_all();
+    }
+    // Untimed: for a wait whose event every success path produces, where a
+    // deadline would only measure how soon the scheduler ran the producer.
+    void wait() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this] { return published_; });
     }
     bool wait(std::chrono::milliseconds timeout) {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -210,6 +211,50 @@ void release_test_workgroup(void* workgroup) {
     (void)workgroup;
 #endif
 }
+
+// Back-to-back batches modelled on the levels of one parallel block. Each level
+// has its own width and context, so a participant still reading one batch when
+// the next is published runs a range of the wrong width against the wrong
+// context. That makes the fork-join barrier visible to run counts rather than
+// only to TSan: every run() must have run its own level's tasks exactly once by
+// the time it returns, and no level may gain a run afterwards. Only the thread
+// that drives run() calls run_block(); check() runs after that thread is joined.
+class LevelledBatches {
+  public:
+    explicit LevelledBatches(std::vector<std::uint32_t> widths)
+        : widths_(std::move(widths)), levels_(widths_.size()) {
+        for (std::size_t level = 0; level < widths_.size(); ++level)
+            levels_[level].out.assign(widths_[level], 0xFFFFFFFFu);
+    }
+    void run_block(GraphRuntimeWorkerPool& pool) {
+        for (std::size_t level = 0; level < widths_.size(); ++level) {
+            auto& ctx = levels_[level];
+            const auto before = ctx.runs.load(std::memory_order_relaxed);
+            pool.run(widths_[level], square_task, &ctx);
+            if (ctx.runs.load(std::memory_order_relaxed) - before != widths_[level])
+                ++miscounted_batches_;
+        }
+        ++blocks_;
+    }
+    std::uint32_t blocks() const noexcept {
+        return blocks_;
+    }
+    void check() const {
+        CHECK(blocks_ > 0);
+        CHECK(miscounted_batches_ == 0);
+        for (std::size_t level = 0; level < widths_.size(); ++level) {
+            CHECK(levels_[level].runs.load() == blocks_ * widths_[level]);
+            for (std::uint32_t i = 0; i < widths_[level]; ++i)
+                CHECK(levels_[level].out[i] == i * i);
+        }
+    }
+
+  private:
+    std::vector<std::uint32_t> widths_;
+    std::vector<SquareCtx> levels_;
+    std::uint32_t blocks_ = 0;
+    std::uint32_t miscounted_batches_ = 0;
+};
 
 } // namespace
 
@@ -828,36 +873,39 @@ TEST_CASE("WorkerPool started on one thread, run() driven from another, is race-
     // The SignalGraph parallel path starts the pool off the control thread (during
     // prepare) but drives run() from the audio thread. Exercise that exact split:
     // start here, then run() repeatedly from a separate thread while this thread
-    // re-validates the pool. Surfaces a first-batch publish race under TSan.
+    // re-validates the pool. Surfaces a first-batch publish race under TSan, and
+    // the per-level run counts surface a barrier that releases a participant early.
+    //
+    // The driver fires at least a fixed number of blocks and keeps firing until
+    // this thread has finished re-validating, so those concurrent reads always
+    // overlap a live pool. Nothing waits on a deadline: a starved host only makes
+    // the test slower, and a pool that stops progressing never completes, which
+    // the ctest timeout reports.
     GraphRuntimeWorkerPool pool;
     REQUIRE(pool.start(8));
-    constexpr std::uint32_t kTasks = 500;
-    SquareCtx ctx;
-    ctx.out.assign(kTasks, 0);
-    std::atomic<bool> stop{false};
-    std::atomic<std::uint64_t> batches{0};
-    Signal progressed;
+    constexpr std::uint32_t kMinBlocks = 1000;
+    // 500 spreads over every participant; 5 and 3 leave several ranges empty.
+    LevelledBatches batches({500, 5, 3});
+    std::atomic<bool> revalidated{false};
+    Signal first_block;
     std::thread driver([&] {
-        while (!stop.load(std::memory_order_relaxed)) {
-            ctx.runs.store(0, std::memory_order_relaxed);
-            pool.run(kTasks, square_task, &ctx);
-            batches.fetch_add(1, std::memory_order_relaxed);
-            progressed.publish();
+        while (batches.blocks() < kMinBlocks || !revalidated.load(std::memory_order_acquire)) {
+            batches.run_block(pool);
+            if (batches.blocks() == 1)
+                first_block.publish();
         }
     });
     // Block on the driver's own progress instead of contending for its cores,
     // then re-validate from this thread while it keeps firing batches: those
-    // concurrent reads against a live pool are the surface TSan watches, and
-    // waiting first guarantees the driver is running underneath them.
-    CHECK(progressed.wait(kFirstBatchTimeout));
+    // concurrent reads against a live pool are the surface TSan watches.
+    first_block.wait();
     for (int probe = 0; probe < 10000; ++probe) {
         (void)pool.running();
         (void)pool.worker_count();
     }
-    stop.store(true, std::memory_order_relaxed);
+    revalidated.store(true, std::memory_order_release);
     driver.join();
-    CHECK(batches.load() > 0);
-    for (std::uint32_t i = 0; i < kTasks; ++i) CHECK(ctx.out[i] == i * i);
+    batches.check();
 }
 
 TEST_CASE("WorkerPool rapid back-to-back batches from a separate thread are race-free",
@@ -865,30 +913,22 @@ TEST_CASE("WorkerPool rapid back-to-back batches from a separate thread are race
     // process_parallel fires several run() calls in quick succession (one per
     // level) within a single audio block; mimic that exactly: start on this
     // thread, then a driver fires 3 tiny back-to-back batches per "block", many
-    // times. width(8) < workers(16) leaves participant 0 + even workers with
-    // empty ranges, matching the wide-level partition.
+    // times. Widths below the 16 participants leave participant 0 and several
+    // workers with empty ranges, matching the wide-level partition.
+    //
+    // The driver fires a fixed number of blocks and the test joins it, so
+    // progress is proved by completion rather than by a deadline: a starved
+    // host only makes the test slower. A pool that stops progressing never
+    // completes, which the ctest timeout reports.
     GraphRuntimeWorkerPool pool;
     REQUIRE(pool.start(16));
-    SquareCtx ctx;
-    ctx.out.assign(8, 0);
-    std::atomic<bool> stop{false};
-    std::atomic<std::uint64_t> blocks{0};
-    Signal progressed;
+    constexpr std::uint32_t kBlocks = 200;
+    LevelledBatches batches({8, 3, 13});
     std::thread driver([&] {
-        while (!stop.load(std::memory_order_relaxed)) {
-            pool.run(8, square_task, &ctx);
-            pool.run(8, square_task, &ctx);
-            pool.run(8, square_task, &ctx);
-            blocks.fetch_add(1, std::memory_order_relaxed);
-            progressed.publish();
-        }
+        for (std::uint32_t block = 0; block < kBlocks; ++block)
+            batches.run_block(pool);
     });
-    // The first block includes the first batch: every one of the 15 workers
-    // must be scheduled to acknowledge the workgroup and then to join each of
-    // three barriers. On a loaded host that alone can take more than ten
-    // seconds, so this waits on the first-batch hang guard.
-    CHECK(progressed.wait(kFirstBatchTimeout));
-    CHECK(blocks.load() > 0);
-    stop.store(true, std::memory_order_relaxed);
     driver.join();
+    CHECK(batches.blocks() == kBlocks);
+    batches.check();
 }

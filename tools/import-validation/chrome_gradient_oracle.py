@@ -84,15 +84,41 @@ def render(css, w=W, h=H):
             f"#g{{position:absolute;left:0;top:0;width:{w}px;height:{h}px;"
             f"background:{css}}}\n"
             "</style><div id=g></div>")
-    subprocess.run(
+    result = subprocess.run(
         # MacAppCodeSignClone: Chrome otherwise copies its app bundle into the
         # per-user temp dir and leaves it behind whenever it does not exit cleanly.
         [CHROME, "--headless", "--disable-gpu", "--no-sandbox",
          "--disable-features=MacAppCodeSignClone",
          f"--screenshot={shot}", f"--window-size={w},{h}", "--hide-scrollbars",
          "--force-device-scale-factor=1", "file://" + page],
-        capture_output=True, check=True)
-    return Image.open(shot).convert("RGB")
+        capture_output=True)
+    return load_screenshot(shot, w, h, result)
+
+
+def load_screenshot(shot, w, h, result):
+    """The screenshot Chrome wrote, or a loud failure.
+
+    The exit status is not the verdict: headless Chrome can write a complete
+    screenshot and then exit non-zero when its teardown watchdog expires. A
+    missing, unreadable or wrongly sized PNG is the failure, whatever the exit
+    status says."""
+    def fail(why):
+        tail = (result.stderr or b"").decode("utf-8", "replace").strip()
+        tail = "\n".join(tail.splitlines()[-5:])
+        sys.exit(f"Chrome (exit {result.returncode}) {why}"
+                 + (f"\n{tail}" if tail else ""))
+
+    if not os.path.isfile(shot):
+        fail(f"wrote no screenshot at {shot}")
+    try:
+        with Image.open(shot) as im:
+            im.load()
+            rgb = im.convert("RGB")
+    except Exception as exc:  # PIL raises several unrelated types here.
+        fail(f"wrote an unreadable screenshot at {shot}: {exc}")
+    if rgb.size != (w, h):
+        fail(f"wrote a {rgb.width}x{rgb.height} screenshot, expected {w}x{h}")
+    return rgb
 
 
 def inside(px):

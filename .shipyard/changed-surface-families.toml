@@ -3016,6 +3016,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-44f4d05a7ec6"
+paths = ["tools/scripts/test_gpu_audio_comparator_v2.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-comparator-v2-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-94f3310ad959"
 paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
 tests = [
@@ -7143,6 +7177,7 @@ paths = [
   "tools/scripts/test_git_safe_push.py",
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
+  "tools/scripts/test_gpu_audio_comparator_v2.py",
   "tools/scripts/test_gpu_audio_p2_campaign.py",
   "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",
@@ -7700,6 +7735,7 @@ paths = [
   "tools/scripts/test_git_safe_push.py",
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
+  "tools/scripts/test_gpu_audio_comparator_v2.py",
   "tools/scripts/test_gpu_audio_p2_campaign.py",
   "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",
@@ -7953,12 +7989,16 @@ tests = [
   "pulp-materialized-runtime-conformance",
   "pulp-rust-gpu-trace-analysis-ctest-selftest",
   "pulp-rust-gpu-trace-analysis-integration",
+  "pulp-test-native-metal-audio-comparator",
   "pulp.vellum-closure-edge-negative",
   "pulp.vellum-closure-external-input-negative",
   "pulp.vellum-closure-gate-negative",
   "pulp_bundle_threejs_for_jsc_smoke",
 ]
-build_targets = ["pulp-cli"]
+build_targets = [
+  "pulp-cli",
+  "pulp-test-native-metal-audio-comparator",
+]
 supported_build_types = [
   "debug",
   "release",

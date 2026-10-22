@@ -132,6 +132,47 @@ _ACTIVE_ARCHIVES: ContextVar[list[Path] | None] = ContextVar(
 )
 
 
+def validate_windows_arm64_toolchain_receipt(dest: Path) -> None:
+    """Require authenticated MSVC provenance for the native ARM64 archive.
+
+    The ARM64 Skia/Dawn libraries are static and intentionally leave MSVC STL
+    ``__std_*`` helpers for the consumer linker.  An archive produced by a
+    newer STL therefore cannot be consumed safely by an older Windows guest.
+    Reject the archive while fetching it when its receipt is missing or still
+    contains the builder's ``unknown`` placeholders; otherwise the eventual
+    Spectr link failure is both late and misleading.
+    """
+    receipt_path = dest / "build" / "win-gpu" / "msvc-toolchain.json"
+    if not receipt_path.is_file():
+        raise ValueError(
+            "Windows ARM64 Skia archive is missing build/win-gpu/msvc-toolchain.json"
+        )
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"invalid Windows ARM64 Skia toolchain receipt: {error}") from error
+    target = receipt.get("target") or {}
+    producer = receipt.get("producer") or {}
+    if target.get("platform") != "windows" or target.get("architecture") != "arm64":
+        raise ValueError(
+            "Windows ARM64 Skia archive toolchain receipt does not identify native ARM64"
+        )
+    required = {
+        "producer.msvc_toolset_version": producer.get("msvc_toolset_version"),
+        "producer.windows_sdk_version": producer.get("windows_sdk_version"),
+        "producer.skia_gn_compiler.version": (producer.get("skia_gn_compiler") or {}).get("version"),
+        "producer.dawn_cmake_compiler.version": (producer.get("dawn_cmake_compiler") or {}).get("version"),
+    }
+    invalid = [name for name, value in required.items()
+               if not isinstance(value, str) or not value.strip()
+               or re.search(r"unknown|error|no input files|not found", value, re.IGNORECASE)]
+    if invalid:
+        raise ValueError(
+            "Windows ARM64 Skia archive has unproven MSVC/STL provenance: "
+            + ", ".join(invalid)
+        )
+
+
 @contextmanager
 def cache_lock(dest_root: str, timeout_secs: float):
     """Serialize publication into one cache root with bounded stale recovery."""
@@ -389,6 +430,14 @@ def generation_receipt_valid(dest: Path, matrix_platform: str, asset_sha: str) -
 def cache_generation_valid(dest: Path, matrix_platform: str, expected_sha: str) -> bool:
     stamp = dest / _ASSET_STAMP
     try:
+        if matrix_platform == "windows-arm64":
+            # A predicate: a cold or unproven generation is simply not valid,
+            # so the caller fetches. The fetch itself refuses a bad receipt
+            # with a named error before anything is published.
+            try:
+                validate_windows_arm64_toolchain_receipt(dest)
+            except ValueError:
+                return False
         return (cache_generation_materialized(dest, matrix_platform) and stamp.is_file()
                 and stamp.read_text(encoding="utf-8").strip() == expected_sha
                 and generation_receipt_valid(dest, matrix_platform, expected_sha))
@@ -1026,6 +1075,13 @@ def _main(argv: list[str]) -> int:
         for p in sorted(dest.rglob("*"))[:50]:
             print(f"  {p}", file=sys.stderr)
         return 1
+
+    if matrix_platform == "windows-arm64":
+        try:
+            validate_windows_arm64_toolchain_receipt(dest)
+        except ValueError as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
 
     # Retain the exact SHA-verified archive as the independent trust anchor.
     # Warm validation intentionally pays one bounded deep verification so
