@@ -1,0 +1,17 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-importer-p3c-parity-watch",
+  "slices": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "vellum_obligation": "When the design-import targets adopt Vellum, carry the captured-text baseline rule (run rect bottom minus round(fDescent)), the rigid page-space registration of a panel-local import, and the differential lab's work-counter and teardown evidence into Vellum's design-import proof harness.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261022-importer-p3c-parity-watch.json",
+    "test/test_importer_differential_lab.py",
+    "pulp-test-design-import-benchmark-contracts"
+  ]
+}
