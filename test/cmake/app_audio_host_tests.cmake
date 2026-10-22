@@ -725,7 +725,8 @@ target_sources(pulp-test-host-signal-graph PRIVATE
     $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
     $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-host-signal-graph)
+catch_discover_tests(pulp-test-host-signal-graph
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 
 pulp_add_test_suite(pulp-test-custom-node-enumeration GROUP pulp-test-group-app-host
     LIBRARIES pulp::host)

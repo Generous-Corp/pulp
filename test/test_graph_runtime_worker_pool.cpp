@@ -9,6 +9,7 @@
 
 #include <pulp/format/graph_runtime_worker_pool.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -344,7 +345,13 @@ TEST_CASE("WorkerPool oversubscribes more workers than cores",
           "[format][worker-pool]") {
     // Far more participants than hardware cores stresses the yield-backoff slow
     // path and oversubscription, where a lost wakeup or starvation would surface.
+    // The workers skip the realtime-priority join: 63 realtime threads spinning
+    // at once hold every core of the machine, which stalls every other process
+    // on it (a whole parallel ctest run) for seconds. The realtime case is the
+    // bounded test below.
+    FallbackJoinProbe normal_priority;
     GraphRuntimeWorkerPool pool;
+    pool.set_fallback_join_hook_for_test(fallback_join_probe, &normal_priority);
     REQUIRE(pool.start(64));
     for (std::uint32_t batch = 0; batch < 20; ++batch) {
         SquareCtx ctx;
@@ -352,6 +359,30 @@ TEST_CASE("WorkerPool oversubscribes more workers than cores",
         pool.run(500, square_task, &ctx);
         REQUIRE(ctx.runs.load() == 500);
         for (std::uint32_t i = 0; i < 500; ++i) REQUIRE(ctx.out[i] == i * i);
+    }
+    pool.stop();
+    // Every worker took the hooked join, so none was raised to realtime.
+    CHECK(normal_priority.attempts.load(std::memory_order_relaxed) == 63);
+}
+
+TEST_CASE("WorkerPool oversubscribes cores at realtime priority",
+          "[format][worker-pool][rt-safety]") {
+    // The same oversubscription with the production realtime join: twice the
+    // core count, capped at the 16 participants a SignalGraph pool can start.
+    // That still oversubscribes a small runner while staying short enough not
+    // to stall the machine it shares.
+    const unsigned hw = std::thread::hardware_concurrency();
+    const std::uint32_t participants = std::clamp<std::uint32_t>(hw == 0 ? 4u : 2u * hw, 2u, 16u);
+    GraphRuntimeWorkerPool pool;
+    pool.set_audio_workgroup(nullptr);
+    REQUIRE(pool.start(participants));
+    for (std::uint32_t batch = 0; batch < 10; ++batch) {
+        SquareCtx ctx;
+        ctx.out.assign(256, 0xFFFFFFFFu);
+        pool.run(256, square_task, &ctx);
+        REQUIRE(ctx.runs.load() == 256);
+        for (std::uint32_t i = 0; i < 256; ++i)
+            REQUIRE(ctx.out[i] == i * i);
     }
     pool.stop();
 }
