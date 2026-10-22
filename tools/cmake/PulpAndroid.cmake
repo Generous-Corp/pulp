@@ -34,7 +34,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 FetchContent_Declare(
     oboe
     GIT_REPOSITORY https://github.com/google/oboe.git
-    GIT_TAG 1.9.0
+    GIT_TAG 1.11.0
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(oboe)
