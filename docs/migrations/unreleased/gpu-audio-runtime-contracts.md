@@ -3,7 +3,9 @@ breaking = false
 summary = "GPU audio: appended status/capability/node contracts, staged convolver pipelining and CPU routing, neural shadow policy and model factory; several GPU audio types grow (rebuild)"
 ---
 
-## What changed
+## Batch A: #10670
+
+### What changed
 
 The experimental GPU audio contract headers gained append-only additions. No
 existing field, enumerator value or virtual slot moved. A new status field
@@ -48,19 +50,14 @@ reports its default until the node in question supplies it.
 - `GpuAudioTransport` holds a private health/configuration copy, and its
   constructor and destructor are now defined out of line. `status_snapshot()`
   and `capability_report()` read only that copy and never the node, and the
-  transport status now reports the hosted node's health, including
-  `gpu_kernel_available`, `completion_mode`, `timestamps_available`,
-  `last_delivery_ns` (passed through; no node fills it yet) and the
-  `shadow_*` fields. A device loss observed after the `ProviderFailure`,
-  `ProviderUnresponsive` or `SustainedDeadlineMisses` it caused is reported as
-  `ProviderLost`; an independent earlier cause keeps first place.
+  transport status now reports the hosted node's health.
 - `GpuConvolutionReverbLaneReport` appends `status` (a `GpuAudioStatus`), so
   `sizeof(GpuConvolutionReverbReport)` grows. `GpuConvolver`,
   `GpuMultiConvolver` and `GpuConvolutionReverb` gain `status_snapshot()`,
   `recovery_reason()` and `fenced()`; `GpuConvolver` gains a trailing pointer
   member (see the Batch B rebuild note below).
 
-## What to do
+### What to do
 
 - **Rebuild against the new headers.** `sizeof(GpuAudioStatus)`,
   `sizeof(GpuAudioCapabilityReport)`, `sizeof(GpuAudioNodeDescriptor)`,
@@ -83,7 +80,7 @@ reports its default until the node in question supplies it.
   A subclass member with the same name but a different signature hides the
   base hook and may warn under `-Woverloaded-virtual`.
 
-## GpuWaveNetRealtimeNode reports loss, hangs and lateness
+### GpuWaveNetRealtimeNode reports loss, hangs and lateness
 
 - `GpuWaveNetRealtimeNode::Config` appends `watchdog_blocks` (default 0, which
   selects `capacity - 1`). `GpuWaveNetSession` appends `device_lost()` and
@@ -102,18 +99,11 @@ reports its default until the node in question supplies it.
   once the callback that would consume it has finished, never by wall-clock
   time.
 
-## Neural realtime node and CPU-only hosting
+### Neural realtime node and CPU-only hosting
 
 - New public `GpuNeuralRealtimeNode` (`gpu_neural_realtime_node.hpp`) hosts a
   neural model behind one node type with a built-in CPU shadow. It is
   additive; existing node types are unchanged.
-- New public `gpu_neural_model.hpp` declares `make_gpu_neural_model()`, the
-  host-thread factory for the node's model. It takes a provenance manifest,
-  the family's shape and one caller-owned `GpuNeuralCpuKernel` per channel,
-  and, for WaveNet only, an optional GPU session configuration. It never
-  throws; a refusal is reported as a `GpuNeuralModelError`.
-- The node adds `callback_contract_violations()`. Its `watchdog_blocks` set
-  to zero selects `capacity - 1`.
 - **Status semantics change for CPU-only nodes.** A hosted node whose provider
   is `GpuAudioProvider::Cpu` reports `path = Cpu`, `provider = Cpu`,
   `selected_engine = Cpu` and `Ready`, and the transport no longer counts its
@@ -122,6 +112,28 @@ reports its default until the node in question supplies it.
 - A WaveNet model whose GPU provider could not be prepared runs on the CPU
   path and reports `Degraded` with `recovery_reason = ProviderFailure` rather
   than `Ready`.
+
+
+## Batch B: #10665
+
+### Transport health passthrough and loss precedence
+
+- The transport status now passes through the hosted node's
+  `gpu_kernel_available`, `completion_mode`, `timestamps_available` and
+  `last_delivery_ns` (passed through; no node fills it yet), and the
+  `shadow_*` fields. A device loss observed after the `ProviderFailure`,
+  `ProviderUnresponsive` or `SustainedDeadlineMisses` it caused is reported as
+  `ProviderLost`; an independent earlier cause keeps first place.
+
+### Neural node: loss detection, model factory, CPU-only callbacks
+
+- New public `gpu_neural_model.hpp` declares `make_gpu_neural_model()`, the
+  host-thread factory for the node's model. It takes a provenance manifest,
+  the family's shape and one caller-owned `GpuNeuralCpuKernel` per channel,
+  and, for WaveNet only, an optional GPU session configuration. It never
+  throws; a refusal is reported as a `GpuNeuralModelError`.
+- The node adds `callback_contract_violations()`. Its `watchdog_blocks` set
+  to zero selects `capacity - 1`.
 - On the GPU path (WaveNet only) the node latches `ProviderLost` for a device
   loss and `ProviderUnresponsive` from a completion watchdog
   (`Config::watchdog_blocks`); both report `Unavailable`. A CPU-only node
@@ -129,7 +141,7 @@ reports its default until the node in question supplies it.
   `callback_contract_violations()` instead of latching a recovery reason, so it
   stays `Ready`.
 
-## Neural shadow placement
+### Neural shadow placement
 
 - **Neural shadow placement.** `GpuNeuralRealtimeNode::Config::shadow_policy`
   (`ShadowPolicy::{Auto, Inline, Worker, None}`) chooses where the built-in
@@ -158,7 +170,7 @@ reports its default until the node in question supplies it.
 - **Preparation.** `PrepareError` appends `ShadowRequired` and
   `ShadowModelMismatch`.
 
-## Staged convolver, spectral nodes and transport pipelining
+### Staged convolver, spectral nodes and transport pipelining
 
 - **`GpuConvolver` staged path (`Auto` / `StagedOnly`).** Every block's input
   now goes either to the GPU result (when it is on time and finite) or to the
