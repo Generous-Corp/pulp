@@ -291,14 +291,14 @@ class CheckSkiaPinTests(unittest.TestCase):
             self.assertEqual(check_skia_pin.main([]), 0)
 
         self.assertIn("matches tools/deps/manifest.json", stdout.getvalue())
-        self.assertEqual(pins.SKIA_BRANCH, "chrome/m153")
+        self.assertEqual(pins.SKIA_BRANCH, "chrome/m157")
         self.assertEqual(
             pins.SKIA_COMMIT,
-            "8b8c3872fbc03f025855db96ce683f34ec98a815",
+            "b94213a11b3a2edadfae89f0c57a7f4ab72772c9",
         )
         self.assertEqual(
             pins.SKIA_BUILDER_REF,
-            "1f8c8d2c343f360a653bce92d11f8ded9a515208",
+            "f710b2834eaf37dbf1bd39408f9361d10d85eda2",
         )
         self.assertIn("linux-x64", pins.RELEASE_ASSET_SHA256)
         # Bundled Dawn/HarfBuzz/ICU revisions remain Skia-internal; the exact

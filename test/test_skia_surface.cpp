@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "include/core/SkBitmap.h"
@@ -520,9 +521,9 @@ TEST_CASE("SkPicture with embedded image needs fImageProc to round-trip pixels",
 
         SkDeserialProcs dprocs;
         dprocs.fImageProc = [](const void* data, size_t length,
-                               void*) -> sk_sp<SkImage> {
-            return SkImages::DeferredFromEncodedData(
-                SkData::MakeWithCopy(data, length));
+                               std::optional<SkAlphaType> alpha_type, void*) -> sk_sp<SkImage> {
+            return SkImages::DeferredFromEncodedData(SkData::MakeWithCopy(data, length),
+                                                     alpha_type);
         };
         sk_sp<SkPicture> restored = SkPicture::MakeFromData(blob.get(), &dprocs);
         REQUIRE(restored != nullptr);
@@ -561,10 +562,9 @@ namespace {
 // SkpFrameCapture wrote back into an SkImage.
 SkDeserialProcs skp_deserial_procs() {
     SkDeserialProcs procs;
-    procs.fImageProc = [](const void* data, size_t length,
+    procs.fImageProc = [](const void* data, size_t length, std::optional<SkAlphaType> alpha_type,
                           void*) -> sk_sp<SkImage> {
-        return SkImages::DeferredFromEncodedData(
-            SkData::MakeWithCopy(data, length));
+        return SkImages::DeferredFromEncodedData(SkData::MakeWithCopy(data, length), alpha_type);
     };
     return procs;
 }

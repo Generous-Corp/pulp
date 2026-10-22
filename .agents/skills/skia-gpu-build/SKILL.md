@@ -99,9 +99,9 @@ headers with another's libraries.
 
 ## Building from source (only when no cached libs anywhere)
 
-`tools/build-skia.sh` builds the currently pinned chrome/m153 Skia+Dawn from source — slow
+`tools/build-skia.sh` builds the currently pinned chrome/m157 Skia+Dawn from source — slow
 (tens of minutes). Prefer the release zip from
-`danielraffel/skia-builder` (chrome/m153, see `external/skia-build/VERSION.md`)
+`danielraffel/skia-builder` (chrome/m157, see `external/skia-build/VERSION.md`)
 or the immutable fetcher-owned cache generation above.
 
 For m153, prove the provider exposes both new integration surfaces before a
@@ -113,9 +113,20 @@ python3 tools/scripts/verify_skia_m153_capabilities.py \
 ```
 
 The directory must be the fetcher's exact stamped manifest generation. This
-compile/links/runs `SkLogHandler` and
+compile/links/runs `SkLogHandler` and a client `SkExecutor` subclass wired into
 `skgpu::graphite::ContextOptions::fExecutor`; headers or unstamped local
 libraries alone are not a pass.
+
+m157 removed Skia's default executors (`SkExecutor::MakeFIFOThreadPool`,
+`MakeLIFOThreadPool`, the default-executor factory), so threaded Graphite
+pipeline compilation now always means a client-owned subclass. Compile that
+subclass's translation unit **without RTTI** (`-fno-rtti`, MSVC `/GR-`):
+skia-builder's official builds disable RTTI, `~SkExecutor` is the class's
+key function, and so `libskia.a` emits no `typeinfo for SkExecutor`. An
+RTTI-enabled subclass fails at link with that undefined symbol. Pulp leaves
+`fExecutor` null today, so Graphite compiles pipelines inline on the render
+thread; adopting an executor is a measured first-visible-frame decision, not a
+toolchain one.
 `SkLogHandler` is process-global and first-install-wins, while the executor must
 outlive the Graphite context. Generic installation and executor policy are
 Vellum-owned; a Pulp build should consume those contracts rather than install a
