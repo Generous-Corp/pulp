@@ -401,17 +401,16 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         if PLANTED_NEGATIVES.get(planted) == "fail":
             # Fired and applied, bound, and the FAIL is the corrupted audio
             # alone: a null failing from the fault sample on, nothing else.
-            # The plug-in arms the corruption in the quantum that contains the
-            # fault sample, so it may begin at that quantum's start (WP-h1, G1).
+            # The plug-in starts the corruption in the callback after the one
+            # holding the fault sample (WP-h1, G1), so it cannot begin earlier.
             plugin = base["nulls"]["plugin"]
-            quantum = int((base.get("plugin_identity") or {}).get("quantum") or 0)
             negative_proved = bool(
                 bound and took_effect and verdict == "fail" and len(base_reasons) == 1 and
                 base_reasons[0].startswith(("plugin null failed",
                                             "host realtime render null failed")) and
                 plugin is not None and not plugin["passed"] and
                 plugin["first_deviating_sample"] is not None and
-                plugin["first_deviating_sample"] >= fault_sample - quantum)
+                plugin["first_deviating_sample"] >= fault_sample)
         else:
             # gpu_off: fired, bound, and only the GPU-off consequences kept the
             # run from passing.

@@ -472,19 +472,16 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(len(receipt["verdict_reasons"]), 1)
         self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
 
-    def test_a_planted_negative_may_start_in_the_fault_quantum(self):
-        # G1: the plug-in arms the corruption for the whole quantum holding the
-        # fault sample, so a deviation up to one quantum early still counts.
-        run = self.run_dir("negative-fault-quantum")
-        receipt = make_run(run, kind="planted_negative", break_fallback=True)
-        quantum = receipt["plugin_identity"]["quantum"]
-        rewrite_capture(run, outputs=lambda pos, v: 0.0 if FAULT - quantum // 2 <= pos < FAULT
-                        else v)
+    def test_a_planted_negative_one_sample_early_is_not_proved(self):
+        # G1: the corruption starts after the fault sample, so even a single
+        # sample of deviation before it means the run is broken, not proof.
+        run = self.run_dir("negative-one-early")
+        make_run(run, kind="planted_negative", break_fallback=True)
+        rewrite_capture(run, outputs=lambda pos, v: v + 0.5 if pos == FAULT - 1 else v)
         receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
                               mode="auhostingservice_arrow")
-        self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"],
-                         FAULT - quantum // 2)
-        self.assertEqual(self.verify(receipt, run), ("fail", "negative_proved"))
+        self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT - 1)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
 
     def test_a_planted_negative_with_another_unmet_precondition_is_not_proved(self):
         run = self.run_dir("negative-refused")
