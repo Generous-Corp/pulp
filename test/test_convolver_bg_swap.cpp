@@ -8,7 +8,8 @@
 //   - swapping under concurrent process() does not corrupt output,
 //   - stage-twice-without-consume frees the older state on the worker
 //     thread (no leak, no audio-thread free),
-//   - convolver still produces identity output after a swap.
+//   - convolver still produces identity output after a swap,
+//   - FixedIrConvolver process()/reset() allocate nothing on either engine.
 
 #include <algorithm>
 #include <atomic>
@@ -24,6 +25,7 @@
 #include "harness/rt_allocation_probe.hpp"
 #include "support/thread_progress.hpp"
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/fixed_ir_convolver.hpp>
 #include <pulp/signal/convolver_messages.hpp>
 #include <pulp/signal/transition_mixer.hpp>
 
@@ -844,4 +846,33 @@ TEST_CASE("PartitionedConvolver crossfaded swap burst keeps the stream continuou
     REQUIRE(got.size() == reference.size());
     for (std::size_t i = 0; i < reference.size(); ++i)
         REQUIRE_THAT(got[i], WithinAbs(reference[i], 1e-4f));
+}
+
+TEST_CASE("FixedIrConvolver process and reset do not allocate on either engine",
+          "[signal][convolver][fixed-ir][rt-safety]") {
+    using pulp::signal::ConvolutionBackend;
+    constexpr std::size_t block = 64;
+    constexpr std::size_t taps = 1025;
+    std::vector<float> ir(taps);
+    for (std::size_t i = 0; i < taps; ++i)
+        ir[i] = 0.01f * std::exp(-0.003f * static_cast<float>(i));
+    for (const auto engine :
+         {ConvolutionBackend::direct_fir, ConvolutionBackend::partitioned_fft}) {
+        pulp::signal::FixedIrConvolver conv;
+        conv.load_ir(ir.data(), ir.size(), block, engine);
+        REQUIRE(conv.backend() == engine);
+        INFO("backend " << static_cast<int>(engine));
+
+        std::vector<float> input(block, 0.25f), output(block);
+        {
+            pulp::test::RtAllocationProbe probe;
+            for (int b = 0; b < 64; ++b)
+                conv.process(input.data(), output.data(), block);
+            conv.process(input.data(), output.data(), block - 1); // fail-closed path
+            conv.reset();
+            conv.process(input.data(), input.data(), block); // in-place
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
+        REQUIRE(conv.block_size_violations() == 0); // reset() cleared it
+    }
 }

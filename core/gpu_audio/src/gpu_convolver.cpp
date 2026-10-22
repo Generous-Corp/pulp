@@ -328,12 +328,10 @@ bool GpuConvolver::prepare() {
         latency_blocks_ > kMaxLatencyBlocks)
         return false;
 
-    // The CPU fallback is a signal::PartitionedConvolver loaded at `block_`, and
-    // load_ir() rounds a non-power-of-two block UP to the next power of two for
-    // its radix-2 FFT. The fallback would then be partitioned for a block size
-    // the transport never delivers, so every fallback block would be a block-size
-    // violation. Refuse to prepare rather than run a convolver whose fallback can
-    // only ever fail closed.
+    // The GPU transport and its prepared CPU fallback both require the exact
+    // host block size. Keep rejecting non-power-of-two blocks: the GPU FFT is
+    // radix-2 and the fallback must never silently normalize to a different
+    // callback size. FixedIrConvolver itself is prepared only after this gate.
     if ((block_ & (block_ - 1u)) != 0u)
         return false;
 

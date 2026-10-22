@@ -186,11 +186,12 @@ TEMPLATE_TEST_CASE("FirFilter processing allocates nothing", "[signal][fir][rt-s
         FirFilterT<T> fir;
         fir.set_coefficients(noise<T>(taps, 51, 0.3));
         auto x = noise<T>(4096, 52, 0.9);
+        std::vector<T> out(596);
         pulp::test::RtAllocationProbe probe;
         for (std::size_t n = 0; n < 1500; ++n)
             x[n] = fir.process(x[n]);
         fir.process(x.data() + 1500, 2000);
-        fir.process(x.data() + 3500, 596);
+        fir.process(x.data() + 3500, out.data(), 596);
         fir.reset();
         CHECK(probe.allocation_count() == 0);
     }
@@ -229,4 +230,27 @@ TEST_CASE("FixedHalfBandFir65 processing allocates nothing", "[signal][fir][rt-s
     stage.reset();
     CHECK(probe.allocation_count() == 0);
     CHECK(std::isfinite(sink));
+}
+
+TEST_CASE("FirFilter in-place and separate-output block processing are identical",
+          "[signal][fir]") {
+    std::vector<float> ir(97);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = 0.01f * std::cos(0.23f * static_cast<float>(i));
+    FirFilterT<float> in_place, separate;
+    in_place.set_coefficients(ir);
+    separate.set_coefficients(ir);
+
+    // Uneven slices that straddle the kBlockCapacity compaction boundary.
+    std::size_t phase = 0;
+    for (const int n : {7, 300, 511, 512, 513, 1, 900}) {
+        std::vector<float> input(static_cast<std::size_t>(n));
+        for (auto& x : input)
+            x = std::sin(0.07f * static_cast<float>(phase++));
+        std::vector<float> data = input;
+        std::vector<float> output(input.size(), -9.0f);
+        in_place.process(data.data(), n);
+        separate.process(input.data(), output.data(), n);
+        REQUIRE(data == output);
+    }
 }

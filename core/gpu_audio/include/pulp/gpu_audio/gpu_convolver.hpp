@@ -10,6 +10,7 @@
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 #include <pulp/gpu_audio/gpu_audio_status.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/fixed_ir_convolver.hpp>
 
 namespace pulp::render {
 class GpuCompute;
@@ -60,13 +61,12 @@ std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 /// than once per channel.
 ///
 /// CPU fallback (MissPolicy::CpuFallback). The fallback is a zero-latency
-/// `signal::PartitionedConvolver` per channel that the transport keeps
-/// CONTINUOUSLY fed via prime_fallback() — one cheap partitioned block per audio
-/// block, every block, not only on misses. Feeding it only on misses (the old
-/// behavior) left its overlap-add history full of gaps, so a substituted block
-/// was NOT a correct continuation of the convolution (its IR tail energy from the
-/// preceding audio was missing) — an audible discontinuity, not merely lower
-/// precision. Because the priming path is zero-latency but the transport reports
+/// `signal::FixedIrConvolver` per channel that the transport keeps
+/// CONTINUOUSLY fed via prime_fallback() — one direct-FIR or partitioned block
+/// each audio block, not only on misses. A fallback fed only on misses would
+/// have gaps in its history, so a substituted block would not continue the
+/// convolution (its IR tail energy from the preceding audio would be missing):
+/// an audible discontinuity, not merely lower precision. Because the priming path is zero-latency but the transport reports
 /// `latency_blocks` of PDC for the GPU pipeline, the fallback's output is pushed
 /// through a matching `latency_blocks`-deep delay so a miss substitute equals the
 /// wet block the worker ring would have returned (input(t-L) convolved) — the
@@ -74,7 +74,7 @@ std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 ///
 /// It still blocks on the GPU readback, which is why `process_block` runs on the
 /// transport's non-RT worker and never on the audio thread. Live use at small
-/// block sizes should still prefer the CPU fallback: a partitioned CPU
+/// block sizes should still prefer the CPU fallback: a prepared CPU
 /// convolution costs microseconds, and no amount of batching beats a map
 /// round-trip for a single stereo pair.
 class GpuConvolver : public GpuAudioNode {
@@ -148,8 +148,8 @@ class GpuConvolver : public GpuAudioNode {
             }
             const float* x = input.channel_ptr(ch);
             // Guard the fallback against a non-finite input block too: without it
-            // a single NaN would poison the partitioned convolver's own overlap
-            // state (and the delay ring) for the whole IR tail, not just one block.
+            // a single NaN would poison the convolver's own history (and the
+            // delay ring) for the whole IR tail, not just one block.
             bool finite = true;
             for (uint32_t i = 0; i < n; ++i) {
                 if (!std::isfinite(x[i])) {
@@ -230,14 +230,15 @@ class GpuConvolver : public GpuAudioNode {
     }
 
     /// No-GPU worker path: run the (continuously-fed) worker fallback for every
-    /// prepared channel into `output`, zeroing anything else. Zero-latency
-    /// partitioned convolution, so it matches the GPU path's algorithmic timing.
+    /// prepared channel into `output`, zeroing anything else. Both selected
+    /// engines are zero-latency, so the fallback matches the GPU path's
+    /// algorithmic timing.
     ///
     /// This is the SOLE audio path when the device fails to init (the `!gpu_`
     /// branch of process_block) and in the no-render build, so it carries the same
     /// non-finite-input guard as prime_fallback(): a single NaN/Inf would otherwise
-    /// smear across every FFT bin and poison worker_fallback_'s overlap state for
-    /// the whole IR tail (~num_partitions blocks). On a poisoned block we reset the
+    /// poison worker_fallback_'s history for the whole IR tail (the IR length,
+    /// plus one block on the FFT engine). On a poisoned block we reset the
     /// convolver and emit silence for that channel; it self-heals on the next
     /// finite block instead of dying for the tail.
     void render_worker_fallback(const audio::BufferView<const float>& input,
@@ -341,8 +342,8 @@ class GpuConvolver : public GpuAudioNode {
     std::vector<float> time_;   // 2*fft_size inverse result (one readback)
 
     // Continuously-fed zero-latency CPU fallbacks.
-    std::vector<signal::PartitionedConvolver> fallback_;        // RT miss fallback
-    std::vector<signal::PartitionedConvolver> worker_fallback_; // no-GPU worker path
+    std::vector<signal::FixedIrConvolver> fallback_;        // RT miss fallback
+    std::vector<signal::FixedIrConvolver> worker_fallback_; // no-GPU worker path
 
     // Latency-alignment delay for the RT miss fallback. `fb_delay_` is a
     // `fallback_delay_blocks_`-deep circular buffer of block-sized, per-channel

@@ -24,6 +24,7 @@
 #include <pulp/signal/character_delay.hpp>
 #include <pulp/signal/compressor.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/fixed_ir_convolver.hpp>
 #include <pulp/signal/convolver_non_uniform.hpp>
 #include <pulp/signal/fdn_reverb.hpp>
 #include <pulp/signal/fft.hpp>
@@ -434,6 +435,76 @@ void run_processors(int B) {
     }
 
     // Convolution.
+    for (int taps : {65, 257, 385, 513, 641, 769, 1025}) {
+        FixedIrConvolver cv;
+        const auto ir = decaying_ir(std::size_t(taps), 11, 3.0f);
+        cv.load_ir(ir.data(), ir.size(), std::size_t(B));
+        bench("conv.fixed-ir " + std::to_string(taps) + " taps " +
+                  (cv.backend() == ConvolutionBackend::direct_fir ? "direct" : "fft"),
+              B, [&](int n) {
+                  cv.process(feed.next(n), out.data(), std::size_t(n));
+                  clobber(out.data());
+              });
+
+        // Forced arms use the identical IR and workload. These rows make the
+        // selector's choice auditable instead of treating the policy constants
+        // as a speedup claim by themselves.
+        FirFilter direct;
+        direct.set_coefficients(ir);
+        bench("conv.forced-direct " + std::to_string(taps) + " taps", B, [&](int n) {
+            const float* input = feed.next(n);
+            direct.process(input, buf.data(), n);
+            clobber(buf.data());
+        });
+
+        PartitionedConvolver fft;
+        fft.load_ir(ir.data(), ir.size(), std::size_t(B));
+        bench("conv.forced-fft " + std::to_string(taps) + " taps", B, [&](int n) {
+            fft.process(feed.next(n), out.data(), std::size_t(n));
+            clobber(out.data());
+        });
+    }
+
+    // Capacity arm: repeated plugin instances share the same input stream but
+    // retain independent convolution history. This exposes the aggregate cost
+    // that a single-instance hot-cache result can hide.
+    {
+        constexpr int kInstances = 8;
+        constexpr int kTaps = 1025;
+        const auto ir = decaying_ir(kTaps, 29, 3.0f);
+        std::vector<FixedIrConvolver> fixed_ir;
+        fixed_ir.reserve(kInstances);
+        for (int i = 0; i < kInstances; ++i) {
+            fixed_ir.emplace_back();
+            fixed_ir.back().load_ir(ir.data(), ir.size(), std::size_t(B));
+        }
+        std::vector<float> outputs(std::size_t(kInstances) * std::size_t(B));
+        InputFeed input;
+        bench("conv.fixed-ir.multi8 1025 taps", B, [&](int n) {
+            const float* source = input.next(n);
+            for (int i = 0; i < kInstances; ++i) {
+                fixed_ir[std::size_t(i)].process(
+                    source, outputs.data() + std::size_t(i) * std::size_t(B), std::size_t(n));
+                clobber(outputs.data() + std::size_t(i) * std::size_t(B));
+            }
+        });
+
+        std::vector<FirFilter> forced;
+        forced.reserve(kInstances);
+        for (int i = 0; i < kInstances; ++i) {
+            forced.emplace_back();
+            forced.back().set_coefficients(ir);
+        }
+        InputFeed forced_input;
+        bench("conv.forced-direct.multi8 1025 taps", B, [&](int n) {
+            const float* source = forced_input.next(n);
+            for (int i = 0; i < kInstances; ++i) {
+                forced[std::size_t(i)].process(source,
+                                               outputs.data() + std::size_t(i) * std::size_t(B), n);
+                clobber(outputs.data() + std::size_t(i) * std::size_t(B));
+            }
+        });
+    }
     for (int ir_seconds : {1, 3}) {
         PartitionedConvolver cv;
         const auto ir = decaying_ir(std::size_t(ir_seconds * 48000), 7, 4.0f);

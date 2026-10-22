@@ -339,42 +339,50 @@ TEST_CASE("GpuConvolver rejects a non-power-of-two block size", "[gpu_audio][con
     }
 }
 
-// The no-GPU worker path is a zero-latency partitioned convolution: process_block
-// (which drives worker_fallback_ when there is no device) must reproduce direct
-// linear convolution of the stream, block-aligned (no one-block streaming lag).
+// The no-GPU worker path is a zero-latency convolution: process_block (which
+// drives worker_fallback_ when there is no device) must reproduce direct linear
+// convolution of the stream, block-aligned (no one-block streaming lag), on both
+// engines the fixed-IR fallback can select.
 TEST_CASE("GpuConvolver process_block uses CPU fallback without a GPU", "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 1, BS = 64, SR = 48000;
-    constexpr int M = 100;
-    std::vector<float> ir(M);
-    for (int i = 0; i < M; ++i)
-        ir[i] = std::cos(0.05f * i) * std::exp(-0.02f * i);
+#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
+    // Where the policy has a direct-engine range, the short IR exercises it.
+    REQUIRE(pulp::signal::FixedIrConvolver::choose_backend(100, BS) !=
+            pulp::signal::FixedIrConvolver::choose_backend(1025, BS));
+#endif
+    for (const int M : {100, 1025}) {
+        INFO("IR length " << M);
+        std::vector<float> ir(M);
+        for (int i = 0; i < M; ++i)
+            ir[i] = std::cos(0.05f * i) * std::exp(-0.02f * i);
 
-    GpuConvolver node(CH, BS, SR, ir);
-    REQUIRE(node.prepare());
-    if (node.gpu_available())
-        return; // this case covers the no-device build only
+        GpuConvolver node(CH, BS, SR, ir);
+        REQUIRE(node.prepare());
+        if (node.gpu_available())
+            return; // this case covers the no-device build only
 
-    constexpr uint32_t NBLK = 8;
-    std::vector<float> input(BS * NBLK);
-    for (uint32_t i = 0; i < input.size(); ++i)
-        input[i] = std::sin(0.11f * i) + 0.3f * std::sin(0.37f * i);
-    const std::vector<float> ref = direct_convolution(input, ir);
+        constexpr uint32_t NBLK = 8;
+        std::vector<float> input(BS * NBLK);
+        for (uint32_t i = 0; i < input.size(); ++i)
+            input[i] = std::sin(0.11f * i) + 0.3f * std::sin(0.37f * i);
+        const std::vector<float> ref = direct_convolution(input, ir);
 
-    std::vector<float> out(BS * NBLK, 0.0f);
-    bool produced_audio = false;
-    for (uint32_t b = 0; b < NBLK; ++b) {
-        const float* in_ptr[1] = {input.data() + b * BS};
-        float* out_ptr[1] = {out.data() + b * BS};
-        BufferView<const float> iv(in_ptr, 1, BS);
-        BufferView<float> ov(out_ptr, 1, BS);
-        node.process_block(iv, ov, BS);
+        std::vector<float> out(BS * NBLK, 0.0f);
+        bool produced_audio = false;
+        for (uint32_t b = 0; b < NBLK; ++b) {
+            const float* in_ptr[1] = {input.data() + b * BS};
+            float* out_ptr[1] = {out.data() + b * BS};
+            BufferView<const float> iv(in_ptr, 1, BS);
+            BufferView<float> ov(out_ptr, 1, BS);
+            node.process_block(iv, ov, BS);
+        }
+        for (uint32_t i = 0; i < out.size(); ++i) {
+            if (std::abs(out[i]) > 1.0e-6f)
+                produced_audio = true;
+            REQUIRE(std::abs(out[i] - ref[i]) < 1.0e-3f * (1.0f + std::abs(ref[i])));
+        }
+        REQUIRE(produced_audio);
     }
-    for (uint32_t i = 0; i < out.size(); ++i) {
-        if (std::abs(out[i]) > 1.0e-6f)
-            produced_audio = true;
-        REQUIRE(std::abs(out[i] - ref[i]) < 1.0e-3f * (1.0f + std::abs(ref[i])));
-    }
-    REQUIRE(produced_audio);
 }
 
 // The worker path (process_block) must not touch the realtime miss fallback: they
@@ -478,43 +486,52 @@ TEST_CASE("GpuConvolver fallback is a correct continuation after hits", "[gpu_au
 // reproduce the reference convolution delayed by exactly kLatencyBlocks blocks.
 TEST_CASE("GpuConvolver fallback latency matches reported PDC", "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 2, BS = 64, SR = 48000;
-    constexpr int M = 150;
-    std::vector<float> ir(M);
-    for (int i = 0; i < M; ++i)
-        ir[i] = std::sin(0.04f * i + 0.3f) * std::exp(-0.015f * i);
+    // Cover both engines the fixed-IR fallback can select, including the
+    // FFT engine's overlap-save history across the PDC delay ring.
+#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
+    // Where the policy has a direct-engine range, the short IR exercises it.
+    REQUIRE(pulp::signal::FixedIrConvolver::choose_backend(150, BS) !=
+            pulp::signal::FixedIrConvolver::choose_backend(1025, BS));
+#endif
+    for (const int M : {150, 1025}) {
+        INFO("IR length " << M);
+        std::vector<float> ir(M);
+        for (int i = 0; i < M; ++i)
+            ir[i] = std::sin(0.04f * i + 0.3f) * std::exp(-0.015f * i);
 
-    GpuConvolver node(CH, BS, SR, ir);
-    REQUIRE(node.prepare());
-    const uint32_t L = GpuConvolver::kLatencyBlocks;
+        GpuConvolver node(CH, BS, SR, ir);
+        REQUIRE(node.prepare());
+        const uint32_t L = GpuConvolver::kLatencyBlocks;
 
-    constexpr uint32_t NBLK = 12;
-    // Two distinct per-channel signals to prove channels stay independent.
-    std::vector<std::vector<float>> in_ch(CH, std::vector<float>(BS * NBLK));
-    for (uint32_t i = 0; i < BS * NBLK; ++i) {
-        in_ch[0][i] = std::sin(0.10f * i);
-        in_ch[1][i] = 0.7f * std::sin(0.05f * i + 1.0f);
-    }
-    std::vector<std::vector<float>> ref(CH);
-    for (uint32_t c = 0; c < CH; ++c)
-        ref[c] = direct_convolution(in_ch[c], ir);
+        constexpr uint32_t NBLK = 12;
+        // Two distinct per-channel signals to prove channels stay independent.
+        std::vector<std::vector<float>> in_ch(CH, std::vector<float>(BS * NBLK));
+        for (uint32_t i = 0; i < BS * NBLK; ++i) {
+            in_ch[0][i] = std::sin(0.10f * i);
+            in_ch[1][i] = 0.7f * std::sin(0.05f * i + 1.0f);
+        }
+        std::vector<std::vector<float>> ref(CH);
+        for (uint32_t c = 0; c < CH; ++c)
+            ref[c] = direct_convolution(in_ch[c], ir);
 
-    std::vector<std::vector<float>> out(CH, std::vector<float>(BS * NBLK, 0.0f));
-    for (uint32_t b = 0; b < NBLK; ++b) {
-        const float* in_ptr[CH] = {in_ch[0].data() + b * BS, in_ch[1].data() + b * BS};
-        float* out_ptr[CH] = {out[0].data() + b * BS, out[1].data() + b * BS};
-        BufferView<const float> iv(in_ptr, CH, BS);
-        BufferView<float> ov(out_ptr, CH, BS);
-        node.prime_fallback(iv, BS);           // every block
-        node.process_cpu_fallback(iv, ov, BS); // every block is a "miss"
-    }
-
-    for (uint32_t c = 0; c < CH; ++c) {
+        std::vector<std::vector<float>> out(CH, std::vector<float>(BS * NBLK, 0.0f));
         for (uint32_t b = 0; b < NBLK; ++b) {
-            for (uint32_t i = 0; i < BS; ++i) {
-                const float got = out[c][b * BS + i];
-                const float expected =
-                    (b < L) ? 0.0f : ref[c][(b - L) * BS + i]; // delayed by L, silence before
-                REQUIRE(std::abs(got - expected) < 1.0e-3f * (1.0f + std::abs(expected)));
+            const float* in_ptr[CH] = {in_ch[0].data() + b * BS, in_ch[1].data() + b * BS};
+            float* out_ptr[CH] = {out[0].data() + b * BS, out[1].data() + b * BS};
+            BufferView<const float> iv(in_ptr, CH, BS);
+            BufferView<float> ov(out_ptr, CH, BS);
+            node.prime_fallback(iv, BS);           // every block
+            node.process_cpu_fallback(iv, ov, BS); // every block is a "miss"
+        }
+
+        for (uint32_t c = 0; c < CH; ++c) {
+            for (uint32_t b = 0; b < NBLK; ++b) {
+                for (uint32_t i = 0; i < BS; ++i) {
+                    const float got = out[c][b * BS + i];
+                    const float expected =
+                        (b < L) ? 0.0f : ref[c][(b - L) * BS + i]; // delayed by L, silence before
+                    REQUIRE(std::abs(got - expected) < 1.0e-3f * (1.0f + std::abs(expected)));
+                }
             }
         }
     }

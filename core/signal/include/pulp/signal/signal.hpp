@@ -103,6 +103,7 @@
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/fixed_ir_convolver.hpp>
 
 // Modulation and utility toolkit — deterministic randomness, LFO, control-signal
 // tools, the trigger/gate event kit, the envelope family, VCA, low-pass gate,
