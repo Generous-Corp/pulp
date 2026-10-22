@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import platform
 import re
@@ -28,6 +27,7 @@ from .core import (
     source_files,
     write_json,
 )
+from .aggregate import percentile
 from .reports import format_corpus_summary, format_summary
 from .rescore import replay, rescore_corpus
 from tools.harness.differential.contract import normalize_report
@@ -148,11 +148,6 @@ def command_corpus(args: argparse.Namespace) -> int:
         report.get("timing_budget", {}).get("status") == "fail"
         for report in reports)
     return 1 if failures or budget_failed else 0
-
-
-def percentile(values: list[int], fraction: float) -> int:
-    ordered = sorted(values)
-    return ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
 
 
 def sanitized_error(error: Exception, paths: list[Path]) -> str:
