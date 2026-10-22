@@ -773,7 +773,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:b749452f8860e043bf21e16e0925d86fd7bcd95d76bb402301de66dd4b822c74",
+        "fingerprint": "sha256:197df79ace67e56c1e12ad85c6d87ff3dcb1aff985dd20a12e3ac90fb2ba36c4",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -804,7 +804,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:0c326ef2065cbf44b83373e6f0f7d9b08eda6ff82817ceb25971ba036d2f1cfe",
+        "fingerprint": "sha256:4396cab523a1485c43cf26aa82e0b37c375fe081a803ee0cb62a849fd7260119",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
