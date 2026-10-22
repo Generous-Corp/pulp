@@ -2561,6 +2561,7 @@
   "pulp-test-golden",
   "pulp-test-golden-effect",
   "pulp-test-gpu-audio-execution-controller",
+  "pulp-test-gpu-audio-plugin-boundary-continuity",
   "pulp-test-gpu-audio-trace",
   "pulp-test-gpu-audio-transport",
   "pulp-test-gpu-compute",
