@@ -72,6 +72,9 @@ std::atomic<std::uint32_t> g_delay_ms{0};
 std::atomic<std::uint64_t> g_applied{0};
 std::atomic<const char*> g_applied_point{""};
 std::atomic<std::uintptr_t> g_applied_device{0};
+// When the fault was applied, on the steady clock the capture's record
+// host_time_ns uses, so the analysis can find the exact block it hit.
+std::atomic<std::uint64_t> g_applied_ns{0};
 std::once_flag g_install_once;
 bool g_installed = false;
 
@@ -135,6 +138,11 @@ bool is_target(WGPUDevice device) noexcept {
 }
 
 void applied(const char* point) noexcept {
+    g_applied_ns.store(
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now().time_since_epoch())
+                                       .count()),
+        std::memory_order_release);
     g_applied_point.store(point, std::memory_order_release);
     g_applied.fetch_add(1, std::memory_order_acq_rel);
 }
@@ -270,6 +278,10 @@ std::uint64_t provider_fault_target_device() noexcept {
 #else
     return 0;
 #endif
+}
+
+std::uint64_t provider_fault_applied_time_ns() noexcept {
+    return g_applied_ns.load(std::memory_order_acquire);
 }
 
 std::uint64_t provider_fault_applied_device() noexcept {

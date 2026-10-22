@@ -771,10 +771,12 @@ void GpuFaultContinuityProcessor::maybe_snapshot_after() {
         std::snprintf(line, sizeof(line),
                       "{\"event\":\"provider_fault_applied\",\"point\":\"%s\","
                       "\"project_sample\":%" PRId64 ",\"delay_ms\":%u,"
-                      "\"device\":\"0x%llx\",\"prepare_index\":%u}",
+                      "\"device\":\"0x%llx\",\"prepare_index\":%u,"
+                      "\"host_time_ns\":%llu}",
                       provider_fault_point(), latest_position_.load(std::memory_order_acquire),
                       delay_ms_, static_cast<unsigned long long>(provider_fault_applied_device()),
-                      prepare_index_ & 0xFFFFu);
+                      prepare_index_ & 0xFFFFu,
+                      static_cast<unsigned long long>(provider_fault_applied_time_ns()));
         emit(line);
     }
     const auto kind = static_cast<FaultKind>(armed_kind_.load(std::memory_order_acquire));

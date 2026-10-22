@@ -24,6 +24,9 @@ bool provider_fault_target_captured() noexcept;
 // addresses for the receipt's device binding (0 when none).
 std::uint64_t provider_fault_target_device() noexcept;
 std::uint64_t provider_fault_applied_device() noexcept;
+// Steady-clock time of the last applied fault (the clock of the capture's
+// record host_time_ns).
+std::uint64_t provider_fault_applied_time_ns() noexcept;
 
 // Any non-audio thread. Arms one provider fault; it is applied, once, at the
 // provider's next matching Dawn call on a non-main thread. `delay_ms` is the

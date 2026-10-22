@@ -425,6 +425,17 @@ class DaWContinuityReceipt(unittest.TestCase):
         cap.inputs[0][stopped] = 0.0
         self.assertIsNone(gfc.captured_input_matches_stimulus(cap, stim[0]))
 
+    def test_the_applied_sample_comes_from_the_interposer_clock(self):
+        # G3: the record whose callback started at or after the interposer's
+        # host_time_ns, not the later sample the service thread observed.
+        cap = gfc.read_capture(self.good / "capture.bin")
+        target = next(r for r in cap.records if r["position"] >= FAULT + 256)
+        applied = {"host_time_ns": target["host_time_ns"], "project_sample": FAULT + 4096}
+        self.assertEqual(gfc.applied_project_sample(cap, applied), target["position"])
+        # Without the time, the observed sample is the (later) bound.
+        self.assertEqual(gfc.applied_project_sample(cap, {"project_sample": FAULT + 4096}),
+                         FAULT + 4096)
+
     def test_wpk_disposition_view(self):
         cap = gfc.read_capture(self.good / "capture.bin")
         d = gfc.delivery_disposition(cap, FAULT, FAULT + 128, 2, fault="force_loss_between",

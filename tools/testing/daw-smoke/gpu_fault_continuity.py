@@ -577,6 +577,22 @@ def captured_input_matches_stimulus(capture: "Capture", stimulus: Sequence[float
     return None
 
 
+def applied_project_sample(capture: "Capture", applied: dict | None) -> int | None:
+    """Where the fault actually hit: the first played record whose callback
+    started at or after the interposer's `host_time_ns` (the same steady clock
+    the capture records). Falls back to the service thread's `project_sample`,
+    which is observed later and so is a bound, when the time is absent."""
+    if not applied:
+        return None
+    t = applied.get("host_time_ns")
+    if isinstance(t, int) and t > 0 and capture.version >= 2:
+        hit = next((r["position"] for r in capture.records
+                    if r["position"] >= 0 and r["host_time_ns"] >= t), None)
+        if hit is not None:
+            return hit
+    return applied.get("project_sample")
+
+
 def delivery_disposition(capture: "Capture", fault_sample: int,
                          applied_project_sample: int | None, lead_blocks: int, *,
                          fault: str = "force_loss_after", quantum: int | None = None,
@@ -888,6 +904,10 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
         "at": status(pre + 1, 1) if audio_fault else status(pre + 50, 0),
         "after": status(pre + 1, 250) if audio_fault else status(pre + 400, 0),
     }
+    if fault in LOSS_FAULTS:
+        # Batch A's truthful status: a lost device reads unavailable/provider-lost.
+        for phase in ("at", "after"):
+            health[phase].update(provider_state="unavailable", recovery_reason="provider-lost")
     device = "0x1d2e3f"
     events = [
         {"event": "prepared", "ok": True, "pdc_samples": pdc, "quantum": quantum,
@@ -907,7 +927,8 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
     elif audio_fault:
         events.append({"event": "provider_fault_applied", "point": FAULT_POINTS[fault],
                        "project_sample": fault_sample + block, "device": device,
-                       "prepare_index": 1})
+                       "prepare_index": 1,
+                       "host_time_ns": (lead_in + fault_sample + block) * 20833})
     events += [{"event": "health", "phase": p, "status": st} for p, st in health.items()]
     with (out_dir / "events.jsonl").open("w", encoding="utf-8") as stream:
         for event in events:
@@ -1121,7 +1142,7 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
     if capture is not None:
         delivery = delivery_analysis(
             capture, fault=fault, fault_sample=fault_sample,
-            applied_sample=applied_event.get("project_sample") if applied_event else None,
+            applied_sample=applied_project_sample(capture, applied_event),
             quantum=int(prepared.get("quantum", 0) or 0) or 1,
             lead_blocks=int(prepared.get("lead_blocks", 0) or 0), window_post=window_post)
         if delivery.get("silence_blocks"):
