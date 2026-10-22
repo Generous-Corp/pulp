@@ -39,9 +39,9 @@
 /// correct at 44.1 kHz, 48 kHz, 96 kHz, or any other rate. The stopband
 /// floor depends only on the order and the transition width:
 ///
-///     passband edge 0.21 (of the 2x rate):  N=5 -79 dB, N=6 -95 dB,
-///                                           N=8 -126 dB
-///     passband edge 0.225:                  N=6 -80 dB, N=11 -146 dB
+///     passband edge 0.21 (of the 2x rate):  N=5 -79.3 dB, N=6 -94.8 dB,
+///                                           N=8 -125.9 dB
+///     passband edge 0.225:                  N=6 -80.1 dB, N=11 -146.3 dB
 ///
 /// `halfband_iir_response()`, `halfband_iir_group_delay()`, and
 /// `halfband_iir_stopband_db()` evaluate a design without running audio
@@ -70,6 +70,7 @@
 #include <complex>
 #include <cstddef>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <type_traits>
 
@@ -187,9 +188,8 @@ inline HalfBandIirDesign design_halfband_iir(std::size_t coefficient_count,
         !(passband_edge >= kHalfBandIirMinPassbandEdge && passband_edge < 0.25))
         return design;
 
-    constexpr double kPi = 3.14159265358979323846;
     const double order = static_cast<double>(2 * coefficient_count + 1);
-    const double t = std::tan(kPi * passband_edge);
+    const double t = std::tan(std::numbers::pi * passband_edge);
     const double k = t * t; // selectivity: passband over stopband bilinear edge
     const double kc_root = std::sqrt(std::sqrt(1.0 - k * k));
     const double e = 0.5 * (1.0 - kc_root) / (1.0 + kc_root);
@@ -199,7 +199,7 @@ inline HalfBandIirDesign design_halfband_iir(std::size_t coefficient_count,
     const double q = e * (1.0 + e4 * (2.0 + e4 * (15.0 + e4 * 150.0)));
 
     for (std::size_t i = 1; i <= coefficient_count; ++i) {
-        const double angle = kPi * static_cast<double>(i) / order;
+        const double angle = std::numbers::pi * static_cast<double>(i) / order;
         // sqrt(k) * sn(2 i K / order) as a ratio of theta series.
         double numerator = 0.0;
         double sign = 1.0;
@@ -239,8 +239,7 @@ namespace detail {
 template <typename Coefficient>
 inline void halfband_path_response(const HalfBandIirDesign& design, bool path_a, double frequency,
                                    std::complex<double>& response, double& group_delay) noexcept {
-    constexpr double kPi = 3.14159265358979323846;
-    const double w = 2.0 * kPi * frequency;
+    const double w = 2.0 * std::numbers::pi * frequency;
     const std::complex<double> z2(std::cos(2.0 * w), -std::sin(2.0 * w)); // z^-2
     response = 1.0;
     group_delay = 0.0;
@@ -262,12 +261,11 @@ inline void halfband_path_response(const HalfBandIirDesign& design, bool path_a,
 template <typename Coefficient = double>
 inline std::complex<double> halfband_iir_response(const HalfBandIirDesign& design,
                                                   double frequency) noexcept {
-    constexpr double kPi = 3.14159265358979323846;
     std::complex<double> a, b;
     double ta = 0.0, tb = 0.0;
     detail::halfband_path_response<Coefficient>(design, true, frequency, a, ta);
     detail::halfband_path_response<Coefficient>(design, false, frequency, b, tb);
-    const double w = 2.0 * kPi * frequency;
+    const double w = 2.0 * std::numbers::pi * frequency;
     return 0.5 * (a + std::complex<double>(std::cos(w), -std::sin(w)) * b);
 }
 
@@ -286,12 +284,11 @@ inline double halfband_iir_magnitude_db(const HalfBandIirDesign& design,
 /// differentiation.
 template <typename Coefficient = double>
 inline double halfband_iir_group_delay(const HalfBandIirDesign& design, double frequency) noexcept {
-    constexpr double kPi = 3.14159265358979323846;
     std::complex<double> a, b;
     double ta = 0.0, tb = 0.0;
     detail::halfband_path_response<Coefficient>(design, true, frequency, a, ta);
     detail::halfband_path_response<Coefficient>(design, false, frequency, b, tb);
-    const double w = 2.0 * kPi * frequency;
+    const double w = 2.0 * std::numbers::pi * frequency;
     const std::complex<double> zb = std::complex<double>(std::cos(w), -std::sin(w)) * b;
     return std::real((ta * a + (tb + 1.0) * zb) / (a + zb));
 }

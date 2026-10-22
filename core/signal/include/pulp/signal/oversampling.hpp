@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/frequency_response.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/oversampling_fir.hpp>
 
@@ -10,6 +11,7 @@
 #include <complex>
 #include <cstddef>
 #include <functional>
+#include <numbers>
 #include <utility>
 
 namespace pulp::signal {
@@ -33,11 +35,12 @@ namespace pulp::signal {
 //     by 2.66 samples near DC at x2 (3.49 at x4), rising toward the passband
 //     edge, against the biquad lane's 0.97 (1.46). `Quality::standard`
 //     keeps the base band flat (< 1e-8 dB droop) to 0.42 Fs and rejects
-//     images and aliases from 0.58 Fs by at least 94 dB; `Quality::pristine`
-//     is flat to 0.45 Fs and rejects from 0.55 Fs by at least 140 dB (the
-//     float build sits on its own rounding floor a little above that). Upper
-//     stages only guard the base band, so they use short designs.
-//     `polyphase_stage_design()` returns each stage's design and
+//     images and aliases from 0.58 Fs by 94.8 dB; `Quality::pristine` is
+//     flat to 0.45 Fs and rejects from 0.55 Fs by 146.3 dB (the float build
+//     sits on its own rounding floor a little above that). Upper stages only
+//     guard the base band, so they use short designs.
+//     `polyphase_stopband_db()` returns the per-quality figure,
+//     `polyphase_stage_design()` each stage's design, and
 //     `group_delay_samples()` the round trip's frequency-dependent delay.
 //   * `linear_phase_fir` — Kaiser-windowed FIR with a transition that ends at
 //     the base-rate Nyquist. `Quality::standard` is a 96 dB design flat to
@@ -83,8 +86,8 @@ template <typename SampleType = float> class OversamplerT {
     };
 
     enum class Quality {
-        standard, ///< FIR: 96 dB, flat to 0.40 Fs. IIR: 94 dB, flat to 0.42 Fs.
-        pristine, ///< FIR: 140 dB, flat to 0.45 Fs. IIR: 140 dB, flat to 0.45 Fs.
+        standard, ///< FIR: 96 dB, flat to 0.40 Fs. IIR: 94.8 dB, flat to 0.42 Fs.
+        pristine, ///< FIR: 140 dB, flat to 0.45 Fs. IIR: 146.3 dB, flat to 0.45 Fs.
     };
 
     struct Latency {
@@ -181,18 +184,19 @@ template <typename SampleType = float> class OversamplerT {
                 // Both biquads of a stage see the full high-rate stream and the
                 // decimator keeps even-phase samples.
                 total += 2.0 *
-                         biquad_group_delay(
-                             biquad_up_stages_[static_cast<std::size_t>(stage)].coefficients(), f) /
+                         section_group_delay(
+                             biquad_up_stages_[static_cast<std::size_t>(stage)].coefficients(),
+                             2.0 * std::numbers::pi * f) /
                          rate;
             }
         }
         return total;
     }
 
-    /// The elliptic half-band design stage `stage` uses in the polyphase_iir
-    /// lane at the current quality. Stage 0 runs at twice the base rate, stage
-    /// s at 2^(s+1) times it; frequencies in the design are relative to that
-    /// stage's own rate.
+    /// The elliptic half-band design stage `stage` (0 to 3) uses in the
+    /// polyphase_iir lane at `quality`. Stage 0 runs at twice the base rate,
+    /// stage s at 2^(s+1) times it; frequencies in the design are relative to
+    /// that stage's own rate. A stage outside 0..3 returns an invalid design.
     static HalfBandIirDesign polyphase_stage_design(Quality quality, int stage) noexcept {
         // Stage 0 fixes the base-band edge; stage s only has to keep the same
         // absolute band clean at 2^s times the rate, so its edge halves each
@@ -201,10 +205,25 @@ template <typename SampleType = float> class OversamplerT {
         constexpr std::array<std::size_t, kMaxStages> kStandardCounts = {6, 3, 2, 2};
         constexpr std::array<std::size_t, kMaxStages> kPristineCounts = {11, 5, 4, 3};
         const double base_edge = pristine ? 0.225 : 0.21;
-        const auto index = static_cast<std::size_t>(std::clamp(stage, 0, int(kMaxStages) - 1));
+        if (stage < 0 || stage >= static_cast<int>(kMaxStages))
+            return {};
+        const auto index = static_cast<std::size_t>(stage);
         const double edge = base_edge / static_cast<double>(1u << index);
         return design_halfband_iir(pristine ? kPristineCounts[index] : kStandardCounts[index],
                                    edge);
+    }
+
+    /// The polyphase lane's stopband floor at `quality`, in dB (negative): the
+    /// worst equiripple level over every stage design. Each stage guards the
+    /// same absolute base band, so the lane rejects images and aliases into
+    /// that band by at least this much at any factor. -94.85 dB standard,
+    /// -146.34 dB pristine; documentation quotes them as 94.8 and 146.3 dB.
+    static double polyphase_stopband_db(Quality quality) noexcept {
+        double worst = -1e300;
+        for (int stage = 0; stage < static_cast<int>(kMaxStages); ++stage)
+            worst =
+                std::max(worst, halfband_iir_stopband_db(polyphase_stage_design(quality, stage)));
+        return worst;
     }
 
     // Process a single sample with oversampled callback.
@@ -362,19 +381,6 @@ template <typename SampleType = float> class OversamplerT {
             }
         }
         return values[0];
-    }
-
-    static double biquad_group_delay(const BiquadCoefficientsT<SampleType>& c,
-                                     double frequency) noexcept {
-        // tau(B/A) = tau(B) - tau(A), tau(P) = Re(sum k p_k z^-k / sum p_k z^-k).
-        constexpr double kPi = 3.14159265358979323846;
-        const double w = 2.0 * kPi * frequency;
-        const std::complex<double> z1(std::cos(w), -std::sin(w));
-        const std::complex<double> z2 = z1 * z1;
-        const auto delay = [&](double p0, double p1, double p2) {
-            return std::real((p1 * z1 + 2.0 * p2 * z2) / (p0 + p1 * z1 + p2 * z2));
-        };
-        return delay(c.b0, c.b1, c.b2) - delay(1.0, c.a1, c.a2);
     }
 
     void configure_kind_filters() {

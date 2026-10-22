@@ -7,15 +7,16 @@ and the real-input transforms in `<pulp/signal/fft.hpp>`.
 
 | Kind | Default | Rejection | Passband | Latency |
 |---|---|---|---|---|
-| `polyphase_iir` | yes | `standard`: 94.8 dB from 0.58 Fs. `pristine`: 146 dB from 0.55 Fs (about -143 dB in the float build) | flat (< 1e-8 dB) to 0.42 Fs / 0.45 Fs | minimum phase, frequency dependent |
+| `polyphase_iir` | yes | `standard`: 94.8 dB from 0.58 Fs. `pristine`: 146.3 dB from 0.55 Fs (about 143 dB in the float build, which sits on its own rounding floor) | flat (< 1e-8 dB) to 0.42 Fs / 0.45 Fs | minimum phase, frequency dependent |
 | `fir_biquad` | no | about 7 dB just above base Nyquist, ~9 dB at 0.55 Fs | -1.9 dB at 0.3 Fs | minimum phase, frequency dependent |
 | `linear_phase_fir` | no | `standard`: 96 dB, `pristine`: 140 dB | flat to 0.40 Fs / 0.45 Fs | constant, reported by `latency()` |
 
 `Kind::polyphase_iir` cascades elliptic half-band allpass stages whose
 coefficients `design_halfband_iir(count, passband_edge)` derives in closed
-form. It is the cheapest lane at a given rejection: on an M3 Ultra it costs
-2.6 ns per base sample at x2 and 7.2 ns at x4, against the biquad lane's 15.2
-and 27.9 ns. Stage 0 sets the base-band edge; each higher stage only keeps the
+form. It is the cheapest lane at a given rejection: per base sample it costs
+about a sixth of the biquad lane's time at x2 and about a quarter at x4. The
+stopband figures are `OversamplerT::polyphase_stopband_db(quality)`, the worst
+stage design's equiripple level. Stage 0 sets the base-band edge; each higher stage only keeps the
 same absolute band clean at twice the rate, so it uses a much shorter design.
 
 A half-band's transition is symmetric about base Nyquist, so content the
@@ -27,7 +28,7 @@ matters, `linear_phase_fir` ends its transition at Nyquist instead.
 
 | Method | Description |
 |---|---|
-| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB, flat to 0.40 Fs) or `pristine` (140 dB, flat to 0.45 Fs). Polyphase lane: `standard` (94.8 dB from 0.58 Fs, flat to 0.42 Fs) or `pristine` (146 dB from 0.55 Fs, flat to 0.45 Fs). |
+| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB, flat to 0.40 Fs) or `pristine` (140 dB, flat to 0.45 Fs). Polyphase lane: `standard` (94.8 dB from 0.58 Fs, flat to 0.42 Fs) or `pristine` (146.3 dB from 0.55 Fs, flat to 0.45 Fs). |
 | `group_delay_samples(double f)` | Round-trip group delay in base samples at `f` cycles per base sample; constant for the linear-phase lane. |
 | `polyphase_stage_design(Quality, int stage)` | The `HalfBandIirDesign` a polyphase stage uses; evaluate it with `halfband_iir_response()`, `halfband_iir_magnitude_db()`, `halfband_iir_group_delay()` or `halfband_iir_stopband_db()`. |
 
@@ -79,4 +80,4 @@ safe after construction; size must be at least 2.
 
 On Apple platforms the float transform pins where its vDSP split buffers sit
 relative to a 64-byte boundary, because vDSP's speed depends on it (up to 1.9x
-for a 512-point real transform on M5).
+for a 512-point real transform, depending on the processor).

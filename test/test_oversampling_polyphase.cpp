@@ -91,6 +91,41 @@ constexpr std::array<Oversampler64::Factor, 4> kFactors = {
 
 } // namespace
 
+TEST_CASE("Each polyphase quality publishes one stopband figure",
+          "[signal][oversampling][polyphase_iir][stopband]") {
+    // The figure every document quotes (94.8 dB standard, 146.3 dB pristine)
+    // is the worst stage design's equiripple level. Pin both the published
+    // function and its derivation from the stage designs, so the header, the
+    // Quality comment, the reference page, and the migration note cannot drift
+    // from what the filters do.
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+        double worst = -1e300;
+        for (int stage = 0; stage < 4; ++stage)
+            worst = std::max(worst, pulp::signal::halfband_iir_stopband_db(
+                                        Oversampler64::polyphase_stage_design(quality, stage)));
+        const double published = Oversampler64::polyphase_stopband_db(quality);
+        REQUIRE(published == worst);
+        // A design whose figure rounds (toward zero) to anything else at one
+        // decimal makes every quoted number wrong.
+        const double quoted = quality == Oversampler64::Quality::pristine ? -146.3 : -94.8;
+        INFO("quality=" << static_cast<int>(quality) << " published=" << published);
+        REQUIRE(published <= quoted);
+        REQUIRE(published > quoted - 0.1);
+    }
+}
+
+TEST_CASE("Polyphase stage designs exist only for the four stages",
+          "[signal][oversampling][polyphase_iir]") {
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+        REQUIRE_FALSE(Oversampler64::polyphase_stage_design(quality, -1).valid());
+        REQUIRE_FALSE(Oversampler64::polyphase_stage_design(quality, 4).valid());
+        for (int stage = 0; stage < 4; ++stage)
+            REQUIRE(Oversampler64::polyphase_stage_design(quality, stage).valid());
+    }
+}
+
 TEST_CASE("Polyphase IIR stage designs meet their analytic floors",
           "[signal][oversampling][polyphase_iir][stopband]") {
     for (const auto quality :
