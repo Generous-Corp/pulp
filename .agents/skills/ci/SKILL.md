@@ -4562,6 +4562,17 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **Node 20's npm 10 cannot resolve some packages fresh; a lockless `npm
+  install` job reds permanently while passing on a dev machine.** npm 10
+  crashes in `#loadPeerSet` with "Cannot read properties of null (reading
+  'edgesOut')" on vitest 4's optional peer set (jsdom -> canvas); the npm 11
+  on a dev Mac resolves it fine. `@pulp/import-ir` failed this way on every
+  nightly for a week. Give the package a lockfile and use `npm ci`. Generate
+  that lockfile with npm 10 (`npx -y npm@10 install --legacy-peer-deps`):
+  npm 11.19 wrote vitest's nested `@esbuild/*` platform entries without
+  `optional`, so `npm ci` then refused with `notsup` on every other CPU.
+  Reproduce with `npx -y npm@10 ci` before pushing.
+
 - **An hourly-or-faster cron here fires about once every five hours.** GitHub
   delays `schedule` events under load and drops the backlog; daily crons still
   fire daily, five to seven hours late. Never assume a `*/15` or `*/30` safety
