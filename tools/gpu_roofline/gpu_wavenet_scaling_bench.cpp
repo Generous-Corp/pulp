@@ -19,6 +19,8 @@
 //            blocking readback each)
 //   batch  — one wavenet_forward_batch() per period (all instances encoded into
 //            one submit, read back through one map)
+//   group  — one wavenet_forward_group() per period (all instances in shared
+//            buffers, one dispatch per pass for the whole group)
 //
 // Tooling only; built under PULP_ENABLE_GPU. Needs a real GPU/Dawn device and
 // exits 77 when none is available. Unpaced and short: it measures cost, not
@@ -338,7 +340,10 @@ int main(int argc, char** argv) {
         else if (k == "--keep-warm") keep_warm = v == "1";
         else { std::fprintf(stderr, "unknown argument %s\n", k.c_str()); return 2; }
     }
-    if (mode != "serial" && mode != "batch") { std::fprintf(stderr, "--mode serial|batch\n"); return 2; }
+    if (mode != "serial" && mode != "batch" && mode != "group") {
+        std::fprintf(stderr, "--mode serial|batch|group\n");
+        return 2;
+    }
 
     auto probe = GpuCompute::create();
     if (!probe || !probe->initialize_standalone()) { std::printf("SKIP: no GPU compute device\n"); return 77; }
@@ -390,11 +395,19 @@ int main(int argc, char** argv) {
                 if (!gpu || !gpu->initialize_standalone()) { std::printf("SKIP: no GPU compute device\n"); return 77; }
                 std::vector<std::vector<float>> weights(N);
                 bool ok = true;
+                std::vector<const float*> wp(N);
+                std::vector<float> scales(N);
                 for (uint32_t i = 0; i < N && ok; ++i) {
                     weights[i] = m.weights.empty() ? synth_weights(m, i) : m.weights;
-                    ok = gpu->prepare_wavenet(plan.specs.data(), static_cast<uint32_t>(plan.specs.size()),
-                                              weights[i].data(), need, B, weights[i].back(), i);
+                    wp[i] = weights[i].data();
+                    scales[i] = weights[i].back();
+                    if (mode != "group")
+                        ok = gpu->prepare_wavenet(plan.specs.data(), static_cast<uint32_t>(plan.specs.size()),
+                                                  weights[i].data(), need, B, weights[i].back(), i);
                 }
+                if (ok && mode == "group")
+                    ok = gpu->prepare_wavenet_group(plan.specs.data(), static_cast<uint32_t>(plan.specs.size()),
+                                                    wp.data(), need, scales.data(), N, B, 0);
                 if (!ok) { std::printf("%s B=%u N=%u: prepare_wavenet failed\n", m.name.c_str(), B, N); ++failures; continue; }
 
                 const double period_us = 1e6 * B / sample_rate;
@@ -432,14 +445,16 @@ int main(int argc, char** argv) {
                     // Every 8th batched period carries a GPU timestamp; its second
                     // readback would inflate wall time, so it is kept out of the
                     // wall/CPU statistics.
-                    const bool timed = mode == "batch" && p % 8u == 7u;
+                    const bool timed = mode != "serial" && p % 8u == 7u;
                     double g = -1.0;
                     const double c0 = thread_cpu_us();
                     const auto t0 = Clock::now();
                     if (mode == "serial") {
                         for (uint32_t i = 0; i < N && ok; ++i) ok = gpu->wavenet_forward(ip[i], op[i], B, i);
-                    } else {
+                    } else if (mode == "batch") {
                         ok = gpu->wavenet_forward_batch(ip.data(), op.data(), ids.data(), N, B, timed ? &g : nullptr);
+                    } else {
+                        ok = gpu->wavenet_forward_group(ip.data(), op.data(), N, B, 0, timed ? &g : nullptr);
                     }
                     const auto t1 = Clock::now();
                     const double c1 = thread_cpu_us();

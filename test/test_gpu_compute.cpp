@@ -1725,6 +1725,85 @@ TEST_CASE("GpuCompute wavenet_forward_batch matches per-instance forwards bit-fo
     REQUIRE(peak > 1e-3);
 }
 
+TEST_CASE("GpuCompute wavenet_forward_group matches per-instance forwards bit-for-bit",
+          "[render][gpu][compute]") {
+    // A group runs every instance in shared buffers with one dispatch per pass.
+    // Each instance must still produce exactly what it produces alone, over
+    // several streaming blocks, with its own weights and its own head_scale.
+    // One instance's head_scale argument deliberately differs from the trailing
+    // float of its blob: the argument is the value that must take effect.
+    auto serial = GpuCompute::create();
+    auto grouped = GpuCompute::create();
+    if (!serial || !serial->initialize_standalone()) SKIP(kNoGpu);
+    if (!grouped || !grouped->initialize_standalone()) SKIP(kNoGpu);
+
+    const BatchNet net;
+    constexpr uint32_t N = 5, B = 24, blocks = 8;
+    std::vector<std::vector<float>> w(N);
+    std::vector<const float*> wp(N);
+    std::vector<float> scales(N);
+    for (uint32_t i = 0; i < N; ++i) {
+        w[i] = net.weights(i);
+        wp[i] = w[i].data();
+        scales[i] = (i == 2) ? -1.25f : w[i].back();
+        REQUIRE(serial->prepare_wavenet(net.specs, 2, w[i].data(), net.need, B, scales[i], i));
+    }
+    REQUIRE(grouped->prepare_wavenet_group(net.specs, 2, wp.data(), net.need, scales.data(), N, B, 7));
+
+    double peak = 0.0;
+    for (uint32_t blk = 0; blk < blocks; ++blk) {
+        std::vector<std::vector<float>> in(N, std::vector<float>(B)), a(N, std::vector<float>(B, 0.0f)),
+            b(N, std::vector<float>(B, -7.0f));
+        std::vector<const float*> ip(N);
+        std::vector<float*> op(N);
+        for (uint32_t i = 0; i < N; ++i) {
+            for (uint32_t t = 0; t < B; ++t)
+                in[i][t] = 0.6f * std::sin(0.05f * (blk * B + t) * (i + 1)) - 0.08f * i;
+            ip[i] = in[i].data();
+            op[i] = b[i].data();
+            REQUIRE(serial->wavenet_forward(in[i].data(), a[i].data(), B, i));
+        }
+        double busy = 0.0;
+        REQUIRE(grouped->wavenet_forward_group(ip.data(), op.data(), N, B, 7, &busy));
+        REQUIRE((busy == -1.0 || busy >= 0.0));
+        for (uint32_t i = 0; i < N; ++i)
+            for (uint32_t t = 0; t < B; ++t) {
+                INFO("block " << blk << " instance " << i << " sample " << t);
+                REQUIRE(std::isfinite(b[i][t]));
+                REQUIRE(b[i][t] == a[i][t]);
+                peak = std::max(peak, static_cast<double>(std::abs(a[i][t])));
+            }
+    }
+    REQUIRE(peak > 1e-3);
+}
+
+TEST_CASE("GpuCompute wavenet group rejects mismatched calls", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
+    const BatchNet net;
+    constexpr uint32_t B = 16;
+    const std::vector<float> w0 = net.weights(0), w1 = net.weights(1);
+    const float* wp[2] = {w0.data(), w1.data()};
+    const float scales[2] = {w0.back(), w1.back()};
+    REQUIRE_FALSE(compute->prepare_wavenet_group(net.specs, 2, wp, net.need, scales, 0, B, 0));
+    REQUIRE_FALSE(compute->prepare_wavenet_group(net.specs, 2, wp, net.need - 1, scales, 2, B, 0));
+    const float* null_w[2] = {w0.data(), nullptr};
+    REQUIRE_FALSE(compute->prepare_wavenet_group(net.specs, 2, null_w, net.need, scales, 2, B, 0));
+    REQUIRE(compute->prepare_wavenet_group(net.specs, 2, wp, net.need, scales, 2, B, 0));
+
+    std::vector<float> in(B, 0.2f), o0(B), o1(B);
+    const float* ip[2] = {in.data(), in.data()};
+    float* op[2] = {o0.data(), o1.data()};
+    REQUIRE_FALSE(compute->wavenet_forward_group(ip, op, 1, B, 0));       // count mismatch
+    REQUIRE_FALSE(compute->wavenet_forward_group(ip, op, 2, B * 2, 0));   // block size mismatch
+    REQUIRE_FALSE(compute->wavenet_forward_group(ip, op, 2, B, 3));       // unknown group
+    const float* null_in[2] = {in.data(), nullptr};
+    REQUIRE_FALSE(compute->wavenet_forward_group(null_in, op, 2, B, 0));
+    REQUIRE(compute->wavenet_forward_group(ip, op, 2, B, 0));
+    // A group is not a per-instance plan: the single-stream API cannot reach it.
+    REQUIRE_FALSE(compute->wavenet_forward(in.data(), o0.data(), B, 0));
+}
+
 TEST_CASE("GpuCompute wavenet_forward_batch rejects a bad set without advancing history",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();

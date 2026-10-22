@@ -536,6 +536,12 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 // head accumulate) → head rechannel, chained array→array, then head_scale.
 // Channels are capped at 64 so the per-thread scratch arrays are fixed-size.
 
+// Every WaveNet pass also runs over a group of independent same-shape instances:
+// workgroup_id.y / global_invocation_id.y is the instance, and every buffer
+// holds one fixed-size slice per instance (weights: st.y floats; input/output:
+// B; a ring: channels*(mask+1); a head sum: C*B; a head output: H*B). A plan
+// with one instance is simply a group of one. `st` is the per-block stream
+// state shared by the group: x = stream position, y = weight slice length.
 static constexpr const char* kWavenetRechannelShader = R"wgsl(
 // 1x1 rechannel (no bias): dst[t] = W * src[t]. Activations are column rings:
 // sample n of the stream lives in column (n & mask), where n = st.x + t and
@@ -552,12 +558,14 @@ struct P { in_ch:u32, out_ch:u32, B:u32, w_off:u32, src_mask:u32, dst_mask:u32, 
 fn main(@builtin(global_invocation_id) gid : vec3u) {
     let t = gid.x;
     if (t >= p.B) { return; }
+    let inst = gid.y;
     let n = st.x + t;
-    let scol = select(t, n & p.src_mask, p.src_ring == 1u) * p.in_ch;
-    let dcol = (n & p.dst_mask) * p.out_ch;
+    let src0 = select(inst * p.B, inst * p.in_ch * (p.src_mask + 1u), p.src_ring == 1u);
+    let scol = src0 + select(t, n & p.src_mask, p.src_ring == 1u) * p.in_ch;
+    let dcol = inst * p.out_ch * (p.dst_mask + 1u) + (n & p.dst_mask) * p.out_ch;
     for (var oc = 0u; oc < p.out_ch; oc = oc + 1u) {
         var acc = 0.0;
-        let wrow = p.w_off + oc * p.in_ch;
+        let wrow = inst * st.y + p.w_off + oc * p.in_ch;
         for (var ic = 0u; ic < p.in_ch; ic = ic + 1u) {
             acc = acc + wts[wrow + ic] * src[scol + ic];
         }
@@ -597,7 +605,7 @@ struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, in_mask:u32,
 @group(0) @binding(3) var<storage, read>       cond    : array<f32>;  // B mono input
 @group(0) @binding(4) var<storage, read_write> headacc : array<f32>;  // C*B
 @group(0) @binding(5) var<uniform>             p       : P;
-@group(0) @binding(6) var<uniform>             st      : vec4u;
+@group(0) @binding(6) var<uniform>             st      : vec4u;  // per-instance slices: see above
 
 const WG : u32 = 64u;                    // lanes per workgroup
 var<workgroup> zbuf : array<f32, 128>;   // S*Z <= 128 (Zmax = 2*Cmax at S = 1)
@@ -608,12 +616,17 @@ fn main(@builtin(workgroup_id) wid : vec3u,
         @builtin(local_invocation_id) lid : vec3u) {
     let S = p.S;
     let t0 = wid.x * S;                  // first sample of this workgroup
+    let inst = wid.y;                    // instance within the group
     // Uniform guard: workgroup_id is identical for every lane, so the whole
     // workgroup returns together — barriers below stay in uniform control flow.
     // Samples past B inside the last workgroup are masked per item instead.
     if (t0 >= p.B) { return; }
     let lane = lid.x;
     let C = p.C; let K = p.K; let Z = p.Z;
+    let w0 = inst * st.y;                        // this instance's weight slice
+    let in0 = inst * C * (p.in_mask + 1u);       // this instance's input ring
+    let out0 = inst * C * (p.out_mask + 1u);     // this instance's output ring
+    let h0 = inst * C * p.B;                     // this instance's head sum
     // Conv stage — dilated conv + input mixin, one item per (sample, output channel).
     for (var i = lane; i < S * Z; i = i + WG) {
         let s = i / Z;
@@ -621,16 +634,16 @@ fn main(@builtin(workgroup_id) wid : vec3u,
         let t = t0 + s;
         if (t < p.B) {
             let n = st.x + t;
-            var acc = wts[p.conv_b + oc];
+            var acc = wts[w0 + p.conv_b + oc];
             for (var k = 0u; k < K; k = k + 1u) {
                 let back = p.dil * (K - 1u - k);   // valid: ring history >= max back
-                let base = ((n - back) & p.in_mask) * C;
-                let wbase = p.conv_w + oc * C * K + k;
+                let base = in0 + ((n - back) & p.in_mask) * C;
+                let wbase = w0 + p.conv_w + oc * C * K + k;
                 for (var ic = 0u; ic < C; ic = ic + 1u) {
                     acc = acc + wts[wbase + ic * K] * ina[base + ic];
                 }
             }
-            acc = acc + wts[p.mix_w + oc] * cond[t];   // input_mixin (condition_size == 1)
+            acc = acc + wts[w0 + p.mix_w + oc] * cond[inst * p.B + t];   // input_mixin (condition_size == 1)
             zbuf[i] = acc;
         }
     }
@@ -661,16 +674,16 @@ fn main(@builtin(workgroup_id) wid : vec3u,
             // layer adds to it (a later array's sum arrives pre-seeded with the
             // previous array's head output).
             if (p.head_init == 1u) {
-                headacc[t * C + oc] = abuf[i];
+                headacc[h0 + t * C + oc] = abuf[i];
             } else {
-                headacc[t * C + oc] = headacc[t * C + oc] + abuf[i];
+                headacc[h0 + t * C + oc] = headacc[h0 + t * C + oc] + abuf[i];
             }
             let n = st.x + t;
-            var r = wts[p.l1_b + oc];
-            let rrow = p.l1_w + oc * C;
+            var r = wts[w0 + p.l1_b + oc];
+            let rrow = w0 + p.l1_w + oc * C;
             let a0 = s * C;
             for (var ic = 0u; ic < C; ic = ic + 1u) { r = r + wts[rrow + ic] * abuf[a0 + ic]; }
-            outa[(n & p.out_mask) * C + oc] = ina[(n & p.in_mask) * C + oc] + r;
+            outa[out0 + (n & p.out_mask) * C + oc] = ina[in0 + (n & p.in_mask) * C + oc] + r;
         }
     }
 }
@@ -683,16 +696,19 @@ struct P { C:u32, H:u32, B:u32, hr_w:u32, hr_b:u32, head_bias:u32, p0:u32, p1:u3
 @group(0) @binding(1) var<storage, read>       headacc : array<f32>;  // C*B
 @group(0) @binding(2) var<storage, read_write> headout : array<f32>;  // H*B
 @group(0) @binding(3) var<uniform>             p       : P;
+@group(0) @binding(4) var<uniform>             st      : vec4u;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
     let t = gid.x;
     if (t >= p.B) { return; }
-    let ic0 = t * p.C;
-    let oc0 = t * p.H;
+    let inst = gid.y;
+    let w0 = inst * st.y;
+    let ic0 = inst * p.C * p.B + t * p.C;
+    let oc0 = inst * p.H * p.B + t * p.H;
     for (var oc = 0u; oc < p.H; oc = oc + 1u) {
         var acc = 0.0;
-        if (p.head_bias == 1u) { acc = wts[p.hr_b + oc]; }
-        let wrow = p.hr_w + oc * p.C;
+        if (p.head_bias == 1u) { acc = wts[w0 + p.hr_b + oc]; }
+        let wrow = w0 + p.hr_w + oc * p.C;
         for (var ic = 0u; ic < p.C; ic = ic + 1u) {
             acc = acc + wts[wrow + ic] * headacc[ic0 + ic];
         }
@@ -702,16 +718,21 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 )wgsl";
 
 static constexpr const char* kWavenetScaleShader = R"wgsl(
-// Final output: out[t] = head_scale * last_headout[t*H + 0].
-struct P { B:u32, H:u32, scale:f32, p0:u32 };
+// Final output: out[t] = head_scale * last_headout[t*H + 0]. Each instance's
+// head_scale is the last float of its weight slice.
+struct P { B:u32, H:u32, p0:u32, p1:u32 };
 @group(0) @binding(0) var<storage, read>       headout : array<f32>;  // H*B
 @group(0) @binding(1) var<storage, read_write> outp    : array<f32>;  // B
 @group(0) @binding(2) var<uniform>             p       : P;
+@group(0) @binding(3) var<storage, read>       wts     : array<f32>;
+@group(0) @binding(4) var<uniform>             st      : vec4u;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
     let t = gid.x;
     if (t >= p.B) { return; }
-    outp[t] = headout[t * p.H] * p.scale;
+    let inst = gid.y;
+    let scale = wts[inst * st.y + st.y - 1u];
+    outp[inst * p.B + t] = headout[inst * p.H * p.B + t * p.H] * scale;
 }
 )wgsl";
 
@@ -1134,6 +1155,7 @@ class DawnGpuCompute : public GpuCompute {
         spectral_stack_plans_.clear();
         conv_stack_plans_.clear();
         wavenet_plans_.clear();
+        wavenet_group_plans_.clear();
         wavenet_batch_plans_.clear();
         wavenet_batch_readback_ = nullptr;
         pipeline_cache_.clear();
@@ -2471,189 +2493,71 @@ class DawnGpuCompute : public GpuCompute {
                      const float* weights, uint32_t weights_len,
                      uint32_t block_size, float head_scale,
                      uint32_t instance) override {
-        if (!ready_for_work() || !arrays || !weights)
-            return false;
-        const uint32_t B = block_size;
-        if (num_arrays == 0 || B == 0) return false;
-
-        // Validate shapes + compute the exact weight count by walking the blob in
-        // the serialization order below. Layout must match the flat weight blob byte-for-byte.
-        uint64_t need = 0;
-        for (uint32_t a = 0; a < num_arrays; ++a) {
-            const WavenetLayerArraySpec& s = arrays[a];
-            if (s.channels == 0 || s.channels > 64 || s.kernel == 0 ||
-                s.num_layers == 0 || !s.dilations || s.head_size == 0)
-                return false;
-            if (s.condition_size != 1) return false;  // mono condition only
-            const uint32_t expect_in = (a == 0) ? 1u : arrays[a - 1].channels;
-            if (s.input_size != expect_in) return false;
-            if (a > 0 && arrays[a - 1].head_size != s.channels) return false;  // head chain
-            const uint64_t Z = s.gated ? 2ull * s.channels : s.channels;
-            need += static_cast<uint64_t>(s.channels) * s.input_size;  // rechannel
-            for (uint32_t l = 0; l < s.num_layers; ++l)
-                need += Z * s.channels * s.kernel + Z          // conv W+bias
-                        + Z * s.condition_size                  // input_mixin
-                        + static_cast<uint64_t>(s.channels) * s.channels + s.channels;  // layer1x1
-            need += static_cast<uint64_t>(s.head_size) * s.channels
-                    + (s.head_bias ? s.head_size : 0u);        // head rechannel
-        }
-        need += 1;  // trailing head_scale
-        if (weights_len != need) return false;
-
         WavenetPlan plan;
-        plan.B = B;
-        plan.head_scale = head_scale;
+        if (!build_wavenet_plan(arrays, num_arrays, &weights, weights_len, &head_scale, 1,
+                                block_size, plan))
+            return false;
+        wavenet_plans_.insert_or_assign(wavenet_plan_key(block_size, instance), std::move(plan));
+        return true;
+    }
 
-        const uint32_t wbytes = static_cast<uint32_t>(need) * 4u;
-        const uint32_t blk_bytes = B * 4u;
-        const auto act_usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc
-                             | wgpu::BufferUsage::CopyDst;
-        plan.weights = create_storage_buffer(wbytes,
-            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-        plan.input = create_storage_buffer(blk_bytes,
-            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-        plan.output = create_storage_buffer(blk_bytes,
-            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
-        plan.readback = create_readback_buffer(blk_bytes);
-        if (!plan.weights || !plan.input || !plan.output || !plan.readback) return false;
-        queue_.WriteBuffer(plan.weights, 0, weights, wbytes);
+    bool prepare_wavenet_group(const WavenetLayerArraySpec* arrays, uint32_t num_arrays,
+                               const float* const* weights, uint32_t weights_len,
+                               const float* head_scales, uint32_t count,
+                               uint32_t block_size, uint32_t group) override {
+        WavenetPlan plan;
+        if (!build_wavenet_plan(arrays, num_arrays, weights, weights_len, head_scales, count,
+                                block_size, plan))
+            return false;
+        wavenet_group_plans_.insert_or_assign(wavenet_plan_key(block_size, group), std::move(plan));
+        return true;
+    }
 
-        auto make_uniform = [&](uint32_t size) {
-            wgpu::BufferDescriptor ud{};
-            ud.size = size;
-            ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-            return device_.CreateBuffer(&ud);
-        };
+    bool wavenet_forward_group(const float* const* in_blocks, float* const* out_blocks,
+                               uint32_t count, uint32_t block_size, uint32_t group,
+                               double* gpu_busy_us) override {
+        if (gpu_busy_us) *gpu_busy_us = -1.0;
+        if (!ready_for_work() || !in_blocks || !out_blocks) return false;
+        auto it = wavenet_group_plans_.find(wavenet_plan_key(block_size, group));
+        if (it == wavenet_group_plans_.end() || it->second.count != count) return false;
+        for (uint32_t i = 0; i < count; ++i)
+            if (!in_blocks[i] || !out_blocks[i]) return false;
+        WavenetPlan& plan = it->second;
+        const std::size_t B = block_size;
+        const uint32_t bytes = static_cast<uint32_t>(B * count * sizeof(float));
+        if (wavenet_batch_scratch_.size() < B * count) wavenet_batch_scratch_.assign(B * count, 0.0f);
+        for (uint32_t i = 0; i < count; ++i)
+            std::memcpy(wavenet_batch_scratch_.data() + B * i, in_blocks[i], B * sizeof(float));
+        queue_.WriteBuffer(plan.input, 0, wavenet_batch_scratch_.data(), bytes);
 
-        // Per-block stream position (sample index of the block's first sample),
-        // read by every ring-indexed pass. Written by encode_wavenet().
-        plan.stream_u = make_uniform(16);
-        if (!plan.stream_u) return false;
-        // A ring holds `history + B` columns, rounded up to a power of two so the
-        // shader can wrap with a mask and the u32 stream position never skews it.
-        auto ring_columns = [B](uint32_t history) {
-            uint32_t r = 1;
-            while (r < history + B) r <<= 1;
-            return r;
-        };
-
-        uint64_t woff = 0;
-
-        for (uint32_t a = 0; a < num_arrays; ++a) {
-            const WavenetLayerArraySpec& s = arrays[a];
-            const uint32_t C = s.channels, K = s.kernel, H = s.head_size;
-            const uint32_t Z = s.gated ? 2u * C : C;
-            WavenetArray na;
-            na.channels = C; na.head_size = H; na.num_layers = s.num_layers;
-            na.head_bias = s.head_bias;
-            // Samples per layer workgroup: as many as fit S*Z into the shader's
-            // 64 lanes (and its 128-float z / 64-float activation scratch).
-            na.samples_per_group = Z <= 64u ? 64u / Z : 1u;
-
-            // act[l] feeds layer l, which reaches dil_l*(K-1) samples back; the
-            // last activation only feeds the next array's rechannel at the
-            // current samples, so it carries no history.
-            for (uint32_t l = 0; l <= s.num_layers; ++l) {
-                const uint32_t history = (l < s.num_layers) ? s.dilations[l] * (K - 1u) : 0u;
-                const uint32_t cols = ring_columns(history);
-                const uint64_t bytes64 = static_cast<uint64_t>(C) * cols * 4u;
-                if (bytes64 > 0xffffffffull) return false;
-                const uint32_t act_bytes = static_cast<uint32_t>(bytes64);
-                wgpu::Buffer buf = create_storage_buffer(act_bytes, act_usage);
-                if (!buf) return false;
-                std::vector<float> act_zero(static_cast<std::size_t>(C) * cols, 0.0f);
-                queue_.WriteBuffer(buf, 0, act_zero.data(), act_bytes);  // zero history
-                na.act.push_back(std::move(buf));
-                na.act_mask.push_back(cols - 1u);
-            }
-            na.headacc = create_storage_buffer(C * B * 4u, wgpu::BufferUsage::Storage);
-            if (!na.headacc) return false;
-            if (a + 1 == num_arrays) {
-                na.headout = create_storage_buffer(H * B * 4u, wgpu::BufferUsage::Storage);
-                if (!na.headout) return false;
-            }
-
-            // rechannel offset (consumed first in the array).
-            const uint32_t rc_w = static_cast<uint32_t>(woff);
-            woff += static_cast<uint64_t>(C) * s.input_size;
-
-            // rechannel uniform + bind group. Array 0 reads the block-local mono
-            // input (in_ch=1); array a>0 reads the previous array's last
-            // activation ring (in_ch=prevC) at the current samples.
-            na.rechannel_u = make_uniform(32);
-            const uint32_t src_mask = (a == 0) ? 0u : plan.arrays[a - 1].act_mask.back();
-            struct RcU { uint32_t in_ch, out_ch, B, w_off, src_mask, dst_mask, src_ring, p1; }
-                rcu{s.input_size, C, B, rc_w, src_mask, na.act_mask[0], a == 0 ? 0u : 1u, 0};
-            queue_.WriteBuffer(na.rechannel_u, 0, &rcu, sizeof(rcu));
-            const wgpu::Buffer& rc_src = (a == 0) ? plan.input
-                                                  : plan.arrays[a - 1].act.back();
-            na.rechannel_bg = create_bind_group(wavenet_rechannel_pipeline_,
-                {plan.weights, rc_src, na.act[0], na.rechannel_u, plan.stream_u});
-            if (!na.rechannel_bg) return false;
-
-            for (uint32_t l = 0; l < s.num_layers; ++l) {
-                const uint32_t conv_w = static_cast<uint32_t>(woff);
-                woff += static_cast<uint64_t>(Z) * C * K;
-                const uint32_t conv_b = static_cast<uint32_t>(woff);
-                woff += Z;
-                const uint32_t mix_w = static_cast<uint32_t>(woff);
-                woff += static_cast<uint64_t>(Z) * s.condition_size;
-                const uint32_t l1_w = static_cast<uint32_t>(woff);
-                woff += static_cast<uint64_t>(C) * C;
-                const uint32_t l1_b = static_cast<uint32_t>(woff);
-                woff += C;
-
-                wgpu::Buffer u = make_uniform(64);
-                struct LyU { uint32_t C, K, B, dil, Z, gated, in_mask,
-                             conv_w, conv_b, mix_w, l1_w, l1_b, out_mask, S, p2, p3; }
-                    lyu{C, K, B, s.dilations[l], Z, s.gated, na.act_mask[l],
-                        conv_w, conv_b, mix_w, l1_w, l1_b, na.act_mask[l + 1],
-                        na.samples_per_group, (a == 0 && l == 0) ? 1u : 0u, 0};
-                queue_.WriteBuffer(u, 0, &lyu, sizeof(lyu));
-                wgpu::BindGroup bg = create_bind_group(wavenet_layer_pipeline_,
-                    {plan.weights, na.act[l], na.act[l + 1], plan.input, na.headacc, u,
-                     plan.stream_u});
-                if (!bg) return false;
-                na.layer_u.push_back(std::move(u));
-                na.layer_bg.push_back(std::move(bg));
-            }
-
-            const uint32_t hr_w = static_cast<uint32_t>(woff);
-            woff += static_cast<uint64_t>(H) * C;
-            const uint32_t hr_b = static_cast<uint32_t>(woff);
-            if (s.head_bias) woff += H;
-
-            na.head_u = make_uniform(32);
-            struct HdU { uint32_t C, H, B, hr_w, hr_b, head_bias, p0, p1; }
-                hdu{C, H, B, hr_w, hr_b, s.head_bias, 0, 0};
-            queue_.WriteBuffer(na.head_u, 0, &hdu, sizeof(hdu));
-
-            plan.arrays.push_back(std::move(na));
+        const bool timed = gpu_busy_us && has_timestamp_ && ensure_device_ts() &&
+                           ensure_timestamp_marker();
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        if (timed) encode_timestamp_marker(encoder, true);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            encode_wavenet(pass, plan);
+            pass.End();
         }
-        // A head rechannel writes straight into the next array's head sum (its
-        // seed: head_size == next channels), so arrays chain with no copy; the
-        // last array writes its own head output for the scale pass.
-        for (std::size_t a = 0; a < plan.arrays.size(); ++a) {
-            WavenetArray& na = plan.arrays[a];
-            const wgpu::Buffer& dst = (a + 1 < plan.arrays.size()) ? plan.arrays[a + 1].headacc
-                                                                   : na.headout;
-            na.head_bg = create_bind_group(wavenet_head_pipeline_,
-                {plan.weights, na.headacc, dst, na.head_u});
-            if (!na.head_bg) return false;
+        encoder.CopyBufferToBuffer(plan.output, 0, plan.readback, 0, bytes);
+        if (timed) {
+            encode_timestamp_marker(encoder, false);
+            encoder.ResolveQuerySet(dev_ts_qs_, 0, 2, dev_ts_resolve_, 0);
+            encoder.CopyBufferToBuffer(dev_ts_resolve_, 0, dev_ts_readback_, 0,
+                                       2u * sizeof(uint64_t));
         }
-
-        // Final scale pass over the last array's head output (head_size==1 in the
-        // standard model; the shader reads index 0 of each sample's head vector).
-        const WavenetArray& last = plan.arrays.back();
-        plan.scale_u = make_uniform(16);
-        struct ScU { uint32_t B, H; float scale; uint32_t p0; }
-            scu{B, last.head_size, head_scale, 0};
-        queue_.WriteBuffer(plan.scale_u, 0, &scu, sizeof(scu));
-        plan.scale_bg = create_bind_group(wavenet_scale_pipeline_,
-            {last.headout, plan.output, plan.scale_u});
-        if (!plan.scale_bg) return false;
-
-        wavenet_plans_.insert_or_assign(wavenet_plan_key(B, instance), std::move(plan));
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+        if (!read_back(plan.readback, wavenet_batch_scratch_.data(), bytes)) return false;
+        for (uint32_t i = 0; i < count; ++i)
+            std::memcpy(out_blocks[i], wavenet_batch_scratch_.data() + B * i, B * sizeof(float));
+        if (timed) {
+            uint64_t ticks[2] = {0, 0};
+            if (read_back(dev_ts_readback_, ticks, 2u * sizeof(uint64_t)) && ticks[1] >= ticks[0])
+                *gpu_busy_us = static_cast<double>(ticks[1] - ticks[0]) / 1000.0;
+        }
         return true;
     }
 
@@ -2718,20 +2622,7 @@ class DawnGpuCompute : public GpuCompute {
         // Marker passes carry the begin/end timestamps so the span covers every
         // instance's dispatches and history copies, whatever their encoder kind.
         const bool timed = do_ts && ensure_timestamp_marker();
-        auto timestamp_pass = [&](bool begin) {
-            wgpu::ComputePassDescriptor pd{};
-            wgpu::PassTimestampWrites tw{};
-            tw.querySet = dev_ts_qs_;
-            tw.beginningOfPassWriteIndex = begin ? 0u : wgpu::kQuerySetIndexUndefined;
-            tw.endOfPassWriteIndex = begin ? wgpu::kQuerySetIndexUndefined : 1u;
-            pd.timestampWrites = &tw;
-            auto pass = encoder.BeginComputePass(&pd);
-            pass.SetPipeline(timestamp_marker_pipeline_);
-            pass.SetBindGroup(0, timestamp_marker_bg_);
-            pass.DispatchWorkgroups(1);
-            pass.End();
-        };
-        if (timed) timestamp_pass(true);
+        if (timed) encode_timestamp_marker(encoder, true);
         {
             wgpu::ComputePassDescriptor pd{};
             auto pass = encoder.BeginComputePass(&pd);
@@ -2742,7 +2633,7 @@ class DawnGpuCompute : public GpuCompute {
             encoder.CopyBufferToBuffer(wavenet_batch_plans_[i]->output, 0, wavenet_batch_readback_,
                                        blk_bytes * i, blk_bytes);
         if (timed) {
-            timestamp_pass(false);
+            encode_timestamp_marker(encoder, false);
             encoder.ResolveQuerySet(dev_ts_qs_, 0, 2, dev_ts_resolve_, 0);
             encoder.CopyBufferToBuffer(dev_ts_resolve_, 0, dev_ts_readback_, 0,
                                        2u * sizeof(uint64_t));
@@ -3677,6 +3568,23 @@ private:
         return dev_ts_qs_ && dev_ts_resolve_ && dev_ts_readback_;
     }
 
+    // A one-dispatch marker pass carrying the begin (slot 0) or end (slot 1)
+    // timestamp of a timed span. Requires ensure_device_ts() and
+    // ensure_timestamp_marker().
+    void encode_timestamp_marker(wgpu::CommandEncoder& encoder, bool begin) {
+        wgpu::ComputePassDescriptor pd{};
+        wgpu::PassTimestampWrites tw{};
+        tw.querySet = dev_ts_qs_;
+        tw.beginningOfPassWriteIndex = begin ? 0u : wgpu::kQuerySetIndexUndefined;
+        tw.endOfPassWriteIndex = begin ? wgpu::kQuerySetIndexUndefined : 1u;
+        pd.timestampWrites = &tw;
+        auto pass = encoder.BeginComputePass(&pd);
+        pass.SetPipeline(timestamp_marker_pipeline_);
+        pass.SetBindGroup(0, timestamp_marker_bg_);
+        pass.DispatchWorkgroups(1);
+        pass.End();
+    }
+
     // Scratch target for the timestamp marker passes (created on first timed use).
     wgpu::Buffer timestamp_marker_buffer_;
     wgpu::BindGroup timestamp_marker_bg_;
@@ -3911,7 +3819,8 @@ private:
     };
     struct WavenetPlan {
         uint32_t B = 0;
-        float head_scale = 1.0f;
+        uint32_t count = 1;           // same-shape instances run together
+        uint32_t weight_stride = 0;   // floats per instance weight slice
         wgpu::Buffer weights, input, output, readback;
         wgpu::Buffer scale_u, stream_u;
         uint32_t position = 0;   // stream sample index of the next block (wraps)
@@ -3925,11 +3834,214 @@ private:
         return (static_cast<uint64_t>(block_size) << 32) | instance;
     }
     std::unordered_map<uint64_t, WavenetPlan> wavenet_plans_;
+    // Instance groups from prepare_wavenet_group(), keyed by (block_size, group).
+    std::unordered_map<uint64_t, WavenetPlan> wavenet_group_plans_;
     // wavenet_forward_batch() state: the validated plan list, a shared readback
     // sized for the largest batch seen, and its host-side landing scratch.
     std::vector<WavenetPlan*> wavenet_batch_plans_;
     wgpu::Buffer wavenet_batch_readback_;
     std::vector<float> wavenet_batch_scratch_;
+
+    // Builds a plan for `count` same-shape WaveNet instances that run as one
+    // group (count == 1 for an ordinary single-stream plan). Each instance gets
+    // its own weight slice, rings, head sums and input/output block in shared
+    // buffers; every pass dispatches all instances at once.
+    bool build_wavenet_plan(const WavenetLayerArraySpec* arrays, uint32_t num_arrays,
+                            const float* const* weights, uint32_t weights_len,
+                            const float* head_scales, uint32_t count, uint32_t block_size,
+                            WavenetPlan& plan) {
+        if (!ready_for_work() || !arrays || !weights || !head_scales || count == 0)
+            return false;
+        for (uint32_t i = 0; i < count; ++i)
+            if (!weights[i]) return false;
+        const uint32_t B = block_size;
+        if (num_arrays == 0 || B == 0) return false;
+
+        // Validate shapes + compute the exact weight count by walking the blob in
+        // the serialization order below. Layout must match the flat weight blob byte-for-byte.
+        uint64_t need = 0;
+        for (uint32_t a = 0; a < num_arrays; ++a) {
+            const WavenetLayerArraySpec& s = arrays[a];
+            if (s.channels == 0 || s.channels > 64 || s.kernel == 0 ||
+                s.num_layers == 0 || !s.dilations || s.head_size == 0)
+                return false;
+            if (s.condition_size != 1) return false;  // mono condition only
+            const uint32_t expect_in = (a == 0) ? 1u : arrays[a - 1].channels;
+            if (s.input_size != expect_in) return false;
+            if (a > 0 && arrays[a - 1].head_size != s.channels) return false;  // head chain
+            const uint64_t Z = s.gated ? 2ull * s.channels : s.channels;
+            need += static_cast<uint64_t>(s.channels) * s.input_size;  // rechannel
+            for (uint32_t l = 0; l < s.num_layers; ++l)
+                need += Z * s.channels * s.kernel + Z          // conv W+bias
+                        + Z * s.condition_size                  // input_mixin
+                        + static_cast<uint64_t>(s.channels) * s.channels + s.channels;  // layer1x1
+            need += static_cast<uint64_t>(s.head_size) * s.channels
+                    + (s.head_bias ? s.head_size : 0u);        // head rechannel
+        }
+        need += 1;  // trailing head_scale
+        if (weights_len != need) return false;
+
+        plan.B = B;
+        plan.count = count;
+        // Every per-instance buffer must stay addressable with u32 byte sizes.
+        const uint64_t wbytes64 = need * 4u * count;
+        const uint64_t blk64 = static_cast<uint64_t>(B) * 4u * count;
+        if (wbytes64 > 0xffffffffull || blk64 > 0xffffffffull) return false;
+        const uint32_t wslice = static_cast<uint32_t>(need) * 4u;
+        const uint32_t blk_bytes = static_cast<uint32_t>(blk64);
+        const auto act_usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc
+                             | wgpu::BufferUsage::CopyDst;
+        plan.weights = create_storage_buffer(static_cast<uint32_t>(wbytes64),
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.input = create_storage_buffer(blk_bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.output = create_storage_buffer(blk_bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+        plan.readback = create_readback_buffer(blk_bytes);
+        if (!plan.weights || !plan.input || !plan.output || !plan.readback) return false;
+        // The scale pass reads each instance's head_scale from the last float of
+        // its weight slice, so that slot always holds the caller's head_scale.
+        for (uint32_t i = 0; i < count; ++i) {
+            queue_.WriteBuffer(plan.weights, uint64_t{wslice} * i, weights[i], wslice);
+            queue_.WriteBuffer(plan.weights, uint64_t{wslice} * i + wslice - 4u, &head_scales[i], 4u);
+        }
+
+        auto make_uniform = [&](uint32_t size) {
+            wgpu::BufferDescriptor ud{};
+            ud.size = size;
+            ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+            return device_.CreateBuffer(&ud);
+        };
+
+        // Per-block stream position (sample index of the block's first sample),
+        // read by every ring-indexed pass. Written by encode_wavenet().
+        plan.stream_u = make_uniform(16);
+        if (!plan.stream_u) return false;
+        plan.weight_stride = static_cast<uint32_t>(need);
+        // A ring holds `history + B` columns, rounded up to a power of two so the
+        // shader can wrap with a mask and the u32 stream position never skews it.
+        auto ring_columns = [B](uint32_t history) {
+            uint32_t r = 1;
+            while (r < history + B) r <<= 1;
+            return r;
+        };
+
+        uint64_t woff = 0;
+
+        for (uint32_t a = 0; a < num_arrays; ++a) {
+            const WavenetLayerArraySpec& s = arrays[a];
+            const uint32_t C = s.channels, K = s.kernel, H = s.head_size;
+            const uint32_t Z = s.gated ? 2u * C : C;
+            WavenetArray na;
+            na.channels = C; na.head_size = H; na.num_layers = s.num_layers;
+            na.head_bias = s.head_bias;
+            // Samples per layer workgroup: as many as fit S*Z into the shader's
+            // 64 lanes (and its 128-float z / 64-float activation scratch).
+            na.samples_per_group = Z <= 64u ? 64u / Z : 1u;
+
+            // act[l] feeds layer l, which reaches dil_l*(K-1) samples back; the
+            // last activation only feeds the next array's rechannel at the
+            // current samples, so it carries no history.
+            for (uint32_t l = 0; l <= s.num_layers; ++l) {
+                const uint32_t history = (l < s.num_layers) ? s.dilations[l] * (K - 1u) : 0u;
+                const uint32_t cols = ring_columns(history);
+                const uint64_t bytes64 = static_cast<uint64_t>(C) * cols * 4u * count;
+                if (bytes64 > 0xffffffffull) return false;
+                const uint32_t act_bytes = static_cast<uint32_t>(bytes64);
+                wgpu::Buffer buf = create_storage_buffer(act_bytes, act_usage);
+                if (!buf) return false;
+                std::vector<float> act_zero(static_cast<std::size_t>(bytes64 / 4u), 0.0f);
+                queue_.WriteBuffer(buf, 0, act_zero.data(), act_bytes);  // zero history
+                na.act.push_back(std::move(buf));
+                na.act_mask.push_back(cols - 1u);
+            }
+            if (uint64_t{C} * blk_bytes > 0xffffffffull) return false;  // H <= C of the next array
+            na.headacc = create_storage_buffer(C * blk_bytes, wgpu::BufferUsage::Storage);
+            if (!na.headacc) return false;
+            if (a + 1 == num_arrays) {
+                na.headout = create_storage_buffer(H * blk_bytes, wgpu::BufferUsage::Storage);
+                if (!na.headout) return false;
+            }
+
+            // rechannel offset (consumed first in the array).
+            const uint32_t rc_w = static_cast<uint32_t>(woff);
+            woff += static_cast<uint64_t>(C) * s.input_size;
+
+            // rechannel uniform + bind group. Array 0 reads the block-local mono
+            // input (in_ch=1); array a>0 reads the previous array's last
+            // activation ring (in_ch=prevC) at the current samples.
+            na.rechannel_u = make_uniform(32);
+            const uint32_t src_mask = (a == 0) ? 0u : plan.arrays[a - 1].act_mask.back();
+            struct RcU { uint32_t in_ch, out_ch, B, w_off, src_mask, dst_mask, src_ring, p1; }
+                rcu{s.input_size, C, B, rc_w, src_mask, na.act_mask[0], a == 0 ? 0u : 1u, 0};
+            queue_.WriteBuffer(na.rechannel_u, 0, &rcu, sizeof(rcu));
+            const wgpu::Buffer& rc_src = (a == 0) ? plan.input
+                                                  : plan.arrays[a - 1].act.back();
+            na.rechannel_bg = create_bind_group(wavenet_rechannel_pipeline_,
+                {plan.weights, rc_src, na.act[0], na.rechannel_u, plan.stream_u});
+            if (!na.rechannel_bg) return false;
+
+            for (uint32_t l = 0; l < s.num_layers; ++l) {
+                const uint32_t conv_w = static_cast<uint32_t>(woff);
+                woff += static_cast<uint64_t>(Z) * C * K;
+                const uint32_t conv_b = static_cast<uint32_t>(woff);
+                woff += Z;
+                const uint32_t mix_w = static_cast<uint32_t>(woff);
+                woff += static_cast<uint64_t>(Z) * s.condition_size;
+                const uint32_t l1_w = static_cast<uint32_t>(woff);
+                woff += static_cast<uint64_t>(C) * C;
+                const uint32_t l1_b = static_cast<uint32_t>(woff);
+                woff += C;
+
+                wgpu::Buffer u = make_uniform(64);
+                struct LyU { uint32_t C, K, B, dil, Z, gated, in_mask,
+                             conv_w, conv_b, mix_w, l1_w, l1_b, out_mask, S, p2, p3; }
+                    lyu{C, K, B, s.dilations[l], Z, s.gated, na.act_mask[l],
+                        conv_w, conv_b, mix_w, l1_w, l1_b, na.act_mask[l + 1],
+                        na.samples_per_group, (a == 0 && l == 0) ? 1u : 0u, 0};
+                queue_.WriteBuffer(u, 0, &lyu, sizeof(lyu));
+                wgpu::BindGroup bg = create_bind_group(wavenet_layer_pipeline_,
+                    {plan.weights, na.act[l], na.act[l + 1], plan.input, na.headacc, u,
+                     plan.stream_u});
+                if (!bg) return false;
+                na.layer_u.push_back(std::move(u));
+                na.layer_bg.push_back(std::move(bg));
+            }
+
+            const uint32_t hr_w = static_cast<uint32_t>(woff);
+            woff += static_cast<uint64_t>(H) * C;
+            const uint32_t hr_b = static_cast<uint32_t>(woff);
+            if (s.head_bias) woff += H;
+
+            na.head_u = make_uniform(32);
+            struct HdU { uint32_t C, H, B, hr_w, hr_b, head_bias, p0, p1; }
+                hdu{C, H, B, hr_w, hr_b, s.head_bias, 0, 0};
+            queue_.WriteBuffer(na.head_u, 0, &hdu, sizeof(hdu));
+
+            plan.arrays.push_back(std::move(na));
+        }
+        // A head rechannel writes straight into the next array's head sum (its
+        // seed: head_size == next channels), so arrays chain with no copy; the
+        // last array writes its own head output for the scale pass.
+        for (std::size_t a = 0; a < plan.arrays.size(); ++a) {
+            WavenetArray& na = plan.arrays[a];
+            const wgpu::Buffer& dst = (a + 1 < plan.arrays.size()) ? plan.arrays[a + 1].headacc
+                                                                   : na.headout;
+            na.head_bg = create_bind_group(wavenet_head_pipeline_,
+                {plan.weights, na.headacc, dst, na.head_u, plan.stream_u});
+            if (!na.head_bg) return false;
+        }
+
+        // Final scale pass over the last array's head output (head_size==1 in the
+        // standard model; the shader reads index 0 of each sample's head vector).
+        const WavenetArray& last = plan.arrays.back();
+        plan.scale_u = make_uniform(16);
+        struct ScU { uint32_t B, H, p0, p1; } scu{B, last.head_size, 0, 0};
+        queue_.WriteBuffer(plan.scale_u, 0, &scu, sizeof(scu));
+        plan.scale_bg = create_bind_group(wavenet_scale_pipeline_,
+            {last.headout, plan.output, plan.scale_u, plan.weights, plan.stream_u});
+        return static_cast<bool>(plan.scale_bg);
+    }
 
     // Encodes one WaveNet block for `plan` (whose input buffer already holds the
     // block) into `pass`: the stream-position write, every array's dispatches and
@@ -3941,27 +4053,28 @@ private:
     void encode_wavenet(wgpu::ComputePassEncoder& pass, WavenetPlan& plan) {
         const uint32_t B = plan.B;
         const uint32_t wg = (B + 255u) / 256u;
-        const uint32_t stream[4] = {plan.position, 0u, 0u, 0u};
+        const uint32_t N = plan.count;
+        const uint32_t stream[4] = {plan.position, plan.weight_stride, 0u, 0u};
         queue_.WriteBuffer(plan.stream_u, 0, stream, sizeof(stream));
         for (const WavenetArray& na : plan.arrays) {
             pass.SetPipeline(wavenet_rechannel_pipeline_);
             pass.SetBindGroup(0, na.rechannel_bg);
-            pass.DispatchWorkgroups(wg);
+            pass.DispatchWorkgroups(wg, N);
             for (uint32_t l = 0; l < na.num_layers; ++l) {
                 pass.SetPipeline(wavenet_layer_pipeline_);
                 pass.SetBindGroup(0, na.layer_bg[l]);
                 // The WaveNet layer shader runs S samples per workgroup (WG lanes
                 // cooperate across samples and channels), so it needs ceil(B/S)
                 // workgroups — not the ceil(B/256) of the per-sample passes.
-                pass.DispatchWorkgroups((B + na.samples_per_group - 1u) / na.samples_per_group);
+                pass.DispatchWorkgroups((B + na.samples_per_group - 1u) / na.samples_per_group, N);
             }
             pass.SetPipeline(wavenet_head_pipeline_);
             pass.SetBindGroup(0, na.head_bg);
-            pass.DispatchWorkgroups(wg);
+            pass.DispatchWorkgroups(wg, N);
         }
         pass.SetPipeline(wavenet_scale_pipeline_);
         pass.SetBindGroup(0, plan.scale_bg);
-        pass.DispatchWorkgroups(wg);
+        pass.DispatchWorkgroups(wg, N);
 
         // The activation rings keep the history in place, so streaming
         // continuity needs no copies: the next block simply starts B samples on.
