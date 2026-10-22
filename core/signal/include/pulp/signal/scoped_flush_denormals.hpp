@@ -105,21 +105,28 @@ inline bool denormals_are_flushed() noexcept {
 
 class ScopedFlushDenormals {
 public:
+    // Control-register writes are not free on the audio path, and many hosts
+    // already run their audio threads with flush-to-zero on. Each write is
+    // therefore made only when it changes the register; the observable
+    // contract (FTZ on inside the scope, the caller's exact value restored on
+    // exit) is unchanged.
     ScopedFlushDenormals() noexcept {
 #if defined(PULP_FLUSH_DENORMALS_X86)
         saved_csr_ = _mm_getcsr();
-        _mm_setcsr(saved_csr_ | detail::kMxcsrFtz);
+        if ((saved_csr_ & detail::kMxcsrFtz) == 0)
+            _mm_setcsr(saved_csr_ | detail::kMxcsrFtz);
 #elif defined(PULP_FLUSH_DENORMALS_ARM64)
         saved_fpcr_ = detail::read_fpcr();
-        detail::write_fpcr(saved_fpcr_ | detail::kFpcrFz);
+        if ((saved_fpcr_ & detail::kFpcrFz) == 0)
+            detail::write_fpcr(saved_fpcr_ | detail::kFpcrFz);
 #endif
     }
 
     ~ScopedFlushDenormals() noexcept {
 #if defined(PULP_FLUSH_DENORMALS_X86)
-        _mm_setcsr(saved_csr_);
+        if (_mm_getcsr() != saved_csr_) _mm_setcsr(saved_csr_);
 #elif defined(PULP_FLUSH_DENORMALS_ARM64)
-        detail::write_fpcr(saved_fpcr_);
+        if (detail::read_fpcr() != saved_fpcr_) detail::write_fpcr(saved_fpcr_);
 #endif
     }
 

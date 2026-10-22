@@ -66,3 +66,32 @@ TEST_CASE("ScopedFlushDenormals flushes a denormal arithmetic result to zero",
         }
     }
 }
+
+#if defined(PULP_FLUSH_DENORMALS_ARM64)
+TEST_CASE("ScopedFlushDenormals restores the caller's exact FPCR even when FTZ was already on",
+          "[signal][denormal]") {
+    using pulp::signal::detail::kFpcrFz;
+    using pulp::signal::detail::read_fpcr;
+    using pulp::signal::detail::write_fpcr;
+    const std::uint64_t original = read_fpcr();
+
+    // Caller already flushing: the scope keeps FTZ on and, if code inside the
+    // scope rewrites the register, still restores the caller's value.
+    write_fpcr(original | kFpcrFz);
+    {
+        pulp::signal::ScopedFlushDenormals guard;
+        REQUIRE((read_fpcr() & kFpcrFz) != 0);
+        write_fpcr(read_fpcr() & ~kFpcrFz);  // inner code turns FTZ off
+    }
+    REQUIRE(read_fpcr() == (original | kFpcrFz));
+
+    // Caller not flushing: FTZ on inside, off again after.
+    write_fpcr(original & ~kFpcrFz);
+    {
+        pulp::signal::ScopedFlushDenormals guard;
+        REQUIRE((read_fpcr() & kFpcrFz) != 0);
+    }
+    REQUIRE(read_fpcr() == (original & ~kFpcrFz));
+    write_fpcr(original);
+}
+#endif
