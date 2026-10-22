@@ -1070,7 +1070,8 @@ jobs:
             # group tree as cumulative base + the generated projection.
             if [ "$native_build_required" = true ]; then
               trusted_bump_check=$(mktemp)
-              trap 'rm -f "$trusted_bump_check"' EXIT
+              bump_check_err=$(mktemp)
+              trap 'rm -f "$trusted_bump_check" "$bump_check_err"' EXIT
               trusted_verifier_base=
               if [ "$EVENT_NAME" = pull_request ] \
                   && [ "$base" = "$PR_BASE_SHA" ]; then
@@ -1144,18 +1145,51 @@ jobs:
                   && [ "${BUMP_FASTPATH_PR_MERGE_REF:-}" = 1 ]; then
                 accept_pr_merge_ref=--accept-pr-merge-ref
               fi
-              if [[ "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]] \
-                  && git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
-                  >"$trusted_bump_check" 2>/dev/null \
-                  && GH_TOKEN="${{ github.token }}" "$ci_python" "$trusted_bump_check" \
+              # Why the fast path was not taken, reported (never decided) below.
+              bump_refusal=
+              if [[ ! "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]]; then
+                bump_refusal="shape: no trusted verifier base (a pull request on a moved base, or a group base that is neither the candidate's parent nor one queue entry past it)"
+              elif ! git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
+                  >"$trusted_bump_check" 2>/dev/null; then
+                bump_refusal="the protected base has no verifier"
+              elif GH_TOKEN="${{ github.token }}" "$ci_python" "$trusted_bump_check" \
                     --repo . \
                     --event-name "$EVENT_NAME" \
                     --event-path "$EVENT_PATH" \
                     --base "$base" \
                     --head "$EVENT_HEAD_SHA" \
-                    ${accept_pr_merge_ref:+"$accept_pr_merge_ref"}; then
+                    ${accept_pr_merge_ref:+"$accept_pr_merge_ref"} 2>"$bump_check_err"; then
                 native_build_required=false
                 echo "Exact generated version bump: native build matrix skipped."
+              else
+                bump_refusal=$(sed -n 's/^generated-version-bump: full validation (\(.*\))$/\1/p' \
+                  "$bump_check_err" | tail -n 1)
+                bump_refusal="verifier: ${bump_refusal:-exited without a reason}"
+              fi
+              [ ! -s "$bump_check_err" ] || cat "$bump_check_err" >&2
+              # Report the outcome for the release bot's bump only, as a
+              # `bump-fast-path` notice that tools/scripts/bump_fastpath_report.py
+              # counts. Recognizing the bump here is for the report alone; the
+              # verifier above is what decides.
+              bump_candidate=
+              if [ "$EVENT_NAME" = pull_request ] \
+                  && [ "${GITHUB_HEAD_REF:-}" = release/version-bump ]; then
+                bump_candidate="$EVENT_HEAD_SHA"
+              elif [ "$EVENT_NAME" = merge_group ] && [ -n "${candidate:-}" ] \
+                  && [ "$(git log -1 --format=%s "$candidate" 2>/dev/null || true)" \
+                    = "chore: bump versions" ]; then
+                bump_candidate="$candidate"
+              fi
+              if [ -n "$bump_candidate" ]; then
+                if [ "$native_build_required" = false ]; then
+                  bump_outcome=taken
+                else
+                  bump_outcome="refused: $bump_refusal"
+                fi
+                bump_outcome=$(printf '%s' "$bump_outcome" | tr -d '\r' | tr '\n' ' ' | cut -c1-300)
+                printf '::notice title=bump-fast-path::%s\n' "${bump_outcome//%/%25}"
+                printf 'bump fast path (%s, %s): %s\n' "$EVENT_NAME" "${bump_candidate:0:12}" \
+                  "$bump_outcome" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
               fi
             fi
           else

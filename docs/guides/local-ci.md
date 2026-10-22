@@ -2927,6 +2927,27 @@ with extra content all keep the full path. The variable is read by the
 workflow, never by PR content; a base verifier that predates the flag rejects
 it and the run keeps the full path.
 
+Every run on the release bot's bump reports the outcome as a `bump-fast-path`
+notice on the `classify` job, and in its step summary: `taken`, or `refused:`
+followed by the reason. The reason is the verifier's own line (`verifier: ...`),
+`shape: no trusted verifier base` when the group or pull-request base resolves
+no trusted base (for example, main moved more than one queue entry past the
+bump's parent, a case the verifier is never asked about), or `the protected
+base has no verifier`. Only the bump is reported; other runs print nothing.
+`tools/scripts/bump_fastpath_report.py` counts the notices
+(`--days 7` by default), and `.github/workflows/bump-fastpath-weekly.yml` runs
+it every Monday into its job summary. A run from before the notice existed
+counts as `unreported`, never as taken.
+
+The four advisory workflows that `pull_request: auto_merge_enabled` starts
+(`coverage.yml`, `control-shipping-native.yml`, `examples-validation.yml`,
+`intel-portability.yml`) skip every job on `release/version-bump`: the bump's
+tree is main's plus version files, which they already ran on, and none of
+their contexts is required. Each job's condition is
+`github.head_ref != 'release/version-bump' && (<its own condition>)`, so every
+other pull request, schedule and dispatch runs exactly as before. This also
+keeps bump pull requests off GitHub-hosted Windows runners.
+
 The current provenance boundary is GitHub's valid SSH-signature record plus the
 `danielraffel` signer/account and exact release-bot author/committer identity.
 The repository does not yet contain an authoritative public key or fingerprint

@@ -1518,6 +1518,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-cf2c9ebf97dc"
+paths = ["tools/scripts/test_bump_fastpath.py"]
+tests = [
+  "build-parallelism-guard",
+  "bump-fastpath-selftest",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-cd2110eb48d5"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
@@ -7070,6 +7104,7 @@ paths = [
   "tools/scripts/test_build_speed_scorecard.py",
   "tools/scripts/test_build_time_report.py",
   "tools/scripts/test_build_workflow.py",
+  "tools/scripts/test_bump_fastpath.py",
   "tools/scripts/test_capability_contract_gate.py",
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
@@ -7628,6 +7663,7 @@ paths = [
   "tools/scripts/test_build_speed_scorecard.py",
   "tools/scripts/test_build_time_report.py",
   "tools/scripts/test_build_workflow.py",
+  "tools/scripts/test_bump_fastpath.py",
   "tools/scripts/test_capability_contract_gate.py",
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
