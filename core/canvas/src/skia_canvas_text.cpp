@@ -291,6 +291,25 @@ void paint_prepared(const PreparedParagraph& prepared, SkCanvas* canvas,
                               y - prepared.painted_baseline);
 }
 
+// The ink box of a prepared paragraph's glyphs where paint_prepared puts them,
+// relative to the Canvas2D origin. Empty when no glyph has ink.
+std::optional<SkRect> painted_ink_bounds(const PreparedParagraph& prepared) {
+    SkRect ink = SkRect::MakeEmpty();
+    prepared.paragraph->extendedVisit(
+        [&](int, const skia::textlayout::Paragraph::ExtendedVisitorInfo* info) {
+            if (!info) return;
+            for (int i = 0; i < info->count; ++i) {
+                SkRect glyph = info->bounds[i];
+                if (glyph.isEmpty()) continue;
+                glyph.offset(info->origin + info->positions[i]);
+                ink.join(glyph);
+            }
+        });
+    if (ink.isEmpty()) return std::nullopt;
+    ink.offset(-prepared.leading_spacing, -prepared.painted_baseline);
+    return ink;
+}
+
 } // namespace
 
 
@@ -1119,6 +1138,9 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
                                         std::nullopt, font_features_);
         if (prepared.paragraph) {
             advance = prepared.advance;
+            // The SkFont box has no letter-spacing or tracking between its
+            // glyphs; the shaped glyphs carry both.
+            if (const auto ink = painted_ink_bounds(prepared)) bounds = *ink;
         }
     }
 #endif

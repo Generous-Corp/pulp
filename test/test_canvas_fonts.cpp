@@ -1708,6 +1708,38 @@ TEST_CASE("SkiaCanvas measures text at its optical size with AAT tracking",
     CHECK(canvas.measure_text("HH") == Catch::Approx(67.2f).margin(0.05));
 }
 
+TEST_CASE("measure_text_full's ink box includes AAT tracking",
+          "[canvas][skia][text][tracking]") {
+    if (!opsz_trak_face()) SKIP("no platform font manager to load the fixture font");
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_OPSZ_TRAK_FONT_PATH,
+                                             "Pulp Test Opsz Trak"));
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_font_full("Pulp Test Opsz Trak", 42.0f, 400, /*slant=*/0,
+                         /*letter_spacing=*/0.0f);
+    const auto one = canvas.measure_text_full("H");
+    const auto two = canvas.measure_text_full("HH");
+    // The second H's ink starts one advance (29.4px at opsz 42) plus one
+    // track (4.2px) after the first's.
+    CHECK(two.actual_bounding_box_right - one.actual_bounding_box_right ==
+          Catch::Approx(33.6f).margin(0.05));
+    CHECK(two.actual_bounding_box_left ==
+          Catch::Approx(one.actual_bounding_box_left).margin(0.01));
+    // Half a track sits in front of the first glyph, where paint puts it.
+    SkFont font(pulp::canvas::typeface_at_auto_optical_size(opsz_trak_face(), 42.0f),
+                42.0f);
+    font.setLinearMetrics(true);
+    SkRect glyph;
+    font.measureText("H", 1, SkTextEncoding::kUTF8, &glyph);
+    CHECK(one.actual_bounding_box_left ==
+          Catch::Approx(-(glyph.fLeft + 2.1f)).margin(0.05));
+    CHECK(one.actual_bounding_box_ascent == Catch::Approx(-glyph.fTop).margin(0.51));
+}
+
 // Sizes that animate or auto-fit reach these caches at a new float every
 // frame. Optical size is asked for on a quarter-pixel grid, and both caches
 // evict, so neither grows with the number of distinct sizes drawn.
