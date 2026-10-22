@@ -2,6 +2,7 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/chart_shader_presets.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/text_editor.hpp>
@@ -107,6 +108,42 @@ std::unique_ptr<View> build_widget_gallery(const Theme& theme) {
         add(std::move(pb), M + 390.0f, y + 13.0f, 240.0f, 10.0f);
     }
     y += 56.0f;
+
+    // ── Shader presets: each knob's arc is a named chart-shader preset ──
+    header("Shader presets");
+    {
+        ChartShaderPresetOptions options;
+        options.color = root->resolve_color("control.track", Color::rgba8(96, 100, 112));
+        options.accent = root->resolve_color("accent.primary", Color::rgba8(100, 170, 255));
+        options.glow_sigma = 4.0f;
+        struct Look {
+            const char* preset;
+            bool pressed;
+            ChartProfile profile;
+        };
+        const Look looks[] = {
+            {"bevel", false, ChartProfile::round},
+            {"bevel", true, ChartProfile::round},
+            {"inset-channel", false, ChartProfile::round},
+            {"tube", false, ChartProfile::chamfer},
+            {"light-pipe", false, ChartProfile::round},
+            {"centre-highlight", false, ChartProfile::round},
+            {"glow", false, ChartProfile::round},
+        };
+        float kx = M;
+        for (const auto& look : looks) {
+            options.pressed = look.pressed;
+            options.profile = look.profile;
+            auto preset = make_chart_shader_preset(look.preset, options);
+            auto k = std::make_unique<Knob>();
+            k->set_value(0.62f);
+            k->set_chart_shader(std::move(preset.sksl));
+            k->set_shader_reach(preset.reach);
+            add(std::move(k), kx, y, 84.0f, 84.0f);
+            kx += 104.0f;
+        }
+    }
+    y += 104.0f;
 
     // ── Status & feedback ──
     header("Status & feedback");

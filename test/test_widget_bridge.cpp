@@ -4941,6 +4941,78 @@ TEST_CASE("WidgetBridge knob chart glow paints outside the widget rect",
 #endif
 }
 
+TEST_CASE("WidgetBridge installs named chart shader presets on a knob",
+          "[view][bridge][shader][chart-preset]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 160, 160});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'root');
+        setFlex('knob', 'width', 80);
+        setFlex('knob', 'height', 80);
+        globalThis.source = getShaderChartPreset('tube', { profile: 'chamfer', color: '#808890' });
+        globalThis.unknown = getShaderChartPreset('chrome');
+        globalThis.badOption = setWidgetShaderChartPreset('knob', 'bevel', { lightAngle: 90 });
+        globalThis.badColor = setWidgetShaderChartPreset('knob', 'bevel', { color: 'not-a-colour' });
+        globalThis.badProfile = setWidgetShaderChartPreset('knob', 'tube', { profile: 'square' });
+        globalThis.glow = setWidgetShaderChartPreset('knob', 'glow', { sigma: 6 });
+    )");
+    REQUIRE(engine.evaluate("source.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("source.sksl")
+                .getWithDefault<std::string>("")
+                .find("half4 shade(PulpChart g)") != std::string::npos);
+    REQUIRE_FALSE(engine.evaluate("unknown.success").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("unknown.error").getWithDefault<std::string>("").find("'chrome'") !=
+            std::string::npos);
+    REQUIRE_FALSE(engine.evaluate("badOption.success").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("badOption.error").getWithDefault<std::string>("").find("lightAngle") !=
+            std::string::npos);
+    REQUIRE_FALSE(engine.evaluate("badColor.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("badProfile.success").getWithDefault<bool>(true));
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+#ifdef PULP_HAS_SKIA
+    REQUIRE(engine.evaluate("glow.success").getWithDefault<bool>(false));
+    // The glow's falloff lives outside the band, so installing it raises the
+    // widget's reach to three sigma.
+    REQUIRE(knob->shader_reach() == Catch::Approx(18.0f));
+    REQUIRE_FALSE(knob->has_custom_shader());
+
+    if (!raw_rgba_render_available())
+        SKIP("this build has no raw RGBA render backend");
+    // A preset alone, with no body shader, paints the knob's arc. At the top
+    // of the 80 px knob the band runs from row 2 to row 21 (centre row 11.5,
+    // half width 9.5), so rows 3 and 19 sit at u = +0.84 and -0.84: the upper
+    // and lower edges of the band there.
+    auto top_minus_bottom = [&](const char* light) {
+        bridge.load_script(std::string("globalThis.lit = setWidgetShaderChartPreset('knob', "
+                                       "'bevel', { light: ") +
+                           light + " });");
+        REQUIRE(engine.evaluate("lit.success").getWithDefault<bool>(false));
+        uint32_t w = 0, h = 0;
+        auto rgba = render_to_rgba(root, 160, 160, 1.0f, &w, &h);
+        REQUIRE(w == 160);
+        auto luma = [&](int x, int y) {
+            const auto* p = &rgba[(static_cast<size_t>(y) * 160 + static_cast<size_t>(x)) * 4];
+            return 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2];
+        };
+        return luma(40, 3) - luma(40, 19);
+    };
+    const float from_above = top_minus_bottom("90");
+    const float from_below = top_minus_bottom("270");
+    INFO("top-bottom luma: light above " << from_above << ", below " << from_below);
+    CHECK(from_above > 8.0f);
+    CHECK(from_below < -8.0f);
+#else
+    // Without Skia there is no chart compiler, so the install is refused and
+    // nothing is installed.
+    REQUIRE_FALSE(engine.evaluate("glow.success").getWithDefault<bool>(true));
+    REQUIRE(knob->chart_shader().empty());
+#endif
+}
+
 TEST_CASE("WidgetBridge binds shader scalar uniforms to live value channels",
           "[view][bridge][shader][value-channel]") {
     ScriptEngine engine;

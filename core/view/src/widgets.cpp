@@ -90,9 +90,9 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
         return true;
     }
     if (!host.shader_draw_failure_logged()) {
-        runtime::log_info(
-            "[custom-shader] body shader failed to draw; painting the default "
-            "widget body instead");
+        runtime::log_info("[custom-shader] {} shader failed to draw; painting the default "
+                          "widget body instead",
+                          host.has_custom_shader() ? "body" : "chart");
         host.mark_shader_draw_failure_logged();
     }
     return false;
@@ -608,11 +608,11 @@ void Knob::paint(canvas::Canvas& canvas) {
         render_schema(canvas, widget_schema_, b.width, b.height, shown, *this);
         // Fall through to draw labels on top
     }
-    // ── Custom shader path: replaces body/track/fill, keeps labels/glow ──
+    // ── Custom shader path (a body shader, a chart shader, or both) ──
     // The `&& draw_custom_shader_body(...)` guard means a draw-time shader
     // FAILURE falls through to the normal body branches below (not a blank
     // widget); on success the shader painted the body and we skip them.
-    else if (has_custom_shader() &&
+    else if ((has_custom_shader() || !chart_shader().empty()) &&
              draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time)) {
         // Shader painted the body; fall through to draw labels and value text.
     } else if (render_style_ == WidgetRenderStyle::minimal) {
