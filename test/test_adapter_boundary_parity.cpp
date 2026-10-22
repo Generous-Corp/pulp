@@ -1013,7 +1013,7 @@ struct StateWriterProbe {
         store.active_state_writers_.fetch_sub(1, std::memory_order_release);
     }
 };
-}  // namespace pulp::state::test_support
+} // namespace pulp::state::test_support
 
 TEST_CASE("Pre-process snapshot is not trusted when a writer was in flight as it began",
           "[format][boundary][snapshot]") {

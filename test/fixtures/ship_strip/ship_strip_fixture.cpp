@@ -7,7 +7,7 @@ __attribute__((noinline, used)) int pulp_ship_strip_fixture_local(int x) {
     return x * 3 + 1;
 }
 
-}  // namespace
+} // namespace
 
 extern "C" __attribute__((visibility("default"))) int pulp_ship_strip_fixture_entry(int x) {
     return pulp_ship_strip_fixture_local(x);

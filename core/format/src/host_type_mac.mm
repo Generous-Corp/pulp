@@ -37,12 +37,15 @@
 namespace pulp::format {
 
 static std::string cfstring_to_std(CFStringRef s) {
-    if (s == nullptr) return {};
-    if (const char* fast = CFStringGetCStringPtr(s, kCFStringEncodingUTF8)) return fast;
+    if (s == nullptr)
+        return {};
+    if (const char* fast = CFStringGetCStringPtr(s, kCFStringEncodingUTF8))
+        return fast;
     const CFIndex max =
         CFStringGetMaximumSizeForEncoding(CFStringGetLength(s), kCFStringEncodingUTF8) + 1;
     std::string out(static_cast<std::size_t>(max), '\0');
-    if (!CFStringGetCString(s, out.data(), max, kCFStringEncodingUTF8)) return {};
+    if (!CFStringGetCString(s, out.data(), max, kCFStringEncodingUTF8))
+        return {};
     out.resize(std::char_traits<char>::length(out.c_str()));
     return out;
 }
@@ -103,7 +106,8 @@ std::string current_auv3_wrapper_identifier() {
         // When the main bundle is not the extension, use it as the host
         // identifier. This is the in-process load path (auval, the Pulp
         // standalone host loading its own AU).
-        if (!main_is_extension && !main_id.empty()) return main_id;
+        if (!main_is_extension && !main_id.empty())
+            return main_id;
 
         // No wrapper context detected — caller falls back to the
         // executable-path heuristic.

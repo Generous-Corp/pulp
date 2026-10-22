@@ -184,16 +184,18 @@ namespace {
 
 SInt32 scheduled_start_offset(const AudioUnitParameterEvent& event) noexcept {
     return event.eventType == kParameterEvent_Immediate
-        ? static_cast<SInt32>(event.eventValues.immediate.bufferOffset)
-        : event.eventValues.ramp.startBufferOffset;
+               ? static_cast<SInt32>(event.eventValues.immediate.bufferOffset)
+               : event.eventValues.ramp.startBufferOffset;
 }
 
 float scheduled_ramp_value_at(const AudioUnitParameterEvent& event, UInt32 frame) noexcept {
     const auto& ramp = event.eventValues.ramp;
     const auto ramp_start = static_cast<UInt32>(std::max<SInt32>(0, ramp.startBufferOffset));
     const auto duration = ramp.durationInFrames;
-    if (frame < ramp_start) return ramp.startValue;
-    if (duration == 0 || frame >= ramp_start + duration) return ramp.endValue;
+    if (frame < ramp_start)
+        return ramp.startValue;
+    if (duration == 0 || frame >= ramp_start + duration)
+        return ramp.endValue;
     const auto t = static_cast<float>(frame - ramp_start) / static_cast<float>(duration);
     return ramp.startValue + (ramp.endValue - ramp.startValue) * t;
 }
@@ -201,7 +203,7 @@ float scheduled_ramp_value_at(const AudioUnitParameterEvent& event, UInt32 frame
 constexpr std::size_t kScheduledRampCapacity = 256;
 constexpr std::size_t kScheduledSortCapacity = 4096;
 
-}  // namespace
+} // namespace
 
 // AUBase's version rescans the whole event list at every slice and rewrites
 // every past event into the element map each time, so its cost grows with
@@ -211,9 +213,7 @@ constexpr std::size_t kScheduledSortCapacity = 4096;
 // finds each break point from a cursor, and leaves the per-slice application
 // to ProcessScheduledSlice.
 OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
-                                                 UInt32 frames_to_process,
-                                                 void* user_data)
-{
+                                                 UInt32 frames_to_process, void* user_data) {
     if (!sample_accurate_params_ && frames_to_process > 0) {
         // Block-rate processor: each parameter takes the value of its latest
         // event (a ramp counts at its start and contributes its value at the
@@ -226,7 +226,8 @@ OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
         scheduled_touched_.clear();
         for (std::size_t i = 0; i < events.size(); ++i) {
             const auto& event = events[i];
-            if (event.scope != kAudioUnitScope_Global || event.element != 0) continue;
+            if (event.scope != kAudioUnitScope_Global || event.element != 0)
+                continue;
             if (event.eventType != kParameterEvent_Immediate &&
                 event.eventType != kParameterEvent_Ramped)
                 continue;
@@ -236,13 +237,14 @@ OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
                 continue;
             }
             const auto index = static_cast<std::size_t>(info - params.data());
-            if (index >= scheduled_latest_.size()) continue;
+            if (index >= scheduled_latest_.size())
+                continue;
             auto& latest = scheduled_latest_[index];
             const SInt32 offset = scheduled_start_offset(event);
             if (latest.event < 0) {
                 scheduled_touched_.push_back(static_cast<std::uint32_t>(index));
             } else if (offset < latest.offset) {
-                continue;  // an equal offset later in host order wins
+                continue; // an equal offset later in host order wins
             }
             latest = {offset, static_cast<std::int32_t>(i)};
         }
@@ -295,7 +297,8 @@ OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
     scheduled_ramps_.clear();
     scheduled_ramps_overflowed_ = false;
     for (std::size_t i = 0; i < events.size(); ++i) {
-        if (events[i].eventType != kParameterEvent_Ramped) continue;
+        if (events[i].eventType != kParameterEvent_Ramped)
+            continue;
         if (scheduled_ramps_.size() < kScheduledRampCapacity)
             scheduled_ramps_.push_back({static_cast<std::uint32_t>(i), false});
         else
@@ -320,12 +323,15 @@ OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
         };
         if (scheduled_ramps_overflowed_) {
             for (const auto& event : events)
-                if (event.eventType == kParameterEvent_Ramped) consider_ramp_end(event);
+                if (event.eventType == kParameterEvent_Ramped)
+                    consider_ramp_end(event);
         } else {
-            for (const auto& ramp : scheduled_ramps_) consider_ramp_end(events[ramp.index]);
+            for (const auto& ramp : scheduled_ramps_)
+                consider_ramp_end(events[ramp.index]);
         }
         result = ProcessScheduledSlice(user_data, start, end - start, frames_to_process);
-        if (result != noErr) break;
+        if (result != noErr)
+            break;
         start = end;
     }
     scheduled_events_ = nullptr;
@@ -342,8 +348,8 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
     // prepared render gets no automation for the slice.
     const auto* events = scheduled_events_;
     if (events == nullptr) {
-        return AUEffectBase::ProcessScheduledSlice(
-            user_data, start_frame_in_buffer, slice_frames, total_buffer_frames);
+        return AUEffectBase::ProcessScheduledSlice(user_data, start_frame_in_buffer, slice_frames,
+                                                   total_buffer_frames);
     }
 
     // Host writes, not editor edits; scoped to the apply phases so a write the
@@ -365,7 +371,8 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
            scheduled_start_offset((*events)[scheduled_cursor_]) <=
                static_cast<SInt32>(start_frame_in_buffer)) {
         const auto& event = (*events)[scheduled_cursor_++];
-        if (event.eventType != kParameterEvent_Immediate || !is_global(event)) continue;
+        if (event.eventType != kParameterEvent_Immediate || !is_global(event))
+            continue;
         const auto param_id = static_cast<state::ParamID>(event.parameter);
         if (store_.info(param_id) == nullptr) {
             if (auto* element = GetElement(event.scope, event.element))
@@ -388,12 +395,15 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
     // Ramps under way at this slice's start: the store takes their value here
     // and the processor gets the segment to this slice's end.
     const auto apply_ramp = [&](const AudioUnitParameterEvent& event, bool superseded) {
-        if (superseded || !is_global(event)) return;
+        if (superseded || !is_global(event))
+            return;
         const auto param_id = static_cast<state::ParamID>(event.parameter);
-        if (store_.info(param_id) == nullptr) return;
+        if (store_.info(param_id) == nullptr)
+            return;
         const auto& ramp = event.eventValues.ramp;
         const auto ramp_start = std::max<SInt32>(0, ramp.startBufferOffset);
-        if (start_frame_in_buffer < static_cast<UInt32>(ramp_start)) return;
+        if (start_frame_in_buffer < static_cast<UInt32>(ramp_start))
+            return;
         const auto ramp_end = static_cast<UInt32>(ramp_start) + ramp.durationInFrames;
         apply_value(param_id, ramp_value_at(event, start_frame_in_buffer));
         if (start_frame_in_buffer < ramp_end) {
@@ -404,9 +414,11 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
     };
     if (scheduled_ramps_overflowed_) {
         for (std::size_t i = 0; i < scheduled_cursor_; ++i)
-            if ((*events)[i].eventType == kParameterEvent_Ramped) apply_ramp((*events)[i], false);
+            if ((*events)[i].eventType == kParameterEvent_Ramped)
+                apply_ramp((*events)[i], false);
     } else {
-        for (const auto& ramp : scheduled_ramps_) apply_ramp((*events)[ramp.index], ramp.superseded);
+        for (const auto& ramp : scheduled_ramps_)
+            apply_ramp((*events)[ramp.index], ramp.superseded);
     }
     param_events_.sort();
     host_write.reset();
@@ -426,25 +438,32 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
         host_write.emplace();
         for (std::size_t i = scheduled_cursor_; i < events->size(); ++i) {
             const auto& event = (*events)[i];
-            if (event.eventType != kParameterEvent_Immediate || !is_global(event)) continue;
-            if (event.eventValues.immediate.bufferOffset > slice_end) break;
+            if (event.eventType != kParameterEvent_Immediate || !is_global(event))
+                continue;
+            if (event.eventValues.immediate.bufferOffset > slice_end)
+                break;
             const auto param_id = static_cast<state::ParamID>(event.parameter);
             if (store_.info(param_id) != nullptr)
                 apply_value(param_id, event.eventValues.immediate.value);
         }
         const auto settle_ramp = [&](const AudioUnitParameterEvent& event, bool superseded) {
-            if (superseded || !is_global(event)) return;
+            if (superseded || !is_global(event))
+                return;
             const auto param_id = static_cast<state::ParamID>(event.parameter);
-            if (store_.info(param_id) == nullptr) return;
-            if (slice_end < static_cast<UInt32>(std::max<SInt32>(0, event.eventValues.ramp.startBufferOffset)))
+            if (store_.info(param_id) == nullptr)
+                return;
+            if (slice_end <
+                static_cast<UInt32>(std::max<SInt32>(0, event.eventValues.ramp.startBufferOffset)))
                 return;
             apply_value(param_id, ramp_value_at(event, slice_end));
         };
         if (scheduled_ramps_overflowed_) {
             for (const auto& event : *events)
-                if (event.eventType == kParameterEvent_Ramped) settle_ramp(event, false);
+                if (event.eventType == kParameterEvent_Ramped)
+                    settle_ramp(event, false);
         } else {
-            for (const auto& ramp : scheduled_ramps_) settle_ramp((*events)[ramp.index], ramp.superseded);
+            for (const auto& ramp : scheduled_ramps_)
+                settle_ramp((*events)[ramp.index], ramp.superseded);
         }
     }
     return result;
@@ -724,21 +743,25 @@ OSStatus PulpAUEffect::Initialize()
 
     warm_render_path();
 
-    runtime::log_debug("AU v2: initialized with {} channels at {} Hz",
-                      GetNumberOfChannels(), GetSampleRate());
+    runtime::log_debug("AU v2: initialized with {} channels at {} Hz", GetNumberOfChannels(),
+                       GetSampleRate());
     return noErr;
 }
 
 void PulpAUEffect::warm_render_path() {
-    if (!processor_) return;
+    if (!processor_)
+        return;
     const UInt32 frames = std::min<UInt32>(GetMaxFramesPerSlice(), 64);
-    if (frames == 0) return;
+    if (frames == 0)
+        return;
     // One silent buffer list per side, shaped like the configured stream format
     // so validation accepts it and the wiring loops run.
     struct List {
         std::vector<std::byte> header;
         std::vector<std::vector<float>> data;
-        AudioBufferList* get() { return reinterpret_cast<AudioBufferList*>(header.data()); }
+        AudioBufferList* get() {
+            return reinterpret_cast<AudioBufferList*>(header.data());
+        }
     };
     auto make = [&](const AudioStreamBasicDescription& format) {
         List list;
@@ -749,9 +772,10 @@ void PulpAUEffect::warm_render_path() {
                            std::max<UInt32>(buffers, 1) * sizeof(AudioBuffer));
         list.get()->mNumberBuffers = buffers;
         for (UInt32 b = 0; b < buffers; ++b) {
-            auto& samples = list.data.emplace_back(static_cast<std::size_t>(frames * per_buffer), 0.0f);
-            list.get()->mBuffers[b] = {per_buffer, static_cast<UInt32>(samples.size() * sizeof(float)),
-                                       samples.data()};
+            auto& samples =
+                list.data.emplace_back(static_cast<std::size_t>(frames * per_buffer), 0.0f);
+            list.get()->mBuffers[b] = {
+                per_buffer, static_cast<UInt32>(samples.size() * sizeof(float)), samples.data()};
         }
         return list;
     };
@@ -938,7 +962,8 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     if (!valid_input || !valid_output) {
         detail::zero_audio_buffer_list(&outBuffer);
         ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
-        if (warming_render_path_) return noErr;
+        if (warming_render_path_)
+            return noErr;
         processor_->set_sidechain(nullptr);
         store_.reset_triggers_rt();
         return noErr;

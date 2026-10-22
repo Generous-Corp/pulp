@@ -670,10 +670,9 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     if (context) {
         FUnknownPtr<IHostApplication> host_app(context);
         if (host_app) {
-            runtime::log_debug(
-                "VST3: IHostApplication present; publishing ARA factory "
-                "under kVst3AraFactoryContextKey='{}'",
-                pulp::format::kVst3AraFactoryContextKey);
+            runtime::log_debug("VST3: IHostApplication present; publishing ARA factory "
+                               "under kVst3AraFactoryContextKey='{}'",
+                               pulp::format::kVst3AraFactoryContextKey);
             // Surface our factory. When non-null (PULP_HAS_ARA build) this
             // is what an ARA-aware host receives via its setHostContext
             // negotiation — the string key matches Celemony's convention.
@@ -947,8 +946,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         }
     }
 
-    runtime::log_debug("VST3: initialized '{}' with {} parameters",
-                      desc.name, store_.param_count());
+    runtime::log_debug("VST3: initialized '{}' with {} parameters", desc.name,
+                       store_.param_count());
 
     // Opt this plugin instance into the process-wide MainThreadDispatcher
     // backend. On macOS this installs or refcounts a Cocoa backend
@@ -1164,8 +1163,7 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
 
     silence_unsupported_active_ = false;
     apply_arrangements();
-    runtime::log_debug(
-        "VST3 setBusArrangements: accepted {} in / {} out buses", numIns, numOuts);
+    runtime::log_debug("VST3 setBusArrangements: accepted {} in / {} out buses", numIns, numOuts);
     return kResultTrue;
 }
 
@@ -1509,7 +1507,8 @@ void PulpVst3Processor::schedule_restart_poll_tick() {
 
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_set_active");
-    if (state) refresh_bus_channel_cache();
+    if (state)
+        refresh_bus_channel_cache();
     if (state && processor_ && has_prepared_context_) {
         processor_->prepare(prepared_context_);
         processor_->prepare_f64_fallback_scratch(prepared_context_, prepared_layout_);
@@ -1698,12 +1697,14 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                             param_id, static_cast<int32_t>(offset), last_value});
                         any_point = true;
                     }
-                    if (any_point) store_.set_value_rt(param_id, last_value);
+                    if (any_point)
+                        store_.set_value_rt(param_id, last_value);
                 }
             }
         }
     }
-    if (sample_accurate_params_) param_events_.sort(param_sort_scratch_, param_offset_counts_);
+    if (sample_accurate_params_)
+        param_events_.sort(param_sort_scratch_, param_offset_counts_);
 }
 
 void PulpVst3Processor::refresh_bus_channel_cache() {
@@ -1711,7 +1712,8 @@ void PulpVst3Processor::refresh_bus_channel_cache() {
         const std::size_t count = std::min<std::size_t>(buses.size(), kCachedBusCount);
         for (std::size_t b = 0; b < count; ++b) {
             auto* bus = FCast<AudioBus>(buses.at(static_cast<int32>(b)));
-            out[b] = bus ? static_cast<int>(SpeakerArr::getChannelCount(bus->getArrangement())) : -1;
+            out[b] =
+                bus ? static_cast<int>(SpeakerArr::getChannelCount(bus->getArrangement())) : -1;
         }
         return count;
     };
@@ -1821,10 +1823,12 @@ bool PulpVst3Processor::process_validate_layout(
     const auto expected_width = [&](bool input, int32 b) -> int {
         const auto& cache = input ? expected_in_channels_ : expected_out_channels_;
         const std::size_t count = input ? cached_in_bus_count_ : cached_out_bus_count_;
-        if (bus_channel_cache_valid_.load(std::memory_order_relaxed) && static_cast<std::size_t>(b) < count)
+        if (bus_channel_cache_valid_.load(std::memory_order_relaxed) &&
+            static_cast<std::size_t>(b) < count)
             return cache[static_cast<std::size_t>(b)];
         auto* declared = FCast<AudioBus>((input ? audioInputs : audioOutputs).at(b));
-        return declared ? static_cast<int>(SpeakerArr::getChannelCount(declared->getArrangement())) : -1;
+        return declared ? static_cast<int>(SpeakerArr::getChannelCount(declared->getArrangement()))
+                        : -1;
     };
     if (!malformed_layout) {
         for (int32 b = 0; b < data.numInputs; ++b) {
@@ -2119,7 +2123,8 @@ bool PulpVst3Processor::process_maybe_bypass(
         // host raised this block must settle even though we short-circuited
         // before process(), or a panic/reset raised while bypassed would fire
         // late on the next non-bypassed block.
-        if (!warming_render_path_) store_.reset_triggers_rt();
+        if (!warming_render_path_)
+            store_.reset_triggers_rt();
         return true;
     }
     return false;
@@ -2281,8 +2286,7 @@ void PulpVst3Processor::process_publish_output_params(
     // Nothing to publish unless the processor emitted explicit events or some
     // store write landed across process(); the snapshot diff below could only
     // find changes in the second case.
-    if (output_param_events_.empty() &&
-        store_.state_generation() == pre_process_generation_)
+    if (output_param_events_.empty() && store_.state_generation() == pre_process_generation_)
         return;
     // The store moved, so the snapshot no longer matches the live values.
     snapshot_state_.valid = false;
@@ -2606,18 +2610,18 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     auto& output64_buses = rt_output64_buses_;
     if (native_f64) {
         input64_buses[0] = {
-            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
-                     proc_in, false, data.numInputs > 0},
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, proc_in, false,
+                     data.numInputs > 0},
             .buffer = input64_view,
         };
         input64_buses[1] = {
-            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
-                     sc_channels, true, sc_channels > 0},
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, sc_channels, true,
+                     sc_channels > 0},
             .buffer = sidechain64_view,
         };
         output64_buses[0] = {
-            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
-                     proc_out, false, data.numOutputs > 0},
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, proc_out, false,
+                     data.numOutputs > 0},
             .buffer = output64_view,
         };
     }
@@ -2775,7 +2779,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
     }
-    if (warming_render_path_) return kResultOk;
+    if (warming_render_path_)
+        return kResultOk;
 
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
@@ -2795,8 +2800,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 }
 
 void PulpVst3Processor::warm_render_path() {
-    if (!processor_ || max_block_size_ <= 0 ||
-        processSetup.symbolicSampleSize != kSample32)
+    if (!processor_ || max_block_size_ <= 0 || processSetup.symbolicSampleSize != kSample32)
         return;
     const int frames = std::min(max_block_size_, 64);
     std::vector<std::vector<float>> storage;

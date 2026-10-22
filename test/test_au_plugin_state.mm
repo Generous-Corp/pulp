@@ -3425,8 +3425,7 @@ TEST_CASE("current_auv3_wrapper_identifier — matches the Foundation reading of
     std::string expected;
     @autoreleasepool {
         NSBundle* main = [NSBundle mainBundle];
-        const bool is_extension =
-            [[[main bundlePath] pathExtension] isEqualToString:@"appex"];
+        const bool is_extension = [[[main bundlePath] pathExtension] isEqualToString:@"appex"];
         NSString* process = [[NSProcessInfo processInfo] processName];
         if ([process hasPrefix:@"AUHostingService"]) {
             expected = [process UTF8String];
@@ -3438,8 +3437,10 @@ TEST_CASE("current_auv3_wrapper_identifier — matches the Foundation reading of
             std::string([[[NSProcessInfo processInfo] processName] UTF8String]));
     REQUIRE(pulp::format::current_auv3_wrapper_identifier() == expected);
 
-    if (prior_bundle) setenv("AU_HOST_BUNDLE_ID", saved_bundle.c_str(), 1);
-    if (prior_identifier) setenv("AU_HOST_IDENTIFIER", saved_identifier.c_str(), 1);
+    if (prior_bundle)
+        setenv("AU_HOST_BUNDLE_ID", saved_bundle.c_str(), 1);
+    if (prior_identifier)
+        setenv("AU_HOST_IDENTIFIER", saved_identifier.c_str(), 1);
 }
 
 TEST_CASE("detect_host_type — wrapper id wins when wrapper is recognized",

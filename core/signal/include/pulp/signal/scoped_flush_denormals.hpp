@@ -104,7 +104,7 @@ inline bool denormals_are_flushed() noexcept {
 }
 
 class ScopedFlushDenormals {
-public:
+  public:
     // Control-register writes are not free on the audio path, and many hosts
     // already run their audio threads with flush-to-zero on. Each write is
     // therefore made only when it changes the register; the observable
@@ -124,9 +124,11 @@ public:
 
     ~ScopedFlushDenormals() noexcept {
 #if defined(PULP_FLUSH_DENORMALS_X86)
-        if (_mm_getcsr() != saved_csr_) _mm_setcsr(saved_csr_);
+        if (_mm_getcsr() != saved_csr_)
+            _mm_setcsr(saved_csr_);
 #elif defined(PULP_FLUSH_DENORMALS_ARM64)
-        if (detail::read_fpcr() != saved_fpcr_) detail::write_fpcr(saved_fpcr_);
+        if (detail::read_fpcr() != saved_fpcr_)
+            detail::write_fpcr(saved_fpcr_);
 #endif
     }
 

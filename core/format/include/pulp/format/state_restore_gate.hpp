@@ -89,21 +89,24 @@ public:
     /// Audio-thread pin. Contextually convertible to bool: false means a state
     /// restore holds the gate and this block must not enter `process()`.
     class [[nodiscard]] RenderLock {
-    public:
+      public:
         RenderLock(const RenderLock&) = delete;
         RenderLock& operator=(const RenderLock&) = delete;
         ~RenderLock() {
-            if (!gate_) return;
-            const std::uint32_t prev =
-                gate_->state_.fetch_sub(1, std::memory_order_acq_rel);
+            if (!gate_)
+                return;
+            const std::uint32_t prev = gate_->state_.fetch_sub(1, std::memory_order_acq_rel);
             // Only a render that finishes while a restore waits pays for the
             // wake-up; an uncontended block is one atomic decrement.
-            if ((prev & kRestoring) != 0) gate_->state_.notify_all();
+            if ((prev & kRestoring) != 0)
+                gate_->state_.notify_all();
         }
 
-        explicit operator bool() const noexcept { return gate_ != nullptr; }
+        explicit operator bool() const noexcept {
+            return gate_ != nullptr;
+        }
 
-    private:
+      private:
         friend class StateRestoreGate;
         explicit RenderLock(StateRestoreGate* gate) noexcept : gate_(gate) {}
         StateRestoreGate* gate_;
@@ -112,14 +115,14 @@ public:
     /// Control-thread hold. Keeps the audio thread out of `process()` until it
     /// is destroyed.
     class [[nodiscard]] RestoreLock {
-    public:
+      public:
         RestoreLock(const RestoreLock&) = delete;
         RestoreLock& operator=(const RestoreLock&) = delete;
         ~RestoreLock() {
             gate_.state_.fetch_and(~kRestoring, std::memory_order_release);
         }
 
-    private:
+      private:
         friend class StateRestoreGate;
         RestoreLock(StateRestoreGate& gate, std::unique_lock<std::mutex> writer) noexcept
             : gate_(gate), writer_(std::move(writer)) {}
@@ -170,7 +173,7 @@ public:
         return contended_blocks_.load(std::memory_order_relaxed);
     }
 
-private:
+  private:
     static constexpr std::uint32_t kRestoring = 0x8000'0000u;
     static constexpr std::uint32_t kRenderMask = ~kRestoring;
     static constexpr int kSpinsBeforeWait = 64;

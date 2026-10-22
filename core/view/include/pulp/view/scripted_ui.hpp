@@ -73,15 +73,21 @@ struct ScriptedUiOptions {
 /// -- but warns once when that blocks the host. Standalone hosts and in-process
 /// harnesses never hold one, so their document is mounted when either returns.
 class ScopedDeferredDocumentLoad {
-public:
-    ScopedDeferredDocumentLoad() noexcept : previous_(flag()) { flag() = true; }
-    ~ScopedDeferredDocumentLoad() { flag() = previous_; }
+  public:
+    ScopedDeferredDocumentLoad() noexcept : previous_(flag()) {
+        flag() = true;
+    }
+    ~ScopedDeferredDocumentLoad() {
+        flag() = previous_;
+    }
     ScopedDeferredDocumentLoad(const ScopedDeferredDocumentLoad&) = delete;
     ScopedDeferredDocumentLoad& operator=(const ScopedDeferredDocumentLoad&) = delete;
     /// Whether a guard is alive on this thread.
-    static bool active() noexcept { return flag(); }
+    static bool active() noexcept {
+        return flag();
+    }
 
-private:
+  private:
     // Inline: hosts open every embedded editor inside a guard, including
     // AutoUi editors, and an out-of-line guard would link the script runtime
     // into each of those plug-ins.
@@ -95,7 +101,7 @@ private:
 // Manages a JS-driven widget tree, optional theme.json overrides, and
 // standalone hot reload semantics with widget value preservation.
 class ScriptedUiSession : public ScriptedEditorSession {
-public:
+  public:
     using NativeMessageHandler =
         std::function<std::string(std::string_view envelope_json)>;
 
@@ -110,7 +116,9 @@ public:
     /// before it destroys the editor root. Idempotent; the destructor runs it.
     void release_root() noexcept override;
     /// True when `view` is this session's root.
-    bool borrows_root(const View& view) const noexcept override { return &root_ == &view; }
+    bool borrows_root(const View& view) const noexcept override {
+        return &root_ == &view;
+    }
 
     ScriptedUiSession(const ScriptedUiSession&) = delete;
     ScriptedUiSession& operator=(const ScriptedUiSession&) = delete;
@@ -128,7 +136,9 @@ public:
     /// a processor that builds its own session in create_view() should too.
     bool load_deferrable(std::string* error = nullptr);
     /// True between a deferred load() and the poll() that evaluates it.
-    bool document_load_pending() const noexcept override { return document_load_pending_; }
+    bool document_load_pending() const noexcept override {
+        return document_load_pending_;
+    }
 
     /// True while the mounted document still owes host frames to settle its
     /// commits (see WidgetBridge::pending_runtime_settle_rounds()). Each

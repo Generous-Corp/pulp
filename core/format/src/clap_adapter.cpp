@@ -366,7 +366,9 @@ static void publish_latency_changed(PulpClapPlugin* self) {
     if (ext && ext->changed) ext->changed(self->host);
 }
 
-static uint32_t clap_warm_event_count(const clap_input_events_t*) { return 0; }
+static uint32_t clap_warm_event_count(const clap_input_events_t*) {
+    return 0;
+}
 static const clap_event_header_t* clap_warm_event_get(const clap_input_events_t*, uint32_t) {
     return nullptr;
 }
@@ -377,7 +379,8 @@ static const clap_event_header_t* clap_warm_event_get(const clap_input_events_t*
 // transport diff is restored so the first real block still reports a start.
 static void clap_warm_render_path(const clap_plugin_t* plugin, PulpClapPlugin* self) {
     const int frames = std::min(self->max_buffer_size, 64);
-    if (frames <= 0) return;
+    if (frames <= 0)
+        return;
     std::vector<std::vector<float>> storage;
     std::vector<std::vector<float*>> pointers;
     storage.reserve(kMaxChannels * (kMaxInputBuses + kMaxOutputBuses));
@@ -425,11 +428,9 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     // largest allocation activation makes. A direction with no note port can
     // receive or emit no SysEx, so it gets no pool; a stray copy there drops
     // like any other overflow.
-    self->midi_in.reserve(kRealtimeMidiEventCapacity,
-                          kRealtimeMidiSysexCapacity,
+    self->midi_in.reserve(kRealtimeMidiEventCapacity, kRealtimeMidiSysexCapacity,
                           desc.accepts_midi ? kRealtimeMidiSysexPayloadCapacity : 0);
-    self->midi_out.reserve(kRealtimeMidiEventCapacity,
-                           kRealtimeMidiSysexCapacity,
+    self->midi_out.reserve(kRealtimeMidiEventCapacity, kRealtimeMidiSysexCapacity,
                            desc.produces_midi ? kRealtimeMidiSysexPayloadCapacity : 0);
     self->midi_in.set_realtime_capacity_limit(true);
     self->midi_out.set_realtime_capacity_limit(true);
@@ -715,10 +716,8 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
                 // wins and nothing is queued.
                 if (self->sample_accurate_params) {
                     boundary::apply_param_value(
-                        self->param_events, self->store,
-                        static_cast<state::ParamID>(ev.param_id),
-                        static_cast<int32_t>(hdr->time),
-                        static_cast<float>(ev.value));
+                        self->param_events, self->store, static_cast<state::ParamID>(ev.param_id),
+                        static_cast<int32_t>(hdr->time), static_cast<float>(ev.value));
                 } else {
                     self->store.set_value_rt(static_cast<state::ParamID>(ev.param_id),
                                              static_cast<float>(ev.value));
@@ -1460,9 +1459,9 @@ static void clap_phase_emit_output(
         // them before the offset-ordered merge below preserves CLAP's global
         // ascending-time contract. Skipped entirely while no store write landed
         // across process(): every value still equals its snapshot.
-        const bool store_moved =
-            self->store.state_generation() != self->pre_process_generation;
-        if (store_moved) self->snapshot_state.valid = false;
+        const bool store_moved = self->store.state_generation() != self->pre_process_generation;
+        if (store_moved)
+            self->snapshot_state.valid = false;
         for (std::size_t i = 0; store_moved && i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
             float current = self->store.get_value(all_params[i].id);
@@ -2005,7 +2004,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
 
     auto all_params = self->store.all_params();
     clap_phase_snapshot_params(self, all_params);
-    if (self->warming_render_path) return CLAP_PROCESS_CONTINUE;
+    if (self->warming_render_path)
+        return CLAP_PROCESS_CONTINUE;
 
     // Prove no state.load is installing underneath this block. state.load is a
     // main-thread call that hosts may make while the plug-in is active, and

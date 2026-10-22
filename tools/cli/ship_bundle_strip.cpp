@@ -15,25 +15,30 @@ namespace pulp::cli {
 namespace {
 
 std::string trim_line_end(std::string s) {
-    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r'))
+        s.pop_back();
     return s;
 }
 
-}  // namespace
+} // namespace
 
 bool is_macho_file(const fs::path& file) {
     std::ifstream in(file, std::ios::binary);
     std::array<unsigned char, 4> b{};
-    if (!in.read(reinterpret_cast<char*>(b.data()), b.size())) return false;
+    if (!in.read(reinterpret_cast<char*>(b.data()), b.size()))
+        return false;
     const std::uint32_t big = (std::uint32_t{b[0]} << 24) | (std::uint32_t{b[1]} << 16) |
                               (std::uint32_t{b[2]} << 8) | std::uint32_t{b[3]};
     switch (big) {
-        case 0xfeedfaceu: case 0xfeedfacfu:  // big-endian thin
-        case 0xcefaedfeu: case 0xcffaedfeu:  // little-endian thin, as read big-endian
-        case 0xcafebabeu: case 0xcafebabfu:  // universal
-            return true;
-        default:
-            return false;
+    case 0xfeedfaceu:
+    case 0xfeedfacfu: // big-endian thin
+    case 0xcefaedfeu:
+    case 0xcffaedfeu: // little-endian thin, as read big-endian
+    case 0xcafebabeu:
+    case 0xcafebabfu: // universal
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -41,19 +46,20 @@ std::string bundle_executable_name(const fs::path& bundle) {
     const auto plist = bundle / "Contents" / "Info.plist";
     std::error_code ec;
     if (fs::is_regular_file(plist, ec)) {
-        auto name = trim_line_end(exec_output(
-            "/usr/bin/plutil -extract CFBundleExecutable raw -o - " +
-            shell_quote(plist) + " 2>/dev/null"));
-        if (!name.empty() && name.find('/') == std::string::npos) return name;
+        auto name =
+            trim_line_end(exec_output("/usr/bin/plutil -extract CFBundleExecutable raw -o - " +
+                                      shell_quote(plist) + " 2>/dev/null"));
+        if (!name.empty() && name.find('/') == std::string::npos)
+            return name;
     }
     return bundle.stem().string();
 }
 
-std::optional<fs::path> stage_stripped_bundle(const fs::path& bundle,
-                                              const fs::path& staging_root,
+std::optional<fs::path> stage_stripped_bundle(const fs::path& bundle, const fs::path& staging_root,
                                               const ShipStripOptions& options) {
     const auto exec_name = bundle_executable_name(bundle);
-    if (!is_macho_file(bundle / "Contents" / "MacOS" / exec_name)) return bundle;
+    if (!is_macho_file(bundle / "Contents" / "MacOS" / exec_name))
+        return bundle;
 
     // An ad hoc signature carries no Authority line, so an identity here means
     // the bundle went through `pulp ship sign` and its copy must be signed the
@@ -80,21 +86,21 @@ std::optional<fs::path> stage_stripped_bundle(const fs::path& bundle,
     // strip warns that the existing signature is invalidated; the copy is
     // re-signed below.
     if (run("/usr/bin/strip -x " + shell_quote(binary) + " 2>/dev/null") != 0) {
-        std::cerr << "  FAILED to strip local symbols from " << bundle.filename().string()
-                  << "\n";
+        std::cerr << "  FAILED to strip local symbols from " << bundle.filename().string() << "\n";
         return std::nullopt;
     }
     if (developer_signed) {
-        if (options.signing_preflight && !options.signing_preflight()) return std::nullopt;
+        if (options.signing_preflight && !options.signing_preflight())
+            return std::nullopt;
         if (!pulp::ship::codesign(staged.string(), options.identity, options.entitlements)) {
-            std::cerr << "  FAILED to re-sign the stripped copy of "
-                      << bundle.filename().string() << "\n";
+            std::cerr << "  FAILED to re-sign the stripped copy of " << bundle.filename().string()
+                      << "\n";
             return std::nullopt;
         }
     } else if (run("/usr/bin/codesign --force --sign - " + shell_quote(staged) +
                    " >/dev/null 2>&1") != 0) {
-        std::cerr << "  FAILED to ad hoc sign the stripped copy of "
-                  << bundle.filename().string() << "\n";
+        std::cerr << "  FAILED to ad hoc sign the stripped copy of " << bundle.filename().string()
+                  << "\n";
         return std::nullopt;
     }
     std::cout << "  stripped local symbols from " << bundle.filename().string()
@@ -102,4 +108,4 @@ std::optional<fs::path> stage_stripped_bundle(const fs::path& bundle,
     return staged;
 }
 
-}  // namespace pulp::cli
+} // namespace pulp::cli

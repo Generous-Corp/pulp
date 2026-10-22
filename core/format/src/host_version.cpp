@@ -43,12 +43,12 @@ HostVersion detect_host_version(HostType /*type*/) {
 
 bool host_type_uses_version(HostType type) noexcept {
     switch (type) {
-        case HostType::Unknown:
-        case HostType::Other:
-        case HostType::Standalone:
-            return false;
-        default:
-            return true;
+    case HostType::Unknown:
+    case HostType::Other:
+    case HostType::Standalone:
+        return false;
+    default:
+        return true;
     }
 }
 

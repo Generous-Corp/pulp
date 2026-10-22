@@ -19,7 +19,7 @@ class View;
 /// from always-linked host code would pull the whole runtime into every
 /// plug-in, including ones whose editor is AutoUi.
 class ScriptedEditorSession {
-public:
+  public:
     virtual ~ScriptedEditorSession() = default;
 
     /// See ScriptedUiSession::document_load_pending().
@@ -39,10 +39,10 @@ public:
     /// See ScriptedUiSession::attach_gpu_surface().
     virtual void attach_gpu_surface(render::GpuSurface* gpu_surface) = 0;
 
-protected:
+  protected:
     ScriptedEditorSession() = default;
     ScriptedEditorSession(const ScriptedEditorSession&) = default;
     ScriptedEditorSession& operator=(const ScriptedEditorSession&) = default;
 };
 
-}  // namespace pulp::view
+} // namespace pulp::view

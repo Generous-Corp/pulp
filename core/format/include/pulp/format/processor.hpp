@@ -1145,7 +1145,9 @@ public:
     /// adapter creates the processor. Other hosting paths (AU v3, LV2, AAX, the
     /// standalone and headless hosts, graph nodes) deliver every point either
     /// way. Appended to preserve additive-only vtable ordering (node_abi_gate).
-    virtual bool wants_sample_accurate_parameters() const { return false; }
+    virtual bool wants_sample_accurate_parameters() const {
+        return false;
+    }
 
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;

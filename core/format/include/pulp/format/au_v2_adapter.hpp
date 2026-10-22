@@ -326,9 +326,8 @@ public:
     Float64 GetTailTime() override;
     Float64 GetLatency() override;
 
-protected:
-    OSStatus ProcessForScheduledParams(ParameterEventList& events,
-                                       UInt32 frames_to_process,
+  protected:
+    OSStatus ProcessForScheduledParams(ParameterEventList& events, UInt32 frames_to_process,
                                        void* user_data) override;
     OSStatus ProcessScheduledSlice(void* user_data,
                                    UInt32 start_frame_in_buffer,
@@ -423,7 +422,7 @@ private:
     // instead of rescanning and rewriting every event.
     struct ScheduledRamp {
         std::uint32_t index = 0;
-        bool superseded = false;  // a later immediate set the same parameter
+        bool superseded = false; // a later immediate set the same parameter
     };
     const ParameterEventList* scheduled_events_ = nullptr;
     std::size_t scheduled_cursor_ = 0;

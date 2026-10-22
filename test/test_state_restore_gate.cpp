@@ -103,21 +103,22 @@ TEST_CASE("A waiting restore refuses new renders until it completes",
         for (int i = 0; i < 2000 && !refused; ++i) {
             auto later = gate.lock_for_render();
             refused = !static_cast<bool>(later);
-            if (!refused) std::this_thread::sleep_for(std::chrono::microseconds(100));
+            if (!refused)
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
         REQUIRE(refused);
         REQUIRE_FALSE(restore_acquired.load(std::memory_order_acquire));
     }
     // The first render released: the restore now owns the gate.
-    while (!restore_acquired.load(std::memory_order_acquire)) std::this_thread::yield();
+    while (!restore_acquired.load(std::memory_order_acquire))
+        std::this_thread::yield();
     REQUIRE_FALSE(static_cast<bool>(gate.lock_for_render()));
     release_restore.store(true, std::memory_order_release);
     restorer.join();
     REQUIRE(static_cast<bool>(gate.lock_for_render()));
 }
 
-TEST_CASE("Two restores never hold the gate at once",
-          "[format][state-restore-gate]") {
+TEST_CASE("Two restores never hold the gate at once", "[format][state-restore-gate]") {
     StateRestoreGate gate;
     std::atomic<int> inside{0};
     std::atomic<int> overlaps{0};
@@ -257,7 +258,7 @@ TEST_CASE("A restore waiting on a long render sleeps instead of spinning",
         });
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
         REQUIRE_FALSE(restored.load());
-    }  // the render finishes here
+    } // the render finishes here
     restorer.join();
     REQUIRE(restored.load());
     // A yield loop spends most of the 300 ms on the CPU.

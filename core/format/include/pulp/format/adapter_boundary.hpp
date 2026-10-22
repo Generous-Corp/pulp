@@ -437,14 +437,11 @@ struct ParamSnapshotState {
 /// plugin-side change it never made. @p after_read runs between the read and
 /// the final check (tests use it to finish a writer there).
 template <typename AfterRead = void (*)()>
-inline void refresh_param_snapshot(const state::StateStore& store,
-                                   std::span<const state::ParamInfo> all_params,
-                                   std::vector<float>& snapshot,
-                                   ParamSnapshotState& state,
-                                   std::uint64_t generation,
-                                   AfterRead&& after_read = [] {}) {
-    if (state.valid && state.generation == generation &&
-        snapshot.size() == all_params.size())
+inline void refresh_param_snapshot(
+    const state::StateStore& store, std::span<const state::ParamInfo> all_params,
+    std::vector<float>& snapshot, ParamSnapshotState& state, std::uint64_t generation,
+    AfterRead&& after_read = [] {}) {
+    if (state.valid && state.generation == generation && snapshot.size() == all_params.size())
         return;
     const bool quiet_before = store.state_snapshot_is_current(generation);
     snapshot_param_values(store, all_params, snapshot);

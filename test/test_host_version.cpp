@@ -70,10 +70,9 @@ TEST_CASE("Only host types with version-gated quirks read the host version",
     REQUIRE_FALSE(host_type_uses_version(HostType::Other));
     REQUIRE_FALSE(host_type_uses_version(HostType::Standalone));
     for (auto type : {HostType::LogicPro, HostType::GarageBand, HostType::AbletonLive,
-                      HostType::Reaper, HostType::ProTools, HostType::Cubase,
-                      HostType::Nuendo, HostType::Wavelab, HostType::StudioOne,
-                      HostType::FLStudio, HostType::Bitwig, HostType::Ardour,
-                      HostType::Mixbus32C, HostType::DigitalPerformer}) {
+                      HostType::Reaper, HostType::ProTools, HostType::Cubase, HostType::Nuendo,
+                      HostType::Wavelab, HostType::StudioOne, HostType::FLStudio, HostType::Bitwig,
+                      HostType::Ardour, HostType::Mixbus32C, HostType::DigitalPerformer}) {
         INFO(host_type_name(type));
         REQUIRE(host_type_uses_version(type));
     }

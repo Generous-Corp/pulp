@@ -1176,24 +1176,21 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 #if defined(PULP_SHIP_STRIP_FIXTURE)
 namespace {
 
-fs::path make_module_bundle(const fs::path& root, std::string_view format,
-                            std::string_view name, std::string_view ext) {
-    auto bundle = root / "build" / std::string(format) /
-                  (std::string(name) + std::string(ext));
+fs::path make_module_bundle(const fs::path& root, std::string_view format, std::string_view name,
+                            std::string_view ext) {
+    auto bundle = root / "build" / std::string(format) / (std::string(name) + std::string(ext));
     fs::create_directories(bundle / "Contents" / "MacOS");
     {
         std::ofstream plist(bundle / "Contents" / "Info.plist");
         plist << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
               << "<plist version=\"1.0\"><dict>"
               << "<key>CFBundleExecutable</key><string>" << name << "</string>"
-              << "<key>CFBundleIdentifier</key><string>com.pulp.test." << name
-              << "</string>"
+              << "<key>CFBundleIdentifier</key><string>com.pulp.test." << name << "</string>"
               << "<key>CFBundlePackageType</key><string>BNDL</string>"
               << "<key>CFBundleVersion</key><string>1.0.0</string>"
               << "</dict></plist>\n";
     }
-    fs::copy_file(PULP_SHIP_STRIP_FIXTURE,
-                  bundle / "Contents" / "MacOS" / std::string(name),
+    fs::copy_file(PULP_SHIP_STRIP_FIXTURE, bundle / "Contents" / "MacOS" / std::string(name),
                   fs::copy_options::overwrite_existing);
     return bundle;
 }
@@ -1210,22 +1207,21 @@ bool has_local_fixture_symbol(const fs::path& binary) {
 }
 
 fs::path packaged_binary(const fs::path& pkg, const fs::path& out, std::string_view name) {
-    auto r = ChildProcess::run("/usr/sbin/pkgutil",
-                               {"--expand-full", pkg.string(), out.string()},
+    auto r = ChildProcess::run("/usr/sbin/pkgutil", {"--expand-full", pkg.string(), out.string()},
                                ProcessOptions{});
     REQUIRE(r.exit_code == 0);
     const auto suffix = fs::path("Contents") / "MacOS" / std::string(name);
     for (const auto& entry : fs::recursive_directory_iterator(out)) {
         const auto& p = entry.path();
-        if (p.filename() == std::string(name) &&
-            p.parent_path().filename() == "MacOS" && entry.is_regular_file())
+        if (p.filename() == std::string(name) && p.parent_path().filename() == "MacOS" &&
+            entry.is_regular_file())
             return p;
     }
     FAIL("no packaged " << suffix.string() << " under " << out.string());
     return {};
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package strips local symbols from the shipped copy only",
@@ -1253,15 +1249,15 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     CHECK(has_local_fixture_symbol(build_binary));
     // The stripped copy carries a valid (ad hoc) signature, so it still loads.
     auto verify = ChildProcess::run(
-        "/usr/bin/codesign", {"--verify", shipped.parent_path().parent_path().parent_path().string()},
-        ProcessOptions{});
+        "/usr/bin/codesign",
+        {"--verify", shipped.parent_path().parent_path().parent_path().string()}, ProcessOptions{});
     CHECK(verify.exit_code == 0);
 
-    auto kept = run_pulp_in(root, {"ship", "package", "--version", "1.0.1", "--separate",
-                                   "--keep-symbols"});
+    auto kept = run_pulp_in(
+        root, {"ship", "package", "--version", "1.0.1", "--separate", "--keep-symbols"});
     REQUIRE(kept.exit_code == 0);
-    const auto kept_binary = packaged_binary(
-        root / "artifacts" / "StripMe-CLAP-1.0.1.pkg", root / "expanded-kept", "StripMe");
+    const auto kept_binary = packaged_binary(root / "artifacts" / "StripMe-CLAP-1.0.1.pkg",
+                                             root / "expanded-kept", "StripMe");
     CHECK(has_local_fixture_symbol(kept_binary));
 
     fs::remove_all(root);

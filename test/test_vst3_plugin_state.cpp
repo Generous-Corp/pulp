@@ -222,7 +222,7 @@ struct TestVst3Config {
 };
 
 class TestVst3Processor : public pulp::format::Processor {
-public:
+  public:
     bool wants_sample_accurate_parameters() const override {
         return config_.sample_accurate_params;
     }
@@ -1250,8 +1250,9 @@ TEST_CASE("VST3 stores a host's exact value for a continuous parameter with a st
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
-TEST_CASE("VST3 hands every automation point to the processor and writes the store once per parameter",
-          "[vst3][param][automation][host]") {
+TEST_CASE(
+    "VST3 hands every automation point to the processor and writes the store once per parameter",
+    "[vst3][param][automation][host]") {
     // Two parameters with three points each, delivered as VST3 does: one
     // time-ordered queue per parameter. The processor's event queue gets all
     // six points in time order; the store, block-rate state, takes each
@@ -1701,8 +1702,7 @@ TEST_CASE("VST3 activation warm-up leaves the Processor, triggers and transport 
 
         INFO("bypassed=" << bypassed);
         REQUIRE(test_processor->process_count == 0);
-        REQUIRE_THAT(test_processor->state().get_value(kResetParamId),
-                     WithinAbs(1.0f, 1e-6f));
+        REQUIRE_THAT(test_processor->state().get_value(kResetParamId), WithinAbs(1.0f, 1e-6f));
 
         constexpr int kFrames = 8;
         std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
@@ -1730,8 +1730,7 @@ TEST_CASE("VST3 activation warm-up leaves the Processor, triggers and transport 
             REQUIRE(test_processor->last_context.transport_started);
         }
         // The trigger settles on the first REAL block, not during warm-up.
-        REQUIRE_THAT(test_processor->state().get_value(kResetParamId),
-                     WithinAbs(0.0f, 1e-6f));
+        REQUIRE_THAT(test_processor->state().get_value(kResetParamId), WithinAbs(0.0f, 1e-6f));
 
         REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
         REQUIRE(processor.terminate() == Steinberg::kResultOk);
@@ -3118,12 +3117,12 @@ TEST_CASE("VST3 publishes only processor-side changes across idle blocks",
     REQUIRE(processor.setParamNormalized(9, 0.4) == Steinberg::kResultOk);
     {
         Steinberg::Vst::ParameterChanges out_params(4);
-        run_block(out_params);  // block 2: nothing to publish
+        run_block(out_params); // block 2: nothing to publish
         REQUIRE(out_params.getParameterCount() == 0);
     }
     {
         Steinberg::Vst::ParameterChanges out_params(4);
-        run_block(out_params);  // block 3: the processor writes Gain
+        run_block(out_params); // block 3: the processor writes Gain
         REQUIRE(out_params.getParameterCount() == 1);
         auto* queue = out_params.getParameterData(0);
         REQUIRE(queue != nullptr);

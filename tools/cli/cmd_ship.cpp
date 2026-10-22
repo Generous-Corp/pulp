@@ -108,9 +108,11 @@ static int print_ship_help() {
     std::cout << "             --ship-inspector-runtime-eval  (separate unsafe-eval acknowledgement)\n";
     std::cout << "             --json  (emit inspector capability evidence)\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (sign the .pkg)\n";
-    std::cout << "             --identity \"Developer ID Application: ...\" [--entitlements <plist>]\n";
+    std::cout
+        << "             --identity \"Developer ID Application: ...\" [--entitlements <plist>]\n";
     std::cout << "               (re-sign stripped plug-in copies; macOS)\n";
-    std::cout << "             --keep-symbols  (ship plug-in bundles without stripping local symbols)\n";
+    std::cout
+        << "             --keep-symbols  (ship plug-in bundles without stripping local symbols)\n";
     std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
     std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
     std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
@@ -621,9 +623,11 @@ static int ship_package_impl(const std::vector<std::string>& args,
             } else if (args[i] == "--installer-identity") {
                 if (!take_ship_value(args, i, sub, args[i], installer_identity)) return 2;
             } else if (args[i] == "--identity") {
-                if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
+                if (!take_ship_value(args, i, sub, args[i], identity))
+                    return 2;
             } else if (args[i] == "--entitlements") {
-                if (!take_ship_value(args, i, sub, args[i], entitlements)) return 2;
+                if (!take_ship_value(args, i, sub, args[i], entitlements))
+                    return 2;
             } else if (args[i] == "--format") {
                 if (!take_ship_value(args, i, sub, args[i], format)) return 2;
             } else if (args[i] == "--binary") {
@@ -632,14 +636,15 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 if (!take_ship_value(args, i, sub, args[i], icon_path)) return 2;
             } else if (args[i] == "--product") {
                 if (!take_ship_value(args, i, sub, args[i], product_filter)) return 2;
-            }
-            else if (args[i] == "--apk-only") apk_only = true;
+            } else if (args[i] == "--apk-only")
+                apk_only = true;
             else if (args[i] == "--aab-only") aab_only = true;
             else if (args[i] == "--per-user") per_user = true;
             else if (args[i] == "--pkg") want_pkg = true;
             else if (args[i] == "--dmg") want_dmg = true;
             else if (args[i] == "--separate") want_separate = true;
-            else if (args[i] == "--keep-symbols") keep_symbols = true;
+            else if (args[i] == "--keep-symbols")
+                keep_symbols = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
             else if (args[i] == "--ship-inspector") ship_inspector = true;
             else if (args[i] == "--ship-inspector-runtime-eval")
@@ -647,7 +652,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
             else return unknown_ship_arg(sub, args[i]);
         }
 
-        (void)keep_symbols;  // macOS plug-in packaging only
+        (void)keep_symbols; // macOS plug-in packaging only
 
         // Refuse to package a PULP_TRACING=ON build unless explicitly allowed.
         if (int rc = enforce_no_tracing({build_dir, fs::path(binary_path)},
@@ -956,15 +961,20 @@ static int ship_package_impl(const std::vector<std::string>& args,
         strip_options.entitlements = entitlements;
         bool preflight_passed = false;
         strip_options.signing_preflight = [&] {
-            if (!preflight_passed) preflight_passed = run_signing_preflight(root);
+            if (!preflight_passed)
+                preflight_passed = run_signing_preflight(root);
             return preflight_passed;
         };
-        const auto strip_staging = fs::temp_directory_path() /
-            ("pulp-ship-strip-" + std::to_string(std::chrono::steady_clock::now()
-                                                 .time_since_epoch().count()));
+        const auto strip_staging =
+            fs::temp_directory_path() /
+            ("pulp-ship-strip-" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         struct RemoveTree {
             fs::path path;
-            ~RemoveTree() { std::error_code ec; fs::remove_all(path, ec); }
+            ~RemoveTree() {
+                std::error_code ec;
+                fs::remove_all(path, ec);
+            }
         } strip_staging_cleanup{strip_staging};
 
 #ifdef __APPLE__
@@ -1011,9 +1021,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
 
                 fs::path ship_path = entry.path();
                 if (!keep_symbols) {
-                    auto staged = pulp::cli::stage_stripped_bundle(
-                        entry.path(), strip_staging, strip_options);
-                    if (!staged) return 1;
+                    auto staged = pulp::cli::stage_stripped_bundle(entry.path(), strip_staging,
+                                                                   strip_options);
+                    if (!staged)
+                        return 1;
                     ship_path = *staged;
                 }
 
@@ -1025,8 +1036,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
                     auto dmg_path = artifacts / dmg_name;
                     std::cout << "Packaging " << name << " (" << dir_name
                               << " → .dmg)...\n";
-                    if (pulp::ship::create_dmg(ship_path.string(),
-                                               dmg_path.string(),
+                    if (pulp::ship::create_dmg(ship_path.string(), dmg_path.string(),
                                                name + " " + dir_name)) {
                         ++dmg_count;
                     } else {
@@ -1054,10 +1064,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 auto pkg_path = artifacts / (name + "-" + dir_name + "-" + version + ".pkg");
                 std::cout << "Packaging " << name << " (" << dir_name << " → .pkg"
                           << (installer_identity.empty() ? "" : ", signed") << ")...\n";
-                std::string cmd = "pkgbuild --component " + shell_quote(ship_path.string())
-                    + " --identifier " + shell_quote("com.pulp." + name + "." + format_lower)
-                    + " --version " + shell_quote(version)
-                    + " --install-location " + shell_quote(install_loc);
+                std::string cmd =
+                    "pkgbuild --component " + shell_quote(ship_path.string()) + " --identifier " +
+                    shell_quote("com.pulp." + name + "." + format_lower) + " --version " +
+                    shell_quote(version) + " --install-location " + shell_quote(install_loc);
                 if (!installer_identity.empty())
                     cmd += " --sign " + shell_quote(installer_identity);
                 cmd += " " + shell_quote(pkg_path.string()) + " 2>/dev/null";

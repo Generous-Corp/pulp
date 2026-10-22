@@ -81,7 +81,7 @@ TEST_CASE("ScopedFlushDenormals restores the caller's exact FPCR even when FTZ w
     {
         pulp::signal::ScopedFlushDenormals guard;
         REQUIRE((read_fpcr() & kFpcrFz) != 0);
-        write_fpcr(read_fpcr() & ~kFpcrFz);  // inner code turns FTZ off
+        write_fpcr(read_fpcr() & ~kFpcrFz); // inner code turns FTZ off
     }
     REQUIRE(read_fpcr() == (original | kFpcrFz));
 

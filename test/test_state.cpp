@@ -3442,8 +3442,8 @@ TEST_CASE("StateStore lookups agree for dense, sparse, and mixed parameter IDs",
         pulp::state::StateStore store;
         float v = 0.1f;
         for (auto id : ids) {
-            store.add_parameter({.id = id, .name = "p" + std::to_string(id),
-                                 .range = {0.0f, 1.0f, v, 0.0f}});
+            store.add_parameter(
+                {.id = id, .name = "p" + std::to_string(id), .range = {0.0f, 1.0f, v, 0.0f}});
             v += 0.1f;
         }
         float expected = 0.1f;
@@ -3451,19 +3451,20 @@ TEST_CASE("StateStore lookups agree for dense, sparse, and mixed parameter IDs",
             REQUIRE_THAT(store.get_value(id), Catch::Matchers::WithinAbs(expected, 1e-6));
             store.set_value(id, expected + 0.05f);
             REQUIRE_THAT(store.get_value(id), Catch::Matchers::WithinAbs(expected + 0.05f, 1e-6));
-            REQUIRE_THAT(store.get_normalized(id), Catch::Matchers::WithinAbs(expected + 0.05f, 1e-6));
+            REQUIRE_THAT(store.get_normalized(id),
+                         Catch::Matchers::WithinAbs(expected + 0.05f, 1e-6));
             store.set_value_rt(id, expected);
             REQUIRE_THAT(store.get_modulated(id), Catch::Matchers::WithinAbs(expected, 1e-6));
             expected += 0.1f;
         }
         REQUIRE(store.get_value(7) == 0.0f);
         REQUIRE(store.get_value(0x7FFF'0000u) == 0.0f);
-        store.set_value(7, 0.9f);  // unknown: ignored, no crash
+        store.set_value(7, 0.9f); // unknown: ignored, no crash
         REQUIRE(store.get_value(7) == 0.0f);
     };
     check({1, 2, 3});
     check({3, 1, 2});
-    check({0x4741'4E31u, 0x4741'4E32u});  // four-char-code style IDs
-    check({1, 0x4741'4E31u, 2});          // dense, then sparse, then dense again
+    check({0x4741'4E31u, 0x4741'4E32u}); // four-char-code style IDs
+    check({1, 0x4741'4E31u, 2});         // dense, then sparse, then dense again
     check({40000, 5});
 }

@@ -35,18 +35,26 @@ void sym_merge(It base, std::size_t a, std::size_t m, std::size_t b, Less& less)
         std::size_t lo = m, hi = b;
         while (lo < hi) {
             const std::size_t h = (lo + hi) / 2;
-            if (less(base[h], base[a])) lo = h + 1; else hi = h;
+            if (less(base[h], base[a]))
+                lo = h + 1;
+            else
+                hi = h;
         }
-        for (std::size_t k = a; k + 1 < lo; ++k) std::iter_swap(base + k, base + (k + 1));
+        for (std::size_t k = a; k + 1 < lo; ++k)
+            std::iter_swap(base + k, base + (k + 1));
         return;
     }
     if (b - m == 1) {
         std::size_t lo = a, hi = m;
         while (lo < hi) {
             const std::size_t h = (lo + hi) / 2;
-            if (!less(base[m], base[h])) lo = h + 1; else hi = h;
+            if (!less(base[m], base[h]))
+                lo = h + 1;
+            else
+                hi = h;
         }
-        for (std::size_t k = m; k > lo; --k) std::iter_swap(base + k, base + (k - 1));
+        for (std::size_t k = m; k > lo; --k)
+            std::iter_swap(base + k, base + (k - 1));
         return;
     }
     const std::size_t mid = (a + b) / 2;
@@ -56,22 +64,28 @@ void sym_merge(It base, std::size_t a, std::size_t m, std::size_t b, Less& less)
     const std::size_t p = n - 1;
     while (start < r) {
         const std::size_t c = (start + r) / 2;
-        if (!less(base[p - c], base[c])) start = c + 1; else r = c;
+        if (!less(base[p - c], base[c]))
+            start = c + 1;
+        else
+            r = c;
     }
     const std::size_t end = n - start;
-    if (start < m && m < end) std::rotate(base + start, base + m, base + end);
-    if (a < start && start < mid) sym_merge(base, a, start, mid, less);
-    if (mid < end && end < b) sym_merge(base, mid, end, b, less);
+    if (start < m && m < end)
+        std::rotate(base + start, base + m, base + end);
+    if (a < start && start < mid)
+        sym_merge(base, a, start, mid, less);
+    if (mid < end && end < b)
+        sym_merge(base, mid, end, b, less);
 }
 
-}  // namespace stable_sort_detail
+} // namespace stable_sort_detail
 
 /// Sorts [first, last) by `less`, keeping equal elements in their original
 /// order, without allocating. Requires random-access iterators.
-template <typename It, typename Less>
-void stable_sort_in_place(It first, It last, Less less) {
+template <typename It, typename Less> void stable_sort_in_place(It first, It last, Less less) {
     const auto n = static_cast<std::size_t>(std::distance(first, last));
-    if (n < 2 || std::is_sorted(first, last, less)) return;
+    if (n < 2 || std::is_sorted(first, last, less))
+        return;
     constexpr std::size_t kBlock = 20;
     for (std::size_t a = 0; a < n; a += kBlock)
         stable_sort_detail::insertion_sort(first, a, std::min(a + kBlock, n), less);
@@ -89,13 +103,16 @@ template <typename It, typename Key, typename Value, typename Count>
 bool stable_counting_sort(It first, It last, Key key, std::span<Value> scratch,
                           std::span<Count> counts) {
     const auto n = static_cast<std::size_t>(std::distance(first, last));
-    if (n > scratch.size()) return false;
+    if (n > scratch.size())
+        return false;
     for (auto it = first; it != last; ++it) {
         const auto k = key(*it);
-        if (k < 0 || static_cast<std::size_t>(k) >= counts.size()) return false;
+        if (k < 0 || static_cast<std::size_t>(k) >= counts.size())
+            return false;
     }
     std::fill(counts.begin(), counts.end(), Count{0});
-    for (auto it = first; it != last; ++it) ++counts[static_cast<std::size_t>(key(*it))];
+    for (auto it = first; it != last; ++it)
+        ++counts[static_cast<std::size_t>(key(*it))];
     Count running = 0;
     for (auto& count : counts) {
         const auto here = count;
@@ -108,4 +125,4 @@ bool stable_counting_sort(It first, It last, Key key, std::span<Value> scratch,
     return true;
 }
 
-}  // namespace pulp::state
+} // namespace pulp::state

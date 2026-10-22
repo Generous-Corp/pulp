@@ -405,7 +405,8 @@ void StateStore::add_parameter(const ParamInfo& info) {
     values_.emplace_back(clamped.range.default_value);
     id_to_index_[info.id] = index;
     if (dense_index_usable_ && info.id < kDenseIndexLimit && index < kNoDenseIndex) {
-        if (dense_index_.size() <= info.id) dense_index_.resize(std::size_t(info.id) + 1, kNoDenseIndex);
+        if (dense_index_.size() <= info.id)
+            dense_index_.resize(std::size_t(info.id) + 1, kNoDenseIndex);
         dense_index_[info.id] = static_cast<std::uint32_t>(index);
     } else if (dense_index_usable_) {
         dense_index_usable_ = false;
@@ -433,7 +434,8 @@ ParamReader StateStore::param_reader(ParamID id) const {
 
 float StateStore::get_modulated(ParamID id) const {
     const std::size_t index = index_of(id);
-    if (index == kNoIndex) return 0.0f;
+    if (index == kNoIndex)
+        return 0.0f;
     // base + mod_offset can leave the declared range (e.g. base near max with
     // positive modulation), and the DSP that reads this must never see an
     // out-of-range value. Clamp to the parameter range; a non-finite offset
@@ -497,7 +499,8 @@ void StateStore::reset_all_mod() {
 
 void StateStore::set_value(ParamID id, float value) {
     const std::size_t index = index_of(id);
-    if (index == kNoIndex) return;
+    if (index == kNoIndex)
+        return;
     auto& param = params_[index];
     float clamped = constrain_stored_value(param, value);
     const auto older_writers =
@@ -516,7 +519,8 @@ void StateStore::set_value(ParamID id, float value) {
 
 void StateStore::set_value_rt(ParamID id, float value) {
     const std::size_t index = index_of(id);
-    if (index == kNoIndex) return;
+    if (index == kNoIndex)
+        return;
     auto& param = params_[index];
     float clamped = constrain_stored_value(param, value);
     const auto older_writers =
@@ -659,7 +663,8 @@ void StateStore::reset_rt_listener_queue_overflow_count() {
 
 float StateStore::get_normalized(ParamID id) const {
     const std::size_t i = index_of(id);
-    if (i == kNoIndex) return 0.0f;
+    if (i == kNoIndex)
+        return 0.0f;
     return values_[i].get_normalized(params_[i].range);
 }
 

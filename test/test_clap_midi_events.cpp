@@ -178,8 +178,10 @@ public:
 
 // Captures midi_in so the test can assert what the CLAP adapter handed up.
 class CapturingProcessor : public Processor {
-public:
-    bool wants_sample_accurate_parameters() const override { return true; }
+  public:
+    bool wants_sample_accurate_parameters() const override {
+        return true;
+    }
     static constexpr state::ParamID kParamId = 9001;
     static constexpr state::ParamID kBypassParamId = 9002;
     static constexpr std::size_t kMaxCapturedSysex = 8;
@@ -700,7 +702,9 @@ public:
     static constexpr state::ParamID kParamId = 9101;
     // Read by the adapter at clap_init(); the cases here inspect the queue.
     static inline bool sample_accurate = true;
-    bool wants_sample_accurate_parameters() const override { return sample_accurate; }
+    bool wants_sample_accurate_parameters() const override {
+        return sample_accurate;
+    }
 
     bool observed_param_events_attached = false;
     std::size_t observed_param_event_count = 0;
@@ -2951,7 +2955,7 @@ TEST_CASE("CLAP release backlog does not suppress accepted parameter output",
     REQUIRE(g_output_param != nullptr);
     g_output_param->push_events = true;
     h.plugin.outbound_note_release_debt[3 * 128 + 60] = 2;
-    h.plugin.outbound_release_debt_pending = true;  // seeded directly, not via record
+    h.plugin.outbound_release_debt_pending = true; // seeded directly, not via record
 
     InputEventList events;
     OutputEventList out;
@@ -4488,7 +4492,9 @@ TEST_CASE("CLAP reserves no SysEx payload pool for a plug-in without a note inpu
           "[clap][midi][realtime][sysex]") {
     ObservingMidiInProcessor::declares_midi_input = false;
     struct Restore {
-        ~Restore() { ObservingMidiInProcessor::declares_midi_input = true; }
+        ~Restore() {
+            ObservingMidiInProcessor::declares_midi_input = true;
+        }
     } restore;
     Harness h(make_observing_midi_in);
     InputEventList in;
@@ -4507,8 +4513,7 @@ TEST_CASE("CLAP reserves no SysEx payload pool for a plug-in without a note inpu
     REQUIRE(g_observing_midi_in->observed_sysex_drops == 1);
     // A dropped SysEx carries no note ownership, so the block is not reset.
     REQUIRE_FALSE(g_observing_midi_in->observed_reset_requested);
-    REQUIRE(g_observing_midi_in->observed_event_capacity ==
-            state::ParameterEventQueue::kCapacity);
+    REQUIRE(g_observing_midi_in->observed_event_capacity == state::ParameterEventQueue::kCapacity);
 }
 
 TEST_CASE("CLAP outbound MIDI drops past realtime event capacity without growing",

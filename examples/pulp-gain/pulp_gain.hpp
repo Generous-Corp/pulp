@@ -146,7 +146,7 @@ public:
         }
     }
 
-private:
+  private:
     // NaN never compares equal, so the first block always computes the gain.
     float cached_input_db_ = std::numeric_limits<float>::quiet_NaN();
     float cached_output_db_ = std::numeric_limits<float>::quiet_NaN();

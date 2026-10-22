@@ -45,8 +45,8 @@ PERFETTO_DEFINE_CATEGORIES(
     perfetto::Category("gpu").SetDescription("Dawn/Graphite GPU passes"),
     perfetto::Category("state").SetDescription("Parameter/state changes"),
     perfetto::Category("io").SetDescription("File / network I/O"),
-    perfetto::Category("lifecycle").SetDescription(
-        "Plug-in instantiation, activation and editor open (host threads only)"));
+    perfetto::Category("lifecycle")
+        .SetDescription("Plug-in instantiation, activation and editor open (host threads only)"));
 
 namespace pulp::runtime::trace_detail {
 

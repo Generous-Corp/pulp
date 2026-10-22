@@ -53,7 +53,9 @@ struct ParameterGestureApplyResult {
 };
 
 class StateStore;
-namespace test_support { struct StateWriterProbe; }
+namespace test_support {
+struct StateWriterProbe;
+}
 
 /// Opaque exact identity captured when asynchronous work is ordered against a
 /// parameter. The identity includes the value bits and a monotonic per-slot
@@ -164,7 +166,7 @@ class StateStore {
     // reader/writer interleavings deterministically.
     friend struct test_support::StateWriterProbe;
 
-public:
+  public:
     StateStore();
     ~StateStore();
 
@@ -686,7 +688,8 @@ public:
             const std::uint32_t i = dense_index_[id];
             return i == kNoDenseIndex ? kNoIndex : i;
         }
-        if (dense_index_usable_) return kNoIndex;
+        if (dense_index_usable_)
+            return kNoIndex;
         const auto it = id_to_index_.find(id);
         return it == id_to_index_.end() ? kNoIndex : it->second;
     }

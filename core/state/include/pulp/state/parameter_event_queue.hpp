@@ -119,8 +119,7 @@ public:
     }
 
     void sort() {
-        stable_sort_in_place(events_.begin(),
-                             events_.begin() + static_cast<std::ptrdiff_t>(size_),
+        stable_sort_in_place(events_.begin(), events_.begin() + static_cast<std::ptrdiff_t>(size_),
                              [](const ParameterEvent& a, const ParameterEvent& b) {
                                  return a.sample_offset < b.sample_offset;
                              });
@@ -137,9 +136,9 @@ public:
                 return a.sample_offset < b.sample_offset;
             }))
             return;
-        if (!stable_counting_sort(first, last,
-                                  [](const ParameterEvent& e) { return e.sample_offset; },
-                                  scratch, offset_counts))
+        if (!stable_counting_sort(
+                first, last, [](const ParameterEvent& e) { return e.sample_offset; }, scratch,
+                offset_counts))
             sort();
     }
 

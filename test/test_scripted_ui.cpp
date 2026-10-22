@@ -1100,8 +1100,9 @@ TEST_CASE("ScriptedUiSession keeps its declared host kind across a reload",
 // virtual calls. Drive a full view-first open, host-kind declaration, and
 // teardown through that interface alone, and check that linking session code
 // published the prewarm entry point the hosts call through.
-TEST_CASE("ScriptedUiSession: a host drives the whole editor lifecycle through ScriptedEditorSession",
-          "[view][scripted-ui][deferred-load][editor-open]") {
+TEST_CASE(
+    "ScriptedUiSession: a host drives the whole editor lifecycle through ScriptedEditorSession",
+    "[view][scripted-ui][deferred-load][editor-open]") {
     const auto temp_dir = make_temp_dir("pulp-scripted-ui-editor-session");
     const auto script_path = temp_dir / "main.js";
     write_text(script_path, R"(
@@ -1113,8 +1114,8 @@ TEST_CASE("ScriptedUiSession: a host drives the whole editor lifecycle through S
     StateStore store;
     auto owned = std::make_unique<ScriptedUiSession>(
         root, store,
-        ScriptedUiOptions{.script_path = script_path, .enable_hot_reload = false,
-                          .enable_theme_reload = false});
+        ScriptedUiOptions{
+            .script_path = script_path, .enable_hot_reload = false, .enable_theme_reload = false});
     ScriptedUiSession& concrete = *owned;
     std::unique_ptr<ScriptedEditorSession> session = std::move(owned);
 
@@ -1143,8 +1144,8 @@ TEST_CASE("ScriptedUiSession: a host drives the whole editor lifecycle through S
     CHECK_FALSE(session->settling());
 
     session->release_root();
-    CHECK_FALSE(concrete.load(&error));  // released: the session refuses loads
-    session.reset();  // destroys through the interface
+    CHECK_FALSE(concrete.load(&error)); // released: the session refuses loads
+    session.reset();                    // destroys through the interface
 
     CHECK(scripted_ui_prewarm_runner().load() == &prewarm_scripted_ui);
 }

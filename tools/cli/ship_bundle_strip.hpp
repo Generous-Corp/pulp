@@ -38,9 +38,8 @@ std::string bundle_executable_name(const std::filesystem::path& bundle);
 // to package: the copy, or `bundle` itself when there is nothing to strip (no
 // Mach-O main executable) or no identity to re-sign a Developer ID bundle with.
 // Returns nullopt, after reporting why, when a step fails.
-std::optional<std::filesystem::path> stage_stripped_bundle(
-    const std::filesystem::path& bundle,
-    const std::filesystem::path& staging_root,
-    const ShipStripOptions& options);
+std::optional<std::filesystem::path>
+stage_stripped_bundle(const std::filesystem::path& bundle,
+                      const std::filesystem::path& staging_root, const ShipStripOptions& options);
 
-}  // namespace pulp::cli
+} // namespace pulp::cli
