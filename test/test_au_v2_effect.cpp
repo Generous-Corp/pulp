@@ -1122,6 +1122,8 @@ public:
     static inline bool sample_accurate = true;
     bool wants_sample_accurate_parameters() const override { return sample_accurate; }
     static inline int process_calls = 0;
+    static inline DenseAutomationProcessor* last = nullptr;
+    DenseAutomationProcessor() { last = this; }
     pulp::format::PluginDescriptor descriptor() const override {
         return {
             .name = "AUDenseAutomationTest",
@@ -1286,6 +1288,11 @@ TEST_CASE("AU v2 effect renders scheduled automation in one call for a block-rat
     ramp.eventValues.ramp.endValue = 1.0f;
     events.push_back(ramp);
     REQUIRE(effect.ScheduleParameter(events.data(), static_cast<UInt32>(events.size())) == noErr);
+    REQUIRE(DenseAutomationProcessor::last != nullptr);
+    int store_writes = 0;
+    auto counter = DenseAutomationProcessor::last->state().add_listener(
+        [&](pulp::state::ParamID, float) { ++store_writes; },
+        pulp::state::ListenerThread::Audio);
 
     std::array<float, kFrames> input_samples{};
     std::array<float, kFrames> output_samples{};
@@ -1300,8 +1307,11 @@ TEST_CASE("AU v2 effect renders scheduled automation in one call for a block-rat
     REQUIRE(effect.process_scheduled(flags, input, output, kFrames) == noErr);
     effect.clear_scheduled();
 
-    // One call; no events, so every sample reads the block's final value.
+    // One call and one store write per automated parameter; no events, so
+    // every sample reads the block's final value.
     REQUIRE(DenseAutomationProcessor::process_calls == 1);
+    REQUIRE(store_writes == 3);
+    counter.reset();
     for (UInt32 n = 0; n < kFrames; ++n) REQUIRE(output_samples[n] == Catch::Approx(0.8f));
     Float32 value = 0.0f;
     REQUIRE(effect.GetParameter(2, kAudioUnitScope_Global, 0, value) == noErr);

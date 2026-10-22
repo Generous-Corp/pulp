@@ -430,6 +430,14 @@ private:
     std::vector<ScheduledRamp> scheduled_ramps_;
     bool scheduled_ramps_overflowed_ = false;
     std::vector<AudioUnitParameterEvent> scheduled_sort_scratch_;
+    // Block-rate path: per store parameter, the latest scheduled event seen
+    // this render (event < 0 when none), and which parameters were touched.
+    struct LatestScheduledEvent {
+        SInt32 offset = 0;
+        std::int32_t event = -1;
+    };
+    std::vector<LatestScheduledEvent> scheduled_latest_;
+    std::vector<std::uint32_t> scheduled_touched_;
     std::vector<std::uint32_t> scheduled_offset_counts_;
 
     // Per-block MIDI I/O. Hoisted to members (not constructed per render call)

@@ -213,6 +213,71 @@ OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
                                                  UInt32 frames_to_process,
                                                  void* user_data)
 {
+    if (!sample_accurate_params_ && frames_to_process > 0) {
+        // Block-rate processor: each parameter takes the value of its latest
+        // event (a ramp counts at its start and contributes its value at the
+        // buffer end), written once; the buffer renders in one call with no
+        // parameter events. One unsorted pass finds the latest event per
+        // parameter, so dense automation costs one store write per parameter
+        // rather than a sort plus a write and a listener call per event.
+        const auto params = store_.all_params();
+        bool foreign = false;
+        scheduled_touched_.clear();
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            const auto& event = events[i];
+            if (event.scope != kAudioUnitScope_Global || event.element != 0) continue;
+            if (event.eventType != kParameterEvent_Immediate &&
+                event.eventType != kParameterEvent_Ramped)
+                continue;
+            const auto* info = store_.info(static_cast<state::ParamID>(event.parameter));
+            if (info == nullptr) {
+                foreign = true;
+                continue;
+            }
+            const auto index = static_cast<std::size_t>(info - params.data());
+            if (index >= scheduled_latest_.size()) continue;
+            auto& latest = scheduled_latest_[index];
+            const SInt32 offset = scheduled_start_offset(event);
+            if (latest.event < 0) {
+                scheduled_touched_.push_back(static_cast<std::uint32_t>(index));
+            } else if (offset < latest.offset) {
+                continue;  // an equal offset later in host order wins
+            }
+            latest = {offset, static_cast<std::int32_t>(i)};
+        }
+        {
+            ScopedHostParamWrite host_write;
+            for (const auto index : scheduled_touched_) {
+                auto& latest = scheduled_latest_[index];
+                const auto& event = events[static_cast<std::size_t>(latest.event)];
+                store_.set_value_rt(params[index].id,
+                                    event.eventType == kParameterEvent_Immediate
+                                        ? event.eventValues.immediate.value
+                                        : scheduled_ramp_value_at(event, frames_to_process));
+                latest = {};
+            }
+        }
+        if (foreign) {
+            // Parameters the store does not own keep AUBase's element map,
+            // in time order so the later event wins.
+            state::stable_sort_in_place(
+                events.begin(), events.end(),
+                [](const AudioUnitParameterEvent& a, const AudioUnitParameterEvent& b) {
+                    return scheduled_start_offset(a) < scheduled_start_offset(b);
+                });
+            for (const auto& event : events) {
+                if (event.eventType != kParameterEvent_Immediate ||
+                    event.scope != kAudioUnitScope_Global || event.element != 0 ||
+                    store_.info(static_cast<state::ParamID>(event.parameter)) != nullptr)
+                    continue;
+                if (auto* element = GetElement(event.scope, event.element))
+                    element->SetScheduledEvent(event.parameter, event, 0, frames_to_process);
+            }
+        }
+        return AUEffectBase::ProcessScheduledSlice(user_data, 0, frames_to_process,
+                                                   frames_to_process);
+    }
+
     const auto by_start = [](const AudioUnitParameterEvent& a, const AudioUnitParameterEvent& b) {
         return scheduled_start_offset(a) < scheduled_start_offset(b);
     };
@@ -223,32 +288,6 @@ OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
             std::span<AudioUnitParameterEvent>(scheduled_sort_scratch_),
             std::span<std::uint32_t>(scheduled_offset_counts_)))
         state::stable_sort_in_place(events.begin(), events.end(), by_start);
-
-    if (!sample_accurate_params_) {
-        // Block-rate processor: the store takes each parameter's value at the
-        // end of the buffer (the last event wins) and the buffer renders in one
-        // call with no parameter events.
-        {
-            ScopedHostParamWrite host_write;
-            for (const auto& event : events) {
-                if (event.scope != kAudioUnitScope_Global || event.element != 0) continue;
-                const auto param_id = static_cast<state::ParamID>(event.parameter);
-                const bool owned = store_.info(param_id) != nullptr;
-                if (event.eventType == kParameterEvent_Immediate) {
-                    if (owned) {
-                        store_.set_value_rt(param_id, event.eventValues.immediate.value);
-                    } else if (auto* element = GetElement(event.scope, event.element)) {
-                        element->SetScheduledEvent(event.parameter, event, 0, frames_to_process);
-                    }
-                } else if (event.eventType == kParameterEvent_Ramped && owned) {
-                    store_.set_value_rt(param_id,
-                                        scheduled_ramp_value_at(event, frames_to_process));
-                }
-            }
-        }
-        return AUEffectBase::ProcessScheduledSlice(user_data, 0, frames_to_process,
-                                                   frames_to_process);
-    }
 
     scheduled_events_ = &events;
     scheduled_cursor_ = 0;
@@ -674,6 +713,9 @@ OSStatus PulpAUEffect::Initialize()
     // it up front turns the first render / reconfig resize into a no-op realloc.
     scheduled_ramps_.reserve(kScheduledRampCapacity);
     scheduled_sort_scratch_.resize(kScheduledSortCapacity);
+    scheduled_latest_.assign(store_.all_params().size(), {});
+    scheduled_touched_.clear();
+    scheduled_touched_.reserve(store_.all_params().size());
     scheduled_offset_counts_.resize(static_cast<std::size_t>(GetMaxFramesPerSlice()) + 1);
     input_ptrs_.reserve(static_cast<std::size_t>(Input(0).GetStreamFormat().mChannelsPerFrame));
     output_ptrs_.reserve(static_cast<std::size_t>(Output(0).GetStreamFormat().mChannelsPerFrame));
