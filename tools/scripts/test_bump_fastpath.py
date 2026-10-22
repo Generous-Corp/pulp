@@ -20,8 +20,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / ".github" / "workflows" / "build.yml"
 RULESET = ROOT / ".github" / "rulesets" / "main-protection.json"
@@ -41,6 +39,38 @@ report = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(report)
 
 SHA = "a" * 40
+
+
+def workflow_jobs(name: str) -> dict[str, dict[str, object]]:
+    """Each job's `if`, `name` and literal matrix legs/labels, read from the
+    workflow text (the gate's Python has no YAML parser)."""
+    lines = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8").split("\n")
+    start = lines.index("jobs:")
+    jobs: dict[str, dict[str, object]] = {}
+    current: dict[str, object] | None = None
+    for line in lines[start + 1:]:
+        key = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if key:
+            current = jobs.setdefault(key.group(1), {"matrix": {}})
+            continue
+        if re.match(r"^\S", line):
+            break
+        if current is None:
+            continue
+        field = re.match(r"^    (if|name):\s*(.*)$", line)
+        if field:
+            current[field.group(1)] = field.group(2).strip()
+        value = re.match(r"^\s+-?\s*(leg|label):\s*['\"]?([^'\"#]+?)['\"]?\s*$", line)
+        if value:
+            current["matrix"].setdefault(value.group(1), []).append(value.group(2))  # type: ignore[union-attr]
+    return jobs
+
+
+def workflow_triggers(name: str) -> str:
+    """The workflow's `on:` block, as text."""
+    text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+    block = text.split("\non:\n", 1)[1]
+    return re.split(r"\n\S", block, 1)[0]
 CANDIDATE = "b" * 40
 
 
@@ -193,14 +223,15 @@ class Report(unittest.TestCase):
 
 
 class AdvisorySkips(unittest.TestCase):
-    def jobs(self, name: str) -> dict:
-        return yaml.safe_load((ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8"))["jobs"]
+    def jobs(self, name: str) -> dict[str, dict[str, object]]:
+        return workflow_jobs(name)
 
     def test_every_job_skips_the_bump_and_keeps_its_condition_otherwise(self) -> None:
         for workflow in ADVISORY:
             for job, spec in self.jobs(workflow).items():
                 with self.subTest(workflow=workflow, job=job):
                     condition = str(spec.get("if", ""))
+                    self.assertTrue(condition, "every job carries a condition")
                     if condition.startswith("${{") and condition.endswith("}}"):
                         condition = condition[3:-2].strip()
                     # The guard is ANDed in front, so on release/version-bump
@@ -225,11 +256,10 @@ class AdvisorySkips(unittest.TestCase):
     def test_non_bump_pull_requests_still_trigger_each_workflow(self) -> None:
         for workflow in ADVISORY:
             with self.subTest(workflow=workflow):
-                doc = yaml.safe_load((ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
-                on = doc.get("on", doc.get(True))
-                self.assertIn("pull_request", on)
-                self.assertEqual(on["pull_request"].get("types"), ["auto_merge_enabled"])
-                self.assertNotIn("branches-ignore", on["pull_request"])
+                triggers = workflow_triggers(workflow)
+                self.assertIn("  pull_request:\n    types: [auto_merge_enabled]", triggers)
+                self.assertNotIn("branches-ignore", triggers)
+                self.assertNotIn("branches:", triggers)
 
     def test_no_skipped_context_is_required(self) -> None:
         ruleset = json.loads(RULESET.read_text(encoding="utf-8"))
@@ -244,35 +274,28 @@ class AdvisorySkips(unittest.TestCase):
                         self.assertNotIn(name, required)
 
     @staticmethod
-    def context_names(job: str, spec: dict) -> list[str]:
+    def context_names(job: str, spec: dict[str, object]) -> list[str]:
         """The check names a job reports: its name with each literal matrix
         value filled in, and a wildcard where the matrix is computed."""
         name = str(spec.get("name", job))
         fields = re.findall(r"\$\{\{ matrix\.(\w+) \}\}", name)
         if not fields:
             return [name]
-        matrix = (spec.get("strategy") or {}).get("matrix")
-        rows = matrix.get("include", []) if isinstance(matrix, dict) else []
-        if not rows:
+        matrix = spec.get("matrix") or {}
+        values = matrix.get(fields[0], []) if isinstance(matrix, dict) else []
+        if len(fields) > 1 or not values:
             # A computed matrix (fromJSON): any value is possible, so no
             # required context may match the name's fixed text.
             return [re.sub(r"\$\{\{ matrix\.\w+ \}\}", "*", name)]
-        names = []
-        for row in rows:
-            filled = name
-            for field in fields:
-                filled = filled.replace("${{ matrix.%s }}" % field, str(row.get(field)))
-            names.append(filled)
-        return names
+        return [name.replace("${{ matrix.%s }}" % fields[0], v) for v in values]
 
     def test_the_weekly_count_runs_the_report(self) -> None:
-        doc = yaml.safe_load(WEEKLY.read_text(encoding="utf-8"))
-        self.assertIn("schedule", doc.get("on", doc.get(True)))
-        steps = [s.get("run", "") for job in doc["jobs"].values() for s in job["steps"]]
-        self.assertTrue(any("tools/scripts/bump_fastpath_report.py" in s for s in steps))
-        job = next(iter(doc["jobs"].values()))
-        self.assertIn("github.repository", job.get("if", ""), "fork-guarded")
-        self.assertEqual(job.get("runs-on"), "ubuntu-latest")
+        text = WEEKLY.read_text(encoding="utf-8")
+        self.assertIn("  schedule:\n", workflow_triggers(WEEKLY.name))
+        self.assertIn("python3 tools/scripts/bump_fastpath_report.py", text)
+        job = workflow_jobs(WEEKLY.name)["count"]
+        self.assertIn("github.repository", str(job.get("if", "")), "fork-guarded")
+        self.assertIn("    runs-on: ubuntu-latest\n", text)
 
 
 if __name__ == "__main__":
