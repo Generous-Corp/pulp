@@ -782,8 +782,10 @@ class GainNode : public GpuAudioNode {
 };
 
 // A staged node that opts into worker pipelining through a link it detaches
-// when destroyed, as GpuConvolver does. `hosted` lives in the node, so a
-// transport reaching a destroyed node writes freed memory (ASan reports it).
+// when destroyed, as GpuConvolver does: hosted, it declares a one-block worker
+// pipeline, so the transport keeps it opted in until release(). `hosted`
+// lives in the node, so a transport reaching a destroyed node writes freed
+// memory (ASan reports it).
 class PipelineGainNode : public GainNode {
   public:
     PipelineGainNode(uint32_t channels, uint32_t block)
@@ -792,6 +794,11 @@ class PipelineGainNode : public GainNode {
     }
     ~PipelineGainNode() override {
         link_->detach();
+    }
+    GpuAudioNodeDescriptor descriptor() const override {
+        auto d = GainNode::descriptor();
+        d.worker_pipeline_blocks = hosted ? 1u : 0u;
+        return d;
     }
     bool bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept override {
         binding.pipeline = link_;
