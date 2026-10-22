@@ -3,6 +3,7 @@
 // contract, license-lineage note, and design rationale.
 
 #include <pulp/canvas/scene/scene.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 // Bring in the nanosvg parser declarations only. The existing `svg.cpp`
 // translation unit owns the `#define NANOSVG_IMPLEMENTATION` so we do
@@ -303,6 +304,18 @@ void SceneShape::paint_geometry(Canvas& canvas) const {
 
 // ── SceneImage ───────────────────────────────────────────────────────────
 
+void SceneImage::set_encoded_bytes(std::vector<uint8_t> bytes) {
+    encoded_bytes_ = std::move(bytes);
+    encoded_key_ = encoded_bytes_.empty()
+                       ? std::string{}
+                       : runtime::sha256_hex(encoded_bytes_.data(), encoded_bytes_.size());
+    rgba_pixels_.clear();
+    file_path_.clear();
+    pixel_width_ = 0;
+    pixel_height_ = 0;
+    mark_dirty();
+}
+
 void SceneImage::paint_geometry(Canvas& canvas) const {
     if (w_ <= 0 || h_ <= 0) return;
     if (!rgba_pixels_.empty() && pixel_width_ > 0 && pixel_height_ > 0) {
@@ -315,8 +328,8 @@ void SceneImage::paint_geometry(Canvas& canvas) const {
         return;
     }
     if (!encoded_bytes_.empty()) {
-        canvas.draw_image_from_data(encoded_bytes_.data(), encoded_bytes_.size(),
-                                    x_, y_, w_, h_);
+        canvas.draw_image_from_keyed_data(encoded_key_, encoded_bytes_.data(),
+                                          encoded_bytes_.size(), x_, y_, w_, h_);
         return;
     }
     if (!file_path_.empty()) {

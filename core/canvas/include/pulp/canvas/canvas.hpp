@@ -1937,6 +1937,29 @@ protected:
                                                   float dw, float dh) {
         return draw_image_from_data_rect(data, size, sx, sy, sw, sh, dx, dy, dw, dh);
     }
+
+    /// Draw encoded image bytes identified by @p content_key, the lowercase
+    /// hex SHA-256 of exactly those bytes. A backend may retain the decoded or
+    /// GPU-uploaded image under that key across frames, so the key must change
+    /// whenever the bytes do and must never be derived from the buffer address
+    /// (a freed buffer's address is reused for different bytes). An empty key
+    /// draws uncached. The default does not cache; it draws exactly as
+    /// `draw_image_from_data`. Appended to preserve existing vtable slots.
+    virtual bool draw_image_from_keyed_data(const std::string& content_key, const uint8_t* data,
+                                            size_t size, float x, float y, float w, float h) {
+        (void)content_key;
+        return draw_image_from_data(data, size, x, y, w, h);
+    }
+
+    /// Source-rect form of `draw_image_from_keyed_data`, with the same key
+    /// contract. The default draws exactly as `draw_image_from_data_rect`.
+    virtual bool draw_image_from_keyed_data_rect(const std::string& content_key,
+                                                 const uint8_t* data, size_t size, float sx,
+                                                 float sy, float sw, float sh, float dx, float dy,
+                                                 float dw, float dh) {
+        (void)content_key;
+        return draw_image_from_data_rect(data, size, sx, sy, sw, sh, dx, dy, dw, dh);
+    }
 };
 
 } // namespace pulp::canvas

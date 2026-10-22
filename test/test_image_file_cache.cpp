@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include "include/core/SkImage.h"
 #include "include/core/SkBitmap.h"
@@ -21,6 +22,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 using namespace pulp::canvas;
 
@@ -107,6 +109,67 @@ TEST_CASE("Static embedded sprites key distinct bytes with the same size",
     REQUIRE(first[1] != second[1]);
     REQUIRE(cache.stats().builds == 2);
     REQUIRE(cache.stats().hits == 0);
+}
+
+TEST_CASE("Keyed inline bytes decode once per content key on a raster canvas",
+          "[canvas][image-cache][inline-image]") {
+    // The same 2x1 red/blue PNG as above, held in a short-lived heap buffer:
+    // the cached image must own its bytes, and the key is the content digest.
+    static constexpr std::uint8_t red_blue_png[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0xf4,
+        0x22, 0x7f, 0x8a, 0x00, 0x00, 0x00, 0x0e, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0x00, 0x42, 0xff, 0x01, 0x0f, 0xf9, 0x03, 0xfd, 0x85, 0x11, 0x99, 0x76, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    };
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const auto key = pulp::runtime::sha256_hex(red_blue_png, sizeof(red_blue_png));
+
+    auto draw = [&](const std::string& k) {
+        std::vector<std::uint8_t> bytes(std::begin(red_blue_png), std::end(red_blue_png));
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(2, 1));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        REQUIRE(canvas.draw_image_from_keyed_data(k, bytes.data(), bytes.size(), 0, 0, 2, 1));
+        bytes.assign(bytes.size(), 0); // the cache must not read this buffer later
+        SkBitmap pixels;
+        REQUIRE(pixels.tryAllocN32Pixels(2, 1));
+        REQUIRE(surface->readPixels(pixels, 0, 0));
+        return std::array<SkColor, 2>{pixels.getColor(0, 0), pixels.getColor(1, 0)};
+    };
+    for (int frame = 0; frame < 3; ++frame) {
+        const auto px = draw(key);
+        REQUIRE(SkColorGetR(px[0]) > 200);
+        REQUIRE(SkColorGetB(px[1]) > 200);
+    }
+    REQUIRE(cache.stats().builds == 1);
+    REQUIRE(cache.stats().hits == 2);
+
+    // An empty key draws through the uncached path and never touches the cache.
+    const auto px = draw(std::string{});
+    REQUIRE(SkColorGetR(px[0]) > 200);
+    REQUIRE(cache.stats().builds == 1);
+    REQUIRE(cache.stats().hits == 2);
+}
+
+TEST_CASE("Recording canvas records keyed inline bytes like unkeyed bytes",
+          "[canvas][image-cache][inline-image]") {
+    const std::uint8_t bytes[] = {1, 2, 3, 4};
+    RecordingCanvas keyed, plain;
+    REQUIRE(keyed.draw_image_from_keyed_data("k", bytes, sizeof(bytes), 1, 2, 3, 4));
+    REQUIRE(plain.draw_image_from_data(bytes, sizeof(bytes), 1, 2, 3, 4));
+    REQUIRE(
+        keyed.draw_image_from_keyed_data_rect("k", bytes, sizeof(bytes), 0, 0, 1, 1, 1, 2, 3, 4));
+    REQUIRE(plain.draw_image_from_data_rect(bytes, sizeof(bytes), 0, 0, 1, 1, 1, 2, 3, 4));
+    REQUIRE(keyed.commands().size() == plain.commands().size());
+    for (size_t i = 0; i < keyed.commands().size(); ++i) {
+        REQUIRE(keyed.commands()[i].type == plain.commands()[i].type);
+        REQUIRE(keyed.commands()[i].text == plain.commands()[i].text);
+        REQUIRE(keyed.commands()[i].floats == plain.commands()[i].floats);
+    }
 }
 
 TEST_CASE("ImageFileCache: miss builds, hit reuses", "[canvas][image-cache][issue-6223]") {

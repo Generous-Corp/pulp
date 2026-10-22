@@ -4,7 +4,10 @@
 /// Process-wide cache for decoded (and GPU-uploaded) file and immutable
 /// embedded images (SkImage). Embedded images use a NUL-prefixed synthetic
 /// key derived from their static address and size, so they cannot collide
-/// with a filesystem path.
+/// with a filesystem path. Inline encoded bytes (a `data:image/*` source, a
+/// retained scene image blob) use a NUL-prefixed key built from the caller's
+/// SHA-256 of the bytes, never their address, because a freed buffer's
+/// address is reused for different bytes.
 ///
 /// `SkiaCanvas::draw_image_from_file` used to re-read the PNG/JPEG bytes off
 /// disk (`SkData::MakeFromFileName`), re-decode them
