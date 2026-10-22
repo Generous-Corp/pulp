@@ -81,6 +81,9 @@ struct GpuConvolver::StagedReadbackState {
         std::vector<float> result; // [channels][2 * fft_size] readback
         std::vector<float> input;  // [channels][block] the block's input
         std::vector<const float*> input_ptrs;
+        // When the request was submitted: its result is due pipeline_blocks
+        // periods later, whatever the call rate.
+        std::chrono::steady_clock::time_point submitted{};
     };
     // Slots only ever grow: an abandoned request may still complete into a
     // slot's buffers after the depth changes, so none is freed before the
@@ -1247,6 +1250,19 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         return;
     }
     auto& due = staged.slots[(call - pipeline) % staged.slot_count];
+    // On time is judged by the clock, not by the call count: a block's result
+    // is due pipeline_blocks periods after its submit. A live worker reaches
+    // this call at or after that point, so it never waits here. A caller that
+    // runs ahead of real time (an offline bounce, a worker catching up) polls,
+    // bounded by that due time, so it does not misjudge a result that is
+    // simply not due yet.
+    if (pipeline > 0 && due.attempted && !due.done && due.id != 0) {
+        const auto period = std::chrono::nanoseconds(static_cast<std::uint64_t>(block_) *
+                                                     1'000'000'000ull / sample_rate_);
+        const auto due_at = due.submitted + period * pipeline;
+        while (!due.done && std::chrono::steady_clock::now() < due_at)
+            (void)gpu_->poll_readbacks();
+    }
     bool gpu_ok =
         due.attempted && due.done && due.status == render::GpuCompute::ReadbackStatus::Success;
     // A result that has not landed is now late; its completion is discarded.
@@ -1370,6 +1386,12 @@ void GpuConvolver::configure_staged_pipeline() {
     staged.pipeline_blocks = staged_pipeline_depth();
     staged.calls.store(0, std::memory_order_relaxed);
     staged.slot_count = staged.pipeline_blocks + 1u;
+    // The provider rejects a submit past its in-flight cap (default 4), so
+    // the cap must cover every request the pipeline keeps in flight, plus as
+    // many abandoned late ones still holding a slot.
+    if (gpu_ && staged.pipeline_blocks > 0)
+        gpu_->set_max_readbacks_in_flight(
+            std::max<std::size_t>(4, 2u * static_cast<std::size_t>(staged.slot_count)));
     if (staged.slots.size() < staged.slot_count)
         staged.slots.resize(staged.slot_count);
     const auto cplx = static_cast<std::size_t>(fft_size_) * 2u;
@@ -1482,6 +1504,7 @@ void GpuConvolver::submit_staged_readback(StagedReadbackState& staged, std::size
     // A rejected submit (in-flight cap reached, no plan) never fires its
     // callback; the slot stays not-done and is judged a miss when due.
     slot.id = id;
+    slot.submitted = std::chrono::steady_clock::now();
 }
 
 bool GpuConvolver::wait_staged_readback(StagedReadbackState& staged, float* dest) {

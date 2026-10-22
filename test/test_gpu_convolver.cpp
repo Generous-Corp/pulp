@@ -1514,7 +1514,11 @@ TEST_CASE("Staged GpuConvolver discards a result that lands after its block was 
     fake->set_delay_polls(3);
 
     const auto input = staged_test_input(BS * NBLK);
+    // Paced like a live worker (one call per period), so each block's due
+    // time has passed when it is judged and the node does not poll for it.
+    const auto period = std::chrono::microseconds(BS * 1'000'000 / 48000);
     const auto out = run_staged_stream(node, input, BS, [&](std::size_t b) {
+        std::this_thread::sleep_for(period);
         fake->set_async_mode(b == kLate ? FakeGpuCompute::AsyncMode::Delayed
                                         : FakeGpuCompute::AsyncMode::Resolve);
     });
@@ -1546,7 +1550,11 @@ TEST_CASE("Staged GpuConvolver keeps a readback slower than one period but insid
         fake->set_async_mode(FakeGpuCompute::AsyncMode::Delayed);
         fake->set_delay_polls(3);
         REQUIRE(node.pipeline() == lead - 1u);
-        const auto out = run_staged_stream(node, input, BS, [](std::size_t) {});
+        // Paced like a live worker: one call per period, so a block is judged
+        // once its due time has passed and the worker polls once per call.
+        const auto period = std::chrono::microseconds(BS * 1'000'000 / 48000);
+        const auto out = run_staged_stream(
+            node, input, BS, [&](std::size_t) { std::this_thread::sleep_for(period); });
         cpu_blocks = node.staged_cpu_blocks();
         reason = node.staged_latched_reason();
         CHECK(validate_gpu_audio_status(node.status_snapshot()).accepted());
@@ -1572,6 +1580,62 @@ TEST_CASE("Staged GpuConvolver keeps a readback slower than one period but insid
     CHECK(short_reason == GpuAudioRecoveryReason::SustainedDeadlineMisses);
     CHECK(first_mismatch(short_out, routed_reference(input, ir, BS, std::vector<bool>(NBLK, false),
                                                      1)) < short_out.size());
+}
+
+TEST_CASE("Staged GpuConvolver judges on-time by the clock in a faster-than-realtime bounce",
+          "[gpu_audio][convolver][staged]") {
+    // An offline bounce calls the node back to back, far faster than one call
+    // per period. Each result lands half a period after its submit: inside
+    // the lead, so on time. Judged by call count it would look late on every
+    // block and trip the breaker; judged by the clock it is a GPU hit.
+    constexpr std::uint32_t BS = 64, SR = 48000;
+    constexpr std::size_t NBLK = 40;
+    const auto ir = staged_test_ir();
+    InjectableConvolver node(1, BS, SR, ir);
+    REQUIRE(node.prepare());
+    auto* fake = node.adopt_fake(ir);
+    REQUIRE(node.pipeline() == 1u);
+    fake->set_async_mode(FakeGpuCompute::AsyncMode::DelayedTime);
+    fake->set_delay_time(std::chrono::microseconds(BS * 1'000'000 / SR / 2));
+
+    const auto input = staged_test_input(BS * NBLK);
+    const auto out = run_staged_stream(node, input, BS, [](std::size_t) {}); // no pacing
+
+    CHECK(first_mismatch(out, routed_reference(input, ir, BS, std::vector<bool>(NBLK, false), 1)) ==
+          out.size());
+    CHECK(node.staged_cpu_blocks() == 0u);
+    CHECK(node.staged_breaker_trips() == 0u);
+    CHECK(node.staged_latched_reason() == GpuAudioRecoveryReason::None);
+    CHECK(validate_gpu_audio_status(node.status_snapshot()).accepted());
+}
+
+TEST_CASE("Staged GpuConvolver raises the provider's in-flight cap to cover its pipeline",
+          "[gpu_audio][convolver][staged]") {
+    // A lead of 8 pipelines 7 blocks, more than the provider's default cap of
+    // 4 in flight. Each result lands six polls after its submit (one poll per
+    // call), so seven requests are in flight at once.
+    constexpr std::uint32_t BS = 64, SR = 48000;
+    constexpr std::uint32_t kLead = 8;
+    constexpr std::size_t NBLK = 40;
+    const auto ir = staged_test_ir();
+    InjectableConvolver node(1, BS, SR, ir, kLead);
+    REQUIRE(node.prepare());
+    auto* fake = node.adopt_fake(ir);
+    REQUIRE(node.pipeline() == kLead - 1u);
+    CHECK(fake->max_in_flight() >= kLead);
+    fake->set_async_mode(FakeGpuCompute::AsyncMode::Delayed);
+    fake->set_delay_polls(6);
+
+    const auto period = std::chrono::microseconds(BS * 1'000'000 / SR);
+    const auto input = staged_test_input(BS * NBLK);
+    const auto out = run_staged_stream(node, input, BS,
+                                       [&](std::size_t) { std::this_thread::sleep_for(period); });
+
+    CHECK(fake->async_submits() == NBLK); // none rejected at the cap
+    CHECK(first_mismatch(out, routed_reference(input, ir, BS, std::vector<bool>(NBLK, false),
+                                               kLead - 1u)) == out.size());
+    CHECK(node.staged_cpu_blocks() == 0u);
+    CHECK(node.staged_latched_reason() == GpuAudioRecoveryReason::None);
 }
 
 TEST_CASE("Staged GpuConvolver continues on the CPU after device loss",
@@ -1654,7 +1718,11 @@ TEST_CASE("Staged GpuConvolver worker never waits under constant expiry",
         fake->set_async_mode(mode);
         const auto input = staged_test_input(BS * NBLK);
         std::vector<std::chrono::nanoseconds> elapsed, cpu;
-        const auto out = run_staged_stream(node, input, BS, [](std::size_t) {}, &elapsed, &cpu);
+        // Paced like a live worker, one call per period: each block is judged
+        // after its due time, so a late result costs no wait at all.
+        const auto out = run_staged_stream(
+            node, input, BS, [&](std::size_t) { std::this_thread::sleep_for(period); }, &elapsed,
+            &cpu);
 
         // Thread CPU time per block stays well inside one period: there is no
         // wait to spend it in. The wall-clock ceiling only rules out a block

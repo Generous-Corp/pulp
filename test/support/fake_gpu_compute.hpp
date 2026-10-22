@@ -32,13 +32,14 @@ namespace pulp::test {
 class FakeGpuCompute final : public render::GpuCompute {
   public:
     enum class AsyncMode : std::uint8_t {
-        Resolve, ///< complete Success on the next poll, writing the result
-        Expire,  ///< complete Expired on the next poll, dest untouched
-        Fail,    ///< complete Failed on the next poll, dest untouched
-        Hang,    ///< accept, never complete (a provider that stopped resolving)
-        Late,    ///< complete Expired only once the request's deadline has passed
-        Delayed, ///< complete Success on the `set_delay_polls()`-th poll after submit
-        Reject,  ///< refuse the submit (returns 0)
+        Resolve,     ///< complete Success on the next poll, writing the result
+        Expire,      ///< complete Expired on the next poll, dest untouched
+        Fail,        ///< complete Failed on the next poll, dest untouched
+        Hang,        ///< accept, never complete (a provider that stopped resolving)
+        Late,        ///< complete Expired only once the request's deadline has passed
+        Delayed,     ///< complete Success on the `set_delay_polls()`-th poll after submit
+        DelayedTime, ///< complete Success once `set_delay_time()` has passed since submit
+        Reject,      ///< refuse the submit (returns 0)
     };
 
     static constexpr float kMultiMarker = 0.25f;
@@ -61,6 +62,12 @@ class FakeGpuCompute final : public render::GpuCompute {
     /// own overhead with long IRs, where the direct convolution is too slow).
     void set_compute_results(bool compute) noexcept {
         compute_results_ = compute;
+    }
+    void set_delay_time(std::chrono::microseconds delay) noexcept {
+        delay_time_ = delay;
+    }
+    std::size_t max_in_flight() const noexcept {
+        return max_in_flight_;
     }
     void set_delay_polls(std::uint32_t polls) noexcept {
         delay_polls_ = polls;
@@ -156,8 +163,11 @@ class FakeGpuCompute final : public render::GpuCompute {
         p.mode = device_lost() ? AsyncMode::Fail : async_mode_;
         p.due = std::chrono::steady_clock::now() + deadline;
         p.polls_left = delay_polls_;
+        if (p.mode == AsyncMode::DelayedTime)
+            p.due = std::chrono::steady_clock::now() + delay_time_;
         p.cb = std::move(cb);
-        if (p.mode == AsyncMode::Resolve || p.mode == AsyncMode::Delayed) {
+        if (p.mode == AsyncMode::Resolve || p.mode == AsyncMode::Delayed ||
+            p.mode == AsyncMode::DelayedTime) {
             p.result.assign(static_cast<std::size_t>(n) * 2u * batch, 0.0f);
             convolve_into(in, p.result.data(), n, batch);
             if (poison_next_) {
@@ -174,13 +184,16 @@ class FakeGpuCompute final : public render::GpuCompute {
                 --pending.polls_left;
         while (!pending_.empty() && pending_.front().mode != AsyncMode::Hang &&
                (pending_.front().mode != AsyncMode::Delayed || pending_.front().polls_left == 0) &&
-               (pending_.front().mode != AsyncMode::Late ||
+               ((pending_.front().mode != AsyncMode::Late &&
+                 pending_.front().mode != AsyncMode::DelayedTime) ||
                 std::chrono::steady_clock::now() >= pending_.front().due)) {
             Pending p = std::move(pending_.front());
             pending_.pop_front();
             ReadbackResult r;
             r.id = p.id;
-            if ((p.mode == AsyncMode::Resolve || p.mode == AsyncMode::Delayed) && !device_lost()) {
+            if ((p.mode == AsyncMode::Resolve || p.mode == AsyncMode::Delayed ||
+                 p.mode == AsyncMode::DelayedTime) &&
+                !device_lost()) {
                 std::copy(p.result.begin(), p.result.end(), p.dest);
                 r.status = ReadbackStatus::Success;
                 r.bytes = static_cast<uint32_t>(p.result.size() * sizeof(float));
@@ -359,6 +372,7 @@ class FakeGpuCompute final : public render::GpuCompute {
     bool blocking_ok_ = true;
     bool poison_next_ = false;
     std::uint32_t delay_polls_ = 0;
+    std::chrono::microseconds delay_time_{0};
     bool compute_results_ = true;
     float result_gain_ = 1.0f;
     std::deque<Pending> pending_;

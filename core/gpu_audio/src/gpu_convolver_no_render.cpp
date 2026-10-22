@@ -13,6 +13,17 @@
 
 namespace pulp::gpu_audio {
 
+// Defined before the constructors, which make_unique the staged state.
+struct GpuConvolver::SharedIoState {};
+
+struct GpuConvolver::StagedReadbackState {
+    GpuConvolverStagedBreaker breaker{};
+    std::atomic<std::uint8_t> reason{0};
+    // Recorded like the render build; without a staged device the node never
+    // pipelines, so it changes nothing else.
+    bool transport_hosted = false;
+};
+
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
     : GpuConvolver(channels, block_size, sample_rate, std::move(impulse_response), kLatencyBlocks) {
@@ -23,16 +34,6 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
       latency_blocks_(latency_blocks), ir_(std::move(impulse_response)),
       staged_readback_(std::make_unique<StagedReadbackState>()) {}
-
-struct GpuConvolver::SharedIoState {};
-
-struct GpuConvolver::StagedReadbackState {
-    GpuConvolverStagedBreaker breaker{};
-    std::atomic<std::uint8_t> reason{0};
-    // Recorded like the render build; without a staged device the node never
-    // pipelines, so it changes nothing else.
-    bool transport_hosted = false;
-};
 
 namespace detail {
 bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
