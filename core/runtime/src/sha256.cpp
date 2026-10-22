@@ -6,8 +6,12 @@
 #include <cstring>
 #include <fstream>
 
-#if defined(__ARM_FEATURE_SHA2)
+// The ARMv8 SHA-2 instructions where the target has them (every Apple silicon
+// and most arm64 targets); the portable rounds everywhere else, x86_64 included.
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
 #include <arm_neon.h>
+#else
+// No SHA-2 instructions: the portable rounds below.
 #endif
 
 namespace pulp::runtime {
@@ -23,7 +27,7 @@ constexpr std::array<std::uint32_t, 64> kRoundConstants{
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
-#if defined(__ARM_FEATURE_SHA2)
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
 // The ARMv8 SHA-2 instructions: each SHA256H/SHA256H2 pair runs four rounds
 // on the {a,b,c,d}/{e,f,g,h} halves of the state, and SHA256SU0/SU1 extend
 // the message schedule four words at a time.
@@ -53,6 +57,8 @@ void compress_blocks_armv8(std::array<std::uint32_t, 8>& state, const std::uint8
     vst1q_u32(state.data(), abcd);
     vst1q_u32(state.data() + 4, efgh);
 }
+#else
+// Other targets hash with the portable rounds in Sha256::compress().
 #endif
 
 class Sha256 {
@@ -112,7 +118,7 @@ private:
     }
 
     void compress_blocks(const std::uint8_t* data, std::size_t blocks) noexcept {
-#if defined(__ARM_FEATURE_SHA2)
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
         compress_blocks_armv8(state_, data, blocks);
 #else
         for (; blocks > 0; --blocks, data += buffer_.size())
