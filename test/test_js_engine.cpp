@@ -1101,6 +1101,11 @@ TEST_CASE("QuickJS heap limit raises a JS error instead of growing unbounded",
     INFO("error: " << message);
     REQUIRE(message.find("out of memory") != std::string::npos);
     REQUIRE(elapsed < std::chrono::seconds(5));
+
+    // The failure is a recoverable JS error: once the hostile array is
+    // unreachable the same realm evaluates ordinary code again.
+    const auto after = engine->evaluate("a = undefined; String(40 + 2)");
+    REQUIRE(after.toString() == "42");
 }
 
 TEST_CASE("QuickJS heap limit leaves allocation under the cap untouched",
