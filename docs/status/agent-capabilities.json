@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 73,
+  "manifest_revision": 75,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -11519,6 +11519,10 @@
               "forward(std::complex<SampleType>* data)",
               "inverse(std::complex<SampleType>* data)",
               "forward_real(const SampleType* input, std::complex<SampleType>* output)",
+              "real_bins()",
+              "forward_real_half(const SampleType* input, std::complex<SampleType>* output, SampleType scale = SampleType{1})",
+              "inverse_real_half(const std::complex<SampleType>* input, SampleType* output, SampleType scale)",
+              "inverse_real_half(const std::complex<SampleType>* input, SampleType* output)",
               "magnitude_db(const std::complex<SampleType>* freq, SampleType* out, int num_bins)",
               "magnitude(const std::complex<SampleType>* freq, SampleType* out, int num_bins)"
             ],
@@ -12139,6 +12143,33 @@
               "process(SampleType x)",
               "set_coefficient(SampleType a)",
               "coefficient()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "HalfBandIirDesign",
+            "qualified_name": "pulp::signal::HalfBandIirDesign",
+            "template": null,
+            "methods": [
+              "valid()",
+              "path_a_count()",
+              "path_b_count()",
+              "path_a(std::size_t i)",
+              "path_b(std::size_t i)",
+              "stopband_edge()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "HalfBandIirStage",
+            "qualified_name": "pulp::signal::detail::HalfBandIirStage",
+            "template": "typename SampleType",
+            "methods": [
+              "reset()",
+              "configure(const HalfBandIirDesign& design)",
+              "coefficient_count()",
+              "upsample(const SampleType* input, SampleType* output, std::size_t n)",
+              "downsample(const SampleType* input, SampleType* output, std::size_t n)"
             ],
             "enums": []
           },
@@ -13603,7 +13634,7 @@
               "factor_value()",
               "latency()",
               "latency_samples()",
-              "process_block(const SampleType* input, SampleType* output, std::size_t num_samples, Callback&& callback)"
+              "group_delay_samples(double frequency)"
             ],
             "enums": [
               [

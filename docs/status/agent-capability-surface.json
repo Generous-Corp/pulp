@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 143,
+  "inventory_version": 145,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 506,
-    "reviewed_headers": 232,
-    "legacy_unreviewed_headers": 274,
+    "reviewed_headers": 234,
+    "legacy_unreviewed_headers": 272,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 63,
-      "legacy_unreviewed": 274,
+      "infrastructure": 65,
+      "legacy_unreviewed": 272,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 273,
-        "reviewed_headers": 130,
-        "legacy_unreviewed_headers": 143,
+        "reviewed_headers": 132,
+        "legacy_unreviewed_headers": 141,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -2257,7 +2257,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/analysis_frontends.hpp",
-      "fingerprint": "sha256:24460c48e2c2206aa41867c5d21cc43a40a665824dbab774730da37abd862b93",
+      "fingerprint": "sha256:6ebbd05760a83309228a7c7ac5d0ae7e2460529b20e1866295821012f96a56ec",
       "include": "pulp/signal/analysis_frontends.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2542,7 +2542,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/convolver.hpp",
-      "fingerprint": "sha256:7b6f5cc6d4bd8a3c71c07149958db256d08aa0f264544df0abfa07eb3a4b5825",
+      "fingerprint": "sha256:f2324d75e7b1fde411c4907b5f2b5f4f4a2849e4877a7b45cf9bd368d6da7564",
       "include": "pulp/signal/convolver.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -2551,7 +2551,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/convolver_messages.hpp",
-      "fingerprint": "sha256:2d4d3361cfa9099d4cd549fc250de196c1053c9c5448fa15b540089433e74e29",
+      "fingerprint": "sha256:f12dc10a6090a81966552ece2a5ebf26b7370cd59d3a310b66e84d2616b36c2f",
       "include": "pulp/signal/convolver_messages.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3152,7 +3152,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fft.hpp",
-      "fingerprint": "sha256:cf26ffef2f59dcc9e06e9bd578b48ae214f34f893f9cedc61e18fab9151c50ab",
+      "fingerprint": "sha256:2794461c6ba9fb79a274f86182439f40b0b003454c5c323f853b730ee7ad6083",
       "include": "pulp/signal/fft.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -3360,11 +3360,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/halfband_iir.hpp",
-      "fingerprint": "sha256:2c82382d9cdd84e5b349e3929f9b29f33d4c9c5976f842c009ab2f6f7004b143",
+      "fingerprint": "sha256:53cdf36221de5bc046af7a9627809126410cea863daeab56d66eb7757e31aa0d",
       "include": "pulp/signal/halfband_iir.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Closed-form elliptic half-band allpass designs, their pure response, group-delay and stopband evaluators, and the polyphase stage kernels OversamplerT cascades. Filter-design infrastructure behind the oversampler rather than an advertised generator surface; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -3884,11 +3884,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/oversampling.hpp",
-      "fingerprint": "sha256:3d5227ff3c98232170387e48a1ed3f08f1e5e2a6bf3e073f306eb12b2e2bc9fd",
+      "fingerprint": "sha256:fda530c94b159df23ae9a6e8b7f7c36292b7be2f79d00e959d9c5cb30e3bd2e1",
       "include": "pulp/signal/oversampling.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Block-processing up/downsampler that runs a caller's nonlinearity at 2x-16x with minimum-phase IIR, linear-phase FIR or legacy biquad anti-aliasing and truthful latency reporting. A bounded DSP primitive a processor drives from its own process(), documented in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -4387,7 +4387,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_frame_engine.hpp",
-      "fingerprint": "sha256:0ecaccef2ad745c8509a74447eb12b07d9fd061743d850bfe563497d77264d05",
+      "fingerprint": "sha256:79757445451e61f1e9d043abe9fc566b89a07df381c76f4b1d3cae525eeb5d49",
       "include": "pulp/signal/spectral_frame_engine.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4477,7 +4477,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/stft.hpp",
-      "fingerprint": "sha256:0b42a15443f679c5eb3c7f92940403f4886ff7286a62dfaa2b1e50645758ae27",
+      "fingerprint": "sha256:1e8bf8737a90a4fc8b7330af7c4b1c9d39f5db95ad24803544369801ccc181ad",
       "include": "pulp/signal/stft.hpp",
       "disposition": "capability_support",
       "capability_keys": [
