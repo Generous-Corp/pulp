@@ -386,25 +386,43 @@ private:
         const int half = s.fft_size / 2;   // Nyquist bin; MAC bins [0, half]
         const std::size_t capacity = h.spectra.size();
         std::complex<SampleType>* accum = s.accum.data();
-        for (std::size_t p = 0; p < s.num_partitions; ++p) {
+        const auto spectrum = [&](std::size_t p) {
             // Partition p convolves with the input block of age p. `write_pos`
             // holds the block being processed, so age p is p slots back.
-            const std::size_t idx = (h.write_pos + capacity - p) % capacity;
-            const std::complex<SampleType>* in = h.spectra[idx].data();
+            return h.spectra[(h.write_pos + capacity - p) % capacity].data();
+        };
+        // Complex MACs as explicit float ops: the finite-value result of
+        // std::complex::operator* without its libm NaN/Inf-recovery branch, so
+        // the loops vectorize. Matches operator* for the finite spectra a
+        // convolver sees (differences are sub-ulp). Partition 0 writes rather
+        // than accumulates, so the accumulator never needs clearing; the rest
+        // go four at a time so each pass loads and stores the accumulator once
+        // for four products.
+        {
+            const std::complex<SampleType>* in = spectrum(0);
+            const std::complex<SampleType>* ir = s.ir_spectra[0].data();
+            for (int i = 0; i <= half; ++i)
+                accum[i] = cmul(in[i], ir[i]);
+        }
+        std::size_t p = 1;
+        for (; p + 4 <= s.num_partitions; p += 4) {
+            const std::complex<SampleType>* in0 = spectrum(p);
+            const std::complex<SampleType>* in1 = spectrum(p + 1);
+            const std::complex<SampleType>* in2 = spectrum(p + 2);
+            const std::complex<SampleType>* in3 = spectrum(p + 3);
+            const std::complex<SampleType>* ir0 = s.ir_spectra[p].data();
+            const std::complex<SampleType>* ir1 = s.ir_spectra[p + 1].data();
+            const std::complex<SampleType>* ir2 = s.ir_spectra[p + 2].data();
+            const std::complex<SampleType>* ir3 = s.ir_spectra[p + 3].data();
+            for (int i = 0; i <= half; ++i)
+                accum[i] += (cmul(in0[i], ir0[i]) + cmul(in1[i], ir1[i])) +
+                            (cmul(in2[i], ir2[i]) + cmul(in3[i], ir3[i]));
+        }
+        for (; p < s.num_partitions; ++p) {
+            const std::complex<SampleType>* in = spectrum(p);
             const std::complex<SampleType>* ir = s.ir_spectra[p].data();
-            // Partition 0 writes rather than accumulates, so the accumulator
-            // never needs clearing.
-            const bool first = p == 0;
-            for (int i = 0; i <= half; ++i) {
-                // Complex MAC as explicit float ops: the finite-value result of
-                // std::complex::operator* without its libm NaN/Inf-recovery
-                // branch, so the loop vectorizes. Matches operator* for the
-                // finite spectra a convolver sees (differences are sub-ulp).
-                const SampleType ar = in[i].real(), ai = in[i].imag();
-                const SampleType br = ir[i].real(), bi = ir[i].imag();
-                const std::complex<SampleType> product(ar * br - ai * bi, ar * bi + ai * br);
-                accum[i] = first ? product : accum[i] + product;
-            }
+            for (int i = 0; i <= half; ++i)
+                accum[i] += cmul(in[i], ir[i]);
         }
 
         // Real inverse in the accumulator's own storage, 1/N folded in; overlap-
@@ -412,6 +430,12 @@ private:
         auto* time = reinterpret_cast<SampleType*>(accum);
         s.fft->inverse_real_half(accum, time);
         std::copy_n(time + s.block_size, s.block_size, output);
+    }
+
+    static std::complex<SampleType> cmul(std::complex<SampleType> a,
+                                         std::complex<SampleType> b) noexcept {
+        return {a.real() * b.real() - a.imag() * b.imag(),
+                a.real() * b.imag() + a.imag() * b.real()};
     }
 
     // Zero the shared input history so the next block starts a new stream.
