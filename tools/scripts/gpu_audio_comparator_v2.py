@@ -221,6 +221,9 @@ def assess(receipt: dict[str, Any], min_blocks: int = MIN_COUNTED_BLOCKS) -> dic
                     reason = ("render_load_unavailable" if load == "render"
                               else "coverage_incomplete")
                     inconclusive.append(f"{reason}:{side}:{frames}:{load}")
+    for cell in completed:
+        if cell["load"] == "render" and cell.get("render_load", {}).get("status") != "completed":
+            inconclusive.append(f"render_load_incomplete:{cell['lane']}:{cell['frames']}")
     if not any(c["side"] == "dawn" and c.get("gpu_timestamps") and
                any(v >= 0 for v in c["samples"]["gpu_busy_ns"]) for c in completed):
         inconclusive.append("dawn_gpu_timestamps_unavailable")
@@ -409,7 +412,7 @@ def evaluate(receipts: list[dict[str, Any]],
 def _git(*args: str) -> str:
     try:
         return subprocess.run(["git", "-C", str(REPO_ROOT), *args], check=True,
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding="utf-8").stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return ""
 
@@ -422,7 +425,7 @@ def run_binary(binary: Path, output: Path, extra: list[str]) -> int:
 
 def run_preflight(path: Path, errors: list[str]) -> dict[str, Any] | None:
     result = subprocess.run([sys.executable, str(PREFLIGHT), "--output", str(path)],
-                            check=False, capture_output=True, text=True)
+                            check=False, capture_output=True, text=True, encoding="utf-8")
     print(result.stdout.strip() or result.stderr.strip(), file=sys.stderr)
     try:
         return json.loads(path.read_text(encoding="utf-8"))

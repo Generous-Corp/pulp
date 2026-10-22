@@ -1122,8 +1122,11 @@ class RenderLoad {
     RenderStats stop() {
         std::unique_lock lock(mutex_);
         active_ = false;
-        idle_cv_.wait(lock, [&] { return !rendering_; });
-        stats_.status = "completed";
+        // A frame takes milliseconds; a render thread that never goes idle
+        // is reported, not waited on forever.
+        const bool idle =
+            idle_cv_.wait_for(lock, std::chrono::seconds(30), [&] { return !rendering_; });
+        stats_.status = idle ? "completed" : "stop_timeout";
         return stats_;
     }
 
@@ -1183,7 +1186,9 @@ class RenderLoad {
         for (;;) {
             {
                 std::unique_lock lock(mutex_);
-                cv_.wait(lock, [&] { return quit_ || active_; });
+                while (!cv_.wait_for(lock, std::chrono::seconds(1),
+                                     [&] { return quit_ || active_; })) {
+                }
                 if (quit_)
                     return;
                 rendering_ = true;
