@@ -788,6 +788,15 @@ A source-only row reports
 without that SDK registry reports the registry unavailable. Do not search a
 different checkout or SDK, or another installed SDK version.
 
+The registry is installed into every SDK (`share/pulp/authority-navigation.json`),
+so a row may describe a private authority but must not name the private
+repository or a file inside it. The `dsp-survey-admission` row says "the DSP
+survey admission protocol in the maintainers' private planning repository";
+the Python and C++ validators pin that exact text, `test_cli_shellout.cpp` pins
+the registry's SHA-256, and `cmake-share-files-no-host-identifiers` /
+`cmake-pulp-install-layout` fail on a private repo, host name, home path or user
+name anywhere under share/pulp (allowlist entries carry their reason).
+
 This is intentionally CLI-only in the parity baseline. It describes the
 separate offline MCP authority and the exact-instance live-control route; it
 does not wrap either as a new generic MCP or control operation. The live row

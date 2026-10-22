@@ -876,15 +876,15 @@ stays encouraged-not-mandated. The real work lives in the script; the command ju
 makes it discoverable and forwards flags.
 
 ```bash
-pulp ci-host setup --class m5                       # minimum: register the m5 host-class label
-pulp ci-host setup --class m5 --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
-pulp ci-host setup --class m5 --validate            # also run a one-shot VM build to prove it
+pulp ci-host setup --class studio                   # minimum: register the studio host-class label
+pulp ci-host setup --class studio --copy-from 'buildhost:/path/to/vms/pulp-build-runner:latest'
+pulp ci-host setup --class studio --validate        # also run a one-shot VM build to prove it
 pulp ci-host setup --help                           # full flag list (delegated to the script)
 ```
 
 Common flags (forwarded verbatim to `setup-ci-host.sh`):
 
-- `--class <name>` — **required** host class for the runner label (`m5`, `studio`, `macbook`, …)
+- `--class <name>` — **required** host class for the runner label (`studio`, `macbook`, `mini`, …)
 - `--copy-from <ssh:path | path>` — rsync a golden in from another host/drive (sparse-safe)
 - `--validate` — after setup, run one ephemeral VM build on the host-only label
 - `--no-agent` — do everything except install/load the launchd agent

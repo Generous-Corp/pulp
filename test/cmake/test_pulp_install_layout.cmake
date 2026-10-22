@@ -111,10 +111,10 @@ if(NOT WIN32)
     endif()
 endif()
 
-# Every file under share/pulp/ship reaches each consumer's SDK, so none may
-# name a build host, a local path or a user.
+# Every file under share/pulp reaches each consumer's SDK, so none may
+# name a build host, a local path, a user or a private repository.
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" "-DSCAN_DIR=${_prefix}/share/pulp/ship"
+    COMMAND "${CMAKE_COMMAND}" "-DSCAN_DIR=${_prefix}/share/pulp"
             -P "${CMAKE_CURRENT_LIST_DIR}/check_no_host_identifiers.cmake"
     RESULT_VARIABLE _ship_hosts_rc OUTPUT_VARIABLE _ship_hosts_out
     ERROR_VARIABLE _ship_hosts_err)

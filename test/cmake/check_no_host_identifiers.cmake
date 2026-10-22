@@ -1,13 +1,20 @@
 #[[
 Fail when a file Pulp installs into every SDK names a build host, a local
-path or a user name. Files under share/pulp/ship (the signing preflight and
-the default entitlements) are copied into each consumer's SDK, so a comment
-naming a fleet machine or a home directory would ship with every release.
+path, a user name or a private repository. Everything under share/pulp is
+copied into each consumer's SDK, so a comment naming a fleet machine or a
+home directory would ship with every release.
 
 Inputs (via -D):
-  SCAN_DIR    a directory whose regular files are all scanned, or
-  SCAN_FILES  a ;-separated list of files to scan.
+  SCAN_DIR    a directory whose regular files are all scanned (the installed
+              share/pulp), and/or
+  SCAN_FILES  a ;-separated list of files to scan, and/or
+  SCAN_LIST   a file listing one path per line (the source copies).
 At least one file must be scanned; an empty set is an error, not a pass.
+
+Allowed exceptions are listed in _allow below, each with its reason. An entry
+names the files it applies to (a regex over the path) and the exact text it
+permits; that text is blanked before the patterns run, so anything else on
+the same line is still checked.
 ]]
 cmake_minimum_required(VERSION 3.20)
 
@@ -21,6 +28,10 @@ if(DEFINED SCAN_DIR)
 endif()
 if(DEFINED SCAN_FILES)
     list(APPEND _files ${SCAN_FILES})
+endif()
+if(DEFINED SCAN_LIST)
+    file(STRINGS "${SCAN_LIST}" _listed)
+    list(APPEND _files ${_listed})
 endif()
 list(LENGTH _files _file_count)
 if(_file_count EQUAL 0)
@@ -38,7 +49,18 @@ set(_patterns
     "/Users/[A-Za-z]"
     "/home/[A-Za-z]"
     "/Volumes/[A-Za-z]"
-    "[A-Za-z]:\\\\Users\\\\")
+    "[A-Za-z]:\\\\Users\\\\"
+    "danielraffel/pulp-planning")
+
+# Each entry: path-regex @@ allowed-text-regex @@ reason (no `;` in any part).
+set(_allow
+    "threejs/@@.*@@vendored third-party three.js, where m1 to m5 are matrix element names"
+    ".*@@https://github[.]com/danielraffel/(pulp|Shipyard|skia-builder|v8-builder)[/#\"')]@@public repositories: the framework's former home and its tool repos (pulp-planning does not match)"
+    "gpu-validation-checklist[.]md$@@(--expected-host-id|--host-id) m5@@the guide's logical host alias example, which it recommends over a real name"
+    "gpu-validation-checklist[.]md$@@gpu-health/a1/m5/@@the same alias in the guide's example output paths"
+    "gpu-validation-checklist[.]md$@@pre-provisioned/m5-ed25519@@the same alias in the guide's example key path"
+    "gpu-validation-checklist[.]md$@@alias such as `m5`@@the guide's sentence recommending a logical alias"
+    ".*@@/Users/me/@@documented placeholder home directory")
 
 set(_problems "")
 foreach(_file IN LISTS _files)
@@ -53,8 +75,17 @@ foreach(_file IN LISTS _files)
     set(_line_number 0)
     foreach(_line IN LISTS _lines)
         math(EXPR _line_number "${_line_number} + 1")
+        set(_checked "${_line}")
+        foreach(_entry IN LISTS _allow)
+            string(REPLACE "@@" ";" _parts "${_entry}")
+            list(GET _parts 0 _path_regex)
+            list(GET _parts 1 _text_regex)
+            if(_file MATCHES "${_path_regex}")
+                string(REGEX REPLACE "${_text_regex}" "" _checked "${_checked}")
+            endif()
+        endforeach()
         foreach(_pattern IN LISTS _patterns)
-            if(_line MATCHES "${_pattern}")
+            if(_checked MATCHES "${_pattern}")
                 string(REPLACE "<semicolon>" ";" _shown "${_line}")
                 string(APPEND _problems "  ${_file}:${_line_number}: ${_shown}\n")
                 break()

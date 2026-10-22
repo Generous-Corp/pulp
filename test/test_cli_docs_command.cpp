@@ -218,7 +218,8 @@ void write_authority_registry(const fs::path& root, const std::string& second_id
                         const std::string& source_query, const std::string& installed_query,
                         const std::string& absence) {
         const auto owner = id == "dsp-survey-admission"
-                               ? "danielraffel/pulp-planning:dsp-survey-claims/WORKER-PROMPT.md"
+                               ? "planning: the DSP survey admission protocol in the "
+                                 "maintainers' private planning repository"
                                : "owner";
         return "{\"id\":\"" + id + "\",\"aliases\":[\"" + alias + "\"],\"plane\":\"" + plane +
                "\",\"native_owner\":\"" + owner + "\",\"source_location\":\"" + source +
@@ -235,7 +236,8 @@ void write_authority_registry(const fs::path& root, const std::string& second_id
             "\"share/pulp/dsp.json\"", "dsp source query", "\"dsp installed query\"",
             "not_present_in_covered_forge_bake_catalog_headers"),
         row("dsp-survey-admission", "dsp-survey", "release_evidence", "planning", "null",
-            "read dsp-survey-claims/WORKER-PROMPT.md from current danielraffel/pulp-planning main",
+            "read the DSP survey admission protocol from the current main of the planning "
+            "submodule's repository",
             "null", "unknown"),
         row("forge-catalog", "forge", "dsp_static", "docs/status/forge.json",
             "\"share/pulp/forge.json\"", "forge source query", "\"forge installed query\"",
@@ -467,9 +469,8 @@ TEST_CASE("docs command reports usage outside and inside projects", "[cli][docs]
                              "\"source_location\":\"planning\",\"installed_location\":null",
                              "\"source_location\":\"planning\",\"installed_location\":"
                              "\"share/pulp/dsp-survey.json\"");
-                replace_once(registry,
-                             "current danielraffel/pulp-planning main\",\"installed\":null",
-                             "current danielraffel/pulp-planning main\",\"installed\":"
+                replace_once(registry, "planning submodule's repository\",\"installed\":null",
+                             "planning submodule's repository\",\"installed\":"
                              "\"pulp dsp-survey validate\"");
             },
             "must remain source-only");
