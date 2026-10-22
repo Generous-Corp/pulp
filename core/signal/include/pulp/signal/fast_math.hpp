@@ -134,14 +134,19 @@ struct FastMath {
     /// Reducing that fraction and applying Horner's rule gives the numerator
     /// and denominator evaluated below. Published derivation:
     /// https://varietyofsound.wordpress.com/2011/02/14/efficient-tanh-computation-using-lamberts-continued-fraction/
+    ///
+    /// Beyond |x| = 4 the result saturates to exactly +/-1. The rational form is
+    /// evaluated unconditionally and the saturation applied as selects rather
+    /// than early returns, so a loop over this function stays branch-free and
+    /// vectorizes. Outside the clamp the polynomial may overflow to inf/inf;
+    /// that NaN is never selected. A NaN input propagates.
     static float tanh(float x) {
-        // Clamp to avoid overflow in the polynomial
-        if (x < -4.0f) return -1.0f;
-        if (x > 4.0f) return 1.0f;
-        float x2 = x * x;
-        float num = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
-        float den = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
-        return num / den;
+        const float x2 = x * x;
+        const float num = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
+        const float den = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
+        const float r = num / den;
+        const float hi = x > 4.0f ? 1.0f : r;
+        return x < -4.0f ? -1.0f : hi;
     }
 
     /// Fast sin approximation (Bhaskara-style, max error ~0.001 for any x).
