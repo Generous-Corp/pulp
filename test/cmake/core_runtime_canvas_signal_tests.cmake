@@ -724,8 +724,8 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
 # provider failure/loss, worker starvation, reactivation, bypass, and state
 # restore. Uses the private provider seam, so it needs no Dawn or GPU device.
 if(PULP_HAS_CLAP)
-    pulp_add_test_suite(pulp-test-gpu-audio-daw-continuity
-        SOURCES test_gpu_audio_daw_continuity.cpp harness/rt_allocation_probe.cpp
+    pulp_add_test_suite(pulp-test-gpu-audio-plugin-boundary-continuity
+        SOURCES test_gpu_audio_plugin_boundary_continuity.cpp harness/rt_allocation_probe.cpp
         LIBRARIES pulp::gpu-audio pulp::format pulp::audio-analysis clap
         COMPILE_DEFINITIONS PULP_CLAP_GUI=1
         INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)

@@ -1,8 +1,11 @@
-// GPU-audio continuity through the real CLAP adapter and HeadlessHost.
+// GPU-audio plug-in-boundary continuity under simulated provider faults,
+// through the real CLAP adapter and HeadlessHost.
+//
+// Fake provider, in-process; not DAW and not render-loss evidence.
 //
 // The transport and execution-controller suites prove the fallback contract one
-// callback at a time. This file checks it at the plug-in boundary, under the
-// host call patterns of a DAW: activate/deactivate with a new sample rate or
+// callback at a time. This file checks it at the plug-in boundary, under
+// host-style call sequences: activate/deactivate with a new sample rate or
 // block size, ragged host callbacks, adapter-owned bypass, and state save/load
 // while the simulated GPU provider has failed. Bypass and state spans null
 // partly by construction (both plug-ins share the adapter's dry delay and
@@ -25,7 +28,9 @@
 // failure, a refused submission, a starved worker, and a ProviderLost recovery
 // request on the bridge (the reason the Dawn convolution session raises on
 // device loss). None of this observes a real graphics device, a render owner,
-// or a DAW; those remain gated on the Vellum render-owner seam.
+// or a DAW. Real render-owner loss, authenticated device callbacks, resource
+// replay, teardown callback suppression, and end-to-end DAW continuity remain
+// gated on the Vellum render-owner seam.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -243,7 +248,7 @@ format::PluginDescriptor continuity_descriptor(const char* name) {
     format::PluginDescriptor d;
     d.name = name;
     d.manufacturer = "PulpTest";
-    d.bundle_id = "com.pulp.test.gpu-audio-daw-continuity";
+    d.bundle_id = "com.pulp.test.gpu-audio-plugin-boundary-continuity";
     d.version = "1.0.0";
     d.category = format::PluginCategory::Effect;
     d.input_buses = {{"In", 2}};
@@ -488,15 +493,13 @@ enum class Fault {
 class ClapSession {
   public:
     explicit ClapSession(format::ProcessorFactory factory) {
-        // clap_destroy() deletes the adapter state, as a host's destroy would.
         plugin_->factory = factory;
-        plugin_->plugin.plugin_data = plugin_;
+        plugin_->plugin.plugin_data = plugin_.get();
         REQUIRE(format::clap_adapter::clap_init(&plugin_->plugin));
     }
     ~ClapSession() {
         if (active_)
             format::clap_adapter::clap_deactivate(&plugin_->plugin);
-        format::clap_adapter::clap_destroy(&plugin_->plugin);
     }
     ClapSession(const ClapSession&) = delete;
     ClapSession& operator=(const ClapSession&) = delete;
@@ -692,7 +695,15 @@ class ClapSession {
     }
 
   private:
-    format::clap_adapter::PulpClapPlugin* plugin_ = new format::clap_adapter::PulpClapPlugin();
+    // clap_destroy() deletes the adapter state, as a host's destroy would; the
+    // deleter also runs when a failed clap_init() unwinds the constructor.
+    struct ClapDestroy {
+        void operator()(format::clap_adapter::PulpClapPlugin* p) const {
+            format::clap_adapter::clap_destroy(&p->plugin);
+        }
+    };
+    std::unique_ptr<format::clap_adapter::PulpClapPlugin, ClapDestroy> plugin_{
+        new format::clap_adapter::PulpClapPlugin()};
     bool active_ = false;
     bool starved_ = false;
     std::uint32_t max_frames_ = 0;
@@ -733,7 +744,7 @@ struct OptionsScope {
 } // namespace
 
 TEST_CASE("GPU-audio plug-in nulls against the CPU reference while the GPU path is healthy",
-          "[gpu_audio][daw-continuity][clap]") {
+          "[gpu_audio][plugin-boundary-continuity][clap]") {
     ClapSession gpu(&make_gpu_effect), cpu(&make_cpu_effect);
     for (auto* s : {&gpu, &cpu}) {
         s->activate(48000.0, 64);
@@ -753,7 +764,7 @@ TEST_CASE("GPU-audio plug-in nulls against the CPU reference while the GPU path 
 }
 
 TEST_CASE("GPU-audio plug-in output stays continuous across simulated provider faults",
-          "[gpu_audio][daw-continuity][clap]") {
+          "[gpu_audio][plugin-boundary-continuity][clap]") {
     const auto fault =
         GENERATE(Fault::FailCompletions, Fault::RejectSubmissions, Fault::ProviderLost);
     CAPTURE(static_cast<int>(fault));
@@ -789,7 +800,7 @@ TEST_CASE("GPU-audio plug-in output stays continuous across simulated provider f
 }
 
 TEST_CASE("GPU-audio plug-in covers a starved worker with the CPU fallback and recovers",
-          "[gpu_audio][daw-continuity][clap]") {
+          "[gpu_audio][plugin-boundary-continuity][clap]") {
     ClapSession gpu(&make_gpu_effect), cpu(&make_cpu_effect);
     for (auto* s : {&gpu, &cpu}) {
         s->activate(48000.0, 64);
@@ -826,7 +837,7 @@ TEST_CASE("GPU-audio plug-in covers a starved worker with the CPU fallback and r
 }
 
 TEST_CASE("GPU-audio plug-in stays continuous across reactivation with new rate and block size",
-          "[gpu_audio][daw-continuity][clap]") {
+          "[gpu_audio][plugin-boundary-continuity][clap]") {
     ClapSession gpu(&make_gpu_effect), cpu(&make_cpu_effect);
     for (auto* s : {&gpu, &cpu}) {
         s->activate(48000.0, 64);
@@ -872,7 +883,7 @@ TEST_CASE("GPU-audio plug-in stays continuous across reactivation with new rate 
 }
 
 TEST_CASE("GPU-audio plug-in keeps adapter bypass and state restore aligned through a fallback",
-          "[gpu_audio][daw-continuity][clap]") {
+          "[gpu_audio][plugin-boundary-continuity][clap]") {
     ClapSession gpu(&make_gpu_effect), cpu(&make_cpu_effect);
     std::vector<std::uint8_t> gpu_state, cpu_state;
     for (auto* s : {&gpu, &cpu}) {
@@ -909,7 +920,7 @@ TEST_CASE("GPU-audio plug-in keeps adapter bypass and state restore aligned thro
 }
 
 TEST_CASE("GPU-audio continuity null detects a missing or misaligned fallback",
-          "[gpu_audio][daw-continuity][clap][negative-control]") {
+          "[gpu_audio][plugin-boundary-continuity][clap][negative-control]") {
     // Both planted faults pass the healthy null, so the failure below is caused
     // by the fallback transition and nothing else.
     const auto planted = GENERATE(0, 1);
@@ -945,7 +956,7 @@ TEST_CASE("GPU-audio continuity null detects a missing or misaligned fallback",
 }
 
 TEST_CASE("GPU-audio plug-in nulls through HeadlessHost across loss and re-prepare",
-          "[gpu_audio][daw-continuity][headless]") {
+          "[gpu_audio][plugin-boundary-continuity][headless]") {
     format::HeadlessHost gpu(&make_gpu_effect), cpu(&make_cpu_effect);
     std::array<std::vector<float>, kChannels> gpu_out, cpu_out;
     std::uint64_t frame = 0;
