@@ -1177,7 +1177,8 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
     frame_placement = frame_placement_check(
         browser_snapshot, lanes.native_doc, native_layout_doc, matches, capture)
     geometry = geometry_metrics_with_registration(
-        raw_comparison["matches"], matches, geometry_registration, frame_placement)
+        raw_comparison["matches"], matches, geometry_registration, frame_placement,
+        reference_node_count=len(browser_flat))
     typography = typography_metrics(matches)
     authored_frame = capture.get("reference", {}).get("authored_frame")
     native_authored_frame = native_capture.get("reference", {}).get("authored_frame")

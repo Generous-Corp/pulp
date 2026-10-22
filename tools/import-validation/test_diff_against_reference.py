@@ -136,7 +136,8 @@ class HelperScoringTests(unittest.TestCase):
             1, "main", -1, "", {}, (0.0, 0.0, 320.0, 18.0), {})
         registered = [(registered_browser, native, 1.0)]
         geometry = geometry_metrics_with_registration(
-            raw_match, registered, {"x": -24.0, "y": -24.0})
+            raw_match, registered, {"x": -24.0, "y": -24.0},
+            reference_node_count=1)
         self.assertLess(geometry["score"], 1.0)
         self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
         self.assertEqual(geometry["registration_applied"]["x"], -24.0)

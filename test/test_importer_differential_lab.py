@@ -7,6 +7,7 @@ from argparse import Namespace
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+import math
 import re
 import sys
 import tempfile
@@ -1647,7 +1648,7 @@ class GeometryGateTests(unittest.TestCase):
                 self.CHILD[2] * dw_scale, self.CHILD[3])
 
     def build(self, *, native_child=None, recorded_shift=0.0, html_shift=0.0,
-              root_shift=0.0, provide_placement=True):
+              root_shift=0.0, provide_placement=True, unmatched_reference=0):
         snapshot = surface_snapshot(self.FRAME, [self.CHILD])
         capture = {"reference": {"authored_frame": dict(
             zip(("x", "y", "width", "height"), self.FRAME))}}
@@ -1681,7 +1682,8 @@ class GeometryGateTests(unittest.TestCase):
         placement = (LAB.frame_placement_check(snapshot, ir, layout, registered, capture)
                      if provide_placement else None)
         return LAB.geometry_metrics_with_registration(
-            raw, registered, registration, placement)
+            raw, registered, registration, placement,
+            reference_node_count=len(browser_raw) + unmatched_reference)
 
     def test_known_good_panel_local_import_passes_with_raw_reported(self) -> None:
         geometry = self.build()
@@ -1759,6 +1761,30 @@ class GeometryGateTests(unittest.TestCase):
     def test_ten_percent_narrow_box_fails(self) -> None:
         geometry = self.build(native_child=self.local_child(dw_scale=0.9))
         self.assertIn("registered_max_abs_delta", geometry["gate"]["failed"])
+
+    def test_non_finite_delta_is_a_violation(self) -> None:
+        # x is the first edge `max` sees and width is not; a NaN must count
+        # wherever it sits.
+        for child in (self.local_child(dx=math.nan), self.local_child(dx=math.inf),
+                      self.local_child(dw_scale=math.nan)):
+            with self.subTest(child=child):
+                geometry = self.build(native_child=child)
+                self.assertIn("registered_max_abs_delta", geometry["gate"]["failed"])
+                bound = geometry["gate"]["checks"]["registered_max_abs_delta"]
+                self.assertEqual(bound["violation_count"], 1)
+                self.assertEqual(bound["violations"][0]["native_anchor"],
+                                 self.CHILD_ANCHOR)
+
+    def test_a_few_correct_boxes_among_many_unmatched_fail_coverage(self) -> None:
+        # Both matched boxes are exact; 98 reference nodes found no match.
+        geometry = self.build(unmatched_reference=98)
+        self.assertTrue(geometry["gate"]["checks"]["registered_max_abs_delta"]["ok"])
+        self.assertEqual(geometry["gate"]["failed"], ["registered_coverage"])
+        coverage = geometry["gate"]["checks"]["registered_coverage"]
+        self.assertAlmostEqual(coverage["coverage"], 0.02)
+        self.assertEqual(coverage["floor"], LAB.PROMOTION_THRESHOLDS["structural"])
+        # Control: the same boxes with every reference node matched pass.
+        self.assertTrue(self.build()["gate"]["ok"])
 
     def test_sub_pixel_delta_passes(self) -> None:
         geometry = self.build(native_child=self.local_child(dx=0.9))

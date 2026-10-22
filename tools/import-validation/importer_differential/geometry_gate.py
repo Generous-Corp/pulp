@@ -113,7 +113,11 @@ def geometry_metrics(
             # Keep the direction visible. An absolute score can hide a
             # systematic offset by collapsing +N and -N into the same value.
             "signed_delta": dict(zip(labels, [round(v, 6) for v in signed_delta])),
-            "max_abs_delta": round(max(abs(v) for v in signed_delta), 6),
+            # `max` drops a NaN that is not its first argument, so a
+            # non-finite edge is carried through explicitly.
+            "max_abs_delta": (
+                round(max(abs(v) for v in signed_delta), 6)
+                if all(math.isfinite(v) for v in signed_delta) else math.nan),
             "depth": depth(browser.index),
             "mean_relative_error": round(mean_error, 6),
         })
@@ -309,6 +313,8 @@ def geometry_metrics_with_registration(
     registration: dict[str, float],
     frame_placement: dict[str, Any] | None = None,
     max_abs_delta: float = GEOMETRY_MAX_ABS_DELTA_PX,
+    *,
+    reference_node_count: int,
 ) -> dict[str, Any]:
     """Return raw page-space geometry and the registered geometry gate.
 
@@ -322,7 +328,17 @@ def geometry_metrics_with_registration(
       the DOM snapshot, DesignIR, and native layout;
     - registered mean score at or above the geometry threshold;
     - registered per-node maximum edge delta at most ``max_abs_delta`` CSS px
-      on x, y, width, and height, with at least one matched box.
+      on x, y, width, and height, with at least one matched box. A delta that
+      is not a finite number is a violation, never a pass;
+    - coverage: the measured boxes are at least the structural threshold's
+      share of ``reference_node_count``, the browser nodes the structural lens
+      scores against.
+
+    The coverage floor exists because the delta bound is a claim about every
+    box it measured and nothing else: one well-placed box among many
+    unmatched ones would otherwise pass. The floor is the structural
+    threshold, so geometry never certifies a smaller share of the reference
+    than structure requires to be matched.
 
     Registration alone can never pass: a missing frame placement result fails.
     """
@@ -336,8 +352,13 @@ def geometry_metrics_with_registration(
     violations = [
         {key: row[key] for key in ("browser_node", "native_anchor",
                                    "signed_delta", "max_abs_delta")}
-        for row in registered["rows"] if row["max_abs_delta"] > max_abs_delta
+        for row in registered["rows"]
+        if not math.isfinite(row["max_abs_delta"])
+        or row["max_abs_delta"] > max_abs_delta
     ]
+    coverage_floor = PROMOTION_THRESHOLDS["structural"]
+    coverage = (registered["matched_bounds"] / reference_node_count
+                if reference_node_count > 0 else 0.0)
     if frame_placement is None:
         frame_placement = {"ok": False, "reason": "not evaluated"}
     threshold = PROMOTION_THRESHOLDS["geometry"]
@@ -356,6 +377,13 @@ def geometry_metrics_with_registration(
             "matched_bounds": registered["matched_bounds"],
             "violation_count": len(violations),
             "violations": violations,
+        },
+        "registered_coverage": {
+            "ok": coverage >= coverage_floor,
+            "coverage": round(coverage, 6),
+            "floor": coverage_floor,
+            "matched_bounds": registered["matched_bounds"],
+            "reference_node_count": reference_node_count,
         },
     }
     geometry["gate"] = {
