@@ -530,6 +530,36 @@ Watch out for:
 - **An SDK older than the record** yields `runtime_pins: null`; the rest of the
   file is still produced by the consumer's own CMake helpers.
 
+### Shipped plug-ins have local symbols stripped; the build output does not
+
+`pulp ship package` and `build_combined_installer.sh` package a COPY of each
+AU/VST3/CLAP bundle with `strip -x` applied to its main executable, then sign
+that copy. On a first load the system checks the whole module file, at roughly
+17 ms per MB on Apple Silicon, and local symbols are several MB of a Release
+editor module that nothing at run time reads. The bundle in the build directory
+keeps its symbols, so a debugger and the nm-based packaging ctests still see
+them.
+
+Watch out for:
+
+- **Strip before signing, never after.** Stripping changes the code the
+  signature seals. The installer script strips the staged copy and then
+  `deep_sign`s it. `pulp ship package` runs after `pulp ship sign`, so it
+  re-signs the stripped copy itself: with `--identity` (or
+  `signing.apple.identity` / `PULP_SIGN_IDENTITY`) when the original carries a
+  Developer ID signature, ad hoc otherwise. `pulp ship release` passes its
+  identity through. If a bundle is Developer-ID-signed and no identity
+  resolves, it ships unstripped with a warning rather than with a broken seal.
+- **`--keep-symbols`** (both paths) packages the build output untouched. Use it
+  when a crash report needs symbolication from the shipped binary itself.
+- **AAX is never stripped**: it arrives PACE-wrapped and any edit voids the wrap.
+- **Only `-x`** (local symbols). Exported symbols such as the format entry
+  points and anything `dlsym` reaches are untouched.
+- Coverage: `pulp ship package strips local symbols from the shipped copy
+  only` in `test/test_cli_ship_shellout.cpp` (real Mach-O fixture, expands the
+  `.pkg`, runs `nm`), and the strip cases in
+  `tools/scripts/test_build_combined_installer.py`.
+
 ### macOS one-command pipeline: `pulp ship release`
 
 ```bash

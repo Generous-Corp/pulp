@@ -10,10 +10,12 @@
 #include "json_writer.hpp"
 #include "mac_runtime_validators.hpp"
 #include "shell_redirect.hpp"
+#include "ship_bundle_strip.hpp"
 #include "xcode_developer_path.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -106,6 +108,9 @@ static int print_ship_help() {
     std::cout << "             --ship-inspector-runtime-eval  (separate unsafe-eval acknowledgement)\n";
     std::cout << "             --json  (emit inspector capability evidence)\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (sign the .pkg)\n";
+    std::cout << "             --identity \"Developer ID Application: ...\" [--entitlements <plist>]\n";
+    std::cout << "               (re-sign stripped plug-in copies; macOS)\n";
+    std::cout << "             --keep-symbols  (ship plug-in bundles without stripping local symbols)\n";
     std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
     std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
     std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
@@ -569,6 +574,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
 
         std::string version, target, keystore_path, key_alias, store_pass, key_pass, abi_arg;
         std::string installer_identity;  // Developer ID Installer (macOS .pkg signing)
+        // Developer ID Application identity and entitlements for re-signing the
+        // stripped copy of a bundle `pulp ship sign` already signed.
+        std::string identity, entitlements;
+        bool keep_symbols = false;
         std::string format;        // Linux: "appimage" selects the AppImage packager
         std::string binary_path;   // Linux AppImage: path to the standalone executable
         std::string icon_path;     // Linux AppImage: optional .png icon
@@ -611,6 +620,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 if (!take_ship_value(args, i, sub, args[i], abi_arg)) return 2;
             } else if (args[i] == "--installer-identity") {
                 if (!take_ship_value(args, i, sub, args[i], installer_identity)) return 2;
+            } else if (args[i] == "--identity") {
+                if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
+            } else if (args[i] == "--entitlements") {
+                if (!take_ship_value(args, i, sub, args[i], entitlements)) return 2;
             } else if (args[i] == "--format") {
                 if (!take_ship_value(args, i, sub, args[i], format)) return 2;
             } else if (args[i] == "--binary") {
@@ -626,12 +639,15 @@ static int ship_package_impl(const std::vector<std::string>& args,
             else if (args[i] == "--pkg") want_pkg = true;
             else if (args[i] == "--dmg") want_dmg = true;
             else if (args[i] == "--separate") want_separate = true;
+            else if (args[i] == "--keep-symbols") keep_symbols = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
             else if (args[i] == "--ship-inspector") ship_inspector = true;
             else if (args[i] == "--ship-inspector-runtime-eval")
                 ship_inspector_runtime_eval = true;
             else return unknown_ship_arg(sub, args[i]);
         }
+
+        (void)keep_symbols;  // macOS plug-in packaging only
 
         // Refuse to package a PULP_TRACING=ON build unless explicitly allowed.
         if (int rc = enforce_no_tracing({build_dir, fs::path(binary_path)},
@@ -931,6 +947,26 @@ static int ship_package_impl(const std::vector<std::string>& args,
         installer_identity = ship_config(installer_identity, "PULP_INSTALLER_IDENTITY",
                                          "signing.apple", "installer_identity");
 
+        // Plug-in bundles ship as stripped, re-signed copies staged outside the
+        // build tree; see ship_bundle_strip.hpp. The staging tree is removed on
+        // every exit from this block.
+        pulp::cli::ShipStripOptions strip_options;
+        strip_options.identity =
+            ship_config(identity, "PULP_SIGN_IDENTITY", "signing.apple", "identity");
+        strip_options.entitlements = entitlements;
+        bool preflight_passed = false;
+        strip_options.signing_preflight = [&] {
+            if (!preflight_passed) preflight_passed = run_signing_preflight(root);
+            return preflight_passed;
+        };
+        const auto strip_staging = fs::temp_directory_path() /
+            ("pulp-ship-strip-" + std::to_string(std::chrono::steady_clock::now()
+                                                 .time_since_epoch().count()));
+        struct RemoveTree {
+            fs::path path;
+            ~RemoveTree() { std::error_code ec; fs::remove_all(path, ec); }
+        } strip_staging_cleanup{strip_staging};
+
 #ifdef __APPLE__
         // Components collected for the DEFAULT single, component-selectable
         // installer (a "Customize" pane lets the user pick formats).
@@ -973,6 +1009,14 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 auto name = entry.path().stem().string();
                 if (!product_filter.empty() && name != product_filter) continue;
 
+                fs::path ship_path = entry.path();
+                if (!keep_symbols) {
+                    auto staged = pulp::cli::stage_stripped_bundle(
+                        entry.path(), strip_staging, strip_options);
+                    if (!staged) return 1;
+                    ship_path = *staged;
+                }
+
 #ifdef __APPLE__
                 // Plugin bundle → .dmg ONLY when the user explicitly
                 // asked. Default + --pkg both produce .pkg.
@@ -981,7 +1025,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
                     auto dmg_path = artifacts / dmg_name;
                     std::cout << "Packaging " << name << " (" << dir_name
                               << " → .dmg)...\n";
-                    if (pulp::ship::create_dmg(entry.path().string(),
+                    if (pulp::ship::create_dmg(ship_path.string(),
                                                dmg_path.string(),
                                                name + " " + dir_name)) {
                         ++dmg_count;
@@ -1003,14 +1047,14 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 if (!want_separate) {
                     // DEFAULT: collect as one toggleable choice in the combined,
                     // component-selectable installer built after this loop.
-                    combined.push_back({entry.path().string(), install_loc, title});
+                    combined.push_back({ship_path.string(), install_loc, title});
                     continue;
                 }
                 // --separate (legacy): one signed `.pkg` per format.
                 auto pkg_path = artifacts / (name + "-" + dir_name + "-" + version + ".pkg");
                 std::cout << "Packaging " << name << " (" << dir_name << " → .pkg"
                           << (installer_identity.empty() ? "" : ", signed") << ")...\n";
-                std::string cmd = "pkgbuild --component " + shell_quote(entry.path().string())
+                std::string cmd = "pkgbuild --component " + shell_quote(ship_path.string())
                     + " --identifier " + shell_quote("com.pulp." + name + "." + format_lower)
                     + " --version " + shell_quote(version)
                     + " --install-location " + shell_quote(install_loc);
@@ -1592,6 +1636,11 @@ static int ship_release(const std::vector<std::string>& args,
             if (!installer_identity.empty()) {
                 pkg_args.push_back("--installer-identity");
                 pkg_args.push_back(installer_identity);
+            }
+            // The Application identity re-signs each stripped plug-in copy.
+            if (!identity.empty()) {
+                pkg_args.push_back("--identity");
+                pkg_args.push_back(identity);
             }
             int pkg_rc = cmd_ship(pkg_args);
             if (pkg_rc != 0) {

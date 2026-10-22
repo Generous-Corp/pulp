@@ -259,6 +259,8 @@ class CombinedInstallerTest(unittest.TestCase):
         refused_after_verification: bool = False,
         wraptool: str = "pass",
         allow_unverified_aax_wrap: bool = False,
+        macho_plugins: bool = False,
+        keep_symbols: bool = False,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -271,6 +273,7 @@ class CombinedInstallerTest(unittest.TestCase):
             productbuild_argv_capture = tmp / "productbuild-argv.txt"
             productsign_argv_capture = tmp / "productsign-argv.txt"
             wraptool_argv_capture = tmp / "wraptool-argv.txt"
+            strip_argv_capture = tmp / "strip-argv.txt"
             output = tmp / "out"
             wraptool_path = tmp / "pace" / "wraptool"
             if wraptool != "absent":
@@ -384,6 +387,16 @@ class CombinedInstallerTest(unittest.TestCase):
                 'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
             )
 
+            # Records each strip and marks the file it was given, so a case can
+            # tell which copy of a module was stripped.
+            self._write_tool(
+                fake_bin,
+                "strip",
+                'printf "%s\\n" "$*" >> "$CAPTURE_STRIP_ARGV"\n'
+                'last=""\nfor arg in "$@"; do last="$arg"; done\n'
+                'printf "stripped" >> "$last"\n',
+            )
+
             args = [
                 "/bin/bash",
                 str(SCRIPT),
@@ -401,6 +414,8 @@ class CombinedInstallerTest(unittest.TestCase):
             ]
             if allow_unverified_aax_wrap:
                 args.append("--allow-unverified-aax-wrap")
+            if keep_symbols:
+                args.append("--keep-symbols")
             if architectures:
                 args.extend(("--architectures", architectures))
             plugin_bundles: list[Path] = []
@@ -417,7 +432,11 @@ class CombinedInstallerTest(unittest.TestCase):
                     "</dict></plist>\n"
                 )
                 executable = macos / plugin_name
-                executable.write_text("fixture executable\n")
+                if macho_plugins:
+                    # Any real Mach-O will do; the fake strip only marks it.
+                    executable.write_bytes(Path("/usr/bin/true").read_bytes())
+                else:
+                    executable.write_text("fixture executable\n")
                 executable.chmod(0o755)
                 if d15_fixture and not plugin_bundles:
                     if d15_fixture == "file":
@@ -523,6 +542,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 # and "absent" names a path that does not exist.
                 "PULP_AAX_WRAPTOOL": str(wraptool_path),
                 "CAPTURE_WRAPTOOL_ARGV": str(wraptool_argv_capture),
+                "CAPTURE_STRIP_ARGV": str(strip_argv_capture),
             }
             Path(env["PULP_SIGN_KEYCHAIN"]).touch()
             Path(env["PULP_SIGN_P12"]).touch()
@@ -602,6 +622,14 @@ class CombinedInstallerTest(unittest.TestCase):
                 str(bundle / "Contents" / "MacOS" / bundle.stem)
                 for bundle in plugin_bundles
             ]
+            self._last_strip_argv = (
+                strip_argv_capture.read_text() if strip_argv_capture.is_file() else ""
+            )
+            self._last_plugin_mains_unmodified = all(
+                not (bundle / "Contents" / "MacOS" / bundle.stem)
+                .read_bytes().endswith(b"stripped")
+                for bundle in plugin_bundles
+            )
             return capture.read_text(), relocation
 
     def test_development_vellum_runtime_is_rejected_before_signing(self) -> None:
@@ -674,6 +702,35 @@ class CombinedInstallerTest(unittest.TestCase):
                 line.endswith(main_path)
                 for line in self._last_codesign_argv.splitlines()
             ))
+
+    def test_plugins_ship_a_stripped_copy_signed_after_stripping(self) -> None:
+        self._run_installer([("Kick", "au"), ("Kick", "clap")], macho_plugins=True)
+
+        strips = self._last_strip_argv.splitlines()
+        self.assertEqual(len(strips), 2, msg=self._last_strip_argv)
+        for line in strips:
+            self.assertTrue(line.startswith("-x "), msg=line)
+        # The build output is never modified; the staged copy is what is
+        # stripped, signed and packaged.
+        self.assertTrue(self._last_plugin_mains_unmodified)
+        for bundle in ("Kick.component", "Kick.clap"):
+            staged = [l for l in strips if "/plugins/" in l and f"/{bundle}/" in l]
+            self.assertEqual(len(staged), 1, msg=self._last_strip_argv)
+            staged_bundle = staged[0].removeprefix("-x ").split(f"/{bundle}/")[0] + f"/{bundle}"
+            self.assertTrue(any(
+                line.rstrip().endswith(staged_bundle)
+                for line in self._last_codesign_argv.splitlines()
+                if "--verify" not in line
+            ), msg=self._last_codesign_argv)
+            pkg_args = self._last_pkgbuild_argv.splitlines()
+            self.assertIn(staged_bundle, pkg_args, msg=self._last_pkgbuild_argv)
+            self.assertEqual(pkg_args[pkg_args.index(staged_bundle) - 1], "--component")
+
+    def test_keep_symbols_ships_the_build_output_unstripped(self) -> None:
+        self._run_installer([("Kick", "au")], macho_plugins=True, keep_symbols=True)
+
+        self.assertEqual(self._last_strip_argv, "")
+        self.assertNotIn("/plugins/", self._last_pkgbuild_argv)
 
     def test_distinct_names_with_the_same_lossy_slug_do_not_collide(self) -> None:
         xml, _ = self._run_installer([("Foo-Bar", "au"), ("Foo Bar", "au")])
