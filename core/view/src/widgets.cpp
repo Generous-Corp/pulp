@@ -146,6 +146,30 @@ void draw_captured_raster(canvas::Canvas& canvas, const View& view,
     draw();
     canvas.restore();
 }
+
+// Whether the frame at (fx, fy) of a byte-backed strip lies inside its pixels.
+// Encoded bytes (PNG, JPEG, ...) compress, so their byte count says nothing
+// about which frames exist: they are bounded by the decoded image size, read
+// from the header once per strip. Bytes the decoder does not recognise are raw
+// RGBA and are bounded by their byte count.
+bool byte_strip_frame_in_bounds(canvas::Canvas& canvas, SpriteStrip& strip, int fx, int fy) {
+    if (!strip.decoded_size_known()) {
+        float w = 0.0f, h = 0.0f;
+        if (canvas.measure_image_from_data(strip.data(), strip.data_size(), w, h))
+            strip.set_decoded_size(static_cast<int>(w), static_cast<int>(h));
+        else
+            strip.set_decoded_size(0, 0);
+    }
+    const int fw = strip.frame_width();
+    const int fh = strip.frame_height();
+    if (strip.decoded_width() > 0 && strip.decoded_height() > 0)
+        return fx >= 0 && fy >= 0 && fx + fw <= strip.decoded_width() &&
+               fy + fh <= strip.decoded_height();
+    const size_t frame_bytes = static_cast<size_t>(fw) * static_cast<size_t>(fh) * 4u;
+    const size_t offset = static_cast<size_t>(fy) * static_cast<size_t>(strip.total_width()) * 4u +
+                          static_cast<size_t>(fx) * 4u;
+    return offset + frame_bytes <= strip.data_size();
+}
 }  // namespace
 
 void Knob::on_mouse_enter() {
@@ -563,14 +587,9 @@ void Knob::paint(canvas::Canvas& canvas) {
                 });
             }
         } else {
-            // Legacy raw-RGBA path. NOTE: SkiaCanvas::draw_image_from_data
-            // expects ENCODED bytes (PNG/JPEG), so callers that fed decoded
-            // pixels here will draw nothing. Kept for backward compatibility
-            // and any future raw-pixmap canvas API.
-            size_t frame_bytes = static_cast<size_t>(fw * fh * 4);
-            size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 +
-                                                 fx * 4);
-            if (offset + frame_bytes <= sprite_strip_->data_size()) {
+            // Byte-backed strip. The draw decodes ENCODED bytes (PNG/JPEG);
+            // raw RGBA pixels pass the bounds check but draw nothing on Skia.
+            if (byte_strip_frame_in_bounds(canvas, *sprite_strip_, fx, fy)) {
                 canvas.save();
                 canvas.clip_rect(0, 0, b.width, b.height);
                 float sx = b.width / fw;
@@ -1003,10 +1022,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         int frame = sprite_strip_->frame_for_value(shown);
         int fx, fy;
         sprite_strip_->frame_offset(frame, fx, fy);
-        size_t frame_bytes = static_cast<size_t>(sprite_strip_->frame_width() *
-                                                  sprite_strip_->frame_height() * 4);
-        size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 + fx * 4);
-        if (offset + frame_bytes <= sprite_strip_->data_size()) {
+        if (byte_strip_frame_in_bounds(canvas, *sprite_strip_, fx, fy)) {
             canvas.save();
             canvas.clip_rect(0, 0, b.width, b.height);
             float sx = b.width / static_cast<float>(sprite_strip_->frame_width());

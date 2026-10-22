@@ -25,6 +25,7 @@
 #include <pulp/view/widgets.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -533,27 +534,26 @@ TEST_CASE("ImageView with an undecodable inline payload attempts one decode and 
 
 namespace {
 
-// A vertical strip of @p frames opaque frames of full-entropy noise over a red
-// base, encoded as PNG. Noise keeps the encoded size above one frame's RGBA
-// size, which the strip paint checks before drawing a frame.
-std::vector<uint8_t> make_noise_strip_png(int fw, int fh, int frames) {
-    const int h = fh * frames;
-    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32(fw, h, kOpaque_SkAlphaType));
+// Solid colour of frame @p i in the strips below.
+SkColor strip_frame_color(int i) {
+    static constexpr SkColor kColors[] = {SK_ColorRED, SK_ColorGREEN, SK_ColorBLUE, SK_ColorYELLOW};
+    return kColors[i % 4];
+}
+
+// A vertical strip of @p frames solid-colour frames encoded as PNG. Flat
+// colour compresses to a few hundred bytes, far less than one frame's RGBA
+// size, so every frame after the first lies past the encoded byte length.
+std::vector<uint8_t> make_strip_png(int fw, int fh, int frames) {
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32(fw, fh * frames, kOpaque_SkAlphaType));
     if (!surface)
         return {};
-    SkPixmap pm;
-    if (!surface->peekPixels(&pm))
-        return {};
-    uint32_t state = 0x2545f491u;
-    for (int y = 0; y < h; ++y) {
-        auto* row = pm.writable_addr32(0, y);
-        for (int x = 0; x < fw; ++x) {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-            row[x] = SkPreMultiplyColor(SkColorSetARGB(0xff, 0x80 | (state & 0x7f),
-                                                       (state >> 8) & 0xff, (state >> 16) & 0xff));
-        }
+    auto* c = surface->getCanvas();
+    SkPaint p;
+    for (int i = 0; i < frames; ++i) {
+        p.setColor(strip_frame_color(i));
+        c->drawRect(SkRect::MakeXYWH(0, static_cast<float>(fh * i), static_cast<float>(fw),
+                                     static_cast<float>(fh)),
+                    p);
     }
     auto data =
         SkPngEncoder::Encode(nullptr, surface->makeImageSnapshot().get(), SkPngEncoder::Options{});
@@ -564,7 +564,7 @@ std::vector<uint8_t> make_noise_strip_png(int fw, int fh, int frames) {
 }
 
 std::shared_ptr<view::SpriteStrip> make_encoded_strip(int fw, int fh, int frames) {
-    const auto png = make_noise_strip_png(fw, fh, frames);
+    const auto png = make_strip_png(fw, fh, frames);
     if (png.empty())
         return nullptr;
     auto strip = std::make_shared<view::SpriteStrip>();
@@ -592,7 +592,6 @@ TEST_CASE("Knob and Fader sprite strips decode their encoded bytes once across G
     auto strip = make_encoded_strip(48, 48, 4);
     REQUIRE(strip);
     REQUIRE(strip->data_key() == runtime::sha256_hex(strip->data(), strip->data_size()));
-    REQUIRE(strip->data_size() >= static_cast<size_t>(48 * 48 * 4));
 
     view::Knob knob;
     knob.set_bounds({0, 0, kSize, kSize});
@@ -624,6 +623,44 @@ TEST_CASE("Knob and Fader sprite strips decode their encoded bytes once across G
     }
 }
 
+TEST_CASE("Knob and Fader draw the last frame of a compressed sprite strip",
+          "[gpu][skia][inline-image][sprite]") {
+    // The last frame starts far past the encoded byte length. Bounding frames
+    // by the byte count, as for raw RGBA pixels, skips it and draws nothing.
+    constexpr int kSize = 96;
+    constexpr int kFrameSize = 48;
+    constexpr int kFrameCount = 4;
+    auto f = make_fixture(kSize, kSize);
+    if (!usable(f))
+        SKIP("Dawn/Graphite unavailable on this host.");
+    auto strip = make_encoded_strip(kFrameSize, kFrameSize, kFrameCount);
+    REQUIRE(strip);
+    const size_t last_frame_offset =
+        static_cast<size_t>(kFrameSize) * kFrameSize * 4u * (kFrameCount - 1);
+    REQUIRE(strip->data_size() < last_frame_offset);
+
+    view::Knob knob;
+    knob.set_bounds({0, 0, kSize, kSize});
+    knob.set_value(1.0f);
+    knob.set_sprite_strip(strip);
+    view::Fader fader;
+    fader.set_bounds({0, 0, kSize, kSize});
+    fader.set_value(1.0f);
+    fader.set_sprite_strip(strip);
+    REQUIRE(strip->frame_for_value(1.0f) == kFrameCount - 1);
+
+    const SkColor last = strip_frame_color(kFrameCount - 1);
+    const Rgba expected{static_cast<int>(SkColorGetR(last)), static_cast<int>(SkColorGetG(last)),
+                        static_cast<int>(SkColorGetB(last))};
+    for (view::View* widget : {static_cast<view::View*>(&knob), static_cast<view::View*>(&fader)}) {
+        INFO((widget == &knob ? "Knob" : "Fader"));
+        std::vector<uint8_t> px;
+        if (!paint_frame(f, [&](canvas::Canvas& c) { widget->paint(c); }, &px))
+            SKIP("GPU readback failed (no adapter).");
+        CHECK(near(pixel_at(px, kSize, kSize / 2, kSize / 2), expected, 0));
+    }
+}
+
 TEST_CASE("Disabling the image cache decodes a sprite strip on every Graphite paint",
           "[gpu][skia][image-cache][inline-image][sprite]") {
     CacheEnabledRestore restore_cache;
@@ -651,8 +688,9 @@ TEST_CASE("Disabling the image cache decodes a sprite strip on every Graphite pa
 TEST_CASE("Sprite strip paint cost per Graphite frame, cached and uncached",
           "[gpu][skia][image-cache][inline-image][sprite][bench]") {
     CacheEnabledRestore restore_cache;
-    // A 128 px knob filmstrip of 32 frames held as encoded bytes. Uncached,
-    // every paint decodes and uploads the whole strip to show one frame.
+    // A 128 px knob filmstrip of 32 frames held as encoded PNG bytes.
+    // Uncached, every paint decodes and uploads the whole strip to show one
+    // frame.
     constexpr int kSize = 128;
     auto f = make_fixture(kSize, kSize);
     if (!usable(f))

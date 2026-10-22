@@ -973,6 +973,56 @@ TEST_CASE("Knob and Fader render loaded sprite strips",
     REQUIRE_THAT(fader_image.f[3], WithinAbs(4.0, 0.001));
 }
 
+TEST_CASE("Sprite strips bound encoded frames by decoded size and raw frames by byte count",
+          "[view][widget][sprite]") {
+    // A PNG signature and IHDR for a 16x48 image: three 16x16 frames. The
+    // recording canvas sizes PNGs from IHDR, and these 33 bytes stand in for a
+    // compressed strip whose later frames start past its byte length.
+    std::vector<uint8_t> png = {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
+                                0x0d, 'I',  'H',  'D',  'R',  0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
+                                0x00, 0x30, 0x08, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    auto encoded = std::make_shared<SpriteStrip>();
+    encoded->load(png.data(), png.size(), 16, 48, 3);
+
+    Knob knob;
+    knob.set_bounds({0, 0, 32, 32});
+    knob.set_value(1.0f);
+    knob.set_sprite_strip(encoded);
+    RecordingCanvas knob_canvas;
+    knob.paint(knob_canvas);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::draw_image) == 1);
+    CHECK(encoded->decoded_size_known());
+    CHECK(encoded->decoded_width() == 16);
+    CHECK(encoded->decoded_height() == 48);
+
+    Fader fader;
+    fader.set_bounds({0, 0, 32, 32});
+    fader.set_value(1.0f);
+    fader.set_sprite_strip(encoded);
+    RecordingCanvas fader_canvas;
+    fader.paint(fader_canvas);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::draw_image) == 1);
+
+    // A frame outside the decoded image is still refused: the strip claims
+    // four frames but the image holds three.
+    auto overclaimed = std::make_shared<SpriteStrip>();
+    overclaimed->load(png.data(), png.size(), 16, 64, 4);
+    knob.set_sprite_strip(overclaimed);
+    RecordingCanvas overclaimed_canvas;
+    knob.paint(overclaimed_canvas);
+    CHECK(overclaimed_canvas.count(DrawCommand::Type::draw_image) == 0);
+
+    // Raw RGBA bytes keep the byte-count bound: one frame short of the last.
+    std::vector<uint8_t> raw(static_cast<size_t>(16) * 16 * 4 * 2, 0x7f);
+    auto truncated = std::make_shared<SpriteStrip>();
+    truncated->load(raw.data(), raw.size(), 16, 48, 3);
+    knob.set_sprite_strip(truncated);
+    RecordingCanvas raw_canvas;
+    knob.paint(raw_canvas);
+    CHECK(raw_canvas.count(DrawCommand::Type::draw_image) == 0);
+    CHECK(truncated->decoded_width() == 0);
+}
+
 // ── RangeSlider (pulp issue-966) ────────────────────────────────────────────
 
 TEST_CASE("RangeSlider default state matches HTML <input type=\"range\">",

@@ -36,6 +36,8 @@ public:
         // Hashed once here so every paint can draw through a content-keyed,
         // cached decode instead of decoding the whole strip per frame.
         data_key_ = data_.empty() ? std::string{} : runtime::sha256_hex(data_.data(), data_.size());
+        decoded_size_known_ = false;
+        decoded_width_ = decoded_height_ = 0;
         path_.clear();
         source_ = Source::raw_pixels;
         total_width_ = total_width;
@@ -101,6 +103,25 @@ public:
         return data_key_;
     }
 
+    /// Pixel size the canvas decoder reported for `data()`, recorded once by
+    /// the painting widget. Zero means the decoder did not recognise the bytes
+    /// as an encoded image (raw RGBA pixels). Unknown until recorded; `load`
+    /// forgets it.
+    void set_decoded_size(int width, int height) {
+        decoded_width_ = width;
+        decoded_height_ = height;
+        decoded_size_known_ = true;
+    }
+    bool decoded_size_known() const {
+        return decoded_size_known_;
+    }
+    int decoded_width() const {
+        return decoded_width_;
+    }
+    int decoded_height() const {
+        return decoded_height_;
+    }
+
     /// Whether to interpolate between adjacent frames for smooth sub-frame animation.
     void set_interpolate(bool v) { interpolate_ = v; }
     bool interpolate() const { return interpolate_; }
@@ -118,6 +139,9 @@ private:
 
     std::vector<uint8_t> data_;
     std::string data_key_;
+    bool decoded_size_known_ = false;
+    int decoded_width_ = 0;
+    int decoded_height_ = 0;
     std::string path_;
     Source source_ = Source::raw_pixels;
     int total_width_ = 0;
