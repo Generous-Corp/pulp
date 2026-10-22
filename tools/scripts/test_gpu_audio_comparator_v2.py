@@ -237,7 +237,7 @@ class ComparatorV2Tests(unittest.TestCase):
         first, second = pair()
         first["source_dirty"] = True
         result = evaluate(seal(first), second)
-        self.assertEqual(result["verdict"], "INCONCLUSIVE")
+        self.assertEqual(result["verdict"], "REFUSED")
         self.assertIn("source_tree_dirty", result["reasons"])
 
     def test_bind_marks_untracked_source_tree_pollution_dirty(self):
@@ -254,6 +254,25 @@ class ComparatorV2Tests(unittest.TestCase):
                 bound = comparator.bind({}, binary, None)
 
         self.assertTrue(bound["source_dirty"])
+
+    def test_bind_marks_git_failure_dirty_and_refuses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "comparator"
+            binary.write_bytes(b"test binary")
+
+            with patch.object(comparator, "_git", return_value=None):
+                bound = comparator.bind({}, binary, None)
+
+        self.assertIsNone(bound["source_revision"])
+        self.assertTrue(bound["source_dirty"])
+        self.assertTrue(bound["source_git_error"])
+
+    def test_missing_source_revision_is_refused(self):
+        first, second = pair()
+        first["source_revision"] = None
+        result = evaluate(seal(first), second)
+        self.assertEqual(result["verdict"], "REFUSED")
+        self.assertIn("source_revision_invalid", result["reasons"])
 
     # -- kernel matching ----------------------------------------------------
 

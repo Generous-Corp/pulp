@@ -186,6 +186,11 @@ Anything else is evaluated and printed, but marked `INCONCLUSIVE`. A noisy
 agent host can therefore still produce a dry-run receipt. Lowering
 `--min-blocks` is for exploration only and can never produce a gate verdict.
 
+Git provenance failures are fail-closed: a missing or invalid `HEAD`, a failed
+Git status query, or any dirty/untracked source tree produces a `REFUSED`
+verdict (`source_revision_invalid`, `source_git_error`, or
+`source_tree_dirty`) rather than an inconclusive campaign.
+
 The ctest runs `gpu_audio_comparator_v2.py smoke`, which makes two runs:
 
 - A short matched run. It must not be refused, and it must be marked

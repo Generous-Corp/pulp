@@ -25,6 +25,7 @@ import json
 import math
 from pathlib import Path
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -287,6 +288,13 @@ def _assess(receipt: dict[str, Any], min_blocks: int) -> dict[str, Any]:
         raise ValueError("schema_mismatch")
     if receipt.get("receipt_sha256") != receipt_digest(receipt):
         refusals.append("receipt_digest_mismatch")
+    source_revision = receipt.get("source_revision")
+    if not isinstance(source_revision, str) or not re.fullmatch(r"[0-9a-f]{40}", source_revision):
+        refusals.append("source_revision_invalid")
+    if receipt.get("source_git_error") is True:
+        refusals.append("source_git_error")
+    if receipt.get("source_dirty") is True:
+        refusals.append("source_tree_dirty")
     config = receipt["config"]
     lanes = {lane["name"]: lane for lane in config.get("lanes", [])}
     cells = receipt["cells"]
@@ -336,8 +344,6 @@ def _assess(receipt: dict[str, Any], min_blocks: int) -> dict[str, Any]:
         inconclusive.append(f"mode_{receipt.get('mode')}")
     if config["blocks_per_cell"] < min_blocks:
         inconclusive.append("undersampled")
-    if receipt.get("source_dirty") is not False:
-        inconclusive.append("source_tree_dirty")
     # The host must pass the P2 preflight both before and after the campaign,
     # at the revision being measured.
     preflight = receipt.get("host_preflight")
@@ -579,12 +585,13 @@ def evaluate(receipts: list[dict[str, Any]],
 # Running and binding
 
 
-def _git(*args: str) -> str:
+def _git(*args: str) -> str | None:
     try:
         return subprocess.run(["git", "-C", str(REPO_ROOT), *args], check=True,
                               capture_output=True, text=True, encoding="utf-8").stdout.strip()
     except (OSError, subprocess.CalledProcessError):
-        return ""
+        # A failed Git query must never be interpreted as a clean tree.
+        return None
 
 
 def run_binary(binary: Path, output: Path, extra: list[str]) -> int:
@@ -612,10 +619,13 @@ def bind(raw: dict[str, Any], binary: Path, preflight: dict[str, Any] | None,
     receipt["host_preflight_sha256"] = (sha256_hex(canonical(preflight))
                                         if preflight is not None else None)
     receipt["host_quiet"] = host_quiet(preflight)
-    receipt["source_revision"] = _git("rev-parse", "HEAD")
+    source_revision = _git("rev-parse", "HEAD")
+    source_status = _git("status", "--porcelain")
+    receipt["source_revision"] = source_revision
     # Include untracked files: a campaign is only valid for a clean source
     # tree, and `--untracked-files=no` would let source-tree pollution through.
-    receipt["source_dirty"] = bool(_git("status", "--porcelain"))
+    receipt["source_dirty"] = source_status is None or bool(source_status)
+    receipt["source_git_error"] = source_revision is None or source_status is None
     receipt["binary_sha256"] = sha256_hex(binary.read_bytes())
     receipt["host"] = {"node": platform.node(), "machine": platform.machine(),
                        "os": platform.platform()}
