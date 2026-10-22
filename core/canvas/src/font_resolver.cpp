@@ -66,6 +66,53 @@ std::string platform_family_for_css_generic(const std::string& css_family) {
     return {};
 }
 
+CssFontFamily parse_css_font_family(std::string_view entry) {
+    constexpr std::string_view kSpace = " \t\n\r\f\v";
+    CssFontFamily out;
+    const size_t lo = entry.find_first_not_of(kSpace);
+    if (lo == std::string_view::npos) return out;
+    const size_t hi = entry.find_last_not_of(kSpace);
+    entry = entry.substr(lo, hi - lo + 1);
+    if (entry.size() >= 2 && (entry.front() == '"' || entry.front() == '\'') &&
+        entry.back() == entry.front()) {
+        out.quoted = true;
+        entry = entry.substr(1, entry.size() - 2);
+    }
+    out.name = std::string(entry);
+    return out;
+}
+
+std::vector<std::string> split_css_font_family_list(std::string_view list) {
+    constexpr std::string_view kSpace = " \t\n\r\f\v";
+    std::vector<std::string> out;
+    size_t pos = 0;
+    while (pos <= list.size()) {
+        const size_t comma = list.find(',', pos);
+        std::string_view entry = list.substr(
+            pos, (comma == std::string_view::npos ? list.size() : comma) - pos);
+        const size_t lo = entry.find_first_not_of(kSpace);
+        if (lo != std::string_view::npos) {
+            const size_t hi = entry.find_last_not_of(kSpace);
+            entry = entry.substr(lo, hi - lo + 1);
+            if (!parse_css_font_family(entry).name.empty())
+                out.emplace_back(entry);
+        }
+        if (comma == std::string_view::npos) break;
+        pos = comma + 1;
+    }
+    return out;
+}
+
+std::string platform_family_for_css_family(std::string_view entry) {
+    CssFontFamily family = parse_css_font_family(entry);
+    if (!family.quoted) {
+        if (auto generic = platform_family_for_css_generic(family.name);
+            !generic.empty())
+            return generic;
+    }
+    return std::move(family.name);
+}
+
 const char* to_string(FallbackOrigin o) noexcept {
     switch (o) {
         case FallbackOrigin::ScopeView:    return "scope-view";
@@ -234,11 +281,15 @@ sk_sp<SkTypeface> system_ui_typeface(SkFontStyle style) {
 // Keep this TU self-contained by using the public registered-font,
 // bundled-font, and SkFontMgr paths directly.
 
-ResolvedFont resolve_one_family(const std::string& family,
+ResolvedFont resolve_one_family(const std::string& entry,
                                 const FontOptions& opts,
                                 SkFontStyle sk_style,
                                 sk_sp<SkFontMgr> mgr,
                                 std::vector<FallbackTraceStep>& trace) {
+    // A family_stack entry may carry its CSS quotes; a quoted entry is a
+    // literal family name and never maps as a generic keyword.
+    const CssFontFamily css = parse_css_font_family(entry);
+    const std::string& family = css.name;
     ResolvedFont r;
     r.scope = opts.scope;
     r.generation = merged_generation_for(opts.scope);
@@ -286,13 +337,14 @@ ResolvedFont resolve_one_family(const std::string& family,
     // invisible; the miss must fall through to the bundled last-resort below.
     if (mgr && platform_font_db_usable()) {
         // A generic keyword names a platform family rather than being one.
-        const std::string generic = platform_family_for_css_generic(family);
+        const std::string generic =
+            css.quoted ? std::string{} : platform_family_for_css_generic(family);
         const std::string& platform_family = generic.empty() ? family : generic;
         sk_sp<SkTypeface> tf;
         bool system_ui = false;
 #if defined(__APPLE__)
         // Widths other than normal keep the name lookup, which maps them.
-        if (names_system_ui_font(family) &&
+        if (!css.quoted && names_system_ui_font(family) &&
             sk_style.width() == SkFontStyle::kNormal_Width) {
             tf = system_ui_typeface(sk_style);
             system_ui = tf != nullptr;
@@ -733,25 +785,8 @@ std::string resolved_face_identity(const std::string& css_font_family,
     FontOptions options;
     options.weight = weight;
     options.slant = slant;
-    // Same comma walk the shaper uses: strip whitespace and one matching pair
-    // of quotes per entry.
-    size_t pos = 0;
-    while (pos < css_font_family.size()) {
-        const size_t comma = css_font_family.find(',', pos);
-        std::string entry = css_font_family.substr(
-            pos, (comma == std::string::npos ? css_font_family.size() : comma) - pos);
-        pos = (comma == std::string::npos) ? css_font_family.size() : comma + 1;
-        const size_t lo = entry.find_first_not_of(" \t");
-        const size_t hi = entry.find_last_not_of(" \t");
-        if (lo == std::string::npos) continue;
-        entry = entry.substr(lo, hi - lo + 1);
-        if (entry.size() >= 2 &&
-            (entry.front() == '"' || entry.front() == '\'') &&
-            entry.front() == entry.back()) {
-            entry = entry.substr(1, entry.size() - 2);
-        }
-        if (!entry.empty()) options.family_stack.push_back(std::move(entry));
-    }
+    // Same comma walk the shaper uses; entries keep their quotes.
+    options.family_stack = split_css_font_family_list(css_font_family);
     const auto resolved = FontResolver::instance().resolve_family_list(options);
     if (!resolved.typeface) return {};
     SkString name;

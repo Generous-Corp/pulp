@@ -116,32 +116,6 @@ SkPaint make_stroke_paint(Color c, float width) {
     return paint;
 }
 
-// Splits a CSS `font-family` value (e.g. `"SF Pro, system-ui, sans-serif"`)
-// into individual family names, stripping outer quotes and whitespace.
-// Used by get_cached_typeface to walk the fallback chain — each family
-// is tried in order through the existing match cascade (registered →
-// bundled → SkFontMgr) until one resolves.
-static std::vector<std::string> split_font_family_list(const std::string& list) {
-    std::vector<std::string> out;
-    size_t i = 0;
-    while (i < list.size()) {
-        while (i < list.size() && std::isspace(static_cast<unsigned char>(list[i]))) ++i;
-        if (i >= list.size()) break;
-        size_t comma = list.find(',', i);
-        std::string seg = list.substr(i, (comma == std::string::npos ? list.size() : comma) - i);
-        while (!seg.empty() && std::isspace(static_cast<unsigned char>(seg.back()))) seg.pop_back();
-        if (seg.size() >= 2
-            && (seg.front() == '"' || seg.front() == '\'')
-            && seg.back() == seg.front()) {
-            seg = seg.substr(1, seg.size() - 2);
-        }
-        if (!seg.empty()) out.push_back(std::move(seg));
-        if (comma == std::string::npos) break;
-        i = comma + 1;
-    }
-    return out;
-}
-
 // Forward decl — defined below.
 static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
                                                     int weight, int slant);
@@ -156,7 +130,8 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
     if (family.find(',') == std::string::npos) {
         return get_cached_typeface_single(family, weight, slant);
     }
-    auto families = split_font_family_list(family);
+    // Entries keep their quotes, so a quoted generic is a literal family.
+    auto families = split_css_font_family_list(family);
     sk_sp<SkTypeface> resolved;
     for (const auto& fam : families) {
         resolved = get_cached_typeface_single(fam, weight, slant);
@@ -177,7 +152,7 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
                 for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 return s;
             };
-            std::string a = lower(actual), f = lower(fam);
+            std::string a = lower(actual), f = lower(parse_css_font_family(fam).name);
             if (a == f || a.find(f) != std::string::npos || f.find(a) != std::string::npos ||
                 !platform_family_for_css_generic(fam).empty()) {
                 return resolved;

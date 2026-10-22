@@ -650,28 +650,9 @@ struct TextShaper::Impl {
         // entry the host lacks could take its ascent from the substitute and
         // its advances from a later entry. One mode for both is the point.
         opts.fallback_mode = FallbackMode::Deterministic;
-        // Mirror skia_canvas.cpp's split_font_family_list so comma-
-        // separated CSS family stacks are walked correctly. Strip
-        // whitespace + matching outer quotes.
-        size_t pos = 0;
-        while (pos < font_family.size()) {
-            size_t comma = font_family.find(',', pos);
-            std::string seg = font_family.substr(
-                pos, (comma == std::string::npos ? font_family.size() : comma) - pos);
-            pos = (comma == std::string::npos) ? font_family.size() : comma + 1;
-            // Strip outer whitespace.
-            size_t a = seg.find_first_not_of(" \t");
-            size_t b = seg.find_last_not_of(" \t");
-            if (a == std::string::npos) continue;
-            seg = seg.substr(a, b - a + 1);
-            // Strip matching outer quotes.
-            if (seg.size() >= 2
-                && (seg.front() == '"' || seg.front() == '\'')
-                && seg.back() == seg.front()) {
-                seg = seg.substr(1, seg.size() - 2);
-            }
-            if (!seg.empty()) opts.family_stack.push_back(std::move(seg));
-        }
+        // Entries keep their quotes; the resolver reads a quoted entry as a
+        // literal family name rather than a generic keyword.
+        opts.family_stack = split_css_font_family_list(font_family);
         auto resolved = FontResolver::instance().resolve_family_list(opts);
         return resolved.typeface;
     }
@@ -787,27 +768,8 @@ struct TextShaper::Impl {
         skia::textlayout::ParagraphStyle paragraph_style;
         skia::textlayout::TextStyle text_style;
         std::vector<SkString> families;
-        size_t cursor = 0;
-        while (cursor < font_family.size()) {
-            const size_t comma = font_family.find(',', cursor);
-            std::string entry = font_family.substr(
-                cursor, comma == std::string::npos ? std::string::npos
-                                                   : comma - cursor);
-            const size_t first = entry.find_first_not_of(" \t\n\r\f\v\"'");
-            const size_t last = entry.find_last_not_of(" \t\n\r\f\v\"'");
-            const size_t raw_first = entry.find_first_not_of(" \t\n\r\f\v");
-            const size_t raw_last = entry.find_last_not_of(" \t\n\r\f\v");
-            const std::string generic = raw_first == std::string::npos
-                ? std::string{}
-                : platform_family_for_css_generic(
-                      entry.substr(raw_first, raw_last - raw_first + 1));
-            if (!generic.empty())
-                families.emplace_back(generic.c_str());
-            else if (first != std::string::npos && last != std::string::npos)
-                families.emplace_back(entry.substr(first, last - first + 1).c_str());
-            if (comma == std::string::npos) break;
-            cursor = comma + 1;
-        }
+        for (const auto& entry : split_css_font_family_list(font_family))
+            families.emplace_back(platform_family_for_css_family(entry).c_str());
         const std::string emoji_family = ctx->emoji_family_name();
         if (!emoji_family.empty()) families.emplace_back(emoji_family.c_str());
         if (families.empty()) families.emplace_back("");
@@ -911,29 +873,9 @@ struct TextShaper::Impl {
                 skia::textlayout::ParagraphStyle paragraph_style;
                 skia::textlayout::TextStyle text_style;
                 std::vector<SkString> families;
-                size_t cursor = 0;
-                while (cursor < font_family.size()) {
-                    const size_t comma = font_family.find(',', cursor);
-                    std::string entry = font_family.substr(
-                        cursor, comma == std::string::npos
-                                    ? std::string::npos : comma - cursor);
-                    const size_t first = entry.find_first_not_of(" \t\n\r\f\v");
-                    const size_t last = entry.find_last_not_of(" \t\n\r\f\v");
-                    if (first != std::string::npos && last != std::string::npos) {
-                        entry = entry.substr(first, last - first + 1);
-                        if (auto generic = platform_family_for_css_generic(entry);
-                            !generic.empty())
-                            entry = std::move(generic);
-                        if (entry.size() >= 2 &&
-                            (entry.front() == '\'' || entry.front() == '"') &&
-                            entry.front() == entry.back()) {
-                            entry = entry.substr(1, entry.size() - 2);
-                        }
-                        if (!entry.empty()) families.emplace_back(entry.c_str());
-                    }
-                    if (comma == std::string::npos) break;
-                    cursor = comma + 1;
-                }
+                for (const auto& entry : split_css_font_family_list(font_family))
+                    families.emplace_back(
+                        platform_family_for_css_family(entry).c_str());
                 const std::string emoji_family = ctx->emoji_family_name();
                 if (!emoji_family.empty()) families.emplace_back(emoji_family.c_str());
                 if (families.empty()) families.emplace_back("");

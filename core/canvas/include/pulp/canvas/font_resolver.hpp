@@ -25,6 +25,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
@@ -47,6 +48,29 @@ namespace pulp::canvas {
 /// Pass the trimmed list entry WITH any quotes still on it: a quoted name is a
 /// family literally called that, never the keyword.
 std::string platform_family_for_css_generic(const std::string& css_family);
+
+/// One entry of a CSS `font-family` list, as written.
+struct CssFontFamily {
+    std::string name;     ///< without surrounding whitespace or quotes
+    bool quoted = false;  ///< written as a string: a family literally named
+                          ///< `name`, never a generic keyword
+};
+
+/// Parse one `font-family` list entry: trim whitespace, then strip one
+/// matching pair of single or double quotes and record that there was one.
+CssFontFamily parse_css_font_family(std::string_view entry);
+
+/// Split a `font-family` list on commas into trimmed entries, each KEPT with
+/// its quotes, dropping empty ones. Quotes stay on so every consumer applies
+/// the same rule: an unquoted generic keyword names a platform family, a
+/// quoted one is a family of that name. Hand the entries to
+/// `FontOptions::family_stack` or to `platform_family_for_css_family`.
+std::vector<std::string> split_css_font_family_list(std::string_view list);
+
+/// The family name to ask a font matcher for, for one list entry (quotes
+/// allowed): the platform family an unquoted generic keyword stands for,
+/// otherwise the entry's name without its quotes.
+std::string platform_family_for_css_family(std::string_view entry);
 
 #ifdef PULP_HAS_SKIA
 

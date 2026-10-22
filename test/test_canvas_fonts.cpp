@@ -2013,3 +2013,76 @@ TEST_CASE("an optical-size clone of the system font's bold keeps weight 700",
 }
 
 #endif  // PULP_HAS_SKIA
+
+// ── A quoted generic keyword is a family name ───────────────────────────────
+//
+// CSS `font-family: "serif", Inter` names a family literally called "serif",
+// which no host has, so the text is Inter; unquoted, `serif` is the generic and
+// the text is Times. The Canvas font, the paragraph shaper, the TextShaper's
+// widths and its line metrics, and the face identity each had their own list
+// walk, and the ones that stripped the quotes before looking for a generic
+// painted Times for the quoted form while the rest measured Inter.
+TEST_CASE("a quoted generic family is a literal name on every text path",
+          "[canvas][skia][text][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("the generic-family table covers macOS");
+#else
+    CHECK(parse_css_font_family(" 'serif' ").quoted);
+    CHECK(parse_css_font_family(" 'serif' ").name == "serif");
+    CHECK_FALSE(parse_css_font_family("serif").quoted);
+    CHECK(split_css_font_family_list(" \"serif\" , Inter,, ") ==
+          std::vector<std::string>{"\"serif\"", "Inter"});
+    CHECK(platform_family_for_css_family("serif") == "Times");
+    CHECK(platform_family_for_css_family("\"serif\"") == "serif");
+
+    FontResolver::instance().clear_cache();
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    const std::string text = "Hamburgefons";
+    struct Reading {
+        float font = 0, paragraph = 0, shaper = 0, ascent = 0;
+        std::string face;
+    };
+    auto read = [&](const char* family) {
+        Reading r;
+        canvas.set_font_full(family, 20.0f, 400, 0, 0.0f);
+        r.font = canvas.measure_text(text);
+        // Letter-spacing routes the measurement through SkParagraph.
+        canvas.set_font_full(family, 20.0f, 400, 0, 1.0f);
+        r.paragraph = canvas.measure_text(text);
+        TextShaper shaper;
+        const auto prepared = shaper.prepare(text, family, 20.0f);
+        r.shaper = prepared.total_width();
+        r.ascent = prepared.font_ascent();
+        r.face = resolved_face_identity(family, 400.0f);
+        return r;
+    };
+    const Reading inter = read("Inter");
+    const Reading times = read("Times");
+    // Control: the two faces are told apart on every path.
+    REQUIRE(std::abs(inter.font - times.font) > 1.0f);
+    REQUIRE(std::abs(inter.paragraph - times.paragraph) > 1.0f);
+    REQUIRE(std::abs(inter.shaper - times.shaper) > 1.0f);
+    REQUIRE(std::abs(inter.ascent - times.ascent) > 0.1f);
+    REQUIRE(inter.face != times.face);
+
+    const auto same_as = [](const Reading& got, const Reading& want) {
+        CHECK(got.font == Catch::Approx(want.font).margin(0.01));
+        CHECK(got.paragraph == Catch::Approx(want.paragraph).margin(0.01));
+        CHECK(got.shaper == Catch::Approx(want.shaper).margin(0.01));
+        CHECK(got.ascent == Catch::Approx(want.ascent).margin(0.01));
+        CHECK(got.face == want.face);
+    };
+    SECTION("quoted: a family named serif, which falls through to Inter") {
+        same_as(read("\"serif\", Inter"), inter);
+        same_as(read("'serif', Inter"), inter);
+    }
+    SECTION("unquoted: the generic, which is Times") {
+        same_as(read("serif, Inter"), times);
+    }
+#endif
+}

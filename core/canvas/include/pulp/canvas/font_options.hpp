@@ -190,7 +190,9 @@ struct FontScopeId {
 struct FontOptions {
     // ── Family + style ──────────────────────────────────────────────────
     /// Full CSS-style cascade. Order is significant; the resolver walks
-    /// front-to-back. Empty vector falls through to platform default.
+    /// front-to-back. Empty vector falls through to platform default. An
+    /// entry may keep its CSS quotes: a quoted entry is a literal family
+    /// name, never a generic keyword (see `split_css_font_family_list`).
     std::vector<std::string> family_stack;
 
     /// CSS scalar 100..900 (or variable-axis value when the resolved face

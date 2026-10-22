@@ -141,39 +141,10 @@ PreparedParagraph make_paragraph(const std::string& text,
     // `family` can be a comma-separated CSS fallback list ("Inter,
     // sans-serif"). Passing the whole string as one SkString makes
     // SkParagraph treat it as a single literal family name and miss the
-    // fallback resolution. Split on commas and strip surrounding whitespace
-    // + optional quote marks so each entry resolves independently in the
-    // font collection.
-    if (!family.empty()) {
-        size_t cursor = 0;
-        while (cursor < family.size()) {
-            size_t comma = family.find(',', cursor);
-            std::string entry = family.substr(cursor,
-                comma == std::string::npos ? std::string::npos : comma - cursor);
-            // Trim ASCII whitespace.
-            size_t lo = entry.find_first_not_of(" \t\n\r\f\v");
-            size_t hi = entry.find_last_not_of(" \t\n\r\f\v");
-            if (lo != std::string::npos && hi != std::string::npos) {
-                entry = entry.substr(lo, hi - lo + 1);
-                // A generic keyword names a platform family the font
-                // collection cannot match by the keyword itself.
-                if (auto generic = platform_family_for_css_generic(entry);
-                    !generic.empty())
-                    entry = std::move(generic);
-                // Strip a single matching pair of single or double quotes.
-                if (entry.size() >= 2
-                    && (entry.front() == '"' || entry.front() == '\'')
-                    && entry.front() == entry.back()) {
-                    entry = entry.substr(1, entry.size() - 2);
-                }
-                if (!entry.empty()) {
-                    families.emplace_back(entry.c_str());
-                }
-            }
-            if (comma == std::string::npos) break;
-            cursor = comma + 1;
-        }
-    }
+    // fallback resolution, so each entry resolves on its own: an unquoted
+    // generic keyword as the platform family it names, anything else by name.
+    for (const auto& entry : split_css_font_family_list(family))
+        families.emplace_back(platform_family_for_css_family(entry).c_str());
     const std::string emoji_family = ctx->emoji_family_name();
     if (!emoji_family.empty()) {
         families.emplace_back(emoji_family.c_str());
