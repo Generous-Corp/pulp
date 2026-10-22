@@ -1715,6 +1715,10 @@ jobs:
           export MISE_ENV=toolchain
           export MISE_TRUSTED_CONFIG_PATHS="$GITHUB_WORKSPACE"
           export MISE_DISABLE_UPDATE_WARNING=1
+          # Environment settings apply whether or not mise trusts the checkout,
+          # so no step can resolve or install a tool mid-build.
+          export MISE_LOCKED=1
+          export MISE_AUTO_INSTALL=0
           "$mise" exec -- "$mise" --version
           # shellcheck disable=SC2016
           tool_path="$("$mise" exec -- sh -c 'printf "%s" "$PATH"')"
@@ -1722,6 +1726,8 @@ jobs:
             echo "MISE_ENV=toolchain"
             echo "MISE_TRUSTED_CONFIG_PATHS=$GITHUB_WORKSPACE"
             echo "MISE_DISABLE_UPDATE_WARNING=1"
+            echo "MISE_LOCKED=1"
+            echo "MISE_AUTO_INSTALL=0"
             echo "PATH=$HOME/.local/opt/mise-2026.10.17/bin:$HOME/.cargo/bin:$tool_path"
           } >> "$GITHUB_ENV"
           echo "mise candidate active: $tool_path"

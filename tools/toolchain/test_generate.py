@@ -569,13 +569,14 @@ class StrictPinTests(unittest.TestCase):
             fake.write_text(
                 "#!/bin/sh\n"
                 f'if [ "$1" = --version ]; then echo "{data["mise"]["version"]} macos-arm64"; exit 0; fi\n'
-                f'echo "$1 MISE_DISABLE_UPDATE_WARNING=$MISE_DISABLE_UPDATE_WARNING" >> "{seen}"\n',
+                f'echo "$1 MISE_DISABLE_UPDATE_WARNING=$MISE_DISABLE_UPDATE_WARNING '
+                f'MISE_AUTO_INSTALL=$MISE_AUTO_INSTALL" >> "{seen}"\n',
                 encoding="utf-8")
             fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
             generate.write_mise_lock(root, data, fake)
             lines = seen.read_text(encoding="utf-8").splitlines()
             self.assertTrue(lines)  # control: the lock command ran
-            self.assertTrue(all(line == "lock MISE_DISABLE_UPDATE_WARNING=1" for line in lines), lines)
+            self.assertTrue(all(line == "lock MISE_DISABLE_UPDATE_WARNING=1 MISE_AUTO_INSTALL=0" for line in lines), lines)
 
 
 if __name__ == "__main__":

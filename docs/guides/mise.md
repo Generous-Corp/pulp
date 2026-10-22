@@ -170,7 +170,20 @@ rather than resolving a new download. Pulp's `.mise.toml` also sets
 `locked = true` and `auto_install = false`, so mise never installs a tool
 behind your back. mise applies a project's `[settings]` only after you trust
 the checkout, so run `mise trust` first; until then those two settings, and
-`disable_update_warning`, are ignored.
+`disable_update_warning`, are ignored, and mise falls back to its defaults
+(`locked = false`, `auto_install = true`). On a machine with many worktrees,
+trust their common parent once instead of each checkout, for example by
+exporting `MISE_TRUSTED_CONFIG_PATHS="$HOME/Code"` in your shell profile (the
+fleet hosts use their checkout roots: `/Volumes/Workshop/Code` on m3, `~/Code`
+on m1, m5 and m5s). Confirm it from inside a checkout:
+
+```bash
+mise settings get locked   # must print true
+```
+
+Automation does not rely on trust: the CI candidate lane and the golden-image
+layer also set `MISE_LOCKED=1` and `MISE_AUTO_INSTALL=0`, which apply whether
+or not the checkout is trusted.
 
 ### 3. Use the tools
 

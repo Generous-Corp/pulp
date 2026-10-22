@@ -103,6 +103,18 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
         self.assertNotIn("runner.arch == 'ARM64'", self.steps[activate]["if"])
         self.assertNotIn("runner.arch == 'ARM64'", self.steps[enforce]["if"])
 
+    def test_candidate_mise_runs_locked_with_auto_install_off(self) -> None:
+        run = self.steps[
+            [step.get("name") for step in self.steps].index(
+                "Activate pinned mise candidate toolchain"
+            )
+        ]["run"]
+        first_mise = run.index('"$mise" exec')
+        for setting in ("MISE_LOCKED=1", "MISE_AUTO_INSTALL=0"):
+            # Set before the first mise call, and exported to every later step.
+            self.assertLess(run.index(f"export {setting}"), first_mise, setting)
+            self.assertIn(f'echo "{setting}"', run.split(">> \"$GITHUB_ENV\"")[0], setting)
+
     def test_non_arm_candidate_fails_before_build(self) -> None:
         activation = self.steps[
             [step.get("name") for step in self.steps].index(

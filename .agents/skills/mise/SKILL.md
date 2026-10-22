@@ -138,6 +138,24 @@ out in a different order each build. The `[mise.binary]` digest names one
 build. Hosts get that exact file, copied from the build host and checked by
 sha256; a differing rebuild is expected and is not a replacement.
 
+The canonical copy of the 2026.10.17 macos-arm64 pin is
+`m3:/Volumes/Workshop/ci/mise-pins/2026.10.17/macos-arm64/mise`, next to its
+`SHA256SUMS` and a `README.txt`; m1's `~/.local/opt/mise-2026.10.17/bin/mise`
+is a mirror with the same digest. A new pin gets its own
+`/Volumes/Workshop/ci/mise-pins/<version>/<platform>/` directory. Install it on
+a host by digest, never by rebuilding:
+
+```bash
+d=$HOME/.local/opt/mise-2026.10.17; mkdir -p "$d/bin" "$d/lib"
+scp m3:/Volumes/Workshop/ci/mise-pins/2026.10.17/macos-arm64/mise "$d/bin/mise.partial"
+(cd "$d/bin" && echo "284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc  mise.partial" | shasum -a 256 -c) \
+  && chmod 755 "$d/bin/mise.partial" && mv "$d/bin/mise.partial" "$d/bin/mise"
+cp "$HOME/.local/opt/mise-2026.10.11/lib/mise-self-update-instructions.toml" "$d/lib/"  # or 2026.10.8's
+MISE_DISABLE_UPDATE_WARNING=1 "$d/bin/mise" --version   # 2026.10.17 macos-arm64
+```
+
+Leave the previous version's directory installed: it is the rollback.
+
 A relock can differ from the committed lock with no mise change at all: conda
 resolves clang-format's runtime dependencies (for example `libcxx`) to the
 newest build the channel publishes. Before blaming the new mise for a lock
@@ -152,7 +170,13 @@ trusted. In an untrusted checkout `locked`, `auto_install` and
 `disable_update_warning` from `.mise.toml` read as mise's defaults (`false`,
 `true`, `false`), so a script that runs mise in a checkout must set
 `MISE_TRUSTED_CONFIG_PATHS` (as `generate.py --lock`, the golden layer and the
-candidate CI lane do) or pass the setting as an environment variable. Since
+candidate CI lane do) or pass the setting as an environment variable. Lanes
+also export `MISE_LOCKED=1` and `MISE_AUTO_INSTALL=0`, which hold whatever
+mise's trust rules do; keep them when adding a lane that runs mise. Each fleet
+host trusts its checkout roots (`MISE_TRUSTED_CONFIG_PATHS` set to
+`/Volumes/Workshop/Code` on m3, `~/Code` on m1, m5 and m5s, or `mise trust`
+there), and a rollout step checks that `mise settings get locked` prints `true`
+inside a checkout. Since
 2026.10.14 a global `~/.config/mise/config.override.toml` (or
 `config.toolchain.override.toml`) outranks the project's tools and is exempt
 from `--locked`; when a host reports a tool drift that the lock cannot
