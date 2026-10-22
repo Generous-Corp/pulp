@@ -161,6 +161,41 @@ every inline script of a few KB.
   timestamp or nonce baked into the document), not that the cache is off.
 - JSC and V8 inherit the default (`evaluate_script` → `evaluate`).
 
+### Build-time bytecode (`pulp_add_js_bytecode`)
+
+The in-process cache still parses once per process. A product whose editor
+opens right after instantiation (Logic opens the window on insert) waits for
+that parse: 65–80 ms of Spectr's fresh-process open was the editor blocked in
+`script_bytecode_lookup` on the instantiation prewarm compiling its 1.6 MB
+runtime. `pulp_add_js_bytecode(<lib> SOURCES … [WIDGET_BRIDGE_SCRIPT])`
+compiles the scripts at build time with a generator linked against the same
+Pulp libraries, embeds the blobs, and the product hands each to
+`register_embedded_script_bytecode()` before its editor opens (constructor or
+`editor_prewarm()`). A cache miss then takes the embedded bytecode
+(`stats.embedded`) instead of compiling.
+
+- The blob is trusted code because it sits in the signed binary. That is the
+  only reason this does not contradict "never load bytecode from anywhere
+  else" above. Never register bytes read from a writable location.
+- It is used only for the exact source (length + SHA-256) and only by the
+  engine build that emitted it (`script_bytecode_engine_fingerprint()`: the
+  QuickJS version plus a digest of a fixed probe script's bytecode). Anything
+  else compiles from source; a damaged payload fails its bytecode SHA-256 on
+  first use.
+- `WIDGET_BRIDGE_SCRIPT` compiles `WidgetBridge::loaded_script_source(script)`,
+  which is what `load_script()` and the prewarm evaluate. Without it a
+  `load_script()` script never matches, silently: check `stats.embedded`.
+- The fingerprint probe script must compile on Pulp's QuickJS build. BigInt
+  literals do not (CONFIG_BIGNUM is off); a probe that fails to compile
+  degrades the fingerprint to `quickjs-<version>-unavailable`, which the
+  embed test rejects.
+- Trace spans: `script_embedded_lookup` (the SHA-256 match, about 1 ms for
+  1.6 MB with the ARMv8 SHA-2 path) followed by `script_bytecode_read`. A
+  fresh process that still shows `script_precompile` for the runtime is not
+  registering its blobs, or registered them after the prewarm started.
+- Cross-compiling: the generator cannot run, so the library holds placeholder
+  blobs that registration rejects, and the scripts compile at run time.
+
 ## Bridge dispatch measurement
 
 `WidgetBridge::bridge_call_count()` is a per-bridge diagnostic counter for

@@ -582,6 +582,58 @@ The function delegates the byte-to-C-array encoding to the
   only added build-time dependency; Python is already required elsewhere
   in the Pulp build.
 
+
+## pulp_add_js_bytecode
+
+**Status**: usable
+
+Compile scripted-UI JavaScript to QuickJS bytecode at build time and embed it,
+so a fresh process reads the bytecode instead of parsing the script before its
+editor can open.
+
+```cmake
+pulp_add_js_bytecode(my_ui_bytecode
+    SOURCES   ui/runtime.js ui/design.js
+    NAMESPACE my_ui_bytecode
+    WIDGET_BRIDGE_SCRIPT)
+target_link_libraries(MyPlugin PRIVATE my_ui_bytecode)
+```
+
+Generates a static library with, per script:
+```cpp
+namespace my_ui_bytecode {
+    extern const unsigned char runtime_js_pjsbc[];
+    extern const std::size_t runtime_js_pjsbc_size;
+}
+```
+
+Register each blob before the editor opens (the processor's constructor or
+`editor_prewarm()`):
+
+```cpp
+pulp::view::register_embedded_script_bytecode(my_ui_bytecode::runtime_js_pjsbc,
+                                              my_ui_bytecode::runtime_js_pjsbc_size);
+```
+
+### Parameters
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `SOURCES` | Yes | -- | Scripts to compile |
+| `NAMESPACE` | No | `<target>` | C++ namespace for the generated symbols |
+| `WIDGET_BRIDGE_SCRIPT` | No | off | Compile each script as `WidgetBridge::load_script()` evaluates it |
+
+### Behavior
+
+- A blob is used only for the exact source text it was compiled from (length
+  and SHA-256) and only by the engine build that compiled it. A changed script,
+  another Pulp version, or a damaged blob falls back to compiling from source.
+- The generator is built from the same Pulp libraries the product links. When
+  cross-compiling it cannot run; the library then holds placeholder blobs that
+  registration rejects, and the scripts compile at run time.
+- `script_bytecode_cache_stats().embedded` counts scripts served from embedded
+  bytecode.
+
 ## pulp_add_cargo_staticlib
 
 **Status**: experimental
