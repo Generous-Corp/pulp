@@ -133,6 +133,20 @@ struct PaintedTreeCounts {
     /// is NOT applied and the node records the value that refused it. A
     /// recorded refusal is findable; a plausible wrong number is not.
     int type_scale_refused = 0;
+    /// Nodes whose anchor segment comes from an author `data-pulp-key`, so a
+    /// reorder carries the anchor with the node instead of leaving it at the
+    /// position.
+    int keyed_anchors = 0;
+    /// Keys declared by more than one child of the same parent, as
+    /// `<parent anchor> data-pulp-key="<key>"`. Those siblings keep positional
+    /// anchors; the list says which ones, because a key that silently stopped
+    /// identifying its node reads exactly like one that works.
+    std::vector<std::string> duplicate_keys;
+    /// Parents whose same-signature children mix keyed and positional
+    /// siblings, as `<parent anchor> <signature>`. The positional ordinals
+    /// count only the unkeyed siblings, so a key added or removed there moves
+    /// a stored edit onto a different node without orphaning it.
+    std::vector<std::string> mixed_keyed_siblings;
 };
 
 /// Lower every painted node in the captured document into a TREE under `root`

@@ -236,8 +236,23 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
 
     def test_scheduled_cross_platform_suite_stays_on_latest(self) -> None:
         windows = job(self.nightly, "windows")
-        self.assertIn("runs-on: windows-latest", windows)
+        # Only a dispatch input can move the job; the schedule has no inputs,
+        # so the nightly always resolves to the fallback.
+        self.assertIn(
+            """runs-on: ${{ fromJSON(inputs.windows_runner_selector_json || '"windows-latest"') }}""",
+            windows,
+        )
+        self.assertNotIn("vars.", windows.split("runs-on:", 1)[1].split("\n", 1)[0])
         self.assertNotIn("windows-2022", windows)
+        triggers = yaml.safe_load(self.nightly)[True]
+        self.assertEqual(
+            triggers["workflow_dispatch"]["inputs"]["windows_runner_selector_json"]["default"], ""
+        )
+
+    def test_a_relocated_windows_run_never_touches_the_tracking_issues(self) -> None:
+        tracking = job(self.nightly, "tracking-issues")
+        self.assertIn("!inputs.windows_runner_selector_json", tracking)
+        self.assertIn("!inputs.windows_only", tracking)
 
     def test_shipyard_mirror_preserves_runtime_and_latest_targets(self) -> None:
         pr_windows = self.profile.split(
