@@ -431,7 +431,13 @@ def cache_generation_valid(dest: Path, matrix_platform: str, expected_sha: str) 
     stamp = dest / _ASSET_STAMP
     try:
         if matrix_platform == "windows-arm64":
-            validate_windows_arm64_toolchain_receipt(dest)
+            # A predicate: a cold or unproven generation is simply not valid,
+            # so the caller fetches. The fetch itself refuses a bad receipt
+            # with a named error before anything is published.
+            try:
+                validate_windows_arm64_toolchain_receipt(dest)
+            except ValueError:
+                return False
         return (cache_generation_materialized(dest, matrix_platform) and stamp.is_file()
                 and stamp.read_text(encoding="utf-8").strip() == expected_sha
                 and generation_receipt_valid(dest, matrix_platform, expected_sha))

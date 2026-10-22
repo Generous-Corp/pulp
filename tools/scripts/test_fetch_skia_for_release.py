@@ -193,6 +193,21 @@ class WindowsArm64ToolchainReceipt(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing.*msvc-toolchain"):
                 fetch_skia.validate_windows_arm64_toolchain_receipt(pathlib.Path(td))
 
+    def test_cold_cache_is_not_valid_rather_than_an_error(self):
+        # The keyed-cache path asks cache_generation_valid() before anything is
+        # downloaded; a cold generation must read as "fetch it", not raise.
+        with tempfile.TemporaryDirectory() as td:
+            dest = pathlib.Path(td) / "windows-arm64-generation"
+            self.assertFalse(
+                fetch_skia.cache_generation_valid(dest, "windows-arm64", "a" * 64))
+
+    def test_warm_generation_with_unproven_receipt_is_not_valid(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            self._write_receipt(root, msvc_toolset_version="unknown")
+            self.assertFalse(
+                fetch_skia.cache_generation_valid(root, "windows-arm64", "a" * 64))
+
 
 class CachePublicationLock(unittest.TestCase):
     def test_live_owner_times_out_bounded(self):
