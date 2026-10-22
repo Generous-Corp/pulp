@@ -124,3 +124,21 @@ if(APPLE AND NOT PULP_IOS)
         LABELS "packaging;ship"
         TIMEOUT 60)
 endif()
+
+# Plug-in modules ship dead-stripped on Apple so code no entry point reaches
+# does not land in the binary.
+if(APPLE)
+    foreach(_fmt VST3 AU CLAP)
+        if(TARGET PulpGain_${_fmt})
+            add_test(NAME plugin-module-dead-strip-PulpGain-${_fmt}
+                COMMAND ${CMAKE_COMMAND}
+                    "-DOPTIONS=$<TARGET_PROPERTY:PulpGain_${_fmt},LINK_OPTIONS>"
+                    "-DCONFIG=$<CONFIG>"
+                    -DMODULE=PulpGain_${_fmt}
+                    -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_dead_strip.cmake)
+            set_tests_properties(plugin-module-dead-strip-PulpGain-${_fmt} PROPERTIES
+                LABELS "packaging"
+                TIMEOUT 30)
+        endif()
+    endforeach()
+endif()

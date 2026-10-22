@@ -25,6 +25,18 @@ if(APPLE AND NOT COMMAND pulp_make_bundle_relocatable)
     include("${CMAKE_CURRENT_LIST_DIR}/PulpBundleRelocatable.cmake")
 endif()
 
+# Plug-in modules are loaded by hosts through a handful of exported entry
+# points, so everything a module does not reach from them is dead weight in the
+# shipped binary. On Apple, link optimized builds with -dead_strip; static
+# initializers, exported symbols and Objective-C metadata stay live, so format
+# registration and bundled resources are unaffected.
+function(_pulp_plugin_module_link_hygiene module_target)
+    if(APPLE)
+        target_link_options(${module_target} PRIVATE
+            "$<$<NOT:$<CONFIG:Debug>>:LINKER:-dead_strip>")
+    endif()
+endfunction()
+
 # Post-build commands in this file run through the shell of whatever generator
 # is in use, and a bundle path carries the user's PLUGIN_NAME verbatim — spaces,
 # parentheses, apostrophes and all ("Spectr Freeze (dev)"). Every such command
@@ -100,6 +112,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp
         ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp
     )
+    _pulp_plugin_module_link_hygiene(${target}_VST3)
     if(PULP_${target}_NO_EDITOR)
         target_link_libraries(${target}_VST3 PRIVATE
             ${target}_Core
@@ -284,6 +297,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${clap_entry}
     )
+    _pulp_plugin_module_link_hygiene(${target}_CLAP)
     if(PULP_${target}_NO_EDITOR)
         # The view-free adapter: PULP_CLAP_GUI stays undefined here and in it.
         target_link_libraries(${target}_CLAP PRIVATE
@@ -394,6 +408,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${lv2_entry}
     )
+    _pulp_plugin_module_link_hygiene(${target}_LV2)
     if(PULP_${target}_NO_EDITOR)
         target_link_libraries(${target}_LV2 PRIVATE
             ${target}_Core
@@ -491,6 +506,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
         ${_PULP_FORMAT_SOURCE_DIR}/aax_midi_node.cpp
         $<TARGET_OBJECTS:pulp-aax-export>
     )
+    _pulp_plugin_module_link_hygiene(${target}_AAX)
     if(APPLE AND NOT headless)
         target_sources(${target}_AAX PRIVATE
             ${_PULP_FORMAT_SOURCE_DIR}/aax_native_view_mac.mm)
@@ -590,6 +606,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             ${PULP_${target}_CORE_OBJECTS}
             ${au_entry}
         )
+        _pulp_plugin_module_link_hygiene(${target}_AU)
         target_link_libraries(${target}_AU PRIVATE
             ${target}_Core
             ${_PULP_FORMAT_CORE_TARGET}
@@ -604,6 +621,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             ${au_entry}
             ${_PULP_FORMAT_SOURCE_DIR}/au_v2_cocoa_view.mm
         )
+        _pulp_plugin_module_link_hygiene(${target}_AU)
         target_link_libraries(${target}_AU PRIVATE
             ${target}_Core
             ${_PULP_FORMAT_TARGET}
