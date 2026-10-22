@@ -4,12 +4,15 @@
 // theme file, and the directories its script may load assets from.
 //
 // The selection belongs to the plug-in target, not to the Pulp libraries it
-// links. `pulp_add_plugin(... UI_SCRIPT ...)` and `pulp_use_kit_ui()` generate
-// one small source per format target (VST3, CLAP, AU, AUv3, LV2, AAX,
-// Standalone, ControlHost) whose static initializer calls
-// `register_editor_assets()`. Every editor path — ViewBridge in each adapter,
-// the standalone window, the control host — then reads the same runtime value,
-// whichever translation unit builds the editor.
+// links. `pulp_add_plugin(... UI_SCRIPT ...)` generates one small source for
+// each VST3, CLAP, AU, AAX, Standalone and ControlHost target, and
+// `pulp_use_kit_ui()` one for every format target that exists when it runs;
+// that source's static initializer calls `register_editor_assets()`. Every
+// editor path (ViewBridge in each adapter, the standalone window, the control
+// host) then reads the same runtime value, whichever translation unit builds
+// the editor. The paths are absolute build-machine paths, so `UI_SCRIPT` is
+// not applied to AUv3: an iOS app extension cannot resolve them, and an AUv3
+// editor ships its script inside the extension bundle instead.
 //
 // Registration runs at static-init time, so the record is POD: no heap, no
 // std::string, no logging.

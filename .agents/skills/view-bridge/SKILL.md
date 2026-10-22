@@ -48,7 +48,17 @@ theme, and asset roots as target properties, and one generated source per
 format target (`<build>/pulp_editor_assets/<target>.cpp`) registers them at
 load time through `pulp::format::register_editor_assets()`. ViewBridge reads
 them back with `editor_assets_for(<bundle id>)`: a keyed bundle entry's
-`ui_*` fields win, then the binary-wide record.
+`ui_*` fields win, then the binary-wide record. That precedence is what lets
+each plug-in in a multi-plug-in bundle carry its own editor; a single-plug-in
+binary has no keyed entry and uses its own record.
+
+The registered paths are absolute paths on the build machine. `UI_SCRIPT`
+therefore applies to VST3, CLAP, AU, AAX, Standalone and ControlHost targets
+and deliberately not to AUv3: an iOS app extension cannot open a path from the
+machine that built it, so an AUv3 editor ships its script inside the extension
+and loads it from there. `pulp_use_kit_ui()` applies to every format target
+that already exists, AUv3 included, which only resolves when the editor runs on
+the machine that built it.
 
 Do not reintroduce a `#ifdef PULP_UI_SCRIPT_PATH` reader. ViewBridge is
 compiled once into the shared format library, so a per-target compile
