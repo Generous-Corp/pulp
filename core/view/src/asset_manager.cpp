@@ -175,15 +175,15 @@ ImageData AssetManager::load_image_embedded(const std::string& name) {
     return img;
 }
 
-ImageData AssetManager::load_image_from_data_uri(const std::string& uri) {
-    // data:image/png;base64,... format
+std::vector<uint8_t> AssetManager::decode_data_uri_bytes(std::string_view uri) {
+    // data:<media type>;base64,<payload>
     auto comma = uri.find(',');
-    if (comma == std::string::npos) return {};
+    if (comma == std::string_view::npos)
+        return {};
+    const std::string_view encoded = uri.substr(comma + 1);
 
-    std::string encoded = uri.substr(comma + 1);
-
-    // Simple base64 decode
-    static const std::string chars =
+    // Lenient base64 decode: padding, line breaks and stray characters are skipped.
+    static constexpr std::string_view chars =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::vector<uint8_t> decoded;
     decoded.reserve(encoded.size() * 3 / 4);
@@ -193,7 +193,8 @@ ImageData AssetManager::load_image_from_data_uri(const std::string& uri) {
     for (char c : encoded) {
         if (c == '=' || c == '\n' || c == '\r') continue;
         auto pos = chars.find(c);
-        if (pos == std::string::npos) continue;
+        if (pos == std::string_view::npos)
+            continue;
         val = (val << 6) | static_cast<uint32_t>(pos);
         bits += 6;
         if (bits >= 8) {
@@ -201,7 +202,11 @@ ImageData AssetManager::load_image_from_data_uri(const std::string& uri) {
             decoded.push_back(static_cast<uint8_t>((val >> bits) & 0xFF));
         }
     }
+    return decoded;
+}
 
+ImageData AssetManager::load_image_from_data_uri(const std::string& uri) {
+    auto decoded = decode_data_uri_bytes(uri);
     return decode_png(decoded.data(), decoded.size());
 }
 

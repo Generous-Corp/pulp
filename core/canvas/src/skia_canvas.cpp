@@ -1123,6 +1123,23 @@ bool SkiaCanvas::measure_image_from_file(const std::string& path,
     return true;
 }
 
+bool SkiaCanvas::measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                         float& out_height) {
+    out_width = 0.0f;
+    out_height = 0.0f;
+    if (!data || size == 0)
+        return false;
+    // A deferred image only parses the header, and its size already applies
+    // the encoded orientation, so it matches what draw_image_from_data draws.
+    // The image is dropped before returning, so borrowing the bytes is safe.
+    auto image = SkImages::DeferredFromEncodedData(SkData::MakeWithoutCopy(data, size));
+    if (!image || image->width() <= 0 || image->height() <= 0)
+        return false;
+    out_width = static_cast<float>(image->width());
+    out_height = static_cast<float>(image->height());
+    return true;
+}
+
 // ── Blend modes ─────────────────────────────────────────────────────────────
 
 // Shared canvas BlendMode -> SkBlendMode lookup. Used by

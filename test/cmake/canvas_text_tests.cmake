@@ -280,10 +280,11 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         LABELS bench)
 
     # Content-keyed inline image cache on a live offscreen Dawn/Graphite
-    # surface: keyed inline bytes (raw, ImageView data URI, SceneImage) build
-    # once and hit afterwards, a disabled cache rebuilds every draw, and cached
-    # frames match the uncached pixels. The [bench] case prints per-frame cost
-    # with the cache on and off. Soft-skips without an adapter.
+    # surface: keyed inline bytes (raw, ImageView data URIs in PNG, JPEG, WebP
+    # and GIF, SceneImage) build once and hit afterwards, a disabled cache
+    # rebuilds every draw, undecodable bytes are tried once, and cached frames
+    # match the uncached pixels. The [bench] case prints per-frame cost with the
+    # cache on and off. Soft-skips without an adapter.
     pulp_add_test_suite(pulp-test-inline-image-cache-gpu
         LIBRARIES pulp::view pulp::canvas pulp::render
         TEST_SPEC "~[bench]"

@@ -542,6 +542,20 @@ TEST_CASE("AssetManager rejects malformed data URIs", "[view][assets]") {
     REQUIRE_FALSE(no_payload.valid());
 }
 
+TEST_CASE("AssetManager data URI bytes are returned whatever the image format",
+          "[view][assets][inline-image]") {
+    // "GIF87a" plus two bytes, base64-encoded with a line break in the payload.
+    auto gif = AssetManager::decode_data_uri_bytes("data:image/gif;base64,R0lGODdh\nEAA=");
+    REQUIRE(gif == std::vector<uint8_t>{'G', 'I', 'F', '8', '7', 'a', 0x10, 0x00});
+    // The PNG-only image loader still reports no dimensions for those bytes.
+    REQUIRE_FALSE(AssetManager::instance()
+                      .load_image_from_data_uri("data:image/gif;base64,R0lGODdhEAA=")
+                      .valid());
+
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;base64").empty());
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;base64,").empty());
+}
+
 // ── Display Scale ───────────────────────────────────────────────────────────
 
 TEST_CASE("AssetManager display scale", "[view][assets]") {
