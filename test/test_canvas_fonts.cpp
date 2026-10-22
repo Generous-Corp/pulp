@@ -2054,8 +2054,6 @@ TEST_CASE("an optical-size clone of the system font's bold keeps weight 700",
 #endif
 }
 
-#endif  // PULP_HAS_SKIA
-
 // ── A quoted generic keyword is a family name ───────────────────────────────
 //
 // CSS `font-family: "serif", Inter` names a family literally called "serif",
@@ -2185,3 +2183,5 @@ TEST_CASE("a generic whose platform family is missing falls through the list",
     CHECK(width_in("math, Inter") == Catch::Approx(inter).margin(0.01));
 #endif
 }
+
+#endif  // PULP_HAS_SKIA
