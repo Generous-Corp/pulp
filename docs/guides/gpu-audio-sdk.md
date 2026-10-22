@@ -284,34 +284,48 @@ CPU, and preparation still succeeds. Models are built by Pulp's private,
 host-only model factory from a verified neural model manifest, and each model
 binds to one node.
 
-Where the shadow runs is `Config::shadow_policy`:
-- `Inline` runs it on the audio thread for every block, even when the GPU
-  delivers.
+Where the shadow runs is `Config::shadow_policy`. The policy governs only
+what happens on a realtime GPU miss:
+- `Inline` runs the CPU model on the audio thread for every block, even when
+  the GPU delivers.
 - `Worker` runs it on a dedicated non-realtime thread. The callback only copies
   its input in and, on a GPU miss, copies the shadow's stamped result out. A
   shadow result that arrives after its slot is dropped. A block that both the
   GPU and the shadow miss is silent.
-- `None` has no shadow, so a GPU miss is silent. It requires a GPU backend.
-  An offline render fences the GPU, so with `None` it renders silence.
+- `None` makes a realtime GPU miss silent. The model is still kept running on
+  the shadow thread, so an offline render can continue it. It requires a
+  family with a GPU kernel.
 - `Auto`, the default, times one block of the CPU model for one channel at
-  `prepare()`. It picks `Inline` when that block costs at most 15% of the
-  block period, and `Worker` otherwise. The threshold is per channel, so an
-  N-channel `Inline` node spends about N times that on the audio thread.
+  `prepare()`. It picks `Inline` when that cost times the channel count is at
+  most 15% of the block period, and `Worker` otherwise.
 
 Families without a GPU backend always run `Inline`, because the CPU model is
-their output. An offline render moves a `Worker` shadow inline on the same
-timeline, and it stays inline until the next `prepare()`. `shadow_status()`
-reports the requested and active policy, the measured inline cost, and how
-many shadow blocks were delivered, late or double-missed. A cheaper
-`shadow_model` is allowed but never selected by default, and status reports
-`shadow_model_differs` when one is in use. Set `shadow_audio_workgroup` to the
-host audio thread's workgroup so the shadow thread joins it. Without one, the
-thread runs at `USER_INTERACTIVE` QoS.
+their output. So does a GPU family whose provider could not be prepared.
+
+An offline render always uses the CPU model inline, whatever the policy. On
+the transport's offline fence, a `Worker` or `None` shadow finishes its queue
+and continues inline on the same timeline, so a bounce never goes silent. It
+stays inline until the next `prepare()`.
+
+`status_snapshot()` reports the shadow in the public `shadow_*` fields of
+`GpuAudioStatus`: the mode, the total inline cost, and how many blocks were
+delivered, late or double-missed. `shadow_double_miss_blocks` is the
+authoritative count of silent blocks. The transport's `CpuFallbackDelivered`
+delivery label means only that the fallback path ran, which includes a
+double miss that emitted silence. `shadow_status()` adds the requested
+policy, the per-channel cost, queue drops, resyncs and workgroup membership.
+
+A cheaper `shadow_model` is allowed but never selected by default, and status
+reports `shadow_model_differs` when one is in use. Set
+`shadow_audio_workgroup` to the host audio thread's workgroup so the shadow
+thread joins it as a member doing audio-deadline work. Without one, the thread
+runs at `USER_INTERACTIVE` QoS.
 
 A `Worker` shadow for a large model can still miss blocks. Its result must
 arrive within the lead. For a model that costs about half the block period, a
 lead of two blocks leaves little slack, so a loaded host will see occasional
 double misses.
+
 A transport hosting a CPU-only family reports the `Cpu` path and provider and
 a `Ready` state. Because the CPU model is that node's primary path, its blocks
 count under `fallback_blocks` and never under `missed_blocks`. A WaveNet
