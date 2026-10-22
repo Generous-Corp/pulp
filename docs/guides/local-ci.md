@@ -915,6 +915,33 @@ otherwise identical tree: **414 s cold configure against 119 s warm**.
 If a dependency pin changes and a stale cache is suspected, the key includes
 `hashFiles('setup.sh')`; bump that or clear the Actions cache to force a refetch.
 
+### Windows caches the Skia generation by its pin
+
+The hosted Windows leg's configure provisions the pinned Skia/Dawn bundle into
+an immutable generation directory under `~/.cache/pulp/skia/`, whose name
+`fetch_skia_for_release.py windows-x64 --print-cache-dest` prints and which
+carries the manifest asset's sha256
+(`windows-x64-<sha256>-receipt-v3`). `build.yml` restores that directory under
+the key `skia-<that name>` before configure and saves it straight after
+configure, so a failing build still publishes it. Saves happen on pushes to
+`main` and on `workflow_dispatch`.
+
+A milestone bump changes the sha256 and therefore the key, and there are no
+restore-keys, so a previous milestone's tree can never be restored. The fetcher
+still validates a restored generation's receipt and re-downloads one that does
+not match the manifest. Measured on hosted `windows-2022` before this cache, the
+85 MB download and unpack took 7 seconds at m153 and 11 seconds at m157; the
+saved entry is about 160 MB.
+
+Two Windows caches still do nothing. The `<build>/_deps` FetchContent save above
+never applies there: Windows configure sets `FETCHCONTENT_BASE_DIR=fc`, the save
+runs before configure, and `setup.sh` primes the sources into
+`$LOCALAPPDATA/Pulp/fetchcontent-src`, so every run re-clones them (about 2
+minutes 40 seconds). A cache of that whole directory is about 1.65 GB and was
+evicted from the full 10 GB repository cache within hours of being saved. The
+Windows ccache reports zero cacheable calls because the Visual Studio generator
+ignores `CMAKE_<LANG>_COMPILER_LAUNCHER`.
+
 ## Primary: Shipyard
 
 [Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.

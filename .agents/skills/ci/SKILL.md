@@ -879,6 +879,31 @@ step fails naming a missing toolchain, the runner image or the resolve step
 lacks it: fix the golden (install the manifest's Rust by name), never by
 re-enabling auto-install in the workflow.
 
+## A hosted dependency cache is only real if its save step finds a path
+
+`actions/cache/save` on a path that does not exist prints
+`Path Validation Error: Path(s) specified in the action for caching do(es) not
+exist` as a warning and succeeds, so a cache that never populates stays green.
+The hosted Windows and Linux legs do this on every push: they save
+`<build>/_deps` before configure runs (Windows puts FetchContent under `fc`
+anyway), while setup.sh primes the sources into its shared `fetchcontent-src`.
+Before trusting a cache, grep the job log for that warning and for a
+`Cache restored from key:` line on the next run, and check the repository's
+cache list (`ghapp api repos/<o>/<r>/actions/caches`) for an entry under the
+expected key. Save a dependency cache straight after the step that fills it,
+not after the build: Windows builds fail often, and a skipped end-of-job save
+publishes nothing. Prebuilt binaries are keyed on the manifest asset sha256 and
+get no `restore-keys`, so a milestone bump cannot restore the previous tree.
+Check an entry's size against the repository budget before adding it: the cache
+sits at its 10 GB limit, and a 1.65 GB Windows source entry was evicted within
+hours of being saved, long before the next run could restore it.
+
+The Windows ccache is a separate dead end: the Visual Studio generator ignores
+`CMAKE_<LANG>_COMPILER_LAUNCHER`, so the job's `ccache per-job` line reads
+`cacheable 0` and the cache stays at 0.0 GiB. A restored or saved Windows ccache
+proves nothing until the leg builds through a generator that honors the
+launcher.
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both

@@ -1672,6 +1672,32 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-
 
+      # The configure step provisions the pinned Skia/Dawn bundle into an
+      # immutable generation directory whose name carries the manifest asset
+      # sha256 (fetch_skia_for_release.py --print-cache-dest). Keying the cache
+      # on that name gives a pin bump a fresh key, and with no restore-keys a
+      # previous milestone's tree can never be restored. The fetcher validates
+      # a restored generation's receipt and re-downloads one that fails.
+      - name: Resolve Skia cache generation (GitHub-hosted Windows)
+        if: runner.os == 'Windows' && runner.environment == 'github-hosted'
+        id: windows-skia-generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          dest="$(python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
+            --cache-root "$HOME/.cache/pulp/skia" --print-cache-dest)"
+          echo "Skia generation: $dest"
+          echo "path=$dest" >> "$GITHUB_OUTPUT"
+          echo "key=skia-$(basename "$dest")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Skia/Dawn generation (GitHub-hosted Windows)
+        if: steps.windows-skia-generation.outputs.key != ''
+        id: windows-skia-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ steps.windows-skia-generation.outputs.path }}
+          key: ${{ steps.windows-skia-generation.outputs.key }}
+
       - name: Restore ccache (GitHub-hosted)
         if: runner.os != 'macOS' || runner.environment == 'github-hosted'
         id: ccache-cache
@@ -2088,6 +2114,19 @@ jobs:
             mkdir -p "$PULP_BUILD_DIR" && : > "$PULP_BUILD_DIR/.pulp-build-incomplete"
           fi
         shell: bash
+
+      # Configure has just provisioned (or validated) the generation; saving
+      # before the build keeps a failing build from losing it.
+      - name: Save Skia/Dawn generation (GitHub-hosted Windows)
+        if: >-
+          steps.windows-skia-generation.outputs.key != ''
+          && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
+              || github.event_name == 'workflow_dispatch')
+          && steps.windows-skia-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.windows-skia-generation.outputs.path }}
+          key: ${{ steps.windows-skia-generation.outputs.key }}
 
       - name: Install visual-analysis Python dependencies
         shell: bash
