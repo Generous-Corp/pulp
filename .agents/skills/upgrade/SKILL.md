@@ -303,6 +303,17 @@ index generator refuses anything else, because an extra `||` arm can show a
 note for an unrelated upgrade while still passing a probe of the boundary
 hops.
 
+**`X` must be the version whose tag first contains the change, not the
+version on `main` when the note was written.** Pulp bumps the version at
+land, so a note authored against the current `CMakeLists.txt` version names a
+release that is already tagged. Its `cli_version_from < X` then excludes every
+user already on `X` or later who is upgrading into the real release, and the
+note is never shown, while the index generator, which only checks that the
+file name matches the `version` field, stays green. Key the note to the
+version `main` will tag next, rename it again if another release lands first,
+and confirm after merge with `git merge-base --is-ancestor <merge> vX.Y.Z`
+(true) against the previous tag (false).
+
 ## Common breaking-change patterns
 
 These are the patterns that have shown up in Pulp migration notes. When
