@@ -2,6 +2,7 @@
 #include "detail/gpu_neural_realtime_test_access.hpp"
 #include "detail/neural_processor.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_execution_contract.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
 
@@ -101,6 +102,7 @@ struct GpuNeuralRealtimeNode::Impl {
     std::atomic<std::uint64_t> cpu_recovery_sequence{std::numeric_limits<std::uint64_t>::max()};
 
     bool prepared = false;
+    PrepareError last_error = PrepareError::None;
 
     explicit Impl(Config source) : config(std::move(source)), model(config.model) {}
 
@@ -108,16 +110,23 @@ struct GpuNeuralRealtimeNode::Impl {
         return model ? model->block_size : 0;
     }
 
-    bool valid_config() const noexcept {
+    PrepareError config_error() const noexcept {
         const auto& c = config;
-        return model != nullptr && c.family != NeuralFamily::Unknown && c.family == model->family &&
-               c.channels > 0 && c.channels <= 64 && c.channels == model->channels() &&
-               model->block_size > 0 && c.lead_blocks > 0 && c.capacity > c.lead_blocks &&
-               c.max_inflight > 0 && c.max_inflight <= c.capacity - c.lead_blocks &&
-               c.completion_service_wait_ns <= 1'000'000 &&
-               c.miss_policy == MissPolicy::CpuFallback && backend_admits(c.max_inflight) &&
-               epoch != UINT64_MAX && sequence < Bridge::kSequenceLimit &&
-               c.prewarm_blocks < Bridge::kSequenceLimit - sequence;
+        if (model == nullptr || c.family == NeuralFamily::Unknown)
+            return PrepareError::InvalidConfig;
+        if (c.family != model->family)
+            return PrepareError::FamilyMismatch;
+        if (c.channels == 0 || c.channels > 64 || c.channels != model->channels())
+            return PrepareError::ChannelMismatch;
+        if (model->block_size == 0 || c.lead_blocks == 0 || c.capacity <= c.lead_blocks ||
+            c.max_inflight == 0 || c.max_inflight > c.capacity - c.lead_blocks ||
+            c.completion_service_wait_ns > 1'000'000 || c.miss_policy != MissPolicy::CpuFallback ||
+            epoch == UINT64_MAX || sequence >= Bridge::kSequenceLimit ||
+            c.prewarm_blocks >= Bridge::kSequenceLimit - sequence)
+            return PrepareError::InvalidConfig;
+        if (!backend_admits(c.max_inflight))
+            return PrepareError::BackendInflightExceeded;
+        return PrepareError::None;
     }
 
     // A node must never admit more blocks than the backend can hold: a
@@ -320,15 +329,25 @@ GpuAudioNodeDescriptor GpuNeuralRealtimeNode::descriptor() const {
 }
 
 bool GpuNeuralRealtimeNode::prepare() {
-    if (!release())
-        return false;
     auto& s = *impl_;
-    if (!s.valid_config())
+    const auto fail = [&s, this](PrepareError error) {
+        (void)release();
+        s.last_error = error;
+        return false;
+    };
+    if (!release()) {
+        s.last_error = PrepareError::ReleaseFailed;
+        return false;
+    }
+    s.last_error = s.config_error();
+    if (s.last_error != PrepareError::None)
         return false;
     if (!s.model_owner) {
         bool expected = false;
-        if (!s.model->bound.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+        if (!s.model->bound.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+            s.last_error = PrepareError::ModelBound;
             return false;
+        }
         s.model_owner = true;
     }
     try {
@@ -346,8 +365,7 @@ bool GpuNeuralRealtimeNode::prepare() {
             if (!processor->prepare(s.context_for(model.spec(), s.model->backend != nullptr),
                                     detail::NeuralProviderPreference::CpuOnly)) {
                 (void)processor->release();
-                (void)release();
-                return false;
+                return fail(PrepareError::ShadowPrepareFailed);
             }
             if (s.test_skip_publish || !processor->publish())
                 s.shadow_published = false;
@@ -355,10 +373,8 @@ bool GpuNeuralRealtimeNode::prepare() {
         }
         // The shadow is the miss policy, so a node without a published shadow
         // must not reach the transport.
-        if (!cpu_fallback_prepared()) {
-            (void)release();
-            return false;
-        }
+        if (!cpu_fallback_prepared())
+            return fail(PrepareError::ShadowUnpublished);
 
         if (s.model->backend) {
             auto& backend = *s.model->backend;
@@ -371,8 +387,7 @@ bool GpuNeuralRealtimeNode::prepare() {
                 s.production_backend = s.model->production_backend();
                 s.backend_quiesced.store(false, std::memory_order_release);
             } else if (!backend.release()) {
-                (void)release();
-                return false;
+                return fail(PrepareError::ReleaseFailed);
             }
         }
 
@@ -389,10 +404,8 @@ bool GpuNeuralRealtimeNode::prepare() {
         s.shadow_sequence = s.sequence;
 
         if (s.backend_active) {
-            if (!s.initialize_bridge()) {
-                (void)release();
-                return false;
-            }
+            if (!s.initialize_bridge())
+                return fail(PrepareError::BridgeFailed);
         } else {
             s.cpu_next_sequence = s.sequence;
             s.cpu_blocks.store(0, std::memory_order_relaxed);
@@ -404,8 +417,7 @@ bool GpuNeuralRealtimeNode::prepare() {
         return true;
     } catch (...) {
     }
-    (void)release();
-    return false;
+    return fail(PrepareError::InvalidConfig);
 }
 
 bool GpuNeuralRealtimeNode::release() noexcept {
@@ -496,7 +508,21 @@ std::uint64_t GpuNeuralRealtimeNode::epoch() const noexcept {
 }
 
 bool GpuNeuralRealtimeNode::fenced() const noexcept {
-    return !impl_->prepared || !impl_->bridge || impl_->bridge->delivery_epoch() == 0;
+    if (!impl_->prepared)
+        return true;
+    // CPU-only execution has no GPU delivery to fence.
+    return impl_->bridge && impl_->bridge->delivery_epoch() == 0;
+}
+
+GpuNeuralRealtimeNode::PrepareError GpuNeuralRealtimeNode::last_prepare_error() const noexcept {
+    return impl_->last_error;
+}
+
+GpuAudioProvider GpuNeuralRealtimeNode::transport_provider() const noexcept {
+    if (authenticated_provider())
+        return GpuAudioProvider::Dawn;
+    return impl_->prepared && !impl_->backend_active ? GpuAudioProvider::Cpu
+                                                     : GpuAudioProvider::Unknown;
 }
 
 GpuAudioRecoveryReason GpuNeuralRealtimeNode::recovery_reason() const noexcept {
@@ -551,7 +577,7 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
     status.recovery_reason = recovery_reason();
     status.recovery_sequence = recovery_sequence();
     status.epoch = epoch();
-    status.delivery_epoch_active = !fenced();
+    status.delivery_epoch_active = epoch() != 0;
     status.gpu_kernel_available = gpu_kernel_available();
     // A model with a GPU kernel asked for the GPU; the others asked for CPU.
     status.requested_engine = s.model->backend ? GpuAudioEngine::Gpu : GpuAudioEngine::Cpu;
@@ -562,7 +588,9 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
         status.selected_engine = GpuAudioEngine::Cpu;
         status.provider = GpuAudioProvider::Cpu;
         status.provider_state =
-            s.model->backend ? GpuAudioProviderState::Degraded : GpuAudioProviderState::Ready;
+            s.model->backend || status.recovery_reason != GpuAudioRecoveryReason::None
+                ? GpuAudioProviderState::Degraded
+                : GpuAudioProviderState::Ready;
         status.fallback_blocks = s.cpu_blocks.load(std::memory_order_relaxed);
         return status;
     }
@@ -576,8 +604,13 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
     status.provider = authenticated_provider() ? GpuAudioProvider::Dawn : GpuAudioProvider::Unknown;
     status.selected_engine =
         authenticated_provider() ? GpuAudioEngine::Gpu : GpuAudioEngine::Unknown;
-    status.provider_state = authenticated_provider() && !fenced() ? GpuAudioProviderState::Ready
-                                                                  : GpuAudioProviderState::Degraded;
+    // Same projection the transport applies to this node's health: a lost or
+    // unresponsive provider is Unavailable, any other latched cause Degraded.
+    detail::RealtimeGpuHealth health;
+    (void)GpuNeuralRealtimeNode::health(this, health);
+    status.provider_state = detail::provider_state_for_health(health);
+    if (status.provider_state == GpuAudioProviderState::Ready && !authenticated_provider())
+        status.provider_state = GpuAudioProviderState::Degraded;
     return status;
 }
 
@@ -714,7 +747,7 @@ bool GpuNeuralRealtimeNode::health(const void* self, detail::RealtimeGpuHealth& 
     out.recovery_reason = node.recovery_reason();
     out.recovery_sequence = node.recovery_sequence();
     out.epoch = node.epoch();
-    out.delivery_epoch_active = !out.fenced;
+    out.delivery_epoch_active = out.epoch != 0;
     return true;
 }
 

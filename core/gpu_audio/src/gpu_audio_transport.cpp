@@ -721,8 +721,10 @@ capability_from(const detail::GpuAudioTransportConfiguration& configuration) noe
     if (!configuration.prepared)
         return report;
     report.provider = configuration.provider;
-    report.path = report.provider != GpuAudioProvider::Unknown ? GpuAudioExecutionPath::SharedMemory
-                                                               : GpuAudioExecutionPath::Staged;
+    report.path = report.provider == GpuAudioProvider::Cpu ? GpuAudioExecutionPath::Cpu
+                  : report.provider != GpuAudioProvider::Unknown
+                      ? GpuAudioExecutionPath::SharedMemory
+                      : GpuAudioExecutionPath::Staged;
     report.eligibility = GpuAudioEligibility::Eligible;
     report.fallback_policy = configuration.miss_policy;
     report.prepared_latency_blocks = configuration.latency_blocks;

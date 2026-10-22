@@ -419,6 +419,9 @@ struct ChannelPlan {
     bool starve = false; // completions withheld
     bool release_ok = true;
     bool sequence_gap_seen = false;
+    // Scales the provider's output so a test can tell GPU blocks from
+    // shadow blocks; 1 makes the two interchangeable.
+    float gain = 1.0f;
     std::uint64_t submissions = 0;
     std::uint32_t releases = 0;
 };
@@ -462,7 +465,8 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         if (plan_.fail_completions)
             return GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::ProviderFailed,
                                          false};
-        std::copy_n(oldest->data.begin(), output.size(), output.begin());
+        for (std::size_t i = 0; i < output.size(); ++i)
+            output[i] = plan_.gain * oldest->data[i];
         return GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::GpuDelivered, false};
     }
     bool release() noexcept override {
