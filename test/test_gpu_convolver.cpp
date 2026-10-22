@@ -1213,11 +1213,15 @@ class InjectableConvolver : public GpuConvolver {
     using GpuConvolver::staged_cpu_blocks;
     using GpuConvolver::staged_gpu_blocks;
     using GpuConvolver::staged_latched_reason;
-    FakeGpuCompute* adopt_fake(std::vector<float> ir, float gain = kGpuMark) {
+    // `hosted` stands in for a transport's pipelining opt-in (what
+    // GpuAudioTransport::prepare() does), so the worker-pipeline behaviour can
+    // be driven block by block; false is a direct process_block() caller.
+    FakeGpuCompute* adopt_fake(std::vector<float> ir, float gain = kGpuMark, bool hosted = true) {
         auto fake = std::make_unique<FakeGpuCompute>(std::move(ir));
         fake->set_result_gain(gain);
         auto* raw = fake.get();
         gpu_ = std::move(fake);
+        (void)detail::set_worker_pipeline_hosting(this, hosted);
         // The pipeline depth follows the prepared device; re-derive it for the
         // scripted one so the result does not depend on the host's adapter.
         configure_staged_pipeline();
@@ -1328,6 +1332,47 @@ struct SubmitLog {
 };
 
 } // namespace
+
+TEST_CASE("A direct process_block caller gets block N, not a pipelined block",
+          "[gpu_audio][convolver][staged]") {
+    constexpr std::uint32_t BS = 64;
+    constexpr std::size_t NBLK = 24;
+    const auto ir = staged_test_ir();
+    const auto input = staged_test_input(BS * NBLK);
+
+    InjectableConvolver node(1, BS, 48000, ir);
+    REQUIRE(node.prepare());
+    // No transport: the node is not hosted, so it reports no worker pipeline
+    // and decides each block inside its call.
+    CHECK(node.descriptor().worker_pipeline_blocks == 0u);
+    auto* fake = node.adopt_fake(ir, kGpuMark, /*hosted=*/false);
+    REQUIRE(node.pipeline() == 0u);
+
+    SECTION("hits are the GPU result for the same block") {
+        const auto out = run_staged_stream(node, input, BS, [](std::size_t) {});
+        CHECK(first_mismatch(out, routed_reference(input, ir, BS, std::vector<bool>(NBLK, false),
+                                                   0)) == out.size());
+        CHECK(node.staged_cpu_blocks() == 0u);
+    }
+    SECTION("a miss is the CPU continuation for the same block") {
+        const auto out = run_staged_stream(node, input, BS, [&](std::size_t b) {
+            fake->set_async_mode(b == 6 ? FakeGpuCompute::AsyncMode::Expire
+                                        : FakeGpuCompute::AsyncMode::Resolve);
+        });
+        const auto cpu = blocks_where(NBLK, [](std::size_t b) { return b == 6; });
+        CHECK(first_mismatch(out, routed_reference(input, ir, BS, cpu, 0)) == out.size());
+    }
+    CHECK(validate_gpu_audio_status(node.status_snapshot()).accepted());
+
+    // Hosting by a transport turns the pipeline on, and releasing the
+    // transport turns it off again for direct use.
+    {
+        GpuAudioTransport transport;
+        REQUIRE(transport.prepare(&node, {/*ring_blocks=*/8}));
+        CHECK(node.descriptor().worker_pipeline_blocks == 1u);
+    }
+    CHECK(node.descriptor().worker_pipeline_blocks == 0u);
+}
 
 TEST_CASE("Staged GpuConvolver hits come from the GPU without a CPU convolution",
           "[gpu_audio][convolver][staged]") {
@@ -1858,13 +1903,17 @@ TEST_CASE("Staged GpuConvolver worker cost per block", "[.][staged-bench]") {
             (void)cpu_worst;
             (void)late_wall;
 
-            for (const auto policy : {GpuConvolver::ProviderPolicy::Auto,
-                                      GpuConvolver::ProviderPolicy::StagedBlocking}) {
+            // Auto hosted (Option A, what a transport runs), Auto called
+            // directly (in-block bounded wait), and StagedBlocking (main).
+            for (int variant = 0; variant < 3; ++variant) {
+                const auto policy = variant == 2 ? GpuConvolver::ProviderPolicy::StagedBlocking
+                                                 : GpuConvolver::ProviderPolicy::Auto;
                 InjectableConvolver real(1, bs, 48000, ir);
                 REQUIRE(real.set_provider_policy(policy));
                 REQUIRE(real.prepare());
                 if (!real.gpu_available())
                     continue;
+                (void)detail::set_worker_pipeline_hosting(&real, variant == 0);
                 // Paced one block per period, as a live worker would be, so an
                 // on-time readback can land before its block is due.
                 std::vector<std::chrono::nanoseconds> wall, cpu;
@@ -1876,12 +1925,13 @@ TEST_CASE("Staged GpuConvolver worker cost per block", "[.][staged-bench]") {
                 const auto c = mean_us(cpu, 20);
                 const auto worst =
                     (*std::max_element(cpu.begin() + 20, cpu.end())).count() / 1000.0;
-                std::printf("  real Metal %-14s: worker wall %.3f ms/block, cpu %.3f ms, worst cpu "
+                std::printf("  real Metal %-16s: worker wall %.3f ms/block, cpu %.3f ms, worst cpu "
                             "%.3f ms; "
                             "GPU hit rate %.1f%% (%llu/%zu); CPU blocks %llu; breaker trips %llu; "
                             "reason %u\n",
-                            policy == GpuConvolver::ProviderPolicy::Auto ? "Auto (A)"
-                                                                         : "StagedBlocking",
+                            variant == 0   ? "Auto hosted (A)"
+                            : variant == 1 ? "Auto direct"
+                                           : "StagedBlocking",
                             w / 1000.0, c / 1000.0, worst / 1000.0,
                             100.0 * static_cast<double>(real.staged_gpu_blocks()) / nblk,
                             static_cast<unsigned long long>(real.staged_gpu_blocks()), nblk,
@@ -1910,10 +1960,29 @@ TEST_CASE("GpuMultiConvolver refuses a lost device and keeps Silence",
     CHECK(l[0] == FakeGpuCompute::kMultiMarker);
     CHECK_FALSE(multi.device_lost());
 
+    // Two more good blocks (1, 2), then the device is lost before block 3.
+    REQUIRE(multi.convolve_stereo(mono.data(), l.data(), r.data(), BS));
+    REQUIRE(multi.convolve_stereo(mono.data(), l.data(), r.data(), BS));
+    CHECK(validate_gpu_audio_status(multi.status_snapshot()).accepted());
+
     raw->lose_device();
     CHECK(multi.device_lost());
-    CHECK_FALSE(multi.convolve_stereo(mono.data(), l.data(), r.data(), BS));
-    CHECK(raw->multi_calls() == 1u); // refused before reaching the device
+    // Before the worker reaches the lost device, status attributes the loss
+    // to the next block it will run.
+    auto status = multi.status_snapshot();
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(status.recovery_sequence == 3u);
+    CHECK(validate_gpu_audio_status(status).accepted());
+
+    CHECK_FALSE(multi.convolve_stereo(mono.data(), l.data(), r.data(), BS)); // block 3
+    CHECK_FALSE(multi.convolve_stereo(mono.data(), l.data(), r.data(), BS)); // block 4
+    CHECK(raw->multi_calls() == 3u); // refused before reaching the device
+    // The recovery sequence is the block that found the loss, not a later one
+    // and not the start of the stream.
+    status = multi.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(status.recovery_sequence == 3u);
+    CHECK(validate_gpu_audio_status(status).accepted());
 
     std::vector<float> in_l(BS, 0.1f), in_r(BS, 0.1f), out_l(BS, -1.0f), out_r(BS, -1.0f);
     const float* in_ptrs[2] = {in_l.data(), in_r.data()};

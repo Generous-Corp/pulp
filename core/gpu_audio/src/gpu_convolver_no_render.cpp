@@ -4,6 +4,7 @@
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -24,6 +25,12 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
       staged_readback_(std::make_unique<StagedReadbackState>()) {}
 
 struct GpuConvolver::SharedIoState {};
+namespace detail {
+bool set_worker_pipeline_hosting(GpuAudioNode*, bool) noexcept {
+    return false;
+}
+} // namespace detail
+
 struct GpuConvolver::StagedReadbackState {
     GpuConvolverStagedBreaker breaker{};
     std::atomic<std::uint8_t> reason{0};

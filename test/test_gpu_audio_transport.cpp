@@ -8,6 +8,7 @@
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/thread_progress.hpp"
 
@@ -683,6 +684,12 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
 }
 
 bool requires_realtime_gpu_path(GpuAudioNode*) noexcept {
+    return false;
+}
+
+// This suite links the transport without the GPU nodes; none of its nodes
+// takes part in worker pipelining.
+bool set_worker_pipeline_hosting(GpuAudioNode*, bool) noexcept {
     return false;
 }
 

@@ -239,8 +239,12 @@ resolves, and its worker never waits on the GPU at all.
   may take up to two block periods. A node with a one-block lead cannot
   pipeline and instead waits inside the block, bounded to one period minus its
   CPU cost.
-- Calling `process_block` directly, outside the transport, now returns block
-  N - `worker_pipeline_blocks`: read the descriptor and account for it.
+- The pipeline is used only while a `GpuAudioTransport` hosts the node; the
+  transport opts the node in at `prepare()` and out at `release()`. Called
+  directly, `process_block` still returns block N for input block N and
+  reports `worker_pipeline_blocks = 0`, deciding each block inside the call
+  with a wait bounded to one period minus its CPU cost (with the same CPU
+  routing and breaker).
 - Every block's input goes to exactly one place: the GPU overlap-add carry when
   its readback is on time, otherwise the worker's CPU partitioned convolution.
   The output is the carry plus whatever the CPU convolution still owes, so a

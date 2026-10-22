@@ -11,6 +11,7 @@
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_convolution_session.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #include "detail/dawn_shared_io_convolution_session.hpp"
@@ -81,7 +82,16 @@ struct GpuConvolver::StagedReadbackState {
         std::vector<float> input;  // [channels][block] the block's input
         std::vector<const float*> input_ptrs;
     };
+    // Slots only ever grow: an abandoned request may still complete into a
+    // slot's buffers after the depth changes, so none is freed before the
+    // device is. `slot_count` is the rotation in use.
     std::vector<Slot> slots;
+    std::size_t slot_count = 1;
+
+    // Set by GpuAudioTransport while it hosts the node (the private hosting
+    // hook below). Only a hosted node pipelines: a direct process_block()
+    // caller keeps block-in, block-out semantics.
+    bool transport_hosted = false;
 
     // Blocks the CPU convolution still owes output for: after the last block
     // routed to it, the IR tail of that block spans this many more blocks.
@@ -428,6 +438,7 @@ bool GpuConvolver::prepare() {
     {
         auto fresh = std::make_unique<StagedReadbackState>();
         fresh->breaker = staged_readback_->breaker;
+        fresh->transport_hosted = staged_readback_->transport_hosted;
         staged_readback_ = std::move(fresh);
     }
     if (channels_ == 0 || block_ == 0 || sample_rate_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
@@ -1168,7 +1179,7 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
     auto& staged = *staged_readback_;
     const std::uint32_t pipeline = staged.pipeline_blocks;
     const std::uint64_t call = staged.calls.fetch_add(1, std::memory_order_relaxed);
-    auto& submit_slot = staged.slots[call % staged.slots.size()];
+    auto& submit_slot = staged.slots[call % staged.slot_count];
 
     const bool lost = gpu_->device_lost();
     if (lost)
@@ -1208,7 +1219,7 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         // complex multiply by the resident IR spectrum, inverse FFT — in a
         // single submit with a single readback.
         if (pipeline > 0) {
-            submit_staged_readback(staged, call % staged.slots.size());
+            submit_staged_readback(staged, call % staged.slot_count);
         } else if (provider_policy_ == ProviderPolicy::StagedBlocking) {
             submit_slot.done = gpu_->convolve_batch(in_pad_.data(), submit_slot.result.data(),
                                                     fft_size_, channels_);
@@ -1232,7 +1243,7 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         output.clear();
         return;
     }
-    auto& due = staged.slots[(call - pipeline) % staged.slots.size()];
+    auto& due = staged.slots[(call - pipeline) % staged.slot_count];
     bool gpu_ok =
         due.attempted && due.done && due.status == render::GpuCompute::ReadbackStatus::Success;
     // A result that has not landed is now late; its completion is discarded.
@@ -1335,30 +1346,61 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
 }
 
 void GpuConvolver::configure_staged_pipeline() {
-    // The staged async path gives the GPU all of the lead but one block: the
-    // result for block N is judged latency_blocks - 1 calls later, and the one
-    // primed block left is the worker's own scheduling slack. At the default
-    // lead of 2 that is one block. The blocking escape hatch, the diagnostic
-    // trial paths, a node with no staged device and a one-block lead decide
-    // each block inside its call.
+    // When a transport hosts the node, the staged async path gives the GPU all
+    // of the lead but one block: the result for block N is judged
+    // latency_blocks - 1 calls later, and the one primed block left is the
+    // worker's own scheduling slack (one block at the default lead of 2). The
+    // transport primes that many fewer blocks, so total latency is unchanged.
+    // Called directly, the node keeps block N in, block N out, and decides each
+    // block inside its call (bounded wait). So do the blocking escape hatch,
+    // the diagnostic trial paths, a node with no staged device and a one-block
+    // lead.
     auto& staged = *staged_readback_;
-    staged.pipeline_blocks = gpu_ && !trial_configured_ && !trial_staged_sync_reference_ &&
-                                     provider_policy_ != ProviderPolicy::StagedBlocking &&
-                                     latency_blocks_ >= 2
-                                 ? latency_blocks_ - 1u
-                                 : 0u;
+    staged.pipeline_blocks =
+        staged.transport_hosted && gpu_ && !trial_configured_ && !trial_staged_sync_reference_ &&
+                provider_policy_ != ProviderPolicy::StagedBlocking && latency_blocks_ >= 2
+            ? latency_blocks_ - 1u
+            : 0u;
     staged.calls.store(0, std::memory_order_relaxed);
+    staged.slot_count = staged.pipeline_blocks + 1u;
+    if (staged.slots.size() < staged.slot_count)
+        staged.slots.resize(staged.slot_count);
     const auto cplx = static_cast<std::size_t>(fft_size_) * 2u;
-    staged.slots.resize(staged.pipeline_blocks + 1u);
     for (auto& slot : staged.slots) {
-        slot = {};
+        // A completion still in flight is ignored from here on (its id no
+        // longer matches); its buffers stay allocated.
+        slot.id = 0;
+        slot.attempted = false;
+        slot.done = false;
+        slot.status = render::GpuCompute::ReadbackStatus::Failed;
         slot.result.assign(cplx * channels_, 0.0f);
         slot.input.assign(static_cast<std::size_t>(block_) * channels_, 0.0f);
         slot.input_ptrs.resize(channels_);
         for (uint32_t ch = 0; ch < channels_; ++ch)
             slot.input_ptrs[ch] = slot.input.data() + static_cast<std::size_t>(ch) * block_;
     }
+    staged.pending_id = 0;
 }
+
+namespace detail {
+bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
+    auto* convolver = dynamic_cast<GpuConvolver*>(node);
+    if (convolver == nullptr || !convolver->staged_readback_)
+        return false;
+    auto& staged = *convolver->staged_readback_;
+    if (staged.transport_hosted == hosted)
+        return true;
+    staged.transport_hosted = hosted;
+    if (!convolver->prepared_)
+        return true;
+    try {
+        convolver->configure_staged_pipeline();
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
+} // namespace detail
 
 std::uint64_t GpuConvolver::staged_gpu_blocks() const noexcept {
     return staged_readback_->gpu_blocks;

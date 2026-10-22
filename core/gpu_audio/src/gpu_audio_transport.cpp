@@ -4,6 +4,7 @@
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -111,6 +112,19 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     release();
     if (node == nullptr)
         return false;
+
+    // Opt the node into worker pipelining before reading its descriptor; a
+    // node that pipelines declares worker_pipeline_blocks only while hosted.
+    // Undone if preparation fails, and by release().
+    detail::set_worker_pipeline_hosting(node, true);
+    struct HostingGuard {
+        GpuAudioNode* node;
+        bool keep = false;
+        ~HostingGuard() {
+            if (!keep)
+                detail::set_worker_pipeline_hosting(node, false);
+        }
+    } hosting{node};
 
     // The descriptor is the single source of truth for channels/block/latency.
     const GpuAudioNodeDescriptor desc = node->descriptor(); // host thread — may allocate
@@ -233,6 +247,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         worker_running_.store(true, std::memory_order_release);
         worker_ = std::thread([this] { worker_loop(); });
     }
+    hosting.keep = true;
     return true;
 }
 
@@ -307,6 +322,9 @@ void GpuAudioTransport::release() noexcept {
     out_fptrs_.clear();
     rejected_input_ptrs_.clear();
     rejected_output_ptrs_.clear();
+    // The worker has stopped: return the node to block-in, block-out use.
+    if (node_ != nullptr)
+        detail::set_worker_pipeline_hosting(node_, false);
     node_ = nullptr;
     realtime_gpu_context_ = nullptr;
     realtime_gpu_process_ = nullptr;

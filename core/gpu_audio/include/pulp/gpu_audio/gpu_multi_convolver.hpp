@@ -163,6 +163,12 @@ public:
     std::uint64_t block_counter_ = 0;
 
     bool prepared_ = false;
+
+    // Blocks convolve_stereo() has been asked for since prepare(), and the one
+    // at which it first found the device lost (UINT64_MAX until then). Atomic
+    // because status readers report them from other threads.
+    std::atomic<std::uint64_t> blocks_seen_{0};
+    std::atomic<std::uint64_t> loss_block_{UINT64_MAX};
 };
 
 } // namespace pulp::gpu_audio

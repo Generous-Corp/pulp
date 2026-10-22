@@ -49,6 +49,7 @@ namespace detail {
 struct RealtimeGpuNodePath;
 struct RealtimeGpuHealth;
 struct GpuConvolverTestAccess;
+bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept;
 struct SharedIoProviderIdentity;
 SharedIoProviderIdentity realtime_gpu_provider_identity(GpuAudioNode*) noexcept;
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
@@ -370,6 +371,7 @@ class GpuConvolver : public GpuAudioNode {
         GpuConvolver&, std::vector<detail::SharedIoTraceAdmission>&) noexcept;
     friend std::uint64_t detail::gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
     friend struct detail::GpuConvolverTestAccess;
+    friend bool detail::set_worker_pipeline_hosting(GpuAudioNode*, bool) noexcept;
 
     struct SharedIoState;
 
