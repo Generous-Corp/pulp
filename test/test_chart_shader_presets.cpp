@@ -611,7 +611,20 @@ TEST_CASE("faders without a chart render as before", "[view][shader][chart-prese
             digest = (digest ^ byte) * 1099511628211ull;
         INFO("stock fader digest " << (vertical ? "vertical " : "horizontal ") << std::hex
                                    << digest);
-        CHECK(stock.rgba == cleared.rgba);
+        // Report where the renders part, rather than dumping both buffers.
+        size_t first_diff = stock.rgba.size();
+        size_t diff_bytes = 0;
+        for (size_t i = 0; i < stock.rgba.size() && i < cleared.rgba.size(); ++i) {
+            if (stock.rgba[i] == cleared.rgba[i])
+                continue;
+            ++diff_bytes;
+            first_diff = std::min(first_diff, i);
+        }
+        INFO("differing bytes " << std::dec << diff_bytes << ", first at pixel ("
+                                << (first_diff / 4) % static_cast<size_t>(stock.width) << ", "
+                                << (first_diff / 4) / static_cast<size_t>(stock.width) << ")");
+        CHECK(stock.rgba.size() == cleared.rgba.size());
+        CHECK(diff_bytes == 0);
         CHECK(count_differing(stock.rgba, charted.rgba) > 40);
     }
 #else
