@@ -44,6 +44,21 @@ enum class FastTrigProfile : std::uint8_t {
 /// Pulp's contraction policy (tools/cmake/PulpFloatingPointContraction.cmake:
 /// Clang contracts within an expression, GCC does not).
 ///
+/// Choosing a tanh — one family, four points on the cost/accuracy curve
+/// (worst absolute error over every float input; cost relative to `tanh()`
+/// in a vectorised block loop on Apple Silicon):
+///
+/// | Function          | Worst error | Cost  | Clamp                          |
+/// |-------------------|-------------|-------|--------------------------------|
+/// | `tanh()`          | 6.7e-4      | 1x    | at 4: a 6.7e-4 step (a seam)   |
+/// | `tanh_minimax()`  | 3.8e-6      | ~1x   | at 7: slope-matched, 4e-7 step |
+/// | `tanh_accurate()` | 3.0e-7      | ~1.3x | at 9, branch-free              |
+/// | `std::tanh`       | exact       | ~7-10x| none                           |
+///
+/// `tanh()` keeps its results for existing callers; prefer `tanh_minimax()`
+/// where it would be used, and `tanh_accurate()` inside a resonant recursion
+/// whose loop gain amplifies saturator error.
+///
 /// @code
 /// float out = FastMath::tanh(input);       // ~4x faster than std::tanh
 /// float freq = FastMath::exp2(pitch);
@@ -468,10 +483,15 @@ public:
 ///   and alias levels match to 0.001 dB and resonant ringing frequency and
 ///   decay are unchanged. About 2.4x the throughput of std::tanh. This is the
 ///   default.
-/// - `realtime_efficient`: the Padé `FastMath::tanh`. Its hard clamp at
-///   |x| = 4, where tanh is still climbing, changes the overdrive character
-///   (about -63 dBFS pointwise, -69 dBFS in the filtered output at +10 dBFS
-///   drive and high resonance); kept for callers that ask for it explicitly.
+/// - `realtime_efficient`: `FastMath::tanh_minimax`, within 3.8e-6 of
+///   std::tanh for every input and continuous in value and slope where it
+///   clamps at |x| = 7. Cheapest per evaluation at normal levels; under heavy
+///   drive `accurate` can be faster, because this form's division is on the
+///   recursion's critical path for every argument below 7. The Lambert
+///   `FastMath::tanh` is not offered here: its clamp at |x| = 4 is a 6.7e-4
+///   step that a hard-driven ladder crosses every cycle (about -63 dBFS
+///   pointwise, -69 dBFS in the filtered output at +10 dBFS drive and high
+///   resonance).
 enum class LadderSaturation { exact, accurate, realtime_efficient };
 
 /// Selecting the default ladder saturator at build time:
@@ -512,7 +532,7 @@ template <auto Saturation>
     requires std::is_same_v<decltype(Saturation), LadderSaturation>
 inline float ladder_tanh_profiled(float x) {
     if constexpr (Saturation == LadderSaturation::realtime_efficient)
-        return FastMath::tanh(x);
+        return FastMath::tanh_minimax(x);
     else if constexpr (Saturation == LadderSaturation::accurate)
         return FastMath::tanh_accurate(x);
     else

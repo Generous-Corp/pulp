@@ -944,7 +944,7 @@ a working convolution and would hide the bug. Assert
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
 | [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting, plus causal minimum-phase reconstruction |
 | [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
-| Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter; the per-stage saturator is a `LadderSaturation` choice (`exact` `std::tanh`, default `accurate` `FastMath::tanh_accurate`, or `realtime_efficient` Padé) |
+| Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter; the per-stage saturator is a `LadderSaturation` choice (`exact` `std::tanh`, default `accurate` `FastMath::tanh_accurate`, or `realtime_efficient` `FastMath::tanh_minimax`) |
 | Ladder Bank | `ladder_bank.hpp` | `LadderBankT<T, Voices>`: a fixed number of independent ladder voices advanced in lockstep as SIMD lanes (`process()` one sample, `process_voices()` a block; one sample rate for all voices), each bit-identical to a `LadderFilterT` with the default saturator |
 | Linkwitz-Riley | `linkwitz_riley.hpp` | Phase-aligned crossover filter for splitting audio into frequency bands |
 | State Variable (TPT) | `svf.hpp` / `tpt_filter.hpp` | Topology-preserving transform filter — simultaneous LP/HP/BP/notch outputs |

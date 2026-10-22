@@ -541,7 +541,7 @@ for (int i = 0; i < num_samples; ++i)
 | `process(float)` | Filter one sample. |
 | `process(float*, int)` | Filter buffer in-place. |
 | `process_reference(...)` | Same, with exact `std::tanh` stages (one sample or a buffer). |
-| `process_realtime_efficient(...)` | Same, with the cheaper Padé tanh (one sample or a buffer). |
+| `process_realtime_efficient(...)` | Same, with the cheaper `FastMath::tanh_minimax` (one sample or a buffer). |
 | `reset()` | Clear all stage states. |
 
 Each stage saturates for analog-style nonlinearity. The feedback path creates resonance: `resonance * 4.0 * (stage[3] - input * 0.5)`.
@@ -550,8 +550,10 @@ The saturator is a `LadderSaturation` choice. The default, `accurate`, is
 `FastMath::tanh_accurate`: within 3.0e-7 of `std::tanh` (3.6e-7 without fused
 multiply-add) and about 2.4x its throughput, keeping the filter's output within
 -124 dBFS of the exact-tanh ladder for input up to 0 dBFS (-102 dBFS at
-+20 dBFS drive). `exact` is `std::tanh`; `realtime_efficient` is the Padé
-`FastMath::tanh`, whose clamp at |x| = 4 audibly changes heavy overdrive.
++20 dBFS drive). `exact` is `std::tanh`; `realtime_efficient` is
+`FastMath::tanh_minimax`, within 3.8e-6 of `std::tanh` and slope-matched where
+it clamps at |x| = 7, so heavy overdrive keeps its character (the Lambert
+`FastMath::tanh` it replaces stepped by 6.7e-4 at |x| = 4).
 Select the build default with `PULP_SIGNAL_LADDER_SATURATION` = 0 (exact),
 1 (accurate) or 2 (realtime_efficient), or call `process_reference()` /
 `process_realtime_efficient()` per call.
