@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -127,6 +129,77 @@ class CacheEnvContractTests(unittest.TestCase):
         text = SCRIPT.read_text()
         self.assertIn('note "resuming existing worktree: $wt"', text)
         self.assertNotIn('worktree remove', text.split("cmd_new()", 1)[1].split("cmd_env()", 1)[0])
+
+
+class HostCcacheConfigTests(unittest.TestCase):
+    """Gate VMs mount the shared ccache directory read-write, so its
+    ccache.conf is guest-writable. A guest that plants `prefix_command` there
+    must not get it run by the next host build: host ccache reads its own
+    config (CCACHE_CONFIGPATH) beside the mounted directory."""
+
+    def test_the_host_reads_a_config_outside_the_shared_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            env = _emit_env(PULP_CI_CACHE=root, PULP_SKIA_CACHE_KEYING="0")
+            values = dict(line[len("export "):].split("=", 1)
+                          for line in env.splitlines() if line.startswith("export CCACHE_"))
+            config = values["CCACHE_CONFIGPATH"].strip('"')
+            cache = values["CCACHE_DIR"].strip('"')
+            self.assertEqual(config, f"{root}/ccache-host.conf")
+            self.assertFalse((config + "/").startswith(cache + "/"), (config, cache))
+
+    def test_a_config_inside_the_shared_cache_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            for inside in (f"{root}/ccache", f"{root}/ccache/ccache.conf"):
+                with self.subTest(path=inside):
+                    environ = dict(os.environ, PULP_CI_CACHE=root,
+                                   PULP_SKIA_CACHE_KEYING="0",
+                                   PULP_HOST_CCACHE_CONFIG=inside)
+                    r = subprocess.run(["bash", str(SCRIPT), "env", "feature/example"],
+                                       capture_output=True, text=True, encoding="utf-8",
+                                       check=False, env=environ)
+                    self.assertNotEqual(r.returncode, 0)
+                    self.assertIn("guest-writable", r.stderr)
+
+    def host_compile(self, root: Path, *, keep_configpath: bool) -> bool:
+        """Compile one file through ccache with the host environment, after a
+        guest planted prefix_command in the shared ccache.conf; whether the
+        planted command ran."""
+        marker = root / "planted-ran"
+        planted = root / "planted.sh"
+        planted.write_text(f'#!/bin/sh\ntouch "{marker}"\nexec "$@"\n', encoding="utf-8")
+        planted.chmod(0o755)
+        shared = root / "ccache"
+        shared.mkdir(exist_ok=True)
+        (shared / "ccache.conf").write_text(f"prefix_command = {planted}\n", encoding="utf-8")
+        source = root / "unit.c"
+        # A fresh body every call: a cache hit compiles nothing, so it would
+        # skip prefix_command and read as "not run" whatever the config.
+        source.write_text(f"int unit(void) {{ return 0x{os.urandom(3).hex()}; }}\n",
+                          encoding="utf-8")
+        env_text = _emit_env(PULP_CI_CACHE=str(root), PULP_SKIA_CACHE_KEYING="0")
+        script = env_text + ("" if keep_configpath else "unset CCACHE_CONFIGPATH\n") + \
+            f'ccache cc -c "{source}" -o "{root}/unit.o"\n'
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                           encoding="utf-8", check=False, timeout=120,
+                           env=dict(os.environ, HOME=str(root)))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((root / "unit.o").exists(), "the compile ran")
+        ran = marker.exists()
+        marker.unlink(missing_ok=True)
+        (root / "unit.o").unlink(missing_ok=True)
+        return ran
+
+    @unittest.skipUnless(shutil.which("ccache") and shutil.which("cc"),
+                         "needs ccache and cc on PATH")
+    def test_a_planted_prefix_command_never_runs_in_a_host_build(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertFalse(self.host_compile(root, keep_configpath=True),
+                             "the host build ran the guest's prefix_command")
+            # Negative control, after: on the same cache, without the host
+            # config, the plant does run, so the check above could see it.
+            self.assertTrue(self.host_compile(root, keep_configpath=False),
+                            "control: ccache reads the shared ccache.conf")
 
 
 if __name__ == "__main__":
