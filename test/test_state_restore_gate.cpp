@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <ctime>
 #include <thread>
 #include <vector>
 
@@ -230,3 +231,36 @@ TEST_CASE("Silence zeroes every output channel",
     REQUIRE(out_r[0] == 0.0f);
     REQUIRE(out_r[1] == 0.0f);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("A restore waiting on a long render sleeps instead of spinning",
+          "[format][state-restore][gate]") {
+    // A render can hold the gate for a whole block. The restoring thread must
+    // block until that render finishes, not burn a core yielding in a loop.
+    StateRestoreGate gate;
+    std::atomic<bool> restored{false};
+    double restore_cpu_ms = 0.0;
+    std::thread restorer;
+    {
+        auto render = gate.lock_for_render();
+        REQUIRE(render);
+        restorer = std::thread([&] {
+            timespec start{}, end{};
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            {
+                auto restore = gate.lock_for_restore();
+                restored.store(true);
+            }
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            restore_cpu_ms = static_cast<double>(end.tv_sec - start.tv_sec) * 1e3 +
+                             static_cast<double>(end.tv_nsec - start.tv_nsec) / 1e6;
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        REQUIRE_FALSE(restored.load());
+    }  // the render finishes here
+    restorer.join();
+    REQUIRE(restored.load());
+    // A yield loop spends most of the 300 ms on the CPU.
+    REQUIRE(restore_cpu_ms < 60.0);
+}
+#endif

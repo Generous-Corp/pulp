@@ -25,7 +25,8 @@
 ///     a passthrough) for that block. It never blocks, never takes a mutex,
 ///     never allocates.
 ///   - The restoring thread raises the "restoring" flag on the same atomic and
-///     then waits for the in-flight render count to drain to zero. Both sides
+///     then waits for the in-flight render count to drain to zero: a short
+///     spin, then an atomic wait that a render finishing under the flag wakes. Both sides
 ///     read-modify-write one atomic word, so every render either registered
 ///     before the flag went up (and the restore waits for it) or sees the flag
 ///     (and refuses). Once the count is zero, no audio reader is inside
@@ -92,7 +93,12 @@ public:
         RenderLock(const RenderLock&) = delete;
         RenderLock& operator=(const RenderLock&) = delete;
         ~RenderLock() {
-            if (gate_) gate_->state_.fetch_sub(1, std::memory_order_release);
+            if (!gate_) return;
+            const std::uint32_t prev =
+                gate_->state_.fetch_sub(1, std::memory_order_acq_rel);
+            // Only a render that finishes while a restore waits pays for the
+            // wake-up; an uncontended block is one atomic decrement.
+            if ((prev & kRestoring) != 0) gate_->state_.notify_all();
         }
 
         explicit operator bool() const noexcept { return gate_ != nullptr; }
@@ -142,9 +148,18 @@ public:
     /// from `process()`.
     RestoreLock lock_for_restore() {
         std::unique_lock<std::mutex> writer(writer_mutex_);
-        state_.fetch_or(kRestoring, std::memory_order_acq_rel);
-        while ((state_.load(std::memory_order_acquire) & kRenderMask) != 0)
+        std::uint32_t current = state_.fetch_or(kRestoring, std::memory_order_acq_rel) | kRestoring;
+        // A render in flight usually finishes within microseconds, so spin
+        // briefly; after that, sleep until a finishing render wakes us rather
+        // than burning a core for the rest of a long block.
+        for (int spin = 0; spin < kSpinsBeforeWait && (current & kRenderMask) != 0; ++spin) {
             std::this_thread::yield();
+            current = state_.load(std::memory_order_acquire);
+        }
+        while ((current & kRenderMask) != 0) {
+            state_.wait(current, std::memory_order_acquire);
+            current = state_.load(std::memory_order_acquire);
+        }
         return RestoreLock(*this, std::move(writer));
     }
 
@@ -158,6 +173,7 @@ public:
 private:
     static constexpr std::uint32_t kRestoring = 0x8000'0000u;
     static constexpr std::uint32_t kRenderMask = ~kRestoring;
+    static constexpr int kSpinsBeforeWait = 64;
     static_assert(std::atomic<std::uint32_t>::is_always_lock_free,
                   "the render side of the gate must be lock-free");
 
