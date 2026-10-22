@@ -40,6 +40,7 @@
 #include <pulp/canvas/canvas.hpp>
 
 #include <atomic>
+#include <objc/runtime.h>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -619,6 +620,108 @@ TEST_CASE("a silent source-bound meter editor stops painting on both mac plugin 
                 [window close];
             }
         }
+    }
+}
+
+namespace smoke {
+
+/// Records the region AppKit is redrawing (-getRectsBeingDrawn:count: on the
+/// host's NSView, valid only inside its drawRect:) while the CPU host paints
+/// the tree.
+class ClipProbeView : public view::View {
+public:
+    void paint(canvas::Canvas&) override {
+        if (!host_view) return;
+        const NSRect* rects = nullptr;
+        NSInteger count = 0;
+        [host_view getRectsBeingDrawn:&rects count:&count];
+        NSRect u = NSZeroRect;
+        for (NSInteger i = 0; i < count; ++i) u = NSUnionRect(u, rects[i]);
+        last_clip = u;
+        ++paints;
+    }
+    NSView* __unsafe_unretained host_view = nil;
+    NSRect last_clip = NSZeroRect;
+    int paints = 0;
+};
+
+} // namespace smoke
+
+TEST_CASE("the mac CPU plugin host redraws only a bounded repaint's rect",
+          "[plugin-host][mac][display-link][partial-repaint]") {
+    // A knob value tick asks for its own box (request_repaint_self). The CPU
+    // host used to answer every request with -setNeedsDisplay:YES, so AppKit
+    // re-rasterized the whole editor for one knob or one meter; now the rect
+    // reaches -setNeedsDisplayInRect: and only that region is redrawn.
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        NSWindow* window = [[NSWindow alloc]
+            initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                      styleMask:NSWindowStyleMaskTitled
+                        backing:NSBackingStoreBuffered
+                          defer:NO];
+        if (!window || !window.contentView) SKIP("No Cocoa window available.");
+
+        auto root = std::make_unique<view::View>();
+        auto probe_owned = std::make_unique<smoke::ClipProbeView>();
+        auto* probe = probe_owned.get();
+        probe_owned->set_position(view::View::Position::absolute);
+        probe_owned->flex().preferred_width = static_cast<float>(smoke::kW);
+        probe_owned->flex().preferred_height = static_cast<float>(smoke::kH);
+        root->add_child(std::move(probe_owned));
+        auto knob_owned = std::make_unique<view::Knob>();
+        auto* knob = knob_owned.get();
+        knob_owned->set_position(view::View::Position::absolute);
+        knob_owned->set_left(20);
+        knob_owned->set_top(20);
+        knob_owned->flex().preferred_width = 64;
+        knob_owned->flex().preferred_height = 64;
+        root->add_child(std::move(knob_owned));
+
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = false;
+        auto host = view::PluginViewHost::create(*root, opts);
+        REQUIRE(host != nullptr);
+        REQUIRE_FALSE(host->is_gpu_backed());
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        probe->host_view = (__bridge NSView*)host->native_handle();
+
+        int frames = 0;
+        while (probe->paints == 0 && frames < 200) {
+            smoke::pump_run_loop(1);
+            ++frames;
+        }
+        if (probe->paints == 0) {
+            host->detach();
+            host.reset();
+            [window close];
+            SKIP("The CPU host never painted (no display link / window server).");
+        }
+        smoke::pump_run_loop(5);
+
+        // A bounded request: only the knob's box (plus halo) is redrawn.
+        const int before = probe->paints;
+        knob->set_value(knob->value() > 0.5f ? 0.1f : 0.9f);
+        smoke::pump_run_loop(5);
+        REQUIRE(probe->paints > before);
+        INFO("bounded clip: " << probe->last_clip.size.width << "x" << probe->last_clip.size.height);
+        CHECK(probe->last_clip.size.width <= 64 + 16);
+        CHECK(probe->last_clip.size.height <= 64 + 16);
+        CHECK(probe->last_clip.size.width >= 64);
+
+        // Control: a rect-less request still redraws the whole editor.
+        const int before_full = probe->paints;
+        root->request_repaint();
+        smoke::pump_run_loop(5);
+        REQUIRE(probe->paints > before_full);
+        CHECK(probe->last_clip.size.width >= smoke::kW);
+        CHECK(probe->last_clip.size.height >= smoke::kH);
+
+        host->detach();
+        host.reset();
+        root.reset();
+        [window close];
     }
 }
 

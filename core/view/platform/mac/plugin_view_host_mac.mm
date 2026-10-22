@@ -1406,6 +1406,13 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     if (flag && self.onNeedsDisplay) self.onNeedsDisplay();
 }
 
+// A bounded repaint (a meter's own rect) arrives here instead; it must open
+// the same gate.
+- (void)setNeedsDisplayInRect:(NSRect)rect {
+    [super setNeedsDisplayInRect:rect];
+    if (self.onNeedsDisplay) self.onNeedsDisplay();
+}
+
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     if (self.onWindowChange) self.onWindowChange();
@@ -1528,6 +1535,9 @@ public:
             if (parent_view && view_) {
                 [parent_view addSubview:view_];
                 [view_ setNeedsDisplay:YES];
+                // That whole-view mark is the first frame's full repaint, so
+                // the next bounded request can stay bounded.
+                damage_.clear();
             }
         }
     }
@@ -1560,9 +1570,37 @@ public:
             display_deferred_to_paint_ = true;
             return;
         }
+        // A bounded request (View::request_repaint(Rect) -> mark_dirty_region)
+        // invalidates only its rect, so AppKit re-rasterizes that region of
+        // the backing store instead of the whole editor. AppKit keeps the
+        // region until it draws, so the damage is taken here.
+        const auto damage = damage_.take();
         @autoreleasepool {
-            [view_ setNeedsDisplay:YES];
+            if (damage.is_bounded())
+                [view_ setNeedsDisplayInRect:view_rect_for_root_rect(damage.bounds())];
+            else
+                [view_ setNeedsDisplay:YES];
         }
+    }
+
+    // Root-space rect -> this NSView's (unflipped) coordinates, through the
+    // same design-viewport transform drawRect: paints with, outset by a pixel
+    // so antialiased edges are re-cleared.
+    NSRect view_rect_for_root_rect(const Rect& r) const {
+        const NSRect b = view_.bounds;
+        const float bw = static_cast<float>(b.size.width);
+        const float bh = static_cast<float>(b.size.height);
+        float sx = 1.0f, sy = 1.0f, tx = 0.0f, ty = 0.0f;
+        if (view_.designW > 0.0f && view_.designH > 0.0f &&
+            !WindowHost::compute_design_viewport_transform(bw, bh, view_.designW, view_.designH,
+                                                          sx, sy, tx, ty)) {
+            return b;
+        }
+        const CGFloat x = r.x * sx + tx - 1.0;
+        const CGFloat top = r.y * sy + ty - 1.0;
+        const CGFloat w = r.width * sx + 2.0;
+        const CGFloat h = r.height * sy + 2.0;
+        return NSIntegralRect(NSMakeRect(x, bh - (top + h), w, h));
     }
 
     // The CPU host repaints only on input (setNeedsDisplay) by default, which
@@ -1807,6 +1845,7 @@ public:
         @autoreleasepool {
             [view_ setFrameSize:NSMakeSize(width, height)];
             [view_ setNeedsDisplay:YES];
+            damage_.clear();  // covered by the whole-view mark above
         }
     }
 
