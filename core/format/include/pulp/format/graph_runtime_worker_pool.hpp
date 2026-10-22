@@ -137,6 +137,15 @@ public:
         worker_park_hook_ = hook;
         worker_park_context_ = context;
     }
+    // Install before start(). Workers never take the cold-idle path, so run()
+    // always finds every worker hot and dispatches instead of running inline.
+    // A test that asserts worker admission needs this: without it, a caller
+    // descheduled for longer than the hot idle window lets a worker park, and
+    // run() then correctly falls back to inline execution.
+    void keep_workers_hot_for_test() noexcept {
+        assert(!running_.load(std::memory_order_acquire));
+        keep_workers_hot_for_test_ = true;
+    }
     // Claim the cold-transition gate from the control thread. While it is held
     // no worker can park (each park CAS fails and the worker keeps spinning),
     // which is how a test builds a pool that provably never idles. run() and
@@ -229,6 +238,7 @@ private:
     void* fallback_join_context_for_test_ = nullptr;
     void (*worker_park_hook_)(void*) noexcept = nullptr;
     void* worker_park_context_ = nullptr;
+    bool keep_workers_hot_for_test_ = false;
     // Kept in every build so test-hook and production class layouts remain
     // identical. The pointer is null in every shipping path.
     SchedulingReceiptHook scheduling_receipt_hook_for_test_ = nullptr;

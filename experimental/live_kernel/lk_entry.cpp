@@ -97,9 +97,9 @@ LK_EXPORT double lk_alloc_count()  { return (double)g_alloc_count; }
 LK_EXPORT float f2_tanhf(float x)          { return std::tanh(x); }
 // The ladder's saturator routes through signal::ladder_tanh — the SAME helper
 // LadderFilterT<float> uses — so the emitted module stays bit-exact to the
-// interpreter no matter how the fidelity gate is set. By default that is exact
-// std::tanh; with PULP_SIGNAL_FAST_LADDER_TANH=1 both become the Padé
-// FastMath::tanh. Routing the ladder — and only the ladder — through this export
+// interpreter no matter how the fidelity gate is set. By default that is
+// FastMath::tanh_accurate; with PULP_SIGNAL_FAST_LADDER_TANH=1 both become the
+// Padé FastMath::tanh. Routing the ladder — and only the ladder — through this export
 // (rather than f2_tanhf) is what lets the two sides stay in lockstep; the
 // waveshaper's tanh_clip curve still wants real libm tanh via f2_tanhf above.
 LK_EXPORT float f2_ladder_tanhf(float x)   { return pulp::signal::ladder_tanh(x); }

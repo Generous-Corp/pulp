@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 146,
+  "inventory_version": 147,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,15 +42,15 @@
     }
   ],
   "counts": {
-    "public_headers": 506,
-    "reviewed_headers": 235,
-    "legacy_unreviewed_headers": 271,
+    "public_headers": 508,
+    "reviewed_headers": 241,
+    "legacy_unreviewed_headers": 267,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 66,
-      "legacy_unreviewed": 271,
+      "infrastructure": 72,
+      "legacy_unreviewed": 267,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -85,9 +85,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 273,
-        "reviewed_headers": 132,
-        "legacy_unreviewed_headers": 141,
+        "public_headers": 275,
+        "reviewed_headers": 138,
+        "legacy_unreviewed_headers": 137,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -2321,7 +2321,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/biquad.hpp",
-      "fingerprint": "sha256:938e359bcd792fb4b8d4205d94ec5ab2db6684ec99ea1f927a417539cb09c55b",
+      "fingerprint": "sha256:4396cab523a1485c43cf26aa82e0b37c375fe081a803ee0cb62a849fd7260119",
       "include": "pulp/signal/biquad.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -2531,7 +2531,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/compressor.hpp",
-      "fingerprint": "sha256:9bf4c81430a11eedaae9e69b19dd8c5ce9fd5c50191e111fe86c3cada3e73fb3",
+      "fingerprint": "sha256:5c1974f731de731d31ec324ff586854f003d987279367c2e939c7eceaca98b46",
       "include": "pulp/signal/compressor.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -2636,11 +2636,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/denormal.hpp",
-      "fingerprint": "sha256:e9b473e4eebb1c10a1fc3d0e2610d8082a6cdd8a7e0c939c077b152addf74c91",
+      "fingerprint": "sha256:a8a9433f0bd463d455260b3b1470571ce1f139722b4cb8acfe42f0e142ed56f4",
       "include": "pulp/signal/denormal.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Denormal handling helpers: flush-to-zero scopes, value snapping, and the shared snap-chunk length recursive filters use to bound subnormal decay within a block. Internal numeric hygiene that processors call from their own process(); it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -2873,7 +2873,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/drum/tom.hpp",
-      "fingerprint": "sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+      "fingerprint": "sha256:df13e3f7a6452302cc25acea7e84bd52aa77008e5ecbd46ad5517b14011f9d68",
       "include": "pulp/signal/drum/tom.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3004,7 +3004,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
-      "fingerprint": "sha256:0819835609a2b5287293638d869edac03e2e9d916d90ca98bb77e5b94289e9be",
+      "fingerprint": "sha256:197df79ace67e56c1e12ad85c6d87ff3dcb1aff985dd20a12e3ac90fb2ba36c4",
       "include": "pulp/signal/fast_math.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3349,7 +3349,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/graphic_eq.hpp",
-      "fingerprint": "sha256:63dafa17e4e4650647680a41b29ab3db78435aecf2136adc0195c827102d4d25",
+      "fingerprint": "sha256:a556beb98a3e89254fe51ff90866a8290246410a7e4ae6e0b9f0f3a8cbc2561f",
       "include": "pulp/signal/graphic_eq.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3428,8 +3428,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/ladder_bank.hpp",
+      "fingerprint": "sha256:4b69722977f1fc7c92ae2aff3d0864b5c264bdc49d4fa86fc9d5bdc51a4c44e9",
+      "include": "pulp/signal/ladder_bank.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Runs N ladder-filter voices in lockstep structure-of-arrays lanes, each voice bit-identical to LadderFilter. A voice-processing primitive for polyphonic processors; it makes no installed agent capability claim of its own."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/ladder_filter.hpp",
-      "fingerprint": "sha256:1c586ff41aceec5c574002dbb5d9ae8b7d4a052c5e605a5fd27988fc7d7a7399",
+      "fingerprint": "sha256:399f80b1a8d01250ac1cbad10b0c511dc5cf465e1d48a85b9489828f8908a16a",
       "include": "pulp/signal/ladder_filter.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -3922,7 +3931,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/parametric_eq.hpp",
-      "fingerprint": "sha256:a213fcce6ab12b3e62108af2ad99a414e875ba6245969ff1b7c037d67ab4151a",
+      "fingerprint": "sha256:7fac0742c304d74e201ece2799ee172c81805e3f7bf1ba5dcc7a8fab70d5fbb6",
       "include": "pulp/signal/parametric_eq.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4067,11 +4076,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/processor_duplicator.hpp",
-      "fingerprint": "sha256:053dfa828a26904b3fc1403c956f24e1fc0b0a9dc582fd5eb3b7f6c8ccabc0e9",
+      "fingerprint": "sha256:33de816a4f93227ff63d3e78e95cb43c3a40731a113548622a98e4653f177298",
       "include": "pulp/signal/processor_duplicator.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Runs one mono processor instance per channel and dispatches to a processor's block path when it has one. Composition infrastructure for multichannel use of existing DSP rather than a generator surface; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -4227,7 +4236,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:429d4f7631c77db36e446bb91359d053059dd767f123d9e45dffd96efa4105e5",
+      "fingerprint": "sha256:605bf3df3ea2937f290f83e8430baf9ef7f3c605faf08cfdbb5b7db206cea736",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4254,7 +4263,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/six_band_eq.hpp",
-      "fingerprint": "sha256:85f2051455ad88b04aa92f73aa44605ec07007acd8761df8deecaa755b08066a",
+      "fingerprint": "sha256:25699c04e11bdd358bbde25071f8528ec81bfddd3a5defda58f1afc3556def09",
       "include": "pulp/signal/six_band_eq.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4292,7 +4301,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/sos_cascade.hpp",
-      "fingerprint": "sha256:8cdd74d36ba12f1b19d85a28d57b501e5b96f8c3a1eae3f82cd96dbb7f027d79",
+      "fingerprint": "sha256:5518e99675c45d7f60acb4f60c9d117eef430beaaba40d75af68ea6084fc3ce1",
       "include": "pulp/signal/sos_cascade.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4529,11 +4538,20 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/svf.hpp",
-      "fingerprint": "sha256:5de2664969eb9eebd63e1af7791a5f9738cc857686102d8cde57fe7174e896f4",
+      "fingerprint": "sha256:50341bc965475434473aaca48a378ca56c4c19d757922fd1b2ae23406a5ebb66",
       "include": "pulp/signal/svf.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Trapezoidal state-variable filter with lowpass/highpass/bandpass/notch modes, a pure design() for its coefficients, and a register-resident block path. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/svf_bank.hpp",
+      "fingerprint": "sha256:feedf8dd0862d2fe70a0640b2f3c4cccb684ff045052f713d11fc31f527ea5d2",
+      "include": "pulp/signal/svf_bank.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Runs N state-variable-filter voices in lockstep structure-of-arrays lanes with a per-voice mode, each voice bit-identical to Svf. A voice-processing primitive for polyphonic processors; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -4587,11 +4605,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/tpt_filter.hpp",
-      "fingerprint": "sha256:280fe931e00700159f4fb526b5f35e08228c4091c09068b111a89d21fc46a974",
+      "fingerprint": "sha256:2e70a37436a0e624d192e38cd15dbf71c936230d21577b35271251d97b04b69c",
       "include": "pulp/signal/tpt_filter.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "First-order topology-preserving-transform lowpass/highpass/allpass with per-sample and block paths. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",

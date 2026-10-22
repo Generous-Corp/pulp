@@ -188,11 +188,23 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
         return std::isfinite(output) ? output : SampleType{};
     }
 
+    /// Process a block in place. A design crossfade runs sample by sample;
+    /// once none is pending, the rest of the block goes through the active
+    /// cascade's block path, which matches the sample path (see
+    /// SosCascadeT::process(SampleType*, std::size_t)).
     bool process_block(SampleType* samples, std::size_t frames) noexcept {
         if (samples == nullptr && frames != 0)
             return false;
-        for (std::size_t i = 0; i < frames; ++i)
-            samples[i] = process(samples[i]);
+        if (!prepared())
+            return true;
+        detail::transition_then_block(
+            frames, [&] { return transitioning(); },
+            [&](std::size_t i) { samples[i] = process(samples[i]); },
+            [&](std::size_t first, std::size_t count) {
+                cascades_[active_index_].process(samples + first, count);
+                for (std::size_t i = first; i < first + count; ++i)
+                    samples[i] = std::isfinite(samples[i]) ? samples[i] : SampleType{};
+            });
         return true;
     }
 

@@ -540,9 +540,25 @@ for (int i = 0; i < num_samples; ++i)
 | `set_resonance(float)` | Set resonance. Clamped to [0, 1]. Values near 1 self-oscillate. |
 | `process(float)` | Filter one sample. |
 | `process(float*, int)` | Filter buffer in-place. |
+| `process_reference(...)` | Same, with exact `std::tanh` stages (one sample or a buffer). |
+| `process_realtime_efficient(...)` | Same, with the cheaper Padé tanh (one sample or a buffer). |
 | `reset()` | Clear all stage states. |
 
-Uses `tanh()` saturation per stage for analog-style nonlinearity. The feedback path creates resonance: `resonance * 4.0 * (stage[3] - input * 0.5)`.
+Each stage saturates for analog-style nonlinearity. The feedback path creates resonance: `resonance * 4.0 * (stage[3] - input * 0.5)`.
+
+The saturator is a `LadderSaturation` choice. The default, `accurate`, is
+`FastMath::tanh_accurate`: within 3.0e-7 of `std::tanh` (3.6e-7 without fused
+multiply-add) and about 2.4x its throughput, keeping the filter's output within
+-124 dBFS of the exact-tanh ladder for input up to 0 dBFS (-102 dBFS at
++20 dBFS drive). `exact` is `std::tanh`; `realtime_efficient` is the Padé
+`FastMath::tanh`, whose clamp at |x| = 4 audibly changes heavy overdrive.
+Select the build default with `PULP_SIGNAL_LADDER_SATURATION` = 0 (exact),
+1 (accurate) or 2 (realtime_efficient), or call `process_reference()` /
+`process_realtime_efficient()` per call.
+
+For many voices in lockstep (a polyphonic synth), `LadderBank<Voices>` runs
+them as SIMD lanes with output bit-identical to separate filters, several
+times faster than a loop over `LadderFilter` instances.
 
 **Sample rate dependency:** `set_sample_rate()` required.
 

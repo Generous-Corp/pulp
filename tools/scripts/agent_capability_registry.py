@@ -408,7 +408,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/compressor.hpp", "sha256:9bf4c81430a11eedaae9e69b19dd8c5ce9fd5c50191e111fe86c3cada3e73fb3"),
+            ("pulp/signal/compressor.hpp", "sha256:5c1974f731de731d31ec324ff586854f003d987279367c2e939c7eceaca98b46"),
             ("pulp/signal/diode_bridge_compressor.hpp", "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3"),
             ("pulp/signal/feedforward_compressor.hpp", "sha256:afcd1e63df356725f2256c0b449900c894e1120f016ac511512cc94b11263524"),
             ("pulp/signal/fet_compressor.hpp", "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee"),
@@ -773,7 +773,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:0819835609a2b5287293638d869edac03e2e9d916d90ca98bb77e5b94289e9be",
+        "fingerprint": "sha256:197df79ace67e56c1e12ad85c6d87ff3dcb1aff985dd20a12e3ac90fb2ba36c4",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -784,7 +784,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/ladder_filter.hpp",
-        "fingerprint": "sha256:1c586ff41aceec5c574002dbb5d9ae8b7d4a052c5e605a5fd27988fc7d7a7399",
+        "fingerprint": "sha256:399f80b1a8d01250ac1cbad10b0c511dc5cf465e1d48a85b9489828f8908a16a",
         "disposition": "capability_support",
         "capability_keys": ["signal.drum-tom-voice"],
         "rationale": (
@@ -804,7 +804,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:938e359bcd792fb4b8d4205d94ec5ab2db6684ec99ea1f927a417539cb09c55b",
+        "fingerprint": "sha256:4396cab523a1485c43cf26aa82e0b37c375fe081a803ee0cb62a849fd7260119",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -856,7 +856,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:429d4f7631c77db36e446bb91359d053059dd767f123d9e45dffd96efa4105e5",
+        "fingerprint": "sha256:605bf3df3ea2937f290f83e8430baf9ef7f3c605faf08cfdbb5b7db206cea736",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1316,6 +1316,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/denormal.hpp",
+        "fingerprint": "sha256:a8a9433f0bd463d455260b3b1470571ce1f139722b4cb8acfe42f0e142ed56f4",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Denormal handling helpers: flush-to-zero scopes, value snapping, and the shared "
+            "snap-chunk length recursive filters use to bound subnormal decay within a block. "
+            "Internal numeric hygiene that processors call from their own process(); it makes "
+            "no installed agent capability claim of its own."
+        ),
+    },
+    {
         "include": "pulp/signal/convolver.hpp",
         "fingerprint": "sha256:f2324d75e7b1fde411c4907b5f2b5f4f4a2849e4877a7b45cf9bd368d6da7564",
         "disposition": "infrastructure",
@@ -1438,6 +1450,63 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "latency reporting. A bounded DSP primitive a processor drives from its own "
             "process(), documented in the signal guide; it makes no installed agent "
             "capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/processor_duplicator.hpp",
+        "fingerprint": "sha256:33de816a4f93227ff63d3e78e95cb43c3a40731a113548622a98e4653f177298",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Runs one mono processor instance per channel and dispatches to a processor's "
+            "block path when it has one. Composition infrastructure for multichannel use of "
+            "existing DSP rather than a generator surface; it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/svf.hpp",
+        "fingerprint": "sha256:50341bc965475434473aaca48a378ca56c4c19d757922fd1b2ae23406a5ebb66",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Trapezoidal state-variable filter with lowpass/highpass/bandpass/notch modes, a "
+            "pure design() for its coefficients, and a register-resident block path. A "
+            "bounded DSP primitive documented in the signal guide; it makes no installed "
+            "agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/tpt_filter.hpp",
+        "fingerprint": "sha256:2e70a37436a0e624d192e38cd15dbf71c936230d21577b35271251d97b04b69c",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "First-order topology-preserving-transform lowpass/highpass/allpass with "
+            "per-sample and block paths. A bounded DSP primitive documented in the signal "
+            "guide; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/ladder_bank.hpp",
+        "fingerprint": "sha256:4b69722977f1fc7c92ae2aff3d0864b5c264bdc49d4fa86fc9d5bdc51a4c44e9",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Runs N ladder-filter voices in lockstep structure-of-arrays lanes, each voice "
+            "bit-identical to LadderFilter. A voice-processing primitive for polyphonic "
+            "processors; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/svf_bank.hpp",
+        "fingerprint": "sha256:feedf8dd0862d2fe70a0640b2f3c4cccb684ff045052f713d11fc31f527ea5d2",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Runs N state-variable-filter voices in lockstep structure-of-arrays lanes with a "
+            "per-voice mode, each voice bit-identical to Svf. A voice-processing primitive for "
+            "polyphonic processors; it makes no installed agent capability claim of its own."
         ),
     },
 ]

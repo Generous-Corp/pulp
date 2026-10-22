@@ -2334,6 +2334,7 @@
   "pulp-generate-control-protocol-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
+  "pulp-gpu-wavenet-scaling-bench",
   "pulp-gpu-wgpu-native-staged-diagnostic",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
@@ -2383,6 +2384,7 @@
   "pulp-test-baked-graph-processor-parity",
   "pulp-test-baked-node-fixture",
   "pulp-test-beat-repeat-kernel",
+  "pulp-test-biquad-scalar-lanes",
   "pulp-test-browser-capture-backend",
   "pulp-test-browser-capture-import",
   "pulp-test-build-check",
@@ -2539,6 +2541,7 @@
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
   "pulp-test-faithful-port-toolkit",
+  "pulp-test-fast-math-no-contract",
   "pulp-test-fdn-reverb",
   "pulp-test-fdn-reverb-catalog",
   "pulp-test-fir-filter",
@@ -3225,6 +3228,7 @@
   "android-smoke": {
    "entry": "tools/scripts/android_smoke.sh",
    "inputs": [
+    "android",
     "tools/scripts/android_smoke.sh"
    ],
    "kind": "shell"
@@ -3826,6 +3830,7 @@
   "check-pulp-cli-hook": {
    "entry": "test/test_check_pulp_cli_hook.sh",
    "inputs": [
+    "hooks/scripts/check-pulp-cli.sh",
     "test/test_check_pulp_cli_hook.sh"
    ],
    "kind": "shell"
@@ -3957,7 +3962,11 @@
   "claude-md-sync-hook": {
    "entry": "test/test_claude_md_sync_hook.sh",
    "inputs": [
+    ".codex/hooks.json",
+    "hooks/hooks.json",
     "hooks/scripts/claude_md_sync.py",
+    "hooks/scripts/pulp-claude-md-sync-session",
+    "hooks/scripts/pulp_claude_md_sync_install.py",
     "test/test_claude_md_sync_hook.sh"
    ],
    "kind": "shell"
@@ -4188,6 +4197,7 @@
   "confirm-failure-harness": {
    "entry": "tools/scripts/test_confirm_failure.sh",
    "inputs": [
+    "tools/scripts/confirm_failure.sh",
     "tools/scripts/test_confirm_failure.sh"
    ],
    "kind": "shell"
@@ -4620,6 +4630,7 @@
   "ensure-signing-ready": {
    "entry": "tools/scripts/test_ensure_signing_ready.sh",
    "inputs": [
+    "tools/scripts/ensure_signing_ready.sh",
     "tools/scripts/test_ensure_signing_ready.sh"
    ],
    "kind": "shell"
@@ -5022,7 +5033,8 @@
   "governed-build-wrapper": {
    "entry": "test/test_governed_build.sh",
    "inputs": [
-    "test/test_governed_build.sh"
+    "test/test_governed_build.sh",
+    "tools/ci/governed-build.sh"
    ],
    "kind": "shell"
   },
@@ -6339,6 +6351,8 @@
   "host-vitals-selftest": {
    "entry": "tools/scripts/test_host_vitals.sh",
    "inputs": [
+    "tools/scripts/host_vitals.sh",
+    "tools/scripts/host_vitals_sensor.sh",
     "tools/scripts/test_host_vitals.sh"
    ],
    "kind": "shell"
@@ -6542,6 +6556,7 @@
   "inject-claude-prefs-hook": {
    "entry": "test/test_inject_claude_prefs_hook.sh",
    "inputs": [
+    "hooks/scripts/inject-claude-prefs.sh",
     "test/test_inject_claude_prefs_hook.sh"
    ],
    "kind": "shell"
@@ -6549,6 +6564,7 @@
   "inject-worktree-lineage-hook": {
    "entry": "test/test_inject_worktree_lineage_hook.sh",
    "inputs": [
+    "hooks/scripts/inject-worktree-lineage.sh",
     "test/test_inject_worktree_lineage_hook.sh"
    ],
    "kind": "shell"
@@ -6616,7 +6632,8 @@
   "install-control-broker-activation": {
    "entry": "test/test_install_control_broker_activation.sh",
    "inputs": [
-    "test/test_install_control_broker_activation.sh"
+    "test/test_install_control_broker_activation.sh",
+    "tools/install/install.sh"
    ],
    "kind": "shell"
   },
@@ -6631,14 +6648,16 @@
   "install-sh-platform-detect": {
    "entry": "test/test_install_platform_detect.sh",
    "inputs": [
-    "test/test_install_platform_detect.sh"
+    "test/test_install_platform_detect.sh",
+    "tools/install/install.sh"
    ],
    "kind": "shell"
   },
   "install-sh-runs-sdk-install": {
    "entry": "test/test_install_sh_runs_sdk_install.sh",
    "inputs": [
-    "test/test_install_sh_runs_sdk_install.sh"
+    "test/test_install_sh_runs_sdk_install.sh",
+    "tools/install/install.sh"
    ],
    "kind": "shell"
   },
@@ -7063,11 +7082,15 @@
    "inputs": [
     ".github/workflows",
     ".github/workflows/build.yml",
+    "core/audio/include/pulp/audio/buffer_ops.hpp",
+    "core/audio/src/buffer_ops.cpp",
     "core/gpu_audio/CMakeLists.txt",
     "core/host",
     "core/host/include",
     "core/host/include/pulp/host/custom_node_type.hpp",
     "core/host/include/pulp/host/signal_graph.hpp",
+    "core/runtime/include/pulp/runtime/seqlock.hpp",
+    "core/runtime/include/pulp/runtime/simd.hpp",
     "docs/status",
     "docs/status/consumption-profiles.json",
     "docs/status/consumption-profiles.schema.json",
@@ -7080,6 +7103,9 @@
     "test/fixtures/sample-region-compat/expected/abi.txt",
     "test/sample_region_compat/compat_runner.cpp",
     "test/support",
+    "test/test_buffer_ops.cpp",
+    "test/test_meter_source.cpp",
+    "test/test_sync_race_hammer.cpp",
     "tools/ci",
     "tools/ci/build_dir_lock.py",
     "tools/ci/changed_surface_lane_reds.json",
@@ -7244,6 +7270,16 @@
    "inputs": [],
    "kind": "python"
   },
+  "proxmox-ephemeral-windows-runner-selftest": {
+   "entry": "tools/ci/test_proxmox_ephemeral_runner_windows.py",
+   "inputs": [
+    "tools/ci/proxmox-ephemeral-runner-windows.sh",
+    "tools/ci/proxmox-host-health.sh",
+    "tools/ci/pulp-windows-ephemeral-pool@.service",
+    "tools/ci/test_proxmox_ephemeral_runner_windows.py"
+   ],
+   "kind": "python"
+  },
   "proxmox-host-watch-selftest": {
    "entry": "tools/ci/test_proxmox_host_watch.py",
    "inputs": [
@@ -7320,6 +7356,7 @@
   "pulp-cli-autoupdate-hook": {
    "entry": "test/test_pulp_cli_autoupdate.sh",
    "inputs": [
+    "hooks/scripts/pulp-cli-autoupdate.sh",
     "test/test_pulp_cli_autoupdate.sh"
    ],
    "kind": "shell"
@@ -7436,7 +7473,9 @@
   "pulp-installer-mcp-contract": {
    "entry": "test/test_pulp_installer_mcp_contract.sh",
    "inputs": [
-    "test/test_pulp_installer_mcp_contract.sh"
+    "test/test_pulp_installer_mcp_contract.sh",
+    "tools/install/install.ps1",
+    "tools/install/install.sh"
    ],
    "kind": "shell"
   },
@@ -7520,7 +7559,9 @@
   "pulp-test-timeout-enforced": {
    "entry": "test/test_ctest_timeout_kills_wedged.sh",
    "inputs": [
-    "test/test_ctest_timeout_kills_wedged.sh"
+    "test/test_ctest_timeout_kills_wedged.sh",
+    "tools/cmake",
+    "tools/cmake/PulpTestTimeout.cmake"
    ],
    "kind": "shell"
   },
@@ -7668,6 +7709,7 @@
   "pulp.vellum-closure-edge-negative": {
    "entry": "tools/scripts/confirm_failure.sh",
    "inputs": [
+    "tools/ci/governed-build.sh",
     "tools/scripts/confirm_failure.sh",
     "tools/scripts/vellum_closure_edge_fixture.json"
    ],
@@ -7734,6 +7776,7 @@
   "pulp.vellum-closure-external-input-negative": {
    "entry": "tools/scripts/confirm_failure.sh",
    "inputs": [
+    "tools/ci/governed-build.sh",
     "tools/scripts/confirm_failure.sh",
     "tools/scripts/vellum_closure_external_input_fixture.json"
    ],
@@ -7772,6 +7815,7 @@
   "pulp.vellum-closure-gate-negative": {
    "entry": "tools/scripts/confirm_failure.sh",
    "inputs": [
+    "tools/ci/governed-build.sh",
     "tools/scripts/confirm_failure.sh",
     "tools/scripts/vellum_closure_gate_fixture.json"
    ],
@@ -9346,6 +9390,7 @@
   "retry-git-clone": {
    "entry": "test/test_retry_git_clone.sh",
    "inputs": [
+    "setup.sh",
     "test/test_retry_git_clone.sh"
    ],
    "kind": "shell"
@@ -11447,6 +11492,7 @@
   "setup-cache-lock": {
    "entry": "tools/scripts/test_setup_cache_lock.sh",
    "inputs": [
+    "setup.sh",
     "tools/scripts/test_setup_cache_lock.sh"
    ],
    "kind": "shell"
@@ -11454,6 +11500,14 @@
   "setup-source-cache": {
    "entry": "tools/scripts/test_setup_source_cache.sh",
    "inputs": [
+    "CMakeLists.txt",
+    "setup.sh",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpFetchContent.cmake",
+    "tools/cmake/PulpPatchChoc.cmake",
+    "tools/deps/manifest.json",
+    "tools/deps/shared-source-contract.txt",
+    "tools/deps/wgpu_native_digests.py",
     "tools/scripts/test_setup_source_cache.sh"
    ],
    "kind": "shell"
@@ -11568,7 +11622,8 @@
   "spectr-roundtrip-window-only-capture": {
    "entry": "test/test_spectr_roundtrip_window_only_capture.sh",
    "inputs": [
-    "test/test_spectr_roundtrip_window_only_capture.sh"
+    "test/test_spectr_roundtrip_window_only_capture.sh",
+    "tools/import-validation/spectr-roundtrip.sh"
    ],
    "kind": "shell"
   },
@@ -11910,6 +11965,7 @@
   "tool-registry-reminder-hook": {
    "entry": "test/test_tool_registry_reminder_hook.sh",
    "inputs": [
+    "hooks/scripts/tool-registry-reminder.sh",
     "test/test_tool_registry_reminder_hook.sh"
    ],
    "kind": "shell"
@@ -12368,7 +12424,8 @@
   "worktree-lineage-selftest": {
    "entry": "tools/scripts/test_worktree_lineage.sh",
    "inputs": [
-    "tools/scripts/test_worktree_lineage.sh"
+    "tools/scripts/test_worktree_lineage.sh",
+    "tools/scripts/worktree_lineage.sh"
    ],
    "kind": "shell"
   },

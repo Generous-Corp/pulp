@@ -132,7 +132,7 @@ adding a build command anywhere, derive `--parallel`/`-j` from the governor: a
 literal is a silent ceiling that survives a VM resize, a core count is the melt.
 
 **External SDKs** (not committed, cloned at configure time or manually):
-- VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)
+- VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.1_build_84`)
 - AudioUnitSDK → `external/AudioUnitSDK` (Apache 2.0, `git clone --depth 1`)
 - CLAP → fetched automatically via CMake FetchContent
 - Skia → pre-built binaries in `external/skia-build/`
