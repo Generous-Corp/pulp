@@ -1132,33 +1132,36 @@ public:
     /// Whether this processor reads sample-accurate parameter automation:
     /// `param_events()`, a `state::ParamCursor`, or `for_each_subblock()`.
     ///
-    /// Default false. The VST3, AU v2 and CLAP adapters then deliver each
-    /// automated parameter's last value in a block, written to the store once
-    /// before `process()`, `param_events()` is empty, and AU v2 renders the
-    /// whole buffer in one call instead of one call per scheduled slice. That
-    /// is what a processor that reads parameters once per block needs, and it
-    /// keeps dense host automation from costing time per point.
+    /// Default true: the VST3, AU v2 and CLAP adapters deliver every automation
+    /// point in `param_events()` with its sample offset, and the store holds
+    /// each parameter's end-of-block value during `process()`. AU v2 renders
+    /// one call per scheduled slice unless
+    /// `wants_au_scheduled_parameter_slices()` returns false.
     ///
-    /// Return true to receive every automation point with its sample offset.
-    /// VST3, CLAP and AU v2 then render the block in one `process()` call
-    /// with the points in `param_events()`; the store holds each parameter's
-    /// end-of-block value. Asked once, when the adapter creates the processor.
+    /// Return false from a processor that reads its parameters once per block
+    /// (`state().get_value()`) and never looks at the queue. Those adapters
+    /// then write each automated parameter's last value in the block to the
+    /// store once, before `process()`, leave `param_events()` empty, and AU v2
+    /// renders the whole buffer in one call, so dense host automation costs
+    /// nothing per point. Asked once, when the adapter creates the processor.
     /// Other hosting paths (AU v3, LV2, AAX, the standalone and headless hosts,
     /// graph nodes) deliver every point either way. Appended to preserve
     /// additive-only vtable ordering (node_abi_gate).
     virtual bool wants_sample_accurate_parameters() const {
-        return false;
+        return true;
     }
 
-    /// For a processor that wants sample-accurate parameters and reads the
-    /// store per call instead of `param_events()`: return true and AU v2
-    /// renders one `process()` call per slice between scheduled events, with
-    /// the store at each slice's starting value and the slice's points in
-    /// `param_events()` relative to the slice. Default false: one call per
-    /// buffer, as in VST3 and CLAP. Other formats ignore it. Appended to
+    /// AU v2 only, and only for a processor that wants sample-accurate
+    /// parameters. Default true: one `process()` call per slice between
+    /// scheduled events, with the store at each slice's starting value and
+    /// the slice's points in `param_events()` relative to the slice. Return
+    /// false from a processor that reads automation only through
+    /// `param_events()` (or a `ParamCursor` over it) to render the buffer in
+    /// one call, as VST3 and CLAP do: every point at its buffer offset and the
+    /// store at its end-of-buffer value. Other formats ignore it. Appended to
     /// preserve additive-only vtable ordering (node_abi_gate).
     virtual bool wants_au_scheduled_parameter_slices() const {
-        return false;
+        return true;
     }
 
 private:

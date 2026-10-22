@@ -1291,10 +1291,13 @@ times, and the first real render runs it once and settles the trigger.
 
 ## Scheduled automation renders once; slicing is a second opt-in
 
-Sample-accurate automation is opt-in: `Processor::wants_sample_accurate_parameters()`
-(default false, asked once when the adapter creates the processor). Either
-way `ProcessForScheduledParams` writes each owned parameter's end-of-buffer
-value (immediates in time order, a ramp's value at the buffer end) as one batch
+Sample-accurate automation is the default and block-rate is the opt-out:
+`Processor::wants_sample_accurate_parameters()` (default true) and
+`wants_au_scheduled_parameter_slices()` (default true), both asked once when
+the adapter creates the processor. The defaults keep the per-slice render
+described below, which is what every processor got before the hooks existed.
+Opted out of either, `ProcessForScheduledParams` writes each owned parameter's
+end-of-buffer value (immediates in time order, a ramp's value at the buffer end) as one batch
 and renders the whole buffer in one `AUEffectBase::ProcessScheduledSlice(0,
 frames)` call, as VST3 and CLAP do. Opted out, `param_events()` is empty.
 Opted in, the events are sorted and every point goes to `param_events()` at
@@ -1307,9 +1310,11 @@ that render so the render path keeps the queue. The `[parity]` cases in
 (`test/support/step_gain_fixture.hpp`) and require the same output to the bit,
 and a schedule one sample late must differ.
 
-The per-slice render described below runs only for a processor that also
-returns true from `wants_au_scheduled_parameter_slices()`: one that reads the
-store inside each slice instead of `param_events()`.
+The per-slice render described below runs for a sample-accurate processor
+that keeps `wants_au_scheduled_parameter_slices()` at its default of true: it
+may read the store inside each slice instead of `param_events()`. Tests that
+care which render they get must set both hooks explicitly; the shared
+step-gain fixture sets slices to false so all three formats render once.
 
 `AUBase::ProcessForScheduledParams` rescans the whole event list at every
 slice and rewrites every past event into the element map each time, and the

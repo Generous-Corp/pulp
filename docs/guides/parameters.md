@@ -171,23 +171,27 @@ carries the current absolute per-voice expression value.
 
 ## Sample-Accurate Automation
 
-A processor that wants every host automation point opts in:
+The VST3, AU v2 and CLAP adapters preserve sparse host automation points in a
+per-block `ParameterEventQueue` and expose it during `Processor::process()`,
+each point at its offset in the block. AU v2 renders one call per slice
+between scheduled events, with each slice's points relative to the slice. AU
+v3, LV2, AAX and the standalone and headless hosts deliver every point too.
+
+A processor that reads its parameters once per block, through
+`state().get_value()`, opts out:
 
 ```cpp
-bool wants_sample_accurate_parameters() const override { return true; }
+bool wants_sample_accurate_parameters() const override { return false; }
 ```
 
-The VST3, AU v2 and CLAP adapters then preserve sparse host automation points
-in a per-block `ParameterEventQueue` and expose it during
-`Processor::process()`, each point at its offset in the block, rendered in
-one call (AU v2 included: its scheduled ramps arrive as a step to the ramp's
-starting value plus a ramp to its value at the block's end). A processor that
-instead reads the store inside each AU v2 slice can also override
-`wants_au_scheduled_parameter_slices()` to keep one call per slice. Without
-the override, those adapters write each automated parameter's last value in
-the block to `StateStore` and leave the queue empty, so dense automation costs
-a block-rate processor nothing per point. AU v3, LV2, AAX and the standalone and
-headless hosts deliver every point either way. See
+Those three adapters then write each automated parameter's last value in the
+block to `StateStore`, leave the queue empty, and AU v2 renders the buffer in
+one call, so dense automation costs the processor nothing per point. A
+sample-accurate processor that reads automation only through `param_events()`
+can also override `wants_au_scheduled_parameter_slices()` to return false: AU
+v2 then renders the buffer in one call with every point at its buffer offset
+(a scheduled ramp arrives as a step to the ramp's starting value plus a ramp
+to its value at the block's end), as VST3 and CLAP do. See
 [the 0.1005.0 migration note](../migrations/v0.1005.0.md).
 
 ```cpp

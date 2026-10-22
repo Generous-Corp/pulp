@@ -1481,8 +1481,9 @@ interleaves exactly that.
 
 ## Automation points: one store write per parameter; the queue only on opt-in
 
-Sample-accurate automation is opt-in: `Processor::wants_sample_accurate_parameters()`
-(default false, asked once when the adapter creates the processor). Opted out, the decode loop reads each
+Sample-accurate automation is the default: `Processor::wants_sample_accurate_parameters()`
+(default true, asked once when the adapter creates the processor). Opted out
+(the override returns false), the decode loop reads each
 `IParamValueQueue`'s last point only, writes the store once and leaves
 `param_events_` empty and unsorted. Opted in, it does what follows.
 

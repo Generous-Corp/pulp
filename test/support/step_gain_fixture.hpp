@@ -26,8 +26,13 @@ inline constexpr std::array<std::pair<int, float>, 4> kStepGainPoints{
 class StepGainProcessor final : public format::Processor {
   public:
     static inline int process_calls = 0;
+    // Sample-accurate, and on AU v2 rendered in one call with every point at
+    // its buffer offset, so all three formats render the block the same way.
     bool wants_sample_accurate_parameters() const override {
         return true;
+    }
+    bool wants_au_scheduled_parameter_slices() const override {
+        return false;
     }
     format::PluginDescriptor descriptor() const override {
         return {

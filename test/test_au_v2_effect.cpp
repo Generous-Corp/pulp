@@ -987,7 +987,7 @@ namespace {
 
 class ScheduledAutomationProcessor final : public pulp::format::Processor {
   public:
-    // These cases cover the per-slice render a processor can opt into.
+    // These cases cover the AU v2 per-slice render.
     bool wants_sample_accurate_parameters() const override {
         return true;
     }

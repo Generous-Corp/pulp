@@ -1634,3 +1634,22 @@ TEST_CASE("value_channels() defaults to null and costs the vtable nothing",
     });
     CHECK(visited_override);
 }
+
+TEST_CASE("Processor receives sample-accurate automation unless it opts out",
+          "[format][processor][params]") {
+    // The VST3, AU v2 and CLAP adapters read these once, at creation. The
+    // defaults keep every automation point and the AU v2 per-slice render, so
+    // a processor that overrides neither behaves as it always has.
+    PlainProcessor plain;
+    CHECK(plain.wants_sample_accurate_parameters());
+    CHECK(plain.wants_au_scheduled_parameter_slices());
+
+    struct BlockRate : PlainProcessor {
+        bool wants_sample_accurate_parameters() const override {
+            return false;
+        }
+    };
+    BlockRate block_rate;
+    const Processor& as_base = block_rate;
+    CHECK_FALSE(as_base.wants_sample_accurate_parameters());
+}
