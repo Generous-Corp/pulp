@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 76,
+  "manifest_revision": 75,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -9110,10 +9110,7 @@
               "reset()",
               "set_coefficients(const BiquadCoefficientsT<U>& c)",
               "coefficients()",
-              "set_coefficients(Type type, SampleType freq_hz, SampleType q, SampleType sample_rate, SampleType gain_db = SampleType{0})",
-              "process_stereo(BiquadT& left, BiquadT& right, SampleType* left_buffer, SampleType* right_buffer, std::size_t num_samples)",
-              "process_chain(BiquadT* sections, std::size_t count, SampleType* buffer, std::size_t num_samples)",
-              "process_chain_stereo(BiquadT* left, BiquadT* right, std::size_t count, SampleType* left_buffer, SampleType* right_buffer, std::size_t num_samples)"
+              "set_coefficients(Type type, SampleType freq_hz, SampleType q, SampleType sample_rate, SampleType gain_db = SampleType{0})"
             ],
             "enums": [
               [
@@ -9127,14 +9124,6 @@
                   "peaking",
                   "low_shelf",
                   "high_shelf"
-                ]
-              ],
-              [
-                "BlockForm",
-                [
-                  "sample_order",
-                  "feedback_last",
-                  "wide_df1"
                 ]
               ]
             ]
@@ -9845,8 +9834,8 @@
               "latency_samples()",
               "process_with_sidechain(SampleType input, SampleType sidechain)",
               "process_with_sidechain(SampleType* buffer, const SampleType* sidechain, int num_samples)",
-              "attack_coefficient()",
-              "release_coefficient()"
+              "gain_reduction_db()",
+              "gain_reduction()"
             ],
             "enums": []
           },
@@ -10068,27 +10057,6 @@
               "read(int delay_samples)",
               "discard_history()",
               "max_delay()"
-            ],
-            "enums": []
-          }
-        ],
-        "denormal.hpp": [
-          {
-            "class": "SnapChunks",
-            "qualified_name": "pulp::signal::SnapChunks",
-            "template": null,
-            "methods": [
-              "begin()",
-              "end()"
-            ],
-            "enums": []
-          },
-          {
-            "class": "iterator",
-            "qualified_name": "pulp::signal::iterator",
-            "template": null,
-            "methods": [
-              "iterator(std::size_t begin, std::size_t size)"
             ],
             "enums": []
           }
@@ -11165,8 +11133,6 @@
               "sin_cycles(float phase_cycles)",
               "sin_cycles(float phase_cycles, FastTrigProfile profile)",
               "tanh(float x)",
-              "tanh_accurate(float x)",
-              "tanh_accurate_rational(float x, float u)",
               "sin(float x)",
               "cos(float x)",
               "exp2(float x)",
@@ -11174,10 +11140,10 @@
               "pow(float base, float exp)",
               "db_to_gain(float db)",
               "gain_to_db(float gain)",
-              "log10_accurate(float x)",
-              "exp10_accurate(float x)",
-              "gain_to_db_accurate(float gain)",
-              "db_to_gain_accurate(float db)"
+              "rcp(float x)",
+              "rsqrt(float x)",
+              "clamp_unit(float x)",
+              "soft_clip(float x)"
             ],
             "enums": []
           }
@@ -12372,27 +12338,6 @@
             "enums": []
           }
         ],
-        "ladder_bank.hpp": [
-          {
-            "class": "LadderBankT",
-            "qualified_name": "pulp::signal::LadderBankT",
-            "template": "typename SampleType = float, std::size_t Voices = 16",
-            "methods": [
-              "process(const SampleType* in, SampleType* out)",
-              "reset(std::size_t voice)",
-              "reset()",
-              "set_sample_rate(SampleType sample_rate)",
-              "sample_rate()",
-              "set_frequency(std::size_t voice, SampleType hz)",
-              "set_resonance(std::size_t voice, SampleType resonance)",
-              "frequency(std::size_t voice)",
-              "resonance(std::size_t voice)",
-              "stage_coefficient(std::size_t voice)",
-              "process_voices(SampleType* const* buffers, std::size_t num_samples)"
-            ],
-            "enums": []
-          }
-        ],
         "ladder_filter.hpp": [
           {
             "class": "LadderFilterT",
@@ -12406,11 +12351,7 @@
               "set_frequency(SampleType hz)",
               "set_resonance(SampleType r)",
               "process_reference(SampleType input)",
-              "process_realtime_efficient(SampleType input)",
-              "process_reference(SampleType* buffer, std::size_t num_samples)",
-              "process_realtime_efficient(SampleType* buffer, std::size_t num_samples)",
-              "stage_coefficient(SampleType cutoff_hz, SampleType sample_rate)",
-              "saturate(SampleType x)"
+              "process_realtime_efficient(SampleType input)"
             ],
             "enums": []
           }
@@ -14656,7 +14597,6 @@
               "storage_capacity()",
               "set_coefficients(std::span<BiquadCoefficientsT<CoefficientType>, Extent> coefficients, SosCascadeTransition transition = SosCascadeTransition::reset_state)",
               "set_coefficients(std::span<const BiquadCoefficientsT<CoefficientType>, Extent> coefficients, SosCascadeTransition transition = SosCascadeTransition::reset_state)",
-              "process_stereo(SosCascadeT& left, SosCascadeT& right, SampleType* left_buffer, SampleType* right_buffer, std::size_t num_samples)",
               "coefficients(std::size_t index)"
             ],
             "enums": []
@@ -15191,8 +15131,7 @@
               "set_frequency(SampleType hz)",
               "set_resonance(SampleType q)",
               "set_mode(Mode m)",
-              "configure(Mode mode, SampleType sample_rate, SampleType frequency, SampleType resonance)",
-              "design(SampleType sample_rate, SampleType frequency, SampleType resonance)"
+              "configure(Mode mode, SampleType sample_rate, SampleType frequency, SampleType resonance)"
             ],
             "enums": [
               [
@@ -15205,26 +15144,6 @@
                 ]
               ]
             ]
-          }
-        ],
-        "svf_bank.hpp": [
-          {
-            "class": "SvfBankT",
-            "qualified_name": "pulp::signal::SvfBankT",
-            "template": "typename SampleType = float, std::size_t Voices = 16",
-            "methods": [
-              "process(const SampleType* in, SampleType* out)",
-              "reset(std::size_t voice)",
-              "reset()",
-              "configure(std::size_t voice, Mode mode, SampleType sample_rate, SampleType frequency, SampleType resonance)",
-              "set_sample_rate(std::size_t voice, SampleType sample_rate)",
-              "set_frequency(std::size_t voice, SampleType hz)",
-              "set_resonance(std::size_t voice, SampleType q)",
-              "set_mode(std::size_t voice, Mode mode)",
-              "coefficients(std::size_t voice)",
-              "process_voices(SampleType* const* buffers, std::size_t num_samples)"
-            ],
-            "enums": []
           }
         ],
         "tape_machine.hpp": [
@@ -15407,10 +15326,7 @@
               "sample_rate()",
               "process_lowpass(SampleType input)",
               "process_highpass(SampleType input)",
-              "process_allpass(SampleType input)",
-              "process_lowpass(SampleType* buffer, std::size_t num_samples)",
-              "process_highpass(SampleType* buffer, std::size_t num_samples)",
-              "process_allpass(SampleType* buffer, std::size_t num_samples)"
+              "process_allpass(SampleType input)"
             ],
             "enums": []
           }
