@@ -441,6 +441,10 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->ump_buffer.reserve(kRealtimeMidiEventCapacity);
     self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
+    self->latest_param_value.assign(self->store.all_params().size(), 0.0f);
+    self->latest_param_pending.assign(self->store.all_params().size(), 0);
+    self->latest_param_touched.clear();
+    self->latest_param_touched.reserve(self->store.all_params().size());
     // Sized here, not on the audio thread: process() calls assign()/resize() to
     // all_params().size() at block start, which would grow-and-allocate on the
     // first block without this reserve (param_snapshot mirrors it above).
@@ -693,6 +697,26 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
     self->param_events.clear();
     self->modulation_events.clear();
 
+    // A block-rate processor's parameters are written once each, after the
+    // events are read, with the block's last value: CLAP delivers events in
+    // time order, so the last one read is the latest.
+    const auto params = self->store.all_params();
+    // latest_param_pending: 0 = not touched this block, 1 = a value is
+    // waiting, 2 = touched and already written (a gesture flushed it). A
+    // parameter enters latest_param_touched once per block, so the list never
+    // outgrows the capacity clap_activate() reserved.
+    const auto write_latest = [self, params](std::uint32_t index) {
+        self->latest_param_pending[index] = 2;
+        self->store.set_value_rt(params[index].id, self->latest_param_value[index]);
+    };
+    const auto flush_latest = [&](state::ParamID id) {
+        if (const auto* info = self->store.info(id)) {
+            const auto index = static_cast<std::uint32_t>(info - params.data());
+            if (index < self->latest_param_pending.size() && self->latest_param_pending[index] == 1)
+                write_latest(index);
+        }
+    };
+
     // Handle parameter, modulation, and gesture events from host
     auto* in_events = process->in_events;
     if (in_events) {
@@ -719,8 +743,18 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
                         self->param_events, self->store, static_cast<state::ParamID>(ev.param_id),
                         static_cast<int32_t>(hdr->time), static_cast<float>(ev.value));
                 } else {
-                    self->store.set_value_rt(static_cast<state::ParamID>(ev.param_id),
-                                             static_cast<float>(ev.value));
+                    const auto id = static_cast<state::ParamID>(ev.param_id);
+                    const auto* info = self->store.info(id);
+                    const auto index =
+                        info ? static_cast<std::size_t>(info - params.data()) : params.size();
+                    if (index < self->latest_param_pending.size()) {
+                        if (self->latest_param_pending[index] == 0)
+                            self->latest_param_touched.push_back(static_cast<std::uint32_t>(index));
+                        self->latest_param_pending[index] = 1;
+                        self->latest_param_value[index] = static_cast<float>(ev.value);
+                    } else {
+                        self->store.set_value_rt(id, static_cast<float>(ev.value));
+                    }
                 }
             } else if (hdr->type == CLAP_EVENT_PARAM_MOD) {
                 const auto ev = load_event<clap_event_param_mod_t>(hdr);
@@ -740,13 +774,22 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
                 }
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
                 const auto ev = load_event<clap_event_param_gesture_t>(hdr);
+                flush_latest(static_cast<state::ParamID>(ev.param_id));
                 self->store.begin_gesture(static_cast<state::ParamID>(ev.param_id));
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_END) {
                 const auto ev = load_event<clap_event_param_gesture_t>(hdr);
+                // A gesture closes on the value the host last sent for it.
+                flush_latest(static_cast<state::ParamID>(ev.param_id));
                 self->store.end_gesture(static_cast<state::ParamID>(ev.param_id));
             }
         }
     }
+    for (const auto index : self->latest_param_touched) {
+        if (self->latest_param_pending[index] == 1)
+            write_latest(index);
+        self->latest_param_pending[index] = 0;
+    }
+    self->latest_param_touched.clear();
     self->param_events.sort();
     self->modulation_events.sort();
 }

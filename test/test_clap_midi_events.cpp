@@ -3119,6 +3119,13 @@ TEST_CASE("CLAP delivers automation points only to a processor that asks for the
         ObservingParamIngressProcessor::sample_accurate = sample_accurate;
         Harness h(make_observing_param_ingress);
         REQUIRE(g_observing_param_ingress != nullptr);
+        int writes = 0;
+        auto listener = g_observing_param_ingress->state().add_listener(
+            [&](state::ParamID id, float) {
+                if (id == ObservingParamIngressProcessor::kParamId)
+                    ++writes;
+            },
+            state::ListenerThread::Audio);
         InputEventList events;
         for (uint32_t i = 0; i < 3; ++i) {
             clap_event_param_value_t ev{};
@@ -3133,10 +3140,58 @@ TEST_CASE("CLAP delivers automation points only to a processor that asks for the
         if (sample_accurate) {
             REQUIRE(g_observing_param_ingress->observed_param_event_count == 3);
             REQUIRE(g_observing_param_ingress->observed_last_sample_offset == 20);
+            REQUIRE(writes == 3);
         } else {
             REQUIRE(g_observing_param_ingress->observed_param_event_count == 0);
+            // One store write per parameter per block: the last value only.
+            REQUIRE(writes == 1);
         }
+        listener.reset();
     }
+    ObservingParamIngressProcessor::sample_accurate = true;
+}
+
+TEST_CASE("CLAP block-rate automation writes a gesture's value before the gesture closes",
+          "[clap][params][automation]") {
+    // A gesture end flushes that parameter's pending value, so the store
+    // holds what the host sent when the gesture closed; a later value in the
+    // same block is written again once, at the end.
+    ObservingParamIngressProcessor::sample_accurate = false;
+    Harness h(make_observing_param_ingress);
+    REQUIRE(g_observing_param_ingress != nullptr);
+    std::vector<float> written;
+    auto listener = g_observing_param_ingress->state().add_listener(
+        [&](state::ParamID id, float value) {
+            if (id == ObservingParamIngressProcessor::kParamId)
+                written.push_back(value);
+        },
+        state::ListenerThread::Audio);
+    InputEventList events;
+    clap_event_param_gesture_t begin{};
+    begin.header = make_header(sizeof(begin), CLAP_EVENT_PARAM_GESTURE_BEGIN, 0);
+    begin.param_id = ObservingParamIngressProcessor::kParamId;
+    events.push(begin);
+    for (const auto [time, value] : {std::pair{1u, 0.1}, std::pair{2u, 0.2}}) {
+        clap_event_param_value_t ev{};
+        ev.header = make_header(sizeof(ev), CLAP_EVENT_PARAM_VALUE, time);
+        ev.param_id = ObservingParamIngressProcessor::kParamId;
+        ev.value = value;
+        events.push(ev);
+    }
+    clap_event_param_gesture_t end{};
+    end.header = make_header(sizeof(end), CLAP_EVENT_PARAM_GESTURE_END, 5);
+    end.param_id = ObservingParamIngressProcessor::kParamId;
+    events.push(end);
+    clap_event_param_value_t later{};
+    later.header = make_header(sizeof(later), CLAP_EVENT_PARAM_VALUE, 10);
+    later.param_id = ObservingParamIngressProcessor::kParamId;
+    later.value = 0.4;
+    events.push(later);
+
+    REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(written == std::vector<float>{0.2f, 0.4f});
+    REQUIRE(g_observing_param_ingress->observed_state_value == 0.4f);
+    listener.reset();
     ObservingParamIngressProcessor::sample_accurate = true;
 }
 

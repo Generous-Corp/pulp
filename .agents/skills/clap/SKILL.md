@@ -1305,9 +1305,14 @@ it waits".
 ## Parameter events reach the queue only on opt-in
 
 Sample-accurate automation is opt-in: `Processor::wants_sample_accurate_parameters()`
-(default false, asked once when the adapter creates the processor). Opted out, `CLAP_EVENT_PARAM_VALUE` events
-are written to the store only (in event order, so the block's last one wins)
-and `param_events` stays empty; opted in, each is also queued with its
-`header.time`. Test processors that inspect the queue must override the flag;
+(default false, asked once when the adapter creates the processor). Opted
+out, `CLAP_EVENT_PARAM_VALUE` events go to the store only and `param_events`
+stays empty: each parameter's latest value is kept in scratch sized in
+`clap_activate()` and written once after the events are read, as VST3 and AU
+v2 do. A gesture end (or begin) for a parameter writes its pending value
+first, so the gesture closes on what the host last sent. Writing per event cost
+a revisioned atomic store and a listener call each time: 6.5 us per block for
+32 automated parameters at B=512. Opted in, each event is queued with its
+`header.time` and written through as before. Test processors that inspect the queue must override the flag;
 `ObservingParamIngressProcessor` in `test_clap_midi_events.cpp` shows the
 pattern.

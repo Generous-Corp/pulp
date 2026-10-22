@@ -205,6 +205,12 @@ struct PulpClapPlugin {
     std::vector<float> param_snapshot;
     // Processor::wants_sample_accurate_parameters(), asked in clap_init().
     bool sample_accurate_params = false;
+    // For a block-rate processor: each parameter's latest value in the block,
+    // indexed like StateStore::all_params(), written to the store once after
+    // the events are read. Sized in clap_activate().
+    std::vector<float> latest_param_value;
+    std::vector<std::uint8_t> latest_param_pending;
+    std::vector<std::uint32_t> latest_param_touched;
     boundary::ParamSnapshotState snapshot_state;
     std::uint64_t pre_process_generation = 0;
     // Bus views handed to the Processor. Members so a block writes only the
