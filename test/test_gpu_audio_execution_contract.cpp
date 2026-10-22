@@ -266,15 +266,18 @@ TEST_CASE("shared IO telemetry completion timing snapshots stay coherent under c
         check_snapshot();
     // Keep reading until both writers have advanced during the read phase, so
     // the coherence check cannot pass without overlapping concurrent updates.
+    // Each predicate evaluation takes a snapshot first, so overlap is never
+    // accepted without a checked read taken after the baseline.
     const bool overlapped =
         writers_started && pulp::test::pump_until(
                                [&] {
+                                   check_snapshot();
                                    return published.load(std::memory_order_relaxed) >
                                               published_before + kMinOverlappingUpdates &&
                                           resets.load(std::memory_order_relaxed) >
                                               resets_before + kMinOverlappingUpdates;
                                },
-                               check_snapshot);
+                               [] { std::this_thread::yield(); });
     stop.store(true, std::memory_order_relaxed);
     recorder.join();
     resetter.join();
