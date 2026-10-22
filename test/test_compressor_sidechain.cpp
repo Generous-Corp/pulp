@@ -541,11 +541,12 @@ TEST_CASE("Compressor decoupled detector tracks the attack knob on a tone",
         step_timing(CompressorBallistics::branching, 5.0f, 100.0f, 48000.0, 1000.0);
     const auto decoupled =
         step_timing(CompressorBallistics::decoupled, 5.0f, 100.0f, 48000.0, 1000.0);
-    CHECK(branching.attack_ms > 1.6 * 2.197 * 5.0);
-    CHECK(branching.settled_db > -10.0);
-    CHECK_THAT(decoupled.attack_ms, WithinRel(2.197 * 5.0, 0.05));
+    // The figures the signal guide and the migration note quote.
+    CHECK_THAT(branching.attack_ms, WithinRel(21.5, 0.02));
+    CHECK_THAT(branching.settled_db, WithinAbs(-9.75, 0.02));
+    CHECK_THAT(decoupled.attack_ms, WithinRel(11.0, 0.02));
     CHECK_THAT(decoupled.release_ms, WithinRel(2.197 * 100.0, 0.02));
-    CHECK_THAT(decoupled.settled_db, WithinAbs(-10.5, 0.05));
+    CHECK_THAT(decoupled.settled_db, WithinAbs(-10.49, 0.02));
 }
 
 TEST_CASE("Compressor decoupled detector distorts low tones less",
@@ -558,6 +559,19 @@ TEST_CASE("Compressor decoupled detector distorts low tones less",
         const double branching = tone_thd_n_db(CompressorBallistics::branching, hz);
         const double decoupled = tone_thd_n_db(CompressorBallistics::decoupled, hz);
         CHECK(decoupled < branching - 8.0);
+    }
+    // The THD+N table the signal guide and the migration note quote, within
+    // half a decibel.
+    struct Row {
+        double hz, branching_db, decoupled_db;
+    };
+    for (const Row row :
+         {Row{50.0, -39.5, -48.8}, Row{100.0, -45.5, -60.3}, Row{1000.0, -65.5, -99.8}}) {
+        INFO(row.hz << " Hz");
+        CHECK_THAT(tone_thd_n_db(CompressorBallistics::branching, row.hz),
+                   WithinAbs(row.branching_db, 0.5));
+        CHECK_THAT(tone_thd_n_db(CompressorBallistics::decoupled, row.hz),
+                   WithinAbs(row.decoupled_db, 0.5));
     }
 }
 
@@ -624,4 +638,38 @@ TEST_CASE("Compressor set_ballistics with the current form leaves state untouche
         every_block.process(b.data() + pos, 256);
     }
     CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
+}
+
+TEST_CASE("Compressor gain computer and ballistics are callable without audio",
+          "[signal][compressor][pipeline]") {
+    // A widget draws the transfer curve from gain_computer_db(); it must be
+    // the curve process() settles on, for hard and soft knees.
+    for (const float knee : {0.0f, 6.0f, 12.0f}) {
+        Compressor::Params p;
+        p.threshold_db = -24.0f;
+        p.ratio = 5.0f;
+        p.knee_db = knee;
+        p.attack_ms = 1.0f;
+        p.release_ms = 20.0f;
+        for (float level_db = -60.0f; level_db <= 0.0f; level_db += 3.0f) {
+            INFO("knee " << knee << " level " << level_db);
+            Compressor c;
+            c.set_sample_rate(48000.0f);
+            c.set_params(p);
+            const float x = std::pow(10.0f, level_db / 20.0f);
+            for (int i = 0; i < 48000; ++i)
+                (void)c.process(x);
+            const float curve = Compressor::gain_computer_db(Compressor::detector_level_db(x), p);
+            CHECK_THAT(c.gain_reduction_db(), WithinAbs(curve, 1e-4));
+        }
+    }
+    // The steps the two ballistics run, as pure functions.
+    const float attack = Compressor::ballistic_coefficient(5.0f, 48000.0f);
+    const float release = Compressor::ballistic_coefficient(100.0f, 48000.0f);
+    CHECK(Compressor::ballistic_coefficient(0.0f, 48000.0f) == 1.0f);
+    CHECK(Compressor::branching_step(0.0f, -10.0f, attack, release) == attack * -10.0f);
+    CHECK(Compressor::branching_step(-10.0f, 0.0f, attack, release) == -10.0f + release * 10.0f);
+    // The hold jumps to deeper reduction and releases toward shallower.
+    CHECK(Compressor::decoupled_hold(-2.0f, -10.0f, release) == -10.0f);
+    CHECK(Compressor::decoupled_hold(-10.0f, 0.0f, release) == -10.0f + release * 10.0f);
 }
