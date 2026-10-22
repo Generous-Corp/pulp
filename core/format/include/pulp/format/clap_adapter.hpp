@@ -203,9 +203,8 @@ struct PulpClapPlugin {
     // Refreshed only when the store generation moved since it was taken; the
     // post-process diff only runs when the generation moved across process().
     std::vector<float> param_snapshot;
-    std::uint64_t snapshot_generation = 0;
+    boundary::ParamSnapshotState snapshot_state;
     std::uint64_t pre_process_generation = 0;
-    bool snapshot_valid = false;
     // Bus views handed to the Processor. Members so a block writes only the
     // entries it routes instead of value-initialising every slot.
     std::array<ProcessBusBufferView<float>, kMaxOutputBuses> rt_output_buses{};

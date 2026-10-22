@@ -1038,15 +1038,8 @@ static void clap_phase_snapshot_params(
     // per-param scratch below requires a matching reserve there; the
     // `ClapSlot::process is allocation-free` rt-safety test guards this.
     self->pre_process_generation = self->store.state_generation();
-    if (!self->snapshot_valid ||
-        self->snapshot_generation != self->pre_process_generation ||
-        self->param_snapshot.size() != all_params.size()) {
-        boundary::snapshot_param_values(self->store, all_params,
-                                        self->param_snapshot);
-        self->snapshot_generation = self->pre_process_generation;
-        self->snapshot_valid =
-            self->store.state_snapshot_is_current(self->pre_process_generation);
-    }
+    boundary::refresh_param_snapshot(self->store, all_params, self->param_snapshot,
+                                     self->snapshot_state, self->pre_process_generation);
     self->output_param_has_event.assign(all_params.size(), 0);
 }
 
@@ -1453,7 +1446,7 @@ static void clap_phase_emit_output(
         // across process(): every value still equals its snapshot.
         const bool store_moved =
             self->store.state_generation() != self->pre_process_generation;
-        if (store_moved) self->snapshot_valid = false;
+        if (store_moved) self->snapshot_state.valid = false;
         for (std::size_t i = 0; store_moved && i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
             float current = self->store.get_value(all_params[i].id);

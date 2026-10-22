@@ -384,11 +384,10 @@ private:
     // advances the generation, so while it is unchanged the snapshot still
     // equals the live values and the per-block refresh is skipped; likewise the
     // post-process diff only runs when the generation moved across process().
-    // snapshot_valid_ is false until the first refresh and after a refresh that
-    // raced a concurrent writer.
-    std::uint64_t snapshot_generation_ = 0;
+    // The snapshot is untrusted until the first refresh and after a refresh
+    // that overlapped a writer (boundary::refresh_param_snapshot).
+    boundary::ParamSnapshotState snapshot_state_;
     std::uint64_t pre_process_generation_ = 0;
-    bool snapshot_valid_ = false;
 
     // Bus views handed to the Processor, kept as members so a block only
     // writes the entries it routes instead of value-initialising every slot.
@@ -403,14 +402,16 @@ private:
     std::array<int, kCachedBusCount> expected_out_channels_{};
     std::size_t cached_in_bus_count_ = 0;
     std::size_t cached_out_bus_count_ = 0;
-    bool bus_channel_cache_valid_ = false;
+    std::atomic<bool> bus_channel_cache_valid_{false};
     void refresh_bus_channel_cache();
 
-    // Runs the adapter's own per-block path once on silence at activation,
-    // without calling the Processor or publishing anything to the host, so
+    // Runs the adapter's own per-block path once on silence at activation so
     // the host's first real block does not pay to fault in cold code and
-    // buffers. While set, process() skips every Processor-, store- and
-    // host-visible side effect.
+    // buffers. It never runs Processor::process() / process_f64() and publishes
+    // nothing to the host; it does hand the Processor the per-block pointers
+    // (parameter events, output events, MPE input) that every block sets and
+    // the first real block sets again. While set, process() also skips the
+    // trigger reset and every store- and host-visible side effect.
     bool warming_render_path_ = false;
     void warm_render_path();
 

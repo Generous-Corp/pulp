@@ -53,6 +53,7 @@ struct ParameterGestureApplyResult {
 };
 
 class StateStore;
+namespace test_support { struct StateWriterProbe; }
 
 /// Opaque exact identity captured when asynchronous work is ordered against a
 /// parameter. The identity includes the value bits and a monotonic per-slot
@@ -159,6 +160,10 @@ class ParamReader {
 /// @note Value access (get_value, set_value, etc.) is lock-free and safe to
 ///       call from the audio thread.
 class StateStore {
+    // Tests drive a writer through its phases one at a time to reproduce
+    // reader/writer interleavings deterministically.
+    friend struct test_support::StateWriterProbe;
+
 public:
     StateStore();
     ~StateStore();
@@ -297,6 +302,12 @@ public:
         return state_generation_.load(std::memory_order_acquire);
     }
 
+    /// True when no writer is in flight and none has advanced the generation
+    /// past @p generation. A writer advances the generation BEFORE it stores
+    /// its value, so a snapshot of values is trustworthy only when this holds
+    /// both before the values are read and after (see
+    /// format::boundary::refresh_param_snapshot); checking only afterwards
+    /// accepts a snapshot that read a value a writer was about to replace.
     bool state_snapshot_is_current(std::uint64_t generation) const noexcept {
         return active_state_writers_.load(std::memory_order_acquire) == 0 &&
                state_generation() == generation;

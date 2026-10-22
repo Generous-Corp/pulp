@@ -999,3 +999,49 @@ TEST_CASE("parameter group projection preserves valid order and rejects invalid 
     CHECK(projection.find(0) == nullptr);
     CHECK(projection.find(50) == nullptr);
 }
+
+namespace pulp::state::test_support {
+// Drives a StateStore writer through its two phases separately: the
+// generation advance (with the writer counted in flight) and the value store.
+struct StateWriterProbe {
+    static void begin(state::StateStore& store) {
+        store.active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+        store.advance_state_generation();
+    }
+    static void finish(state::StateStore& store, state::ParamID id, float value) {
+        store.values_[store.index_of(id)].set(value);
+        store.active_state_writers_.fetch_sub(1, std::memory_order_release);
+    }
+};
+}  // namespace pulp::state::test_support
+
+TEST_CASE("Pre-process snapshot is not trusted when a writer was in flight as it began",
+          "[format][boundary][snapshot]") {
+    using Probe = state::test_support::StateWriterProbe;
+    state::StateStore store;
+    store.add_parameter({.id = 1, .name = "A", .range = {0.0f, 1.0f, 0.25f}});
+    store.add_parameter({.id = 2, .name = "B", .range = {0.0f, 1.0f, 0.5f}});
+    const auto params = store.all_params();
+    std::vector<float> snapshot;
+    boundary::ParamSnapshotState state;
+
+    // Quiet store: the snapshot is trusted and reused while nothing moves.
+    boundary::refresh_param_snapshot(store, params, snapshot, state, store.state_generation());
+    REQUIRE(state.valid);
+
+    // A writer has advanced the generation but not yet stored its value when
+    // the block reads the generation and snapshots; it stores before the
+    // snapshot's final check. The value read is the old one.
+    Probe::begin(store);
+    const auto generation = store.state_generation();
+    boundary::refresh_param_snapshot(store, params, snapshot, state, generation,
+                                     [&] { Probe::finish(store, 1, 0.75f); });
+    REQUIRE(snapshot[0] == 0.25f);
+    REQUIRE_FALSE(state.valid);
+
+    // The next block, at the same generation, must re-read rather than keep
+    // the stale value, which would later diff as a plugin-side change.
+    boundary::refresh_param_snapshot(store, params, snapshot, state, store.state_generation());
+    REQUIRE(snapshot[0] == 0.75f);
+    REQUIRE(state.valid);
+}

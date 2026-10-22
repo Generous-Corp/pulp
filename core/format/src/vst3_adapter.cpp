@@ -1007,7 +1007,7 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
 {
     // Any outcome below may rewrite bus arrangements; process() reads the SDK
     // buses directly until setActive()/setupProcessing() recaches them.
-    bus_channel_cache_valid_ = false;
+    bus_channel_cache_valid_.store(false, std::memory_order_relaxed);
     // VST3 hosts call this when the project's channel layout changes
     // (e.g. loading a stereo project over a mono plugin slot) and
     // expect the plug-in to either accept the request and apply it
@@ -1699,7 +1699,7 @@ void PulpVst3Processor::refresh_bus_channel_cache() {
     };
     cached_in_bus_count_ = fill(audioInputs, expected_in_channels_);
     cached_out_bus_count_ = fill(audioOutputs, expected_out_channels_);
-    bus_channel_cache_valid_ = true;
+    bus_channel_cache_valid_.store(true, std::memory_order_relaxed);
 }
 
 bool PulpVst3Processor::process_validate_layout(
@@ -1803,7 +1803,7 @@ bool PulpVst3Processor::process_validate_layout(
     const auto expected_width = [&](bool input, int32 b) -> int {
         const auto& cache = input ? expected_in_channels_ : expected_out_channels_;
         const std::size_t count = input ? cached_in_bus_count_ : cached_out_bus_count_;
-        if (bus_channel_cache_valid_ && static_cast<std::size_t>(b) < count)
+        if (bus_channel_cache_valid_.load(std::memory_order_relaxed) && static_cast<std::size_t>(b) < count)
             return cache[static_cast<std::size_t>(b)];
         auto* declared = FCast<AudioBus>((input ? audioInputs : audioOutputs).at(b));
         return declared ? static_cast<int>(SpeakerArr::getChannelCount(declared->getArrangement())) : -1;
@@ -2267,7 +2267,7 @@ void PulpVst3Processor::process_publish_output_params(
         store_.state_generation() == pre_process_generation_)
         return;
     // The store moved, so the snapshot no longer matches the live values.
-    snapshot_valid_ = false;
+    snapshot_state_.valid = false;
     if (data.outputParameterChanges) {
         output_param_has_event_.assign(all_params.size(), 0);
         output_param_queue_cache_.assign(all_params.size(), nullptr);
@@ -2678,12 +2678,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // it was taken. A refresh that overlapped a concurrent writer is not
     // trusted, so the next block takes it again.
     pre_process_generation_ = store_.state_generation();
-    if (!snapshot_valid_ || snapshot_generation_ != pre_process_generation_ ||
-        param_snapshot_.size() != all_params.size()) {
-        boundary::snapshot_param_values(store_, all_params, param_snapshot_);
-        snapshot_generation_ = pre_process_generation_;
-        snapshot_valid_ = store_.state_snapshot_is_current(pre_process_generation_);
-    }
+    boundary::refresh_param_snapshot(store_, all_params, param_snapshot_, snapshot_state_,
+                                     pre_process_generation_);
     processor_->set_param_events(&param_events_);
     output_param_events_.clear();
     processor_->set_output_param_events(&output_param_events_);
