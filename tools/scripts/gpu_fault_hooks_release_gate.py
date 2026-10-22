@@ -81,14 +81,27 @@ def _cache_value(cache: Path, key: str) -> str | None:
     return None
 
 
+def _walk(root: Path):
+    """os.walk that follows symlinked directories (a Components entry may be a
+    link to a build tree), visiting each real directory once."""
+    seen: set[str] = set()
+    for here, dirs, files in os.walk(root, followlinks=True):
+        real = os.path.realpath(here)
+        if real in seen:
+            dirs[:] = []
+            continue
+        seen.add(real)
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and
+                   os.path.realpath(os.path.join(here, d)) not in seen]
+        yield Path(here), dirs, files
+
+
 def _candidates(build: Path):
-    for root, dirs, files in os.walk(build):
-        here = Path(root)
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+    for here, dirs, files in _walk(build):
         in_bundle = any(part.endswith(BUNDLES) for part in here.parts)
         for name in files:
             path = here / name
-            if path.is_symlink():
+            if path.is_symlink() and not path.resolve().is_file():
                 continue
             if name.endswith(BINARY_SUFFIXES) or (in_bundle and here.name in ("MacOS",
                                                                                "x86_64-win",
@@ -99,9 +112,7 @@ def _candidates(build: Path):
 
 
 def _bundle_metadata(build: Path):
-    for root, dirs, files in os.walk(build):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        here = Path(root)
+    for here, dirs, files in _walk(build):
         if not any(part.endswith(BUNDLES) for part in here.parts):
             continue
         for name in files:
@@ -123,21 +134,35 @@ def _metadata_findings(path: Path) -> list[str]:
 
 
 def _scan(path: Path) -> list[str]:
+    """Forbidden identifiers in the file; a file that cannot be read is
+    reported too (the gate fails closed rather than call it clean)."""
     try:
         data = path.read_bytes()
-    except OSError:
-        return []
+    except OSError as exc:
+        return [f"<unreadable: {exc.strerror or exc}>"]
     return [needle.decode() for needle in FORBIDDEN if needle in data]
 
 
 def _archives(root: Path):
-    for here, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+    for here, dirs, files in _walk(root):
         for name in files:
             if name.lower().endswith(ARCHIVE_SUFFIXES):
-                path = Path(here) / name
-                if not path.is_symlink():
+                path = here / name
+                if path.resolve().is_file():
                     yield path
+
+
+def _detach(mount: Path) -> bool:
+    """Detach a disk image this gate mounted; True once it is gone."""
+    for extra in ([], ["-force"]):
+        try:
+            done = subprocess.run(["hdiutil", "detach", str(mount), *extra],
+                                  capture_output=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            continue
+        if done.returncode == 0 or not os.path.ismount(mount):
+            return True
+    return not os.path.ismount(mount)
 
 
 def _extract(archive: Path, into: Path) -> str | None:
@@ -175,17 +200,23 @@ def _extract(archive: Path, into: Path) -> str | None:
                 return "hdiutil is not available"
             mount = into / "mnt"
             mount.mkdir()
-            done = subprocess.run(["hdiutil", "attach", "-readonly", "-nobrowse", "-noautoopen",
-                                   "-mountpoint", str(mount), str(archive)],
-                                  capture_output=True, text=True, timeout=300, encoding="utf-8")
+            try:
+                done = subprocess.run(["hdiutil", "attach", "-readonly", "-nobrowse",
+                                       "-noautoopen", "-mountpoint", str(mount), str(archive)],
+                                      capture_output=True, text=True, timeout=300,
+                                      encoding="utf-8")
+            except subprocess.TimeoutExpired:
+                # It may have mounted before the timeout: never leave it attached.
+                _detach(mount)
+                return "hdiutil attach timed out"
             if done.returncode != 0:
+                _detach(mount)
                 return f"hdiutil attach failed: {done.stderr.strip()}"
             try:
                 shutil.copytree(mount, into / "dmg", symlinks=True)
             finally:
-                subprocess.run(["hdiutil", "detach", str(mount), "-force"],
-                               capture_output=True, timeout=120)
-            return None
+                detached = _detach(mount)
+            return None if detached else f"{archive.name} stayed mounted at {mount}"
     except (OSError, zipfile.BadZipFile, tarfile.TarError, subprocess.SubprocessError) as exc:
         return f"{type(exc).__name__}: {exc}"
     return "unknown archive type"
@@ -199,7 +230,7 @@ def scan_tree(root: Path, depth: int = 0) -> list[str]:
         if depth >= MAX_ARCHIVE_DEPTH:
             findings.append(f"{rel} is nested deeper than {MAX_ARCHIVE_DEPTH} archives")
             continue
-        with tempfile.TemporaryDirectory(prefix="pulp-gate-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="pulp-gate-", ignore_cleanup_errors=True) as tmp:
             why = _extract(archive, Path(tmp))
             if why is not None:
                 findings.append(f"{rel} could not be opened to scan ({why})")
@@ -208,12 +239,26 @@ def scan_tree(root: Path, depth: int = 0) -> list[str]:
     for path in _candidates(root):
         hits = _scan(path)
         if hits:
-            findings.append(f"{path.relative_to(root)} contains {', '.join(hits)}")
+            findings.append(f"{path.relative_to(root)}: {', '.join(hits)}")
     for path in _bundle_metadata(root):
         hits = _metadata_findings(path)
         if hits:
             findings.append(f"{path.relative_to(root)} names {', '.join(hits)}")
     return findings
+
+
+def scan_extra(path: Path) -> list[str]:
+    """An --extra-dir: a directory is scanned like the build, an archive is
+    opened and scanned, anything else (missing, a plain file) is a finding:
+    a mistyped path must not report clean."""
+    if path.is_dir():
+        return scan_tree(path.resolve())
+    if path.is_file() and path.name.lower().endswith(ARCHIVE_SUFFIXES):
+        with tempfile.TemporaryDirectory(prefix="pulp-gate-", ignore_cleanup_errors=True) as tmp:
+            stage = Path(tmp)
+            (stage / path.name).symlink_to(path.resolve())
+            return scan_tree(stage)
+    return [f"{path} is not a directory or an archive the gate can open"]
 
 
 def check(build: Path) -> list[str]:
@@ -248,8 +293,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     findings = check(build)
     for extra in args.extra_dir:
-        if extra.is_dir():
-            findings += [f"{extra}: {f}" for f in scan_tree(extra.resolve())]
+        findings += [f"{extra}: {f}" for f in scan_extra(extra)]
     for finding in findings:
         print(f"gpu-fault-hooks-release-gate: FOUND {finding}")
     if findings:

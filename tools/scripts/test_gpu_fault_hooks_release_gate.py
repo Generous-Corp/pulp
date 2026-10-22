@@ -174,6 +174,87 @@ class ReleaseGate(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertIn("could not be opened", findings[0])
 
+    def test_a_zip_member_escaping_the_archive_is_refused(self):
+        import zipfile
+        with zipfile.ZipFile(self.build / "slip.zip", "w") as z:
+            z.writestr("../../outside.bin", b"x")
+        findings = GATE.check(self.build)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("escapes the archive", findings[0])
+
+    def _tar_with_link(self) -> Path:
+        import tarfile
+        path = self.build / "links.tar"
+        with tarfile.open(path, "w") as tar:
+            info = tarfile.TarInfo("evil")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "/etc/passwd"
+            tar.addfile(info)
+        return path
+
+    def test_a_tar_link_is_refused_with_the_data_filter(self):
+        self._tar_with_link()
+        findings = GATE.check(self.build)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("could not be opened", findings[0])
+
+    def test_a_tar_link_is_refused_without_the_data_filter(self):
+        import tarfile
+        self._tar_with_link()
+        saved = getattr(tarfile, "data_filter", None)
+        if saved is not None:
+            del tarfile.data_filter
+            self.addCleanup(setattr, tarfile, "data_filter", saved)
+        findings = GATE.check(self.build)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("is a link or escapes", findings[0])
+
+    def test_a_symlinked_bundle_is_followed(self):
+        with tempfile.TemporaryDirectory() as elsewhere:
+            target = Path(elsewhere) / "X.component" / "Contents" / "MacOS"
+            target.mkdir(parents=True)
+            (target / "X").write_bytes(b"\xcf\xfa\xed\xfe arm_provider_fault")
+            components = self.build / "Components"
+            components.mkdir()
+            (components / "X.component").symlink_to(Path(elsewhere) / "X.component")
+            self.assertEqual(self.run_gate(), 1)
+
+    def test_a_symlink_loop_terminates(self):
+        loop = self.build / "loop"
+        loop.mkdir()
+        (loop / "again").symlink_to(loop)
+        self.assertEqual(self.run_gate(), 0)
+
+    def test_an_unreadable_binary_fails_closed(self):
+        lib = self.build / "core/gpu_audio/libpulp-gpu-audio.a"
+        os.chmod(lib, 0)
+        try:
+            if os.access(lib, os.R_OK):
+                self.skipTest("running with privileges that ignore file modes")
+            findings = GATE.check(self.build)
+        finally:
+            os.chmod(lib, 0o644)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("unreadable", findings[0])
+
+    def test_extra_paths_never_report_clean_by_mistake(self):
+        missing = self.build.parent / (self.build.name + "-missing")
+        self.assertEqual(GATE.main(["--build-dir", str(self.build), "--extra-dir",
+                                    str(missing)]), 1)
+        plain = self.build / "notes.txt"
+        plain.write_text("x", encoding="utf-8")
+        self.assertEqual(GATE.main(["--build-dir", str(self.build), "--extra-dir",
+                                    str(plain)]), 1)
+        stage = self.build.parent / (self.build.name + "-stage")
+        (stage / "X.clap/Contents/MacOS").mkdir(parents=True)
+        (stage / "X.clap/Contents/MacOS/X").write_bytes(b"resolve_run_config")
+        self.addCleanup(shutil.rmtree, stage, True)
+        archive = shutil.make_archive(str(self.build.parent / (self.build.name + "-dist")),
+                                      "zip", stage)
+        self.addCleanup(os.unlink, archive)
+        self.assertEqual(GATE.main(["--build-dir", str(self.build), "--extra-dir",
+                                    archive]), 1)
+
     def test_not_a_build_directory(self):
         (self.build / "CMakeCache.txt").unlink()
         self.assertEqual(self.run_gate(), 2)

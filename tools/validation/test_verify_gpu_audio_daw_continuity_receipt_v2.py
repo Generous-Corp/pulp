@@ -367,6 +367,46 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(self.verify(receipt, run), ("pass", "pass_plugin_capture_only"))
         self.assertEqual(self.main(run), V2.EXIT_NOT_OK)
 
+    def test_garageband_cells_still_get_every_later_check(self):
+        # Regression (independent review, item 1): the capture-only cap may
+        # never skip the realtime-block, health or per-block delivery checks.
+        gb = dict(host_id="garageband", realtime=False, mode="in_process", plugin_pid=HOST_PID,
+                  process_path=GARAGEBAND)
+        cases = {
+            "fault, delivery not met": ("fault", "force_loss_after", dict(met=False),
+                                        "inconclusive"),
+            "control, delivery not met": ("positive_control", hosts.POSITIVE_CONTROL,
+                                          dict(met=False), "control_inconclusive"),
+        }
+        for label, (kind, fault, change, outcome) in cases.items():
+            with self.subTest(label):
+                self._override_delivery(note="the GPU kept delivering", **change)
+                run = self.run_dir("gb-" + label.replace(" ", "-").replace(",", ""))
+                receipt = make_run(run, kind=kind, fault=fault, **gb)
+                self.assertEqual(self.verify(receipt, run), ("inconclusive", outcome))
+                self.assertEqual(self.main(run), V2.EXIT_NOT_OK)
+                gfc.delivery_analysis = self._real_delivery
+
+    def test_garageband_fault_on_an_offline_block_is_not_a_pass(self):
+        run = self.run_dir("gb-offline")
+        make_run(run, host_id="garageband", realtime=False, mode="in_process",
+                 plugin_pid=HOST_PID, process_path=GARAGEBAND)
+        _rewrite_events(run, lambda ev: [dict(e, offline=True) if e["event"] == "fault_fired"
+                                         else e for e in ev])
+        receipt = receipt_for(run, kind="fault", fault="force_loss_before", mode="in_process",
+                              host_id="garageband", realtime=False)
+        self.assertEqual(self.verify(receipt, run)[0], "inconclusive")
+
+    def test_a_positive_control_that_named_a_recovery_is_not_passed(self):
+        run = self.run_dir("control-recovery")
+        make_run(run, kind="positive_control", fault=hosts.POSITIVE_CONTROL)
+        _rewrite_events(run, lambda ev: [
+            dict(e, status=dict(e["status"], recovery_reason="provider-failure"))
+            if e["event"] == "health" and e["phase"] == "after" else e for e in ev])
+        receipt = receipt_for(run, kind="positive_control", fault=hosts.POSITIVE_CONTROL,
+                              mode="auhostingservice_arrow")
+        self.assertNotEqual(self.verify(receipt, run)[1], "control_passed")
+
     def test_logic_evidence_in_a_garageband_run_is_another_daw(self):
         run = self.run_dir("garageband-logic")
         receipt = make_run(run, host_id="garageband", realtime=False, mode="in_process",
@@ -378,6 +418,7 @@ class V2Receipt(unittest.TestCase):
 
     def _override_delivery(self, **change):
         real = gfc.delivery_analysis
+        self._real_delivery = real
 
         def patched(*a, **k):
             out = real(*a, **k)

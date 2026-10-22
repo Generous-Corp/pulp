@@ -237,6 +237,77 @@ class Revert(Env):
             rhs.HOSTS["bitwig"]["prefs_dir"] = saved
 
 
+class Safety(Env):
+    """Each guard that protects the owner's machine, with the case it stops."""
+
+    def bitwig_prefs(self):
+        prefs = Path(self._tmp.name) / "prefs"
+        prefs.mkdir()
+        (prefs / "a.prefs").write_bytes(b"original")
+        saved = rhs.HOSTS["bitwig"]["prefs_dir"]
+        rhs.HOSTS["bitwig"]["prefs_dir"] = str(prefs)
+        self.addCleanup(rhs.HOSTS["bitwig"].__setitem__, "prefs_dir", saved)
+        self.assertTrue(self.preflight("bitwig")[0])
+        return prefs
+
+    def test_a_second_prefs_snapshot_is_refused(self):
+        prefs = self.bitwig_prefs()
+        rhs.snapshot_prefs(self.run, "bitwig")
+        (prefs / "a.prefs").write_bytes(b"changed by the run")
+        with self.assertRaisesRegex(SystemExit, "already holds a prefs snapshot"):
+            rhs.snapshot_prefs(self.run, "bitwig")
+        rhs.revert(self.run)
+        self.assertEqual((prefs / "a.prefs").read_bytes(), b"original")
+
+    def test_a_missing_saved_copy_leaves_the_prefs_untouched(self):
+        prefs = self.bitwig_prefs()
+        rhs.snapshot_prefs(self.run, "bitwig")
+        (prefs / "a.prefs").write_bytes(b"current")
+        shutil.rmtree(self.run / "prefs-before")
+        with self.assertRaisesRegex(RuntimeError, "saved copy .* is missing"):
+            rhs.revert(self.run)
+        self.assertEqual((prefs / "a.prefs").read_bytes(), b"current")
+        self.assertEqual(len(rhs.unreverted(self.run)), 1)
+
+    def test_a_rendezvous_that_appeared_since_the_preflight_is_not_overwritten(self):
+        self.assertTrue(self.preflight()[0])
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "active.json").write_text('{"nonce": "someone-else"}', encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "another rendezvous appeared"):
+            rhs.stage(self.run, fault="force_loss_before", at_sample=FAULT, window_post=POST,
+                      stimulus_frames=FRAMES)
+        rhs.revert(self.run)
+        self.assertEqual(json.loads((self.root / "active.json").read_text(encoding="utf-8")),
+                         {"nonce": "someone-else"})
+
+    def test_another_runs_rendezvous_is_never_deleted(self):
+        self.assertTrue(self.preflight()[0])
+        st = rhs.stage(self.run, fault="force_loss_before", at_sample=FAULT, window_post=POST,
+                       stimulus_frames=FRAMES)
+        # Another run replaced it (after this one's rendezvous was lost).
+        (self.root / "active.json").write_text('{"nonce": "someone-else"}', encoding="utf-8")
+        (Path(st["plugin_run"]) / "claim").write_text("1\n2\n", encoding="utf-8")
+        rhs.await_claim(self.run, timeout=1, poll=0.01)
+        self.assertTrue((self.root / "active.json").exists())
+        entries = rhs.revert(self.run)
+        self.assertTrue((self.root / "active.json").exists())
+        self.assertFalse(Path(st["plugin_run"]).exists())
+        self.assertTrue(any(e.get("note", "").startswith("left in place") for e in entries))
+
+    def test_no_revert_while_the_host_is_running(self):
+        self.assertTrue(self.preflight()[0])
+        component = Path(self._tmp.name) / "X.component"
+        (component / "Contents").mkdir(parents=True)
+        installed = rhs.install_au(self.run, component)
+        rhs.save_state(self.run, host_pid=4242, engine_pids=[])
+        alive = [(4242, LOGIC)]
+        with self.assertRaisesRegex(RuntimeError, "REFUSING TO REVERT"):
+            rhs.revert(self.run, processes=lambda: alive, wait_s=0.05, poll=0.01)
+        self.assertTrue(installed.exists())
+        rhs.revert(self.run, processes=lambda: [], wait_s=0.05, poll=0.01)
+        self.assertFalse(installed.exists())
+
+
 class EndToEnd(Env):
     """Stage, a simulated launch and plug-in, the realtime render's
     provenance, collect: the receipt the driver writes verifies."""

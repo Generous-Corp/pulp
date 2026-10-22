@@ -228,9 +228,48 @@ def unreverted(run: Path) -> list[dict]:
     return [e for e in _read_json(run / "revert_log.json", []) if not e.get("reverted")]
 
 
+def _remove_active_if_ours(path: Path, nonce: str | None) -> bool:
+    """Delete the rendezvous only if it is still this run's (same nonce): a
+    rendezvous written by another run is never removed by this one."""
+    doc = _read_json(path, None)
+    if doc is None:
+        return not path.exists()
+    if not nonce or doc.get("nonce") != nonce:
+        log(f"leaving {path}: it belongs to another run (nonce {doc.get('nonce')!r})")
+        return False
+    path.unlink(missing_ok=True)
+    return True
+
+
+def _restore_prefs(target: Path, saved: Path) -> None:
+    """Put the saved byte copy back. The current prefs are moved aside, not
+    deleted, until the copy is in place; on any failure they are moved back."""
+    if not saved.is_dir():
+        raise RuntimeError(f"cannot restore {target}: the saved copy {saved} is missing; the "
+                           "current prefs were left untouched")
+    aside = target.with_name(f"{target.name}.wpk-revert-{now_us()}")
+    if target.exists() or target.is_symlink():
+        target.rename(aside)
+    try:
+        shutil.copytree(saved, target, symlinks=True)
+    except BaseException:
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+        if aside.exists() or aside.is_symlink():
+            aside.rename(target)
+        raise
+    if aside.exists() or aside.is_symlink():
+        shutil.rmtree(aside) if aside.is_dir() and not aside.is_symlink() else aside.unlink()
+
+
 def _revert_entry(entry: dict) -> None:
     kind = entry["kind"]
-    if kind in ("au_install", "rendezvous_run", "rendezvous_active"):
+    if kind == "rendezvous_active":
+        # Ours is removed; one that now belongs to another run is left in
+        # place (there is nothing of this run's to undo there).
+        if not _remove_active_if_ours(Path(entry["path"]), entry.get("nonce")):
+            entry["note"] = "left in place: it belongs to another run"
+    elif kind in ("au_install", "rendezvous_run"):
         path = Path(entry["path"])
         if path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)
@@ -239,19 +278,46 @@ def _revert_entry(entry: dict) -> None:
         if kind == "au_install":
             refresh_au_registry(path.parent)
     elif kind == "prefs_snapshot":
-        target, saved = Path(entry["path"]), Path(entry["saved"])
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(saved, target, symlinks=True)
+        _restore_prefs(Path(entry["path"]), Path(entry["saved"]))
     elif kind == "throwaway_project":
         shutil.rmtree(entry["path"], ignore_errors=True)
     else:
         raise ValueError(f"unknown revert kind {kind!r}")
 
 
-def revert(run: Path) -> list[dict]:
+def host_alive(run: Path, processes: Callable[[], list[tuple[int, str]]] = list_processes
+               ) -> list[int]:
+    """The launched host's processes that are still running (app and engine)."""
+    st = state(run)
+    host = HOSTS.get(st.get("host", ""), {})
+    pids = {st.get("host_pid"), *st.get("engine_pids", [])} - {None}
+    if not pids:
+        return []
+    exes = {host.get("executable", "\0")}
+    prefix = host.get("engine_prefix", "\0")
+    return sorted(pid for pid, path in processes()
+                  if pid in pids and (path in exes or path.startswith(prefix)))
+
+
+def revert(run: Path, *, processes: Callable[[], list[tuple[int, str]]] = list_processes,
+           wait_s: float = 30.0, poll: float = 0.5) -> list[dict]:
     """Undo every recorded change, newest first. Idempotent: an entry is
-    marked reverted only after its undo succeeded."""
+    marked reverted only after its undo succeeded.
+
+    Never while the host this run launched is still running: it may hold the
+    AU, the throwaway project and the plug-in's run directory open, and
+    anything it wrote after the revert would be outside the log. The agent
+    quits the host first (AX quit, Don't Save); this waits up to `wait_s`
+    for it to exit, then refuses and leaves the run unreverted."""
+    deadline = time.monotonic() + wait_s
+    alive = host_alive(run, processes)
+    while alive and time.monotonic() < deadline:
+        time.sleep(poll)
+        alive = host_alive(run, processes)
+    if alive:
+        raise RuntimeError(f"REFUSING TO REVERT: the host this run launched is still running "
+                           f"(pids {alive}). Quit it (AX quit, Don't Save), then run "
+                           f"`revert --run {run}` again. Nothing was reverted.")
     entries = _read_json(run / "revert_log.json", [])
     for entry in reversed(entries):
         if entry.get("reverted"):
@@ -264,10 +330,15 @@ def revert(run: Path) -> list[dict]:
 
 
 def _install_revert_on_signals(run: Path) -> None:
-    """For the long-running steps: an interrupt or termination still reverts."""
+    """For the long-running steps: an interrupt or termination still reverts,
+    but only once the host is gone; otherwise it says so loudly and leaves the
+    run for `revert` (which the next preflight insists on)."""
     def handler(signum, _frame):
         log(f"signal {signum}: reverting before exit")
-        revert(run)
+        try:
+            revert(run, wait_s=10.0)
+        except RuntimeError as exc:
+            log(str(exc))
         raise SystemExit(EXIT_USAGE)
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, handler)
@@ -344,8 +415,11 @@ def snapshot_prefs(run: Path, host_id: str) -> Path | None:
         return None
     source = Path(os.path.expanduser(prefs))
     saved = run / "prefs-before"
-    if saved.exists():
-        shutil.rmtree(saved)
+    # One snapshot per run: a second one would capture prefs this run already
+    # changed and make revert restore those.
+    if saved.exists() or any(e["kind"] == "prefs_snapshot"
+                             for e in _read_json(run / "revert_log.json", [])):
+        raise SystemExit("snapshot-prefs: this run already holds a prefs snapshot")
     shutil.copytree(source, saved, symlinks=True)
     record_change(run, "prefs_snapshot", path=str(source), saved=str(saved))
     return saved
@@ -429,8 +503,18 @@ def stage(run: Path, *, fault: str, at_sample: int, window_post: int, stimulus_f
         record_change(run, "throwaway_project", path=str(copy_dir))
         project = copy_dir / template.name
         shutil.copytree(template, project, symlinks=True)
-    record_change(run, "rendezvous_active", path=str(root / "active.json"))
-    _write_json(root / "active.json", active)
+    # Exclusive: a rendezvous that appeared since the preflight (another run)
+    # is never overwritten.
+    record_change(run, "rendezvous_active", path=str(root / "active.json"), nonce=nonce)
+    try:
+        fd = os.open(root / "active.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o644)
+    except FileExistsError:
+        _mark_reverted(run, "rendezvous_active", str(root / "active.json"))
+        raise SystemExit("stage: another rendezvous appeared since the preflight; not "
+                         "overwriting it")
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write(json.dumps(active, indent=1, sort_keys=True) + "\n")
     return save_state(run, nonce=nonce, plugin_run=str(plugin_run), fault=fault,
                       at_sample=at_sample, window_post=window_post,
                       stimulus_frames=stimulus_frames, planted=planted, provider=provider,
@@ -495,8 +579,8 @@ def await_claim(run: Path, *, timeout: float = 300.0, poll: float = 0.25) -> dic
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and not claim.exists():
         time.sleep(poll)
-    active.unlink(missing_ok=True)
-    _mark_reverted(run, "rendezvous_active", str(active))
+    if _remove_active_if_ours(active, st.get("nonce")):
+        _mark_reverted(run, "rendezvous_active", str(active))
     if not claim.exists():
         raise SystemExit("await-claim: no instance claimed the run (INCONCLUSIVE)")
     return save_state(run, claimed=True)
@@ -715,7 +799,11 @@ def main(argv: list[str] | None = None) -> int:
             log(f"verdict={verdict} outcome={outcome}")
             return EXIT_OK if outcome in V2.FULL_OUTCOMES else EXIT_NOT_PASS
         elif args.cmd == "revert":
-            entries = revert(run)
+            try:
+                entries = revert(run)
+            except RuntimeError as exc:
+                log(str(exc))
+                return EXIT_REFUSED
             log(f"reverted {sum(1 for e in entries if e.get('reverted'))} of {len(entries)}")
     except SystemExit as exc:
         if isinstance(exc.code, str):

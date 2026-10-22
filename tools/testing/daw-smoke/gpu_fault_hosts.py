@@ -229,6 +229,8 @@ def positive_control_expectation(snapshots: dict[str, dict]) -> tuple[bool, str]
         return False, "missing health snapshots: " + ", ".join(missing)
     if any(snapshots[p].get("provider_state") != "ready" for p in gfc.HEALTH_PHASES):
         return False, "the provider left `ready` during the positive control"
+    if any(snapshots[p].get("recovery_reason", "none") != "none" for p in gfc.HEALTH_PHASES):
+        return False, "the transport named a recovery during the positive control"
     before, after = snapshots["before"], snapshots["after"]
     gpu = gfc.gpu_delivered(after) - gfc.gpu_delivered(before)
     fallback = int(after.get("fallback_blocks", 0)) - int(before.get("fallback_blocks", 0))
@@ -263,6 +265,15 @@ def _usable(run_dir: Path, name: str, listed: Sequence[str] | None) -> bool:
 _PATH_NEGATIVE_REASONS = (NOT_SHARED_PATH, "path negative", "per-block delivery",
                           "the GPU carried", "GPU path delivered no blocks")
 REALTIME_NOT_COMPUTED = "host realtime render null not computed"
+
+
+def _took_effect(base: dict, fault: str, applied: dict | None) -> bool:
+    """Fired, and for an audio fault applied by the interposer; for a render
+    fault, the editor performed the loss; the control applies nothing."""
+    return bool(base["fault"]["fired"]) and (
+        bool((base["fault"].get("render_loss") or {}).get("performed"))
+        if fault in gfc.RENDER_FAULTS else
+        True if fault in gfc.CONTROL_FAULTS else applied is not None)
 
 
 def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: int,
@@ -373,12 +384,21 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
     base_verdict, base_reasons = base["verdict"], list(base["verdict_reasons"])
     capture_only = (host.get("id") not in REALTIME_RENDER_HOSTS and
                     base["nulls"].get("host_realtime") is None)
-    if capture_only:
-        # GarageBand cannot render in realtime: the missing realtime null is
-        # expected and the outcome is capped instead (column_outcome).
-        base_reasons = [r for r in base_reasons if r != REALTIME_NOT_COMPUTED]
-        if base_verdict == "inconclusive" and not base_reasons:
-            base_verdict = "pass"
+    if capture_only and base_verdict == "inconclusive" and base_reasons == [REALTIME_NOT_COMPUTED]:
+        # GarageBand cannot render in realtime, so WP-h1's decide() stopped at
+        # the missing realtime null before its later checks. That reason being
+        # the only one means nothing before it failed (no mismatch, no
+        # precondition, the fault fired); re-run decide() with the plug-in's
+        # own capture standing in for the host's realtime render, so the
+        # realtime-block, health and per-block delivery checks still run.
+        # The outcome is capped at plug-in capture only (column_outcome).
+        nulls = base["nulls"]
+        base_verdict, base_reasons = gfc.decide(
+            fault=fault, plugin_null=nulls["plugin"], bounce_null=nulls["bounce"],
+            health_ok=base["health"]["expectation_met"],
+            fault_fired=_took_effect(base, fault, applied),
+            host_alive=host_alive, realtime_at_fault=base["fault"]["realtime_block"],
+            realtime_null=nulls["plugin"], delivery=base.get("delivery"))
     if not host_alive:
         verdict, reasons = "fail", ["host process died during the run"]
     elif mismatches:
@@ -391,10 +411,7 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
     else:
         verdict, reasons = base_verdict, base_reasons
 
-    took_effect = bool(base["fault"]["fired"]) and (
-        bool((base["fault"].get("render_loss") or {}).get("performed"))
-        if fault in gfc.RENDER_FAULTS else
-        True if fault in gfc.CONTROL_FAULTS else applied is not None)
+    took_effect = _took_effect(base, fault, applied)
     negative_proved = None
     if control_kind == "planted_negative":
         bound = binding["outcome"] == "bound" and not mismatches and not preconditions
