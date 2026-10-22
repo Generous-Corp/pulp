@@ -1106,6 +1106,21 @@ scan**, not an index — param counts are small and the scan is what both adapte
 already did. If it ever becomes hot, index it for both adapters at once; a
 one-sided optimization is how these two paths drifted before.
 
+## Idle blocks must stay O(1)
+
+`drain_outbound_release_debt()` returns immediately while
+`outbound_release_debt_pending` is false. Every writer of
+`outbound_note_release_debt` / `outbound_control_release_debt` /
+`outbound_panic_debt` must set that flag (`record_outbound_release_debt()`
+does); a white-box test that seeds the arrays directly must set it as well, or
+the drain never visits the seeded slot. Without the flag the drain walked all
+2160 slots per block, about 5.5 us of pure overhead for a gain plug-in.
+
+The parameter snapshot and the time-0 snapshot diff are gated on
+`StateStore::state_generation()` exactly as in the VST3 adapter: refreshed only
+when the generation moved since the last snapshot, diffed only when it moved
+across `process()`.
+
 ## The StateStore must outlive the Processor
 
 `Processor::state()` dereferences a pointer the host installs. A Processor may

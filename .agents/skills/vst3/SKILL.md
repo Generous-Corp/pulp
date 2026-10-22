@@ -969,6 +969,24 @@ then process. If the adapter needs additional logic (e.g.
 gesture-coalesced output events), insert it after `process()` and
 before the snapshot diff, not before `set_normalized`.
 
+### Per-block work is gated on the StateStore generation
+
+Every store write advances `StateStore::state_generation()`. `process()`
+refreshes `param_snapshot_` only when the generation moved since the last
+snapshot, and `process_publish_output_params()` returns immediately unless the
+processor pushed explicit output events or the generation moved across
+`process()`. Keep it that way: an O(params) loop that runs on idle blocks is a
+regression in the framework's overhead floor. A new store write path must go
+through a `StateStore` setter (they all advance the generation) or the diff
+will not see it.
+
+The expected channel count of each declared bus is cached by
+`refresh_bus_channel_cache()` (called from `setActive(true)` and
+`setupProcessing()`) and invalidated at the top of `setBusArrangements()`.
+A new code path that rewrites `audioInputs`/`audioOutputs` arrangements must
+invalidate it too; while invalid, layout validation falls back to the SDK
+buses.
+
 ### `getTailSamples` returns `kInfiniteTail` for `tail_samples < 0`
 
 Pulp uses `tail_samples = -1` to mean "infinite" (reverb, delay with
