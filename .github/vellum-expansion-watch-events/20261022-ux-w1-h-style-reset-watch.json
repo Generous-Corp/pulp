@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-ux-w1-h-style-reset-watch",
+  "created_at": "2026-10-22T07:04:54Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Pulp-owned removal resets: @pulp/react hands every style key that disappears from a commit back to the widget's starting value through a complete reset table (layout through a new resetStyleProperty bridge entry that restores the flex and grid style a widget had before its first layout write), re-applies surviving keys and host-config creation defaults that share a reset slot, and protects style-derived keys by the set the style source contributed. A native pixel proof replays the recorded bridge calls. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "cd packages/pulp-react && npm run build && npx vitest run",
+    "ctest --test-dir build -R 'a style toggled on and off renders like one never styled'",
+    "ctest --test-dir build -R 'resetStyleProperty restores the layout a widget was created with'",
+    "python3 -m pytest -q tools/scripts/test_generate_widget_bridge_api.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
