@@ -68,6 +68,8 @@ public:
                     return dry * (1.0f - mix) + wet * mix;
                 });
         }
+        // Output channels with no matching input channel are silenced rather
+        // than left holding whatever the host's buffer contained.
         for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
             std::fill_n(output.channel_ptr(ch), n, 0.0f);
     }

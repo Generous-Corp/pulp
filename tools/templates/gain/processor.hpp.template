@@ -84,6 +84,8 @@ public:
                 input.channel_ptr(ch), output.channel_ptr(ch), n,
                 [gain](float x) { return x * gain; });
         }
+        // Output channels with no matching input channel are silenced rather
+        // than left holding whatever the host's buffer contained.
         for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
             std::fill_n(output.channel_ptr(ch), n, 0.0f);
 

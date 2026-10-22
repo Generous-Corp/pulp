@@ -42,6 +42,8 @@ public:
             float* out = output.channel_ptr(ch);
             if (out != in) std::copy_n(in, n, out);
         }
+        // Output channels with no matching input channel are silenced rather
+        // than left holding whatever the host's buffer contained.
         for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
             std::fill_n(output.channel_ptr(ch), n, 0.0f);
     }

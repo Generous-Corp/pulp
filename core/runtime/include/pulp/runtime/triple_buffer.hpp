@@ -4,6 +4,7 @@
 /// Lock-free latest-value publication between two threads.
 
 #include <atomic>
+#include <cassert>
 #include <array>
 #include <cstdint>
 #include <type_traits>
@@ -32,8 +33,14 @@ namespace pulp::runtime {
 /// draw_meter(levels);
 /// @endcode
 ///
-/// @note Exactly one writer and one reader thread. Multiple concurrent
-///       writers or readers require external synchronization.
+/// @note Exactly one writer and one reader at a time. The writer owns its
+///       back slot index and the reader its front slot index as plain,
+///       unsynchronized state, so successive write() calls must be ordered by
+///       happens-before (one thread, or a mutex / host dispatch handoff when
+///       the writer role moves between threads), and likewise for read().
+///       Two overlapping writers or two overlapping readers corrupt slot
+///       ownership permanently, not just one frame. Debug builds assert when
+///       two calls in the same role overlap.
 template <typename T>
 class TripleBuffer {
 public:
@@ -64,6 +71,7 @@ public:
     /// and must not retain the reference. If it throws, no value is published.
     template <typename Fill>
     void write_with(Fill&& fill) noexcept(noexcept(std::declval<Fill>()(std::declval<T&>()))) {
+        [[maybe_unused]] const RoleGuard guard(active_roles_, kWriterRole);
         std::forward<Fill>(fill)(buffers_[back_]);
         // One exchange publishes the filled buffer as the middle slot and
         // hands the previous middle slot back to the writer. Release makes the
@@ -78,6 +86,7 @@ public:
     /// If new data is available, atomically swaps middle to front first.
     /// @return Const reference to the front buffer. Valid until the next read().
     const T& read() noexcept {
+        [[maybe_unused]] const RoleGuard guard(active_roles_, kReaderRole);
         if (middle_.load(std::memory_order_relaxed) & kDirtyBit) {
             const auto previous = middle_.exchange(front_, std::memory_order_acq_rel);
             front_ = previous & kIndexMask;
@@ -93,10 +102,33 @@ private:
     static constexpr std::uint8_t kDirtyBit = 0x80;
     static constexpr std::uint8_t kIndexMask = 0x03;
 
+    // Debug-only overlap check for the one-writer / one-reader contract. The
+    // flag byte is present in every build so the layout does not depend on
+    // NDEBUG; release builds never touch it.
+    static constexpr std::uint8_t kWriterRole = 0x01;
+    static constexpr std::uint8_t kReaderRole = 0x02;
+    struct RoleGuard {
+#ifndef NDEBUG
+        RoleGuard(std::atomic<std::uint8_t>& roles, std::uint8_t role) noexcept
+            : roles_(roles), role_(role) {
+            const auto before = roles_.fetch_or(role_, std::memory_order_acquire);
+            assert((before & role_) == 0 &&
+                   "TripleBuffer: two overlapping calls in the same role");
+            (void)before;
+        }
+        ~RoleGuard() { roles_.fetch_and(static_cast<std::uint8_t>(~role_), std::memory_order_release); }
+        std::atomic<std::uint8_t>& roles_;
+        std::uint8_t role_;
+#else
+        RoleGuard(std::atomic<std::uint8_t>&, std::uint8_t) noexcept {}
+#endif
+    };
+
     std::array<T, 3> buffers_{};
     std::atomic<std::uint8_t> middle_{1};
     std::uint8_t back_ = 0;
     std::uint8_t front_ = 2;
+    std::atomic<std::uint8_t> active_roles_{0};
 };
 
 } // namespace pulp::runtime

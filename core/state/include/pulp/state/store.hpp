@@ -101,9 +101,11 @@ struct ConditionalParameterApplyResult {
 /// once — typically in `prepare()` — and read through the handle instead:
 /// `get()` is an inline relaxed atomic load with no lookup and no call.
 ///
-/// The handle stays valid for the lifetime of the store it came from, even
-/// if more parameters are registered afterwards (it holds the store's value
-/// table and an index, not a pointer to the value). A default-constructed
+/// The handle stays valid while the store it came from exists, even if more
+/// parameters are registered afterwards (it holds the store's value table and
+/// an index, not a pointer to the value). Registration must still not run
+/// concurrently with `get()` — the same rule as for `get_value()` — and the
+/// handle dangles once its StateStore is destroyed. A default-constructed
 /// handle, or one resolved from an unknown ID, reads 0.0f — the same result
 /// as `get_value()` for an unknown ID.
 ///
