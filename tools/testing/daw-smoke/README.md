@@ -168,6 +168,14 @@ same reason: smaller quanta run back to back inside one callback.
 `--dry-run --dry-run-break-fallback` is the planted negative (silence after the
 fault) and must come back FAIL at the fault sample.
 
+## Scan-path note (2026-10-22)
+
+The pre-warm launch now waits for a scanned plug-in entry in REAPER's cache, not
+just the bundle's section header, which REAPER writes before scanning. Matching
+the header killed the pre-warm too early and is the likely cause of the
+long-standing "REAPER could not find/insert the FX" / "flaky launch"
+INCONCLUSIVEs on CLAP and VST3.
+
 ## Audio etiquette
 This launches REAPER with a Pulp plugin on a track and may press Play, so audio
 can be active out of the default device during the run. The harness **announces**

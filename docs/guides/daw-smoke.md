@@ -91,6 +91,11 @@ propagation, resource replay or teardown callback suppression, which stay
 Vellum-gated. It also does not prove recovery, because the GPU stays lost for
 the rest of the run.
 
+A CLAP/VST3 run that ends "could not find/insert the FX" or "flaky launch" was,
+until 2026-10-22, most likely the pre-warm stopping REAPER after it wrote a
+bundle's cache section header but before it scanned the bundle. The harness now
+waits for a scanned entry.
+
 See [`tools/testing/daw-smoke/README.md`](../../tools/testing/daw-smoke/README.md).
 
 ## Guarantees (so it's safe to run anywhere)

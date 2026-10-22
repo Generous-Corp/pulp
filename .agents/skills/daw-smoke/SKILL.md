@@ -145,7 +145,23 @@ ditto "$SRC" "$DST" && codesign --verify --deep --strict "$DST"
 knowing when reading such an error; `--deep --strict` treats everything in
 `MacOS/` as a subcomponent.)
 
-### A custom scan path does not publish on REAPER 7.78 — the editor modes cannot prove anything there
+### "FX not found / flaky launch": the likely cause was the pre-warm, fixed 2026-10-22
+
+Measured on REAPER 7.79/7.82, CLAP and VST3 from the temp scan path: REAPER
+writes a bundle's `[<file>.clap]` cache **section header** before it has
+scanned the bundle. The bundle is usually named after its plug-in, so the old
+pre-warm (a substring match on the whole cache file) saw the name and killed
+REAPER with an empty section. The scripted launch then did not know the
+plug-in and reported `REAPER could not find/insert the FX` / `flaky launch`.
+`cache_publishes()` now waits for a scanned entry line (`id=...|Name (Vendor)`),
+and with it the temp-path scan works for CLAP and VST3: the gpu-fault mode ran
+dozens of scripted launches through it, and `--mode editor-open` on CLAP, which
+was INCONCLUSIVE on the same machine before the fix, now PASSes. The two notes below predate that fix
+and were probably this bug. Re-check them before relying on them, and still
+grep the portable cache for an entry line (not just the name) when a run is
+INCONCLUSIVE.
+
+### (Historical, likely the pre-warm bug above) A custom scan path does not publish on REAPER 7.78
 
 `editor-open` (and any mode needing the FX inserted) currently reports
 INCONCLUSIVE on REAPER 7.78 with:
@@ -253,8 +269,8 @@ way and say plainly that this rung is unproven.
   scanned from a custom path, so `--format au` installs to the real Components folder
   and MUST uninstall on exit. Cleanup ALWAYS runs (finally): kill REAPER, rm temp
   dirs, uninstall AU.
-- **The temp-path scan does not actually work — `--format au` is the only lane that
-  tests anything.** Measured 2026-07-30 on REAPER/macOS arm64: REAPER **ignores** the
+- **(Historical, likely the pre-warm bug: see "FX not found / flaky launch"
+  above.) The temp-path scan does not actually work.** Measured 2026-07-30 on REAPER/macOS arm64: REAPER **ignores** the
   `vstpath`/`clap_path` keys written into the portable `reaper.ini`. It scanned the
   real plugin folders instead (124 CLAP + 104 VST3 entries in the portable caches)
   and never looked at the staged copy, so the bundle under test is absent from the
