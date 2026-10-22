@@ -96,6 +96,17 @@ inline F4 abs(F4 a) {
 
 // Widen the low / high pair of a float vector to doubles, and narrow two
 // double vectors back to one float vector.
+using F2 = float __attribute__((vector_size(8)));
+// Two adjacent floats, widened to doubles in one step, and back.
+inline D2 load_widen2(const float* p) {
+    F2 v;
+    std::memcpy(&v, p, sizeof v);
+    return __builtin_convertvector(v, D2);
+}
+inline void store_narrow2(float* p, D2 v) {
+    const F2 n = __builtin_convertvector(v, F2);
+    std::memcpy(p, &n, sizeof n);
+}
 inline D2 widen_low(F4 v) {
     return D2{static_cast<double>(v[0]), static_cast<double>(v[1])};
 }
@@ -288,6 +299,13 @@ inline F4 abs(F4 a) {
     for (int i = 0; i < 4; ++i)
         r.v[i] = a.v[i] < 0.0f ? -a.v[i] : a.v[i];
     return r;
+}
+inline D2 load_widen2(const float* p) {
+    return {{static_cast<double>(p[0]), static_cast<double>(p[1])}};
+}
+inline void store_narrow2(float* p, D2 v) {
+    p[0] = static_cast<float>(v.v[0]);
+    p[1] = static_cast<float>(v.v[1]);
 }
 inline D2 widen_low(F4 a) {
     return {{a.v[0], a.v[1]}};

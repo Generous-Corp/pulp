@@ -49,6 +49,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::signal::fdn {
@@ -165,8 +166,12 @@ template <typename SampleType = float> class StereoPositionRing {
 
     void push(lanes::D2 x) {
         const std::size_t slot = (static_cast<std::size_t>(written_) & mask_) * 2;
-        buffer_[slot] = static_cast<SampleType>(lanes::lane(x, 0));
-        buffer_[slot + 1] = static_cast<SampleType>(lanes::lane(x, 1));
+        if constexpr (std::is_same_v<SampleType, float>) {
+            lanes::store_narrow2(&buffer_[slot], x);
+        } else {
+            buffer_[slot] = static_cast<SampleType>(lanes::lane(x, 0));
+            buffer_[slot + 1] = static_cast<SampleType>(lanes::lane(x, 1));
+        }
         ++written_;
     }
 
@@ -196,8 +201,11 @@ template <typename SampleType = float> class StereoPositionRing {
   private:
     lanes::D2 at(std::int64_t index) const {
         const std::size_t slot = (static_cast<std::size_t>(index) & mask_) * 2;
-        return lanes::make(static_cast<double>(buffer_[slot]),
-                           static_cast<double>(buffer_[slot + 1]));
+        if constexpr (std::is_same_v<SampleType, float>)
+            return lanes::load_widen2(&buffer_[slot]);
+        else
+            return lanes::make(static_cast<double>(buffer_[slot]),
+                               static_cast<double>(buffer_[slot + 1]));
     }
 
     std::vector<SampleType> buffer_;
@@ -224,6 +232,17 @@ struct StereoSection {
 // One biquad cascade's state for both rails, two lanes per section. The state
 // is snapped and sanitized every kHealIntervalSamples samples it processes,
 // counted from reset(), so the cleanup never depends on the caller's blocks.
+// A StereoSection with every coefficient already broadcast to both lanes,
+// built once per block rather than at every sample.
+struct StereoSectionLanes {
+    lanes::D2 b0, c1, c2, a1, a2;
+
+    static StereoSectionLanes from(const StereoSection& s) {
+        return {lanes::splat(s.b0), lanes::splat(s.c1), lanes::splat(s.c2), lanes::splat(s.a1),
+                lanes::splat(s.a2)};
+    }
+};
+
 template <int Sections> class StereoBiquadState {
   public:
     void reset() {
@@ -235,12 +254,18 @@ template <int Sections> class StereoBiquadState {
     }
 
     lanes::D2 process(const StereoSection* sections, lanes::D2 x) {
+        StereoSectionLanes l[Sections];
+        for (int k = 0; k < Sections; ++k) l[k] = StereoSectionLanes::from(sections[k]);
+        return process(l, x);
+    }
+
+    lanes::D2 process(const StereoSectionLanes* sections, lanes::D2 x) {
         for (int k = 0; k < Sections; ++k) {
             const auto& c = sections[k];
             const lanes::D2 s1 = s1_[k];
-            const lanes::D2 y = lanes::splat(c.b0) * x + s1;
-            s1_[k] = lanes::splat(c.c1) * x + s2_[k] - lanes::splat(c.a1) * s1;
-            s2_[k] = lanes::splat(c.c2) * x - lanes::splat(c.a2) * s1;
+            const lanes::D2 y = c.b0 * x + s1;
+            s1_[k] = c.c1 * x + s2_[k] - c.a1 * s1;
+            s2_[k] = c.c2 * x - c.a2 * s1;
             x = y;
         }
         if (++count_ == kHealIntervalSamples) {
@@ -365,7 +390,8 @@ public:
         }
 
         const bool downsampling = tank_rate_ < host_rate_;
-        const StereoSection* sections = sections_;
+        const StereoSectionLanes sections[2] = {StereoSectionLanes::from(sections_[0]),
+                                                StereoSectionLanes::from(sections_[1])};
         int produced = 0;
         for (int i = 0; i < n; ++i) {
             const lanes::D2 x = lanes::make(static_cast<double>(finite_or_zero(left[i])),
@@ -399,7 +425,8 @@ public:
             return;
         }
         const bool downsampling = tank_rate_ < host_rate_;
-        const StereoSection* sections = sections_;
+        const StereoSectionLanes sections[2] = {StereoSectionLanes::from(sections_[0]),
+                                                StereoSectionLanes::from(sections_[1])};
         for (int i = 0; i < tank_n; ++i) {
             const lanes::D2 v = lanes::make(static_cast<double>(finite_or_zero(tl[i])),
                                             static_cast<double>(finite_or_zero(tr[i])));
