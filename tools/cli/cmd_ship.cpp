@@ -151,12 +151,12 @@ static int print_ship_help() {
 static fs::path ship_support_file(const fs::path& root, const fs::path& checkout_rel,
                                   const std::string& sdk_name) {
     auto in_checkout = root / checkout_rel;
-    if (fs::exists(in_checkout) || fs::exists(root / "core")
-        || !fs::exists(root / "pulp.toml")) {
+    if (fs::exists(in_checkout) || fs::exists(root / "core") || !fs::exists(root / "pulp.toml")) {
         return in_checkout;
     }
     auto sdk = resolve_standalone_sdk(root, /*materialize=*/false);
-    if (sdk.resolved_sdk_dir.empty()) return in_checkout;
+    if (sdk.resolved_sdk_dir.empty())
+        return in_checkout;
     return sdk.resolved_sdk_dir / "share" / "pulp" / "ship" / sdk_name;
 }
 
@@ -950,7 +950,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 std::cout << "Packaging " << name << " (Standalone .app → .dmg)...\n";
                 if (pulp::ship::create_dmg(app.string(), dmg_path.string(), name))
                     ++dmg_count;
-                else { std::cerr << "  FAILED to create .dmg for " << name << "\n"; ++failed_count; }
+                else {
+                    std::cerr << "  FAILED to create .dmg for " << name << "\n";
+                    ++failed_count;
+                }
             } else {
                 combined.push_back({app.string(), "/Applications", "Standalone App"});
             }
@@ -1015,7 +1018,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
                     cmd += " --sign " + shell_quote(installer_identity);
                 cmd += " " + shell_quote(pkg_path.string()) + " 2>/dev/null";
                 if (run(cmd) == 0) ++pkg_count;
-                else { std::cerr << "  FAILED\n"; ++failed_count; }
+                else {
+                    std::cerr << "  FAILED\n";
+                    ++failed_count;
+                }
             }
         }
 
@@ -1029,7 +1035,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
             if (pulp::ship::create_combined_pkg(combined, pkg_path.string(),
                     "com.pulp." + product_name, version, installer_identity))
                 ++pkg_count;
-            else { std::cerr << "  FAILED to create combined installer\n"; ++failed_count; }
+            else {
+                std::cerr << "  FAILED to create combined installer\n";
+                ++failed_count;
+            }
         }
         std::cout << "Created " << pkg_count << " .pkg and " << dmg_count
                   << " .dmg artifacts in " << artifacts.string() << "\n";
@@ -1042,7 +1051,8 @@ static int ship_package_impl(const std::vector<std::string>& args,
         }
         if (pkg_count + dmg_count == 0) {
             std::cerr << "Error: nothing to package: no plugin bundles or standalone apps "
-                         "were found under " << build_dir.string() << "\n";
+                         "were found under "
+                      << build_dir.string() << "\n";
             return 1;
         }
         return 0;

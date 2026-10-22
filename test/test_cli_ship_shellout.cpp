@@ -537,8 +537,7 @@ static void make_fake_installed_sdk(const fs::path& pulp_home, std::string_view 
                "echo \"SDK-DOCTOR-STUB-RAN args=$*\"\n"
                "exit 0\n";
     }
-    fs::permissions(stub, fs::perms::owner_all | fs::perms::group_read |
-                              fs::perms::others_read);
+    fs::permissions(stub, fs::perms::owner_all | fs::perms::group_read | fs::perms::others_read);
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
@@ -570,8 +569,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     }
     // The SDK is installed but predates the shipped preflight.
     make_fake_installed_sdk(home_dir, "0.1.0");
-    fs::remove(home_dir / "sdk" / "0.1.0" / "share" / "pulp" / "ship" /
-               "ensure_signing_ready.sh");
+    fs::remove(home_dir / "sdk" / "0.1.0" / "share" / "pulp" / "ship" / "ensure_signing_ready.sh");
     auto root = make_fake_consumer_project("doctor-old-sdk", false);
 
     auto r = run_pulp_in(root, {"ship", "doctor"});
@@ -580,8 +578,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     INFO(combined);
     REQUIRE(r.exit_code == 1);
     REQUIRE(contains(combined, "missing"));
-    REQUIRE(contains(combined, (fs::path("share") / "pulp" / "ship" /
-                                "ensure_signing_ready.sh").string()));
+    REQUIRE(contains(combined,
+                     (fs::path("share") / "pulp" / "ship" / "ensure_signing_ready.sh").string()));
 
     fs::remove_all(root);
 }
@@ -1162,8 +1160,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     // HOME is the fixture's empty directory, so no installer identity by this
     // name can exist and productbuild's signing step must fail.
-    auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9",
-                                "--installer-identity",
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9", "--installer-identity",
                                 "Developer ID Installer: Pulp Fixture Nobody (0000000000)"});
     REQUIRE_FALSE(r.timed_out);
     INFO(r.stdout_output << r.stderr_output);

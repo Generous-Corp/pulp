@@ -365,12 +365,14 @@ TEST_CASE("pulp create configures a standalone project with Ninja when ninja is 
     const auto stub_dir = tmp.path / "stubs";
     const auto argv_log = tmp.path / "configure-argv.txt";
     fs::create_directories(stub_dir);
-    write_file(stub_dir / "cmake",
-               "#!/bin/sh\n"
-               "case \" $* \" in\n"
-               "  *\" -S \"*) printf '%s\\n' \"$@\" > '" + argv_log.string() + "'; exit 3 ;;\n"
-               "esac\n"
-               "exec '" + real_cmake + "' \"$@\"\n");
+    write_file(stub_dir / "cmake", "#!/bin/sh\n"
+                                   "case \" $* \" in\n"
+                                   "  *\" -S \"*) printf '%s\\n' \"$@\" > '" +
+                                       argv_log.string() +
+                                       "'; exit 3 ;;\n"
+                                       "esac\n"
+                                       "exec '" +
+                                       real_cmake + "' \"$@\"\n");
     write_file(stub_dir / "ninja", "#!/bin/sh\nexit 0\n");
     for (const auto* name : {"cmake", "ninja"}) {
         fs::permissions(stub_dir / name, fs::perms::owner_all, fs::perm_options::replace);
@@ -386,22 +388,23 @@ TEST_CASE("pulp create configures a standalone project with Ninja when ninja is 
     INFO(r.stdout_output);
     INFO(r.stderr_output);
     REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code != 0);  // the stub stops the configure
+    REQUIRE(r.exit_code != 0); // the stub stops the configure
     REQUIRE(r.stderr_output.find("Configure failed.") != std::string::npos);
 
     REQUIRE(fs::exists(argv_log));
     std::vector<std::string> argv;
     {
         std::istringstream in(read_file(argv_log));
-        for (std::string line; std::getline(in, line);) argv.push_back(line);
+        for (std::string line; std::getline(in, line);)
+            argv.push_back(line);
     }
     auto g = std::find(argv.begin(), argv.end(), "-G");
     REQUIRE(g != argv.end());
     REQUIRE(std::next(g) != argv.end());
     CHECK(*std::next(g) == "Ninja");
     CHECK(std::any_of(sdks.begin(), sdks.end(), [&](const fs::path& sdk) {
-        return std::find(argv.begin(), argv.end(), "-DCMAKE_PREFIX_PATH=" + sdk.string())
-               != argv.end();
+        return std::find(argv.begin(), argv.end(), "-DCMAKE_PREFIX_PATH=" + sdk.string()) !=
+               argv.end();
     }));
 }
 #endif
