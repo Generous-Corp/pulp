@@ -323,6 +323,30 @@ TEST_CASE("JsEngine circular reference safety (;void 0 pattern)", "[js_engine]")
     END_FOR_EACH_ENGINE
 }
 
+TEST_CASE("JsEngine converts an object whose early members are objects", "[js_engine]") {
+    // Converting the first member allocates handles. If the property walk keeps
+    // handles that outlived their scope (V8's Array::Iterate since 15.4), that
+    // allocation overwrites the later members, which then read as garbage or
+    // crash the property enumeration.
+    FOR_EACH_ENGINE(engine)
+    auto result = engine->evaluate("({ first: { x: 1, nested: { deep: 'd' } },"
+                                   "   second: [2, 3, { inner: 4 }],"
+                                   "   helper: function() { return 0; },"
+                                   "   other: function(a, b) { return a + b; },"
+                                   "   third: { y: 'z' },"
+                                   "   fifth: 5 })");
+    REQUIRE(result.isObject());
+    REQUIRE(result["first"]["x"].getWithDefault<int>(0) == 1);
+    REQUIRE(result["first"]["nested"]["deep"].getWithDefault<std::string>("") == "d");
+    REQUIRE(result["second"].isArray());
+    REQUIRE(result["second"].size() == 3);
+    REQUIRE(result["second"][1].getWithDefault<int>(0) == 3);
+    REQUIRE(result["second"][2]["inner"].getWithDefault<int>(0) == 4);
+    REQUIRE(result["third"]["y"].getWithDefault<std::string>("") == "z");
+    REQUIRE(result["fifth"].getWithDefault<int>(0) == 5);
+    END_FOR_EACH_ENGINE
+}
+
 TEST_CASE("JsEngine error message includes details", "[js_engine]") {
     FOR_EACH_ENGINE(engine)
         bool threw = false;
@@ -423,7 +447,7 @@ TEST_CASE("V8 engine reports a non-empty runtime version and provider identity",
     REQUIRE(engine != nullptr);
     REQUIRE(engine->type() == JsEngineType::v8);
 
-    // v8::V8::GetVersion() must yield something like "15.3.76.5".
+    // v8::V8::GetVersion() must yield something like "15.7.112.5".
     const auto runtime = engine->runtime_version();
     INFO("runtime_version=" << runtime);
     REQUIRE_FALSE(runtime.empty());

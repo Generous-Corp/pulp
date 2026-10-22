@@ -335,7 +335,7 @@ physically cannot disagree about which binary is in use — and a pin bump
 self-invalidates the cache. When you bump either the slice or the toolchain,
 bump them in the manifest, never by editing a URL into a workflow.
 
-The Skia toolchain itself is pinned at `chrome/m153` via the
+The Skia toolchain itself is pinned at `chrome/m157` via the
 `danielraffel/skia-builder` fork (see `tools/deps/manifest.json` →
 `determinism.skia_builder_fork`). The fork tracks upstream
 `olilarkin/skia-builder`'s tag pattern and additionally publishes iOS
@@ -374,7 +374,7 @@ Apple Silicon dev machines) only needs `arm64`.
 
 The **V8** toolchain follows the same prebuilt-pin pattern (added 2026-06).
 It is the optional JS engine backend (`PULP_JS_ENGINE=v8`), a sealed
-embeddable `libv8` pinned at tag `v8-m153-15.3.76.5-26cef0256b0e` via the
+embeddable `libv8` pinned at tag `v8-m157-15.7.112.5-3362da6c495d` via the
 `danielraffel/v8-builder` fork (`tools/deps/manifest.json` → V8 entry,
 `determinism.release_assets` per-platform URL + sha256). Fetched by
 `tools/scripts/fetch_v8_for_release.py` into `external/v8-build/<platform>/`
@@ -384,7 +384,7 @@ manifest row for V8 (BSD-3-Clause) plus the bundled-component NOTICE
 attribution (ICU/zlib/Abseil), NOT separate manifest rows for the nested
 libs (their distribution boundary is the parent `libv8`). Re-verify the
 NOTICE list against the v8-builder source and artifact evidence when the V8 pin
-bumps; the m153 assets do not carry a separate third-party manifest, so absence
+bumps; the m153 and m157 assets do not carry a separate third-party manifest, so absence
 of that file is not evidence of an empty bundled dependency set. iOS publishes
 an actual jitless simulator `V8.framework` marked `library: false`: Pulp
 validates its provenance and headers but has no device/AUv3 runtime acceptance
