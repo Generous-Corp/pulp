@@ -45,6 +45,18 @@ foreach(_fmt IN LISTS _ui_script_formats)
     endif()
 endforeach()
 
+# The format adapters refuse to open an editor when CI, PULP_HEADLESS,
+# PULP_TEST_MODE or PULP_DISABLE_PLUGIN_EDITOR is set, so a plug-in never pops a
+# window during an unattended host scan. CI runners export CI=true, which would
+# turn these probes into "editor disabled" failures on every runner. The probes
+# exist to open the editor, and the macOS runners have a window server, so they
+# run with those switches cleared.
+set(_ui_script_editor_env
+    "CI=unset:"
+    "PULP_HEADLESS=unset:"
+    "PULP_TEST_MODE=unset:"
+    "PULP_DISABLE_PLUGIN_EDITOR=unset:")
+
 foreach(_fmt IN LISTS _ui_script_formats)
     if(NOT TARGET PulpUiScriptFixture_${_fmt} OR _fmt STREQUAL "Standalone")
         continue()
@@ -58,7 +70,8 @@ foreach(_fmt IN LISTS _ui_script_formats)
             "-DEXPECT_GPU=${PULP_HAS_SKIA}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/check_editor_mode.cmake")
     set_tests_properties(ui-script-plugin-editor-${_probe_format} PROPERTIES
-        LABELS "pr;format;view;scripted-ui" TIMEOUT 120)
+        LABELS "pr;format;view;scripted-ui" TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "${_ui_script_editor_env}")
 endforeach()
 
 # The Standalone opens an audio device, so it is not launched here; its image
@@ -85,5 +98,6 @@ if(PULP_HAS_CLAP)
             "-DCONFIG=$<CONFIG>"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/sdk_consumer.cmake")
     set_tests_properties(ui-script-plugin-editor-installed-sdk PROPERTIES
-        LABELS "cmake;sdk;format;view;scripted-ui;slow" TIMEOUT 900)
+        LABELS "cmake;sdk;format;view;scripted-ui;slow" TIMEOUT 900
+        ENVIRONMENT_MODIFICATION "${_ui_script_editor_env}")
 endif()
