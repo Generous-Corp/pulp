@@ -3050,6 +3050,58 @@ host that clips to bounded damage would paint exactly what the probe reports;
 the macOS plug-in host still repaints in full, so on that host the win is the
 avoided layout and commit, and the bound is what a partial-repaint host uses.
 
+## A live clock subscriber ticks the editor; only damage composites it
+
+`begin_host_frame` reports two things: `continuous` (anything wants FrameClock
+ticks: a running animation, or a live render subscriber such as a source-bound
+`Meter`) and `animating` (the tree paints new pixels every frame on its own:
+`needs_continuous_frames`). The macOS plug-in hosts and the standalone GPU
+window keep their vsync gate open for `continuous`, but composite a frame only
+for `animating` or real damage (`host_frame_composites`). So:
+
+- A FrameClock subscriber that changes what it draws must request a repaint.
+  `animate()`, the caret blinks and `LottieView` already do; the value-source
+  bindings repaint their owner when the snapshot changes
+  (`View::on_meter_snapshot_changed`, default whole-view; `Meter` overrides it
+  and keeps its own bounded, ballistics-gated invalidation). A subscriber that
+  silently mutates paint state is now a frozen view, not a slow one.
+- A paint that reads time (`frame_clock()->time()`, a shader clock) must keep
+  the view in `needs_continuous_frames` (continuous repaint / a registered
+  predicate), or it stops on the first frame nothing dirtied.
+- Before this split, an editor with one bound meter re-composited its whole
+  surface every vsync through silence. Measured with an 8-knob, 16-meter
+  editor at 60 Hz on an M5 Max (process CPU, editor open and silent, host
+  baseline about 1.5%): CPU host 4.8% -> 2.5%; GPU host 7.3% -> 2.5% and 62
+  -> 0 presented drawables per second.
+
+The CPU (CoreGraphics) plug-in host draws from its display link, bounded:
+
+- While the link runs, `repaint()` records damage and opens the frame gate;
+  the paint half of the tick hands it to AppKit. Marking the NSView directly
+  let AppKit re-rasterize at the end of every run-loop turn that carried a
+  request, i.e. at the automation or pointer event rate, not the display's.
+- `request_repaint(Rect)` reaches `-setNeedsDisplayInRect:` through the design
+  viewport transform, so AppKit re-rasterizes only that region of the layer's
+  backing store (RGBA16F on a Retina/XDR display, so a whole-editor redraw is
+  expensive). A layer-backed NSView redraws the bounding box of several dirty
+  rects, so a frame's bounded requests union into one rect on purpose.
+- Requests made from the idle half (host automation reaching the editor
+  through the store listeners) stay bounded; they used to be escalated to a
+  whole-view redraw, so a knob following automation redrew the whole editor.
+- Held drag motion only opens the gate (`onNeedsDisplay`); the motion the
+  frame delivers repaints what it moved.
+- A rect-less `request_repaint()` is still whole-view. Widgets on a value hot
+  path must use `request_repaint_self()` (Knob, Fader, Meter do), or each tick
+  redraws the editor.
+- `drawRect:` lays out with `layout_children_if_needed()`, like the GPU host; a
+  geometry change that does not bump the layout generation is not re-laid out
+  there either.
+
+Measure redraw rate and area from outside the plug-in: count
+`-[NSViewBackingLayer display]` calls and the area passed to
+`-setNeedsDisplayInRect:` / `-setNeedsDisplay:` per second in the host
+process. Process CPU alone hides whether a frame was full or bounded.
+
 ## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
 
 `PluginViewHost::PresentPolicy::nonblocking` prefers Mailbox, then Immediate.
