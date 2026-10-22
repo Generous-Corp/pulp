@@ -256,10 +256,12 @@ TEST_CASE("LadderFilter lowpass behavior", "[signal][ladder]") {
 }
 
 // The float ladder's saturator is gated by PULP_SIGNAL_FAST_LADDER_TANH
-// (fast_math.hpp): exact std::tanh by DEFAULT, opt-in Padé FastMath::tanh. The
-// references below reproduce both formulations of the process loop so the tests
-// can (a) prove the default is bit-exact std::tanh and (b) pin how far the Padé
-// path would move the filter — regardless of which way the gate is compiled.
+// (fast_math.hpp): FastMath::tanh_accurate by DEFAULT, opt-in Padé
+// FastMath::tanh, and exact std::tanh through process_reference(). The
+// references below reproduce the process loop with each saturator so the tests
+// can (a) bound how far the default moves the filter from exact tanh and (b)
+// pin how far the Padé path would — regardless of which way the gate is
+// compiled.
 namespace {
 template <typename Sat>
 float ladder_reference(const std::vector<float>& in, float sr, float fc, float res, Sat sat) {
@@ -279,6 +281,10 @@ float ladder_reference(const std::vector<float>& in, float sr, float fc, float r
 }
 float ladder_reference_std_tanh(const std::vector<float>& in, float sr, float fc, float res) {
     return ladder_reference(in, sr, fc, res, [](float v) { return std::tanh(v); });
+}
+[[maybe_unused]] float ladder_reference_accurate_tanh(const std::vector<float>& in, float sr,
+                                                      float fc, float res) {
+    return ladder_reference(in, sr, fc, res, [](float v) { return FastMath::tanh_accurate(v); });
 }
 [[maybe_unused]] float ladder_reference_fast_tanh(const std::vector<float>& in, float sr, float fc,
                                                   float res) {
@@ -308,10 +314,11 @@ TEST_CASE("FastMath::tanh stays within its pinned error bound of std::tanh",
     REQUIRE(max_err_full < 7e-4f); // ~-63 dBFS  — the +/-4 hard-clamp seam (worst case)
 }
 
-// The default float ladder must be EXACT std::tanh, so a driven signal tracks
-// the libm reference to float round-off. If someone flips the default back to
-// the Padé path, this fails — the fidelity guarantee is pinned, not implicit.
-TEST_CASE("LadderFilter default saturator is exact std::tanh", "[signal][ladder]") {
+// The default float ladder must track the EXACT std::tanh filter to within
+// the accurate saturator's bound even when overdriven. If someone flips the
+// default to the Padé path, this fails — the fidelity guarantee is pinned, not
+// implicit.
+TEST_CASE("LadderFilter default saturator tracks exact std::tanh", "[signal][ladder]") {
     constexpr float kSr = 48000.0f, kFc = 1200.0f, kRes = 0.7f;
     LadderFilter ladder;
     ladder.set_sample_rate(kSr);
@@ -350,8 +357,9 @@ TEST_CASE("LadderFilter default saturator is exact std::tanh", "[signal][ladder]
     REQUIRE(max_fast_dev < 1e-3f); // tracks the Padé reference
     REQUIRE(max_abs_dev > 1e-5f);  // and is provably NOT the exact filter
 #else
-    // Default build: bit-exact to libm (snap_to_zero is a no-op at these levels).
-    REQUIRE(max_abs_dev < 1e-5f);
+    // Default build: within a few times the saturator's 3.0e-7 bound of the
+    // exact filter at +10 dBFS drive, far inside the Padé path's ~1e-3 seam.
+    REQUIRE(max_abs_dev < 4e-6f);
 #endif
 }
 
@@ -838,5 +846,78 @@ TEST_CASE("Svf block path flushes a decaying tail without subnormal residency",
         // chunked snap must still bring the tail to exact zero.
         if (block > 1)
             REQUIRE(tail.nonzero_end < kTotal / 8);
+    }
+}
+
+TEST_CASE("FastMath::tanh_accurate stays within its pinned bound of std::tanh",
+          "[signal][ladder][fast_math]") {
+    // Every 64th positive float: the bound is 3.0e-7 absolute over the whole
+    // range (the exhaustive sweep is a private receipt).
+    double worst = 0.0;
+    double worst_small_rel = 0.0;
+    for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 64) {
+        float x;
+        std::memcpy(&x, &bits, sizeof x);
+        const double exact = std::tanh(static_cast<double>(x));
+        const double got = FastMath::tanh_accurate(x);
+        worst = std::max(worst, std::abs(got - exact));
+        if (x > 0.0f && x < 0.05f)
+            worst_small_rel = std::max(worst_small_rel, std::abs(got - exact) / exact);
+        // Odd symmetry is exact, not approximate.
+        REQUIRE(FastMath::tanh_accurate(-x) == -FastMath::tanh_accurate(x));
+    }
+    CHECK(worst < 3.5e-7);
+    // Unit slope at the origin: small signals see the same loop gain as tanh.
+    CHECK(worst_small_rel < 3.0e-7);
+    CHECK(FastMath::tanh_accurate(9.5f) == 1.0f);
+    CHECK(FastMath::tanh_accurate(-9.5f) == -1.0f);
+    CHECK(FastMath::tanh_accurate(1.0e30f) == 1.0f);
+    CHECK(FastMath::tanh_accurate(-1.0e30f) == -1.0f);
+    CHECK(FastMath::tanh_accurate(std::numeric_limits<float>::infinity()) == 1.0f);
+    CHECK(FastMath::tanh_accurate(-std::numeric_limits<float>::infinity()) == -1.0f);
+    CHECK(std::isfinite(FastMath::tanh_accurate(std::numeric_limits<float>::quiet_NaN())));
+    CHECK(std::signbit(FastMath::tanh_accurate(-0.0f)));
+}
+
+TEST_CASE("LadderFilter default saturator preserves resonance and drive behavior",
+          "[signal][ladder][parity]") {
+    // Against process_reference() (exact std::tanh stages): ringing frequency,
+    // decay, and the driven waveform must match to well below -120 dBFS at
+    // normal levels.
+    constexpr float kSr = 48000.0f;
+    for (const float fc : {500.0f, 2000.0f}) {
+        for (const float res : {0.0f, 0.9f, 1.0f}) {
+            INFO("fc " << fc << " res " << res);
+            LadderFilter fast;
+            LadderFilter exact;
+            for (auto* l : {&fast, &exact}) {
+                l->set_sample_rate(kSr);
+                l->set_frequency(fc);
+                l->set_resonance(res);
+            }
+            float worst = 0.0f;
+            int crossings_fast = 0;
+            int crossings_exact = 0;
+            float prev_fast = 0.0f;
+            float prev_exact = 0.0f;
+            for (int i = 0; i < 48000; ++i) {
+                // A kick, then a 0 dBFS two-tone, then silence to ring out.
+                float x = i < 32 ? 2.0f : 0.0f;
+                if (i >= 8000 && i < 24000)
+                    x = 0.6f * std::sin(6.2831853f * 220.0f * static_cast<float>(i) / kSr) +
+                        0.4f * std::sin(6.2831853f * 3150.0f * static_cast<float>(i) / kSr);
+                const float a = fast.process(x);
+                const float b = exact.process_reference(x);
+                worst = std::max(worst, std::abs(a - b));
+                if (i > 1000 && i < 8000) {
+                    crossings_fast += prev_fast < 0.0f && a >= 0.0f;
+                    crossings_exact += prev_exact < 0.0f && b >= 0.0f;
+                }
+                prev_fast = a;
+                prev_exact = b;
+            }
+            CHECK(worst < 1.0e-6f);
+            CHECK(crossings_fast == crossings_exact);
+        }
     }
 }

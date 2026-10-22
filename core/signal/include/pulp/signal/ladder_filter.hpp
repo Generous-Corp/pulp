@@ -24,16 +24,19 @@ public:
         update();
     }
 
+    /// Process one sample with the default saturator (see LadderSaturation).
     SampleType process(SampleType input) {
-        return process_with_profile<PULP_SIGNAL_FAST_LADDER_TANH != 0>(input);
+        return process_with_profile<kDefaultLadderSaturation>(input);
     }
 
+    /// Process one sample with exact std::tanh stages.
     SampleType process_reference(SampleType input) {
-        return process_with_profile<false>(input);
+        return process_with_profile<LadderSaturation::exact>(input);
     }
 
+    /// Process one sample with the Padé `FastMath::tanh` stages.
     SampleType process_realtime_efficient(SampleType input) {
-        return process_with_profile<true>(input);
+        return process_with_profile<LadderSaturation::realtime_efficient>(input);
     }
 
     void process(SampleType* buffer, int num_samples) {
@@ -47,7 +50,7 @@ public:
     }
 
 private:
-    template <bool RealtimeEfficient>
+    template <LadderSaturation Saturation>
     SampleType process_with_profile(SampleType input) {
         // Non-linear feedback
         SampleType feedback =
@@ -56,14 +59,14 @@ private:
 
         // Cache each snapped stage's saturation. The next stage and next sample
         // reuse exactly that value, avoiding repeated transcendental calls.
-        SampleType saturated_prev = saturate<RealtimeEfficient>(x);
+        SampleType saturated_prev = saturate<Saturation>(x);
         for (int i = 0; i < 4; ++i) {
             // Snap each ladder stage: at high resonance the stages self-
             // oscillate and their tails otherwise decay into denormals with
             // no FTZ guard. No-op above 1e-15.
             stage_[i] = snap_to_zero(
                 stage_[i] + g_ * (saturated_prev - saturated_stage_[i]));
-            saturated_stage_[i] = saturate<RealtimeEfficient>(stage_[i]);
+            saturated_stage_[i] = saturate<Saturation>(stage_[i]);
             saturated_prev = saturated_stage_[i];
         }
 
@@ -71,16 +74,14 @@ private:
     }
 
     /// Saturating non-linearity. The `float` path goes through
-    /// `signal::ladder_tanh`, which is exact `std::tanh` by default and switches
-    /// to the float-only Padé `FastMath::tanh` only when
-    /// `PULP_SIGNAL_FAST_LADDER_TANH=1` (see fast_math.hpp for the fidelity
-    /// rationale — the Padé form's +/-4 hard clamp alters the ladder's overdrive
-    /// character, so exact saturation is the default). `LadderFilterT<double>`
-    /// always uses libm: no double Padé exists and it is not on a hot path.
-    template <bool RealtimeEfficient>
+    /// `signal::ladder_tanh_profiled` (see LadderSaturation in fast_math.hpp
+    /// for the choices and their measured deviation from exact tanh).
+    /// `LadderFilterT<double>` always uses libm: the float approximations do
+    /// not reach double precision and it is not on a hot path.
+    template <LadderSaturation Saturation>
     static SampleType saturate(SampleType x) {
         if constexpr (std::is_same_v<SampleType, float>)
-            return ladder_tanh_profiled<RealtimeEfficient>(x);
+            return ladder_tanh_profiled<Saturation>(x);
         else
             return std::tanh(x);
     }

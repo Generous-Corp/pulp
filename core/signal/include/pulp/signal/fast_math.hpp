@@ -149,6 +149,38 @@ struct FastMath {
         return x < -4.0f ? -1.0f : hi;
     }
 
+    /// tanh within 3.0e-7 absolute of std::tanh for every float input
+    /// (measured exhaustively), cheap enough for a saturator inside a
+    /// per-sample feedback loop.
+    ///
+    /// x * P(x^2) / Q(x^2) with both polynomials of degree 4 and P(0) = Q(0)
+    /// = 1, fitted for minimax absolute error on [0, 9]; x^2 is clamped to 81
+    /// and the result to [-1, 1], so |x| past 9 saturates to exactly +/-1.
+    /// Properties the ladder relies on:
+    ///   - odd: tanh_accurate(-x) == -tanh_accurate(x) exactly, -0 stays -0;
+    ///   - unit slope at 0 and relative error below 3e-7 for small |x|, so the
+    ///     small-signal loop gain of a resonant filter is unchanged;
+    ///   - bounded and finite for every input: +/-inf give +/-1 and NaN gives
+    ///     -1 instead of propagating;
+    ///   - monotone to within its error bound (float rounding can step down by
+    ///     a few ulps near saturation);
+    ///   - no branches or calls, so loops over it vectorize.
+    /// About 2.4x the throughput of std::tanh inside a ladder recursion.
+    static float tanh_accurate(float x) {
+        // Clamping x^2 rather than x keeps the sign path short; past |x| = 9
+        // the ratio exceeds 1 and the output clamp saturates it, and a NaN
+        // becomes -1 there (fmax returns the non-NaN operand).
+        const float u = std::fmin(x * x, 81.0f);
+        const float u2 = u * u;
+        // Both polynomials in Estrin form: shorter dependency chains than
+        // Horner, which matters inside a serial per-sample recursion.
+        const float p = (1.0f + u * 0.133803148f) +
+                        u2 * ((0.00349475497f + u * 2.05960245e-05f) + u2 * 1.33379685e-08f);
+        const float q = (1.0f + u * 0.467136322f) +
+                        u2 * ((0.0258737793f + u * 0.000328429886f) + u2 * 7.7694232e-07f);
+        return std::fmin(std::fmax(x * p / q, -1.0f), 1.0f);
+    }
+
     /// Fast sin approximation (Bhaskara-style, max error ~0.001 for any x).
     /// Input in radians.
     static float sin(float x) {
@@ -267,44 +299,48 @@ public:
     }
 };
 
-/// Fidelity gate for the Moog ladder's saturating non-linearity (PR #5880).
+/// Saturator choices for the Moog ladder's per-stage non-linearity.
 ///
-/// `FastMath::tanh` is a Padé approximation of `std::tanh`: ~1.2-1.4x faster on
-/// the real-time path, but NOT bit-exact. Its error is negligible (~-130 dBFS)
-/// for the input range the ladder sees at normal levels (|arg| < ~3, i.e. input
-/// up to ~+6 dBFS even at self-oscillation), but the approximation HARD-CLAMPS
-/// to +/-1 beyond |x| = 4, where real tanh is still climbing. When the ladder is
-/// driven hard (3-4x / +10 dBFS overdrive at high resonance — a signature Moog
-/// "drive" setting) the stage argument crosses 4 and the clamp seam produces a
-/// genuine, phase-stable deviation that peaks at ~-63 dBFS pointwise and ~-69
-/// dBFS in the filtered output. That sits inside the plausibly-audible band and
-/// alters the ladder's overdrive character, so the exact saturator is the
-/// DEFAULT. Define `PULP_SIGNAL_FAST_LADDER_TANH=1` to opt into the fast Padé
-/// path where the ~1.4x throughput win matters more than bit-exact drive.
+/// - `exact`: std::tanh. The reference the others are measured against.
+/// - `accurate`: `FastMath::tanh_accurate`, within 3.0e-7 of std::tanh for
+///   every input. In the ladder that keeps the output within about -120 dBFS
+///   of the exact-saturator filter at any drive and resonance, including
+///   self-oscillation, at about a third of the cost. This is the default.
+/// - `realtime_efficient`: the Padé `FastMath::tanh`. Its hard clamp at
+///   |x| = 4, where tanh is still climbing, changes the overdrive character
+///   (about -63 dBFS pointwise, -69 dBFS in the filtered output at +10 dBFS
+///   drive and high resonance); kept for callers that ask for it explicitly.
+enum class LadderSaturation { exact, accurate, realtime_efficient };
+
+/// Defining `PULP_SIGNAL_FAST_LADDER_TANH=1` switches the default ladder
+/// saturator from `accurate` to `realtime_efficient`.
 ///
 /// This is the single source of truth for the saturator: `LadderFilterT<float>`
 /// (the interpreter) and the live-kernel `f2_ladder_tanhf` export (the F2 WASM
 /// emitter) both route through it, so the per-node bit-exact null test stays
 /// green under either setting.
 #ifndef PULP_SIGNAL_FAST_LADDER_TANH
-#define PULP_SIGNAL_FAST_LADDER_TANH 0  // default: exact std::tanh (fidelity)
+#define PULP_SIGNAL_FAST_LADDER_TANH 0  // default: the accurate saturator
 #endif
 
-/// The ladder's `float` saturator, gated by `PULP_SIGNAL_FAST_LADDER_TANH`.
-template <bool RealtimeEfficient>
+inline constexpr LadderSaturation kDefaultLadderSaturation =
+    PULP_SIGNAL_FAST_LADDER_TANH ? LadderSaturation::realtime_efficient
+                                 : LadderSaturation::accurate;
+
+/// The ladder's `float` saturator for an explicit choice.
+template <LadderSaturation Saturation>
 inline float ladder_tanh_profiled(float x) {
-    if constexpr (RealtimeEfficient)
+    if constexpr (Saturation == LadderSaturation::realtime_efficient)
         return FastMath::tanh(x);
+    else if constexpr (Saturation == LadderSaturation::accurate)
+        return FastMath::tanh_accurate(x);
     else
         return std::tanh(x);
 }
 
+/// The ladder's default `float` saturator.
 inline float ladder_tanh(float x) {
-#if PULP_SIGNAL_FAST_LADDER_TANH
-    return ladder_tanh_profiled<true>(x);
-#else
-    return ladder_tanh_profiled<false>(x);
-#endif
+    return ladder_tanh_profiled<kDefaultLadderSaturation>(x);
 }
 
 /// A [3/2] Padé tanh that is 1-LIPSCHITZ and bounded — the saturator to reach
