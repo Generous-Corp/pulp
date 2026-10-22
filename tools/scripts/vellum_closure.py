@@ -1097,21 +1097,7 @@ def prelude_inputs(source: Path) -> list[Path] | None:
     if len(re.findall(r"(?i)\bCOMMAND\b", uncommented)) != 1:
         return None
 
-    expected_files = (
-        "css-colors.js", "css-parser.js", "web-compat-element.js",
-        "web-compat-element-events.js", "web-compat-canvas.js", "web-compat-canvas-gpu.js",
-        "web-compat-canvas-matrix.js", "web-compat-canvas-image.js",
-        "web-compat-style-dedup-table.js", "web-compat-style-decl.js",
-        "web-compat-style-decl-layout.js", "web-compat-style-decl-paint.js",
-        "web-compat-style-decl-typography.js", "web-compat-style-decl-transform.js",
-        "web-compat-style-decl-misc.js", "web-compat-style-decl-helpers.js",
-        "web-compat-animation.js", "web-compat-document.js",
-        "web-compat-transient-interaction.js", "web-compat-document-selectors.js",
-        "web-compat-document-gpu-mock.js", "web-compat-dom-ops.js",
-        "web-compat-gpu-buffered.js", "web-compat-observers.js",
-        "web-compat-scheduler.js", "import-runtime.js",
-    )
-    expected_preludes = ["PULP_JS_PRELUDES"] + ["${CMAKE_CURRENT_SOURCE_DIR}/js/" + name for name in expected_files]
+    expected_preludes = ["PULP_JS_PRELUDES"]
     expected_commands = [
         expected_preludes,
         ["PULP_JS_EMBEDDED_HEADER", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp"],
@@ -1134,12 +1120,22 @@ def prelude_inputs(source: Path) -> list[Path] | None:
         ["OUTPUT", "${PULP_JS_EMBEDDED_SOURCE}", "COMMAND", "${Python3_EXECUTABLE}", "${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py", "${PULP_JS_EMBEDDED_SOURCE}", "${PULP_JS_PRELUDES}", "DEPENDS", "${PULP_JS_PRELUDES}", "${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py", "COMMENT", '"Embedding JS preludes into C++ source (UTF-8-safe Python chunker)"', "VERBATIM"],
         ["pulp-view-script", "PRIVATE", "${PULP_JS_EMBEDDED_SOURCE}"],
     ]
-    if any(actual != expected for (_, actual), expected in zip(parsed, expected_commands)):
+    if parsed is None or len(parsed) != len(expected_commands):
         return None
+    for index, ((actual_name, actual), expected) in enumerate(zip(parsed, expected_commands)):
+        if index == 0:
+            if actual_name != "set" or not actual or actual[0] != "PULP_JS_PRELUDES":
+                return None
+            expected_preludes = actual
+            continue
+        if actual != expected:
+            return None
     tokens = parsed[0][1][1:]
     prefix = "${CMAKE_CURRENT_SOURCE_DIR}/"
     paths: list[Path] = []
     for token in tokens:
+        if not token.startswith(prefix + "js/"):
+            return None
         token = token.removeprefix(prefix)
         rel = Path(token)
         if rel.is_absolute() or ".." in rel.parts:
@@ -1148,7 +1144,7 @@ def prelude_inputs(source: Path) -> list[Path] | None:
         if not path.is_file():
             return None
         paths.append(path)
-    if len(paths) != 26 or len({path.relative_to(source / "core/view") for path in paths}) != len(paths):
+    if len({path.relative_to(source / "core/view") for path in paths}) != len(paths):
         return None
     return paths or None
 
@@ -1630,7 +1626,13 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
         # list declared by PulpViewJsPreludes.cmake to the closure.  Without
         # these source files a Vellum export carries only the generated C++
         # and header and cannot reproduce the prelude bytes.
-        for input_path in prelude_inputs(source) or []:
+        prelude_paths = prelude_inputs(source)
+        if prelude_paths is None:
+            raise SystemExit(
+                "pulp-view-script prelude producer could not be parsed: "
+                "core/view/cmake/PulpViewJsPreludes.cmake"
+            )
+        for input_path in prelude_paths:
             all_files.add(input_path.resolve())
             normalized.append(norm_path(str(input_path), source, build))
         for suffix in ("web_compat_preludes_gen.hpp", "web_compat_preludes_gen.cpp"):
