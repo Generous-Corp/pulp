@@ -38,6 +38,16 @@ class CpuSharedIoArenaProvider final : public SharedIoArenaProvider {
         HoldTerminalBusy,
         // Run the work, then retire it RetiredFailed.
         FailExecution,
+        // Injected device loss, for the conformance kit's loss scenarios. The
+        // first submission loses the provider at the named point: before its
+        // work runs (the submission is refused), after its work runs but
+        // before its terminal is recorded, or after the terminal is recorded.
+        // Once lost, the provider refuses submissions and new slots, holds
+        // every outstanding terminal until drain() retires it RetiredFailed,
+        // reports device_lost(), and never resumes. Production never sets it.
+        ForceLossBeforeSubmit,
+        ForceLossBetweenSubmitAndCompletionRegistration,
+        ForceLossAfterCompletionRegistration,
     };
 
     struct Options {
@@ -55,7 +65,14 @@ class CpuSharedIoArenaProvider final : public SharedIoArenaProvider {
         std::uint64_t terminal_busy_retries = 0;
         std::uint64_t drain_calls = 0;
         std::uint64_t failed_drains = 0;
+        // Recorded when an injected loss occurs: steady-clock time and a
+        // nonzero reason. Zero means the provider has not been lost.
+        std::uint64_t device_lost_callback_ns = 0;
+        std::uint32_t device_lost_reason = 0;
     };
+
+    // Reason recorded for an injected loss.
+    static constexpr std::uint32_t kInjectedLossReason = 1;
 
     // Executes one prepared program over a slot's host bytes. Returning false
     // retires the accepted submission RetiredFailed.
@@ -102,9 +119,8 @@ class CpuSharedIoArenaProvider final : public SharedIoArenaProvider {
                 std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept override;
     void poll() noexcept override;
     void service_until(std::uint64_t deadline_ns) noexcept override;
-    bool device_lost() const noexcept override {
-        return false;
-    }
+    // Only an injected loss fault can lose this provider.
+    bool device_lost() const noexcept override;
     bool can_resume_after_drain() const noexcept override;
     SharedIoProviderIdentity provider_identity() const noexcept override;
     SharedIoProviderCapabilities provider_capabilities() const noexcept override;

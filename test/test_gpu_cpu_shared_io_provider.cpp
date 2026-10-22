@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -772,4 +773,152 @@ TEST_CASE("CPU provider WaveNet program enforces contiguous stream order",
     CHECK(completion->status == SharedIoArena::CompletionStatus::RetiredSuccess);
     CHECK(session.discard_completion(*completion));
     CHECK(session.release());
+}
+
+namespace {
+
+std::uint64_t steady_ns() {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+
+struct LossRun {
+    bool accepted = false;
+    std::size_t terminals_before_drain = 0;
+    std::size_t terminals_after_drain = 0;
+    std::optional<SharedIoTerminalStatus> status;
+    bool lost = false;
+    bool resumable = true;
+    bool loss_recorded_in_window = false;
+    bool refused_after_loss = false;
+    bool new_preparation_refused = false;
+    bool released = false;
+};
+
+// One submission on a provider armed with `fault`, serviced, then drained:
+// the shape of the conformance kit's force-loss scenarios.
+LossRun run_loss(CpuSharedIoArenaProvider::Fault fault) {
+    LossRun run;
+    CpuSharedIoArenaProvider provider({.fault = fault});
+    SharedIoArena arena;
+    if (!arena.prepare(provider, probe_config(2)))
+        return run;
+    TerminalLog log;
+    const auto before = steady_ns();
+    const auto token = submit_probe(arena, 1, run.accepted);
+    if (!token)
+        return run;
+    for (int pass = 0; pass < 4; ++pass)
+        arena.drain_completions(log.observer());
+    run.terminals_before_drain = log.count(*token);
+    // A second block after the loss must be refused before any work runs.
+    bool second_accepted = true;
+    const auto second = submit_probe(arena, 2, second_accepted);
+    run.refused_after_loss = second && !second_accepted;
+    arena.begin_retirement();
+    if (!provider.drain())
+        return run;
+    arena.drain_completions(log.observer());
+    run.terminals_after_drain = log.count(*token);
+    for (const auto& entry : log.entries)
+        if (entry.first == *token)
+            run.status = entry.second;
+    if (run.accepted)
+        (void)arena.discard(*token);
+    run.lost = provider.device_lost();
+    run.resumable = provider.can_resume_after_drain();
+    const auto stats = provider.stats();
+    run.loss_recorded_in_window = stats.device_lost_reason != 0 &&
+                                  stats.device_lost_callback_ns >= before &&
+                                  stats.device_lost_callback_ns <= steady_ns();
+    run.released = arena.release();
+    SharedIoArena retry;
+    run.new_preparation_refused = !retry.prepare(provider, probe_config(1));
+    run.resumable = run.resumable || provider.can_resume_after_drain();
+    return run;
+}
+
+void check_lost(const LossRun& run) {
+    CHECK(run.terminals_before_drain == 0);
+    CHECK(run.lost);
+    CHECK_FALSE(run.resumable);
+    CHECK(run.loss_recorded_in_window);
+    CHECK(run.refused_after_loss);
+    CHECK(run.released);
+    CHECK(run.new_preparation_refused);
+}
+
+} // namespace
+
+TEST_CASE("CPU provider without a loss fault is never lost",
+          "[gpu-audio][shared-io][cpu-provider][loss]") {
+    const auto run = run_loss(CpuSharedIoArenaProvider::Fault::None);
+    CHECK(run.accepted);
+    CHECK(run.terminals_before_drain == 1);
+    CHECK(run.status == SharedIoTerminalStatus::RetiredSuccess);
+    CHECK_FALSE(run.lost);
+    CHECK(run.resumable);
+    CHECK_FALSE(run.loss_recorded_in_window);
+    CHECK_FALSE(run.refused_after_loss);
+    CHECK(run.released);
+    CHECK_FALSE(run.new_preparation_refused);
+}
+
+TEST_CASE("CPU provider loss before submit refuses the work and stays lost",
+          "[gpu-audio][shared-io][cpu-provider][loss]") {
+    const auto run = run_loss(CpuSharedIoArenaProvider::Fault::ForceLossBeforeSubmit);
+    CHECK_FALSE(run.accepted);
+    CHECK(run.terminals_after_drain == 0);
+    check_lost(run);
+}
+
+TEST_CASE("CPU provider loss between submit and registration fails the work at drain",
+          "[gpu-audio][shared-io][cpu-provider][loss]") {
+    const auto run =
+        run_loss(CpuSharedIoArenaProvider::Fault::ForceLossBetweenSubmitAndCompletionRegistration);
+    CHECK(run.accepted);
+    CHECK(run.terminals_after_drain == 1);
+    CHECK(run.status == SharedIoTerminalStatus::RetiredFailed);
+    check_lost(run);
+}
+
+TEST_CASE("CPU provider loss after registration fails the work at drain",
+          "[gpu-audio][shared-io][cpu-provider][loss]") {
+    const auto run =
+        run_loss(CpuSharedIoArenaProvider::Fault::ForceLossAfterCompletionRegistration);
+    CHECK(run.accepted);
+    CHECK(run.terminals_after_drain == 1);
+    CHECK(run.status == SharedIoTerminalStatus::RetiredFailed);
+    check_lost(run);
+}
+
+TEST_CASE("CPU provider drain after loss retires every in-flight block failed",
+          "[gpu-audio][shared-io][cpu-provider][loss]") {
+    // The loss strikes once the first block's terminal is registered; that
+    // block stays in flight, unpublished by service, until drain.
+    CpuSharedIoArenaProvider provider(
+        {.fault = CpuSharedIoArenaProvider::Fault::ForceLossAfterCompletionRegistration});
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(provider, probe_config(2)));
+    TerminalLog log;
+    bool accepted = false;
+    const auto first = submit_probe(arena, 1, accepted);
+    REQUIRE(first);
+    REQUIRE(accepted);
+    CHECK(provider.device_lost());
+    for (int pass = 0; pass < 4; ++pass)
+        arena.drain_completions(log.observer());
+    CHECK(log.entries.empty());
+    arena.begin_retirement();
+    REQUIRE(provider.drain());
+    arena.drain_completions(log.observer());
+    REQUIRE(log.count(*first) == 1);
+    CHECK(log.entries.front().second == SharedIoTerminalStatus::RetiredFailed);
+    CHECK(arena.discard(*first));
+    CHECK_FALSE(provider.can_resume_after_drain());
+    CHECK(arena.release());
+    CHECK(provider.device_lost());
+    CHECK_FALSE(provider.can_resume_after_drain());
+    CHECK(provider.stats().retired_success == 0);
 }

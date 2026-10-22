@@ -6,6 +6,7 @@
 #include <pulp/signal/fft.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <complex>
 #include <cstring>
 #include <limits>
@@ -84,8 +85,12 @@ struct CpuSharedIoArenaProvider::Impl {
         auto& submission = slot.submission;
         if (!submission.accepted || !submission.pending || !submission.inbox)
             return;
-        if (submission.delayed && !draining)
+        if ((submission.delayed || lost) && !draining)
             return;
+        // Work outstanding when the provider was lost retires failed, and
+        // only at the drain boundary.
+        if (lost)
+            submission.pending = SharedIoTerminalStatus::RetiredFailed;
         SharedIoTerminalInbox::PushResult result;
         if (submission.held_claim) {
             // The injected claimant now finishes the publication it held.
@@ -122,6 +127,20 @@ struct CpuSharedIoArenaProvider::Impl {
         }
     }
 
+    // Loses the provider once, at the armed point, recording when and why.
+    void lose(Fault point) noexcept {
+        if (lost || options.fault != point)
+            return;
+        lost = true;
+        accepting = false;
+        reusable = false;
+        stats.device_lost_callback_ns =
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now().time_since_epoch())
+                                           .count());
+        stats.device_lost_reason = kInjectedLossReason;
+    }
+
     bool any_accepted() const noexcept {
         return std::any_of(slots.begin(), slots.end(),
                            [](const auto& slot) { return slot->submission.accepted; });
@@ -134,6 +153,7 @@ struct CpuSharedIoArenaProvider::Impl {
     bool accepting = true;
     bool reusable = true;
     bool busy_fault_consumed = false;
+    bool lost = false;
 };
 
 namespace {
@@ -469,6 +489,8 @@ bool CpuSharedIoArenaProvider::submit_kernel(const SlotResources& resources, Slo
                                              std::shared_ptr<SharedIoTerminalInbox> terminal_inbox,
                                              Kernel& kernel) noexcept {
     auto* slot = impl_ ? impl_->find(resources) : nullptr;
+    if (slot != nullptr)
+        impl_->lose(Fault::ForceLossBeforeSubmit);
     const bool refused = slot == nullptr || !impl_->accepting || !terminal_inbox || slot->retired ||
                          slot->submission.accepted || token.slot != slot->index ||
                          resources.input != reinterpret_cast<std::byte*>(slot->input.get()) ||
@@ -486,6 +508,7 @@ bool CpuSharedIoArenaProvider::submit_kernel(const SlotResources& resources, Slo
     const bool executed = kernel.execute(token, {resources.input, resources.input_size},
                                          {resources.output, resources.output_size}) &&
                           impl_->options.fault != Fault::FailExecution;
+    impl_->lose(Fault::ForceLossBetweenSubmitAndCompletionRegistration);
     auto& submission = slot->submission;
     submission.accepted = true;
     submission.token = token;
@@ -495,6 +518,7 @@ bool CpuSharedIoArenaProvider::submit_kernel(const SlotResources& resources, Slo
     submission.delayed =
         impl_->options.fault == Fault::DelayCompletion && impl_->options.fault_slot == slot->index;
     ++impl_->stats.submissions;
+    impl_->lose(Fault::ForceLossAfterCompletionRegistration);
     return true;
 }
 
@@ -530,8 +554,12 @@ bool CpuSharedIoArenaProvider::drain() noexcept {
     return true;
 }
 
+bool CpuSharedIoArenaProvider::device_lost() const noexcept {
+    return impl_ && impl_->lost;
+}
+
 bool CpuSharedIoArenaProvider::can_resume_after_drain() const noexcept {
-    return impl_ && impl_->reusable && impl_->accepting && !impl_->any_accepted();
+    return impl_ && !impl_->lost && impl_->reusable && impl_->accepting && !impl_->any_accepted();
 }
 
 bool CpuSharedIoArenaProvider::has_accepted_work() const noexcept {
