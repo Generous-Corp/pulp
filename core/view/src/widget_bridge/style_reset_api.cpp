@@ -156,6 +156,15 @@ void capture_layout_baseline(const View& view) {
     sweep_expired(store);
 }
 
+void set_layout_baseline(const View& view, LayoutBaseline baseline) {
+    std::lock_guard<std::mutex> lock(baseline_mutex());
+    auto& store = baselines();
+    store.entries.insert_or_assign(
+        view.import_binding_instance_id(),
+        StoredBaseline{std::move(baseline), view.import_binding_lifetime_token()});
+    sweep_expired(store);
+}
+
 std::optional<LayoutBaseline> find_layout_baseline(const View& view) {
     std::lock_guard<std::mutex> lock(baseline_mutex());
     const auto& entries = baselines().entries;

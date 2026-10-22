@@ -192,6 +192,37 @@ TEST_CASE("resetStyleProperty stops a CSS animation", "[view][bridge][style-rese
     CHECK(h.bridge.widget("a")->active_animations().empty());
 }
 
+TEST_CASE("resetStyleProperty on an upgraded scroll container restores its starting layout",
+          "[view][bridge][style-reset]") {
+    Harness h;
+    h.bridge.load_script(R"(
+        var panel = document.createElement('div');
+        document.body.appendChild(panel);
+        globalThis.panelId = panel._id;
+        setFlex(panelId, 'width', 120);
+        setFlex(panelId, 'margin_top', 9);
+        setFlex(panelId, 'padding_top', 7);
+    )");
+    const auto id = h.engine.evaluate("panelId").getWithDefault<std::string>("");
+    REQUIRE_FALSE(id.empty());
+    h.engine.evaluate("__domAppend('', panelId, 'div', 'scroll')");
+    auto* wrapper = h.bridge.scroll_wrapper(id);
+    REQUIRE(wrapper != nullptr);
+    auto* content = h.bridge.widget(id);
+    REQUIRE(wrapper->flex().preferred_width == 120.0f);
+
+    // Non-padding slots answer from the wrapper, which took the authored
+    // style over at the upgrade but must reset to the content's start.
+    REQUIRE(h.reset(id, "width"));
+    CHECK(wrapper->flex().preferred_width == 0.0f);
+    CHECK(wrapper->flex().dim_width.value == 0.0f);
+    REQUIRE(h.reset(id, "margin_top"));
+    CHECK(wrapper->flex().margin_top == -1.0f);
+    // Padding answers from the inner box.
+    REQUIRE(h.reset(id, "padding_top"));
+    CHECK(content->flex().padding_top == -1.0f);
+}
+
 TEST_CASE("resetStyleProperty refuses an unknown slot or widget", "[view][bridge][style-reset]") {
     Harness h;
     h.bridge.load_script("createCol('box', ''); setFlex('box', 'gap', 4);");

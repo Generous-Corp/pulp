@@ -34,6 +34,10 @@ struct LayoutBaseline {
 /// exists for it. Call before the first mutation of either.
 void capture_layout_baseline(const View& view);
 
+/// Replace `view`'s baseline. For a view that takes over another's layout
+/// role, whose starting style is the other view's rather than its own.
+void set_layout_baseline(const View& view, LayoutBaseline baseline);
+
 /// The baseline recorded for `view`, or nullopt when no layout write has
 /// reached it yet (its current style is then still its starting style).
 std::optional<LayoutBaseline> find_layout_baseline(const View& view);
