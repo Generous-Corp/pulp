@@ -41,6 +41,15 @@ function(_pulp_expand_create_template type in_file out_file)
         string(SUBSTRING "${pair}" ${value_start} -1 value)
         string(REPLACE "{{${key}}}" "${value}" content "${content}")
     endforeach()
+    # A placeholder this list does not know would reach the compiler as
+    # literal text; fail at configure time with the name instead.
+    string(REGEX MATCH "{{[A-Za-z0-9_]+}}" leftover "${content}")
+    if(leftover)
+        message(FATAL_ERROR
+            "create_template_tests.cmake: ${in_file} uses ${leftover}, which "
+            "this expansion does not substitute. Add it to the list above "
+            "(and to KNOWN_TEMPLATE_VARS in tools/scripts/verify_create_templates.py).")
+    endif()
     # Rewrite only on change so a reconfigure does not force a rebuild.
     set(existing "")
     if(EXISTS "${out_file}")
