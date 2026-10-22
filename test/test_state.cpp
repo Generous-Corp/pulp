@@ -3405,3 +3405,13 @@ TEST_CASE("ParamReader::get does not allocate", "[state][param-reader][rt-safety
     }
     REQUIRE(sum == 64.0f);
 }
+
+TEST_CASE("ParamReader reads the base value, not the modulated value", "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 3, .name = "Cutoff", .range = {0.0f, 1.0f, 0.25f}});
+    const auto cutoff = store.param_reader(3);
+    store.set_mod_offset(3, 0.5f);
+    REQUIRE(store.get_modulated(3) == 0.75f);
+    REQUIRE(cutoff.get() == 0.25f);
+    REQUIRE(cutoff.get() == store.get_value(3));
+}

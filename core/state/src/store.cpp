@@ -426,7 +426,7 @@ ParamReader StateStore::param_reader(ParamID id) const {
     auto it = id_to_index_.find(id);
     if (it == id_to_index_.end())
         return {};
-    return ParamReader(&values_, it->second);
+    return ParamReader(this, it->second);
 }
 
 float StateStore::get_modulated(ParamID id) const {

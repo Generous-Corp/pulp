@@ -102,8 +102,8 @@ struct ConditionalParameterApplyResult {
 /// `get()` is an inline relaxed atomic load with no lookup and no call.
 ///
 /// The handle stays valid while the store it came from exists, even if more
-/// parameters are registered afterwards (it holds the store's value table and
-/// an index, not a pointer to the value). Registration must still not run
+/// parameters are registered afterwards (it holds the store and an index,
+/// not a pointer to the value). Registration must still not run
 /// concurrently with `get()` — the same rule as for `get_value()` — and the
 /// handle dangles once its StateStore is destroyed. A default-constructed
 /// handle, or one resolved from an unknown ID, reads 0.0f — the same result
@@ -123,21 +123,21 @@ class ParamReader {
     ParamReader() = default;
 
     /// Current base value (lock-free, relaxed ordering), or 0.0f if unbound.
-    float get() const noexcept {
-        return values_ != nullptr ? (*values_)[index_].get() : 0.0f;
-    }
+    /// This is the value get_value() returns; it does not include the
+    /// per-buffer modulation offset that get_modulated() adds.
+    float get() const noexcept;
 
     /// True if this handle refers to a registered parameter.
     bool valid() const noexcept {
-        return values_ != nullptr;
+        return store_ != nullptr;
     }
 
   private:
     friend class StateStore;
-    ParamReader(const std::vector<ParamValue>* values, std::size_t index) noexcept
-        : values_(values), index_(index) {}
+    ParamReader(const StateStore* store, std::size_t index) noexcept
+        : store_(store), index_(index) {}
 
-    const std::vector<ParamValue>* values_ = nullptr;
+    const StateStore* store_ = nullptr;
     std::size_t index_ = 0;
 };
 
@@ -638,7 +638,14 @@ public:
     /// state.
     void copy_state_migrations_from(const StateStore& source);
 
-private:
+  private:
+    friend class ParamReader;
+
+    /// Base value of the parameter registered at @p index (ParamReader::get).
+    float value_at_index_(std::size_t index) const noexcept {
+        return values_[index].get();
+    }
+
     // Member ORDER is load-bearing for the RT->main listener path. The
     // parameter storage (id_to_index_ + values_) MUST be declared before
     // registry_ so that, on destruction (reverse declaration order),
@@ -771,6 +778,10 @@ public:
         deferred_gesture_releases_.clear();
     }
 };
+
+inline float ParamReader::get() const noexcept {
+    return store_ != nullptr ? store_->value_at_index_(index_) : 0.0f;
+}
 
 // ─── Template definitions ──────────────────────────────────────────────────
 
