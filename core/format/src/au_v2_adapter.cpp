@@ -969,7 +969,21 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     for (UInt32 i = 0; i < out_channels; ++i) {
         output_ptrs_[i] = static_cast<float*>(outBuffer.mBuffers[i].mData);
     }
-    if (warming_render_path_) return noErr;
+    if (warming_render_path_) {
+        // Also fault in the per-block MIDI buffer reset and the context build.
+        // Both touch only adapter-owned state that every real render resets
+        // first; the inbound MIDI/SysEx queues are not drained, no host
+        // callback runs, and the Processor is not called.
+        midi_in_.clear();
+        midi_in_.clear_sysex();
+        midi_out_.clear();
+        midi_out_.clear_sysex();
+        midi_in_.sort();
+        const ProcessContext warm_ctx = make_render_process_context(
+            GetSampleRate(), static_cast<int>(inFramesToProcess), offline_render_.offline());
+        (void)warm_ctx;
+        return noErr;
+    }
 
     // When the Bypass param is engaged, copy main input to main output
     // (null-guarded), zero any output channel without a matching input, and

@@ -1935,6 +1935,7 @@ class CountingTriggerEffect : public pulp::format::Processor {
 public:
     static constexpr pulp::state::ParamID kTriggerId = 1;
     static inline int process_calls = 0;
+    static inline std::size_t midi_seen = 0;
 
     pulp::format::PluginDescriptor descriptor() const override {
         return {
@@ -1957,9 +1958,10 @@ public:
     }
     void prepare(const pulp::format::PrepareContext&) override {}
     void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer& midi_in_events, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {
         ++process_calls;
+        midi_seen += midi_in_events.size();
     }
 };
 
@@ -1994,6 +1996,10 @@ TEST_CASE("AU v2 effect: Initialize warm-up never runs the Processor or settles 
     // the first real render.
     REQUIRE(effect.SetParameter(CountingTriggerEffect::kTriggerId,
                                 kAudioUnitScope_Global, 0, 1.0f, 0) == noErr);
+    // Likewise a note the host queued before initialization: the warm-up
+    // resets the MIDI buffers but must not drain the inbound queue.
+    CountingTriggerEffect::midi_seen = 0;
+    REQUIRE(effect.MIDIEvent(0x90, 60, 100, 0) == noErr);
     REQUIRE(effect.DoInitialize() == noErr);
     REQUIRE(CountingTriggerEffect::process_calls == 0);
     Float32 trigger = 0.0f;
@@ -2015,6 +2021,7 @@ TEST_CASE("AU v2 effect: Initialize warm-up never runs the Processor or settles 
     AudioUnitRenderActionFlags flags = 0;
     REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
     REQUIRE(CountingTriggerEffect::process_calls == 1);
+    REQUIRE(CountingTriggerEffect::midi_seen == 1);
     REQUIRE(effect.GetParameter(CountingTriggerEffect::kTriggerId, kAudioUnitScope_Global, 0,
                                 trigger) == noErr);
     REQUIRE(trigger == 0.0f);
