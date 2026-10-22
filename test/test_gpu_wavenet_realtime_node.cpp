@@ -40,6 +40,9 @@ TEST_CASE("realtime provider identity fails closed for an untyped node",
 struct Control {
     bool complete = true, fail = false, reject = false, release = true;
     bool wrong_sequence = false, late = false;
+    // Return each completion under the generation before the one that
+    // admitted it, as a completion surviving from an earlier epoch would.
+    bool stale_generation = false;
     // lost: the device is gone; submits are refused, pending work completes
     // as ProviderFailed. hang: the provider accepts work and never completes it.
     bool lost = false, hang = false;
@@ -60,7 +63,8 @@ struct Control {
 class Channel final : public detail::WaveNetRealtimeChannel {
   public:
     explicit Channel(Control& control) : control_(control) {}
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
+    bool submit(std::span<const float> input,
+                const detail::SharedIoSubmissionTicket& ticket) noexcept override {
         ++control_.submits;
         if (control_.lose_on_submit)
             control_.lost = true;
@@ -71,7 +75,8 @@ class Channel final : public detail::WaveNetRealtimeChannel {
         if (pending == pending_.end())
             return false;
         std::copy(input.begin(), input.end(), pending->data.begin());
-        pending->sequence = sequence;
+        pending->sequence = ticket.sequence;
+        pending->ticket = ticket;
         pending->submit_index = control_.submits;
         pending->active = true;
         return true;
@@ -89,7 +94,8 @@ class Channel final : public detail::WaveNetRealtimeChannel {
         control_.last_wait_deadline = deadline;
         ++control_.services;
     }
-    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
+    std::optional<detail::WaveNetChannelCompletion>
+    receive(std::span<float> output) noexcept override {
         ++control_.receives;
         if (!control_.complete || (control_.hang && !control_.lost))
             return {};
@@ -119,10 +125,15 @@ class Channel final : public detail::WaveNetRealtimeChannel {
         if (!failed)
             std::copy_n(pending->data.data(), output.size(), output.data());
         const bool late = control_.late;
-        return GpuWaveNetBlockResult{pending->sequence + (control_.wrong_sequence ? 1 : 0),
-                                     failed ? GpuWaveNetBlockStatus::ProviderFailed
-                                            : GpuWaveNetBlockStatus::GpuDelivered,
-                                     late};
+        auto ticket = pending->ticket;
+        if (control_.stale_generation)
+            --ticket.generation;
+        return detail::WaveNetChannelCompletion{
+            GpuWaveNetBlockResult{pending->sequence + (control_.wrong_sequence ? 1 : 0),
+                                  failed ? GpuWaveNetBlockStatus::ProviderFailed
+                                         : GpuWaveNetBlockStatus::GpuDelivered,
+                                  late},
+            ticket};
     }
     bool lost() const noexcept override {
         return control_.lost;
@@ -137,6 +148,7 @@ class Channel final : public detail::WaveNetRealtimeChannel {
         std::array<float, 2> data{};
         std::uint64_t sequence = 0;
         int submit_index = 0;
+        detail::SharedIoSubmissionTicket ticket{};
         bool active = false;
     };
     Control& control_;
@@ -792,6 +804,33 @@ TEST_CASE("WaveNet owned trace closes each worker admission without inventing GP
     CHECK(stats.dropped == 0);
     REQUIRE(h.node.release());
     CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(h.node).attempted == stats.attempted);
+}
+
+TEST_CASE("WaveNet rejects a completion carrying another generation's admission ticket",
+          "[gpu_audio][wavenet][realtime][ticket]") {
+    // Production path: the node's own collection, fed by a channel that hands
+    // back each completion under the generation before the one that admitted
+    // it, as a completion surviving an earlier epoch would.
+    Harness h(1);
+    h.controls[0].stale_generation = true;
+    CHECK(h.callback(1) == detail::kRealtimeGpuPriming);
+    h.service();
+    h.service();
+    CHECK(detail::WaveNetRealtimeTestAccess::stale_completions(h.node) >= 1);
+    // The stale completion retires nothing: it is not delivered, and it is not
+    // taken as a provider failure either.
+    CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK(h.callback(2) != detail::kRealtimeGpuReady);
+
+    // Positive control: the same channel returning the admitted ticket
+    // completes the block, which the next callback delivers.
+    Harness control(1);
+    CHECK(control.callback(1) == detail::kRealtimeGpuPriming);
+    control.service();
+    control.service();
+    CHECK(detail::WaveNetRealtimeTestAccess::stale_completions(control.node) == 0);
+    CHECK(control.callback(2) == detail::kRealtimeGpuReady);
+    CHECK(control.node.recovery_reason() == GpuAudioRecoveryReason::None);
 }
 
 TEST_CASE("WaveNet partial channel rejection produces one failed terminal after retirement",

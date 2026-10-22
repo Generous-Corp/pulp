@@ -36,6 +36,18 @@ class SharedIoComputePlan {
         std::uint64_t submitted_ns = 0;
         std::uint64_t worker_ns = 0;
         std::uint64_t predicted_ns = 0;
+        // Captured from the slot at admission; the completion is checked
+        // against it rather than against whatever epoch is current then.
+        SharedIoSubmissionTicket ticket{};
+
+        static SubmitToken admit(const SharedIoSlotLedger::SlotToken& slot,
+                                 std::uint64_t deadline_ns = 0) noexcept {
+            SubmitToken token;
+            token.slot = slot;
+            token.deadline_ns = deadline_ns;
+            token.ticket = admit_submission(slot.preparation_epoch, slot.stream_sequence);
+            return token;
+        }
     };
     struct Completion {
         SubmitToken token;

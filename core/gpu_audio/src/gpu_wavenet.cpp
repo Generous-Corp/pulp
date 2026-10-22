@@ -157,7 +157,8 @@ bool GpuWaveNetSession::submit_block(std::span<const float> input, std::uint64_t
     if (!lease || lease->bytes.size() != input.size() * sizeof(float))
         return false;
     std::memcpy(lease->bytes.data(), input.data(), lease->bytes.size());
-    const detail::SharedIoProgramSession::SubmitToken token{lease->token, deadline_ns};
+    const auto token =
+        detail::SharedIoProgramSession::SubmitToken::admit(lease->token, deadline_ns);
     if (impl_->session->submit(token)) {
         ++impl_->outstanding;
         return true;

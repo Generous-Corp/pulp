@@ -201,7 +201,7 @@ bool GpuSpectralMaskSession::submit_impl(std::span<const float> input, std::uint
                     gains.data(), gains.size_bytes());
         impl_->report.cpu_input_bytes += gains.size_bytes();
     }
-    const detail::SharedIoProgramSession::SubmitToken token{lease->token, deadline};
+    const auto token = detail::SharedIoProgramSession::SubmitToken::admit(lease->token, deadline);
     if (!impl_->session.submit(token)) {
         (void)impl_->session.cancel(token);
         return false;

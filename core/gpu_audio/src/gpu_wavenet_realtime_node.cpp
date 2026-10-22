@@ -14,32 +14,6 @@
 namespace pulp::gpu_audio {
 namespace {
 using Bridge = detail::SharedIoStampedBridge;
-class SessionChannel final : public detail::WaveNetRealtimeChannel {
-  public:
-    explicit SessionChannel(std::unique_ptr<GpuWaveNetSession> session)
-        : session_(std::move(session)) {}
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
-        return session_->submit_block(input, sequence);
-    }
-    void service(std::uint64_t now) noexcept override {
-        session_->service(now);
-    }
-    void service_until(std::uint64_t, std::uint64_t deadline) noexcept override {
-        session_->service_until(deadline);
-    }
-    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
-        return session_->receive(output);
-    }
-    bool release() noexcept override {
-        return session_->release();
-    }
-    bool lost() const noexcept override {
-        return session_->device_lost();
-    }
-
-  private:
-    std::unique_ptr<GpuWaveNetSession> session_;
-};
 std::uint64_t now_ns() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
@@ -49,7 +23,9 @@ std::uint64_t now_ns() noexcept {
 
 struct GpuWaveNetRealtimeNode::Impl {
     struct Pending {
-        Bridge::Stamp stamp;
+        // Captured when the worker admits the block; the completion must carry
+        // the same ticket to retire it.
+        detail::SharedIoSubmissionTicket ticket;
         std::vector<float> output;
         detail::SharedIoTraceRecord trace_record;
         std::uint64_t completed_mask = 0;
@@ -59,8 +35,11 @@ struct GpuWaveNetRealtimeNode::Impl {
         bool suppress = false;
         bool counted = false;
 
+        Bridge::Stamp stamp() const noexcept {
+            return {ticket.generation, ticket.sequence};
+        }
         void reset() noexcept {
-            stamp = {};
+            ticket = {};
             completed_mask = 0;
             outcome = detail::SharedIoTraceOutcome::Success;
             occupied = false;
@@ -119,7 +98,7 @@ struct GpuWaveNetRealtimeNode::Impl {
                         detail::SharedIoFallbackReason reason, bool observed = false) noexcept {
         if (!pending.counted) {
             pending.counted = true;
-            tally(terminal, pending.stamp.sequence);
+            tally(terminal, pending.ticket.sequence);
         }
         if (!pending.trace_pending || !trace)
             return;
@@ -279,6 +258,8 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::vector<Pending> pending_ring;
     Bridge::Callback callback;
     std::size_t pending_head = 0, pending_count = 0;
+    // Completions dropped because an earlier generation admitted them.
+    std::uint64_t stale_completions = 0;
     std::uint64_t next_input = 0, sequence = 0, epoch = 0;
     std::uint64_t all_channels_mask = 0;
     // The sequence after the last callback that has finished consuming its
@@ -347,6 +328,7 @@ struct GpuWaveNetRealtimeNode::Impl {
         for (auto& pending : pending_ring)
             pending.output.assign(count, 0.f);
         pending_head = pending_count = 0;
+        stale_completions = 0;
         all_channels_mask = c.channels == 64 ? UINT64_MAX : (UINT64_C(1) << c.channels) - 1;
         next_input = sequence;
         callback_next.store(sequence, std::memory_order_relaxed);
@@ -397,7 +379,7 @@ struct GpuWaveNetRealtimeNode::Impl {
     // The block the provider will not deliver: the oldest one in flight, or the
     // next to be admitted when nothing is in flight.
     std::uint64_t first_undelivered() const noexcept {
-        return pending_count != 0 ? pending_ring[pending_head].stamp.sequence : next_input;
+        return pending_count != 0 ? pending_ring[pending_head].ticket.sequence : next_input;
     }
     std::uint32_t service_and_collect(std::uint64_t service_now, std::uint64_t deadline,
                                       bool* progressed = nullptr) noexcept {
@@ -420,21 +402,36 @@ struct GpuWaveNetRealtimeNode::Impl {
         for (std::size_t ch = 0; ch < channels.size(); ++ch) {
             std::size_t received = 0;
             while (received < pending_count) {
-                auto result = channels[ch]->receive({worker_output.data() + ch * n, n});
-                if (!result)
+                auto completion = channels[ch]->receive({worker_output.data() + ch * n, n});
+                if (!completion)
                     break;
                 ++received;
                 if (progressed)
                     *progressed = true;
+                const auto* result = &completion->result;
+                // Only the ticket a block was admitted with can complete it.
                 Pending* pending = nullptr;
+                bool stale = false;
                 for (std::size_t offset = 0; offset < pending_count; ++offset) {
                     auto& candidate = pending_ring[(pending_head + offset) % pending_ring.size()];
-                    if (candidate.occupied && candidate.stamp.sequence == result->sequence) {
+                    if (!candidate.occupied || candidate.ticket.sequence != result->sequence)
+                        continue;
+                    if (completion->ticket.admits(candidate.ticket.generation,
+                                                  candidate.ticket.sequence))
                         pending = &candidate;
-                        break;
-                    }
+                    else
+                        stale = completion->ticket.accepted() &&
+                                completion->ticket.generation != candidate.ticket.generation;
+                    break;
                 }
                 if (pending == nullptr) {
+                    // A ticket from another generation names a block this
+                    // admission never issued: drop it, it is not a provider
+                    // fault. An unattributable completion still fails.
+                    if (stale) {
+                        ++stale_completions;
+                        continue;
+                    }
                     fail(failure, result->sequence);
                     continue;
                 }
@@ -464,8 +461,8 @@ struct GpuWaveNetRealtimeNode::Impl {
             // already finished; wall-clock time plays no part. A stale block
             // keeps its recovery cause instead.
             const bool consumer_passed = callback_next.load(std::memory_order_acquire) >
-                                         pending.stamp.sequence + config.lead_blocks;
-            const bool current = bridge->delivery_epoch() == pending.stamp.epoch;
+                                         pending.ticket.sequence + config.lead_blocks;
+            const bool current = bridge->delivery_epoch() == pending.ticket.generation;
             if (pending.outcome != detail::SharedIoTraceOutcome::Success) {
                 trace_terminal(pending, pending.outcome, failed_terminal(pending.outcome),
                                failed_reason(pending.outcome), true);
@@ -478,13 +475,13 @@ struct GpuWaveNetRealtimeNode::Impl {
                                detail::SharedIoGpuTerminalDisposition::StaleRejected,
                                recovery_trace_reason(), true);
             } else {
-                const auto publication = bridge->publish_output(pending.stamp, pending.output);
+                const auto publication = bridge->publish_output(pending.stamp(), pending.output);
                 produced += publication == Bridge::Publication::Published ? 1 : 0;
                 if (publication != Bridge::Publication::Published) {
                     trace_terminal(pending, detail::SharedIoTraceOutcome::LateRejected,
                                    detail::SharedIoGpuTerminalDisposition::LateRejected,
                                    detail::SharedIoFallbackReason::InputSaturated, true);
-                    fail(detail::SharedIoRecoveryReason::InputSaturated, pending.stamp.sequence);
+                    fail(detail::SharedIoRecoveryReason::InputSaturated, pending.ticket.sequence);
                 } else {
                     trace_terminal(pending, detail::SharedIoTraceOutcome::Success,
                                    detail::SharedIoGpuTerminalDisposition::CompletedAccepted,
@@ -569,19 +566,22 @@ bool GpuWaveNetRealtimeNode::prepare() {
             if (!result) {
                 // Retain a partially prepared session if its physical drain needs retry.
                 if (result.session)
-                    s.channels.push_back(
-                        std::make_unique<SessionChannel>(std::move(result.session)));
+                    s.channels.push_back(std::make_unique<detail::GpuWaveNetSessionChannel<>>(
+                        std::move(result.session), s.config.session.slots));
                 (void)release();
                 return false;
             }
-            s.channels.push_back(std::make_unique<SessionChannel>(std::move(result.session)));
+            s.channels.push_back(std::make_unique<detail::GpuWaveNetSessionChannel<>>(
+                std::move(result.session), s.config.session.slots));
         }
         // Silence warmup is explicit and stopped-host-only. Never auto-reprime a
         // failed live history with silence. All channels begin at the same block.
         std::vector<float> zero(s.config.session.descriptor.block_size, 0.f), output(zero.size());
         for (std::uint32_t block = 0; block < s.config.prewarm_blocks; ++block) {
             for (auto& channel : s.channels) {
-                if (!channel->submit(zero, s.sequence + block)) {
+                // Warm-up runs before any delivery epoch opens, so it is admitted
+                // under generation 0, which no delivery can ever carry.
+                if (!channel->submit(zero, detail::admit_submission(0, s.sequence + block))) {
                     (void)release();
                     return false;
                 }
@@ -589,9 +589,9 @@ bool GpuWaveNetRealtimeNode::prepare() {
                 bool received = false;
                 while (now_ns() < deadline) {
                     channel->service(now_ns());
-                    if (auto result = channel->receive(output)) {
-                        received = result->sequence == s.sequence + block &&
-                                   result->status == GpuWaveNetBlockStatus::GpuDelivered;
+                    if (auto completion = channel->receive(output)) {
+                        received = completion->ticket.admits(0, s.sequence + block) &&
+                                   completion->result.status == GpuWaveNetBlockStatus::GpuDelivered;
                         break;
                     }
                     std::this_thread::yield();
@@ -814,7 +814,7 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
             (void)s.bridge->release_input(*input);
             break;
         }
-        pending.stamp = stamp;
+        pending.ticket = detail::admit_submission(stamp.epoch, stamp.sequence);
         s.trace_stage(pending, detail::SharedIoTraceStage::EncodeBegin);
         // WaveNet's provider path does not expose a separate command encoder.
         // The channel submit boundary is the authenticated host submission
@@ -824,7 +824,7 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
         s.trace_stage(pending, detail::SharedIoTraceStage::SubmitBegin);
         bool submission_ok = true;
         for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
-            if (!s.channels[ch]->submit(input->samples().subspan(ch * n, n), stamp.sequence)) {
+            if (!s.channels[ch]->submit(input->samples().subspan(ch * n, n), pending.ticket)) {
                 submission_ok = false;
                 pending.completed_mask |= UINT64_C(1) << ch;
                 const bool lost = s.channels[ch]->lost();
@@ -900,6 +900,10 @@ std::uint64_t
 detail::WaveNetRealtimeTestAccess::recovery_sequence(const GpuWaveNetRealtimeNode& node) noexcept {
     return node.impl_->bridge ? node.impl_->bridge->recovery_sequence()
                               : std::numeric_limits<std::uint64_t>::max();
+}
+std::uint64_t
+detail::WaveNetRealtimeTestAccess::stale_completions(const GpuWaveNetRealtimeNode& node) noexcept {
+    return node.impl_->stale_completions;
 }
 void detail::WaveNetRealtimeTestAccess::observe_trace(
     GpuWaveNetRealtimeNode& node, SharedIoTraceDrainObserver observer) noexcept {

@@ -3,7 +3,7 @@
 //
 // Fake provider, in-process; not DAW and not render-loss evidence.
 //
-// The transport and execution-controller suites prove the fallback contract one
+// The transport and stamped-bridge suites prove the fallback contract one
 // callback at a time. This file checks it at the plug-in boundary, under
 // host-style call sequences: activate/deactivate with a new sample rate or
 // block size, ragged host callbacks, adapter-owned bypass, and state save/load
@@ -133,7 +133,9 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (auto& slot : slots_)
             slot.data.assign(quantum, 0.0f);
     }
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
+    bool submit(std::span<const float> input,
+                const detail::SharedIoSubmissionTicket& ticket) noexcept override {
+        const auto sequence = ticket.sequence;
         if (plan_.reject_submissions || plan_.lost)
             return false;
         auto slot =
@@ -147,13 +149,15 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (std::size_t i = 0; i < input.size(); ++i)
             slot->data[i] = fir_.step(input[i]);
         slot->sequence = sequence;
+        slot->ticket = ticket;
         slot->active = true;
         ++plan_.submissions;
         return true;
     }
     void service(std::uint64_t) noexcept override {}
     void service_until(std::uint64_t, std::uint64_t) noexcept override {}
-    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
+    std::optional<detail::WaveNetChannelCompletion>
+    receive(std::span<float> output) noexcept override {
         if (plan_.hang && !plan_.lost)
             return {};
         auto slot =
@@ -162,10 +166,13 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
             return {};
         slot->active = false;
         if (plan_.fail_completions || plan_.lost)
-            return GpuWaveNetBlockResult{slot->sequence, GpuWaveNetBlockStatus::ProviderFailed,
-                                         false};
+            return detail::WaveNetChannelCompletion{
+                GpuWaveNetBlockResult{slot->sequence, GpuWaveNetBlockStatus::ProviderFailed, false},
+                slot->ticket};
         std::copy_n(slot->data.begin(), output.size(), output.begin());
-        return GpuWaveNetBlockResult{slot->sequence, GpuWaveNetBlockStatus::GpuDelivered, false};
+        return detail::WaveNetChannelCompletion{
+            GpuWaveNetBlockResult{slot->sequence, GpuWaveNetBlockStatus::GpuDelivered, false},
+            slot->ticket};
     }
     bool release() noexcept override {
         return true;
@@ -178,6 +185,7 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
     struct Slot {
         std::vector<float> data;
         std::uint64_t sequence = 0;
+        detail::SharedIoSubmissionTicket ticket{};
         bool active = false;
     };
     FaultPlan& plan_;

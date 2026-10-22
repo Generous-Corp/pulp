@@ -625,7 +625,7 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
         }
 
         const auto deadline_ns = *deadline;
-        const auto submit = SharedIoComputePlan::SubmitToken{input->token, deadline_ns};
+        const auto submit = SharedIoComputePlan::SubmitToken::admit(input->token, deadline_ns);
         trace_admit(input->token);
         trace_stage(input->token, SharedIoTraceStage::EncodeBegin);
         if (!pack_input(*pending_ingress_, *input)) {

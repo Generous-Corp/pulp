@@ -436,7 +436,9 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (auto& slot : slots_)
             slot.data.assign(block, 0.0f);
     }
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
+    bool submit(std::span<const float> input,
+                const detail::SharedIoSubmissionTicket& ticket) noexcept override {
+        const auto sequence = ticket.sequence;
         if (plan_.reject_submissions || plan_.lost)
             return false;
         auto slot = std::find_if(slots_.begin(), slots_.end(), [](auto& s) { return !s.active; });
@@ -449,6 +451,7 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (std::size_t i = 0; i < input.size(); ++i)
             slot->data[i] = fir_.step(input[i]);
         slot->sequence = sequence;
+        slot->ticket = ticket;
         slot->order = next_order_++;
         slot->active = true;
         ++plan_.submissions;
@@ -456,7 +459,8 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
     }
     void service(std::uint64_t) noexcept override {}
     void service_until(std::uint64_t, std::uint64_t) noexcept override {}
-    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
+    std::optional<detail::WaveNetChannelCompletion>
+    receive(std::span<float> output) noexcept override {
         if (plan_.starve)
             return {};
         Slot* oldest = nullptr;
@@ -468,11 +472,15 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
             return {};
         oldest->active = false;
         if (plan_.fail_completions || plan_.lost)
-            return GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::ProviderFailed,
-                                         false};
+            return detail::WaveNetChannelCompletion{
+                GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::ProviderFailed,
+                                      false},
+                oldest->ticket};
         for (std::size_t i = 0; i < output.size(); ++i)
             output[i] = plan_.gain * oldest->data[i];
-        return GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::GpuDelivered, false};
+        return detail::WaveNetChannelCompletion{
+            GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::GpuDelivered, false},
+            oldest->ticket};
     }
     bool lost() const noexcept override {
         return plan_.lost;
@@ -490,6 +498,7 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
     struct Slot {
         std::vector<float> data;
         std::uint64_t sequence = 0, order = 0;
+        detail::SharedIoSubmissionTicket ticket{};
         bool active = false;
     };
     ChannelPlan& plan_;

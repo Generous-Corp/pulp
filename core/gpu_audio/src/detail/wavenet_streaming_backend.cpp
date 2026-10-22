@@ -88,6 +88,7 @@ WaveNetStreamingBackend::enqueue_validated(const StreamingBlock& block) noexcept
     auto& slot = slots_[(head_ + count_) % slots_.size()];
     slot = {};
     slot.stamp = block.stamp;
+    slot.ticket = admit_submission(block.stamp.epoch, block.stamp.sequence);
     slot.output = block.output;
     slot.output_channel_stride = block.output_channel_stride;
     slot.output_frame_stride = block.output_frame_stride;
@@ -104,7 +105,7 @@ WaveNetStreamingBackend::enqueue_validated(const StreamingBlock& block) noexcept
                     block.input[base + static_cast<std::size_t>(i) * block.input_frame_stride];
             samples = {scratch_.data(), block.frames};
         }
-        if (channels_[ch]->submit(samples, block.stamp.sequence)) {
+        if (channels_[ch]->submit(samples, slot.ticket)) {
             ++submitted;
         } else {
             lost_ = lost_ || channels_[ch]->lost();
@@ -159,11 +160,21 @@ std::size_t WaveNetStreamingBackend::service_until(std::uint64_t deadline_ns) no
     std::size_t completions = 0;
     for (std::uint32_t ch = 0; ch < channels_.size(); ++ch) {
         for (std::size_t received = 0; received < count_; ++received) {
-            auto result = channels_[ch]->receive(scratch_);
-            if (!result)
+            auto completion = channels_[ch]->receive(scratch_);
+            if (!completion)
                 break;
             ++completions;
+            const auto* result = &completion->result;
             auto* slot = find(result->sequence);
+            if (slot != nullptr &&
+                !completion->ticket.admits(slot->ticket.generation, slot->ticket.sequence)) {
+                // A ticket from another generation never completes this
+                // admission; drop it rather than fail the stream.
+                if (completion->ticket.accepted() &&
+                    completion->ticket.generation != slot->ticket.generation)
+                    continue;
+                slot = nullptr;
+            }
             if (slot == nullptr) {
                 // An unattributable completion means this provider stream is
                 // no longer trustworthy; nothing pending may be delivered.
