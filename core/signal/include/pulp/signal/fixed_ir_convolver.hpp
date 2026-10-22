@@ -80,15 +80,17 @@ template <typename SampleType = float> class FixedIrConvolverT {
 
     /// The longest IR run on the direct engine for a block size.
     ///
-    /// The table is measured on Apple Silicon with the Accelerate backend,
-    /// single and multi-instance, for IRs of 8 to 4096 taps (receipt:
-    /// docs/validation/convolver-crossover/). At 16-frame callbacks and below
-    /// the direct engine beat the uniform FFT at every measured length, so
-    /// the limit there is the end of the measured range; longer IRs keep the
-    /// FFT engine until they are measured. Above 16 frames the crossover is
-    /// not monotonic in block size, so it is a table rather than a formula.
-    /// Other backends keep the FFT engine until they have their own
-    /// measurements; a scalar direct kernel is an order of magnitude slower.
+    /// The table is measured on Apple Silicon with the Accelerate backend
+    /// (M1 Max, M5 Max and M5 Ultra), single and multi-instance, for IRs of 8
+    /// to 4096 taps (receipt: docs/validation/convolver-crossover/). Each
+    /// limit is the lowest of the three chips' crossovers. At 8-frame
+    /// callbacks and below the direct engine beat the uniform FFT at every
+    /// measured length, so the limit there is the end of the measured range;
+    /// longer IRs keep the FFT engine until they are measured. From 16 frames
+    /// up the real-input FFT wins early: about 576 taps at 16 frames, 128 at
+    /// 32 and 64, and 64 from 128 frames up. Other backends keep the FFT
+    /// engine until they have their own measurements; a scalar direct kernel
+    /// is an order of magnitude slower.
     static constexpr std::size_t direct_fir_limit(std::size_t block_size) noexcept {
 #if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
         switch (detail::convolver_block_size(block_size)) {
@@ -96,18 +98,14 @@ template <typename SampleType = float> class FixedIrConvolverT {
         case 2:
         case 4:
         case 8:
-        case 16:
             return 4096;
+        case 16:
+            return 576;
         case 32:
-            return 448;
         case 64:
-            return 256;
-        case 128:
-            return 512;
-        case 256:
-            return 384;
+            return 128;
         default:
-            return 256;
+            return 64;
         }
 #else
         (void)block_size;
