@@ -207,11 +207,43 @@ public:
         return output;
     }
 
-    // Process a buffer in-place
+    // Process a buffer in-place.
+    //
+    // Same expressions as the per-sample path, so every output is identical to
+    // it while the state stays at or above 1e-15. Coefficients and state are
+    // held in locals: the member state is otherwise stored and reloaded every
+    // sample because the buffer may alias it, which puts a store-to-load
+    // round trip on the recursive path. The denormal snap is applied to the
+    // state every kStateSnapInterval samples and at the end of the call
+    // instead of after every sample: it only alters states below 1e-15, and a
+    // state that starts a chunk at or above 1e-15 cannot decay into the float
+    // subnormal range within one chunk unless both poles are inside
+    // |z| < 0.44, where the tail falls through the subnormal range to exact
+    // zero within a few samples anyway. Subnormal residency is therefore
+    // bounded by one chunk however long the buffer is.
     void process(SampleType* buffer, int num_samples) {
-        for (int i = 0; i < num_samples; ++i)
-            buffer[i] = process(buffer[i]);
+        const SampleType b0 = b0_, b1 = b1_, b2 = b2_, a1 = a1_, a2 = a2_;
+        SampleType s1 = s1_, s2 = s2_;
+        for (int start = 0; start < num_samples; start += kStateSnapInterval) {
+            const int end = num_samples - start < kStateSnapInterval
+                ? num_samples : start + kStateSnapInterval;
+            for (int i = start; i < end; ++i) {
+                const SampleType input = buffer[i];
+                const SampleType output = b0 * input + s1;
+                s1 = b1 * input - a1 * output + s2;
+                s2 = b2 * input - a2 * output;
+                buffer[i] = output;
+            }
+            s1 = snap_to_zero(s1);
+            s2 = snap_to_zero(s2);
+        }
+        s1_ = s1;
+        s2_ = s2;
     }
+
+    // Number of samples the buffer path runs between denormal snaps of the
+    // recursive state.
+    static constexpr int kStateSnapInterval = 64;
 
     // Reset state (call on discontinuities)
     void reset() { s1_ = SampleType{0}; s2_ = SampleType{0}; }

@@ -7,6 +7,9 @@
 #include <limits>
 #include <numbers>
 #include <pulp/signal/signal.hpp>
+#include "support/denormal_tail.hpp"
+#include <cstdint>
+#include <cstring>
 #include <vector>
 
 using namespace pulp::signal;
@@ -577,5 +580,263 @@ TEST_CASE("LinkwitzRiley retuning after active history stays finite", "[signal][
         auto split = lr.process(i == 0 ? 1.0f : 0.0f);
         REQUIRE(std::isfinite(split.low));
         REQUIRE(std::isfinite(split.high));
+    }
+}
+
+// ── Block paths and denormal tails (TptFilter, Svf) ─────────────────────────
+
+namespace {
+
+std::vector<float> filters_busy_signal(std::size_t n, float sample_rate) {
+    std::vector<float> s(n);
+    std::uint32_t lcg = 0x13579bdu;
+    for (std::size_t i = 0; i < n; ++i) {
+        lcg = lcg * 1664525u + 1013904223u;
+        const float noise = static_cast<float>(lcg >> 8) / 16777216.0f - 0.5f;
+        const float t = static_cast<float>(i) / sample_rate;
+        s[i] = 0.5f * std::sin(6.2831853f * 220.0f * t) + 0.3f * std::sin(6.2831853f * 3150.0f * t) +
+               0.2f * noise;
+    }
+    return s;
+}
+
+std::vector<int> filters_split_schedule(std::size_t total) {
+    static constexpr int kPattern[] = {1, 63, 64, 65, 7, 128, 333, 1024, 2, 512, 31};
+    std::vector<int> blocks;
+    std::size_t done = 0;
+    for (std::size_t k = 0; done < total; ++k) {
+        const int b = static_cast<int>(std::min<std::size_t>(
+            static_cast<std::size_t>(kPattern[k % std::size(kPattern)]), total - done));
+        blocks.push_back(b);
+        done += static_cast<std::size_t>(b);
+    }
+    return blocks;
+}
+
+bool same_bits(const std::vector<float>& a, const std::vector<float>& b) {
+    return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
+}
+
+}  // namespace
+
+TEST_CASE("TptFilter block paths are bit-identical to the sample paths across split blocks",
+          "[signal][filter][tpt][determinism]") {
+    constexpr float sr = 48000.0f;
+    const auto input = filters_busy_signal(8192, sr);
+    const auto schedule = filters_split_schedule(input.size());
+
+    for (const float cutoff : {20.0f, 1000.0f, 0.24f * sr, 0.45f * sr}) {
+        INFO("cutoff " << cutoff);
+        auto run = [&](auto sample_fn, auto block_fn) {
+            TptFilter by_sample;
+            TptFilter by_block;
+            by_sample.prepare(sr);
+            by_block.prepare(sr);
+            std::vector<float> expected = input;
+            std::vector<float> actual = input;
+            std::size_t pos = 0;
+            int k = 0;
+            for (int block : schedule) {
+                // Modulate the cutoff at every block boundary on both paths.
+                const float c = cutoff * (1.0f + 0.25f * static_cast<float>(k++ % 3));
+                by_sample.set_cutoff(c);
+                by_block.set_cutoff(c);
+                for (int i = 0; i < block; ++i)
+                    expected[pos + static_cast<std::size_t>(i)] =
+                        sample_fn(by_sample, expected[pos + static_cast<std::size_t>(i)]);
+                block_fn(by_block, actual.data() + pos, block);
+                pos += static_cast<std::size_t>(block);
+            }
+            return same_bits(actual, expected);
+        };
+        CHECK(run([](TptFilter& f, float x) { return f.process_lowpass(x); },
+                  [](TptFilter& f, float* p, int n) { f.process_lowpass(p, n); }));
+        CHECK(run([](TptFilter& f, float x) { return f.process_highpass(x); },
+                  [](TptFilter& f, float* p, int n) { f.process_highpass(p, n); }));
+        CHECK(run([](TptFilter& f, float x) { return f.process_allpass(x); },
+                  [](TptFilter& f, float* p, int n) { f.process_allpass(p, n); }));
+        CHECK(run([](TptFilter& f, float x) { return f.process(x).lowpass; },
+                  [](TptFilter& f, float* p, int n) { f.process_lowpass(p, n); }));
+    }
+}
+
+TEST_CASE("TptFilter tracks a double-precision trapezoidal reference",
+          "[signal][filter][tpt][precision]") {
+    // The recursion is s' = s + 2g (x - s) with lowpass g (x - s) + s; this
+    // is the same filter evaluated in double. The float path must stay within
+    // a few float ulps of full scale of it, which bounds any rearrangement of
+    // the update to well below -120 dBFS.
+    for (const float sr : {44100.0f, 48000.0f, 96000.0f}) {
+        for (const float cutoff : {20.0f, 1000.0f, 0.24f * sr, 0.45f * sr}) {
+            INFO("sr " << sr << " cutoff " << cutoff);
+            TptFilter filter;
+            filter.prepare(sr);
+            filter.set_cutoff(cutoff);
+            const double g = std::tan(std::numbers::pi_v<double> * static_cast<double>(cutoff) /
+                                      static_cast<double>(sr));
+            const double gd = g / (1.0 + g);
+            const auto input = filters_busy_signal(16384, sr);
+            auto output = input;
+            filter.process_lowpass(output.data(), static_cast<int>(output.size()));
+            double state = 0.0;
+            double worst = 0.0;
+            for (std::size_t i = 0; i < input.size(); ++i) {
+                const double d = static_cast<double>(input[i]) - state;
+                const double lp = gd * d + state;
+                state += 2.0 * gd * d;
+                worst = std::max(worst, std::abs(lp - static_cast<double>(output[i])));
+            }
+            CHECK(worst < 1.0e-6);
+        }
+    }
+}
+
+TEST_CASE("TptFilter block path flushes a decaying tail without subnormal residency",
+          "[signal][filter][tpt][denormal]") {
+    using namespace pulp::test::denormal_tail;
+    if (flush_to_zero_active())
+        SKIP("this thread flushes subnormals to zero; the tail counts would be vacuous");
+    constexpr std::size_t kTotal = std::size_t{1} << 18;
+    constexpr float sr = 48000.0f;
+
+    // Negative control: the unsnapped recursion at 5 Hz sits in a subnormal
+    // limit cycle for the rest of the buffer.
+    TptFilter probe;
+    probe.prepare(sr);
+    probe.set_cutoff(5.0f);
+    const float g = probe.process_lowpass(1.0f); // first lowpass sample == g
+    float state = 0.0f;
+    const auto control = impulse_tail(
+        [&](float* x, int n) {
+            for (int i = 0; i < n; ++i) {
+                const float d = x[i] - state;
+                x[i] = g * d + state;
+                state = 2.0f * g * d + state;
+            }
+        },
+        kTotal, 512);
+    REQUIRE(control.subnormal_outputs > kTotal / 2);
+    REQUIRE(control.nonzero_end == kTotal);
+
+    for (std::size_t block : {std::size_t{1}, std::size_t{64}, std::size_t{4096}, kTotal}) {
+        INFO("block " << block);
+        TptFilter filter;
+        filter.prepare(sr);
+        filter.set_cutoff(5.0f);
+        const auto tail =
+            impulse_tail([&](float* x, int n) { filter.process_lowpass(x, n); }, kTotal, block);
+        REQUIRE(tail.subnormal_outputs == 0);
+        REQUIRE(tail.nonzero_end > 0);
+        REQUIRE(tail.nonzero_end < kTotal / 4);
+    }
+
+    // Near a quarter of the sample rate the pole is close to zero; at most one
+    // chunk of subnormal output before exact zero.
+    TptFilter fast;
+    fast.prepare(sr);
+    fast.set_cutoff(0.2f * sr);
+    const auto tail = impulse_tail([&](float* x, int n) { fast.process_lowpass(x, n); }, kTotal, kTotal);
+    REQUIRE(tail.subnormal_outputs <= static_cast<std::size_t>(TptFilter::kStateSnapInterval));
+    REQUIRE(tail.nonzero_end < 1024);
+}
+
+TEST_CASE("Svf block path is bit-identical to the sample path for every mode",
+          "[signal][svf][determinism]") {
+    constexpr float sr = 48000.0f;
+    const auto input = filters_busy_signal(8192, sr);
+    const auto schedule = filters_split_schedule(input.size());
+    for (const auto mode : {Svf::Mode::lowpass, Svf::Mode::highpass, Svf::Mode::bandpass,
+                            Svf::Mode::notch}) {
+        INFO("mode " << static_cast<int>(mode));
+        Svf by_sample;
+        Svf by_block;
+        by_sample.configure(mode, sr, 1000.0f, 0.7071f);
+        by_block.configure(mode, sr, 1000.0f, 0.7071f);
+        std::vector<float> expected = input;
+        std::vector<float> actual = input;
+        std::size_t pos = 0;
+        int k = 0;
+        for (int block : schedule) {
+            if (k++ % 4 == 1) {
+                const float f = 200.0f * static_cast<float>(1 + k % 7);
+                const float q = 0.5f + static_cast<float>(k % 5);
+                by_sample.set_frequency(f);
+                by_block.set_frequency(f);
+                by_sample.set_resonance(q);
+                by_block.set_resonance(q);
+            }
+            for (int i = 0; i < block; ++i)
+                expected[pos + static_cast<std::size_t>(i)] =
+                    by_sample.process(expected[pos + static_cast<std::size_t>(i)]);
+            by_block.process(actual.data() + pos, block);
+            pos += static_cast<std::size_t>(block);
+        }
+        CHECK(same_bits(actual, expected));
+    }
+}
+
+TEST_CASE("Svf block path applies a mode change from the next block",
+          "[signal][svf]") {
+    constexpr float sr = 48000.0f;
+    const auto input = filters_busy_signal(256, sr);
+    Svf by_sample;
+    Svf by_block;
+    by_sample.configure(Svf::Mode::lowpass, sr, 1500.0f, 2.0f);
+    by_block.configure(Svf::Mode::lowpass, sr, 1500.0f, 2.0f);
+    std::vector<float> expected = input;
+    std::vector<float> actual = input;
+    const Svf::Mode order[] = {Svf::Mode::lowpass, Svf::Mode::highpass, Svf::Mode::bandpass,
+                               Svf::Mode::notch};
+    for (int b = 0; b < 4; ++b) {
+        by_sample.set_mode(order[b]);
+        by_block.set_mode(order[b]);
+        for (int i = 0; i < 64; ++i)
+            expected[static_cast<std::size_t>(b * 64 + i)] =
+                by_sample.process(expected[static_cast<std::size_t>(b * 64 + i)]);
+        by_block.process(actual.data() + b * 64, 64);
+    }
+    CHECK(same_bits(actual, expected));
+}
+
+TEST_CASE("Svf block path flushes a decaying tail without subnormal residency",
+          "[signal][svf][denormal]") {
+    using namespace pulp::test::denormal_tail;
+    if (flush_to_zero_active())
+        SKIP("this thread flushes subnormals to zero; the tail counts would be vacuous");
+    constexpr std::size_t kTotal = std::size_t{1} << 18;
+
+    // Negative control: the same TPT recursion with no snap.
+    const float g = std::tan(3.14159265f * 20.0f / 48000.0f);
+    const float k = 1.0f / 0.7071f;
+    const float a1 = 1.0f / (1.0f + g * (g + k));
+    const float a2 = g * a1;
+    const float a3 = g * a2;
+    float ic1 = 0.0f;
+    float ic2 = 0.0f;
+    const auto control = impulse_tail(
+        [&](float* x, int n) {
+            for (int i = 0; i < n; ++i) {
+                const float v3 = x[i] - ic2;
+                const float v1 = a1 * ic1 + a2 * v3;
+                const float v2 = ic2 + a2 * ic1 + a3 * v3;
+                ic1 = 2.0f * v1 - ic1;
+                ic2 = 2.0f * v2 - ic2;
+                x[i] = v2;
+            }
+        },
+        kTotal, 512);
+    REQUIRE(control.subnormal_outputs > kTotal / 2);
+
+    for (std::size_t block : {std::size_t{1}, std::size_t{64}, std::size_t{4096}, kTotal}) {
+        INFO("block " << block);
+        Svf filter;
+        filter.configure(Svf::Mode::lowpass, 48000.0f, 20.0f, 0.7071f);
+        const auto tail = impulse_tail([&](float* x, int n) { filter.process(x, n); }, kTotal, block);
+        REQUIRE(tail.subnormal_outputs == 0);
+        REQUIRE(tail.nonzero_end > 0);
+        // A one-sample block snaps every sample, as the sample path does; the
+        // chunked snap must still bring the tail to exact zero.
+        if (block > 1)
+            REQUIRE(tail.nonzero_end < kTotal / 8);
     }
 }

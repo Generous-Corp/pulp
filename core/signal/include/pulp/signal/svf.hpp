@@ -51,10 +51,26 @@ public:
         return v2;
     }
 
+    /// Process a buffer in place.
+    ///
+    /// Same arithmetic as the per-sample path, with the mode resolved once per
+    /// call and the coefficients and integrator states held in registers. The
+    /// denormal snap runs every kStateSnapInterval samples and at the end of the
+    /// call; it only alters states below 1e-15, so the output differs from the
+    /// per-sample path only once a tail is already below that level.
     void process(SampleType* buffer, int num_samples) {
-        for (int i = 0; i < num_samples; ++i)
-            buffer[i] = process(buffer[i]);
+        switch (mode_) {
+            case Mode::lowpass:  process_block<Mode::lowpass>(buffer, num_samples); return;
+            case Mode::highpass: process_block<Mode::highpass>(buffer, num_samples); return;
+            case Mode::bandpass: process_block<Mode::bandpass>(buffer, num_samples); return;
+            case Mode::notch:    process_block<Mode::notch>(buffer, num_samples); return;
+        }
+        process_block<Mode::lowpass>(buffer, num_samples);
     }
+
+    /// Number of samples the buffer path runs between denormal snaps of the
+    /// integrator states.
+    static constexpr int kStateSnapInterval = 64;
 
     void reset() { ic1_ = 0; ic2_ = 0; }
 
@@ -67,6 +83,36 @@ private:
     SampleType g_ = 0, k_ = 0;
     SampleType a1_ = 0, a2_ = 0, a3_ = 0;
     SampleType ic1_ = 0, ic2_ = 0;
+
+    template <Mode M>
+    void process_block(SampleType* buffer, int num_samples) {
+        const SampleType a1 = a1_, a2 = a2_, a3 = a3_, k = k_;
+        SampleType ic1 = ic1_, ic2 = ic2_;
+        for (int start = 0; start < num_samples; start += kStateSnapInterval) {
+            const int end = num_samples - start < kStateSnapInterval
+                ? num_samples : start + kStateSnapInterval;
+            for (int i = start; i < end; ++i) {
+                const SampleType input = buffer[i];
+                const SampleType v3 = input - ic2;
+                const SampleType v1 = a1 * ic1 + a2 * v3;
+                const SampleType v2 = ic2 + a2 * ic1 + a3 * v3;
+                ic1 = SampleType{2.0f} * v1 - ic1;
+                ic2 = SampleType{2.0f} * v2 - ic2;
+                if constexpr (M == Mode::lowpass)
+                    buffer[i] = v2;
+                else if constexpr (M == Mode::highpass)
+                    buffer[i] = input - k * v1 - v2;
+                else if constexpr (M == Mode::bandpass)
+                    buffer[i] = v1;
+                else
+                    buffer[i] = input - k * v1;
+            }
+            ic1 = snap_to_zero(ic1);
+            ic2 = snap_to_zero(ic2);
+        }
+        ic1_ = ic1;
+        ic2_ = ic2;
+    }
 
     void update() {
         g_ = std::tan(SampleType{3.14159265f} * freq_ / sample_rate_);
