@@ -1,8 +1,6 @@
 ---
-version = "0.1000.0"
 breaking = false
-applies_if = "cli_version_from < 0.1000.0 && cli_version_to >= 0.1000.0"
-summary = "GPU audio status, capability, descriptor and node contracts gain appended fields and hooks; sizeof(GpuAudioStatus) grows"
+summary = "GPU audio: appended status/capability/node contracts, staged convolver pipelining and CPU routing, neural shadow policy and model factory; several GPU audio types grow (rebuild)"
 ---
 
 ## What changed
