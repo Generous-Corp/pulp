@@ -138,8 +138,10 @@ struct FastMath {
     /// Beyond |x| = 4 the result saturates to exactly +/-1. The rational form is
     /// evaluated unconditionally and the saturation applied as selects rather
     /// than early returns, so a loop over this function stays branch-free and
-    /// vectorizes. Outside the clamp the polynomial may overflow to inf/inf;
-    /// that NaN is never selected. A NaN input propagates.
+    /// vectorizes. Outside the clamp the polynomial may overflow to inf/inf
+    /// (|x| above about 1.8e19); that NaN is never selected, but the division
+    /// raises the FE_INVALID status flag, which matters only to code that
+    /// tests floating-point exception flags. A NaN input propagates.
     static float tanh(float x) {
         const float x2 = x * x;
         const float num = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
@@ -149,13 +151,15 @@ struct FastMath {
         return x < -4.0f ? -1.0f : hi;
     }
 
-    /// tanh within 3.0e-7 absolute of std::tanh for every float input
-    /// (measured exhaustively), cheap enough for a saturator inside a
-    /// per-sample feedback loop.
+    /// tanh within 3.0e-7 absolute of std::tanh for every float input when
+    /// the compiler fuses multiply-adds, and within 3.6e-7 when it does not
+    /// (-ffp-contract=off, MSVC, x86-64 without FMA); both measured over every
+    /// float. Cheap enough for a saturator inside a per-sample feedback loop.
     ///
     /// x * P(x^2) / Q(x^2) with both polynomials of degree 4 and P(0) = Q(0)
     /// = 1, fitted for minimax absolute error on [0, 9]; x^2 is clamped to 81
-    /// and the result to [-1, 1], so |x| past 9 saturates to exactly +/-1.
+    /// and the result to [-1, 1], so the result is exactly +/-1 for |x| >= 9.0001
+    /// (std::tanh itself rounds to 1 only above about 9.01).
     /// Properties the ladder relies on:
     ///   - odd: tanh_accurate(-x) == -tanh_accurate(x) exactly, -0 stays -0;
     ///   - unit slope at 0 and relative error below 3e-7 for small |x|, so the
@@ -306,33 +310,44 @@ public:
 /// Saturator choices for the Moog ladder's per-stage non-linearity.
 ///
 /// - `exact`: std::tanh. The reference the others are measured against.
-/// - `accurate`: `FastMath::tanh_accurate`, within 3.0e-7 of std::tanh for
+/// - `accurate`: `FastMath::tanh_accurate`, within 3.0e-7 (3.6e-7 without
+///   fused multiply-add) of std::tanh for
 ///   every input. Against the exact-saturator ladder the output residual is
 ///   at most -129 dBFS for input up to 0 dBFS, -115.6 dBFS at +10 dBFS drive
 ///   and -113.9 dBFS at +20 dBFS (about -134 dB relative to the output);
 ///   harmonic and alias levels match to 0.001 dB and resonant ringing
-///   frequency and decay are unchanged. About 2.4x the throughput of
-///   std::tanh. This is the default.
+///   frequency and decay are unchanged (measured with fused multiply-add).
+///   About 2.4x the throughput of std::tanh. This is the default.
 /// - `realtime_efficient`: the Padé `FastMath::tanh`. Its hard clamp at
 ///   |x| = 4, where tanh is still climbing, changes the overdrive character
 ///   (about -63 dBFS pointwise, -69 dBFS in the filtered output at +10 dBFS
 ///   drive and high resonance); kept for callers that ask for it explicitly.
 enum class LadderSaturation { exact, accurate, realtime_efficient };
 
-/// Defining `PULP_SIGNAL_FAST_LADDER_TANH=1` switches the default ladder
-/// saturator from `accurate` to `realtime_efficient`.
+/// Selecting the default ladder saturator at build time:
+///   - `PULP_SIGNAL_LADDER_SATURATION` = 0 (exact), 1 (accurate) or
+///     2 (realtime_efficient) selects it explicitly;
+///   - otherwise `PULP_SIGNAL_FAST_LADDER_TANH` keeps its original meaning:
+///     defined to 1 selects realtime_efficient, defined to 0 selects exact
+///     std::tanh (the default before the accurate saturator existed);
+///   - with neither defined the default is accurate.
 ///
 /// This is the single source of truth for the saturator: `LadderFilterT<float>`
 /// (the interpreter) and the live-kernel `f2_ladder_tanhf` export (the F2 WASM
 /// emitter) both route through it, so the per-node bit-exact null test stays
-/// green under either setting.
-#ifndef PULP_SIGNAL_FAST_LADDER_TANH
-#define PULP_SIGNAL_FAST_LADDER_TANH 0  // default: the accurate saturator
-#endif
-
+/// green under any setting.
+#if defined(PULP_SIGNAL_LADDER_SATURATION)
+inline constexpr LadderSaturation kDefaultLadderSaturation =
+    PULP_SIGNAL_LADDER_SATURATION == 0   ? LadderSaturation::exact
+    : PULP_SIGNAL_LADDER_SATURATION == 2 ? LadderSaturation::realtime_efficient
+                                         : LadderSaturation::accurate;
+#elif defined(PULP_SIGNAL_FAST_LADDER_TANH)
 inline constexpr LadderSaturation kDefaultLadderSaturation =
     PULP_SIGNAL_FAST_LADDER_TANH ? LadderSaturation::realtime_efficient
-                                 : LadderSaturation::accurate;
+                                 : LadderSaturation::exact;
+#else
+inline constexpr LadderSaturation kDefaultLadderSaturation = LadderSaturation::accurate;
+#endif
 
 /// The ladder's `float` saturator for an explicit choice.
 template <LadderSaturation Saturation>
@@ -343,6 +358,15 @@ inline float ladder_tanh_profiled(float x) {
         return FastMath::tanh_accurate(x);
     else
         return std::tanh(x);
+}
+
+/// The previous boolean form: true is the Padé saturator, false is exact
+/// std::tanh, as before LadderSaturation existed.
+template <bool RealtimeEfficient>
+[[deprecated("use ladder_tanh_profiled<LadderSaturation>")]]
+inline float ladder_tanh_profiled(float x) {
+    return ladder_tanh_profiled<RealtimeEfficient ? LadderSaturation::realtime_efficient
+                                                  : LadderSaturation::exact>(x);
 }
 
 /// The ladder's default `float` saturator.
@@ -381,13 +405,15 @@ namespace detail {
 // Branch-free float log10 / exp10 for decibel conversions in per-sample
 // dynamics paths. Both are plain arithmetic and bit manipulation with no calls
 // and no branches, so a loop over them auto-vectorizes, unlike the libm calls
-// they replace. Accuracy is within a few float ulps of the correctly rounded
-// result over the documented domain, which keeps a compressor's gain within a
-// few parts in 10^7 of the libm path, i.e. a residual below -120 dBFS.
+// they replace. log10_float is within 4 ulps (3.3 measured) and exp10_float
+// within 1.2e-7 relative of the correctly rounded result over the documented
+// domain, with or without fused multiply-add, which keeps a compressor's gain
+// within a few parts in 10^7 of the libm path, i.e. a residual below
+// -120 dBFS.
 
 
-/// log10(x) for finite, positive, normal x. Other inputs are outside the
-/// contract (callers clamp to a positive floor first).
+/// log10(x) for finite, positive, normal x, within 4 ulps. Other inputs are
+/// outside the contract (callers clamp to a positive floor first).
 ///
 /// x = m * 2^k with m in [sqrt(1/2), sqrt(2)); ln(m) = 2 atanh(s) with
 /// s = (m - 1) / (m + 1), |s| <= 0.1716, from the odd series
@@ -413,38 +439,43 @@ inline float log10_float(float x) noexcept {
     return k * kLog10TwoHi + (ln_m * kInvLn10 + k * kLog10TwoLo);
 }
 
-/// 10^x for finite x. Results beyond the float range saturate to +inf or 0
-/// (through the subnormal range) as std::pow does; a NaN input is outside the
-/// contract.
+/// 10^x. Results beyond the float range saturate to +inf or 0 (through the
+/// subnormal range) as std::pow does, and NaN propagates.
 ///
-/// 10^x = 2^n * 2^r with n = round(x log2(10)) and |r| <= 1/2; r is formed
-/// with a split constant so the product's rounding does not reach it, and 2^r
-/// is its Taylor series through degree 7 (truncation below 6e-9 relative).
-/// 2^n is applied as two normal-range factors so n may run past the float
-/// exponent range and the final product over- or underflows naturally.
+/// 10^x = 2^n * 10^d with n = round(x log2(10)) and d = x - n log10(2),
+/// |d| <= log10(2) / 2. The reduction is Cody-Waite in the decimal domain:
+/// log10(2) is split into a high part with few enough significant bits that
+/// n * hi is exact for every n used, so x - n * hi is exact (Sterbenz) and d
+/// carries no rounding from the product whether or not the compiler fuses
+/// multiply-adds. 10^d = e^(d ln 10) is the Taylor series through degree 7
+/// (truncation below 6e-9 relative). 2^n is applied as two normal-range
+/// factors so n may run past the float exponent range and the final product
+/// over- or underflows naturally.
 inline float exp10_float(float x) noexcept {
     constexpr float kLog2Ten = 3.32192809489f;
-    constexpr float kLog2TenHi = 3.3219280243f;   // float(log2(10)), 0x40549a78
-    constexpr float kLog2TenLo = 7.0595370e-08f;  // log2(10) - hi
+    constexpr float kLog10TwoHi = 0.30102539062f;  // 0x3e9a2000, 11 significant bits
+    constexpr float kLog10TwoLo = 4.6050390e-06f;  // log10(2) - hi
+    constexpr float kLnTen = 2.30258509299f;
     // Past 10^+/-75 (about 250 octaves) the result is inf or 0 anyway;
-    // clamping there keeps each half of 2^n inside the normal exponent range.
+    // clamping there keeps |n| <= 250 (so n * hi stays exact) and each half
+    // of 2^n inside the normal exponent range.
     const float xc = std::fmin(std::fmax(x, -75.0f), 75.0f);
     const float n = std::nearbyint(xc * kLog2Ten);
-    const float r = (xc * kLog2TenHi - n) + xc * kLog2TenLo;
-    constexpr float c1 = 0.69314718056f;  // ln2
-    constexpr float c2 = 0.24022650695f;  // ln2^2 / 2!
-    constexpr float c3 = 0.05550410866f;  // ln2^3 / 3!
-    constexpr float c4 = 0.00961812911f;  // ln2^4 / 4!
-    constexpr float c5 = 0.00133335581f;  // ln2^5 / 5!
-    constexpr float c6 = 0.00015403530f;  // ln2^6 / 6!
-    constexpr float c7 = 0.00001525273f;  // ln2^7 / 7!
+    const float d = (xc - n * kLog10TwoHi) - n * kLog10TwoLo;
+    const float t = d * kLnTen;
     const float p =
-        1.0f + r * (c1 + r * (c2 + r * (c3 + r * (c4 + r * (c5 + r * (c6 + r * c7))))));
+        1.0f +
+        t * (1.0f +
+             t * (0.5f +
+                  t * (1.0f / 6.0f +
+                       t * (1.0f / 24.0f +
+                            t * (1.0f / 120.0f + t * (1.0f / 720.0f + t * (1.0f / 5040.0f)))))));
     const std::int32_t e = static_cast<std::int32_t>(n);
     const std::int32_t e_half = e / 2;
     const float scale_a = std::bit_cast<float>(static_cast<std::uint32_t>(e_half + 127) << 23);
     const float scale_b = std::bit_cast<float>(static_cast<std::uint32_t>(e - e_half + 127) << 23);
-    return (p * scale_a) * scale_b;
+    const float result = (p * scale_a) * scale_b;
+    return x == x ? result : x;
 }
 
 } // namespace detail

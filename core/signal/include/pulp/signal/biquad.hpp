@@ -237,10 +237,11 @@ public:
     // kStateSnapInterval samples and at the end of the call instead of after
     // every sample: it only alters states below 1e-15, and a state that starts
     // a chunk at or above 1e-15 cannot decay into the float subnormal range
-    // within one chunk unless both poles are inside |z| < 0.44, where the tail
-    // falls through the subnormal range to exact zero within a few samples
-    // anyway. Subnormal residency is therefore bounded by one chunk however
-    // long the buffer is.
+    // within one chunk unless both poles are inside |z| < 0.44. Inside that
+    // radius, or when the input itself is subnormal, the state can sit in the
+    // subnormal range (rounding can hold it in a one-ulp cycle) until the next
+    // snap. Subnormal residency is therefore bounded by one chunk however long
+    // the buffer is.
     void process(SampleType* buffer, int num_samples) {
         if (sample_path_order_in_block_)
             process_block<false>(buffer, num_samples);

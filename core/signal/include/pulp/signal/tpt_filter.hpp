@@ -92,7 +92,8 @@ template <typename SampleType = float> class TptFilterT {
     /// (cutoffs near a quarter of the sample rate) a state at or above 1e-15
     /// at the start of a chunk cannot decay into the float subnormal range
     /// before the next snap, and inside that band the tail falls through the
-    /// subnormal range to exact zero within a few samples.
+    /// subnormal range; there, and with subnormal input, the state can stay
+    /// subnormal until the next snap, so residency is bounded by one chunk.
     void process_lowpass(SampleType* buffer, int num_samples) {
         process_block(buffer, num_samples, [](SampleType, SampleType lp) { return lp; });
     }

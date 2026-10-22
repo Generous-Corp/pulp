@@ -221,3 +221,16 @@ pulp_dsp_series_catalog_suite(pulp-test-forge-spectral-dynamics-catalogs
 # rebuilt next.
 pulp_dsp_series_catalog_suite(pulp-test-baked-node-fixture
                               test_baked_node_fixture_smoke.cpp)
+
+# How the ladder-saturator macros select the default, each configuration in
+# its own translation unit (they define the same inline variable differently,
+# so they are compiled but never linked together). A wrong selection is a
+# static_assert failure at build time.
+add_library(pulp-ladder-saturation-selection-checks OBJECT
+    header_compile/ladder_saturation_default.cpp
+    header_compile/ladder_saturation_fast0.cpp
+    header_compile/ladder_saturation_fast1.cpp
+    header_compile/ladder_saturation_sel0.cpp
+    header_compile/ladder_saturation_sel1.cpp
+    header_compile/ladder_saturation_bool_shim.cpp)
+target_link_libraries(pulp-ladder-saturation-selection-checks PRIVATE pulp::signal)

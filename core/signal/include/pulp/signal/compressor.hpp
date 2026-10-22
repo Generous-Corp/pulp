@@ -292,8 +292,11 @@ private:
             }
 
             // The envelope is snapped once per chunk: it only alters a level
-            // below 1e-15 dB, and the release pole keeps a chunk-start value
-            // above that out of the subnormal range until the next snap.
+            // below 1e-15 dB. With releases longer than about 0.05 ms the
+            // release pole is slow enough that a chunk-start value above that
+            // cannot reach the subnormal range before the next snap; with
+            // shorter ones the envelope decays through it within the chunk,
+            // so subnormal residency is still bounded by one chunk.
             const SampleType attack = attack_coeff_;
             const SampleType release = release_coeff_;
             SampleType envelope = envelope_db_;
