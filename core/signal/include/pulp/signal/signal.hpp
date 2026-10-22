@@ -32,6 +32,7 @@
 #include <pulp/signal/de_esser.hpp>
 #include <pulp/signal/expander.hpp>
 #include <pulp/signal/svf.hpp>
+#include <pulp/signal/svf_bank.hpp>
 #include <pulp/signal/explicit_q_resonator_bank.hpp>
 #include <pulp/signal/waveshaper.hpp>
 #include <pulp/signal/waveset_transformer.hpp>
@@ -42,6 +43,7 @@
 #include <pulp/signal/chorus.hpp>
 #include <pulp/signal/phaser.hpp>
 #include <pulp/signal/reverb.hpp>
+#include <pulp/signal/ladder_bank.hpp>
 #include <pulp/signal/ladder_filter.hpp>
 #include <pulp/signal/analog_vcf.hpp>
 #include <pulp/signal/linkwitz_riley.hpp>

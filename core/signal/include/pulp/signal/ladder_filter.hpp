@@ -49,6 +49,27 @@ public:
         for (auto& s : saturated_stage_) s = 0;
     }
 
+    /// One-pole stage coefficient for a cutoff and sample rate:
+    /// g = 1 - exp(-2 pi fc / fs). Each stage moves g of the way from its
+    /// saturated state toward its saturated input per sample.
+    static SampleType stage_coefficient(SampleType cutoff_hz, SampleType sample_rate) {
+        return SampleType{1.0f} -
+               std::exp(SampleType{-2.0f} * SampleType{3.14159265f} * cutoff_hz / sample_rate);
+    }
+
+    /// Saturating non-linearity. The `float` path goes through
+    /// `signal::ladder_tanh_profiled` (see LadderSaturation in fast_math.hpp
+    /// for the choices and their measured deviation from exact tanh).
+    /// `LadderFilterT<double>` always uses libm: the float approximations do
+    /// not reach double precision and it is not on a hot path.
+    template <LadderSaturation Saturation>
+    static SampleType saturate(SampleType x) {
+        if constexpr (std::is_same_v<SampleType, float>)
+            return ladder_tanh_profiled<Saturation>(x);
+        else
+            return std::tanh(x);
+    }
+
 private:
     template <LadderSaturation Saturation>
     SampleType process_with_profile(SampleType input) {
@@ -73,19 +94,6 @@ private:
         return stage_[3];
     }
 
-    /// Saturating non-linearity. The `float` path goes through
-    /// `signal::ladder_tanh_profiled` (see LadderSaturation in fast_math.hpp
-    /// for the choices and their measured deviation from exact tanh).
-    /// `LadderFilterT<double>` always uses libm: the float approximations do
-    /// not reach double precision and it is not on a hot path.
-    template <LadderSaturation Saturation>
-    static SampleType saturate(SampleType x) {
-        if constexpr (std::is_same_v<SampleType, float>)
-            return ladder_tanh_profiled<Saturation>(x);
-        else
-            return std::tanh(x);
-    }
-
     SampleType sample_rate_ = SampleType{44100.0f};
     SampleType cutoff_ = SampleType{1000.0f};
     SampleType resonance_ = SampleType{0.0f};
@@ -93,11 +101,7 @@ private:
     SampleType stage_[4] = {};
     SampleType saturated_stage_[4] = {};
 
-    void update() {
-        g_ = SampleType{1.0f} -
-             std::exp(SampleType{-2.0f} * SampleType{3.14159265f} *
-                      cutoff_ / sample_rate_);
-    }
+    void update() { g_ = stage_coefficient(cutoff_, sample_rate_); }
 };
 
 using LadderFilter = LadderFilterT<float>;

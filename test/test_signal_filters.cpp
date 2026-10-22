@@ -923,3 +923,115 @@ TEST_CASE("LadderFilter default saturator preserves resonance and drive behavior
         }
     }
 }
+
+// ── Voice banks ─────────────────────────────────────────────────────────────
+
+TEST_CASE("LadderBank voices are bit-identical to independent LadderFilters",
+          "[signal][ladder][bank][determinism]") {
+    constexpr std::size_t kVoices = 16;
+    LadderBank<kVoices> bank;
+    std::array<LadderFilter, kVoices> scalar;
+    bank.set_sample_rate(48000.0f);
+    for (std::size_t v = 0; v < kVoices; ++v) {
+        scalar[v].set_sample_rate(48000.0f);
+        scalar[v].set_frequency(300.0f + 250.0f * static_cast<float>(v));
+        scalar[v].set_resonance(0.1f * static_cast<float>(v % 11));
+        bank.set_frequency(v, 300.0f + 250.0f * static_cast<float>(v));
+        bank.set_resonance(v, 0.1f * static_cast<float>(v % 11));
+    }
+    std::size_t mismatches = 0;
+    for (int n = 0; n < 12000; ++n) {
+        if (n == 4000) {
+            // Retune and reset single voices mid-stream on both sides.
+            scalar[3].set_frequency(5000.0f);
+            bank.set_frequency(3, 5000.0f);
+            scalar[7].set_resonance(1.0f);
+            bank.set_resonance(7, 1.0f);
+            scalar[9].reset();
+            bank.reset(9);
+        }
+        std::array<float, kVoices> in{};
+        for (std::size_t v = 0; v < kVoices; ++v)
+            in[v] = 2.5f * std::sin(0.013f * static_cast<float>(n) * static_cast<float>(v + 1));
+        std::array<float, kVoices> out{};
+        bank.process(in.data(), out.data());
+        for (std::size_t v = 0; v < kVoices; ++v) {
+            const float expected = scalar[v].process(in[v]);
+            mismatches += std::memcmp(&expected, &out[v], sizeof(float)) != 0;
+        }
+    }
+    CHECK(mismatches == 0);
+    CHECK(bank.stage_coefficient(3) == LadderFilter::stage_coefficient(5000.0f, 48000.0f));
+}
+
+TEST_CASE("LadderBank block processing matches per-sample bank processing",
+          "[signal][ladder][bank]") {
+    constexpr std::size_t kVoices = 4;
+    LadderBank<kVoices> by_block;
+    LadderBank<kVoices> by_sample;
+    for (auto* b : {&by_block, &by_sample}) {
+        b->set_sample_rate(44100.0f);
+        for (std::size_t v = 0; v < kVoices; ++v) {
+            b->set_frequency(v, 800.0f * static_cast<float>(v + 1));
+            b->set_resonance(v, 0.6f);
+        }
+    }
+    std::array<std::vector<float>, kVoices> buffers;
+    std::array<float*, kVoices> pointers{};
+    for (std::size_t v = 0; v < kVoices; ++v) {
+        buffers[v].resize(500);
+        for (std::size_t n = 0; n < 500; ++n)
+            buffers[v][n] = std::sin(0.02f * static_cast<float>(n * (v + 1)));
+        pointers[v] = buffers[v].data();
+    }
+    auto expected = buffers;
+    by_block.process_block(pointers.data(), 500);
+    for (std::size_t n = 0; n < 500; ++n) {
+        std::array<float, kVoices> frame{};
+        for (std::size_t v = 0; v < kVoices; ++v) frame[v] = expected[v][n];
+        by_sample.process(frame.data(), frame.data());
+        for (std::size_t v = 0; v < kVoices; ++v) expected[v][n] = frame[v];
+    }
+    for (std::size_t v = 0; v < kVoices; ++v)
+        CHECK(std::memcmp(buffers[v].data(), expected[v].data(), 500 * sizeof(float)) == 0);
+}
+
+TEST_CASE("SvfBank voices are bit-identical to independent Svfs in every mode",
+          "[signal][svf][bank][determinism]") {
+    constexpr std::size_t kVoices = 16;
+    SvfBank<kVoices> bank;
+    std::array<Svf, kVoices> scalar;
+    for (std::size_t v = 0; v < kVoices; ++v) {
+        const auto mode = static_cast<Svf::Mode>(v % 4);
+        const float f = 200.0f + 300.0f * static_cast<float>(v);
+        const float q = 0.5f + 0.3f * static_cast<float>(v % 5);
+        scalar[v].configure(mode, 48000.0f, f, q);
+        bank.configure(v, mode, 48000.0f, f, q);
+    }
+    std::size_t mismatches = 0;
+    for (int n = 0; n < 12000; ++n) {
+        if (n == 5000) {
+            scalar[2].set_mode(Svf::Mode::notch);
+            bank.set_mode(2, Svf::Mode::notch);
+            scalar[5].set_frequency(9000.0f);
+            bank.set_frequency(5, 9000.0f);
+            scalar[11].set_resonance(8.0f);
+            bank.set_resonance(11, 8.0f);
+            scalar[13].reset();
+            bank.reset(13);
+        }
+        std::array<float, kVoices> in{};
+        for (std::size_t v = 0; v < kVoices; ++v)
+            in[v] = std::sin(0.017f * static_cast<float>(n) * static_cast<float>(v + 1));
+        std::array<float, kVoices> out{};
+        bank.process(in.data(), out.data());
+        for (std::size_t v = 0; v < kVoices; ++v) {
+            const float expected = scalar[v].process(in[v]);
+            mismatches += std::memcmp(&expected, &out[v], sizeof(float)) != 0;
+        }
+    }
+    CHECK(mismatches == 0);
+    const auto c = bank.coefficients(5);
+    const auto d = Svf::design(48000.0f, 9000.0f, 0.5f + 0.3f * 0.0f);
+    CHECK(c.g == d.g);
+}
