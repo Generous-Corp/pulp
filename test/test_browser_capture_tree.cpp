@@ -21,14 +21,19 @@
 #include "tools/import-design/browser_capture_tree.hpp"
 
 #include <pulp/view/design_ir_io.hpp>
+#include <pulp/view/design_update.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -1996,6 +2001,109 @@ TEST_CASE("a duplicated sibling key is reported and falls back to positions",
     // layer require of them.
     const auto all = anchors(lowered.root);
     CHECK(std::set<std::string>(all.begin(), all.end()).size() == all.size());
+}
+
+namespace {
+
+/// The `<ol>` children of a lowered list, as the update planner receives them.
+std::span<const IRNode> list_children(const LoweredSnapshot& lowered) {
+    const auto* list = find_named(lowered.root, "ol");
+    REQUIRE(list != nullptr);
+    return list->children;
+}
+
+/// The key order the keyed-list differential fixture declares, before and
+/// after its Reorder button runs.
+std::pair<std::vector<std::string>, std::vector<std::string>> keyed_fixture_orders() {
+    std::ifstream in(fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / "import-differential" /
+                     "18-keyed-list-panel.identity.json");
+    REQUIRE(in.good());
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto identity = choc::json::parse(text);
+    const auto read = [&](const char* member) {
+        std::vector<std::string> keys;
+        const auto list = identity[member];
+        for (uint32_t i = 0; i < list.size(); ++i)
+            keys.emplace_back(list[i].getString());
+        return keys;
+    };
+    return {read("keys"), read("reordered_keys")};
+}
+
+/// `lower_list` attribute rows that declare `keys` in document order.
+std::string keyed_rows(const std::vector<std::string>& keys) {
+    // String-table indices of the keys `lower_list` knows how to spell.
+    const std::map<std::string, int> spelled{{"drive", 6}, {"tone", 7}, {"mix", 8}};
+    std::string rows;
+    for (const auto& key : keys) {
+        REQUIRE(spelled.count(key) == 1);
+        if (!rows.empty())
+            rows += ",";
+        rows += "[5," + std::to_string(spelled.at(key)) + "]";
+    }
+    return rows;
+}
+
+} // namespace
+
+TEST_CASE("a keyed list reorder plans moves, not rewrites",
+          "[browser-capture][native-lowering][anchor][update]") {
+    // Fixture 18's Reorder button reverses a keyed list. Planned over the two
+    // lowered child lists, every row must be found again by its anchor and
+    // moved: a rewrite (removed + inserted) would tear down Drive's view and
+    // rebuild it from scratch, and a retain-in-place would leave Mix's view
+    // showing Drive's content.
+    const auto [keys, reordered] = keyed_fixture_orders();
+    REQUIRE(keys.size() == 3);
+    REQUIRE(reordered == std::vector<std::string>(keys.rbegin(), keys.rend()));
+    const auto before = lower_list(keyed_rows(keys), "fixture-18-before");
+    const auto after = lower_list(keyed_rows(reordered), "fixture-18-after");
+
+    const auto old_children = list_children(before);
+    const auto new_children = list_children(after);
+    const auto plan = pulp::view::plan_design_child_updates(old_children, new_children);
+    REQUIRE(plan.keyed);
+    CHECK_FALSE(plan.ambiguous_keys);
+    // Reversing three rows keeps at most one in place, so two moves is the
+    // least work that reaches the new order; nothing is rebuilt.
+    CHECK(plan.work == pulp::view::DesignUpdateWorkCounters{1, 2, 0, 0});
+    for (const auto& update : plan.updates)
+        CHECK(update.key.find("/li[key=") != std::string::npos);
+
+    // Applying the plan to the old anchors reproduces the new order exactly.
+    std::vector<std::string> working;
+    for (const auto& child : old_children)
+        working.push_back(child.stable_anchor_id.value_or(""));
+    for (const auto& update : plan.updates) {
+        REQUIRE(update.kind != pulp::view::DesignUpdateKind::inserted);
+        REQUIRE(update.kind != pulp::view::DesignUpdateKind::removed);
+        const auto at = std::find(working.begin(), working.end(), update.key);
+        REQUIRE(at != working.end());
+        auto value = *at;
+        working.erase(at);
+        working.insert(working.begin() + static_cast<std::ptrdiff_t>(update.new_index),
+                       std::move(value));
+    }
+    std::vector<std::string> expected;
+    for (const auto& child : new_children)
+        expected.push_back(child.stable_anchor_id.value_or(""));
+    CHECK(working == expected);
+}
+
+TEST_CASE("an unkeyed list reorder plans rewrites, not moves",
+          "[browser-capture][native-lowering][anchor][update]") {
+    // Planted negative for the keyed case above: the same reorder with Drive
+    // marked only by `data-pulp-id`, which does not change the anchor. Every
+    // anchor is positional, so the planner cannot see that Drive moved. It
+    // reports no move at all; the slot Drive left and the slot it arrived in
+    // are both rebuilt, because their identity attributes differ.
+    const auto before = lower_list("[13,14],[],[]", "unkeyed-before");
+    const auto after = lower_list("[],[],[13,14]", "unkeyed-after");
+    const auto plan =
+        pulp::view::plan_design_child_updates(list_children(before), list_children(after));
+    REQUIRE(plan.keyed);
+    CHECK(plan.work.moved == 0);
+    CHECK(plan.work == pulp::view::DesignUpdateWorkCounters{1, 0, 2, 2});
 }
 
 TEST_CASE("hiding a middle sibling misapplies no stored edit",

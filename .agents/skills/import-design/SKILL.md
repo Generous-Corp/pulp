@@ -573,6 +573,20 @@ knowing before you touch that file:
   The raw values ride along as `pulp_key` / `pulp_id` node attributes;
   `data-pulp-id` is the page-wide source id the materialized lane maps, and it
   does NOT change the anchor.
+- **Anchors change for documents that already declare `data-pulp-key`, and
+  there is no ordinal-to-key alias.** Every keyed node, and every node under
+  one, gets a new anchor. A stored edit (`pulp-tweaks.json`) on the old
+  ordinal path finds no node and surfaces as an `orphaned-tweak` drift; re-store
+  it against the new path once. An alias is deliberately not offered: an
+  ordinal named a SLOT at the time the edit was stored, and nothing records
+  which keyed node held that slot then, so the alias would guess, which is the
+  misapplied edit keys exist to prevent. The one case that does not orphan: in
+  a parent that mixes keyed and unkeyed same-signature siblings, the unkeyed
+  ones renumber over the unkeyed set only, so an old `li[0]` edit that belonged
+  to a keyed row now resolves onto the first UNKEYED row. Re-check stored edits
+  under such parents by hand. The update planner treats `pulp_key` and
+  `pulp_id` as immutable contract attributes (they start with `pulp`), so the
+  same anchor whose `data-pulp-id` changed is rebuilt, not retained.
 
 - When improving the offline/native HTML importer, use the development-only
   Importer Differential Lab rather than changing the authoritative browser
