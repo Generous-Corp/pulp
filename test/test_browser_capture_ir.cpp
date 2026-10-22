@@ -751,6 +751,98 @@ TEST_CASE("an empty pseudo-element's generated row keeps the document canvas",
                                 "root-canvas-repeated-pseudo"));
 }
 
+namespace {
+
+// The frozen root-canvas capture plus one `<canvas>` (backend 9002) inside its
+// MAIN, laid out at 300,40 100x50 CSS px with no border or padding.
+std::string root_canvas_with_canvas() {
+    const auto parsed = choc::json::parse(root_canvas_snapshot());
+    const auto strings = parsed["strings"];
+    const auto section_style =
+        choc::json::toString(parsed["documents"][0]["layout"]["styles"][4], false);
+    auto json = choc::json::toString(parsed, false);
+    append_to_array(json, "strings", "\"CANVAS\"");
+    append_to_array(json, "parentIndex", "9");
+    append_to_array(json, "nodeType", "1");
+    append_to_array(json, "nodeName", std::to_string(strings.size()));
+    append_to_array(json, "nodeValue", "-1");
+    append_to_array(json, "backendNodeId", "9002");
+    append_to_array(json, "attributes", "[]");
+    append_to_array(json, "nodeIndex", "13");
+    append_to_array(json, "styles", section_style);
+    append_to_array(json, "bounds", "[300,40,100,50]");
+    append_to_array(json, "text", "-1");
+    append_to_array(json, "paintOrders", "4");
+    for (const auto* key : {"offsetRects", "scrollRects", "clientRects"})
+        append_to_array(json, key, "[]");
+    append_to_array(json, "blendedBackgroundColors", "-1");
+    append_to_array(json, "textColorOpacities", "1");
+    return json;
+}
+
+const pulp::view::IRNode* find_captured_canvas(const pulp::view::IRNode& node) {
+    if (node.attributes.count("captured_element")) return &node;
+    for (const auto& child : node.children)
+        if (const auto* found = find_captured_canvas(child)) return found;
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("a capture-sized canvas asset lowers as a viewport plane",
+          "[import-design][browser-capture][ir][canvas]") {
+    // Capture: 1280x800 CSS px at DPR 2, so a viewport plane is 2560x1600 px.
+    TempCapture temp;
+    const auto reference = png_header(2560, 1600);
+    temp.write("browser.png", reference);
+    write_valid_reports(temp);
+    const auto lower_with_asset = [&](int width, int height) {
+        const auto asset = png_header(width, height);
+        temp.write("canvas-9002.png", asset);
+        const auto capture = with_canvas_asset(
+            root_canvas_envelope(pulp::runtime::sha256_hex(reference)),
+            pulp::runtime::sha256_hex(asset), 9002, "canvas:9002",
+            "canvas-9002.png", width, height);
+        return lower_root_canvas(temp, root_canvas_with_canvas(), capture, false);
+    };
+
+    SECTION("an asset the capture's size is a plane placed inside the canvas") {
+        const auto result = lower_with_asset(2560, 1600);
+        INFO(result.error);
+        REQUIRE(result);
+        const auto* canvas = find_captured_canvas(result.design_ir->root);
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->type == "frame");
+        REQUIRE(canvas->children.size() == 1);
+        const auto& plane = canvas->children[0];
+        CHECK(plane.type == "image");
+        CHECK(plane.attributes.at("asset_ref") == "canvas:9002");
+        CHECK(plane.attributes.at("captured_layer") == "viewport");
+        // The plane is the capture's CSS extent, not the canvas box.
+        CHECK(*plane.style.width == Catch::Approx(1280.0));
+        CHECK(*plane.style.height == Catch::Approx(800.0));
+    }
+    SECTION("an element-sized asset is the canvas picture itself") {
+        const auto result = lower_with_asset(200, 100);
+        INFO(result.error);
+        REQUIRE(result);
+        const auto* canvas = find_captured_canvas(result.design_ir->root);
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->type == "image");
+        CHECK(canvas->attributes.at("asset_ref") == "canvas:9002");
+        CHECK(canvas->style.object_fit.value_or("") == "fill");
+        CHECK(canvas->children.empty());
+    }
+    SECTION("one pixel off the capture size is not a plane") {
+        const auto result = lower_with_asset(2559, 1600);
+        INFO(result.error);
+        REQUIRE(result);
+        const auto* canvas = find_captured_canvas(result.design_ir->root);
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->type == "image");
+    }
+}
+
 TEST_CASE("unsupported document canvas facts preserve complete legacy lowering",
           "[import-design][browser-capture][ir][root-canvas]") {
     TempCapture temp;
