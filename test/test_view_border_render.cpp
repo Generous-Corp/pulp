@@ -698,3 +698,101 @@ TEST_CASE("border_style_from_css names every CSS line style and nothing else",
     CHECK_FALSE(border_style_from_css("wavy").has_value());
     CHECK_FALSE(border_style_from_css("Dashed").has_value());
 }
+
+// ── Banded borders with a radius, and translucent banded borders ────────────
+//
+// Expectations are 8-bit pixels Chrome 151 painted for the same 120x60 box on
+// the same plate at dpr 2 (a probe page of eight boxes, read out of
+// browser.png). Two defects motivated them: a rounded banded border drew a
+// square inner corner, leaving the plate where Chrome paints the curved pocket
+// between the padding-box corner and the inner arc; and adjacent sides meeting
+// on a mitre were separate antialiased fills, so a translucent border showed a
+// lighter seam down every corner diagonal.
+
+namespace {
+
+// Chrome's 8-bit result, within one level per channel for the float pipeline.
+bool chrome_pixel(const Pixels& px, int x, int y, Rgb want) {
+    const Rgb got = px.at(x, y);
+    INFO("pixel (" << x << "," << y << ") = " << got.r << "," << got.g << ","
+         << got.b << " want " << want.r << "," << want.g << "," << want.b);
+    return same(got, want);
+}
+
+}  // namespace
+
+TEST_CASE("a rounded outset border has a curved inner edge",
+          "[view][border][border-shading]") {
+    // `border: 6px outset black; border-radius: 12px`. The inner radius is
+    // 6px, so device (13,13) and (14,14) sit in the pocket between the
+    // padding-box corner (12,12) and the inner arc and are border; (18,18) is
+    // inside the arc and is the plate.
+    View v;
+    v.set_border(paint(Rgb{0, 0, 0}), 6.0f, 12.0f);
+    v.set_border_style(View::BorderStyle::outset);
+    const auto px = render(v);
+    const Rgb light{168, 168, 168};
+    CHECK(chrome_pixel(px, 13, 13, light));
+    CHECK(chrome_pixel(px, 14, 14, light));
+    CHECK(chrome_pixel(px, 18, 18, kPlate));
+    CHECK(chrome_pixel(px, 5, 60, light));
+    // Outside the outer arc no border is drawn. (What shows there is the
+    // render target, not the page plate Chrome composites onto.)
+    CHECK_FALSE(chrome_pixel(px, 1, 1, light));
+}
+
+TEST_CASE("a rounded double border keeps both lines curved",
+          "[view][border][border-shading]") {
+    // `border: 9px double rgb(159,255,221); border-radius: 16px`.
+    View v;
+    v.set_border(paint(Rgb{159, 255, 221}), 9.0f, 16.0f);
+    v.set_border_style(View::BorderStyle::double_);
+    const auto px = render(v);
+    const Rgb mint{159, 255, 221};
+    CHECK(chrome_pixel(px, 10, 10, mint));    // outer line, on the curve
+    CHECK(chrome_pixel(px, 16, 16, kPlate));  // the gap, on the curve
+    CHECK(chrome_pixel(px, 19, 19, mint));    // inner line, on the curve
+    CHECK_FALSE(chrome_pixel(px, 6, 6, mint));  // outside the outer arc
+}
+
+TEST_CASE("a translucent double border has no seam on its mitres",
+          "[view][border][border-shading]") {
+    // `border: 9px double rgba(255,255,255,0.5)`: every pixel of both lines,
+    // including the corner diagonal where top meets left, is one blend.
+    View v;
+    v.set_border(pulp::canvas::Color::rgba(1.0f, 1.0f, 1.0f, 0.5f), 9.0f);
+    v.set_border_style(View::BorderStyle::double_);
+    const auto px = render(v);
+    const Rgb line{138, 140, 143};
+    for (int k : {0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17}) {
+        CHECK(chrome_pixel(px, k, k, line));
+        CHECK(chrome_pixel(px, kDevW - 1 - k, kDevH - 1 - k, line));
+    }
+    CHECK(chrome_pixel(px, 8, 8, kPlate));
+    CHECK(chrome_pixel(px, 120, 2, line));
+}
+
+TEST_CASE("a translucent rounded groove matches on its curved corner",
+          "[view][border][border-shading]") {
+    // `border: 6px groove rgba(163,230,53,0.6); border-radius: 14px`.
+    View v;
+    v.set_border(pulp::canvas::Color::rgba(163.0f / 255.0f, 230.0f / 255.0f,
+                                           53.0f / 255.0f, 0.6f),
+                 6.0f, 14.0f);
+    v.set_border_style(View::BorderStyle::groove);
+    const auto px = render(v);
+    CHECK(chrome_pixel(px, 14, 14, Rgb{116, 163, 46}));
+    CHECK(chrome_pixel(px, 16, 16, Rgb{101, 141, 43}));
+    CHECK(chrome_pixel(px, 20, 20, kPlate));
+    CHECK(chrome_pixel(px, 120, 3, Rgb{69, 97, 31}));
+    CHECK(chrome_pixel(px, 120, 9, Rgb{116, 163, 46}));
+}
+
+TEST_CASE("only double and the 3D styles are banded",
+          "[view][border][border-shading]") {
+    using B = View::BorderStyle;
+    for (B s : {B::double_, B::groove, B::ridge, B::inset, B::outset})
+        CHECK(is_banded_border_style(s));
+    for (B s : {B::solid, B::dashed, B::dotted, B::none, B::hidden})
+        CHECK_FALSE(is_banded_border_style(s));
+}

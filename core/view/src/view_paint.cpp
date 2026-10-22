@@ -1527,72 +1527,27 @@ void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
     const Color cb = edge_c(border_bottom_color_set_, border_bottom_.color);
     const Color cl = edge_c(border_left_color_set_, border_left_.color);
 
-    // Shaded and multi-line styles are bands of per-side colour: up to two
-    // rings, each side of a ring a trapezoid mitred into its neighbours at
-    // 45°, which is how the reference joins a light top to a dark right.
-    if (border_style_ == BorderStyle::double_ ||
-        border_style_ == BorderStyle::groove ||
-        border_style_ == BorderStyle::ridge ||
-        border_style_ == BorderStyle::inset ||
-        border_style_ == BorderStyle::outset) {
-        const bool rounded_bands = use_per_corner || eff_r > 0;
-        if (rounded_bands) {
-            canvas.save();
-            if (use_per_corner) {
-                build_corner_path(w, h, eff_tl, eff_tr, eff_bl, eff_br);
-            } else {
-                build_per_corner_rounded_rect_path(canvas, w, h, eff_r, eff_r,
-                                                   eff_r, eff_r);
-            }
-            canvas.clip();
-        }
-        const BorderBands bt = border_bands(border_style_, BorderEdge::top, wt);
-        const BorderBands br = border_bands(border_style_, BorderEdge::right, wr);
-        const BorderBands bb = border_bands(border_style_, BorderEdge::bottom, wb);
-        const BorderBands bl = border_bands(border_style_, BorderEdge::left, wl);
-        const auto band = [&](BorderEdge side, bool outer, Color c, float width) {
-            return border_band_color(border_style_, side, outer, c, width);
-        };
-        // One ring between two rectangles, each given by its insets from the
-        // border box, so mitres stay on the diagonal through both corners.
-        const auto fill_quad = [&](Color c, float ax, float ay, float bx,
-                                   float by, float cx, float cy, float dx,
-                                   float dy) {
-            canvas.set_fill_color(c);
-            canvas.begin_path();
-            canvas.move_to(ax, ay);
-            canvas.line_to(bx, by);
-            canvas.line_to(cx, cy);
-            canvas.line_to(dx, dy);
-            canvas.close_path();
-            canvas.fill_current_path();
-        };
-        const auto ring = [&](float ot, float orr, float ob, float ol,
-                              float it, float ir, float ib, float il,
-                              Color kt, Color kr, Color kb, Color kl) {
-            if (it > ot)
-                fill_quad(kt, ol, ot, w - orr, ot, w - ir, it, il, it);
-            if (ir > orr)
-                fill_quad(kr, w - orr, ot, w - orr, h - ob, w - ir, h - ib,
-                          w - ir, it);
-            if (ib > ob)
-                fill_quad(kb, w - orr, h - ob, ol, h - ob, il, h - ib, w - ir,
-                          h - ib);
-            if (il > ol)
-                fill_quad(kl, ol, h - ob, ol, ot, il, it, il, h - ib);
-        };
-        ring(0.0f, 0.0f, 0.0f, 0.0f, bt.outer, br.outer, bb.outer, bl.outer,
-             band(BorderEdge::top, true, ct, wt),
-             band(BorderEdge::right, true, cr, wr),
-             band(BorderEdge::bottom, true, cb, wb),
-             band(BorderEdge::left, true, cl, wl));
-        ring(wt - bt.inner, wr - br.inner, wb - bb.inner, wl - bl.inner,
-             wt, wr, wb, wl,
-             band(BorderEdge::top, false, ct, wt),
-             band(BorderEdge::right, false, cr, wr),
-             band(BorderEdge::bottom, false, cb, wb),
-             band(BorderEdge::left, false, cl, wl));
-        if (rounded_bands) canvas.restore();
+    // Shaded and multi-line styles are bands of per-side colour, painted by
+    // border_style.cpp. A per-corner path that is not circular (a continuous
+    // corner curve) is approximated by its circular radii there.
+    if (is_banded_border_style(border_style_)) {
+        BandedBorder banded;
+        banded.style = border_style_;
+        banded.width = w;
+        banded.height = h;
+        banded.top = wt;
+        banded.right = wr;
+        banded.bottom = wb;
+        banded.left = wl;
+        banded.top_color = ct;
+        banded.right_color = cr;
+        banded.bottom_color = cb;
+        banded.left_color = cl;
+        banded.radius_tl = use_per_corner ? eff_tl : eff_r;
+        banded.radius_tr = use_per_corner ? eff_tr : eff_r;
+        banded.radius_br = use_per_corner ? eff_br : eff_r;
+        banded.radius_bl = use_per_corner ? eff_bl : eff_r;
+        paint_banded_border(canvas, banded);
         return;
     }
 

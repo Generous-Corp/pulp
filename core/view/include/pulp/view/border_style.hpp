@@ -49,4 +49,36 @@ BorderBands border_bands(View::BorderStyle style, BorderEdge side, float width);
 Color border_band_color(View::BorderStyle style, BorderEdge side,
                         bool outer_band, Color side_color, float width);
 
+/// Whether `style` is painted in bands of per-side colour (`double` and the
+/// four 3D styles) rather than as one stroke.
+bool is_banded_border_style(View::BorderStyle style);
+
+/// A banded border in its own border box, origin at the top-left corner.
+struct BandedBorder {
+    View::BorderStyle style = View::BorderStyle::outset;
+    float width = 0.0f;   ///< border box
+    float height = 0.0f;
+    float top = 0.0f;     ///< side widths, already resolved and clamped
+    float right = 0.0f;
+    float bottom = 0.0f;
+    float left = 0.0f;
+    Color top_color;
+    Color right_color;
+    Color bottom_color;
+    Color left_color;
+    float radius_tl = 0.0f;  ///< outer corner radii
+    float radius_tr = 0.0f;
+    float radius_br = 0.0f;
+    float radius_bl = 0.0f;
+};
+
+/// Paint `border`. Each band is the region between two rounded rectangles —
+/// the outer one inset by the bands outside it, the inner one by the bands up
+/// to its inside edge, with corner radii shrunk by the inset on each axis as
+/// CSS shrinks them — so a rounded border keeps a curved inner edge. The band
+/// is divided between sides by the line from each outer box corner through
+/// the matching padding-box corner, and sides that share a colour are filled
+/// as one shape, so no antialiased seam runs down a mitre between them.
+void paint_banded_border(canvas::Canvas& canvas, const BandedBorder& border);
+
 }  // namespace pulp::view
