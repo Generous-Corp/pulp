@@ -169,6 +169,9 @@ class NativeNode:
     style: dict[str, Any]
     bounds: tuple[float, float, float, float] | None
     backend_node_id: int | None = None
+    # Set on a raster plane the importer hangs inside a captured element (a
+    # canvas snapshot): the anchor of the element whose pixels it carries.
+    captured_layer_of: str | None = None
 
 
 def sha256_file(path: Path) -> str:
@@ -490,8 +493,11 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
             continue
     result: list[NativeNode] = []
 
-    def visit(node: dict[str, Any], parent: str | None) -> None:
+    def visit(node: dict[str, Any], parent: str | None,
+              parent_captured: bool = False) -> None:
         anchor = str(node.get("stable_anchor_id") or "")
+        attributes = node.get("attributes") if isinstance(
+            node.get("attributes"), dict) else {}
         node_type = str(node.get("type") or "unknown")
         text = str(node.get("content") or node.get("text") or "").strip()
         result.append(NativeNode(
@@ -507,10 +513,13 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
                 if isinstance(node.get("attributes"), dict)
                 and str(node.get("attributes", {}).get("backend_node_id", "")).isdigit()
                 else None),
+            captured_layer_of=(
+                parent if parent_captured and "captured_layer" in attributes
+                else None),
         ))
         for child in node.get("children", []):
             if isinstance(child, dict):
-                visit(child, anchor or parent)
+                visit(child, anchor or parent, "captured_element" in attributes)
 
     root = ir.get("root")
     if isinstance(root, dict):
@@ -635,18 +644,25 @@ def comparable_native_nodes(native: list[NativeNode]) -> tuple[list[NativeNode],
 
     Chromium's DOM snapshot reader intentionally exposes element nodes only;
     native DesignIR also contains synthetic frame roots, html/body capture
-    wrappers, and explicit text children. Counting those implementation nodes
-    as unmatched browser elements makes an exact element join look like a
-    structural failure. Keep them in the report as ignored representation
-    nodes, but exclude them from precision/recall.
+    wrappers, explicit text children, and the raster plane inside a captured
+    canvas. Counting those implementation nodes as unmatched browser elements
+    makes an exact element join look like a structural failure. Keep them in
+    the report as ignored representation nodes, but exclude them from
+    precision/recall.
     """
     ignored_names = {"html", "body"}
     comparable: list[NativeNode] = []
     ignored: list[NativeNode] = []
     for node in native:
+        # A captured element's raster plane is that element's paint, the way
+        # a text run is its element's text. `captured_layer_of` is set only
+        # for a plane hanging directly inside its captured element, so a plane
+        # whose element was dropped still counts.
+        layer_of_present_element = node.captured_layer_of is not None
         if (node.node_type.lower() == "text"
                 or node.anchor == "browser:root"
-                or node.name.lower() in ignored_names):
+                or node.name.lower() in ignored_names
+                or layer_of_present_element):
             ignored.append(node)
         else:
             comparable.append(node)

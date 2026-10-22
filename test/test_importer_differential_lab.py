@@ -222,6 +222,49 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertAlmostEqual(result["precision"], 1.0)
         self.assertAlmostEqual(result["score"], 1.0)
 
+    @staticmethod
+    def _canvas_ir(with_canvas: bool) -> dict:
+        plane = {
+            "type": "image", "name": "canvas#scope/layer",
+            "stable_anchor_id": "panel/canvas/layer[0]",
+            "attributes": {"asset_ref": "canvas:14", "captured_layer": "viewport"},
+            "children": [],
+        }
+        canvas = {
+            "type": "frame", "name": "canvas#scope", "stable_anchor_id": "panel/canvas",
+            "attributes": {"backend_node_id": "14", "captured_element": "canvas"},
+            "children": [plane],
+        }
+        return {"root": {
+            "type": "frame", "name": "div", "stable_anchor_id": "panel",
+            "attributes": {"backend_node_id": "11"},
+            "children": [canvas] if with_canvas else [plane],
+        }}
+
+    def test_a_captured_canvas_plane_is_its_canvas_paint(self) -> None:
+        browser = [
+            LAB.BrowserNode(0, "div", -1, "", {}, (0, 0, 100, 40), {}, 11),
+            LAB.BrowserNode(1, "canvas", 0, "", {}, (0, 0, 80, 30), {}, 14),
+        ]
+        native = LAB.native_nodes(self._canvas_ir(True), {"views": []})
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual(result["extra"], [])
+        self.assertIn("panel/canvas/layer[0]",
+                      [node.anchor for node in result["ignored_native"]])
+        self.assertAlmostEqual(result["score"], 1.0)
+
+    def test_control_a_plane_without_its_canvas_is_not_excused(self) -> None:
+        browser = [
+            LAB.BrowserNode(0, "div", -1, "", {}, (0, 0, 100, 40), {}, 11),
+            LAB.BrowserNode(1, "canvas", 0, "", {}, (0, 0, 80, 30), {}, 14),
+        ]
+        native = LAB.native_nodes(self._canvas_ir(False), {"views": []})
+        result = LAB.structural_comparison(browser, native)
+        self.assertEqual([node.tag for node in result["missing"]], ["canvas"])
+        self.assertEqual([node.anchor for node in result["extra"]],
+                         ["panel/canvas/layer[0]"])
+        self.assertLess(result["score"], LAB.PROMOTION_THRESHOLDS["structural"])
+
     def test_representation_nodes_are_not_structural_element_extras(self) -> None:
         native = [
             LAB.NativeNode("browser:root", "frame", "Browser-evaluated HTML", "", None, {}, None),
