@@ -79,6 +79,12 @@ endif()
 
 message(STATUS "Pulp ${PROJECT_VERSION} — platform: ${PULP_PLATFORM}")
 
+# ── Build profile ───────────────────────────────────────────────────────────
+# PULP_PROFILE=release seeds the enforced security options OFF before they are
+# declared; pulp_profile_validate() below refuses a disagreeing configure once
+# every governed option() has run. Release and SDK sites pass only the profile.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpProfiles.cmake)
+
 # ── Options ─────────────────────────────────────────────────────────────────
 # Tests default OFF on iOS and Android: both mobile targets ship plugins or
 # apps, not a CTest harness, and many tests depend on desktop-only libraries
@@ -214,7 +220,7 @@ option(PULP_LOTTIE "Enable Lottie animation playback via the bundled skottie mod
 # binary + attack surface). The runtime W3C token pair (importDesignTokens /
 # exportDesignTokens) stays compiled regardless (see core/view/src/w3c_tokens.cpp).
 # When OFF, WidgetBridge::install_runtime_import_handlers() becomes a no-op.
-option(PULP_ENABLE_DESIGN_IMPORT "Compile the design-import authoring subsystem. Default ON; release/ship OFF." ON)
+option(PULP_ENABLE_DESIGN_IMPORT "Compile the design-import authoring subsystem. Default ON; the checkout SDK (pulp sdk install) turns it OFF; PULP_PROFILE records but does not enforce it." ON)
 # Plugin packaging model — the centralized single-vs-bundle default.
 # `single` (the default) = one plugin per binary via pulp_add_plugin. `bundle`
 # = one binary hosting N plugins via pulp_add_plugin_bundle (Expert Sleepers
@@ -424,6 +430,9 @@ option(PULP_DEV_BRIDGE_EXEC
 # release profile module owns this option once it lands.
 option(PULP_DEV_BUILD
     "Compile development-only paths (on-disk ui.js override) in" ${PULP_BUILD_TESTS})
+
+# Every option PULP_PROFILE governs is declared above this line.
+pulp_profile_validate()
 add_subdirectory(core/platform)
 add_subdirectory(core/simd)
 add_subdirectory(core/runtime)
@@ -589,7 +598,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     if(NOT PULP_ENABLE_DESIGN_IMPORT)
         message(FATAL_ERROR
             "PULP_BUILD_TESTS=ON requires PULP_ENABLE_DESIGN_IMPORT=ON. "
-            "For a stripped build set -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF.")
+            "For a stripped build set -DPULP_PROFILE=release (tools/cmake/PulpProfiles.cmake).")
     endif()
     enable_testing()
     # The file-api query is retained in the build tree so the Vellum closure

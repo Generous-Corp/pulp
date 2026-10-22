@@ -826,6 +826,17 @@ add_test(NAME cmake-sdk-provenance-contract
 set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
     LABELS "cmake;sdk;provenance"
     TIMEOUT 30)
+# PULP_PROFILE contract: release seeds the enforced options OFF, refuses a
+# contradicting -D or stale cache, and only PULP_PROFILE_ALLOW_OVERRIDE (with a
+# warning) lets one through. Six fixture configures with LANGUAGES NONE.
+add_test(NAME cmake-build-profile-contract
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_BINARY_DIR}/test-build-profile-contract
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_build_profile_contract.cmake)
+set_tests_properties(cmake-build-profile-contract PROPERTIES
+    LABELS "cmake;sdk;provenance"
+    TIMEOUT 120)
 # pulp_check_vendored_react_runtime(): stale vendored @pulp/react bundles warn
 # (STRICT fails) and name the missing fix; current ones are quiet.
 add_test(NAME cmake-pulp-react-runtime-check
