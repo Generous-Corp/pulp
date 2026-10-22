@@ -687,15 +687,8 @@ int main(int argc, char** argv) {
             return 2;
         }
         const char* value = argv[++i];
-        if (arg == "--input") input_path = value;
-        else if (arg == "--render") render_path = value;
-        else if (arg == "--layout") layout_path = value;
-        else if (arg == "--text-diagnostics")
-            text_diagnostics_path = value;
-        else if (arg == "--width" && parse_positive(value, width)) {}
-        else if (arg == "--height" && parse_positive(value, height)) {}
-        else if (arg == "--scale" && parse_positive(value, scale)) {
-        } else if (arg == "--origin") {
+        // Panel placement for page-space observation; see translate_to_page_space.
+        if (arg == "--origin") {
             auto point = parse_point(value);
             if (!point) {
                 std::cerr << "Error: --origin expects <x>,<y>\n";
@@ -704,9 +697,21 @@ int main(int argc, char** argv) {
             origin_x = point->x;
             origin_y = point->y;
             has_origin = true;
-        } else if (arg == "--page-background" && *value != '\0') {
+            continue;
+        }
+        if (arg == "--page-background" && *value != '\0') {
             page_background = value;
-        } else if (arg == "--set-value") {
+            continue;
+        }
+        if (arg == "--input") input_path = value;
+        else if (arg == "--render") render_path = value;
+        else if (arg == "--layout") layout_path = value;
+        else if (arg == "--text-diagnostics")
+            text_diagnostics_path = value;
+        else if (arg == "--width" && parse_positive(value, width)) {}
+        else if (arg == "--height" && parse_positive(value, height)) {}
+        else if (arg == "--scale" && parse_positive(value, scale)) {}
+        else if (arg == "--set-value") {
             auto parsed = parse_value_override(value);
             if (!parsed) {
                 std::cerr << "Error: --set-value expects "
