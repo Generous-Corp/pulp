@@ -25,7 +25,9 @@
 
 import { call } from './prop-applier-internal.js';
 
-type ResetFn = (id: string, type: string, oldValue: unknown) => void;
+/// Returns false when it decided there was nothing to undo, so the slots it
+/// names are not treated as reset.
+type ResetFn = (id: string, type: string, oldValue: unknown) => void | boolean;
 
 export interface StyleKeyRule {
     /// Native style slots this key writes. Keys that share a slot are
@@ -54,9 +56,9 @@ const setter = (slots: readonly string[], fn: string, ...args: unknown[]): Style
     reset: (id) => call(fn, id, ...args),
 });
 
-const OFFSET_GAP = 'View has no way to clear an inset edge once set and its '
-    + 'header is not part of this change; 0 is only right for static or '
-    + 'relative boxes, so the stale offset is left in place.';
+const OFFSET_GAP = 'View has no way to clear an inset edge once set, and 0 '
+    + 'is only right for static or relative boxes, so the stale offset stays: '
+    + 'a hover lift written {position: relative, top: -2} stays lifted.';
 const COLOUR_GAP = 'the colour slot has no unset argument, so the edge is '
     + 'hidden instead; a surviving width re-applies with the last colour.';
 const TYPOGRAPHY_GAP = 'the typography bridge has no clear for an own value, '
@@ -123,7 +125,9 @@ const cornerRadius = (corner: string): StyleKeyRule =>
 const releaseClaim = (claimed: (oldValue: unknown) => boolean): StyleKeyRule => ({
     slots: OVERLAY_CLAIM_SLOTS,
     reset: (id, _type, oldValue) => {
-        if (claimed(oldValue)) call('releaseOverlay', id);
+        if (!claimed(oldValue)) return false;
+        call('releaseOverlay', id);
+        return true;
     },
 });
 const whiteSpaceReset: StyleKeyRule = {
@@ -487,12 +491,10 @@ export function resetRemovedStyleKeys(
     let mutated = false;
     for (const { key, oldValue } of removed) {
         const rule = STYLE_KEY_RULES[key];
-        if (!rule) continue;
+        if (!rule?.reset) continue;
+        if (rule.reset(id, type, oldValue) === false) continue;
+        mutated = true;
         for (const slot of rule.slots) touched.add(slot);
-        if (rule.reset) {
-            rule.reset(id, type, oldValue);
-            mutated = true;
-        }
     }
     if (touched.size === 0) return mutated;
     const shares = (key: string) =>

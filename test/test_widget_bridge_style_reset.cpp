@@ -232,6 +232,13 @@ TEST_CASE("a style toggled on and off renders like one never styled",
     REQUIRE(differing_pixels(active, neutral) > 0);
     CHECK(differing_pixels(toggled, neutral) == 0);
 
+    // Base keys that share a slot with an active key (paddingTop with
+    // padding, borderRadius with border) are re-applied after the reset;
+    // without that the render lands on the bare slot instead.
+    const auto no_reapply =
+        render_scene(fixture, {fixture["active"], fixture["withoutSurvivorReapply"]});
+    CHECK(differing_pixels(no_reapply, neutral) > 0);
+
     // Each active key on its own still changes the render, so a reset that
     // stopped working for any one of them would break the equality above.
     const auto leave_one = fixture["leaveOneActive"];

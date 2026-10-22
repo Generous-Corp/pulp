@@ -70,7 +70,8 @@ function functionBody(file: string, name: string): string {
 }
 
 /// Prop keys a function dispatches on: `case 'key':` labels and
-/// `key === 'name'` comparisons.
+/// `key === 'name'` comparisons. A key dispatched any other way (a lookup
+/// table, or host-config instead of an applier) is invisible to this.
 function dispatchedKeys(body: string): string[] {
     const keys = new Set<string>();
     for (const m of body.matchAll(/case '([^']+)':/g)) keys.add(m[1]);
@@ -289,6 +290,11 @@ describe('@pulp/react prop-applier — disappearing style keys', () => {
         expect(callsTo('releaseOverlay')).toEqual([]);
     });
 
+    it('does not re-claim a surviving overlay when the removed role never claimed', () => {
+        applyChangedProps(makeInstance('o'), { role: 'button', overlay: true }, { overlay: true });
+        expect(bridge.calls).toEqual([]);
+    });
+
     it('conditional-spread true → false: active-only background + border clear', () => {
         const baseProps = { padding: 8, borderRadius: 4 };
         const active = { ...baseProps, background: '#3a7', borderColor: '#fff' };
@@ -327,7 +333,14 @@ describe('@pulp/react prop-applier — disappearing style keys', () => {
 
 const FIXTURE = resolve(here, 'fixtures', 'style-reset-toggle.json');
 
-const BOX_BASE = { width: 200, height: 96, background: '#20242c' };
+// paddingTop and borderRadius share slots with the active `padding` and
+// `border`, so turning those off resets the shared slot and must re-apply
+// the surviving base key afterwards.
+const BOX_BASE = {
+    width: 200, height: 96, background: '#20242c', paddingTop: 6, borderRadius: 8,
+};
+/// The calls that re-apply a surviving base key after a shared-slot reset.
+const SURVIVOR_REAPPLY: Call[] = [['setFlex', 'box', 'padding_top', 6], ['setBorderRadius', 'box', 8]];
 const BOX_ACTIVE: Record<string, unknown> = {
     padding: 14,
     marginTop: 10,
@@ -384,8 +397,17 @@ function buildFixture() {
         neutral: mount(BOX_BASE, LABEL_BASE),
         active: mount({ ...BOX_BASE, ...BOX_ACTIVE }, { ...LABEL_BASE, ...LABEL_ACTIVE }),
         deactivate: deactivate([], []),
+        withoutSurvivorReapply: withoutSurvivorReapply(deactivate([], [])),
         leaveOneActive,
     };
+}
+
+/// The deactivation with the survivor re-applies left out: the planted
+/// negative that shows the re-apply reaches the native render.
+function withoutSurvivorReapply(calls: Call[]): Call[] {
+    const firstReset = calls.findIndex((c) => c[0] === 'resetStyleProperty');
+    const isReapply = (c: Call) => SURVIVOR_REAPPLY.some((r) => JSON.stringify(r) === JSON.stringify(c));
+    return calls.filter((c, i) => i < firstReset || !isReapply(c));
 }
 
 /// JSON with one bridge call per line, so a diff shows which call changed.
@@ -400,6 +422,7 @@ function formatFixture(fixture: ReturnType<typeof buildFixture>): string {
         + `  "neutral": ${calls(fixture.neutral, '  ')},\n`
         + `  "active": ${calls(fixture.active, '  ')},\n`
         + `  "deactivate": ${calls(fixture.deactivate, '  ')},\n`
+        + `  "withoutSurvivorReapply": ${calls(fixture.withoutSurvivorReapply, '  ')},\n`
         + `  "leaveOneActive": {\n${leave}\n  }\n}\n`;
 }
 
@@ -410,6 +433,12 @@ describe('@pulp/react prop-applier — style reset pixel-proof fixture', () => {
         const text = formatFixture(fixture);
         if (process.env.PULP_UPDATE_STYLE_RESET_FIXTURE === '1') writeFileSync(FIXTURE, text);
         expect(readFileSync(FIXTURE, 'utf8')).toBe(text);
+    });
+
+    it('re-applies the surviving base keys after their shared slots reset', () => {
+        const fixture = buildFixture();
+        expect(fixture.deactivate.length - fixture.withoutSurvivorReapply.length)
+            .toBe(SURVIVOR_REAPPLY.length);
     });
 
     it('deactivates every active key in the fixture', () => {
