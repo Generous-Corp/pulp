@@ -41,6 +41,7 @@
 #include <memory>
 #include <string>
 #include "../examples/pulp-gain/pulp_gain.hpp"
+#include "support/step_gain_fixture.hpp"
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -986,7 +987,11 @@ namespace {
 
 class ScheduledAutomationProcessor final : public pulp::format::Processor {
   public:
+    // These cases cover the per-slice render a processor can opt into.
     bool wants_sample_accurate_parameters() const override {
+        return true;
+    }
+    bool wants_au_scheduled_parameter_slices() const override {
         return true;
     }
     pulp::format::PluginDescriptor descriptor() const override {
@@ -1122,8 +1127,12 @@ class DenseAutomationProcessor final : public pulp::format::Processor {
   public:
     // Read when the AU effect constructs the processor.
     static inline bool sample_accurate = true;
+    static inline bool slices = true;
     bool wants_sample_accurate_parameters() const override {
         return sample_accurate;
+    }
+    bool wants_au_scheduled_parameter_slices() const override {
+        return slices;
     }
     static inline int process_calls = 0;
     static inline DenseAutomationProcessor* last = nullptr;
@@ -1174,6 +1183,72 @@ AudioUnitParameterEvent immediate_event(AudioUnitParameterID id, UInt32 offset, 
 }
 
 } // namespace
+
+TEST_CASE("AU v2 renders sample-accurate automation once, each point at its offset",
+          "[au][au-v2][automation][parity]") {
+    // The same steps the VST3 and CLAP cases send; all three must produce
+    // step_gain_expected() exactly. A schedule one sample late must not.
+    const auto previous = pulp::format::registered_factory();
+    pulp::format::register_plugin(pulp::test::make_step_gain_processor);
+    struct Restore {
+        pulp::format::ProcessorFactory value;
+        ~Restore() {
+            pulp::format::register_plugin(value);
+        }
+    } restore{previous};
+
+    for (const int shift : {0, 1}) {
+        CAPTURE(shift);
+        constexpr UInt32 kFrames = pulp::test::kStepGainFrames;
+        TestScheduledEffect effect;
+        effect.CreateElements();
+        REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+        REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+        UInt32 max_frames = kFrames;
+        REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+        REQUIRE(effect.DoInitialize() == noErr);
+
+        std::vector<AudioUnitParameterEvent> events;
+        for (const auto& [offset, value] : pulp::test::kStepGainPoints)
+            events.push_back(immediate_event(pulp::test::kStepGainParam,
+                                             static_cast<UInt32>(offset + shift), value));
+        REQUIRE(effect.ScheduleParameter(events.data(), static_cast<UInt32>(events.size())) ==
+                noErr);
+
+        std::array<std::array<float, kFrames>, 2> in{}, out{};
+        for (std::size_t ch = 0; ch < 2; ++ch)
+            for (std::size_t n = 0; n < kFrames; ++n)
+                in[ch][n] = pulp::test::step_gain_input(ch, n);
+        struct TwoBufferList {
+            AudioBufferList bl;
+            AudioBuffer second;
+        } input{}, output{};
+        input.bl.mNumberBuffers = 2;
+        output.bl.mNumberBuffers = 2;
+        for (UInt32 ch = 0; ch < 2; ++ch) {
+            input.bl.mBuffers[ch] = {1, kFrames * sizeof(float), in[ch].data()};
+            output.bl.mBuffers[ch] = {1, kFrames * sizeof(float), out[ch].data()};
+        }
+        pulp::test::StepGainProcessor::process_calls = 0;
+        AudioUnitRenderActionFlags flags = 0;
+        REQUIRE(effect.process_scheduled(flags, input.bl, output.bl, kFrames) == noErr);
+        effect.clear_scheduled();
+
+        REQUIRE(pulp::test::StepGainProcessor::process_calls == 1);
+        bool matches = true;
+        for (std::size_t ch = 0; ch < 2; ++ch)
+            for (std::size_t n = 0; n < kFrames; ++n)
+                matches = matches && out[ch][n] == pulp::test::step_gain_expected(ch, n);
+        CHECK(matches == (shift == 0));
+        Float32 value = 0.0f;
+        REQUIRE(effect.GetParameter(pulp::test::kStepGainParam, kAudioUnitScope_Global, 0, value) ==
+                noErr);
+        CHECK(value == 0.75f); // the store ends at the last point
+        effect.DoCleanup();
+    }
+}
 
 TEST_CASE("AU v2 effect slices dense scheduled automation in time order with final store values",
           "[au][au-v2][automation][sample-accurate]") {

@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include "../examples/pulp-gain/pulp_gain.hpp"
+#include "support/step_gain_fixture.hpp"
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -1411,6 +1412,68 @@ TEST_CASE("VST3 gives a block-rate processor each parameter's last value and no 
     listener.reset();
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 delivers sample-accurate automation at each point's offset",
+          "[vst3][param][automation][parity]") {
+    // The same steps the AU v2 and CLAP cases send; all three must produce
+    // step_gain_expected() exactly. A schedule one sample late must not.
+    for (const int shift : {0, 1}) {
+        CAPTURE(shift);
+        constexpr int kFrames = pulp::test::kStepGainFrames;
+        std::array<std::array<float, kFrames>, 2> in{}, out{};
+        for (std::size_t ch = 0; ch < 2; ++ch)
+            for (std::size_t n = 0; n < kFrames; ++n)
+                in[ch][n] = pulp::test::step_gain_input(ch, n);
+        float* inputs[2] = {in[0].data(), in[1].data()};
+        float* outputs[2] = {out[0].data(), out[1].data()};
+        Steinberg::Vst::AudioBusBuffers input_bus{};
+        input_bus.numChannels = 2;
+        input_bus.channelBuffers32 = inputs;
+        Steinberg::Vst::AudioBusBuffers output_bus{};
+        output_bus.numChannels = 2;
+        output_bus.channelBuffers32 = outputs;
+
+        HostApp host_app;
+        pulp::format::vst3::PulpVst3Processor processor(pulp::test::make_step_gain_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = kFrames;
+        setup.sampleRate = 48000.0;
+        REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+        REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+        Steinberg::Vst::ParameterChanges changes(1);
+        Steinberg::int32 queue_index = 0, point_index = 0;
+        auto* queue = changes.addParameterData(pulp::test::kStepGainParam, queue_index);
+        REQUIRE(queue != nullptr);
+        // On a 0..1 range the normalized value is the plain value.
+        for (const auto& [offset, value] : pulp::test::kStepGainPoints)
+            REQUIRE(queue->addPoint(offset + shift, value, point_index) == Steinberg::kResultTrue);
+        Steinberg::Vst::ProcessData data{};
+        data.symbolicSampleSize = Steinberg::Vst::kSample32;
+        data.numSamples = kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = &input_bus;
+        data.outputs = &output_bus;
+        data.inputParameterChanges = &changes;
+        pulp::test::StepGainProcessor::process_calls = 0;
+        Steinberg::tresult processed = Steinberg::kResultFalse;
+        std::thread([&] { processed = processor.process(data); }).join();
+        REQUIRE(processed == Steinberg::kResultOk);
+
+        REQUIRE(pulp::test::StepGainProcessor::process_calls == 1);
+        bool matches = true;
+        for (std::size_t ch = 0; ch < 2; ++ch)
+            for (std::size_t n = 0; n < kFrames; ++n)
+                matches = matches && out[ch][n] == pulp::test::step_gain_expected(ch, n);
+        CHECK(matches == (shift == 0));
+        REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
 }
 
 TEST_CASE("VST3 PulpGain at 0 dB is bit-transparent, including after a round trip",

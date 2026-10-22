@@ -327,6 +327,8 @@ public:
     Float64 GetLatency() override;
 
   protected:
+    void queue_scheduled_events(const ParameterEventList& events, UInt32 frames_to_process);
+    void write_scheduled_end_values(ParameterEventList& events, UInt32 frames_to_process);
     OSStatus ProcessForScheduledParams(ParameterEventList& events, UInt32 frames_to_process,
                                        void* user_data) override;
     OSStatus ProcessScheduledSlice(void* user_data,
@@ -415,6 +417,9 @@ private:
     // Processor::wants_sample_accurate_parameters(), asked at construction.
     // False: scheduled automation renders the buffer in one call.
     bool sample_accurate_params_ = false;
+    // Processor::wants_au_scheduled_parameter_slices(): render one call per
+    // scheduled slice instead of one call per buffer.
+    bool slice_scheduled_params_ = false;
 
     // One scheduled render: the time-sorted event list, how far its
     // immediates have been applied, and its ramps (by index, reserved in

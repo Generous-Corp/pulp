@@ -1289,14 +1289,27 @@ be side-effect-free too. `test_au_v2_effect.cpp` (`[activation]`) pins this: a
 trigger raised before `DoInitialize()` survives it, the Processor has run zero
 times, and the first real render runs it once and settles the trigger.
 
-## Scheduled automation is sliced by Pulp's own ProcessForScheduledParams
+## Scheduled automation renders once; slicing is a second opt-in
 
 Sample-accurate automation is opt-in: `Processor::wants_sample_accurate_parameters()`
-(default false, asked once when the adapter creates the processor). Opted out, `ProcessForScheduledParams` sorts
-the events, writes each owned parameter's end-of-buffer value (immediates in
-time order, a ramp's value at the buffer end), and renders the whole buffer in
-one `ProcessScheduledSlice(0, frames)` call with no parameter events. The
-slicing described below runs only for a processor that opted in.
+(default false, asked once when the adapter creates the processor). Either
+way `ProcessForScheduledParams` writes each owned parameter's end-of-buffer
+value (immediates in time order, a ramp's value at the buffer end) as one batch
+and renders the whole buffer in one `AUEffectBase::ProcessScheduledSlice(0,
+frames)` call, as VST3 and CLAP do. Opted out, `param_events()` is empty.
+Opted in, the events are sorted and every point goes to `param_events()` at
+its buffer offset: an immediate as a step, a ramp as a step to its value where
+it starts in this buffer plus a ramp (`ramp_duration_sample_frames`) to its
+value where it ends or the buffer ends. `scheduled_slice_active_` is set for
+that render so the render path keeps the queue. The `[parity]` cases in
+`test_au_v2_effect.cpp`, `test_vst3_plugin_state.cpp` and
+`test_clap_midi_events.cpp` drive the same steps through all three formats
+(`test/support/step_gain_fixture.hpp`) and require the same output to the bit,
+and a schedule one sample late must differ.
+
+The per-slice render described below runs only for a processor that also
+returns true from `wants_au_scheduled_parameter_slices()`: one that reads the
+store inside each slice instead of `param_events()`.
 
 `AUBase::ProcessForScheduledParams` rescans the whole event list at every
 slice and rewrites every past event into the element map each time, and the

@@ -49,6 +49,9 @@ class SidechainProbe final : public pulp::format::Processor {
     bool wants_sample_accurate_parameters() const override {
         return true;
     }
+    bool wants_au_scheduled_parameter_slices() const override {
+        return true;
+    }
     PluginDescriptor descriptor() const override {
         return {
             .name = "AUSidechainProbe",

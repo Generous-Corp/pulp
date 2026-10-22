@@ -45,6 +45,7 @@
 #include "native_components/rt_test_scope.hpp"
 #endif
 #include "harness/rt_allocation_probe.hpp"
+#include "support/step_gain_fixture.hpp"
 
 #include <clap/ext/preset-load.h>
 
@@ -3243,6 +3244,38 @@ TEST_CASE("CLAP reads a misaligned or short parameter-value event safely",
         REQUIRE(g_observing_param_ingress->observed_state_value == 0.0f);
     }
     ObservingParamIngressProcessor::sample_accurate = true;
+}
+
+TEST_CASE("CLAP delivers sample-accurate automation at each point's offset",
+          "[clap][params][automation][parity]") {
+    // The same steps the VST3 and AU v2 cases send; all three must produce
+    // step_gain_expected() exactly. A schedule one sample late must not.
+    for (const int shift : {0, 1}) {
+        CAPTURE(shift);
+        Harness h(pulp::test::make_step_gain_processor,
+                  static_cast<uint32_t>(pulp::test::kStepGainFrames));
+        for (std::size_t n = 0; n < h.in_left.size(); ++n) {
+            h.in_left[n] = pulp::test::step_gain_input(0, n);
+            h.in_right[n] = pulp::test::step_gain_input(1, n);
+        }
+        InputEventList events;
+        for (const auto& [offset, value] : pulp::test::kStepGainPoints) {
+            clap_event_param_value_t ev{};
+            ev.header = make_header(sizeof(ev), CLAP_EVENT_PARAM_VALUE,
+                                    static_cast<uint32_t>(offset + shift));
+            ev.param_id = pulp::test::kStepGainParam;
+            ev.value = value;
+            events.push(ev);
+        }
+        pulp::test::StepGainProcessor::process_calls = 0;
+        REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(pulp::test::StepGainProcessor::process_calls == 1);
+        bool matches = true;
+        for (std::size_t n = 0; n < h.out_left.size(); ++n)
+            matches = matches && h.out_left[n] == pulp::test::step_gain_expected(0, n) &&
+                      h.out_right[n] == pulp::test::step_gain_expected(1, n);
+        CHECK(matches == (shift == 0));
+    }
 }
 
 TEST_CASE("CLAP_EVENT_MIDI decodes CC into MidiBuffer",

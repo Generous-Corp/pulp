@@ -179,11 +179,14 @@ bool wants_sample_accurate_parameters() const override { return true; }
 
 The VST3, AU v2 and CLAP adapters then preserve sparse host automation points
 in a per-block `ParameterEventQueue` and expose it during
-`Processor::process()` (AU v2 also renders one call per slice between
-scheduled events). Without the override, those adapters write each automated
-parameter's last value in the block to `StateStore`, leave the queue empty,
-and render AU v2 automation in one call, so dense automation costs a
-block-rate processor nothing per point. AU v3, LV2, AAX and the standalone and
+`Processor::process()`, each point at its offset in the block, rendered in
+one call (AU v2 included: its scheduled ramps arrive as a step to the ramp's
+starting value plus a ramp to its value at the block's end). A processor that
+instead reads the store inside each AU v2 slice can also override
+`wants_au_scheduled_parameter_slices()` to keep one call per slice. Without
+the override, those adapters write each automated parameter's last value in
+the block to `StateStore` and leave the queue empty, so dense automation costs
+a block-rate processor nothing per point. AU v3, LV2, AAX and the standalone and
 headless hosts deliver every point either way. See
 [the 0.1005.0 migration note](../migrations/v0.1005.0.md).
 

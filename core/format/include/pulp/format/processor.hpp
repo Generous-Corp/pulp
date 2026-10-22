@@ -1139,13 +1139,25 @@ public:
     /// is what a processor that reads parameters once per block needs, and it
     /// keeps dense host automation from costing time per point.
     ///
-    /// Return true to receive every automation point with its sample offset
-    /// (and, on AU v2, one `process()` call per slice between scheduled events,
-    /// with the store at each slice's starting value). Asked once, when the
-    /// adapter creates the processor. Other hosting paths (AU v3, LV2, AAX, the
-    /// standalone and headless hosts, graph nodes) deliver every point either
-    /// way. Appended to preserve additive-only vtable ordering (node_abi_gate).
+    /// Return true to receive every automation point with its sample offset.
+    /// VST3, CLAP and AU v2 then render the block in one `process()` call
+    /// with the points in `param_events()`; the store holds each parameter's
+    /// end-of-block value. Asked once, when the adapter creates the processor.
+    /// Other hosting paths (AU v3, LV2, AAX, the standalone and headless hosts,
+    /// graph nodes) deliver every point either way. Appended to preserve
+    /// additive-only vtable ordering (node_abi_gate).
     virtual bool wants_sample_accurate_parameters() const {
+        return false;
+    }
+
+    /// For a processor that wants sample-accurate parameters and reads the
+    /// store per call instead of `param_events()`: return true and AU v2
+    /// renders one `process()` call per slice between scheduled events, with
+    /// the store at each slice's starting value and the slice's points in
+    /// `param_events()` relative to the slice. Default false: one call per
+    /// buffer, as in VST3 and CLAP. Other formats ignore it. Appended to
+    /// preserve additive-only vtable ordering (node_abi_gate).
+    virtual bool wants_au_scheduled_parameter_slices() const {
         return false;
     }
 
