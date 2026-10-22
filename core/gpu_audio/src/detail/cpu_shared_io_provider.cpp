@@ -269,7 +269,16 @@ class CpuSharedIoWavenetProgram final : public SharedIoPreparedProgram,
         : provider_(&provider), block_size_(block_size) {}
 
     bool configure(const WavenetProgramSpec& spec) {
-        return model_.configure_program(spec);
+        if (!model_.configure_program(spec))
+            return false;
+        // The artifact defaults to the reference kernel; run the block SIMD
+        // engine where it covers the topology, as the neural shadow does.
+        model_.set_cpu_kernel(NamCpuKernel::BlockSimd);
+        return true;
+    }
+
+    NamCpuKernel cpu_kernel() const noexcept {
+        return model_.cpu_kernel();
     }
 
     bool prepare(SharedIoArenaProvider& provider,
@@ -366,6 +375,14 @@ CpuSharedIoArenaProvider::make_wavenet_program(const WavenetProgramSpec& spec) n
     } catch (...) {
         return {};
     }
+}
+
+std::optional<NamCpuKernel>
+CpuSharedIoArenaProvider::wavenet_cpu_kernel(const SharedIoPreparedProgram& program) noexcept {
+    const auto* wavenet = dynamic_cast<const CpuSharedIoWavenetProgram*>(&program);
+    if (wavenet == nullptr)
+        return std::nullopt;
+    return wavenet->cpu_kernel();
 }
 
 bool CpuSharedIoArenaProvider::create_slot(std::uint32_t slot_index, std::size_t input_bytes,

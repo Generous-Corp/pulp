@@ -10,9 +10,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace pulp::gpu_audio::detail {
+
+enum class NamCpuKernel : std::uint8_t; // nam_tcn_artifact.hpp
 
 // Host-memory implementation of the shared-I/O provider seam. It owns plain
 // heap slots and runs each accepted submission's program on the serialized
@@ -105,6 +108,11 @@ class CpuSharedIoArenaProvider final : public SharedIoArenaProvider {
     // causal history resident in the program, contiguous submit sequences.
     std::unique_ptr<SharedIoPreparedProgram>
     make_wavenet_program(const WavenetProgramSpec& spec) noexcept;
+    // Diagnostic: the CPU kernel a WaveNet program from this provider runs
+    // (block SIMD where the engine covers the topology, else the reference);
+    // nullopt for any other program.
+    static std::optional<NamCpuKernel>
+    wavenet_cpu_kernel(const SharedIoPreparedProgram& program) noexcept;
 
     bool create_slot(std::uint32_t slot, std::size_t input_bytes, std::size_t output_bytes,
                      SlotResources& resources) noexcept override;

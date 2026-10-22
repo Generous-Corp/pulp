@@ -1,4 +1,5 @@
 #include "detail/cpu_shared_io_provider.hpp"
+#include "detail/nam_tcn_artifact.hpp"
 #include "detail/shared_io_program_session.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
 
@@ -712,6 +713,28 @@ TEST_CASE("CPU provider WaveNet program matches the Dawn program's math across b
             worst = std::max(worst, std::abs((*actual)[index] - expected[index]));
         CHECK(worst > 1.0e-3);
     }
+}
+
+TEST_CASE("CPU provider WaveNet program runs the block SIMD kernel",
+          "[gpu-audio][shared-io][cpu-provider]") {
+    using pulp::gpu_audio::detail::NamCpuKernel;
+    WavenetFixture fixture;
+    CpuSharedIoArenaProvider provider;
+    auto program = provider.make_wavenet_program(fixture.spec(16));
+    REQUIRE(program);
+    // The artifact defaults to the reference kernel; the provider must select
+    // the SIMD block engine, which covers this topology.
+    CHECK(CpuSharedIoArenaProvider::wavenet_cpu_kernel(*program) == NamCpuKernel::BlockSimd);
+
+    // Planted negative: a program that is not a WaveNet program has no kernel.
+    std::vector<float> spectrum(std::size_t(kFft) * 2u, 0.0f);
+    auto convolution = provider.make_convolution_program({.fft_size = kFft,
+                                                          .channels = 1,
+                                                          .logical_frames = kBlock,
+                                                          .ir_length = kIrLength,
+                                                          .normalized_ir_spectrum = spectrum});
+    REQUIRE(convolution);
+    CHECK_FALSE(CpuSharedIoArenaProvider::wavenet_cpu_kernel(*convolution));
 }
 
 TEST_CASE("CPU provider WaveNet program reproduces a hand-computed causal model",
