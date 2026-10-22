@@ -267,6 +267,9 @@ class SharedIoConvolutionSession {
     Config config_{};
     bool prepared_ = false;
     bool failed_ = false;
+    // Set by fence_for_offline() and cleared only by a fresh prepare() or
+    // release(). Kept apart from the recovery reason, which latches first-wins.
+    bool offline_fenced_ = false;
 };
 
 } // namespace pulp::gpu_audio::detail

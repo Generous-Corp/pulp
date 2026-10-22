@@ -33,7 +33,14 @@ def main() -> int:
         cmake,
     )
     require(cmake_text, "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE FALSE", cmake)
-    capability_branch = cmake_text.index("if(APPLE AND NOT PULP_IOS")
+    # Anchor on the branch that detects the provider capability, not the first
+    # Apple branch: an earlier one selects private observer sources and does
+    # not read or write any derived provider state.
+    capability_branch = cmake_text.rindex(
+        "if(APPLE AND NOT PULP_IOS",
+        0,
+        cmake_text.index("set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO TRUE CACHE INTERNAL"),
+    )
     for derived_cache_key in (
         "PULP_GPU_AUDIO_HAS_VELLUM_D15 FALSE CACHE INTERNAL",
         'PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME "" CACHE INTERNAL',

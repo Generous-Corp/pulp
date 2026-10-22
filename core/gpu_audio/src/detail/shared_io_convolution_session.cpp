@@ -418,6 +418,7 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
             config_.trace.enabled = false;
     }
     failed_ = false;
+    offline_fenced_ = false;
     prepared_ = true;
     (void)prepare_trace_generation();
     return true;
@@ -739,11 +740,17 @@ bool SharedIoConvolutionSession::drain_quiescent() noexcept {
 }
 
 bool SharedIoConvolutionSession::fence_for_offline() noexcept {
+    offline_fenced_ = true;
     request_recovery(SharedIoRecoveryReason::OfflineFence);
     return drain_quiescent();
 }
 
 bool SharedIoConvolutionSession::fence_and_reprime() noexcept {
+    // The offline fence ends GPU delivery for this preparation even when the
+    // provider could resume after its drain; release and a fresh prepare are
+    // the only way back.
+    if (offline_fenced_)
+        return false;
     if (!drain_quiescent())
         return false;
     if (provider_->device_lost()) {
@@ -802,6 +809,7 @@ std::unique_ptr<SharedIoArenaProvider> SharedIoConvolutionSession::release_to_ow
     close_trace_generation();
     prepared_ = false;
     failed_ = false;
+    offline_fenced_ = false;
     terminal_.clear();
     return std::move(provider_);
 }
