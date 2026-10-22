@@ -141,6 +141,20 @@ def list_processes() -> list[tuple[int, str]]:
     return procs
 
 
+def console_locked() -> bool:
+    """True while the login window covers the console. Hosts like Logic expose
+    an accessibility tree dominated by their menu bar, so the run's UI steps
+    need pixel clicks on a visible window, which a locked screen blocks."""
+    out = subprocess.run(["ioreg", "-n", "Root", "-d1", "-a"], capture_output=True, text=True,
+                         encoding="utf-8", check=False).stdout
+    import plistlib
+    try:
+        doc = plistlib.loads(out.encode("utf-8"))
+    except Exception:  # noqa: BLE001 - unknown is treated as locked (fail closed)
+        return True
+    return bool(doc.get("IOConsoleLocked", True)) if isinstance(doc, dict) else True
+
+
 def responsible_pid(pid: int) -> int:
     """The macOS responsible process for `pid` (the same call the plug-in
     makes), or -1 when unavailable."""
@@ -263,7 +277,8 @@ def _install_revert_on_signals(run: Path) -> None:
 
 def preflight(host_id: str, run: Path, *, runs_parent: Path | None = None,
               processes: Callable[[], list[tuple[int, str]]] = list_processes,
-              host_preflight: Callable[[], dict] | None = None) -> tuple[bool, list[str]]:
+              host_preflight: Callable[[], dict] | None = None,
+              locked: Callable[[], bool] = console_locked) -> tuple[bool, list[str]]:
     """Refuse a run that could touch someone's session or inherit a previous
     run's state. Writes preflight.json (the P2 quiet-host document the
     receipt binds) and state.json."""
@@ -276,6 +291,8 @@ def preflight(host_id: str, run: Path, *, runs_parent: Path | None = None,
                            "quits a session it did not launch")
     if any(path.startswith(host.get("engine_prefix", "\0")) for path in running):
         reasons.append("a Bitwig audio engine is already running")
+    if locked():
+        reasons.append("the console is locked; the run's UI steps need an unlocked screen")
     root = rendezvous_root()
     if (root / "active.json").exists():
         reasons.append(f"a rendezvous is already active at {root / 'active.json'}")

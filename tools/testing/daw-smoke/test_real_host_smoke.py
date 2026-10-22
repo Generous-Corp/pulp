@@ -41,6 +41,7 @@ class Env(unittest.TestCase):
         os.environ["PULP_GPU_FAULT_RENDEZVOUS_ROOT"] = str(self.root)
         os.environ["PULP_REAL_HOST_COMPONENTS_DIR"] = str(self.components)
         self.procs: list[tuple[int, str]] = []
+        self.locked = False
 
     def tearDown(self):
         for key, value in self._env.items():
@@ -53,7 +54,8 @@ class Env(unittest.TestCase):
     def preflight(self, host="logic"):
         return rhs.preflight(host, self.run, runs_parent=self.runs,
                              processes=lambda: list(self.procs),
-                             host_preflight=lambda: dict(QUIET))
+                             host_preflight=lambda: dict(QUIET),
+                             locked=lambda: self.locked)
 
 
 class Preflight(Env):
@@ -74,6 +76,12 @@ class Preflight(Env):
         self.procs = [(77, rhs.HOSTS["bitwig"]["engine_prefix"] + " ARM64-NEON.app/x")]
         ok, _ = self.preflight("bitwig")
         self.assertFalse(ok)
+
+    def test_a_locked_console_refuses_the_run(self):
+        self.locked = True
+        ok, reasons = self.preflight()
+        self.assertFalse(ok)
+        self.assertIn("console is locked", reasons[0])
 
     def test_a_stale_rendezvous_refuses_the_run(self):
         self.root.mkdir(parents=True)
