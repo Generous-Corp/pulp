@@ -578,7 +578,8 @@ class GpuFaultMode(unittest.TestCase):
                 "--plugin-name", "Pulp GPU Fault Continuity", "--plugin-path", str(bundle),
                 "--format", "clap", "--timeout", "5",
                 "--stimulus-frames", str(self.FRAMES), "--fault-at-sample", str(self.FAULT),
-                "--window-post", str(self.POST), "--out-dir", str(tmp / "run")]
+                "--window-pre", "1000", "--window-post", str(self.POST),
+                "--out-dir", str(tmp / "run")]
         args = ap.parse_args(argv)
         rs.validate_mode_args(ap, args)
         return args
@@ -603,7 +604,9 @@ class GpuFaultMode(unittest.TestCase):
             assert env["PULP_GPU_FAULT_STIMULUS"].endswith("stimulus.wav")
             assert env["PULP_GPU_FAULT_REQUEST"].endswith("fault-request.json")
             lib.synthesize_run(run_dir, fault=args.gpu_fault, fault_sample=args.fault_at_sample,
-                               frames=args.stimulus_frames, break_fallback=break_fallback)
+                               frames=args.stimulus_frames, break_fallback=break_fallback,
+                               nonce=env["PULP_GPU_FAULT_NONCE"], pid=4242,
+                               tail=args.window_post)
             if refuse:
                 (run_dir / "events.jsonl").write_text(
                     '{"event":"prepared","path":"shared_memory"}\n'
@@ -612,6 +615,7 @@ class GpuFaultMode(unittest.TestCase):
             return None
 
         session.run_until_fx_shown.side_effect = shown
+        session.proc.pid = 4242
         session.proc.poll.return_value = 139 if crash else None
         session.proc.returncode = 139 if crash else None
         return session
@@ -620,7 +624,7 @@ class GpuFaultMode(unittest.TestCase):
         flags = {k: kw.pop(k) for k in ("crash", "refuse", "break_fallback") if k in kw}
         args = self.args(tmp, **kw)
         session = self.fake_session(tmp, args, **flags)
-        preflight = ({"status": "blocked", "quiet_host": False, "reasons": ["load"]}, None)
+        preflight = {"status": "blocked", "quiet_host": False, "reasons": ["load"]}
         with mock.patch.object(rs, "ReaperSession", return_value=session), \
                 mock.patch.object(rs, "_host_preflight", return_value=preflight), \
                 mock.patch.object(rs, "_reaper_version", return_value="7.79"):
@@ -685,8 +689,8 @@ class GpuFaultMode(unittest.TestCase):
             session.place_plugin.return_value = rs.EXIT_FAIL
             with mock.patch.object(rs, "ReaperSession", return_value=session), \
                     mock.patch.object(rs, "_host_preflight",
-                                      return_value=({"status": "x", "quiet_host": False,
-                                                     "reasons": []}, None)):
+                                      return_value={"status": "x", "quiet_host": False,
+                                                    "reasons": []}):
                 self.assertEqual(rs.run_gpu_fault_mode(pathlib.Path("/reaper"), args),
                                  rs.EXIT_FAIL)
             session.cleanup.assert_called_once_with()
@@ -740,7 +744,8 @@ class GpuFaultMode(unittest.TestCase):
             rc = subprocess.run(
                 [sys.executable, str(MODULE_PATH), "--mode", "gpu-fault", "--gpu-fault", "hang",
                  "--dry-run", "--stimulus-frames", str(self.FRAMES), "--fault-at-sample",
-                 str(self.FAULT), "--window-post", str(self.POST), "--out-dir", tmp,
+                 str(self.FAULT), "--window-pre", "1000", "--window-post", str(self.POST),
+                 "--out-dir", tmp,
                  "--reaper-bin", "/nonexistent/REAPER"],
                 capture_output=True, text=True, encoding="utf-8", check=False).returncode
         self.assertEqual(rc, rs.EXIT_PASS)

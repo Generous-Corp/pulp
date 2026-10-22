@@ -9,13 +9,16 @@ independent CPU reference, the null analysis around the fault sample, the
 receipt builder, and a dry run that exercises all of it with synthetic
 captures.
 
-Two captures are nulled against the same reference:
+Two captures are nulled:
 
 * the plug-in side: every callback's input and output, written by the plug-in
   from a host thread. The reference is the recorded input convolved with the
-  impulse response and delayed by the plug-in's reported PDC.
-* the REAPER bounce: the rendered track. REAPER compensates PDC, so the
-  reference is the stimulus convolved with the impulse response, undelayed.
+  impulse response and delayed by the PDC each prepare reported. This is the
+  continuity evidence: the fault fires during this realtime playback.
+* the REAPER bounce: an offline render made after playback. REAPER compensates
+  PDC, so the reference is the stimulus convolved with the impulse response,
+  undelayed. The fault fired once, on the realtime pass, and an offline render
+  runs the CPU path, so this only cross-checks the offline path and PDC.
 
 A shared-I/O GPU convolver delivers `conv(input(t - L))` whether a block came
 from the GPU or from the continuously primed CPU fallback, so a continuous
@@ -34,9 +37,10 @@ from typing import Any, Sequence
 
 SCHEMA = "pulp.gpu-audio.daw-continuity.v1"
 
-# Audio-device faults are injected through WP-A2's provider fault seam;
-# render_force_loss calls ForceLoss on the editor's render device through the
-# surface's device accessor, which a separate Dawn device from the audio one.
+# Audio-device faults are applied to the running provider by the plug-in's
+# test-only Dawn proc-table interposer; render_force_loss calls ForceLoss on the
+# editor's render device through the surface's device accessor, which is a
+# separate Dawn device from the audio one.
 AUDIO_FAULTS = ("force_loss_before", "force_loss_between", "force_loss_after",
                 "delay_completion", "hang")
 RENDER_FAULTS = ("render_force_loss",)
@@ -66,6 +70,7 @@ FLAG_PLAYING = 1 << 0
 FLAG_OFFLINE = 1 << 1
 FLAG_FAULT_BLOCK = 1 << 2
 FLAG_SEGMENT_START = 1 << 3
+PREPARE_INDEX_SHIFT = 16  # a segment-start record names its prepare (low 16 bits)
 
 
 # ── Deterministic signals ────────────────────────────────────────────────
@@ -185,6 +190,8 @@ class Capture:
     # the plug-in's last capture write short. That final partial record is
     # dropped and counted here; a short record anywhere else is corruption.
     truncated_tail_bytes: int = 0
+    # The prepare index each segment follows (see PREPARE_INDEX_SHIFT).
+    segment_prepares: list[int] = field(default_factory=list)
 
     @property
     def frames(self) -> int:
@@ -217,6 +224,7 @@ def read_capture(path: Path) -> Capture:
     outputs = [[] for _ in range(channels)]
     positions: list[int] = []
     segments: list[int] = []
+    segment_prepares: list[int] = []
     faults: list[int] = []
     offline = 0
     pos = CAPTURE_HEADER.size
@@ -238,6 +246,7 @@ def read_capture(path: Path) -> Capture:
         start = len(positions)
         if flags & FLAG_SEGMENT_START or not segments:
             segments.append(start)
+            segment_prepares.append(flags >> PREPARE_INDEX_SHIFT)
         if flags & FLAG_FAULT_BLOCK:
             faults.append(start)
         if flags & FLAG_OFFLINE:
@@ -248,7 +257,7 @@ def read_capture(path: Path) -> Capture:
         playing = bool(flags & FLAG_PLAYING) and project != POSITION_NONE
         positions.extend((project + i) if playing else -1 for i in range(frames))
     return Capture(rate, channels, inputs, outputs, positions, segments, offline, faults,
-                   truncated)
+                   truncated, segment_prepares)
 
 
 # ── Reference and null ───────────────────────────────────────────────────
@@ -283,14 +292,20 @@ def delayed(signal: Sequence[float], delay: int) -> list[float]:
     return [0.0] * min(delay, len(signal)) + list(signal[:max(0, len(signal) - delay)])
 
 
-def plugin_reference(capture: Capture, ir: Sequence[float], pdc: int) -> list[list[float]]:
+def plugin_reference(capture: Capture, ir: Sequence[float],
+                     pdcs: Sequence[int]) -> list[list[float]]:
     """conv(input) delayed by PDC, restarted at every (re)prepare, because a
-    prepare resets the convolver history and the transport's priming."""
+    prepare resets the convolver history and the transport's priming. Segment
+    i uses the PDC the plug-in reported in its i-th `prepared` event: a host
+    can re-prepare with a different block size, and the quantum follows it."""
+    if len(pdcs) != len(capture.segment_starts):
+        raise ValueError(f"{len(pdcs)} prepared events for {len(capture.segment_starts)} "
+                         "capture segments")
     refs = []
     bounds = capture.segment_starts + [capture.frames]
     for c in range(capture.channels):
         plane: list[float] = []
-        for start, end in zip(bounds, bounds[1:]):
+        for (start, end), pdc in zip(zip(bounds, bounds[1:]), pdcs):
             plane.extend(delayed(convolve(capture.inputs[c][start:end], ir), pdc))
         refs.append(plane)
     return refs
@@ -313,10 +328,24 @@ class NullResult:
     candidate_rms: float
     tolerance: float
     non_finite_samples: int = 0
+    # The fault window must lie entirely inside the compared frames, and the
+    # candidate must be at least `required_frames` long: a short capture or
+    # bounce that stops before (or just after) the fault would otherwise null
+    # only the audio that was never at risk.
+    required_frames: int = 0
+    candidate_frames: int = 0
+
+    @property
+    def covered(self) -> bool:
+        lo, hi = self.window
+        return (hi - lo) > 0 and self.candidate_frames >= self.required_frames \
+            and not self.window_clamped
+
+    window_clamped: bool = False
 
     @property
     def passed(self) -> bool:
-        return (self.compared_samples > 0 and self.reference_rms > 0.0
+        return (self.covered and self.compared_samples > 0 and self.reference_rms > 0.0
                 and self.non_finite_samples == 0 and self.deviating_samples == 0
                 and self.max_abs_error <= self.tolerance
                 and self.window_max_abs_error <= self.tolerance)
@@ -336,19 +365,24 @@ class NullResult:
             "compared_samples": self.compared_samples,
             "reference_rms": self.reference_rms,
             "candidate_rms": self.candidate_rms,
+            "covered": self.covered,
+            "required_frames": self.required_frames,
+            "candidate_frames": self.candidate_frames,
         }
 
 
 def null_test(candidate: Sequence[Sequence[float]], reference: Sequence[Sequence[float]],
               fault_index: int, *, tolerance: float = DEFAULT_TOLERANCE,
               window_pre: int = DEFAULT_WINDOW_PRE, window_post: int = DEFAULT_WINDOW_POST,
-              index_labels: Sequence[int] | None = None) -> NullResult:
+              index_labels: Sequence[int] | None = None,
+              required_frames: int = 0) -> NullResult:
     """Null `candidate` against `reference` over every sample both cover, and
     separately over [fault - pre, fault + post]. Deviating sample indices are
     reported through `index_labels` (project samples) when given."""
     frames = min(min(len(p) for p in candidate), min(len(p) for p in reference))
     lo = max(0, fault_index - window_pre)
     hi = min(frames, fault_index + window_post)
+    clamped = lo != fault_index - window_pre or hi != fault_index + window_post
     worst = window_worst = 0.0
     first = last = None
     deviating = non_finite = 0
@@ -373,7 +407,8 @@ def null_test(candidate: Sequence[Sequence[float]], reference: Sequence[Sequence
     count = frames * min(len(candidate), len(reference))
     rms = lambda energy: math.sqrt(energy / count) if count else 0.0  # noqa: E731
     return NullResult(worst, window_worst, first, last, deviating, (lo, hi), count,
-                      rms(ref_energy), rms(cand_energy), tolerance, non_finite)
+                      rms(ref_energy), rms(cand_energy), tolerance, non_finite,
+                      required_frames, min(len(p) for p in candidate), clamped)
 
 
 def fault_stream_index(capture: Capture, fault_sample: int) -> int | None:
@@ -384,12 +419,12 @@ def fault_stream_index(capture: Capture, fault_sample: int) -> int | None:
     return None
 
 
-def analyze_plugin_capture(capture: Capture, ir: Sequence[float], pdc: int, fault_sample: int,
-                           **kw) -> tuple[NullResult | None, str]:
+def analyze_plugin_capture(capture: Capture, ir: Sequence[float], pdcs: Sequence[int],
+                           fault_sample: int, **kw) -> tuple[NullResult | None, str]:
     index = fault_stream_index(capture, fault_sample)
     if index is None:
         return None, f"the capture never played project sample {fault_sample}"
-    reference = plugin_reference(capture, ir, pdc)
+    reference = plugin_reference(capture, ir, pdcs)
     labels = [p if p >= 0 else -1 for p in capture.positions]
     return null_test(capture.outputs, reference, index, index_labels=labels, **kw), ""
 
@@ -447,12 +482,19 @@ def health_expectation(fault: str, snapshots: dict[str, dict]) -> tuple[bool, st
     fallback_delta = int(after.get("fallback_blocks", 0)) - int(before.get("fallback_blocks", 0))
     gpu_delta = gpu_delivered(after) - gpu_delivered(before)
     if fault in LOSS_FAULTS:
-        if after.get("recovery_reason") not in ("provider-lost", "provider-failure"):
-            return False, (f"{fault}: recovery_reason after is "
-                           f"{after.get('recovery_reason')!r}, expected provider-lost")
+        # A lost device delivers nothing more, so the GPU count freezes once the
+        # loss is observed and the fallback carries the stream. recovery_reason
+        # is reported but not required: on this base the transport does not yet
+        # name the loss for the convolver (WP-A makes that truthful).
+        at = snapshots["at"]
+        reason = after.get("recovery_reason")
         if fallback_delta <= 0:
             return False, f"{fault}: no fallback blocks after the loss"
-        return True, f"loss observed; {fallback_delta} fallback blocks covered it"
+        if gpu_delivered(after) != gpu_delivered(at) and reason not in ("provider-lost",
+                                                                       "provider-failure"):
+            return False, f"{fault}: the GPU kept delivering after the loss"
+        return True, (f"loss observed; the GPU stopped delivering and {fallback_delta} fallback "
+                      f"blocks covered it; recovery_reason={reason!r}")
     if fault in ("delay_completion", "hang"):
         if fallback_delta <= 0 and int(after.get("missed_blocks", 0)) <= int(before.get("missed_blocks", 0)):
             return False, f"{fault}: neither missed nor fallback blocks moved"
@@ -471,25 +513,33 @@ def health_expectation(fault: str, snapshots: dict[str, dict]) -> tuple[bool, st
 
 def decide(*, fault: str, plugin_null: dict | None, bounce_null: dict | None,
            health_ok: bool, fault_fired: bool, host_alive: bool,
-           realtime_at_fault: bool, preconditions: Sequence[str] = ()) -> tuple[str, list[str]]:
-    """`preconditions` lists what made the run unable to test the claim (not on
-    the shared-I/O path, a dropped capture record, a different IR); any of them
-    makes the run inconclusive unless audio demonstrably broke."""
+           realtime_at_fault: bool, preconditions: Sequence[str] = (),
+           mismatches: Sequence[str] = ()) -> tuple[str, list[str]]:
+    """Order matters. A host crash, evidence that does not belong to this run
+    (`mismatches`), and a computed null that failed are all FAIL, even when a
+    precondition also failed, so a broken run is never softened to
+    INCONCLUSIVE. `preconditions` (not on the shared-I/O path, a dropped
+    capture record, a different IR, a refused fault) make an otherwise clean
+    run INCONCLUSIVE."""
     reasons: list[str] = []
     if not host_alive:
         # A crash on render loss is the h2 finding the plan asks to record, not hide.
         return "fail", ["host process died during the run"]
-    if preconditions:
-        return "inconclusive", list(preconditions)
-    if not fault_fired:
-        return "inconclusive", ["the fault never fired"]
+    if mismatches:
+        return "fail", list(mismatches)
     for name, result in (("plugin", plugin_null), ("bounce", bounce_null)):
         if result is None:
             reasons.append(f"{name} null not computed")
         elif not result["passed"]:
-            return "fail", [f"{name} null failed: max_abs_error={result['max_abs_error']} "
+            why = ("did not cover the fault window" if not result.get("covered", True)
+                   else f"max_abs_error={result['max_abs_error']}")
+            return "fail", [f"{name} null failed: {why} "
                             f"first={result['first_deviating_sample']} "
                             f"last={result['last_deviating_sample']}"]
+    if preconditions:
+        return "inconclusive", list(preconditions)
+    if not fault_fired:
+        return "inconclusive", ["the fault never fired"]
     if reasons:
         return "inconclusive", reasons
     if not realtime_at_fault:
@@ -518,7 +568,8 @@ def receipt_digest(receipt: dict[str, Any]) -> str:
 
 def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
                    block: int = 128, quantum: int = 128, lead_blocks: int = 2,
-                   break_fallback: bool = False) -> dict[str, Any]:
+                   break_fallback: bool = False, nonce: str = "dry-run",
+                   pid: int = 0, tail: int = 0) -> dict[str, Any]:
     """Write the artifacts a real run would produce, from the reference
     itself, so the analysis and the verifier can be exercised without REAPER.
     `break_fallback` is the planted negative: the blocks after the fault
@@ -531,9 +582,10 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
     write_wav_f32(out_dir / "stimulus.wav", stimulus)
     write_f32(out_dir / "ir.f32", ir)
 
-    # Plug-in stream: a few stopped blocks of silence, then the played item.
+    # Plug-in stream: a few stopped blocks of silence, then the played item and
+    # `tail` samples past it, as the harness plays past the fault window.
     lead_in = 4 * block
-    stream_in = [0.0] * lead_in + stim
+    stream_in = [0.0] * lead_in + stim + [0.0] * tail
     wet = delayed(convolve(stream_in, ir), pdc)
     blocks, fault_stream = [], lead_in + fault_sample
     for start in range(0, len(stream_in), block):
@@ -542,7 +594,8 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
         if break_fallback and end > fault_stream:
             out = [0.0 if start + i >= fault_stream else v for i, v in enumerate(out)]
         playing = start >= lead_in
-        flags = (FLAG_PLAYING if playing else 0) | (FLAG_SEGMENT_START if start == 0 else 0)
+        flags = (FLAG_PLAYING if playing else 0) | (
+            (FLAG_SEGMENT_START | (1 << PREPARE_INDEX_SHIFT)) if start == 0 else 0)
         if start <= fault_stream < end:
             flags |= FLAG_FAULT_BLOCK
         blocks.append({"position": start - lead_in if playing else None, "flags": flags,
@@ -550,7 +603,7 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
                        "outputs": [out] * CHANNELS})
     write_capture(out_dir / "capture.bin", SAMPLE_RATE, blocks)
 
-    bounce = convolve(stim, ir)
+    bounce = convolve(stim + [0.0] * tail, ir)
     if break_fallback:
         bounce = [0.0 if i >= fault_sample else v for i, v in enumerate(bounce)]
     write_wav_f32(out_dir / "bounce.wav", [bounce] * CHANNELS)
@@ -566,23 +619,26 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
 
     lost = fault in LOSS_FAULTS
     stalled = fault in ("delay_completion", "hang")
-    after_state = "degraded" if lost else "ready"
-    after_reason = "provider-lost" if lost else "none"
+    # Shaped like this base's real snapshots: a loss freezes GPU delivery but
+    # recovery_reason is not named for the convolver.
     health = {
         "before": status(100, 0, "ready", "none"),
-        "at": status(150, 1 if (lost or stalled) else 0, after_state, after_reason),
+        "at": status(150, 1 if (lost or stalled) else 0, "ready", "none"),
         "after": status(150 if lost else 400, 250 if lost else (20 if stalled else 0),
-                        after_state, after_reason),
+                        "ready", "none"),
     }
     events = [
         {"event": "prepared", "ok": True, "pdc_samples": pdc, "quantum": quantum,
          "lead_blocks": lead_blocks, "ir_taps": len(ir),
-         "provider": "dawn", "path": "shared_memory"},
+         "provider": "dawn", "path": "shared_memory", "nonce": nonce, "pid": pid,
+         "prepare_index": 1},
         {"event": "fault_armed", "fault": fault, "at_project_sample": fault_sample},
         {"event": "fault_fired", "fault": fault, "at_project_sample": fault_sample,
          "issued_project_sample": fault_sample + block, "offline": False},
     ] + ([{"event": "render_loss", "performed": True, "detail": "dry run"}]
-         if fault in RENDER_FAULTS else []) + [{"event": "health", "phase": p, "status": s} for p, s in health.items()]
+         if fault in RENDER_FAULTS else
+         [{"event": "provider_fault_applied", "point": "dry_run",
+           "project_sample": fault_sample + block}]) + [{"event": "health", "phase": p, "status": s} for p, s in health.items()]
     with (out_dir / "events.jsonl").open("w", encoding="utf-8") as stream:
         for event in events:
             stream.write(json.dumps(event, sort_keys=True) + "\n")
@@ -618,57 +674,117 @@ def health_snapshots(events: Sequence[dict]) -> dict[str, dict]:
     return snaps
 
 
+def summarize_preflight(doc: dict[str, Any]) -> dict[str, Any]:
+    """The receipt's preflight summary, derived from preflight.json. The
+    verifier re-derives it, so a receipt cannot claim a quieter host than the
+    preflight it carries."""
+    return {"status": doc.get("status"), "quiet_host": doc.get("quiet_host") is True,
+            "reasons": [str(r) for r in doc.get("reasons", [])],
+            "load1": doc.get("load1"), "ncpu": doc.get("ncpu"),
+            "raw_observations_sha256": doc.get("raw_observations_sha256")}
+
+
 def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: float,
                  window_pre: int, window_post: int, host_alive: bool,
-                 bounce_path: Path | None) -> dict[str, Any]:
+                 bounce_path: Path | None, render_frames: int = 0,
+                 nonce: str | None = None, reaper_pid: int | None = None,
+                 listed: Sequence[str] | None = None) -> dict[str, Any]:
     """Analyse a finished run directory and return the receipt's evidence
-    fields (everything except identity and preflight)."""
-    events = load_events(run_dir / "events.jsonl")
-    prepared = first_event(events, "prepared") or {}
+    fields (everything except identity and preflight).
+
+    `listed` restricts the analysis to digest-bound artifacts: a file that is
+    present but not listed is treated as absent. `render_frames` is how long
+    the bounce must be. `nonce` and `reaper_pid` tie the plug-in's events to
+    this run and this REAPER process."""
+    def usable(name: str) -> bool:
+        return (run_dir / name).is_file() and (listed is None or name in listed)
+
+    events = load_events(run_dir / "events.jsonl") if usable("events.jsonl") else []
+    prepares = [e for e in events if e.get("event") == "prepared"]
+    prepared = prepares[0] if prepares else {}
+    armed = first_event(events, "fault_armed")
     fired = first_event(events, "fault_fired")
     pdc = int(prepared.get("pdc_samples", -1))
-    ir = read_f32(run_dir / "ir.f32")
-    _, stimulus = read_wav(run_dir / "stimulus.wav")
+    ir = read_f32(run_dir / "ir.f32") if usable("ir.f32") else []
+    _, stimulus = read_wav(run_dir / "stimulus.wav") if usable("stimulus.wav") else (0, [[]])
     kw = {"tolerance": tolerance, "window_pre": window_pre, "window_post": window_post}
 
-    plugin_null, plugin_note = None, "no capture"
+    preconditions: list[str] = []
+    mismatches: list[str] = []
+    # Every event the verdict rests on must be about this fault and sample.
+    for name, event in (("fault_armed", armed), ("fault_fired", fired)):
+        if event is None:
+            continue
+        if event.get("fault") != fault:
+            mismatches.append(f"{name} names fault {event.get('fault')!r}, the run asked for "
+                              f"{fault!r}")
+        if event.get("at_project_sample") != fault_sample:
+            mismatches.append(f"{name} is at project sample {event.get('at_project_sample')}, "
+                              f"the run asked for {fault_sample}")
+    if nonce is not None and any(e.get("nonce") != nonce for e in prepares):
+        mismatches.append("the plug-in's events carry a different run nonce")
+    if reaper_pid is not None and any(e.get("pid") != reaper_pid for e in prepares):
+        mismatches.append("the plug-in's events come from a different process than the REAPER "
+                          "this run started")
+
     capture = None
-    if (run_dir / "capture.bin").exists() and pdc >= 0:
+    plugin_null, plugin_note = None, "no capture"
+    owning: list[dict] = []
+    if usable("capture.bin") and prepares:
         capture = read_capture(run_dir / "capture.bin")
-        result, plugin_note = analyze_plugin_capture(capture, ir, pdc, fault_sample, **kw)
-        plugin_null = result.as_dict() if result else None
+        # Pair each capture segment with the prepare it follows. A host may
+        # prepare several times before processing again; only the last of
+        # those owns audio.
+        by_index = {e.get("prepare_index"): e for e in prepares}
+        owning = [by_index.get(i) for i in capture.segment_prepares]
+        if any(e is None for e in owning):
+            preconditions.append("a capture segment has no matching prepared event")
+            owning = [e for e in owning if e is not None]
+        else:
+            result, plugin_note = analyze_plugin_capture(
+                capture, ir, [int(e.get("pdc_samples", -1)) for e in owning], fault_sample,
+                **kw)
+            plugin_null = result.as_dict() if result else None
 
     bounce_null, bounce_lag = None, None
-    if bounce_path is not None and bounce_path.exists():
+    if bounce_path is not None and usable(bounce_path.name):
         _, bounce = read_wav(bounce_path)
         reference = bounce_reference(stimulus, ir, len(bounce[0]))
-        result = null_test(bounce, reference, fault_sample, **kw)
+        result = null_test(bounce, reference, fault_sample, required_frames=render_frames, **kw)
         bounce_null = result.as_dict()
-        if not result.passed:
+        if not result.passed and result.covered:
             bounce_lag = estimate_lag(bounce[0], reference[0], max(64, pdc + 64))
 
     snaps = health_snapshots(events)
     health_ok, health_note = health_expectation(fault, snaps)
     realtime = bool(fired) and not bool(fired.get("offline", True))
     render_loss = first_event(events, "render_loss")
+    applied = first_event(events, "provider_fault_applied")
+    # Armed is not fired, and fired is not applied: an audio fault counts only
+    # once the interposer reports it faulted the provider, a render fault only
+    # once the editor reports ForceLoss was issued.
     took_effect = fired is not None and (
-        fault not in RENDER_FAULTS or bool(render_loss and render_loss.get("performed")))
-    preconditions = []
-    if prepared.get("path") != "shared_memory":
+        bool(render_loss and render_loss.get("performed")) if fault in RENDER_FAULTS
+        else applied is not None)
+    audio_prepares = owning or prepares
+    if any(e.get("ok") is not True for e in audio_prepares) or not prepares:
+        preconditions.append("the plug-in did not prepare its GPU engine every time")
+    if any(e.get("path") != "shared_memory" for e in audio_prepares):
         preconditions.append(f"the plug-in is not on the shared-I/O GPU path "
-                             f"(path={prepared.get('path')!r})")
-    if prepared.get("ir_taps") != len(ir):
+                             f"(paths={sorted({str(e.get('path')) for e in audio_prepares})})")
+    if any(e.get("ir_taps") != len(ir) for e in audio_prepares):
         preconditions.append(f"the plug-in loaded {prepared.get('ir_taps')} IR taps, "
                              f"the harness wrote {len(ir)}")
     if first_event(events, "capture_overflow") is not None:
         preconditions.append("the plug-in dropped capture records")
     refused = first_event(events, "fault_refused")
     if refused is not None:
-        preconditions.append(f"the plug-in refused the fault: {refused.get('reason') or refused.get('detail')}")
+        preconditions.append(f"the plug-in refused the fault: "
+                             f"{refused.get('reason') or refused.get('detail')}")
     verdict, reasons = decide(fault=fault, plugin_null=plugin_null, bounce_null=bounce_null,
                               health_ok=health_ok, fault_fired=took_effect,
                               host_alive=host_alive, realtime_at_fault=realtime,
-                              preconditions=preconditions)
+                              preconditions=preconditions, mismatches=mismatches)
     if plugin_note:
         reasons.append(plugin_note)
     return {
@@ -680,6 +796,7 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
             "issued_project_sample": fired.get("issued_project_sample") if fired else None,
             "realtime_block": realtime,
             "render_loss": render_loss,
+            "provider_fault_applied": applied,
         },
         "pdc_samples": pdc,
         "plugin_identity": {k: prepared.get(k) for k in ("provider", "path", "quantum",

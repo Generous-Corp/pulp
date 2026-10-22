@@ -149,6 +149,15 @@ double max_error(const std::vector<float>& got, const std::vector<double>& want)
     return worst;
 }
 
+// gpu_blocks of the delivery counters in the health event tagged `phase`.
+long long gpu_blocks_in(const std::string& text, const std::string& phase) {
+    const auto at = text.find(phase);
+    if (at == std::string::npos)
+        return -1;
+    const auto key = text.find("\"gpu_blocks\":", at);
+    return key == std::string::npos ? -1 : std::atoll(text.c_str() + key + 13);
+}
+
 pulp::format::PrepareContext prepare_context() {
     pulp::format::PrepareContext ctx;
     ctx.sample_rate = kRate;
@@ -265,9 +274,9 @@ TEST_CASE("gpu fault plug-in arms a fault only when it can inject it", "[gpu-fau
         CHECK_FALSE(p.render_loss_requested());
     }
 
-    SECTION("an audio fault without the WP-A2 seam is refused, never faked") {
+    SECTION("an unknown fault is refused, never faked") {
         std::ofstream(dir.path / "fault-request.json")
-            << R"({"fault": "force_loss_between", "at_project_sample": 4000})";
+            << R"({"fault": "melt_the_gpu", "at_project_sample": 4000})";
         GpuFaultContinuityProcessor p;
         p.prepare(prepare_context());
         REQUIRE(wait_for(events, "\"event\":\"fault_refused\""));
@@ -276,7 +285,70 @@ TEST_CASE("gpu fault plug-in arms a fault only when it can inject it", "[gpu-fau
         const auto text = read_text(events);
         CHECK(text.find("\"event\":\"fault_armed\"") == std::string::npos);
         CHECK(text.find("\"event\":\"fault_fired\"") == std::string::npos);
-        CHECK(text.find("WP-A2") != std::string::npos);
+    }
+}
+
+TEST_CASE("provider faults fire in the running GPU path and audio stays continuous",
+          "[gpu-fault-continuity]") {
+    struct Case {
+        const char* fault;
+        const char* point;
+        bool loss;
+    };
+    const Case cases[] = {
+        {"force_loss_before", "before_submit", true},
+        {"force_loss_between", "between_submit_and_completion_registration", true},
+        {"force_loss_after", "after_completion_registration", true},
+        {"delay_completion", "process_events_stall", false},
+        {"hang", "process_events_stall", false},
+    };
+    for (const auto& c : cases) {
+        DYNAMIC_SECTION(c.fault) {
+            RunDir dir;
+            const auto ir = make_ir();
+            write_ir(dir.path, ir);
+            const auto events = dir.path / "events.jsonl";
+            std::ofstream(dir.path / "fault-request.json")
+                << "{\"fault\": \"" << c.fault
+                << "\", \"at_project_sample\": 4000, \"after_project_sample\": 9000,"
+                   " \"delay_ms\": 300}";
+            const auto x = make_input();
+            Run run;
+            int pdc = 0;
+            {
+                GpuFaultContinuityProcessor p;
+                p.prepare(prepare_context());
+                REQUIRE(wait_for(events, "\"event\":\"prepared\""));
+                if (!on_shared_path(events))
+                    SKIP("no shared-I/O GPU provider on this host");
+                REQUIRE(wait_for(events, "\"event\":\"fault_armed\""));
+                pdc = p.latency_samples();
+                run = drive(p, x, /*paced=*/true);
+                REQUIRE(wait_for(events, "\"event\":\"provider_fault_applied\""));
+                REQUIRE(wait_for(events, "\"phase\":\"after\""));
+            }
+            const auto text = read_text(events);
+            INFO(text);
+            CHECK(text.find(std::string("\"point\":\"") + c.point + "\"") != std::string::npos);
+            if (c.loss) {
+                // A lost device delivers nothing more: the GPU count is frozen
+                // between the "at" and "after" snapshots. (The transport does
+                // not yet name the loss in recovery_reason for this node;
+                // WP-A makes that truthful, so it is reported, not required.)
+                const auto at = gpu_blocks_in(text, "\"phase\":\"at\"");
+                const auto after = gpu_blocks_in(text, "\"phase\":\"after\"");
+                CHECK(at >= 0);
+                CHECK(after == at);
+                WARN(c.fault << " recovery_reason after: "
+                             << (text.find("\"recovery_reason\":\"provider-lost\"") !=
+                                         std::string::npos
+                                     ? "provider-lost"
+                                     : "not reported"));
+            }
+            CHECK(run.allocations == 0);
+            // The fault happened inside the provider; the output did not notice.
+            CHECK(max_error(run.output, reference(x, ir, static_cast<std::size_t>(pdc))) < 1e-4);
+        }
     }
 }
 

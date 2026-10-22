@@ -95,16 +95,29 @@ floats its editor, and plays a known stimulus in realtime while the plug-in fire
 one fault when the playhead crosses `--fault-at-sample`:
 
 - `force_loss_before|force_loss_between|force_loss_after|delay_completion|hang`
-  hit the **audio** device through WP-A2's `gpu_audio_fault_inject` seam;
+  hit the running **audio** provider. The provider's own fault hooks are
+  construction-time options, and WP-A2's `gpu_audio_fault_inject` control op
+  cannot reach a plug-in inside REAPER. So the test plug-in interposes Dawn's
+  proc table (test-only, off the main thread only) and applies the fault at the
+  provider's own call sites: ForceLoss before `Submit`, between `Submit` and
+  `OnSubmittedWorkDone`, or after it; or a stalled `ProcessEvents` (100 ms for
+  `delay_completion`, 3 s for `hang`, `--fault-delay-ms` to change). An audio
+  fault counts only once the plug-in reports it was applied, not merely armed;
 - `render_force_loss` loses the **editor's render** device through the
   surface's existing device accessor. Audio owns a separate Dawn device, so the
   expectation is "audio continues"; a REAPER crash is recorded as FAIL.
 
-The plug-in captures every callback's input and output from a host thread, and
-both that capture and REAPER's bounce are nulled against an independent CPU
-reference (stimulus convolved with the same IR, delayed by the reported PDC for
-the capture, PDC-compensated for the bounce) over the whole run and in a window
-around the fault sample. Transport health is snapshotted before, at, and after
+The plug-in captures every callback's input and output from a host thread. That
+capture is nulled against an independent CPU reference (its own recorded input
+convolved with the same IR, delayed by the PDC each prepare reported) over the
+whole run and in a window around the fault sample. **That null is the
+continuity evidence.** After playback the track is bounced with an offline
+render. The fault fires once, on the realtime pass, and an offline render runs
+the CPU path, so the bounce holds neither the fault nor GPU output. Its null
+(stimulus convolved with the IR, PDC-compensated by REAPER) is a cross-check of
+the offline path and of PDC reporting, nothing more. Both nulls must cover the
+whole fault window, and the bounce must reach the render end, or they fail.
+Transport health and delivery counters are snapshotted before, at, and after
 the fault. The run directory holds every artifact plus a
 `pulp.gpu-audio.daw-continuity.v1` receipt
 ([schema](../../../docs/contracts/gpu-audio-daw-continuity-v1.schema.json)):
@@ -121,23 +134,27 @@ cmake --build build --target PulpGpuFaultContinuity_CLAP PulpGpuFaultContinuity_
 
 ```bash
 python3 tools/testing/daw-smoke/reaper_smoke.py --mode gpu-fault \
-  --gpu-fault force_loss_between --format clap \
+  --gpu-fault force_loss_after --format clap \
   --plugin-name "Pulp GPU Fault Continuity" \
   --plugin-path "build/CLAP/Pulp GPU Fault Continuity.clap" \
   --out-dir /tmp/gpu-fault-run --reaper-bin /Applications/REAPER.app/Contents/MacOS/REAPER
 python3 tools/validation/verify_gpu_audio_daw_continuity_receipt.py /tmp/gpu-fault-run/receipt.json
 ```
 
-The verifier re-derives every null, counter expectation and the verdict from the
-digest-bound artifacts; edited numbers or swapped files are rejected (exit 2).
-The receipt labels host quietness from `gpu_audio_p2_host_preflight.py`;
-`--require-quiet-host` and `--require-control-op` make those binding. A fault
-that reached the plug-in through the request file (`in_process_file`) proves the
-audio claim but not the control operation. A run is INCONCLUSIVE, never PASS,
-when the plug-in is not on the shared-I/O path, refuses the fault, drops a
-capture record, or fires the fault on an offline block. After playback the track
-is bounced with an offline render, so the bounce null covers the post-fault
-provider state through REAPER's own render path.
+The verifier reads only digest-listed artifacts. From them it re-derives every
+null, the counter expectations, the verdict, and the preflight summary (from
+`preflight.json`). It checks that the plug-in's events carry this run's nonce
+and REAPER's pid, and that every fault event names the fault and sample the
+receipt claims. Edited numbers, unlisted or swapped files, and events from
+another run are rejected (exit 2). What it cannot prove is that the bound files
+came from a real REAPER rather than a careful forger: the receipt is
+self-contained, with no external signer. `--require-quiet-host` makes host
+quietness binding. Every live receipt today says `in_process_file`, which proves
+the audio claim but not a control operation, so `--require-control-op` refuses
+it. A failed null, or evidence that does not match the run, is a FAIL. A clean
+run is INCONCLUSIVE, never PASS, when the plug-in is not on the shared-I/O path,
+refuses or never applies the fault, drops a capture record, fires the fault on
+an offline block, or the GPU delivered nothing before the fault.
 
 The harness turns off REAPER's anticipative FX processing for the test track.
 With it on, REAPER runs the plug-in ahead of playback in back-to-back bursts,

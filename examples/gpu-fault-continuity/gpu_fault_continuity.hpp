@@ -148,6 +148,7 @@ class GpuFaultContinuityProcessor : public format::Processor {
     std::vector<float> stage_out_; // [channel][quantum]
     std::uint32_t stage_fill_ = 0;
     std::uint32_t quantum_ = 512;
+    std::uint32_t prepare_index_ = 0;
     std::vector<const float*> in_ptrs_;
     std::vector<float*> out_ptrs_;
     std::vector<float> scratch_in_; // [channel][max block] contiguous copy for capture
@@ -176,6 +177,12 @@ class GpuFaultContinuityProcessor : public format::Processor {
     bool at_taken_ = false;
     bool after_taken_ = false;
     std::uint64_t fired_ns_ = 0;
+    std::uint64_t applied_ns_ = 0;
+    std::uint64_t applied_before_ = 0;
+    bool applied_reported_ = false;
+    std::uint32_t delay_ms_ = 100;
+    std::string nonce_;
+    std::uint32_t latency_samples_ = 3 * 512;
     std::mutex hook_mutex_;
     std::function<void()> render_loss_hook_;
     std::atomic<int> render_loss_state_{0}; // 0 none, 1 performed, 2 refused

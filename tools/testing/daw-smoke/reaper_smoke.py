@@ -35,9 +35,11 @@ MODES  (--mode, default reload)
     gpu-fault          Load the GPU fault-continuity test plug-in on its shared-I/O
                        GPU path, float its editor, and play a known stimulus while
                        the plug-in fires one GPU fault (--gpu-fault) at a recorded
-                       project sample. The plug-in's own output capture and REAPER's
-                       bounce are both nulled against an independent CPU reference
-                       around the fault sample, transport health is snapshotted
+                       project sample. The plug-in's own output capture is nulled
+                       against an independent CPU reference across the fault window
+                       (the continuity evidence); REAPER's later offline bounce is
+                       nulled too, as an offline-path/PDC cross-check only. Transport
+                       health is snapshotted
                        before/at/after, and a pulp.gpu-audio.daw-continuity.v1
                        receipt is written (verify it with
                        tools/validation/verify_gpu_audio_daw_continuity_receipt.py).
@@ -1376,11 +1378,11 @@ def run_sequence_loop_seek_mode(reaper: Path, args: argparse.Namespace) -> int:
 # ── gpu-fault mode ───────────────────────────────────────────────────────
 #
 # The plug-in under test is the GPU fault-continuity test plug-in
-# (test/support/gpu_fault_continuity_plugin). It reads three env vars REAPER
-# passes through: the run directory it writes its capture and events into,
-# the impulse response the harness chose, and the fault request file. The
-# analysis lives in gpu_fault_continuity.py so the dry run and the verifier
-# share it with the live run.
+# (examples/gpu-fault-continuity). It reads env vars REAPER passes through:
+# the run directory it writes its capture and events into, the impulse
+# response the harness chose, the fault request file, and a per-run nonce it
+# stamps into its events. The analysis lives in gpu_fault_continuity.py so the
+# dry run and the verifier share it with the live run.
 
 def _gpu_fault_lib():
     import importlib.util
@@ -1392,23 +1394,20 @@ def _gpu_fault_lib():
     return mod
 
 
-def _host_preflight() -> tuple[dict, dict | None]:
-    """Summarise the P2 quiet-host preflight. An unavailable preflight is a
-    not-quiet host, never a quiet one."""
+def _host_preflight() -> dict:
+    """The P2 quiet-host preflight document written to preflight.json. An
+    unavailable preflight is a not-quiet host, never a quiet one; the receipt's
+    summary is derived from this document so the verifier can re-derive it."""
     import importlib.util
     path = HERE.parents[1] / "scripts" / "gpu_audio_p2_host_preflight.py"
     try:
         spec = importlib.util.spec_from_file_location("gpu_audio_p2_host_preflight", path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        full = mod.collect()
+        return mod.collect()
     except Exception as exc:  # noqa: BLE001 - the label must survive any probe failure
         return {"status": "unavailable", "quiet_host": False,
-                "reasons": [f"preflight_error: {exc}"]}, None
-    return {"status": full.get("status"), "quiet_host": bool(full.get("quiet_host")),
-            "reasons": list(full.get("reasons", [])),
-            "load1": full.get("load1"), "ncpu": full.get("ncpu"),
-            "raw_observations_sha256": full.get("raw_observations_sha256")}, full
+                "reasons": [f"preflight_error: {exc}"]}
 
 
 def _reaper_version(reaper: Path) -> str | None:
@@ -1425,22 +1424,6 @@ def _bundle_executable(bundle: Path) -> Path | None:
     macos = bundle / "Contents" / "MacOS"
     found = [p for p in macos.iterdir() if p.is_file()] if macos.is_dir() else []
     return found[0] if len(found) == 1 else None
-
-
-def _invoke_control_fault(args: argparse.Namespace, fault: str, sample: int) -> dict:
-    """Run the operator-supplied gpu_audio_fault_inject command. Kept to one
-    seam so the control op's final shape is a one-place change."""
-    import shlex
-    argv = [a.format(fault=fault, sample=sample) for a in shlex.split(args.control_inject_cmd)]
-    proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", timeout=30, check=False)
-    try:
-        response = json.loads(proc.stdout) if proc.stdout.strip() else None
-    except json.JSONDecodeError:
-        response = None
-    return {"operation": "gpu_audio_fault_inject", "argv": argv,
-            "request": {"fault": fault, "at_project_sample": sample},
-            "returncode": proc.returncode, "response": response,
-            "stderr_tail": proc.stderr[-2000:]}
 
 
 def _wait_for_event(events: Path, names, timeout: float, proc) -> dict | None:
@@ -1475,24 +1458,30 @@ def _wait_for_stable_file(path: Path, deadline: float, proc, settle: float = 3.0
 
 
 def _finish_gpu_fault(lib, run_dir: Path, args: argparse.Namespace, *, transport: str,
-                      host_alive: bool, bounce: Path | None, identity: dict,
-                      preflight: dict, control: dict | None) -> int:
+                      host_alive: bool, bounce: Path | None, identity: dict, nonce: str,
+                      reaper_pid: int | None) -> int:
+    names = ["stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json",
+             "reaper.out.txt"] + ([bounce.name] if bounce is not None else [])
+    artifacts = lib.artifact_digests(run_dir, names)
+    render_frames = args.stimulus_frames + args.window_post
     evidence = lib.evaluate_run(run_dir, fault=args.gpu_fault, fault_sample=args.fault_at_sample,
                                 tolerance=args.null_tolerance, window_pre=args.window_pre,
                                 window_post=args.window_post, host_alive=host_alive,
-                                bounce_path=bounce)
-    names = ["stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json",
-             "reaper.out.txt"] + ([bounce.name] if bounce is not None else [])
+                                bounce_path=bounce, render_frames=render_frames, nonce=nonce,
+                                reaper_pid=reaper_pid, listed=list(artifacts))
+    preflight = lib.summarize_preflight(
+        json.loads((run_dir / "preflight.json").read_text(encoding="utf-8")))
     receipt = lib.build_receipt(
         created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         trigger_transport=transport,
-        control_op=control,
-        analysis={"tolerance": args.null_tolerance,
+        control_op=None,
+        nonce=nonce,
+        analysis={"tolerance": args.null_tolerance, "render_frames": render_frames,
                   "window": {"pre": args.window_pre, "post": args.window_post}},
-        bounce_artifact=bounce.name if bounce is not None and bounce.exists() else None,
+        bounce_artifact=bounce.name if bounce is not None and bounce.name in artifacts else None,
         preflight=preflight,
-        host_quiet=bool(preflight.get("quiet_host")),
-        artifacts=lib.artifact_digests(run_dir, names),
+        host_quiet=preflight["quiet_host"],
+        artifacts=artifacts,
         **identity, **evidence)
     out = run_dir / "receipt.json"
     out.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1515,10 +1504,13 @@ def run_gpu_fault_dry_run(args: argparse.Namespace) -> int:
     built from the reference, then the same analysis, receipt and verifier a
     live run uses. --dry-run-break-fallback plants the negative (silence after
     the fault) and must come back FAIL."""
+    import secrets
     lib = _gpu_fault_lib()
     run_dir = Path(args.out_dir or tempfile.mkdtemp(prefix="pulp-gpu-fault-dry-"))
+    nonce = "dry-run-" + secrets.token_hex(8)
     lib.synthesize_run(run_dir, fault=args.gpu_fault, fault_sample=args.fault_at_sample,
-                       frames=args.stimulus_frames, break_fallback=args.dry_run_break_fallback)
+                       frames=args.stimulus_frames, break_fallback=args.dry_run_break_fallback,
+                       nonce=nonce, tail=args.window_post)
     preflight = {"status": "dry_run", "quiet_host": False, "reasons": ["dry_run"]}
     (run_dir / "preflight.json").write_text(json.dumps(preflight) + "\n", encoding="utf-8")
     identity = {"host": {"reaper_version": None, "machine": platform.machine(),
@@ -1526,8 +1518,8 @@ def run_gpu_fault_dry_run(args: argparse.Namespace) -> int:
                 "plugin": {"format": args.format, "name": args.plugin_name or "dry-run",
                            "executable_sha256": None}}
     return _finish_gpu_fault(lib, run_dir, args, transport="dry_run", host_alive=True,
-                             bounce=run_dir / "bounce.wav", identity=identity,
-                             preflight=preflight, control=None)
+                             bounce=run_dir / "bounce.wav", identity=identity, nonce=nonce,
+                             reaper_pid=None)
 
 
 def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
@@ -1541,12 +1533,17 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
         log(f"{plugin} has no single bundle executable — FAIL")
         return EXIT_FAIL
 
+    import secrets
     run_dir = Path(args.out_dir or tempfile.mkdtemp(prefix="pulp-gpu-fault-"))
     run_dir.mkdir(parents=True, exist_ok=True)
-    preflight, full = _host_preflight()
-    (run_dir / "preflight.json").write_text(json.dumps(full or preflight, indent=2,
-                                                       sort_keys=True, default=str) + "\n", encoding="utf-8")
-    log(f"host preflight: status={preflight['status']} quiet={preflight['quiet_host']}")
+    preflight = _host_preflight()
+    (run_dir / "preflight.json").write_text(json.dumps(preflight, indent=2, sort_keys=True,
+                                                       default=str) + "\n", encoding="utf-8")
+    log(f"host preflight: status={preflight.get('status')} "
+        f"quiet={preflight.get('quiet_host') is True}")
+    # Stamped by the plug-in into every `prepared` event, so the events this
+    # receipt rests on provably come from this run.
+    nonce = secrets.token_hex(16)
 
     frames = args.stimulus_frames
     stim = lib.make_stimulus(frames)
@@ -1556,13 +1553,17 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
     # Play (and later bounce) far enough past the fault for the `after` snapshot.
     render_end = (frames + args.window_post) / 48000.0
 
-    transport = "control_op" if args.control_inject_cmd else "in_process_file"
+    # The fault request reaches the plug-in through a file. WP-A2's
+    # gpu_audio_fault_inject control op cannot reach a plug-in inside REAPER
+    # (only the standalone host joins the control broker), so the receipt says
+    # in_process_file and is not control-op evidence.
+    transport = "in_process_file"
     request = run_dir / "fault-request.json"
-    if transport == "in_process_file":
-        request.write_text(json.dumps({
-            "fault": args.gpu_fault, "at_project_sample": args.fault_at_sample,
-            "after_project_sample": args.fault_at_sample + args.window_post,
-        }) + "\n", encoding="utf-8")
+    fault_request = {"fault": args.gpu_fault, "at_project_sample": args.fault_at_sample,
+                     "after_project_sample": args.fault_at_sample + args.window_post}
+    if args.fault_delay_ms is not None:
+        fault_request["delay_ms"] = args.fault_delay_ms
+    request.write_text(json.dumps(fault_request) + "\n", encoding="utf-8")
     go = run_dir / "go"
 
     _announce(f'"{args.plugin_name}" ({args.format}) gpu-fault {args.gpu_fault} smoke '
@@ -1576,7 +1577,6 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
                            "bundle": str(plugin.resolve()),
                            "executable_sha256": lib.sha256_file(executable)},
                 "anticipative_fx": bool(args.anticipative_fx)}
-    control = None
     host_alive = True
     try:
         placed = session.place_plugin()
@@ -1592,7 +1592,10 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
             "PULP_GPU_FAULT_RENDER_END": f"{render_end:.6f}",
             "PULP_GPU_FAULT_PLAY_END": f"{render_end:.6f}",
             "PULP_GPU_FAULT_ANTICIPATIVE": "1" if args.anticipative_fx else "0",
-            "PULP_GPU_FAULT_GO_TIMEOUT": str(args.timeout),
+            # The harness may wait one timeout for `prepared` and another for
+            # `fault_armed` after FX_SHOWN; the script must outlast both.
+            "PULP_GPU_FAULT_GO_TIMEOUT": str(2 * args.timeout + 30),
+            "PULP_GPU_FAULT_NONCE": nonce,
         })
         def forget_scan_instances() -> None:
             # The pre-warm scan launch instantiated the plug-in with the same
@@ -1611,9 +1614,6 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
             log("the plug-in never logged `prepared` (not the fault-continuity build, or the "
                 "shared-IO GPU path refused) — INCONCLUSIVE")
             return EXIT_INCONCLUSIVE
-        if transport == "control_op":
-            control = _invoke_control_fault(args, args.gpu_fault, args.fault_at_sample)
-            log(f"control op returned {control['returncode']}: {control['response']}")
         armed = _wait_for_event(events, ("fault_armed", "fault_refused"), args.timeout,
                                 session.proc)
         if armed is None or armed.get("event") != "fault_armed":
@@ -1645,12 +1645,14 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
             log("the bounce never stopped growing before the timeout — INCONCLUSIVE")
             return EXIT_INCONCLUSIVE
         host_alive = session.proc is not None and session.proc.poll() is None
+        reaper_pid = session.proc.pid if session.proc is not None else None
+        identity["host"]["reaper_pid"] = reaper_pid
         session.terminate()
         shutil.copyfile(session.reaper_out, run_dir / "reaper.out.txt")
         return _finish_gpu_fault(lib, run_dir, args, transport=transport,
                                  host_alive=host_alive,
                                  bounce=bounce if bounce.exists() else None,
-                                 identity=identity, preflight=preflight, control=control)
+                                 identity=identity, nonce=nonce, reaper_pid=reaper_pid)
     finally:
         session.cleanup()
 
@@ -1740,10 +1742,9 @@ def build_parser() -> argparse.ArgumentParser:
                              help="Leave REAPER's anticipative FX processing on for the track. "
                                   "It runs callbacks back to back, so the GPU never meets its "
                                   "lead and every block is CPU fallback.")
-    fault_group.add_argument("--control-inject-cmd",
-                             help="Command that invokes the gpu_audio_fault_inject control op "
-                                  "({fault}/{sample} are substituted; JSON on stdout). Without "
-                                  "it the fault request reaches the plug-in through a file.")
+    fault_group.add_argument("--fault-delay-ms", type=int,
+                             help="Worker stall for delay_completion/hang (plug-in defaults: "
+                                  "100 ms and 3000 ms).")
     fault_group.add_argument("--out-dir", help="Run directory for artifacts and the receipt.")
     fault_group.add_argument("--dry-run", action="store_true",
                              help="Exercise the analysis, receipt and verifier on synthetic "
@@ -1761,6 +1762,9 @@ def validate_mode_args(ap: argparse.ArgumentParser, args: argparse.Namespace) ->
             ap.error("gpu-fault mode requires --plugin-name and --plugin-path (or --dry-run)")
         if not 0 < args.fault_at_sample < args.stimulus_frames:
             ap.error("--fault-at-sample must fall inside the stimulus")
+        if args.fault_at_sample < args.window_pre:
+            ap.error("--fault-at-sample must leave room for --window-pre before it: the "
+                     "fault window has to lie entirely inside the compared audio")
         if args.dry_run_break_fallback and not args.dry_run:
             ap.error("--dry-run-break-fallback only applies to --dry-run")
         return

@@ -1,4 +1,5 @@
 #include "gpu_fault_continuity.hpp"
+#include "gpu_fault_interposer.hpp"
 #include "gpu_fault_seam.hpp"
 
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
@@ -29,6 +30,10 @@ constexpr std::uint32_t kFlagPlaying = 1u << 0;
 constexpr std::uint32_t kFlagOffline = 1u << 1;
 constexpr std::uint32_t kFlagFaultBlock = 1u << 2;
 constexpr std::uint32_t kFlagSegmentStart = 1u << 3;
+// A segment-start record carries the low 16 bits of the prepare it follows, so
+// the reader can pair it with that prepare's `prepared` event even when a host
+// prepares several times between two process calls (the VST3 adapter does).
+constexpr std::uint32_t kPrepareIndexShift = 16;
 constexpr std::size_t kRingBytes = 16u << 20;
 
 struct RecordHeader {
@@ -228,6 +233,8 @@ GpuFaultContinuityProcessor::GpuFaultContinuityProcessor() {
     run_dir_ = env_path("PULP_GPU_FAULT_RUN_DIR");
     request_path_ = env_path("PULP_GPU_FAULT_REQUEST");
     ir_path_ = env_path("PULP_GPU_FAULT_IR");
+    if (const char* nonce = std::getenv("PULP_GPU_FAULT_NONCE"))
+        nonce_ = nonce;
 }
 
 void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
@@ -277,8 +284,9 @@ format::PluginDescriptor GpuFaultContinuityProcessor::descriptor() const {
 }
 
 int GpuFaultContinuityProcessor::latency_samples() const {
-    // One staging quantum plus the transport's GPU lead.
-    return static_cast<int>((gpu_audio::GpuConvolver::kLatencyBlocks + 1) * quantum_);
+    // One staging quantum plus the transport's own reported PDC, read at
+    // prepare so it follows the transport rather than a constant.
+    return static_cast<int>(latency_samples_);
 }
 
 void GpuFaultContinuityProcessor::prepare(const format::PrepareContext& context) {
@@ -299,6 +307,7 @@ void GpuFaultContinuityProcessor::prepare(const format::PrepareContext& context)
     out_ptrs_.assign(kChannels, nullptr);
     stage_fill_ = 0;
     segment_start_ = true;
+    ++prepare_index_;
     claim_run_dir(sample_rate_);
     prepare_engine();
 }
@@ -329,7 +338,15 @@ void GpuFaultContinuityProcessor::prepare_engine() {
         .run_worker_thread = true,
         .wake_on_write = true,
     };
+    // Install the provider fault interposer once the provider has made its
+    // one process-wide proc-table installation, and before the worker starts.
+    std::string interposer_detail = "not a harness run";
+    if (harness_ && node_ok)
+        install_provider_fault_interposer(interposer_detail);
     const bool transport_ok = node_ok && transport_->prepare(node_.get(), config);
+    latency_samples_ =
+        quantum_ + (transport_ok ? transport_->latency_samples()
+                                 : gpu_audio::GpuConvolver::kLatencyBlocks * quantum_);
     const auto capability =
         transport_ok ? transport_->capability_report() : gpu_audio::GpuAudioCapabilityReport{};
     provider_name_ = provider_name(capability.provider);
@@ -339,15 +356,19 @@ void GpuFaultContinuityProcessor::prepare_engine() {
     engine_ready_.store(transport_ok, std::memory_order_release);
 
     if (harness_) {
-        char line[512];
+        char line[768];
         std::snprintf(line, sizeof(line),
                       "{\"event\":\"prepared\",\"ok\":%s,\"pdc_samples\":%d,\"quantum\":%u,"
                       "\"lead_blocks\":%u,\"ir_taps\":%zu,\"provider\":\"%s\",\"path\":\"%s\","
-                      "\"sample_rate\":%u,\"max_block\":%u,\"audio_fault_seam\":%s}",
+                      "\"sample_rate\":%u,\"max_block\":%u,\"audio_fault_seam\":%s,"
+                      "\"seam_detail\":\"%s\",\"nonce\":\"%s\",\"pid\":%d,"
+                      "\"prepare_index\":%u}",
                       transport_ok ? "true" : "false", latency_samples(), quantum_,
-                      gpu_audio::GpuConvolver::kLatencyBlocks, ir_.size(), provider_name_.c_str(),
+                      capability.prepared_lead_blocks, ir_.size(), provider_name_.c_str(),
                       path_name_.c_str(), sample_rate_, max_block_,
-                      audio_fault_seam_available() ? "true" : "false");
+                      audio_fault_seam_available() ? "true" : "false",
+                      escape(interposer_detail).c_str(), escape(nonce_).c_str(),
+                      static_cast<int>(::getpid()), prepare_index_ & 0xFFFFu);
         emit(line);
     }
 }
@@ -358,6 +379,8 @@ void GpuFaultContinuityProcessor::release() {
 
 void GpuFaultContinuityProcessor::release_engine() {
     engine_ready_.store(false, std::memory_order_release);
+    if (harness_)
+        disarm_provider_fault();
     std::lock_guard lock(engine_mutex_);
     if (transport_)
         transport_->release();
@@ -376,8 +399,10 @@ void GpuFaultContinuityProcessor::process(audio::BufferView<float>& output,
     const bool playing = context.is_playing && context.position_samples >= 0;
     const std::int64_t position = context.position_samples;
 
-    std::uint32_t flags = (playing ? kFlagPlaying : 0u) | (offline ? kFlagOffline : 0u) |
-                          (segment_start_ ? kFlagSegmentStart : 0u);
+    std::uint32_t flags =
+        (playing ? kFlagPlaying : 0u) | (offline ? kFlagOffline : 0u) |
+        (segment_start_ ? kFlagSegmentStart | ((prepare_index_ & 0xFFFFu) << kPrepareIndexShift)
+                        : 0u);
     segment_start_ = false;
     const std::int64_t fault_at = fault_at_.load(std::memory_order_acquire);
     if (playing && fault_at >= position && fault_at < position + n &&
@@ -494,7 +519,10 @@ void GpuFaultContinuityProcessor::emit_health(const char* phase) {
 }
 
 void GpuFaultContinuityProcessor::poll_request() {
-    if (request_seen_ || request_path_.empty() || !std::filesystem::exists(request_path_))
+    // Not before the engine is prepared: the provider fault interposer is
+    // installed during prepare, and an audio fault read earlier would be refused.
+    if (request_seen_ || request_path_.empty() || !engine_ready_.load(std::memory_order_acquire) ||
+        !std::filesystem::exists(request_path_))
         return;
     std::ifstream in(request_path_);
     std::stringstream text;
@@ -506,6 +534,7 @@ void GpuFaultContinuityProcessor::poll_request() {
     const FaultKind kind = parse_fault(json_string(body, "fault"));
     const std::int64_t at = json_int(body, "at_project_sample");
     const std::int64_t after = json_int(body, "after_project_sample");
+    const std::int64_t delay = json_int(body, "delay_ms");
     const bool audio = kind != FaultKind::RenderForceLoss;
     std::string refusal;
     if (kind == FaultKind::None)
@@ -520,6 +549,10 @@ void GpuFaultContinuityProcessor::poll_request() {
         return;
     }
     after_at_.store(after, std::memory_order_relaxed);
+    // A delayed completion stalls the worker for longer than the lead; a hang
+    // for seconds. Either way the callback must not notice.
+    delay_ms_ = delay > 0 ? static_cast<std::uint32_t>(std::min<std::int64_t>(delay, 60'000))
+                          : (kind == FaultKind::Hang ? 3000u : 100u);
     fault_at_.store(at, std::memory_order_release);
     armed_kind_.store(static_cast<std::uint8_t>(kind), std::memory_order_release);
     char line[200];
@@ -550,9 +583,8 @@ void GpuFaultContinuityProcessor::fire_pending_fault() {
             detail = "no editor is open, so there is no render device to lose";
         }
     } else {
-        std::lock_guard lock(engine_mutex_);
-        const auto result = transport_ ? inject_audio_fault(*transport_, kind)
-                                       : FaultSeamResult{false, "engine not prepared"};
+        applied_before_ = provider_faults_applied();
+        const auto result = inject_audio_fault(kind, delay_ms_);
         issued = result.accepted;
         detail = result.detail;
     }
@@ -587,12 +619,25 @@ void GpuFaultContinuityProcessor::report_render_loss(bool performed, const std::
 void GpuFaultContinuityProcessor::maybe_snapshot_after() {
     if (!fired_)
         return;
+    if (!applied_reported_ && provider_faults_applied() > applied_before_) {
+        // The interposer actually faulted the provider (not merely armed).
+        applied_reported_ = true;
+        applied_ns_ = now_ns();
+        char line[256];
+        std::snprintf(line, sizeof(line),
+                      "{\"event\":\"provider_fault_applied\",\"point\":\"%s\","
+                      "\"project_sample\":%" PRId64 ",\"delay_ms\":%u}",
+                      provider_fault_point(), latest_position_.load(std::memory_order_acquire),
+                      delay_ms_);
+        emit(line);
+    }
     const auto kind = static_cast<FaultKind>(armed_kind_.load(std::memory_order_acquire));
     if (!at_taken_) {
         // "at": once the editor has acted for a render loss, otherwise a
         // fixed 250 ms after injection, long enough for the worker to observe it.
         const bool render_done = render_loss_state_.load(std::memory_order_acquire) != 0;
-        const bool waited = now_ns() - fired_ns_ > 250'000'000ull;
+        const std::uint64_t since = applied_reported_ ? applied_ns_ : fired_ns_;
+        const bool waited = now_ns() - since > 250'000'000ull;
         if ((kind == FaultKind::RenderForceLoss && (render_done || waited)) ||
             (kind != FaultKind::RenderForceLoss && waited)) {
             at_taken_ = true;

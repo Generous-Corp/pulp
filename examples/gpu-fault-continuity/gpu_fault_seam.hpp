@@ -1,18 +1,18 @@
 #pragma once
 
-// The one place the plug-in reaches the audio provider's fault seam.
+// The one place the plug-in reaches the audio provider's faults.
 //
-// Audio-device faults (forced device loss at the three submission points, a
-// delayed completion, a hung terminal) are injected by WP-A2's
-// `gpu_audio_fault_inject` seam, which forwards to the shared-I/O provider's
-// test fault hooks. Until that seam is on this branch every audio fault is
-// refused with a reason the harness records; the plug-in never fakes a fault
-// it cannot inject. render_force_loss does not come through here: it is the
-// editor's render device, reached through the surface's device accessor.
+// The real DawnSharedIoProvider's fault hooks are construction-time Options,
+// and WP-A2's `dev.pulp.gpu-audio/fault.inject@1` op arms only fault targets
+// that wire their own arm function; a plug-in inside REAPER is also not
+// reachable by the control broker. So this test plug-in arms its faults
+// through the Dawn proc-table interposer in gpu_fault_interposer.cpp, which
+// faults the running provider at the provider's own call sites.
+// render_force_loss does not come through here: it is the editor's render
+// device, reached through the surface's device accessor.
 
 #include "gpu_fault_continuity.hpp"
-
-#include <pulp/gpu_audio/gpu_audio_transport.hpp>
+#include "gpu_fault_interposer.hpp"
 
 #include <string>
 
@@ -25,15 +25,18 @@ struct FaultSeamResult {
 
 inline std::string audio_fault_unavailable_reason(FaultKind kind) {
     return std::string("audio fault ") + fault_name(kind) +
-           " needs the WP-A2 gpu_audio_fault_inject seam, which is not on this branch";
+           " needs the provider fault interposer, which is not installed (no Dawn headers, or "
+           "the shared-I/O provider did not prepare)";
 }
 
-inline FaultSeamResult inject_audio_fault(gpu_audio::GpuAudioTransport&, FaultKind kind) {
-    return {false, audio_fault_unavailable_reason(kind)};
+inline FaultSeamResult inject_audio_fault(FaultKind kind, std::uint32_t delay_ms) {
+    FaultSeamResult result;
+    result.accepted = arm_provider_fault(kind, delay_ms, result.detail);
+    return result;
 }
 
 inline bool audio_fault_seam_available() noexcept {
-    return false;
+    return provider_fault_interposer_installed();
 }
 
 } // namespace pulp::examples::gpu_fault

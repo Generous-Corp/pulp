@@ -25,14 +25,14 @@ VERIFY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VERIFY)
 gfc = VERIFY.gfc
 
-FRAMES, FAULT, POST = 6000, 3000, 2400
+FRAMES, FAULT, PRE, POST = 6000, 3000, 1000, 2400
 
 
 def dry_run(out: Path, fault: str = "force_loss_between", *extra: str) -> int:
     return subprocess.run(
         [sys.executable, str(HARNESS), "--mode", "gpu-fault", "--gpu-fault", fault,
          "--dry-run", "--stimulus-frames", str(FRAMES), "--fault-at-sample", str(FAULT),
-         "--window-post", str(POST), "--out-dir", str(out), *extra],
+         "--window-pre", str(PRE), "--window-post", str(POST), "--out-dir", str(out), *extra],
         capture_output=True, text=True, encoding="utf-8", check=False).returncode
 
 
@@ -162,6 +162,78 @@ class DaWContinuityReceipt(unittest.TestCase):
         jsonschema.validate(receipt, schema)
         jsonschema.validate(load(self.bad), schema)
 
+    # The reviewer's forgery probes, each now rejected.
+    def copy_run(self, source: Path) -> Path:
+        run = Path(self.tmp.name) / f"copy-{len(list(Path(self.tmp.name).iterdir()))}"
+        run.mkdir()
+        for item in source.iterdir():
+            (run / item.name).write_bytes(item.read_bytes())
+        return run
+
+    def test_a_relabeled_dry_run_claiming_a_quiet_host_is_rejected(self):
+        receipt = load(self.good)
+        receipt["trigger_transport"] = "in_process_file"
+        receipt["host"]["reaper_version"] = "7.0"
+        receipt["host"]["reaper_pid"] = 4242
+        receipt["plugin"]["executable_sha256"] = "0" * 64
+        receipt["preflight"] = {"status": "ok", "quiet_host": True, "reasons": []}
+        receipt["host_quiet"] = True
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "reaper.out.txt not listed|preflight"):
+            VERIFY.verify(resign(receipt), self.good, require_quiet_host=True)
+
+    def test_a_quiet_preflight_summary_must_come_from_preflight_json(self):
+        receipt = load(self.good)
+        receipt["preflight"] = {**receipt["preflight"], "quiet_host": True}
+        receipt["host_quiet"] = True
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "preflight summary"):
+            self.verify(resign(receipt), self.good)
+
+    def test_capture_must_be_digest_bound(self):
+        receipt = load(self.good)
+        del receipt["artifacts"]["capture.bin"]
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "capture.bin not listed"):
+            self.verify(resign(receipt), self.good)
+
+    def test_a_truncated_bounce_cannot_pass(self):
+        run = self.copy_run(self.good)
+        _, bounce = gfc.read_wav(run / "bounce.wav")
+        gfc.write_wav_f32(run / "bounce.wav", [p[:FAULT - 500] for p in bounce])
+        receipt = load(run)
+        receipt["artifacts"]["bounce.wav"] = gfc.sha256_file(run / "bounce.wav")
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "re-derive"):
+            self.verify(resign(receipt), run)
+        # And recomputed honestly, it is a FAIL for not covering the window.
+        evidence = gfc.evaluate_run(run, fault="force_loss_between", fault_sample=FAULT,
+                                    tolerance=1e-4, window_pre=PRE, window_post=POST,
+                                    host_alive=True, bounce_path=run / "bounce.wav",
+                                    render_frames=FRAMES + POST)
+        self.assertFalse(evidence["nulls"]["bounce"]["covered"])
+        self.assertEqual(evidence["verdict"], "fail")
+
+    def test_a_relabeled_fault_kind_is_a_mismatch(self):
+        receipt = load(self.good)
+        receipt["fault"]["kind"] = "delay_completion"
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "re-derive"):
+            self.verify(resign(receipt), self.good)
+        evidence = gfc.evaluate_run(self.good, fault="delay_completion", fault_sample=FAULT,
+                                    tolerance=1e-4, window_pre=PRE, window_post=POST,
+                                    host_alive=True, bounce_path=self.good / "bounce.wav")
+        self.assertEqual(evidence["verdict"], "fail")
+        self.assertIn("names fault", evidence["verdict_reasons"][0])
+
+    def test_a_foreign_nonce_is_a_mismatch(self):
+        receipt = load(self.good)
+        receipt["nonce"] = "f" * 32
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "re-derive"):
+            self.verify(resign(receipt), self.good)
+
+    def test_a_fabricated_control_op_is_rejected(self):
+        receipt = load(self.good)
+        receipt["trigger_transport"] = "control_op"
+        receipt["control_op"] = {"operation": "gpu_audio_fault_inject", "response": {}}
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "reaper_version|reaper_pid|reaper.out.txt"):
+            VERIFY.verify(resign(receipt), self.good, require_control_op=True)
+
     def test_cli_exit_codes(self):
         self.assertEqual(VERIFY.main([str(self.good / "receipt.json"), "--allow-dry-run"]), 0)
         self.assertEqual(VERIFY.main([str(self.bad / "receipt.json"), "--allow-dry-run"]), 1)
@@ -186,6 +258,15 @@ class Decisions(unittest.TestCase):
     def test_a_host_crash_is_a_fail_not_an_inconclusive(self):
         self.assertEqual(self.decide(host_alive=False, fault="render_force_loss"), "fail")
 
+    def test_a_failed_null_is_a_fail_even_with_a_failed_precondition(self):
+        broken = {**self.OK, "passed": False, "max_abs_error": 0.5}
+        self.assertEqual(self.decide(plugin_null=broken, preconditions=["capture overflow"]),
+                         "fail")
+        self.assertEqual(self.decide(preconditions=["capture overflow"]), "inconclusive")
+
+    def test_evidence_from_another_run_is_a_fail(self):
+        self.assertEqual(self.decide(mismatches=["foreign nonce"]), "fail")
+
     def test_an_unfired_fault_is_inconclusive(self):
         self.assertEqual(self.decide(fault_fired=False), "inconclusive")
 
@@ -205,13 +286,21 @@ class HealthExpectations(unittest.TestCase):
                   "produced_blocks": 10, "fallback_blocks": 0, "missed_blocks": 0}
         return {"before": before, "at": before, "after": {**before, **after}}
 
-    def test_loss_needs_provider_lost_and_fallback(self):
-        ok = self.snaps({"recovery_reason": "provider-lost", "fallback_blocks": 5})
-        self.assertTrue(gfc.health_expectation("force_loss_after", ok)[0])
-        self.assertFalse(gfc.health_expectation(
-            "force_loss_after", self.snaps({"fallback_blocks": 5}))[0])
-        self.assertFalse(gfc.health_expectation(
-            "force_loss_after", self.snaps({"recovery_reason": "provider-lost"}))[0])
+    def test_loss_needs_fallback_and_frozen_gpu_delivery(self):
+        def snaps(at_gpu, after_gpu, fallback, reason="none"):
+            out = self.snaps({"fallback_blocks": fallback, "recovery_reason": reason})
+            out["before"]["delivery"] = {"gpu_blocks": 5}
+            out["at"] = {**out["at"], "delivery": {"gpu_blocks": at_gpu}}
+            out["after"]["delivery"] = {"gpu_blocks": after_gpu}
+            return out
+        self.assertTrue(gfc.health_expectation("force_loss_after", snaps(7, 7, 4))[0])
+        # Still delivering after the "loss": the loss never landed.
+        self.assertFalse(gfc.health_expectation("force_loss_after", snaps(7, 30, 4))[0])
+        # Nothing covered the stream.
+        self.assertFalse(gfc.health_expectation("force_loss_after", snaps(7, 7, 0))[0])
+        # A transport that names the loss is accepted even if delivery moved.
+        self.assertTrue(gfc.health_expectation(
+            "force_loss_after", snaps(7, 9, 4, "provider-lost"))[0])
 
     def test_render_loss_must_leave_audio_untouched(self):
         ok = self.snaps({"produced_blocks": 50})
@@ -258,9 +347,37 @@ class CaptureFormat(unittest.TestCase):
 
     def test_a_reprepare_restarts_the_reference(self):
         ir = [1.0, 0.5]
-        cap = gfc.Capture(48000, 1, [[1.0, 0.0, 1.0, 0.0]], [[0.0] * 4], [-1] * 4, [0, 2])
-        self.assertEqual(gfc.plugin_reference(cap, ir, 0)[0], [1.0, 0.5, 1.0, 0.5])
-        self.assertEqual(gfc.plugin_reference(cap, ir, 1)[0], [0.0, 1.0, 0.0, 1.0])
+        cap = gfc.Capture(48000, 1, [[1.0, 0.0, 1.0, 0.0]], [[0.0] * 4], [-1] * 4, [0, 2],
+                          segment_prepares=[1, 2])
+        self.assertEqual(gfc.plugin_reference(cap, ir, [0, 0])[0], [1.0, 0.5, 1.0, 0.5])
+        self.assertEqual(gfc.plugin_reference(cap, ir, [1, 1])[0], [0.0, 1.0, 0.0, 1.0])
+        # Each segment uses the PDC its own prepare reported.
+        self.assertEqual(gfc.plugin_reference(cap, ir, [0, 1])[0], [1.0, 0.5, 0.0, 1.0])
+        with self.assertRaisesRegex(ValueError, "prepared events"):
+            gfc.plugin_reference(cap, ir, [0])
+
+    def test_a_segment_pairs_with_the_prepare_it_follows(self):
+        # The VST3 adapter prepares several times before processing again; only
+        # the last of those prepares owns the audio that follows.
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            gfc.synthesize_run(run, fault="hang", fault_sample=FAULT, frames=FRAMES, tail=POST)
+            events = (run / "events.jsonl").read_text(encoding="utf-8")
+            stale = json.dumps({"event": "prepared", "ok": True, "pdc_samples": 999,
+                                "path": "shared_memory", "ir_taps": gfc.IR_TAPS,
+                                "nonce": "dry-run", "pid": 0, "prepare_index": 0})
+            (run / "events.jsonl").write_text(stale + "\n" + events, encoding="utf-8")
+            kw = dict(fault="hang", fault_sample=FAULT, tolerance=1e-4, window_pre=PRE,
+                      window_post=POST, host_alive=True, bounce_path=run / "bounce.wav")
+            self.assertEqual(gfc.evaluate_run(run, **kw)["verdict"], "pass")
+            # Positive control for the pairing: point the segment at the stale
+            # prepare and the null fails on its wrong PDC.
+            events = (run / "events.jsonl").read_text(encoding="utf-8")
+            (run / "events.jsonl").write_text(
+                events.replace('"prepare_index": 0', '"prepare_index": 9')
+                      .replace('"prepare_index": 1', '"prepare_index": 0')
+                      .replace('"prepare_index": 9', '"prepare_index": 1'), encoding="utf-8")
+            self.assertEqual(gfc.evaluate_run(run, **kw)["verdict"], "fail")
 
     def test_non_finite_output_fails_and_stays_json_safe(self):
         result = gfc.null_test([[0.0, float("nan")]], [[0.0, 0.0]], 0, tolerance=1e-4)

@@ -98,9 +98,14 @@ companion gates; screenshots alone do not prove audio or performance.
   test-only GPU fault-continuity plug-in (`examples/gpu-fault-continuity`, built
   with `-DPULP_GPU_AUDIO_FAULT_HOOKS=ON`) on its shared-I/O path, floats its
   editor, and plays a known stimulus in realtime while the plug-in fires one
-  `--gpu-fault` when the playhead crosses `--fault-at-sample`. The plug-in's
-  own capture and REAPER's bounce are nulled against an independent CPU
-  reference, health is snapshotted before/at/after, and a
+  `--gpu-fault` when the playhead crosses `--fault-at-sample`. Audio faults are
+  applied to the running provider by a test-only Dawn proc-table interposer in
+  the plug-in. The provider's own fault hooks are construction-time, and WP-A2's
+  control op cannot reach a plug-in in REAPER. The plug-in's own capture, nulled
+  against an independent CPU reference across the fault window, is the
+  continuity evidence. The REAPER bounce is an offline render made after the
+  fault, so it only cross-checks the offline path and PDC. Health is
+  snapshotted before/at/after, and a
   `pulp.gpu-audio.daw-continuity.v1` receipt is written; only
   `tools/validation/verify_gpu_audio_daw_continuity_receipt.py`, which
   re-derives everything from the artifacts, can accept it. `render_force_loss`

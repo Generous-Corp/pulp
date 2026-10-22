@@ -10,9 +10,12 @@ were edited, or whose artifacts were swapped, is rejected.
 Exit codes: 0 verified PASS, 1 verified but not PASS (FAIL or INCONCLUSIVE, a
 legitimate finding), 2 invalid receipt.
 
-What a PASS here does and does not prove: audio stayed sample-exact against an
-independent CPU reference across one injected fault while the plug-in ran in
-REAPER with its editor open. It does not prove render-owner loss propagation,
+What a PASS here does and does not prove: the plug-in's output stayed
+sample-exact against an independent CPU reference across one injected fault
+while it ran in REAPER with its editor open (the REAPER bounce, rendered offline
+afterwards, only cross-checks the offline path and PDC). The receipt is
+self-contained: the verifier proves internal consistency and run binding
+(nonce, pid, digests), not that a careful forger did not fabricate every file. It does not prove render-owner loss propagation,
 resource replay or teardown callback suppression; those stay Vellum-gated.
 """
 from __future__ import annotations
@@ -35,7 +38,9 @@ _spec.loader.exec_module(gfc)
 
 EXIT_PASS, EXIT_NOT_PASS, EXIT_INVALID = 0, 1, 2
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
-REQUIRED_ARTIFACTS = ("stimulus.wav", "ir.f32", "events.jsonl")
+REQUIRED_ARTIFACTS = ("stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json")
+# A live run must also bind the host's own log, which names the plug-in it loaded.
+LIVE_ARTIFACTS = ("reaper.out.txt",)
 
 
 class ReceiptError(ValueError):
@@ -88,21 +93,19 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     _require(plugin.get("format") in ("clap", "vst3", "au"), "plugin.format missing")
     _require(bool(plugin.get("name")), "plugin.name missing")
     host = receipt.get("host") or {}
-    if transport != "dry_run":
+    live = transport != "dry_run"
+    nonce = receipt.get("nonce")
+    _require(isinstance(nonce, str) and len(nonce) >= 16, "run nonce missing")
+    reaper_pid = host.get("reaper_pid") if live else None
+    if live:
         _require(bool(host.get("reaper_version")), "host.reaper_version missing")
+        _require(isinstance(reaper_pid, int) and reaper_pid > 0, "host.reaper_pid missing")
         _require(SHA256.match(str(plugin.get("executable_sha256", ""))) is not None,
                  "plugin.executable_sha256 missing")
-    preflight = receipt.get("preflight")
-    _require(isinstance(preflight, dict) and "quiet_host" in preflight,
-             "host preflight missing")
-    _require(receipt.get("host_quiet") is bool(preflight.get("quiet_host")),
-             "host_quiet disagrees with the preflight")
-    if require_quiet_host:
-        _require(receipt.get("host_quiet") is True, "quiet host required; preflight was not quiet")
 
     artifacts = receipt.get("artifacts")
     _require(isinstance(artifacts, dict), "artifacts map missing")
-    for name in REQUIRED_ARTIFACTS:
+    for name in REQUIRED_ARTIFACTS + (LIVE_ARTIFACTS if live else ()):
         _require(name in artifacts, f"required artifact {name} not listed")
     for name, digest in artifacts.items():
         _require("/" not in name and name not in ("", ".", ".."), f"artifact name {name!r} escapes the run dir")
@@ -110,6 +113,24 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
         path = run_dir / name
         _require(path.is_file(), f"artifact {name} is missing from {run_dir}")
         _require(gfc.sha256_file(path) == digest, f"artifact {name} digest mismatch")
+
+    # The preflight summary and host_quiet are re-derived from the bound
+    # preflight.json, never taken from the receipt.
+    try:
+        preflight_doc = json.loads((run_dir / "preflight.json").read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ReceiptError(f"preflight.json unreadable: {exc}") from exc
+    _require(isinstance(preflight_doc, dict), "preflight.json is not an object")
+    summary = gfc.summarize_preflight(preflight_doc)
+    _require(_close(receipt.get("preflight"), summary),
+             "preflight summary does not re-derive from preflight.json")
+    _require(receipt.get("host_quiet") is summary["quiet_host"],
+             "host_quiet disagrees with preflight.json")
+    if require_quiet_host:
+        _require(summary["quiet_host"], "quiet host required; preflight was not quiet")
+    if live:
+        log_text = (run_dir / "reaper.out.txt").read_text(encoding="utf-8", errors="replace")
+        _require(plugin["name"] in log_text, "reaper.out.txt never mentions the plug-in")
 
     analysis = receipt.get("analysis") or {}
     tolerance = analysis.get("tolerance")
@@ -122,11 +143,21 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     bounce_name = receipt.get("bounce_artifact")
     if bounce_name is not None:
         _require(bounce_name in artifacts, "bounce artifact not digest-bound")
+    render_frames = analysis.get("render_frames")
+    _require(isinstance(render_frames, int) and render_frames > 0,
+             "analysis.render_frames malformed")
+    _require(render_frames >= int(fault.get("requested_project_sample", -1)) + window["post"],
+             "analysis.render_frames ends before the fault window does")
+    # host_alive stays self-attested (a crash is a FAIL either way), but only
+    # digest-listed artifacts are read and the events must carry this run's
+    # nonce and REAPER's pid.
     recomputed = gfc.evaluate_run(
         run_dir, fault=kind, fault_sample=int(fault.get("requested_project_sample", -1)),
         tolerance=float(tolerance), window_pre=window["pre"], window_post=window["post"],
         host_alive=bool(receipt.get("host_alive")),
-        bounce_path=(run_dir / bounce_name) if bounce_name else None)
+        bounce_path=(run_dir / bounce_name) if bounce_name else None,
+        render_frames=render_frames, nonce=nonce, reaper_pid=reaper_pid,
+        listed=list(artifacts))
     for key in ("fault", "pdc_samples", "plugin_identity", "capture", "nulls", "health",
                 "host_alive", "verdict", "verdict_reasons"):
         _require(_close(receipt.get(key), recomputed.get(key)),
