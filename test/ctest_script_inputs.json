@@ -144,6 +144,7 @@
     "tools/cli/sdk_distribution_guard.cpp",
     "tools/cli/shell_quote.cpp",
     "tools/cli/shell_redirect.cpp",
+    "tools/cli/ship_bundle_strip.cpp",
     "tools/cli/tartci_lease.cpp",
     "tools/cli/tool_registry.cpp",
     "tools/cli/update_check.cpp",
@@ -923,7 +924,8 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli"
+    "pulp-cli",
+    "pulp-test-ship-strip-fixture"
    ],
    "sources": [],
    "spawning_sources": [
@@ -3842,6 +3844,8 @@
     "docs/status/gpu-recipes.yaml",
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
@@ -9632,6 +9636,8 @@
     "docs/status/gpu-recipes.yaml",
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
