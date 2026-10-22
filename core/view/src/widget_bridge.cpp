@@ -1336,12 +1336,12 @@ void WidgetBridge::service_frame_callbacks() {
         request_repaint();
 }
 
+// Shell exec/execAsync is a development-only affordance: PULP_BRIDGE_EXEC_ENABLED
+// comes from the PULP_DEV_BRIDGE_EXEC option (OFF for release/SDK builds), which
+// compiles the registrar out; when compiled in it is ALSO gated by the `exec`
+// capability. No default on purpose — a build that forgets the define fails here.
 #ifndef PULP_BRIDGE_EXEC_ENABLED
-// Shell exec/execAsync is a development-only affordance. Compiled out of shipping
-// builds via -DPULP_BRIDGE_EXEC_ENABLED=0, and even when compiled in it is ALSO
-// gated behind the `exec` capability, so a UI with no granted capabilities never
-// receives it. Two independent locks, because shelling out is the sharpest edge.
-#define PULP_BRIDGE_EXEC_ENABLED 1
+#error "PULP_BRIDGE_EXEC_ENABLED is not defined; core/view/cmake/PulpViewJsEngines.cmake sets it from PULP_DEV_BRIDGE_EXEC"
 #endif
 
 // One bridge-API group. `gate` names the capability an EFFECTFUL group requires;
@@ -1441,7 +1441,7 @@ void WidgetBridge::register_api() {
         {ReloadCapability::Ai,             &BridgeRegistrars::register_platform_services_ai_api},
         {std::nullopt,                     &BridgeRegistrars::register_metadata_computed_api},
 #if PULP_BRIDGE_EXEC_ENABLED
-        // Shell exec — dev-only (compiled out of ship) AND gated by the exec cap.
+        // Shell exec — dev-only (registrar not compiled otherwise) AND exec-gated.
         {ReloadCapability::Exec,           &BridgeRegistrars::register_platform_services_exec_api},
 #endif
         {std::nullopt,                     &BridgeRegistrars::register_context_menu_event_api},

@@ -13,8 +13,18 @@
 #include <utility>
 #include <vector>
 
+// The exec/execAsync registrar and its PATH helper exist only when
+// PULP_BRIDGE_EXEC_ENABLED is 1 (core/view/cmake/PulpViewJsEngines.cmake, from
+// the PULP_DEV_BRIDGE_EXEC option). Gating the API-group table alone is not enough:
+// this translation unit also carries the always-present AI, dialog and clipboard
+// registrars, so a static-archive link would pull the shell body in with them.
+#ifndef PULP_BRIDGE_EXEC_ENABLED
+#error "PULP_BRIDGE_EXEC_ENABLED is not defined; core/view/cmake/PulpViewJsEngines.cmake sets it from PULP_DEV_BRIDGE_EXEC"
+#endif
+
 namespace pulp::view {
 
+#if PULP_BRIDGE_EXEC_ENABLED
 namespace {
 
 std::string build_shell_command(const std::string& cmd) {
@@ -31,6 +41,7 @@ std::string build_shell_command(const std::string& cmd) {
 }
 
 } // namespace
+#endif // PULP_BRIDGE_EXEC_ENABLED
 
 void BridgeRegistrars::register_platform_services_ai_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
@@ -47,6 +58,7 @@ void BridgeRegistrars::register_platform_services_ai_api(WidgetBridge& self) {
     });
 }
 
+#if PULP_BRIDGE_EXEC_ENABLED
 void BridgeRegistrars::register_platform_services_exec_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
@@ -84,6 +96,7 @@ void BridgeRegistrars::register_platform_services_exec_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 }
+#endif // PULP_BRIDGE_EXEC_ENABLED
 
 void BridgeRegistrars::register_platform_services_dialog_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
