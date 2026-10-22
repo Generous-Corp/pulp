@@ -91,6 +91,19 @@
     catch_discover_tests(pulp-test-headless-surface
         ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # Caller SkSL whose locals share Graphite's runtime-effect parameter names
+    # (pos, inColor, destColor), drawn and read back on offscreen Graphite.
+    add_executable(pulp-test-runtime-effect-names-gpu
+        test_runtime_effect_names_gpu.cpp)
+    target_link_libraries(pulp-test-runtime-effect-names-gpu PRIVATE
+        pulp::render pulp::canvas Catch2::Catch2WithMain)
+    if(PULP_HAS_SKIA)
+        target_compile_definitions(pulp-test-runtime-effect-names-gpu PRIVATE
+            PULP_HAS_SKIA=1)
+    endif()
+    catch_discover_tests(pulp-test-runtime-effect-names-gpu
+        ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
     # Direct native Metal availability/timing probe. This is test-only: it
     # establishes the host capability before any production backend integration.
     if(APPLE AND NOT IOS AND NOT PULP_IOS)
