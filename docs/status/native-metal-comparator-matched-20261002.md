@@ -1,5 +1,10 @@
 # Matched native Metal audio comparator
 
+> Superseded (2026-10-22). This page describes the pre-WP-Q comparator, which ran
+> a `complex_multiply` kernel on Metal while Dawn ran the convolution program. It
+> was not matched. The current comparator is described in
+> [../validation/gpu-audio-comparator-v2.md](../validation/gpu-audio-comparator-v2.md).
+
 This test-only comparator is the smallest native control needed before a
 Dawn-versus-Metal scheduling comparison. It runs the same 32-frame, two-channel
 complex multiply through ordinary Metal and Metal 4 on one device.

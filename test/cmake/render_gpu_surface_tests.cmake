@@ -122,22 +122,76 @@
             SKIP_RETURN_CODE 77
             TIMEOUT 20)
 
-        # Matched ordinary-Metal and Metal 4 controls for the shared audio
-        # multiply. These remain test-only and never run from an audio callback.
+        # Matched Dawn-vs-native-Metal comparator (WP-Q): the same convolution
+        # program on both sides, paced, idle and under a Skia render load.
+        # Test-only; never runs from an audio callback. The ctest is a short
+        # smoke plus the planted unmatched-kernel negative; the campaign runs
+        # through tools/scripts/gpu_audio_comparator_v2.py run.
         add_executable(pulp-test-native-metal-audio-comparator
             test_metal_native_audio_comparator.mm)
         target_link_libraries(pulp-test-native-metal-audio-comparator PRIVATE
             "-framework Metal" "-framework Foundation" pulp::gpu-audio)
+        target_compile_options(pulp-test-native-metal-audio-comparator PRIVATE -fobjc-arc)
         target_include_directories(pulp-test-native-metal-audio-comparator PRIVATE
             "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+        set(_pulp_comparator_dawn_sha "")
+        if(TARGET pulp-gpu-audio)
+            get_target_property(_pulp_comparator_dawn_sha pulp-gpu-audio
+                PULP_PROVIDER_expected_dawn_sha)
+            if(NOT _pulp_comparator_dawn_sha)
+                set(_pulp_comparator_dawn_sha "")
+            endif()
+        endif()
+        # Hash the provider WGSL at configure time: that is the WGSL compiled into
+        # pulp-gpu-audio, and the comparator refuses a run whose source tree
+        # disagrees with it.
+        set(_pulp_comparator_provider
+            "${PROJECT_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_shared_io_provider.cpp")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${_pulp_comparator_provider}")
+        file(READ "${_pulp_comparator_provider}" _pulp_comparator_src)
+        foreach(_kernel Fft Mul)
+            string(TOUPPER "${_kernel}" _kernel_upper)
+            set(_pulp_comparator_${_kernel_upper} "")
+            set(_marker "constexpr auto kSharedIo${_kernel}Wgsl = R\"wgsl(")
+            string(FIND "${_pulp_comparator_src}" "${_marker}" _begin)
+            if(_begin GREATER -1)
+                string(LENGTH "${_marker}" _marker_length)
+                math(EXPR _begin "${_begin} + ${_marker_length}")
+                string(SUBSTRING "${_pulp_comparator_src}" ${_begin} -1 _rest)
+                string(FIND "${_rest}" ")wgsl\"" _end)
+                if(_end GREATER -1)
+                    string(SUBSTRING "${_rest}" 0 ${_end} _body)
+                    string(SHA256 _pulp_comparator_${_kernel_upper} "${_body}")
+                endif()
+            endif()
+        endforeach()
         target_compile_definitions(pulp-test-native-metal-audio-comparator PRIVATE
-            PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_comparator_dawn_sha}"
+            PULP_GPU_AUDIO_PROVIDER_SOURCE="${_pulp_comparator_provider}"
+            PULP_COMPARATOR_BUILD_FFT_WGSL_SHA256="${_pulp_comparator_FFT}"
+            PULP_COMPARATOR_BUILD_MUL_WGSL_SHA256="${_pulp_comparator_MUL}")
+        unset(_pulp_comparator_dawn_sha)
+        unset(_pulp_comparator_src)
+        # The kernel digest reads the WGSL the provider compiles from its source.
+        pulp_test_data(pulp-test-native-metal-audio-comparator NO_DEFINE
+            PATHS core/gpu_audio/src/detail/dawn_shared_io_provider.cpp)
+        if(PULP_HAS_SKIA AND TARGET pulp::render AND TARGET pulp::canvas)
+            target_link_libraries(pulp-test-native-metal-audio-comparator PRIVATE
+                pulp::render pulp::canvas)
+            target_compile_definitions(pulp-test-native-metal-audio-comparator PRIVATE
+                PULP_COMPARATOR_HAS_RENDER_LOAD=1)
+        endif()
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
         add_test(NAME pulp-test-native-metal-audio-comparator
-            COMMAND pulp-test-native-metal-audio-comparator)
+            COMMAND "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_comparator_v2.py" smoke
+                --binary "$<TARGET_FILE:pulp-test-native-metal-audio-comparator>"
+                --out-dir "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-comparator-smoke")
         set_tests_properties(pulp-test-native-metal-audio-comparator PROPERTIES
             RESOURCE_LOCK pulp_gpu
             SKIP_RETURN_CODE 77
-            TIMEOUT 30)
+            TIMEOUT 300)
     endif()
 
     # GPU compute tests.
