@@ -437,6 +437,7 @@ private:
     };
     std::vector<LatestScheduledEvent> scheduled_latest_;
     std::vector<std::uint32_t> scheduled_touched_;
+    std::vector<state::StateStore::ParamWrite> scheduled_writes_;
     std::vector<std::uint32_t> scheduled_offset_counts_;
 
     // Per-block MIDI I/O. Hoisted to members (not constructed per render call)

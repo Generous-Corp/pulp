@@ -211,6 +211,7 @@ struct PulpClapPlugin {
     std::vector<float> latest_param_value;
     std::vector<std::uint8_t> latest_param_pending;
     std::vector<std::uint32_t> latest_param_touched;
+    std::vector<state::StateStore::ParamWrite> latest_param_writes;
     boundary::ParamSnapshotState snapshot_state;
     std::uint64_t pre_process_generation = 0;
     // Bus views handed to the Processor. Members so a block writes only the

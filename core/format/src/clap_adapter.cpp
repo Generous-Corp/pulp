@@ -235,7 +235,12 @@ static T load_event(const clap_event_header_t* hdr) {
     // thread). Copy only the bytes the host actually provided; the rest stay
     // zero-initialized. memcpy-into-a-stack-local also fixes alignment.
     T out{};
-    std::memcpy(&out, hdr, std::min(static_cast<std::size_t>(hdr->size), sizeof(T)));
+    // A full-size event (the normal case) copies a constant size, which the
+    // compiler inlines; only a short one pays for a variable-length copy.
+    if (hdr->size >= sizeof(T))
+        std::memcpy(&out, hdr, sizeof(T));
+    else
+        std::memcpy(&out, hdr, hdr->size);
     return out;
 }
 
@@ -445,6 +450,8 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->latest_param_pending.assign(self->store.all_params().size(), 0);
     self->latest_param_touched.clear();
     self->latest_param_touched.reserve(self->store.all_params().size());
+    self->latest_param_writes.clear();
+    self->latest_param_writes.reserve(self->store.all_params().size());
     // Sized here, not on the audio thread: process() calls assign()/resize() to
     // all_params().size() at block start, which would grow-and-allocate on the
     // first block without this reserve (param_snapshot mirrors it above).
@@ -784,12 +791,17 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
             }
         }
     }
+    // The pending values go to the store as one batch; latest_param_writes
+    // holds one slot per parameter, like latest_param_touched.
+    self->latest_param_writes.clear();
     for (const auto index : self->latest_param_touched) {
         if (self->latest_param_pending[index] == 1)
-            write_latest(index);
+            self->latest_param_writes.push_back(
+                {params[index].id, self->latest_param_value[index]});
         self->latest_param_pending[index] = 0;
     }
     self->latest_param_touched.clear();
+    self->store.set_values_rt(self->latest_param_writes);
     self->param_events.sort();
     self->modulation_events.sort();
 }

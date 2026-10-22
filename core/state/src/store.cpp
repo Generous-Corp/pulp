@@ -237,6 +237,29 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         }
     }
 
+    // notify_rt() for a batch of writes under one snapshot lease. `apply`
+    // performs the writes and calls the notifier it is given for each one
+    // that was applied.
+    template <typename Apply> void notify_rt_batch(Apply&& apply) {
+        RtSnapshotLease snap(*this);
+        const bool has_entries = snap.entries && !snap.entries->empty();
+        apply([&](ParamID param_id, float value) {
+            if (!has_entries)
+                return;
+            bool any_main = false;
+            for (const auto& entry : *snap.entries) {
+                if (!entry.callback)
+                    continue;
+                if (entry.thread == ListenerThread::Audio)
+                    entry.callback(param_id, value);
+                else
+                    any_main = true;
+            }
+            if (any_main)
+                (void)pending_rt.try_push(RtChange{param_id, value});
+        });
+    }
+
     // Drain the RT->main queue and fan changes out to Main listeners.
     //
     // Contract: Main listeners receive CURRENT-VALUE notifications,
@@ -518,6 +541,30 @@ void StateStore::set_value(ParamID id, float value) {
     // listeners route through the installed EventLoop (which allocates;
     // audio-thread callers must use set_value_rt() instead).
     if (applied && registry_) registry_->notify(id, clamped);
+}
+
+void StateStore::set_values_rt(std::span<const ParamWrite> writes) {
+    if (writes.empty())
+        return;
+    const auto older_writers = active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+    const auto generation = advance_state_generation();
+    const auto apply = [&](auto&& notify) {
+        for (const auto& write : writes) {
+            const std::size_t index = index_of(write.id);
+            if (index == kNoIndex)
+                continue;
+            const float clamped = constrain_stored_value(params_[index], write.value);
+            // One generation for the whole batch: a second write to the same
+            // parameter cannot claim it again, so the first value stands.
+            if (values_[index].set_packed_revisioned(clamped, generation, older_writers + 1))
+                notify(write.id, clamped);
+        }
+    };
+    if (registry_)
+        registry_->notify_rt_batch(apply);
+    else
+        apply([](ParamID, float) {});
+    active_state_writers_.fetch_sub(1, std::memory_order_release);
 }
 
 void StateStore::set_value_rt(ParamID id, float value) {

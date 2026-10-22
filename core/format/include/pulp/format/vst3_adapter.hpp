@@ -367,6 +367,11 @@ private:
     state::ParameterEventQueue param_events_;
     // Processor::wants_sample_accurate_parameters(), asked in initialize().
     bool sample_accurate_params_ = false;
+    // A block's automated values, written to the store in one batch after the
+    // input queues are read; one slot per parameter, reserved in
+    // setupProcessing().
+    std::vector<state::StateStore::ParamWrite> param_writes_;
+    void queue_param_write(state::ParamID id, float value);
     // Lent to param_events_.sort(); sized in setupProcessing().
     std::vector<state::ParameterEvent> param_sort_scratch_;
     std::vector<std::uint32_t> param_offset_counts_;

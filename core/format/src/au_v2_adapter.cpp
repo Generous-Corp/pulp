@@ -250,15 +250,19 @@ OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
         }
         {
             ScopedHostParamWrite host_write;
+            // One batch write: touched parameters are distinct, and the
+            // buffer holds one slot per parameter (Initialize()).
+            scheduled_writes_.clear();
             for (const auto index : scheduled_touched_) {
                 auto& latest = scheduled_latest_[index];
                 const auto& event = events[static_cast<std::size_t>(latest.event)];
-                store_.set_value_rt(params[index].id,
-                                    event.eventType == kParameterEvent_Immediate
-                                        ? event.eventValues.immediate.value
-                                        : scheduled_ramp_value_at(event, frames_to_process));
+                scheduled_writes_.push_back(
+                    {params[index].id, event.eventType == kParameterEvent_Immediate
+                                           ? event.eventValues.immediate.value
+                                           : scheduled_ramp_value_at(event, frames_to_process)});
                 latest = {};
             }
+            store_.set_values_rt(scheduled_writes_);
         }
         if (foreign) {
             // Parameters the store does not own keep AUBase's element map,
@@ -737,6 +741,8 @@ OSStatus PulpAUEffect::Initialize()
     scheduled_latest_.assign(store_.all_params().size(), {});
     scheduled_touched_.clear();
     scheduled_touched_.reserve(store_.all_params().size());
+    scheduled_writes_.clear();
+    scheduled_writes_.reserve(store_.all_params().size());
     scheduled_offset_counts_.resize(static_cast<std::size_t>(GetMaxFramesPerSlice()) + 1);
     input_ptrs_.reserve(static_cast<std::size_t>(Input(0).GetStreamFormat().mChannelsPerFrame));
     output_ptrs_.reserve(static_cast<std::size_t>(Output(0).GetStreamFormat().mChannelsPerFrame));

@@ -3468,3 +3468,35 @@ TEST_CASE("StateStore lookups agree for dense, sparse, and mixed parameter IDs",
     check({1, 0x4741'4E31u, 2});         // dense, then sparse, then dense again
     check({40000, 5});
 }
+
+TEST_CASE("StateStore::set_values_rt writes a batch as one store write", "[state][store][rt]") {
+    pulp::state::StateStore store;
+    for (pulp::state::ParamID id : {1u, 2u, 3u, 0x7042'7970u})
+        store.add_parameter(
+            {.id = id, .name = "p" + std::to_string(id), .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    std::vector<std::pair<pulp::state::ParamID, float>> seen;
+    auto listener = store.add_listener(
+        [&](pulp::state::ParamID id, float value) { seen.emplace_back(id, value); },
+        pulp::state::ListenerThread::Audio);
+
+    const auto before = store.state_generation();
+    const std::array<pulp::state::StateStore::ParamWrite, 5> writes{
+        {{3, 0.3f}, {0x7042'7970u, 1.0f}, {1, 2.0f}, {99, 0.5f}, {3, 0.9f}}};
+    store.set_values_rt(writes);
+
+    // One generation for the batch, every known parameter written and
+    // clamped, notified once each in batch order; the unknown ID is skipped
+    // and a repeated ID keeps its first value.
+    REQUIRE(store.state_generation() == before + 1);
+    REQUIRE_THAT(store.get_value(3), WithinAbs(0.3, 1e-6));
+    REQUIRE_THAT(store.get_value(0x7042'7970u), WithinAbs(1.0, 1e-6));
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 1e-6));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(0.0, 1e-6));
+    REQUIRE(seen == std::vector<std::pair<pulp::state::ParamID, float>>{
+                        {3, 0.3f}, {0x7042'7970u, 1.0f}, {1, 1.0f}});
+
+    // An empty batch writes nothing and does not move the generation.
+    store.set_values_rt({});
+    REQUIRE(store.state_generation() == before + 1);
+    listener.reset();
+}

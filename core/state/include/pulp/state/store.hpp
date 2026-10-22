@@ -226,6 +226,21 @@ class StateStore {
     ///       @c rt_listener_queue_telemetry() to inspect this pressure.
     void set_value_rt(ParamID id, float value);
 
+    /// One parameter write in a @c set_values_rt() batch.
+    struct ParamWrite {
+        ParamID id = 0;
+        float value = 0.0f;
+    };
+
+    /// @c set_value_rt() for several distinct parameters as one store write:
+    /// one writer claim and one state generation for the batch, and one
+    /// listener-snapshot lease for its notifications. Every applied write
+    /// still notifies its parameter's listeners once, in batch order, and
+    /// Audio listeners run inside the batch. A repeated ID keeps its first
+    /// value. Real-time safe; format adapters use it to write a block's
+    /// automation, one value per parameter.
+    void set_values_rt(std::span<const ParamWrite> writes);
+
     /// Real-time-safe normalized-value write. Denormalizes through the
     /// parameter's @c ParamRange and then dispatches through
     /// @c set_value_rt(). Used by the VST3 adapter where the host

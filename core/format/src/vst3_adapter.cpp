@@ -1372,6 +1372,8 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // Scratch for the parameter-event counting sort: one slot per event and
     // one count per sample offset in the largest block.
     param_sort_scratch_.resize(state::ParameterEventQueue::kCapacity);
+    param_writes_.clear();
+    param_writes_.reserve(std::max<std::size_t>(store_.all_params().size(), 1));
     param_offset_counts_.resize(
         ctx.max_buffer_size > 0 ? static_cast<std::size_t>(ctx.max_buffer_size) : 1u);
     mpe_.reserve(kMaxEventsPerBlock);
@@ -1567,8 +1569,27 @@ uint32 PLUGIN_API PulpVst3Processor::getTailSamples() {
     return static_cast<uint32>(tail);
 }
 
+void PulpVst3Processor::queue_param_write(state::ParamID id, float value) {
+    // Capacity is one slot per parameter (setupProcessing()); a host that
+    // repeats a parameter's queue past that is written through now. Without
+    // the reservation (no setupProcessing() yet) each value is written alone
+    // rather than growing the vector on the audio thread.
+    if (param_writes_.capacity() == 0) {
+        store_.set_value_rt(id, value);
+        return;
+    }
+    if (param_writes_.size() == param_writes_.capacity()) {
+        store_.set_values_rt(param_writes_);
+        param_writes_.clear();
+    }
+    param_writes_.push_back({id, value});
+}
+
 void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
     param_events_.clear();
+    // Each automated parameter's value is collected here and written to the
+    // store as one batch after the queues are read.
+    param_writes_.clear();
 
     // Reset the reused per-block MIDI buffers up front. They are cleared here
     // (not just before the event loop below) because MIDI controllers arrive
@@ -1677,7 +1698,7 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                         int32 offset;
                         if (point_count > 0 &&
                             queue->getPoint(point_count - 1, offset, value) == kResultTrue)
-                            store_.set_value_rt(param_id, plain(value));
+                            queue_param_write(param_id, plain(value));
                         continue;
                     }
                     bool any_point = false;
@@ -1698,11 +1719,13 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                         any_point = true;
                     }
                     if (any_point)
-                        store_.set_value_rt(param_id, last_value);
+                        queue_param_write(param_id, last_value);
                 }
             }
         }
     }
+    store_.set_values_rt(param_writes_);
+    param_writes_.clear();
     if (sample_accurate_params_)
         param_events_.sort(param_sort_scratch_, param_offset_counts_);
 }
