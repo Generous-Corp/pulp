@@ -2709,6 +2709,7 @@
   "pulp-test-gpu-neural-plugin-boundary-continuity",
   "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-neural-shadow-policy",
+  "pulp-test-gpu-neural-shadow-simd",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-proc-installer",

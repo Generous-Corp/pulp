@@ -780,6 +780,12 @@ pulp_add_test_suite(pulp-test-gpu-neural-shadow-policy
     LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# The neural node with WP-S's SIMD CPU kernels as its shadow.
+pulp_add_test_suite(pulp-test-gpu-neural-shadow-simd
+    SOURCES test_gpu_neural_shadow_simd.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime pulp::signal Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Plug-in-boundary continuity: a GPU-audio effect driven through the real CLAP
 # adapter and HeadlessHost must null against a CPU reference across injected
 # provider failure/loss, worker starvation, reactivation, bypass, and state
