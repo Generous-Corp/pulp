@@ -365,6 +365,9 @@ private:
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;
     state::ParameterEventQueue param_events_;
+    // Lent to param_events_.sort(); sized in setupProcessing().
+    std::vector<state::ParameterEvent> param_sort_scratch_;
+    std::vector<std::uint32_t> param_offset_counts_;
     // Sample-accurate parameter OUTPUT: the processor pushes offset-tagged events
     // via push_output_param_event(); we drain them into per-parameter VST3 output
     // queues after process(). All three vectors are sized off the audio thread

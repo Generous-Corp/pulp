@@ -1478,3 +1478,18 @@ The editor edit callback maps the bridge's snapshot (`plain`), never a fresh
 automation write first, and a re-read would report the host's value to the host
 as the user's edit. `[vst3][editor][automation]` in `test_vst3_plugin_state.cpp`
 interleaves exactly that.
+
+## Automation points: every point to the queue, one store write per parameter
+
+VST3 delivers one time-ordered `IParamValueQueue` per parameter, so a block's
+`param_events_` arrive as one sorted run per parameter. An insertion sort over
+those interleaved runs was quadratic (about 28 us for 32 parameters x 16
+points), and writing the store per point cost a revisioned atomic write and a
+listener notification each. The decode loop now pushes every point to the
+sample-accurate queue, writes the store once per parameter with its last
+value, and sorts with `ParameterEventQueue::sort(scratch, counts)`, a stable
+counting sort over scratch sized in `setupProcessing()`. When timing
+automation in a private host, run `process()` on a thread other than the one
+that created the plug-in: writes on the creating thread are treated as editor
+edits by `HostParameterEditBridge` and echoed back through `performEdit` and
+`setParamNormalized`, which inflated the old numbers by several times.

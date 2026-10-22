@@ -1366,6 +1366,11 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // timbre), so size the buffer at the same worst-case event ceiling as the
     // MIDI buffers and pin it to realtime-capacity mode. Reset the noteId map
     // and tracker so a fresh activation starts with no stale per-note state.
+    // Scratch for the parameter-event counting sort: one slot per event and
+    // one count per sample offset in the largest block.
+    param_sort_scratch_.resize(state::ParameterEventQueue::kCapacity);
+    param_offset_counts_.resize(
+        ctx.max_buffer_size > 0 ? static_cast<std::size_t>(ctx.max_buffer_size) : 1u);
     mpe_.reserve(kMaxEventsPerBlock);
     mpe_.reset();
     note_id_map_clear();
@@ -1651,33 +1656,36 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                         }
                         continue;
                     }
+                    // Every point reaches the sample-accurate queue; the store
+                    // takes only the block's last value. The store is block-rate
+                    // state, and writing it per point cost a revisioned atomic
+                    // write plus a listener notification each time.
+                    const auto param_id = static_cast<state::ParamID>(id);
+                    const auto* info = store_.info(param_id);
+                    bool any_point = false;
+                    float last_value = 0.0f;
                     for (int32 point = 0; point < point_count; ++point) {
                         ParamValue value;
                         int32 offset;
                         if (queue->getPoint(point, offset, value) != kResultTrue) {
                             continue;
                         }
-                        const auto param_id = static_cast<state::ParamID>(id);
                         // VST3 hands normalized 0-1 values; the DSP cursor and
-                        // the store both want the plain (denormalized) value.
-                        // Denormalize once here so the shared dual-write pushes
-                        // the same plain value to the sample-accurate queue and
-                        // to the RT-safe store path (set_value_rt). A continuous
+                        // the store both want the plain value. A continuous
                         // parameter keeps the host's exact value, as it does in
                         // the plain-value formats.
-                        float plain_value = static_cast<float>(value);
-                        if (const auto* info = store_.info(param_id)) {
-                            plain_value = state::value_from_host_normalized(*info, value);
-                        }
-                        boundary::apply_param_value(
-                            param_events_, store_, param_id,
-                            static_cast<int32_t>(offset), plain_value);
+                        last_value = info ? state::value_from_host_normalized(*info, value)
+                                          : static_cast<float>(value);
+                        param_events_.push(state::ParameterEvent{
+                            param_id, static_cast<int32_t>(offset), last_value});
+                        any_point = true;
                     }
+                    if (any_point) store_.set_value_rt(param_id, last_value);
                 }
             }
         }
     }
-    param_events_.sort();
+    param_events_.sort(param_sort_scratch_, param_offset_counts_);
 }
 
 void PulpVst3Processor::refresh_bus_channel_cache() {

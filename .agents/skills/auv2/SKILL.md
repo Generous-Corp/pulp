@@ -1288,3 +1288,21 @@ callbacks, `reset_triggers_rt()`, or `Processor::process()`. Anything added to
 be side-effect-free too. `test_au_v2_effect.cpp` (`[activation]`) pins this: a
 trigger raised before `DoInitialize()` survives it, the Processor has run zero
 times, and the first real render runs it once and settles the trigger.
+
+## Scheduled automation is sliced by Pulp's own ProcessForScheduledParams
+
+`AUBase::ProcessForScheduledParams` rescans the whole event list at every
+slice and rewrites every past event into the element map each time, and the
+old `ProcessScheduledSlice` did three more full passes of store writes per
+slice, so a render cost events x slices: 32 parameters with 16 events each in
+a 512-frame block took about 330 us. `PulpAUEffect` overrides it: one stable,
+allocation-free sort (`state::stable_sort_in_place`, so coincident events keep
+host order and the later one wins), break points found from a cursor, and each
+slice applies only the immediates that reach its start plus the ramps under
+way (indices kept in a list reserved in `Initialize()`; past 256 ramps it
+falls back to scanning). The store is settled to end-of-buffer values after
+the last slice only. A later immediate supersedes an earlier ramp on the same
+parameter. Parameters the store does not own still go through the element's
+`SetScheduledEvent`. `[au][automation]` in `test_au_v2_effect.cpp` covers
+dense interleaved events, coincident events, and ramp supersession. Each slice
+is still one full `ProcessBufferLists` and Processor call.

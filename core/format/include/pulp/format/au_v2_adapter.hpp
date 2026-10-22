@@ -327,6 +327,9 @@ public:
     Float64 GetLatency() override;
 
 protected:
+    OSStatus ProcessForScheduledParams(ParameterEventList& events,
+                                       UInt32 frames_to_process,
+                                       void* user_data) override;
     OSStatus ProcessScheduledSlice(void* user_data,
                                    UInt32 start_frame_in_buffer,
                                    UInt32 slice_frames,
@@ -410,6 +413,19 @@ private:
     // events translated from AudioUnitParameterEvent; otherwise it is empty.
     state::ParameterEventQueue param_events_;
     bool scheduled_slice_active_ = false;
+
+    // One scheduled render: the time-sorted event list, how far its
+    // immediates have been applied, and its ramps (by index, reserved in
+    // Initialize()), so each slice touches only what changes at its start
+    // instead of rescanning and rewriting every event.
+    struct ScheduledRamp {
+        std::uint32_t index = 0;
+        bool superseded = false;  // a later immediate set the same parameter
+    };
+    const ParameterEventList* scheduled_events_ = nullptr;
+    std::size_t scheduled_cursor_ = 0;
+    std::vector<ScheduledRamp> scheduled_ramps_;
+    bool scheduled_ramps_overflowed_ = false;
 
     // Per-block MIDI I/O. Hoisted to members (not constructed per render call)
     // and given reserved, realtime-capacity-limited storage in Initialize() so

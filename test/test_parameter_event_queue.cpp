@@ -230,3 +230,68 @@ TEST_CASE("ParameterEventQueue telemetry path allocates zero times",
 
     REQUIRE_FALSE(probe.saw_allocation());
 }
+
+TEST_CASE("ParameterEventQueue sorts one time-ordered run per parameter, stably and without allocating",
+          "[host][parameter-event-queue][sort]") {
+    // The VST3 shape: each parameter's points arrive together and in time
+    // order, so the queue holds one sorted run per parameter. Both sort()
+    // overloads must interleave the runs by offset and keep each offset's
+    // events in push order (parameter order here).
+    constexpr int kParams = 32;
+    constexpr int kPoints = 16;
+    constexpr int kBlock = 512;
+    const auto fill = [](ParameterEventQueue& q) {
+        for (int p = 0; p < kParams; ++p)
+            for (int i = 0; i < kPoints; ++i)
+                REQUIRE(q.push(ParameterEvent{
+                    .param_id = static_cast<pulp::state::ParamID>(100 + p),
+                    .sample_offset = i * (kBlock / kPoints),
+                    .value = static_cast<float>(p * kPoints + i)}));
+    };
+    const auto check = [](const ParameterEventQueue& q) {
+        const auto events = q.events();
+        REQUIRE(events.size() == static_cast<std::size_t>(kParams * kPoints));
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            const auto slot = static_cast<int>(i) / kParams;
+            const auto param = static_cast<int>(i) % kParams;
+            REQUIRE(events[i].sample_offset == slot * (kBlock / kPoints));
+            REQUIRE(events[i].param_id == static_cast<pulp::state::ParamID>(100 + param));
+            REQUIRE(events[i].value == static_cast<float>(param * kPoints + slot));
+        }
+    };
+
+    ParameterEventQueue merged;
+    fill(merged);
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        merged.sort();
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+    check(merged);
+
+    std::vector<ParameterEvent> scratch(ParameterEventQueue::kCapacity);
+    std::vector<std::uint32_t> counts(kBlock);
+    ParameterEventQueue counted;
+    fill(counted);
+    {
+        pulp::test::RtAllocationProbe probe;
+        counted.sort(scratch, counts);
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+    check(counted);
+
+    // An offset outside the lent range falls back to the merge sort.
+    ParameterEventQueue out_of_range;
+    fill(out_of_range);
+    REQUIRE(out_of_range.push(ParameterEvent{.param_id = 1, .sample_offset = kBlock + 3, .value = 0.0f}));
+    REQUIRE(out_of_range.push(ParameterEvent{.param_id = 2, .sample_offset = -1, .value = 0.0f}));
+    out_of_range.sort(scratch, counts);
+    const auto events = out_of_range.events();
+    REQUIRE(events.front().param_id == 2);
+    REQUIRE(events.back().param_id == 1);
+    for (std::size_t i = 1; i < events.size(); ++i)
+        REQUIRE(events[i - 1].sample_offset <= events[i].sample_offset);
+}

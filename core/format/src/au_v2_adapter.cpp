@@ -3,6 +3,7 @@
 // Subclasses AUEffectBase and overrides ProcessBufferLists for multi-channel
 
 #include <algorithm>
+#include <pulp/state/stable_sort.hpp>
 #include <cstddef>
 #include <vector>
 #include <AudioUnitSDK/AUPlugInDispatch.h>
@@ -175,62 +176,153 @@ OSStatus PulpAUEffect::ScheduleParameter(
     return noErr;
 }
 
+namespace {
+
+SInt32 scheduled_start_offset(const AudioUnitParameterEvent& event) noexcept {
+    return event.eventType == kParameterEvent_Immediate
+        ? static_cast<SInt32>(event.eventValues.immediate.bufferOffset)
+        : event.eventValues.ramp.startBufferOffset;
+}
+
+constexpr std::size_t kScheduledRampCapacity = 256;
+
+}  // namespace
+
+// AUBase's version rescans the whole event list at every slice and rewrites
+// every past event into the element map each time, so its cost grows with
+// events x slices. This one sorts once (stably, without allocating, so a
+// host's order for coincident events survives), finds each break point from
+// a cursor, and leaves the per-slice application to ProcessScheduledSlice.
+OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
+                                                 UInt32 frames_to_process,
+                                                 void* user_data)
+{
+    state::stable_sort_in_place(
+        events.begin(), events.end(),
+        [](const AudioUnitParameterEvent& a, const AudioUnitParameterEvent& b) {
+            return scheduled_start_offset(a) < scheduled_start_offset(b);
+        });
+    scheduled_events_ = &events;
+    scheduled_cursor_ = 0;
+    scheduled_ramps_.clear();
+    scheduled_ramps_overflowed_ = false;
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        if (events[i].eventType != kParameterEvent_Ramped) continue;
+        if (scheduled_ramps_.size() < kScheduledRampCapacity)
+            scheduled_ramps_.push_back({static_cast<std::uint32_t>(i), false});
+        else
+            scheduled_ramps_overflowed_ = true;
+    }
+
+    OSStatus result = noErr;
+    UInt32 start = 0;
+    std::size_t next = 0;
+    while (start < frames_to_process) {
+        UInt32 end = frames_to_process;
+        while (next < events.size() &&
+               scheduled_start_offset(events[next]) <= static_cast<SInt32>(start))
+            ++next;
+        if (next < events.size())
+            end = std::min(end, static_cast<UInt32>(scheduled_start_offset(events[next])));
+        const auto consider_ramp_end = [&](const AudioUnitParameterEvent& event) {
+            const SInt64 ramp_end = static_cast<SInt64>(event.eventValues.ramp.startBufferOffset) +
+                                    static_cast<SInt64>(event.eventValues.ramp.durationInFrames);
+            if (ramp_end > static_cast<SInt64>(start) && ramp_end < static_cast<SInt64>(end))
+                end = static_cast<UInt32>(ramp_end);
+        };
+        if (scheduled_ramps_overflowed_) {
+            for (const auto& event : events)
+                if (event.eventType == kParameterEvent_Ramped) consider_ramp_end(event);
+        } else {
+            for (const auto& ramp : scheduled_ramps_) consider_ramp_end(events[ramp.index]);
+        }
+        result = ProcessScheduledSlice(user_data, start, end - start, frames_to_process);
+        if (result != noErr) break;
+        start = end;
+    }
+    scheduled_events_ = nullptr;
+    return result;
+}
+
 OSStatus PulpAUEffect::ProcessScheduledSlice(
     void* user_data, UInt32 start_frame_in_buffer, UInt32 slice_frames,
     UInt32 total_buffer_frames)
 {
     const auto slice_end = start_frame_in_buffer + slice_frames;
     param_events_.clear();
+    // Called by ProcessForScheduledParams above; a direct caller without a
+    // prepared render gets no automation for the slice.
+    const auto* events = scheduled_events_;
+    if (events == nullptr) {
+        return AUEffectBase::ProcessScheduledSlice(
+            user_data, start_frame_in_buffer, slice_frames, total_buffer_frames);
+    }
 
-    auto apply_value = [this](AudioUnitParameterID id, float value) {
-        const auto param_id = static_cast<state::ParamID>(id);
-        if (store_.info(param_id) == nullptr) return;
+    auto apply_value = [this](state::ParamID param_id, float value) {
         ScopedHostParamWrite host_write;
         store_.set_value_rt(param_id, value);
     };
+    const auto is_global = [](const AudioUnitParameterEvent& event) {
+        return event.scope == kAudioUnitScope_Global && event.element == 0;
+    };
+    const auto ramp_value_at = [](const AudioUnitParameterEvent& event, UInt32 frame) {
+        const auto& ramp = event.eventValues.ramp;
+        const auto ramp_start = static_cast<UInt32>(std::max<SInt32>(0, ramp.startBufferOffset));
+        const auto duration = ramp.durationInFrames;
+        if (duration == 0 || frame >= ramp_start + duration) return ramp.endValue;
+        const auto t = static_cast<float>(frame - ramp_start) / static_cast<float>(duration);
+        return ramp.startValue + (ramp.endValue - ramp.startValue) * t;
+    };
 
-    // ProcessForScheduledParams sorts this list before invoking us. Replaying
-    // it in order preserves the host's last-event-wins rule for coincident
-    // events without allocating a per-parameter map on the audio thread.
-    for (const auto& event : GetParamEventList()) {
-        if (event.scope != kAudioUnitScope_Global || event.element != 0) continue;
+    // Immediates up to this slice's start take effect once, in time order (a
+    // later one wins), and supersede an earlier ramp on the same parameter.
+    // Parameters the store does not own keep AUBase's element-map path.
+    while (scheduled_cursor_ < events->size() &&
+           scheduled_start_offset((*events)[scheduled_cursor_]) <=
+               static_cast<SInt32>(start_frame_in_buffer)) {
+        const auto& event = (*events)[scheduled_cursor_++];
+        if (event.eventType != kParameterEvent_Immediate || !is_global(event)) continue;
         const auto param_id = static_cast<state::ParamID>(event.parameter);
-        if (store_.info(param_id) == nullptr) continue;
-
-        if (event.eventType == kParameterEvent_Immediate) {
-            const auto offset = event.eventValues.immediate.bufferOffset;
-            if (offset <= start_frame_in_buffer) {
-                apply_value(event.parameter, event.eventValues.immediate.value);
-            }
-            if (offset == start_frame_in_buffer) {
-                param_events_.push({param_id, 0,
-                                    event.eventValues.immediate.value, 0});
-            }
+        if (store_.info(param_id) == nullptr) {
+            if (auto* element = GetElement(event.scope, event.element))
+                element->SetScheduledEvent(event.parameter, event, start_frame_in_buffer,
+                                           slice_frames);
             continue;
         }
+        apply_value(param_id, event.eventValues.immediate.value);
+        if (event.eventValues.immediate.bufferOffset == start_frame_in_buffer)
+            param_events_.push({param_id, 0, event.eventValues.immediate.value, 0});
+        for (auto& ramp : scheduled_ramps_) {
+            const auto& ramp_event = (*events)[ramp.index];
+            if (ramp_event.parameter == event.parameter &&
+                ramp_event.eventValues.ramp.startBufferOffset <=
+                    static_cast<SInt32>(event.eventValues.immediate.bufferOffset))
+                ramp.superseded = true;
+        }
+    }
 
-        if (event.eventType != kParameterEvent_Ramped) continue;
+    // Ramps under way at this slice's start: the store takes their value here
+    // and the processor gets the segment to this slice's end.
+    const auto apply_ramp = [&](const AudioUnitParameterEvent& event, bool superseded) {
+        if (superseded || !is_global(event)) return;
+        const auto param_id = static_cast<state::ParamID>(event.parameter);
+        if (store_.info(param_id) == nullptr) return;
         const auto& ramp = event.eventValues.ramp;
         const auto ramp_start = std::max<SInt32>(0, ramp.startBufferOffset);
-        const auto duration = ramp.durationInFrames;
-        const auto ramp_end = static_cast<UInt32>(ramp_start) + duration;
-        if (start_frame_in_buffer < static_cast<UInt32>(ramp_start)) continue;
-
-        const auto value_at = [&](UInt32 frame) {
-            if (duration == 0 || frame >= ramp_end) return ramp.endValue;
-            const auto elapsed = frame - static_cast<UInt32>(ramp_start);
-            const auto t = static_cast<float>(elapsed) /
-                           static_cast<float>(duration);
-            return ramp.startValue + (ramp.endValue - ramp.startValue) * t;
-        };
-
-        apply_value(event.parameter, value_at(start_frame_in_buffer));
+        if (start_frame_in_buffer < static_cast<UInt32>(ramp_start)) return;
+        const auto ramp_end = static_cast<UInt32>(ramp_start) + ramp.durationInFrames;
+        apply_value(param_id, ramp_value_at(event, start_frame_in_buffer));
         if (start_frame_in_buffer < ramp_end) {
             const auto segment_end = std::min(slice_end, ramp_end);
-            param_events_.push({
-                param_id, 0, value_at(segment_end),
-                static_cast<int32_t>(segment_end - start_frame_in_buffer)});
+            param_events_.push({param_id, 0, ramp_value_at(event, segment_end),
+                                static_cast<int32_t>(segment_end - start_frame_in_buffer)});
         }
+    };
+    if (scheduled_ramps_overflowed_) {
+        for (std::size_t i = 0; i < scheduled_cursor_; ++i)
+            if ((*events)[i].eventType == kParameterEvent_Ramped) apply_ramp((*events)[i], false);
+    } else {
+        for (const auto& ramp : scheduled_ramps_) apply_ramp((*events)[ramp.index], ramp.superseded);
     }
     param_events_.sort();
 
@@ -241,30 +333,32 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
     slice_frame_offset_ = 0;
     scheduled_slice_active_ = false;
 
-    // Leave StateStore at the value effective immediately after this slice so
-    // legacy block-rate processors and editor projections observe the same
-    // terminal state as sample-aware processors.
-    for (const auto& event : GetParamEventList()) {
-        if (event.scope != kAudioUnitScope_Global || event.element != 0) continue;
-        const auto param_id = static_cast<state::ParamID>(event.parameter);
-        if (store_.info(param_id) == nullptr) continue;
-        if (event.eventType == kParameterEvent_Immediate) {
-            if (event.eventValues.immediate.bufferOffset <= slice_end) {
-                apply_value(event.parameter, event.eventValues.immediate.value);
-            }
-        } else if (event.eventType == kParameterEvent_Ramped) {
-            const auto& ramp = event.eventValues.ramp;
-            const auto ramp_start = std::max<SInt32>(0, ramp.startBufferOffset);
-            if (slice_end >= static_cast<UInt32>(ramp_start)) {
-                const auto duration = ramp.durationInFrames;
-                const auto elapsed = std::min(
-                    slice_end - static_cast<UInt32>(ramp_start), duration);
-                const auto t = duration == 0
-                    ? 1.0f
-                    : static_cast<float>(elapsed) / static_cast<float>(duration);
-                apply_value(event.parameter,
-                            ramp.startValue + (ramp.endValue - ramp.startValue) * t);
-            }
+    // After the last slice, leave StateStore at the value in effect at the end
+    // of the buffer, so legacy block-rate processors and editor projections
+    // observe the same terminal state as sample-aware processors. Earlier
+    // slices need nothing here: the next slice applies its own start.
+    if (slice_end >= total_buffer_frames) {
+        for (std::size_t i = scheduled_cursor_; i < events->size(); ++i) {
+            const auto& event = (*events)[i];
+            if (event.eventType != kParameterEvent_Immediate || !is_global(event)) continue;
+            if (event.eventValues.immediate.bufferOffset > slice_end) break;
+            const auto param_id = static_cast<state::ParamID>(event.parameter);
+            if (store_.info(param_id) != nullptr)
+                apply_value(param_id, event.eventValues.immediate.value);
+        }
+        const auto settle_ramp = [&](const AudioUnitParameterEvent& event, bool superseded) {
+            if (superseded || !is_global(event)) return;
+            const auto param_id = static_cast<state::ParamID>(event.parameter);
+            if (store_.info(param_id) == nullptr) return;
+            if (slice_end < static_cast<UInt32>(std::max<SInt32>(0, event.eventValues.ramp.startBufferOffset)))
+                return;
+            apply_value(param_id, ramp_value_at(event, slice_end));
+        };
+        if (scheduled_ramps_overflowed_) {
+            for (const auto& event : *events)
+                if (event.eventType == kParameterEvent_Ramped) settle_ramp(event, false);
+        } else {
+            for (const auto& ramp : scheduled_ramps_) settle_ramp((*events)[ramp.index], ramp.superseded);
         }
     }
     return result;
@@ -532,6 +626,7 @@ OSStatus PulpAUEffect::Initialize()
     // block resizes to the host-supplied buffer count, which is at most the
     // configured channel count in AU's non-interleaved float model; reserving to
     // it up front turns the first render / reconfig resize into a no-op realloc.
+    scheduled_ramps_.reserve(kScheduledRampCapacity);
     input_ptrs_.reserve(static_cast<std::size_t>(Input(0).GetStreamFormat().mChannelsPerFrame));
     output_ptrs_.reserve(static_cast<std::size_t>(Output(0).GetStreamFormat().mChannelsPerFrame));
 

@@ -808,9 +808,8 @@ bool StateStore::reset_triggers_rt() {
 }
 
 const ParamInfo* StateStore::info(ParamID id) const {
-    auto it = id_to_index_.find(id);
-    if (it == id_to_index_.end()) return nullptr;
-    return &params_[it->second];
+    const std::size_t index = index_of(id);
+    return index == kNoIndex ? nullptr : &params_[index];
 }
 
 bool StateStore::set_parameter_display_name(ParamID id, std::string name) {

@@ -4,27 +4,30 @@
 //
 // Ordering contract: events are sorted by sample_offset ascending before
 // being handed to consumers. Callers that append events unordered must call
-// sort() before passing the queue on. sort() is a stable insertion sort:
-// equal sample_offsets keep their push order. It is tuned for the common case
-// where hosts deliver automation already in (or near) sample-offset order —
-// O(n) on sorted input, O(n*shift) in general, and O(n^2) only on a fully
-// reversed adversarial flood. n is bounded by kCapacity, so even the worst
-// case is a bounded, allocation-free pass on the audio thread; there is no
-// unbounded blowup. If a future audio-rate source can deliver large reverse-
-// ordered batches, switch to a counting/bucket sort keyed on sample_offset
-// (offsets are bounded by the block size) rather than raising kCapacity.
+// sort() before passing the queue on. sort() is stable: equal sample_offsets
+// keep their push order. Input already in time order is detected in one pass.
+// Anything else -- notably VST3, which delivers one time-ordered queue per
+// parameter, so a block's events arrive as one sorted run per parameter --
+// goes through stable_sort_in_place (stable_sort.hpp), O(n log^2 n) and
+// allocation-free. An insertion sort over those
+// interleaved runs was quadratic: 32 parameters with 16 points each cost
+// about 28 us per block. An adapter that knows its block size passes scratch
+// to the two-argument sort(), a stable counting sort on the offset.
 //
 // Realtime contract: fixed-capacity storage only. push(), clear(), sort(),
 // iteration, and events() do not allocate; overflow is reported through
 // overflowed() / dropped_event_count() and the extra event is dropped.
 
 #include <pulp/state/parameter.hpp>
+#include <pulp/state/stable_sort.hpp>
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <utility>
 
 namespace pulp::state {
 
@@ -116,15 +119,45 @@ public:
     }
 
     void sort() {
+        stable_sort_in_place(events_.begin(),
+                             events_.begin() + static_cast<std::ptrdiff_t>(size_),
+                             [](const ParameterEvent& a, const ParameterEvent& b) {
+                                 return a.sample_offset < b.sample_offset;
+                             });
+    }
+
+    /// sort() for a caller that can lend scratch storage, typically sized once
+    /// at prepare time: a stable counting sort on sample_offset, O(n + range),
+    /// when every offset lies in [0, offset_counts.size()) and `scratch` holds
+    /// size() events; otherwise sort(). Allocation-free either way.
+    void sort(std::span<ParameterEvent> scratch, std::span<std::uint32_t> offset_counts) {
+        std::size_t ordered = 1;
+        bool in_range = size_ == 0 || (events_[0].sample_offset >= 0 &&
+            static_cast<std::size_t>(events_[0].sample_offset) < offset_counts.size());
         for (std::size_t i = 1; i < size_; ++i) {
-            auto current = events_[i];
-            auto j = i;
-            while (j > 0 && events_[j - 1].sample_offset > current.sample_offset) {
-                events_[j] = events_[j - 1];
-                --j;
-            }
-            events_[j] = current;
+            const auto offset = events_[i].sample_offset;
+            if (ordered == i && events_[i - 1].sample_offset <= offset) ++ordered;
+            if (offset < 0 || static_cast<std::size_t>(offset) >= offset_counts.size())
+                in_range = false;
         }
+        if (ordered >= size_) return;
+        if (!in_range || scratch.size() < size_) {
+            sort();
+            return;
+        }
+        std::fill(offset_counts.begin(), offset_counts.end(), 0u);
+        for (std::size_t i = 0; i < size_; ++i)
+            ++offset_counts[static_cast<std::size_t>(events_[i].sample_offset)];
+        std::uint32_t running = 0;
+        for (auto& count : offset_counts) {
+            const auto here = count;
+            count = running;
+            running += here;
+        }
+        for (std::size_t i = 0; i < size_; ++i)
+            scratch[offset_counts[static_cast<std::size_t>(events_[i].sample_offset)]++] = events_[i];
+        std::copy(scratch.begin(), scratch.begin() + static_cast<std::ptrdiff_t>(size_),
+                  events_.begin());
     }
 
     using iterator = std::array<ParameterEvent, kCapacity>::iterator;

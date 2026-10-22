@@ -1113,6 +1113,137 @@ TEST_CASE("AU v2 effect preserves scheduled offsets and ramps for processors",
     effect.DoCleanup();
 }
 
+namespace {
+
+class DenseAutomationProcessor final : public pulp::format::Processor {
+public:
+    static inline int process_calls = 0;
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUDenseAutomationTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-dense-automation",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 1}},
+            .output_buses = {{"Main Out", 1}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        for (pulp::state::ParamID id = 1; id <= 3; ++id)
+            store.add_parameter({.id = id, .name = "P" + std::to_string(id),
+                                 .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        ++process_calls;
+        pulp::state::ParamCursor cursor(state(), param_events());
+        for (std::size_t n = 0; n < output.num_samples(); ++n) {
+            cursor.advance_to(static_cast<int32_t>(n));
+            output.channel_ptr(0)[n] = cursor.value(1);
+        }
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_dense_automation_effect() {
+    return std::make_unique<DenseAutomationProcessor>();
+}
+
+AudioUnitParameterEvent immediate_event(AudioUnitParameterID id, UInt32 offset, float value) {
+    AudioUnitParameterEvent event{};
+    event.eventType = kParameterEvent_Immediate;
+    event.parameter = id;
+    event.scope = kAudioUnitScope_Global;
+    event.eventValues.immediate.bufferOffset = offset;
+    event.eventValues.immediate.value = value;
+    return event;
+}
+
+}  // namespace
+
+TEST_CASE("AU v2 effect slices dense scheduled automation in time order with final store values",
+          "[au][au-v2][automation][sample-accurate]")
+{
+    const auto previous = pulp::format::registered_factory();
+    pulp::format::register_plugin(create_dense_automation_effect);
+    struct RestoreFactory {
+        pulp::format::ProcessorFactory value;
+        ~RestoreFactory() { pulp::format::register_plugin(value); }
+    } restore{previous};
+
+    constexpr UInt32 kFrames = 64;
+    TestScheduledEffect effect;
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    std::array<float, kFrames> input_samples{};
+    std::array<float, kFrames> output_samples{};
+    AudioBufferList input{};
+    input.mNumberBuffers = 1;
+    AudioBufferList output{};
+    output.mNumberBuffers = 1;
+    const auto render = [&] {
+        input.mBuffers[0] = {1, kFrames * sizeof(float), input_samples.data()};
+        output.mBuffers[0] = {1, kFrames * sizeof(float), output_samples.data()};
+        AudioUnitRenderActionFlags flags = 0;
+        REQUIRE(effect.process_scheduled(flags, input, output, kFrames) == noErr);
+        effect.clear_scheduled();
+    };
+
+    SECTION("a step per 8 frames on one parameter, others interleaved, delivered parameter by parameter") {
+        std::vector<AudioUnitParameterEvent> events;
+        for (UInt32 i = 0; i < 8; ++i) events.push_back(immediate_event(1, i * 8, 0.1f * (i + 1)));
+        for (UInt32 i = 0; i < 8; ++i) events.push_back(immediate_event(2, i * 8 + 4, 0.05f * (i + 1)));
+        events.push_back(immediate_event(3, 60, 0.5f));
+        events.push_back(immediate_event(3, 60, 0.7f));  // coincident: the later one wins
+        REQUIRE(effect.ScheduleParameter(events.data(), static_cast<UInt32>(events.size())) == noErr);
+        DenseAutomationProcessor::process_calls = 0;
+        render();
+        for (UInt32 n = 0; n < kFrames; ++n)
+            REQUIRE(output_samples[n] == Catch::Approx(0.1f * static_cast<float>(n / 8 + 1)));
+        // Break points at 0, 4, 8, ..., 60: one processor call per slice.
+        REQUIRE(DenseAutomationProcessor::process_calls == 16);
+        Float32 value = 0.0f;
+        REQUIRE(effect.GetParameter(1, kAudioUnitScope_Global, 0, value) == noErr);
+        REQUIRE(value == Catch::Approx(0.8f));
+        REQUIRE(effect.GetParameter(2, kAudioUnitScope_Global, 0, value) == noErr);
+        REQUIRE(value == Catch::Approx(0.4f));
+        REQUIRE(effect.GetParameter(3, kAudioUnitScope_Global, 0, value) == noErr);
+        REQUIRE(value == Catch::Approx(0.7f));
+    }
+
+    SECTION("a later immediate overrides a ramp on the same parameter") {
+        REQUIRE(effect.SetParameter(1, kAudioUnitScope_Global, 0, 0.0f, 0) == noErr);
+        AudioUnitParameterEvent ramp{};
+        ramp.eventType = kParameterEvent_Ramped;
+        ramp.parameter = 1;
+        ramp.scope = kAudioUnitScope_Global;
+        ramp.eventValues.ramp.startBufferOffset = 0;
+        ramp.eventValues.ramp.durationInFrames = 64;
+        ramp.eventValues.ramp.startValue = 0.0f;
+        ramp.eventValues.ramp.endValue = 1.0f;
+        const AudioUnitParameterEvent events[] = {ramp, immediate_event(1, 32, 0.25f)};
+        REQUIRE(effect.ScheduleParameter(events, 2) == noErr);
+        render();
+        REQUIRE(output_samples[16] == Catch::Approx(0.25f));  // 16/64 along the ramp
+        for (UInt32 n = 32; n < kFrames; ++n) REQUIRE(output_samples[n] == Catch::Approx(0.25f));
+        Float32 value = 0.0f;
+        REQUIRE(effect.GetParameter(1, kAudioUnitScope_Global, 0, value) == noErr);
+        REQUIRE(value == Catch::Approx(0.25f));
+    }
+
+    effect.DoCleanup();
+}
+
 TEST_CASE("AU v2 PulpGain at 0 dB is bit-transparent, including after a round trip",
           "[au][au-v2][null-test]") {
     const auto previous = pulp::format::registered_factory();
