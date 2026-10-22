@@ -139,6 +139,26 @@ Corpus output aggregates promotion shares, average latency and fidelity,
 zero-false-promotion tracking, and recurring gaps ranked by affected fixtures,
 visual impact, and root-cause confidence.
 
+### Rescore a finished corpus offline
+
+```bash
+python3 tools/import-validation/importer_differential_lab.py rescore \
+  --corpus /tmp/importer-differential/corpus \
+  --output /tmp/importer-differential/rescore-a
+```
+
+`rescore` replays every completed fixture's stored lane outputs through the
+same `compare_one`: replay stand-ins for the importer and observer copy each
+lane's recorded IR, capture evidence, render, layout, and render receipt into
+place, so every binding check, registration, and lens runs unchanged with no
+browser or importer build. `rescore.json` holds, per fixture, the report with
+process timings, observability timings, and the stand-in executables' digests
+removed, a SHA-256 of that report in emitted key order, and the digest of every
+overlay image. Two rescores of one corpus are byte-identical exactly when the
+scoring code produces the same report, so `cmp` of two `rescore.json` files is
+the proof that a scoring refactor changed nothing. Fixtures whose corpus run
+failed have no stored report and are listed as skipped.
+
 The checked-in corpus covers static HTML, flex, grid, CSS variables,
 pseudo-elements, absolute positioning, SVG, form controls, Canvas, runtime
 state, typography, and media queries. It is a diagnostic seed corpus, not proof

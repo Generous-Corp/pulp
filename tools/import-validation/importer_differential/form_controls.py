@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .snapshot import DomSnapshot
+
 FORM_CONTROL_TAGS = frozenset({
     "input", "button", "select", "textarea", "meter", "progress"})
 
@@ -72,10 +74,12 @@ def control_status(tag: str, input_type: str, styles: dict[str, str],
     return AUTHOR_STYLED
 
 
-def theme_verdicts(snapshot: dict[str, Any] | None) -> dict[int, str | None] | None:
+def theme_verdicts(
+    snapshot: DomSnapshot | dict[str, Any] | None,
+) -> dict[int, str | None] | None:
     """Node index -> the capture's theme verdict, or None for a capture that
     predates the verdict."""
-    report = (snapshot or {}).get("formControlTheme")
+    report = DomSnapshot.coerce(snapshot or {}).form_control_theme()
     if not isinstance(report, dict):
         return None
     verdicts: dict[int, str | None] = {}
@@ -87,7 +91,8 @@ def theme_verdicts(snapshot: dict[str, Any] | None) -> dict[int, str | None] | N
 
 
 def form_controls(browser_flat: list[Any],
-                  snapshot: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+                  snapshot: DomSnapshot | dict[str, Any] | None = None,
+                  ) -> list[dict[str, Any]]:
     """Every laid-out, visible form control with its support status.
 
     `browser_flat` is the lab's `BrowserNode` list, so hidden and zero-area
