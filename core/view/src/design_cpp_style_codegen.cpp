@@ -266,12 +266,24 @@ bool drops(const std::optional<std::string>& value, std::string_view rendered_ke
     return value && !value->empty() && !is_css_keyword(*value, rendered_keyword);
 }
 
-bool has_border_width(const IRStyle& style) {
-    for (const auto& width : {style.border_width, style.border_top_width, style.border_right_width,
-                              style.border_bottom_width, style.border_left_width})
+struct BorderSides {
+    bool css_draws = false;  // some side has a width CSS paints
+    bool lane_draws = false; // some side has a width this lane strokes
+};
+
+// A side takes its own width, else the shorthand's. A side with neither is
+// CSS `medium`, which paints, while this lane strokes only a recorded width.
+BorderSides border_sides(const IRStyle& style) {
+    BorderSides sides;
+    for (const auto& side : {style.border_top_width, style.border_right_width,
+                             style.border_bottom_width, style.border_left_width}) {
+        const auto& width = side ? side : style.border_width;
+        if (!width || *width > 0.0f)
+            sides.css_draws = true;
         if (width && *width > 0.0f)
-            return true;
-    return false;
+            sides.lane_draws = true;
+    }
+    return sides;
 }
 
 } // namespace
@@ -474,10 +486,17 @@ void report_unlowered_visual_style(const EmitContext& ctx,
     // rather than claiming the whole property was dropped.
     if (drops(style.transform, "none") && !css_transform_rotation(*style.transform))
         note("transform", "the node renders untransformed");
-    // Borders lower as solid strokes of the declared width. Without a width
-    // neither CSS nor this lane draws one, whatever the style says.
-    if (drops(style.border_style, "solid") && has_border_width(style))
-        note("border-style", "the border renders solid");
+    // Borders lower as solid strokes of the recorded width. `none` and
+    // `hidden` paint nothing in CSS, so they drop only a width the lane would
+    // stroke; any other style drops whenever CSS paints a side.
+    if (drops(style.border_style, "solid")) {
+        const auto sides = border_sides(style);
+        const bool hides = is_css_keyword(*style.border_style, "none") ||
+                           is_css_keyword(*style.border_style, "hidden");
+        if (hides ? sides.lane_draws : sides.css_draws)
+            note("border-style",
+                 sides.lane_draws ? "the border renders solid" : "the border does not render");
+    }
     if (drops(style.text_overflow, "clip"))
         note("text-overflow", "overflowing text hard-clips instead of ellipsising");
     if (drops(style.pointer_events, "auto"))
