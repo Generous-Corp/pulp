@@ -1361,7 +1361,9 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 
         if (has_viewport) {
             self.rootView->set_bounds({0, 0, self.designW, self.designH});
-            self.rootView->layout_children();
+            // Every repaint lands here (a meter tick, a knob drag): lay out
+            // only when geometry actually changed, as the GPU host does.
+            self.rootView->layout_children_if_needed();
             const int saved = canvas.save_count();
             canvas.save();
             canvas.translate(tx, ty);
@@ -1378,7 +1380,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
             canvas.restore_to_count(saved);
         } else {
             self.rootView->set_bounds({0, 0, bw, bh});
-            self.rootView->layout_children();
+            self.rootView->layout_children_if_needed();
             self.rootView->paint_all(canvas);
             pulp::view::View::paint_overlays(canvas, self.rootView);
         }
@@ -1773,8 +1775,11 @@ public:
                 // open for the settling frame after the last animation one.
                 // A dirty-ONLY frame must NOT re-mark here — that would feed
                 // needs_repaint through -setNeedsDisplay: forever (an ungated
-                // link with extra steps).
-                if (tick.continuous) [view_ setNeedsDisplay:YES];
+                // link with extra steps). Nor may a frame that ticked only for
+                // a live clock subscriber: a bound meter in silence would
+                // repaint the whole editor every vsync. A subscriber whose
+                // content moved already marked the view while it advanced.
+                if (tick.animating) [view_ setNeedsDisplay:YES];
                 // DRIVE the paint from the display-link tick — the CPU
                 // analogue of the GPU host presenting from render_frame().
                 // AppKit only services a pending -setNeedsDisplay: on its
@@ -2628,6 +2633,9 @@ private:
     HostFramePump frame_pump_;
     std::atomic<bool> needs_repaint_{true};
     std::atomic<bool> continuous_frames_{false};
+    // The subset of continuous_frames_ that paints without asking: re-arms
+    // needs_repaint_ after a frame (HostFrameTick::animating).
+    std::atomic<bool> animating_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
@@ -2813,14 +2821,14 @@ private:
 
         paint_scene(*canvas);
 
-        continuous_frames_.store(
-            // The O(1) question first. `needs_continuous_frames` walks the
-            // whole view tree; `has_active_subscribers` is a count. Asking the
-            // expensive one first meant the walk ran on every frame of every
-            // animation, when the answer was already yes.
-            frame_clock_.has_active_subscribers() ||
-                pulp::view::needs_continuous_frames(&root_),
-            std::memory_order_relaxed);
+        // Two liveness answers (see HostFrameTick::animating): the gate stays
+        // open while anything wants clock ticks, but only a tree that paints
+        // new pixels on its own re-arms the dirty flag below. A live subscriber
+        // that changes what it draws requests its own repaint.
+        const bool animating = pulp::view::needs_continuous_frames(&root_);
+        animating_frames_.store(animating, std::memory_order_relaxed);
+        continuous_frames_.store(animating || frame_clock_.has_active_subscribers(),
+                                 std::memory_order_relaxed);
 
         // PULP_EMBED_GPU_FRAME_STAT — env-gated LIVE display-link present-path
         // pixel proof (NOT the forced capture path). Every Nth on-screen frame,
@@ -2904,7 +2912,7 @@ private:
             skia_surface_->wait_for_submitted_work();
         gpu_surface_->end_frame();
 
-        needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
+        needs_repaint_.store(animating_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
         return captured;
     }
@@ -3050,8 +3058,17 @@ private:
         // the only chance to update the cursor: AppKit re-asks on
         // pointer motion, never because the content moved.
         [metal_view_ refreshHoverCursor];
-        if (tick.continuous) {
+        if (tick.animating) {
             needs_repaint_.store(true, std::memory_order_relaxed);
+        }
+        // A tick that advanced only for a live clock subscriber, which nothing
+        // dirtied, presents nothing: the drawable already shows these pixels.
+        // The gate stays open so the subscribers keep ticking.
+        if (!pulp::view::host_frame_composites(
+                tick, needs_repaint_.load(std::memory_order_relaxed))) {
+            continuous_frames_.store(tick.continuous, std::memory_order_relaxed);
+            render_dispatch_queued_.store(false, std::memory_order_release);
+            return;
         }
         only_first_frame_presented_ = false;
         render_frame();

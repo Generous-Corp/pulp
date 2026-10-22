@@ -35,6 +35,8 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/audio_widgets.hpp>
+#include <pulp/view/value_source.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 #include <atomic>
@@ -517,6 +519,106 @@ TEST_CASE("mac CPU plugin host reopen survives a display-link teardown race",
         host2->detach();
         host2.reset();
         [window close];
+    }
+}
+
+namespace smoke {
+
+/// Counts every paint the host drives through the tree.
+class PaintCountingView : public view::View {
+public:
+    void paint(canvas::Canvas&) override { paints.fetch_add(1, std::memory_order_relaxed); }
+    std::atomic<int> paints{0};
+};
+
+} // namespace smoke
+
+TEST_CASE("a silent source-bound meter editor stops painting on both mac plugin hosts",
+          "[gpu][skia][plugin-gpu-host][mac][display-link][idle-gate]") {
+    // A bound meter is a FrameClock subscriber for as long as it is bound. The
+    // hosts used to composite the whole editor every vsync while any subscriber
+    // was live, so a static editor with a silent meter repainted at the display
+    // rate forever. The clock must keep ticking (the meter keeps reading its
+    // source) while no frame is painted, and a real level must still paint.
+    smoke::clear_no_editor_env();
+    for (const bool gpu : {false, true}) {
+        DYNAMIC_SECTION((gpu ? "GPU" : "CPU") << " host") {
+            @autoreleasepool {
+                NSWindow* window = [[NSWindow alloc]
+                    initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                              styleMask:NSWindowStyleMaskTitled
+                                backing:NSBackingStoreBuffered
+                                  defer:NO];
+                if (!window || !window.contentView) SKIP("No Cocoa window available.");
+
+                auto root = std::make_unique<view::View>();
+                if (gpu) root->set_requires_gpu_host(true);
+                auto counting = std::make_unique<smoke::PaintCountingView>();
+                auto* counter = counting.get();
+                counter->set_bounds({0, 0, 40, 40});
+                root->add_child(std::move(counting));
+                auto meter = std::make_unique<view::Meter>();
+                view::Meter* m = meter.get();
+                m->set_bounds({60, 10, 20, 200});
+                root->add_child(std::move(meter));
+                auto source = std::make_shared<view::MeterSource>();
+                view::MeterFrame silent;
+                silent.channels = 1;
+                source->publish(silent);
+                m->set_source(source, 0);
+
+                view::PluginViewHost::Options opts;
+                opts.size = {smoke::kW, smoke::kH};
+                opts.use_gpu = gpu;
+                auto host = view::PluginViewHost::create(*root, opts);
+                REQUIRE(host != nullptr);
+                if (gpu && !host->is_gpu_backed()) {
+                    host.reset();
+                    [window close];
+                    SKIP("GPU plugin host unavailable on this runner.");
+                }
+                auto ticks = std::make_shared<std::atomic<int>>(0);
+                host->set_idle_callback([ticks]() { ticks->fetch_add(1); });
+                REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+
+                int frames = 0;
+                while (ticks->load() == 0 && frames < 200) {
+                    smoke::pump_run_loop(1);
+                    ++frames;
+                }
+                if (ticks->load() == 0) {
+                    host->detach();
+                    host.reset();
+                    [window close];
+                    SKIP("No display link fired (no active CGDisplay).");
+                }
+                // Let the first frame(s) land, then measure a quiet window.
+                smoke::pump_run_loop(10);
+                const int paints_before = counter->paints.load();
+                const int ticks_before = ticks->load();
+                smoke::pump_run_loop(25);  // ~0.5 s
+                const int quiet_ticks = ticks->load() - ticks_before;
+                const int quiet_paints = counter->paints.load() - paints_before;
+                INFO("ticks during the quiet window: " << quiet_ticks
+                     << ", paints: " << quiet_paints);
+                REQUIRE(quiet_ticks >= 5);  // the editor is live and being pumped
+                CHECK(quiet_paints == 0);
+
+                // Control: a real level must paint.
+                view::MeterFrame loud;
+                loud.channels = 1;
+                loud.peak[0] = 0.8f;
+                loud.rms[0] = 0.5f;
+                source->publish(loud);
+                smoke::pump_run_loop(10);
+                CHECK(counter->paints.load() > paints_before + quiet_paints);
+
+                host->detach();
+                host.reset();
+                root.reset();
+                [window close];
+            }
+        }
     }
 }
 
