@@ -776,3 +776,62 @@ TEST_CASE("Convolver overlap-add matches a direct convolution when the IR fits o
         REQUIRE(null_db < -120.0);
     }
 }
+
+TEST_CASE("FFT vDSP split halves sit 16 bytes past a 64-byte boundary",
+          "[signal][fft][real][placement]") {
+    // vDSP's 64-byte-aligned split path rounds 2.6-6.6 dB worse from 512
+    // points up, so the transform keeps both halves off that boundary at every
+    // size, including either side of every size that once switched paths.
+    for (const int n : {32, 64, 512, 1024, 2048, 4096, 8192}) {
+        Fft fft(n);
+        INFO("n=" << n);
+#if PULP_FFT_HAS_VDSP
+        REQUIRE(fft.vdsp_split_offset_bytes(true) == 16);
+        REQUIRE(fft.vdsp_split_offset_bytes(false) == 16);
+        Fft moved(std::move(fft));
+        REQUIRE(moved.vdsp_split_offset_bytes(true) == 16);
+        REQUIRE(moved.vdsp_split_offset_bytes(false) == 16);
+#else
+        REQUIRE(fft.vdsp_split_offset_bytes(true) == -1);
+#endif
+    }
+    REQUIRE(Fft64(512).vdsp_split_offset_bytes(true) == -1);
+}
+
+TEST_CASE("FFT real transform error matches the most accurate vDSP placement",
+          "[signal][fft][real][accuracy]") {
+    // Worst error over bins and frames relative to the largest bin, against a
+    // long-double DFT: the metric the cross-framework quality runs use. Off the
+    // 64-byte boundary vDSP measures -135.2 to -136.4 dB here; on it, -129.9 to
+    // -132.7 dB. The gate sits between, so a placement that slides back onto
+    // the boundary fails it.
+    for (const int n : {512, 1024, 2048, 4096}) {
+        Fft fft(n);
+        double worst = 0.0;
+        std::uint32_t state = 12345u + static_cast<std::uint32_t>(n);
+        for (int frame = 0; frame < 6; ++frame) {
+            std::vector<float> x(static_cast<std::size_t>(n));
+            for (auto& v : x) {
+                state = state * 1664525u + 1013904223u;
+                v = static_cast<float>(state >> 8) / 16777216.0f - 0.5f;
+            }
+            const auto reference = reference_dft(std::vector<double>(x.begin(), x.end()));
+            long double largest = 0;
+            for (const auto& bin : reference)
+                largest = std::max(largest, std::abs(bin));
+            std::vector<std::complex<float>> bins(static_cast<std::size_t>(n / 2 + 1));
+            fft.forward_real_half(x.data(), bins.data());
+            for (std::size_t k = 0; k < bins.size(); ++k) {
+                const std::complex<long double> y(bins[k].real(), bins[k].imag());
+                worst = std::max(worst, static_cast<double>(std::abs(y - reference[k]) / largest));
+            }
+        }
+        const double worst_db = 20.0 * std::log10(worst);
+        INFO("n=" << n << " max relative error=" << worst_db << " dB");
+#if PULP_FFT_HAS_VDSP
+        REQUIRE(worst_db < -134.0);
+#else
+        REQUIRE(worst_db < -120.0);
+#endif
+    }
+}

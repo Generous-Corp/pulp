@@ -190,6 +190,26 @@ public:
         return true;
     }
 
+    /// Byte offset past a 64-byte boundary of the real and imaginary halves
+    /// the vDSP transforms use, or -1 when this transform does not use vDSP.
+    /// Always 16 for a ready float transform of 32 points or more (see the
+    /// placement note on the split storage); exposed so that contract can be
+    /// tested rather than assumed.
+    [[nodiscard]] int vdsp_split_offset_bytes(bool real_transform) const noexcept {
+#if PULP_FFT_HAS_VDSP
+        if constexpr (std::is_same_v<SampleType, float>) {
+            if (!ready())
+                return -1;
+            const DSPSplitComplex z = real_transform ? real_split() : split();
+            const auto re = static_cast<int>(reinterpret_cast<std::uintptr_t>(z.realp) % 64u);
+            const auto im = static_cast<int>(reinterpret_cast<std::uintptr_t>(z.imagp) % 64u);
+            return re == im ? re : -2;
+        }
+#endif
+        static_cast<void>(real_transform);
+        return -1;
+    }
+
     // Forward FFT (time → frequency) — complex in-place
     void forward(std::complex<SampleType>* data) const {
         rt::count_fft();
@@ -319,39 +339,36 @@ private:
 #if PULP_FFT_HAS_VDSP
     int log2n_ = 0;
     FFTSetup vdsp_setup_ = nullptr;
-    // One buffer holds both split halves so their placement can be chosen.
-    // vDSP takes a separate code path when both halves of a split complex
-    // array sit on 64-byte boundaries, and which path is faster depends on the
-    // transform and the chip. Measured with vDSP_fft_zrip / vDSP_fft_zip:
-    //   * real, 512-2048 points: off-boundary is 1.4-1.9x faster on M5
-    //     Ultra and M5 Max; M3 Ultra prefers the boundary from 1024 points
-    //     (up to 1.3x at 2048). Off-boundary is used: it is the newer chips'
-    //     win and the larger one.
-    //   * real, 4096 points and up: on-boundary, 1.3-1.6x faster on all three.
-    //   * complex, 512 points and up: on-boundary, up to 1.6x faster on all
-    //     three; below 512 off-boundary, up to 1.6x faster on M5.
-    // Two separate allocations left the placement to the allocator, so the
-    // same transform's speed changed with where the buffers landed.
+    // One buffer holds both split halves so their placement is fixed rather
+    // than left to the allocator. vDSP takes a separate code path when both
+    // halves of a split complex array sit on 64-byte boundaries, and that
+    // path is the less accurate one: from 512 points up it rounds 2.6-6.6 dB
+    // worse (max error over bins against a double-precision DFT, about -130
+    // to -133 dB against -135 to -137 dB off the boundary), for real and
+    // complex transforms alike. Off the boundary, the real transform is also
+    // up to 1.9x faster from 512 to 2048 points; the boundary path is faster
+    // for large transforms on some processors, but never at the accuracy
+    // this one keeps. Both halves therefore always sit 16 bytes past a
+    // 64-byte boundary. Separate allocations made the same transform's speed
+    // and error depend on where the buffers happened to land.
     mutable std::vector<float> split_;
     std::size_t split_base_ = 0;
-    static_assert(kVdspSplitPaddingFloats >= 64 / sizeof(float) - 1 + 4,
-                  "split padding must cover the 64-byte alignment slack plus the 4-float step");
+    static constexpr std::size_t kVdspSplitOffsetFloats = 4; // 16 bytes
+    static_assert(kVdspSplitPaddingFloats >= 64 / sizeof(float) - 1 + kVdspSplitOffsetFloats,
+                  "split padding must cover the 64-byte alignment slack plus the 16-byte step");
 #endif
 
 #if PULP_FFT_HAS_VDSP
-    // N-point halves for complex transforms: on 64-byte boundaries from 512
-    // points up, 16 bytes past one below that.
+    // N-point halves for complex transforms, each 16 bytes past a 64-byte
+    // boundary (N is a power of two, so the second half keeps the offset).
     DSPSplitComplex split() const {
-        const std::size_t offset = size_ >= 512 ? 0 : 4;
-        float* base = split_.data() + split_base_ + offset;
+        float* base = split_.data() + split_base_ + kVdspSplitOffsetFloats;
         return {base, base + size_};
     }
 
-    // N/2-point halves for real transforms: on 64-byte boundaries from 4096
-    // points up, 16 bytes past one below that.
+    // N/2-point halves for real transforms, placed like split()'s.
     DSPSplitComplex real_split() const {
-        const std::size_t offset = size_ >= 4096 ? 0 : 4;
-        float* base = split_.data() + split_base_ + offset;
+        float* base = split_.data() + split_base_ + kVdspSplitOffsetFloats;
         return {base, base + size_ / 2};
     }
 
