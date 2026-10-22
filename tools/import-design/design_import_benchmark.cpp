@@ -1,6 +1,8 @@
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/design_ir_io.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -51,6 +53,14 @@ struct Config {
     int interactive_ms = 60000;
     int target_fps = 60;
     std::filesystem::path output_path;
+    // An importer-produced DesignIR to measure instead of the built-in panel.
+    std::filesystem::path ir_path;
+    // When set, each phase runs exactly this many frames without pacing, so
+    // every counter in the receipt is reproducible run to run.
+    std::optional<int> frames;
+    // Planted negative: leak one view past teardown, to prove the terminal
+    // readback can fail.
+    bool plant_leak = false;
 };
 
 struct PhaseMetrics {
@@ -75,6 +85,10 @@ struct PhaseMetrics {
     std::uint64_t paint_commands_total = 0;
     std::uint64_t invalidation_requests = 0;
     std::uint64_t unmarked_paint_mutations = 0;
+    std::uint64_t views_constructed = 0;
+    std::uint64_t views_destroyed = 0;
+    std::uint64_t slot_identity_changes = 0;
+    std::uint64_t slot_text_mismatches = 0;
     int js_evaluations = 0;
 };
 
@@ -194,6 +208,11 @@ public:
     virtual std::uint64_t bridge_call_count() const {
         return 0;
     }
+    // Anchor-keyed text slots whose View changed identity across an update,
+    // and slots whose text did not read back as written. Only fixtures that
+    // drive keyed slots report non-zero.
+    virtual std::uint64_t slot_identity_change_count() const { return 0; }
+    virtual std::uint64_t slot_text_mismatch_count() const { return 0; }
 };
 
 void place_absolute(IRNode& node, float left, float top, float width, float height) {
@@ -772,7 +791,135 @@ layout();
     int js_evaluations_ = 0;
 };
 
-std::unique_ptr<BenchmarkFixture> make_fixture(const std::string& lane) {
+View* find_by_anchor(View& root, std::string_view anchor) {
+    if (root.anchor_id() == anchor) return &root;
+    for (std::size_t i = 0; i < root.child_count(); ++i)
+        if (auto* found = find_by_anchor(*root.child_at(i), anchor)) return found;
+    return nullptr;
+}
+
+// An importer-produced DesignIR, with the provenance that binds a receipt to
+// the exact bytes measured.
+struct LoadedIr {
+    DesignIR ir;
+    std::string sha256;
+    std::string file_name;
+    float width = static_cast<float>(kFixtureWidth);
+    float height = static_cast<float>(kFixtureHeight);
+    std::vector<std::string> slot_anchors;
+};
+
+LoadedIr load_ir(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot read DesignIR " + path.string());
+    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    LoadedIr loaded;
+    loaded.ir = parse_design_ir_json(text);
+    loaded.sha256 = pulp::runtime::sha256_hex(text);
+    loaded.file_name = path.filename().string();
+    if (loaded.ir.root.style.width && *loaded.ir.root.style.width > 0.0f)
+        loaded.width = *loaded.ir.root.style.width;
+    if (loaded.ir.root.style.height && *loaded.ir.root.style.height > 0.0f)
+        loaded.height = *loaded.ir.root.style.height;
+    const auto collect = [&](auto& self, const IRNode& node) -> void {
+        if (node.type == "text" && !node.text_content.empty() && node.stable_anchor_id &&
+            !node.stable_anchor_id->empty())
+            loaded.slot_anchors.push_back(*node.stable_anchor_id);
+        for (const auto& child : node.children) self(self, child);
+    };
+    collect(collect, loaded.ir.root);
+    if (loaded.slot_anchors.empty())
+        throw std::runtime_error("DesignIR " + loaded.file_name + " has no anchored text slots");
+    return loaded;
+}
+
+std::string slot_text(std::size_t slot, int frame) {
+    return "slot " + std::to_string(slot) + " frame " + std::to_string(frame);
+}
+
+// The retained-plan experiment over real importer output. Each anchored text
+// node is a typed slot. The retained lane resolves every slot to its Label
+// once and writes through it; the rebuild lane is the control, writing the
+// same text into a copy of the IR and rematerializing the whole tree. Both
+// read every slot back by anchor after the update, so a slot that rebound to
+// a different View, or kept stale text, is counted rather than assumed away.
+class IrBoundFixture final : public BenchmarkFixture {
+  public:
+    IrBoundFixture(const std::filesystem::path& path, bool rebuild_each_step)
+        : loaded_(load_ir(path)), rebuild_each_step_(rebuild_each_step) {
+        materialize(loaded_.ir);
+        for (const auto& anchor : loaded_.slot_anchors) {
+            auto* label = dynamic_cast<Label*>(find_by_anchor(*root_, anchor));
+            if (!label)
+                throw std::runtime_error("text slot " + anchor + " did not materialize as a Label");
+            slots_.push_back({label, label->import_binding_instance_id()});
+        }
+    }
+
+    View& root() override { return *root_; }
+    int js_evaluation_count() const override { return 0; }
+    std::uint64_t slot_identity_change_count() const override { return identity_changes_; }
+    std::uint64_t slot_text_mismatch_count() const override { return text_mismatches_; }
+    const LoadedIr& loaded() const { return loaded_; }
+
+    void step(int frame) override {
+        if (rebuild_each_step_) {
+            auto ir = loaded_.ir;
+            std::size_t slot = 0;
+            const auto write = [&](auto& self, IRNode& node) -> void {
+                if (node.type == "text" && node.stable_anchor_id &&
+                    slot < loaded_.slot_anchors.size() &&
+                    *node.stable_anchor_id == loaded_.slot_anchors[slot])
+                    node.text_content = slot_text(slot++, frame);
+                for (auto& child : node.children) self(self, child);
+            };
+            write(write, ir.root);
+            materialize(ir);
+        } else {
+            for (std::size_t i = 0; i < slots_.size(); ++i)
+                slots_[i].label->set_text(slot_text(i, frame));
+            root_->layout_children();
+        }
+        for (std::size_t i = 0; i < slots_.size(); ++i) {
+            auto* label = dynamic_cast<Label*>(find_by_anchor(*root_, loaded_.slot_anchors[i]));
+            if (!label || label->import_binding_instance_id() != slots_[i].instance_id) {
+                ++identity_changes_;
+                if (label) slots_[i] = {label, label->import_binding_instance_id()};
+            }
+            if (!label || label->text() != slot_text(i, frame)) ++text_mismatches_;
+        }
+    }
+
+  private:
+    struct Slot {
+        Label* label = nullptr;
+        std::uint64_t instance_id = 0;
+    };
+
+    void materialize(const DesignIR& ir) {
+        NativeMaterializeOptions options;
+        std::vector<ImportDiagnostic> diagnostics;
+        options.diagnostics_out = &diagnostics;
+        auto next = build_native_view_tree(ir, ir.asset_manifest, options);
+        if (!next) throw std::runtime_error("DesignIR materialization returned null root");
+        next->set_bounds({0, 0, loaded_.width, loaded_.height});
+        next->layout_children();
+        root_ = std::move(next);
+    }
+
+    LoadedIr loaded_;
+    bool rebuild_each_step_ = false;
+    std::unique_ptr<View> root_;
+    std::vector<Slot> slots_;
+    std::uint64_t identity_changes_ = 0;
+    std::uint64_t text_mismatches_ = 0;
+};
+
+std::unique_ptr<BenchmarkFixture> make_fixture(const Config& config) {
+    if (!config.ir_path.empty())
+        return std::make_unique<IrBoundFixture>(config.ir_path,
+                                                config.lane == "baked-native-rebuild");
+    const auto& lane = config.lane;
     if (lane == "live") return std::make_unique<LiveFixture>();
     if (lane == "baked-native") return std::make_unique<BakedNativeFixture>();
     if (lane == "baked-native-rebuild")
@@ -790,11 +937,12 @@ std::uint64_t render_frame(View& root) {
 
 PhaseMetrics run_phase(BenchmarkFixture& fixture,
                        int duration_ms,
+                       std::optional<int> frames,
                        int target_fps,
                        bool interactive) {
     PhaseMetrics metrics;
-    metrics.duration_ms = duration_ms;
-    if (duration_ms <= 0) return metrics;
+    metrics.duration_ms = frames ? 0 : duration_ms;
+    if (frames ? *frames <= 0 : duration_ms <= 0) return metrics;
 
     const auto interval = std::chrono::duration<double>(1.0 / std::max(1, target_fps));
     const auto interval_duration = std::chrono::duration_cast<Clock::duration>(interval);
@@ -805,6 +953,10 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     const auto layout_passes_start = View::layout_pass_count();
     const auto invalidation_start = View::damage_request_count();
     const auto unmarked_start = View::unmarked_paint_mutation_count();
+    const auto constructed_start = View::constructed_count();
+    const auto destroyed_start = View::destroyed_count();
+    const auto identity_start = fixture.slot_identity_change_count();
+    const auto mismatch_start = fixture.slot_text_mismatch_count();
     std::vector<double> frame_ms;
     std::vector<double> frame_cpu_ms;
     std::vector<double> update_ms;
@@ -831,10 +983,12 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
         metrics.rss_peak_bytes = std::max(metrics.rss_peak_bytes, rss);
         ++frame;
 
+        if (frames) continue;
         next_frame += interval_duration;
         const auto now = Clock::now();
         if (next_frame > now) std::this_thread::sleep_until(next_frame);
-    } while (elapsed_ms(phase_start) < static_cast<double>(duration_ms));
+    } while (frames ? frame < *frames
+                    : elapsed_ms(phase_start) < static_cast<double>(duration_ms));
 
     metrics.samples = static_cast<int>(frame_ms.size());
     if (!frame_ms.empty()) {
@@ -861,6 +1015,10 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     metrics.layout_passes = View::layout_pass_count() - layout_passes_start;
     metrics.invalidation_requests = View::damage_request_count() - invalidation_start;
     metrics.unmarked_paint_mutations = View::unmarked_paint_mutation_count() - unmarked_start;
+    metrics.views_constructed = View::constructed_count() - constructed_start;
+    metrics.views_destroyed = View::destroyed_count() - destroyed_start;
+    metrics.slot_identity_changes = fixture.slot_identity_change_count() - identity_start;
+    metrics.slot_text_mismatches = fixture.slot_text_mismatch_count() - mismatch_start;
     metrics.js_evaluations = fixture.js_evaluation_count();
     return metrics;
 }
@@ -902,21 +1060,50 @@ void append_phase_json(std::ostringstream& out,
     out << "      \"paint_calls\": " << metrics.paint_calls << ",\n";
     out << "      \"paint_commands_total\": " << metrics.paint_commands_total << ",\n";
     out << "      \"invalidation_requests\": " << metrics.invalidation_requests << ",\n";
-    out << "      \"unmarked_paint_mutations\": " << metrics.unmarked_paint_mutations << "\n";
+    out << "      \"unmarked_paint_mutations\": " << metrics.unmarked_paint_mutations << ",\n";
+    out << "      \"views_constructed\": " << metrics.views_constructed << ",\n";
+    out << "      \"views_destroyed\": " << metrics.views_destroyed << ",\n";
+    out << "      \"slot_identity_changes\": " << metrics.slot_identity_changes << ",\n";
+    out << "      \"slot_text_mismatches\": " << metrics.slot_text_mismatches << "\n";
     out << "    }\n";
     out << "  }" << (trailing_comma ? "," : "") << "\n";
 }
 
+// Views alive after the fixture is destroyed: the terminal lifetime readback.
+struct TeardownMetrics {
+    std::uint64_t views_constructed = 0;
+    std::uint64_t views_destroyed = 0;
+    std::uint64_t live_views_after_teardown = 0;
+    bool planted_leak = false;
+};
+
+struct IrProvenance {
+    std::string file_name;
+    std::string sha256;
+    std::size_t slots = 0;
+};
+
 std::string make_json(const Config& config,
+                      const std::optional<IrProvenance>& ir,
                       const StartupMetrics& startup,
                       const PhaseMetrics& idle,
-                      const PhaseMetrics& interactive) {
+                      const PhaseMetrics& interactive,
+                      const TeardownMetrics& teardown) {
     std::ostringstream out;
     out << std::fixed << std::setprecision(4);
     out << "{\n";
     out << "  \"schema\": \"pulp-design-import-benchmark-v1\",\n";
     out << "  \"lane\": \"" << json_escape(config.lane) << "\",\n";
-    out << "  \"fixture\": \"" << kFixtureName << "\",\n";
+    out << "  \"fixture\": \"" << (ir ? json_escape(ir->file_name) : std::string(kFixtureName))
+        << "\",\n";
+    if (ir) {
+        out << "  \"ir\": {\n";
+        out << "    \"sha256\": \"" << ir->sha256 << "\",\n";
+        out << "    \"text_slots\": " << ir->slots << "\n";
+        out << "  },\n";
+    }
+    out << "  \"pacing\": \"" << (config.frames ? "fixed-frames" : "wall-clock") << "\",\n";
+    if (config.frames) out << "  \"frames_per_phase\": " << *config.frames << ",\n";
     out << "  \"host\": \"" << json_escape(host_name()) << "\",\n";
     out << "  \"platform\": \"" << json_escape(platform_name()) << "\",\n";
     out << "  \"target_fps\": " << config.target_fps << ",\n";
@@ -932,7 +1119,13 @@ std::string make_json(const Config& config,
            "setters, baked-native-rebuild rematerializes the same IR per interactive step, "
            "baked-cpp mutates generated-style native widgets directly\",\n";
     append_phase_json(out, "idle", idle, true);
-    append_phase_json(out, "interactive", interactive, false);
+    append_phase_json(out, "interactive", interactive, true);
+    out << "  \"teardown\": {\n";
+    out << "    \"views_constructed\": " << teardown.views_constructed << ",\n";
+    out << "    \"views_destroyed\": " << teardown.views_destroyed << ",\n";
+    out << "    \"live_views_after_teardown\": " << teardown.live_views_after_teardown << ",\n";
+    out << "    \"planted_leak\": " << (teardown.planted_leak ? "true" : "false") << "\n";
+    out << "  }\n";
     out << "}\n";
     return out.str();
 }
@@ -940,7 +1133,13 @@ std::string make_json(const Config& config,
 void print_usage(std::ostream& out) {
     out << "usage: pulp-design-import-bench "
            "[--lane=live|baked-native|baked-native-rebuild|baked-cpp] "
-           "[--idle-ms=N] [--interactive-ms=N] [--target-fps=N] [--output=PATH]\n";
+           "[--idle-ms=N] [--interactive-ms=N] [--target-fps=N] [--output=PATH] "
+           "[--ir=DESIGN_IR_JSON] [--frames=N] [--plant-leak]\n"
+           "  --ir measures an importer-produced DesignIR (baked-native and\n"
+           "     baked-native-rebuild only) with anchored text nodes as keyed slots.\n"
+           "  --frames runs exactly N frames per phase without pacing, so every\n"
+           "     counter in the receipt is reproducible.\n"
+           "  --plant-leak leaks one view past teardown; the run must then fail.\n";
 }
 
 bool parse_int(std::string_view value, int& out) {
@@ -983,6 +1182,16 @@ std::optional<Config> parse_args(int argc, char** argv) {
             if (!parse_int(*value, config.target_fps)) return std::nullopt;
         } else if (arg == "--target-fps" && i + 1 < argc) {
             if (!parse_int(argv[++i], config.target_fps)) return std::nullopt;
+        } else if (auto value = value_after("--ir=")) {
+            config.ir_path = *value;
+        } else if (arg == "--ir" && i + 1 < argc) {
+            config.ir_path = argv[++i];
+        } else if (auto value = value_after("--frames=")) {
+            int frames = 0;
+            if (!parse_int(*value, frames) || frames < 0) return std::nullopt;
+            config.frames = frames;
+        } else if (arg == "--plant-leak") {
+            config.plant_leak = true;
         } else if (auto value = value_after("--output=")) {
             config.output_path = *value;
         } else if (arg == "--output" && i + 1 < argc) {
@@ -994,6 +1203,15 @@ std::optional<Config> parse_args(int argc, char** argv) {
     if (config.lane != "live" && config.lane != "baked-native" &&
         config.lane != "baked-native-rebuild" && config.lane != "baked-cpp")
         return std::nullopt;
+    // The live lane runs a scripted UI and baked-cpp is compiled code; neither
+    // can be built from a DesignIR at run time, so neither can claim to have
+    // measured one.
+    if (!config.ir_path.empty() && config.lane != "baked-native" &&
+        config.lane != "baked-native-rebuild") {
+        std::cerr << "--ir applies to baked-native and baked-native-rebuild only; the "
+                  << config.lane << " lane cannot be built from a DesignIR\n";
+        return std::nullopt;
+    }
     config.idle_ms = std::max(0, config.idle_ms);
     config.interactive_ms = std::max(0, config.interactive_ms);
     config.target_fps = std::max(1, config.target_fps);
@@ -1010,10 +1228,12 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    const auto views_constructed_start = View::constructed_count();
+    const auto views_destroyed_start = View::destroyed_count();
     const auto build_start = Clock::now();
     std::unique_ptr<BenchmarkFixture> fixture;
     try {
-        fixture = make_fixture(config->lane);
+        fixture = make_fixture(*config);
     } catch (const std::exception& e) {
         std::cerr << "benchmark setup failed: " << e.what() << "\n";
         return 1;
@@ -1035,9 +1255,31 @@ int main(int argc, char** argv) {
     startup.first_frame_paint_commands = first_commands;
     startup.rss_after_first_frame_bytes = current_rss_bytes();
 
-    const auto idle = run_phase(*fixture, config->idle_ms, config->target_fps, false);
-    const auto interactive = run_phase(*fixture, config->interactive_ms, config->target_fps, true);
-    const auto json = make_json(*config, startup, idle, interactive);
+    const auto idle =
+        run_phase(*fixture, config->idle_ms, config->frames, config->target_fps, false);
+    const auto interactive =
+        run_phase(*fixture, config->interactive_ms, config->frames, config->target_fps, true);
+
+    std::optional<IrProvenance> ir;
+    if (auto* bound = dynamic_cast<IrBoundFixture*>(fixture.get()))
+        ir = IrProvenance{bound->loaded().file_name, bound->loaded().sha256,
+                          bound->loaded().slot_anchors.size()};
+
+    // Terminal readback: destroy the fixture, then count the views it left.
+    TeardownMetrics teardown;
+    teardown.planted_leak = config->plant_leak;
+    // The planted subtree outlives the fixture but is freed after the
+    // readback, so the negative control is a live view, not a real leak.
+    std::unique_ptr<View> planted;
+    if (config->plant_leak && fixture->root().child_count() > 0)
+        planted = fixture->root().remove_child(fixture->root().child_at(0));
+    fixture.reset();
+    teardown.views_constructed = View::constructed_count() - views_constructed_start;
+    teardown.views_destroyed = View::destroyed_count() - views_destroyed_start;
+    teardown.live_views_after_teardown =
+        teardown.views_constructed - std::min(teardown.views_constructed, teardown.views_destroyed);
+    planted.reset();
+    const auto json = make_json(*config, ir, startup, idle, interactive, teardown);
 
     if (!config->output_path.empty()) {
         if (!write_file(config->output_path, json)) {
@@ -1046,6 +1288,11 @@ int main(int argc, char** argv) {
         }
     } else {
         std::cout << json;
+    }
+    if (teardown.live_views_after_teardown != 0) {
+        std::cerr << "teardown left " << teardown.live_views_after_teardown
+                  << " live views\n";
+        return 3;
     }
     return 0;
 }

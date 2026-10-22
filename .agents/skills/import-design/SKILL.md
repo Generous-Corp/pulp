@@ -20,6 +20,22 @@ The rebuild control must replay the complete fixture state, including secondary
 meter state such as the `peak` value; matching only a primary value changes the
 rendered workload and invalidates retained-versus-rebuild comparisons.
 
+To measure importer output rather than the built-in panel, pass
+`--ir=<design.ir.json>` (baked-native and baked-native-rebuild only; `live`
+and `baked-cpp` refuse it because neither can be built from a DesignIR) with
+`--frames=N`. Fixed frames are what make the counters comparable run to run;
+wall-clock pacing changes the frame count and every counter with it. Anchored
+text nodes become keyed slots: the retained lane writes through the Label each
+anchor resolved to at build, the rebuild lane rematerializes a copy of the IR.
+The receipt binds the IR's sha256 and adds per-phase views constructed and
+destroyed, slot identity changes and slot text mismatches, plus a terminal
+`teardown` readback; a run that leaves live views exits 3. On the held-out
+corpus the retained lane builds no views, rebinds no slots and records no
+unmarked mutations, while the rebuild control rebinds every slot every frame
+and records thousands of unmarked mutations. If the control ever reports zero
+identity changes, the counter is blind, not the plan retained. `--plant-leak`
+holds one subtree past the fixture's destruction to prove the readback fails.
+
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
 ### Preconverted vector artwork is validation-only
