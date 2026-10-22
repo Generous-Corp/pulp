@@ -4,6 +4,12 @@
 #include <limits>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/gpu_audio/gpu_convolution_reverb.hpp>
+
+#include "detail/gpu_convolution_reverb_test_access.hpp"
+#include "support/shared_io_loss_provider.hpp"
+#include "support/thread_progress.hpp"
+
+#include <array>
 #include <utility>
 #include <vector>
 
@@ -136,6 +142,83 @@ TEST_CASE("GPU convolution valid configuration fails closed when the shared prov
     CHECK_FALSE(route.prepare());
     CHECK_FALSE(route.prepared());
     CHECK_FALSE(route.report().authenticated_shared_provider);
+}
+
+// Every status a health test observes must satisfy the v3 invariants.
+pulp::gpu_audio::GpuAudioStatus validated(const pulp::gpu_audio::GpuAudioStatus& status) {
+    const auto validation = pulp::gpu_audio::validate_gpu_audio_status(status);
+    INFO("status error " << static_cast<int>(validation.error));
+    CHECK(validation.accepted());
+    return status;
+}
+
+TEST_CASE("GPU convolution route status is Uninitialized and fenced until prepared",
+          "[gpu_audio][convolution][status]") {
+    GpuConvolutionReverb route(valid_config());
+    if (route.prepare())
+        SKIP("authenticated shared provider present; covered by the GPU probe");
+    const auto status = validated(route.status_snapshot());
+    CHECK(status.schema_version == pulp::gpu_audio::GpuAudioStatus::kSchemaVersion);
+    CHECK(status.provider_state == pulp::gpu_audio::GpuAudioProviderState::Uninitialized);
+    CHECK(route.recovery_reason() == pulp::gpu_audio::GpuAudioRecoveryReason::None);
+    CHECK(route.fenced());
+    for (const auto& lane : route.report().lanes) {
+        CHECK(lane.status.schema_version == pulp::gpu_audio::GpuAudioStatus::kSchemaVersion);
+        CHECK(lane.status.provider_state == pulp::gpu_audio::GpuAudioProviderState::Uninitialized);
+    }
+}
+
+struct LossLanes {
+    std::array<pulp::test::LossProvider*, 2> providers{};
+    std::size_t prepared = 0;
+    std::uint32_t block = 0;
+};
+
+bool prepare_loss_lane(pulp::gpu_audio::GpuConvolver& node, void* context) noexcept {
+    auto& lanes = *static_cast<LossLanes*>(context);
+    if (lanes.prepared >= lanes.providers.size() || !node.prepare())
+        return false;
+    return pulp::test::install_loss_session(node, lanes.block, lanes.providers[lanes.prepared++]);
+}
+
+TEST_CASE("GPU convolution route status reports the least healthy prepared lane",
+          "[gpu_audio][convolution][status][health]") {
+    using pulp::gpu_audio::GpuAudioProviderState;
+    using pulp::gpu_audio::GpuAudioRecoveryReason;
+    auto config = valid_config();
+    GpuConvolutionReverb route(config);
+    LossLanes lanes;
+    lanes.block = route.block_size();
+    if (!pulp::gpu_audio::detail::GpuConvolutionReverbTestAccess::prepare_with(
+            route, &prepare_loss_lane, &lanes))
+        SKIP("shared-I/O provider state is not compiled into this build");
+    REQUIRE(route.prepared());
+    REQUIRE(lanes.prepared == 2);
+
+    // Positive control: both authenticated lanes are Ready.
+    auto status = validated(route.status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK_FALSE(route.fenced());
+    for (const auto& lane : route.report().lanes)
+        CHECK(lane.status.provider_state == GpuAudioProviderState::Ready);
+
+    // Lose lane 1's provider; its worker observes the loss on the next pump.
+    lanes.providers[1]->lost = true;
+    CHECK(pulp::test::wait_for_condition([&] {
+        return validated(route.status_snapshot()).provider_state ==
+               GpuAudioProviderState::Unavailable;
+    }));
+    status = validated(route.status_snapshot());
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(route.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(route.fenced());
+    const auto report = route.report();
+    CHECK(report.lanes[0].status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(report.lanes[1].status.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(report.lanes[1].status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    route.release();
+    CHECK(validated(route.status_snapshot()).provider_state ==
+          GpuAudioProviderState::Uninitialized);
 }
 
 } // namespace

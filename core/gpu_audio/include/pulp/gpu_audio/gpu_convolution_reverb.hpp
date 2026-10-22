@@ -13,6 +13,10 @@
 
 namespace pulp::gpu_audio {
 
+namespace detail {
+struct GpuConvolutionReverbTestAccess;
+} // namespace detail
+
 /// Configuration for the opt-in GPU realization of Forge's stereo convolution
 /// reverb.  The CPU catalog realization remains the default; callers must set
 /// `gpu_enabled` explicitly before prepare().
@@ -43,6 +47,9 @@ struct GpuConvolutionReverbLaneReport {
     GpuAudioCapabilityReport capability;
     GpuAudioTransport::Stats stats;
     GpuAudioTransport::DeliverySnapshot delivery;
+    // The lane transport's status_snapshot(), including its convolver's
+    // health. Appended so positional initialization of the fields above holds.
+    GpuAudioStatus status;
 };
 
 struct GpuConvolutionReverbReport {
@@ -108,6 +115,16 @@ class GpuConvolutionReverb final {
 
     GpuConvolutionReverbReport report() const noexcept;
 
+    /// Allocation-free status of the least healthy lane (lane 0 on a tie),
+    /// because one fenced or lost lane already changes what the route emits.
+    /// Per-lane statuses are in report().lanes[i].status. Uninitialized until
+    /// prepare() succeeds. Host/UI thread; not concurrent with prepare().
+    GpuAudioStatus status_snapshot() const noexcept;
+    /// First latched recovery cause of that lane, or None.
+    GpuAudioRecoveryReason recovery_reason() const noexcept;
+    /// True before preparation, or when any lane's GPU delivery is fenced.
+    bool fenced() const noexcept;
+
   private:
     struct Lane;
     struct ControlSample {
@@ -119,7 +136,12 @@ class GpuConvolutionReverb final {
     };
 
     bool valid_config() const noexcept;
-    bool prepare_lanes() noexcept;
+    // Prepares each lane's convolver: the authenticated shared provider by
+    // default, or `prepare_node` when a private test seam supplies one.
+    using LaneNodePreparer = bool (*)(GpuConvolver&, void*) noexcept;
+    bool prepare_with(LaneNodePreparer prepare_node, void* context) noexcept;
+    bool prepare_lanes(LaneNodePreparer prepare_node, void* context) noexcept;
+    friend struct detail::GpuConvolutionReverbTestAccess;
     void update_filter_coefficients() noexcept;
     void clear_runtime_buffers() noexcept;
     void process_quantum() noexcept;

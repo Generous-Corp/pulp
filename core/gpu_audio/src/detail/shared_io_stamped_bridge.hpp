@@ -19,7 +19,8 @@ enum class SharedIoRecoveryReason : std::uint8_t {
     ProviderFailure,
     ProviderLost,
     OfflineFence,
-    InvalidCallback
+    InvalidCallback,
+    ProviderUnresponsive
 };
 
 // Fixed audio records between one callback producer/consumer and one serialized
@@ -140,6 +141,11 @@ class SharedIoStampedBridge {
     bool activate_epoch(std::uint64_t epoch) noexcept;
     std::uint64_t delivery_epoch() const noexcept {
         return delivery_epoch_.load(std::memory_order_acquire);
+    }
+    // First sequence of the current epoch; written only while the callback is
+    // quiescent, so the serialized worker may read it.
+    std::uint64_t epoch_first_sequence() const noexcept {
+        return epoch_first_sequence_;
     }
     // Callback-owned absolute stream position. The serialized worker uses this
     // at an epoch boundary so its collector starts at the exact record the

@@ -268,6 +268,37 @@ and missing results remain tied to their epoch/sequence; they never shift later
 samples into an earlier hole. See [the lifecycle and limitations](gpu-audio-wavenet-realtime.md).
 This is experimental correctness infrastructure, not a CPU-saving claim.
 
+`<pulp/gpu_audio/gpu_neural_realtime_node.hpp>` adds `GpuNeuralRealtimeNode`,
+one realtime contract for every neural family Pulp hosts. The family
+(`NeuralFamily::WaveNet`, `Tcn`, `Ssm`, `Lstm`, `Gru`, `Custom`) is a
+configuration field, not a class. Every node owns a built-in CPU shadow of its
+model. The transport feeds the shadow on every callback, and the shadow emits
+its result `lead_blocks` callbacks later, so `cpu_fallback_prepared()` is true
+for every prepared node and the miss policy is always `CpuFallback`. Only
+WaveNet has a GPU backend. TCN, SSM, LSTM and GRU run the same contract on the
+CPU only: their `capability_report()` reports the `Cpu` path and provider with
+`gpu_kernel_available` false, and `epoch()` stays zero because no GPU delivery
+epoch is ever opened. A WaveNet model whose provider cannot be prepared uses the same
+CPU-only contract. Its status reports a GPU request that was degraded to the
+CPU, and preparation still succeeds. Models are built by Pulp's private,
+host-only model factory from a verified neural model manifest, and each model
+binds to one node. The shadow runs on the audio thread for every block, even
+when the GPU delivers, so measure its cost for the model size you ship.
+A transport hosting a CPU-only family reports the `Cpu` path and provider and
+a `Ready` state. Because the CPU model is that node's primary path, its blocks
+count under `fallback_blocks` and never under `missed_blocks`. A WaveNet
+model whose GPU provider could not be prepared also runs on the `Cpu` path. It
+reports `Degraded`, with `ProviderFailure` as the recovery reason.
+
+Non-finite input samples (NaN, +Inf, -Inf) are replaced with zero before
+either the GPU submission or the CPU shadow sees them, so the two stay
+comparable and no causal state is poisoned. `sanitized_input_samples()`
+counts the replacements.
+
+Any latched cause, including one invalid callback, fences GPU delivery until
+the host prepares the node again. The shadow carries the stream until then.
+`last_prepare_error()` reports why `prepare()` failed.
+
 When a host has already prepared a transport, pass its
 `GpuAudioCapabilityReport` to the two-argument overload of
 `validate_gpu_audio_program()`. That overload binds the declaration to the
@@ -585,6 +616,50 @@ instants while processing continues. Stop the callback before checking exact
 aggregate totals. Do not race preparation or destruction with snapshot readers.
 These aggregate counters complement the per-block tracing identities; they do
 not replace terminal-disposition or deadline analysis.
+
+### Read provider health after a fence
+
+`GpuAudioTransport::status_snapshot()` folds the hosted node's health into
+`provider_state`. A node whose GPU delivery is fenced reports `Degraded` with the
+first latched `recovery_reason` and `recovery_sequence`, for example
+`InputSaturated`, `ProviderFailure`, `OfflineFence` or `InvalidCallback`. While it
+is `Degraded`, the callback continues on the prepared CPU fallback, or emits
+silence for a node that declared no fallback. A lost provider (`ProviderLost`, or
+`ProviderUnresponsive`) is `Unavailable`, because nothing in the current
+preparation can bring it back. A node that also latched an earlier cause still
+reports `Unavailable` and keeps the first cause. Whenever the state is not
+`Ready`, `selected_engine` names the engine that actually delivers. That is
+`Cpu` for a node with a CPU fallback, and `Unknown` for a node that emits
+silence; it is never `Gpu`. `provider` still names the provider that was
+prepared. `epoch`,
+`delivery_epoch_active` and `terminal_counts` come from the node when it
+supplies them. The shared `GpuConvolver` path supplies the epoch and counts one
+terminal disposition per admitted GPU block. A refused or failed block is counted
+as `CpuFallback`, because that is what the callback delivers for it.
+
+The read is allocation-free and safe from a UI thread. `status_snapshot()` and
+`capability_report()` read only the transport's own copies: the configuration
+captured at `prepare()`, and the last health sample. They never touch the node,
+so a host may re-prepare or destroy the node while a UI thread reads status.
+The transport worker takes the samples. For `GpuWaveNetRealtimeNode` and the
+shared `GpuConvolver` path, it calls the node's private health hook after every
+service step. For a staged node, it calls the node's own
+`GpuAudioNode::status_snapshot()` after every pump. `prepare()` and the offline
+fence sample as well. Each sample is republished as one coherent copy, so a
+snapshot can trail the node by up to one worker pump but never mixes two
+samples. If no stable copy is available for a realtime node, the status is never
+reported as `Ready`. A staged node whose status keeps the base default carries
+no health, so the transport's staged `Degraded` stands.
+
+The convolver family reports the same status directly. `GpuConvolver`,
+`GpuMultiConvolver` and `GpuConvolutionReverb` each gain `status_snapshot()`,
+`recovery_reason()` and `fenced()`. A staged convolver reports `provider` and
+`selected_engine` as `Unknown`, because a live `GpuCompute` device identifies
+neither. Without a device, the engine is reported as `Cpu`. A lost staged device
+is `Unavailable` with `ProviderLost`. `GpuMultiConvolver` declares
+`fallback_policy == Silence` and `fallback_available == false`, so a lost device
+explains silent blocks. `GpuConvolutionReverb::status_snapshot()` returns the
+least healthy lane, and `report().lanes[i].status` carries each lane.
 
 ### Keep host controls separate from callback execution
 

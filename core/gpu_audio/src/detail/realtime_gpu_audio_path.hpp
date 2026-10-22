@@ -3,9 +3,11 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/gpu_audio_status.hpp>
 
 #include "shared_io_provider_identity.hpp"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 
@@ -27,6 +29,28 @@ using RealtimeGpuDeliveryFn = void (*)(void*, std::uint64_t, std::uint8_t, std::
 using RealtimeGpuSequenceFn = std::uint64_t (*)(void*) noexcept;
 using RealtimeGpuFenceFn = bool (*)(void*) noexcept;
 
+// One allocation-free health sample, filled by the node's `health` hook.
+// Hook contract: serialized non-RT only. GpuAudioTransport calls it from its
+// worker after each service step and after the offline fence, or from a
+// quiescent host inside prepare(). It is never called from a UI or realtime
+// thread, so a node may read worker-owned state there. The UI-safe read is
+// GpuAudioTransport::status_snapshot(), which serves the transport's coherent
+// copy of the last sample and never calls into the node.
+struct RealtimeGpuHealth {
+    bool fenced = false;
+    GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
+    std::uint64_t recovery_sequence = UINT64_MAX;
+    std::uint64_t epoch = 0;
+    bool delivery_epoch_active = false;
+    bool device_lost = false;
+    // Indexed by GpuAudioTerminalDisposition.
+    std::array<std::uint64_t, GpuAudioStatus::kTerminalDispositionCount> terminal_counts{};
+};
+// Returns false when no coherent read could be taken.
+using RealtimeGpuHealthFn = bool (*)(const void*, RealtimeGpuHealth&) noexcept;
+// Non-RT: release and re-prepare the provider, opening a new epoch.
+using RealtimeGpuReprepareFn = bool (*)(void*) noexcept;
+
 struct RealtimeGpuNodePath {
     void* context = nullptr;
     RealtimeGpuProcessFn process = nullptr;
@@ -36,6 +60,10 @@ struct RealtimeGpuNodePath {
     // Host/quiescent only: the prepared node retains the callback timeline
     // across transport release, reconstruction and reprepare.
     RealtimeGpuSequenceFn next_sequence = nullptr;
+    // Optional; not part of active(). `health` is populated for the WaveNet
+    // realtime node and the shared GpuConvolver path; `reprepare` is unused.
+    RealtimeGpuHealthFn health = nullptr;
+    RealtimeGpuReprepareFn reprepare = nullptr;
 
     bool active() const noexcept {
         return context != nullptr && process != nullptr && service != nullptr && fence != nullptr &&
