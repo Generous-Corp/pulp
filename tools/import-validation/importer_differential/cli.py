@@ -29,6 +29,7 @@ from .core import (
     write_json,
 )
 from .reports import format_corpus_summary, format_summary
+from .rescore import replay, rescore_corpus
 from tools.harness.differential.contract import normalize_report
 
 
@@ -424,9 +425,38 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--output", type=Path, required=True)
     benchmark.add_argument("--runs", type=positive_int, default=5)
     benchmark.set_defaults(func=command_benchmark)
+
+    rescore = subparsers.add_parser(
+        "rescore", help="replay a finished corpus's artifacts through the scorer")
+    rescore.add_argument("--corpus", type=Path, required=True)
+    rescore.add_argument("--output", type=Path, required=True)
+    rescore.add_argument(
+        "--fixture-sources", type=Path,
+        default=_REPO_ROOT / "test" / "fixtures" / "import-differential",
+        help="directory holding the interaction plans fixtures name")
+    rescore.set_defaults(func=command_rescore)
     return parser
 
 
+def command_rescore(args: argparse.Namespace) -> int:
+    try:
+        receipt = rescore_corpus(
+            args.corpus.resolve(), args.output.resolve(),
+            args.fixture_sources.resolve())
+    except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"importer_differential_lab: {exc}", file=sys.stderr)
+        return 2
+    for name, row in receipt["fixtures"].items():
+        print(f"{row['report_sha256']}  {name}")
+    for name in receipt["skipped_without_report"]:
+        print(f"skipped (no stored report)  {name}")
+    return 0
+
+
 def main() -> int:
+    # The rescore replay stands in for the importer and observer processes, so
+    # it takes their argv verbatim instead of going through argparse.
+    if len(sys.argv) > 2 and sys.argv[1] == "replay-artifact":
+        return replay(sys.argv[2], sys.argv[3:])
     args = build_parser().parse_args()
     return args.func(args)
