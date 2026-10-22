@@ -264,7 +264,7 @@ void Knob::on_mouse_drag(Point pos) {
     const float snapped = static_cast<float>(core_.normalized());
     if (snapped == value_) return;
     value_ = snapped;
-    request_repaint();
+    request_repaint_self();
     if (on_change) on_change(value_);
 }
 
