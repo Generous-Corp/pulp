@@ -880,10 +880,33 @@ TEST_CASE("GPU-off convolver nodes expose fail-closed provider status",
     REQUIRE_FALSE(convolver.gpu_available());
     REQUIRE(convolver.backend().empty());
 
+    // With no compute device the worker runs the exact CPU convolution: the
+    // status names the CPU engine, an unknown provider and Degraded, never a
+    // GPU kernel, and it passes the public validator.
+    const auto status = convolver.status_snapshot();
+    INFO("status error " << static_cast<int>(validate_gpu_audio_status(status).error));
+    CHECK(validate_gpu_audio_status(status).accepted());
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(status.provider == GpuAudioProvider::Unknown);
+    CHECK(status.fallback_available);
+    CHECK_FALSE(status.gpu_kernel_available);
+    CHECK(convolver.recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK_FALSE(convolver.fenced());
+
+    GpuConvolver unprepared(1, 32, 48000, {1.0f});
+    CHECK(unprepared.status_snapshot().provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK(validate_gpu_audio_status(unprepared.status_snapshot()).accepted());
+    CHECK(unprepared.fenced());
+
     GpuMultiConvolver multi(32, 48000, {{1.0f}});
     REQUIRE_FALSE(multi.prepare());
     REQUIRE_FALSE(multi.gpu_available());
     REQUIRE(multi.backend().empty());
+    const GpuAudioNode& multi_node = multi;
+    const auto multi_status = multi_node.status_snapshot();
+    CHECK(multi_status.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK(validate_gpu_audio_status(multi_status).accepted());
 }
 
 namespace {
