@@ -1608,6 +1608,8 @@ public:
 private:
   static constexpr float kModulatedMarkerHalo = 6.0f;
   void paint_modulated_marker(canvas::Canvas& canvas);
+  // The stock thumb (slab or circle) at track position `pos`, 0..1.
+  void paint_stock_thumb(canvas::Canvas& canvas, float pos, canvas::Color color);
   bool has_modulated_ = false;
   float modulated_ = 0.0f;
   float value_ = 0.0f;
@@ -1800,6 +1802,18 @@ private:
     float skin_track_width_ = 0.0f;
     bool has_skin_track_width_ = false;
 };
+
+/// The SDF shape a widget's chart shader is drawn on: `flat_arc` for a Knob's
+/// value arc, `stadium` for a Fader's track (a vertical Fader turns it a
+/// quarter counter-clockwise, so `t` runs from the bottom up). Empty for a
+/// widget that draws no chart.
+std::optional<canvas::Canvas::SDFShape> widget_chart_shape(const View& view);
+
+/// Height of the stadium a Fader's chart is drawn in, given the fader's
+/// extent across its track: half of it, kept between 8 and 24 units.
+inline float fader_chart_track_thickness(float cross_extent) {
+    return std::clamp(cross_extent * 0.5f, 8.0f, 24.0f);
+}
 
 // ── UA form-control skins ───────────────────────────────────────────────────
 // An imported `appearance: auto` form control carries no CSS paint: the

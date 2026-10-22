@@ -457,3 +457,157 @@ TEST_CASE("a knob painted by a chart preset still shows its value",
     SUCCEED("chart preset renders require PULP_HAS_SKIA");
 #endif
 }
+
+namespace {
+
+struct FaderRender {
+    std::vector<uint8_t> rgba;
+    int width = 0;
+    float luma(int x, int y) const {
+        const auto* p =
+            &rgba[(static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) *
+                  4];
+        return 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2];
+    }
+};
+
+// A fader rendered on its own; `chart` names a preset (or nullptr for none).
+FaderRender render_fader(bool vertical, float value, const char* chart,
+                         const ChartShaderPresetOptions& options = {}, const char* body = nullptr,
+                         bool clear_chart_after = false) {
+    Fader fader;
+    fader.set_orientation(vertical ? Fader::Orientation::vertical : Fader::Orientation::horizontal);
+    const int w = vertical ? 32 : 200, h = vertical ? 200 : 32;
+    fader.set_bounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
+    fader.set_value(value);
+    if (chart) {
+        auto preset = make_chart_shader_preset(chart, options);
+        REQUIRE(preset.error.empty());
+        fader.set_chart_shader(std::move(preset.sksl), preset.reach);
+    }
+    if (body)
+        fader.set_custom_shader(body);
+    if (clear_chart_after)
+        fader.set_chart_shader({});
+    FaderRender out;
+    uint32_t rw = 0, rh = 0;
+    out.rgba =
+        render_to_rgba(fader, static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1.0f, &rw, &rh);
+    REQUIRE(rw == static_cast<uint32_t>(w));
+    out.width = w;
+    return out;
+}
+
+int count_differing(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    REQUIRE(a.size() == b.size());
+    int count = 0;
+    for (size_t i = 0; i < a.size(); i += 4)
+        if (std::abs(int(a[i]) - int(b[i])) + std::abs(int(a[i + 1]) - int(b[i + 1])) +
+                std::abs(int(a[i + 2]) - int(b[i + 2])) >
+            24)
+            ++count;
+    return count;
+}
+
+} // namespace
+
+TEST_CASE("fader chart presets show the fader's value", "[view][shader][chart-preset][fader]") {
+#ifdef PULP_HAS_SKIA
+    if (!raw_rgba_render_available())
+        SKIP("this build has no raw RGBA render backend");
+    // A chart paints the track's material, the same at every value, so the
+    // stock thumb goes on top of it: two values must render differently and
+    // one value the same, on a vertical and a horizontal track.
+    for (bool vertical : {true, false}) {
+        INFO((vertical ? "vertical" : "horizontal"));
+        const auto low = render_fader(vertical, 0.2f, "tube");
+        const auto high = render_fader(vertical, 0.8f, "tube");
+        const auto low_again = render_fader(vertical, 0.2f, "tube");
+        INFO("pixels differing between 0.2 and 0.8: " << count_differing(low.rgba, high.rgba));
+        CHECK(count_differing(low.rgba, high.rgba) > 40);
+        CHECK(count_differing(low.rgba, low_again.rgba) == 0);
+    }
+
+    // With a body shader as well, the body paints over the chart and owns the
+    // value: here a translucent green bar from the left edge as wide as the
+    // value, on a horizontal track. Column 100 is green at 0.8, not at 0.2.
+    constexpr const char* kValueBar = "uniform float2 resolution; uniform float value; "
+                                      "half4 main(float2 p) { return p.x < value * resolution.x ? "
+                                      "half4(0, 0.6, 0, 0.6) : half4(0); }";
+    const auto bar_low = render_fader(false, 0.2f, "tube", {}, kValueBar);
+    const auto bar_high = render_fader(false, 0.8f, "tube", {}, kValueBar);
+    auto green_minus_red = [](const FaderRender& r, int x, int y) {
+        const auto* p = &r.rgba[(static_cast<size_t>(y) * static_cast<size_t>(r.width) +
+                                 static_cast<size_t>(x)) *
+                                4];
+        return int(p[1]) - int(p[0]);
+    };
+    INFO("green-red at column 100: 0.8 -> " << green_minus_red(bar_high, 100, 3) << ", 0.2 -> "
+                                            << green_minus_red(bar_low, 100, 3));
+    CHECK(green_minus_red(bar_high, 100, 3) > 60);
+    CHECK(green_minus_red(bar_low, 100, 3) < 20);
+#else
+    SUCCEED("chart preset renders require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("fader chart presets are lit on screen on vertical and horizontal tracks",
+          "[view][shader][chart-preset][fader]") {
+#ifdef PULP_HAS_SKIA
+    if (!raw_rgba_render_available())
+        SKIP("this build has no raw RGBA render backend");
+    // The track is a stadium 16 units thick, centred across the fader, with a
+    // half width of 6. Horizontal (200 x 32): rows 11 and 20 sit 4.5 units
+    // above and below the centre line. Vertical (32 x 200): columns 11 and 20
+    // sit 4.5 units left and right of it. The thumb is parked at 0.9, away
+    // from the probes (column 60 and row 140).
+    //
+    // A light from above must brighten the horizontal track's top edge, and a
+    // light from the left the vertical track's left edge; reversing the light
+    // reverses the sign. The vertical track is drawn as the horizontal shape
+    // turned a quarter, so this only holds if the chart reports its direction
+    // on screen rather than in the turned frame.
+    auto lit = [](float angle) {
+        ChartShaderPresetOptions options;
+        options.light_angle_deg = angle;
+        return options;
+    };
+    const auto h_above = render_fader(false, 0.9f, "bevel", lit(90.0f));
+    const auto h_below = render_fader(false, 0.9f, "bevel", lit(270.0f));
+    const float h_up = h_above.luma(60, 11) - h_above.luma(60, 20);
+    const float h_down = h_below.luma(60, 11) - h_below.luma(60, 20);
+    const auto v_left = render_fader(true, 0.9f, "bevel", lit(180.0f));
+    const auto v_right = render_fader(true, 0.9f, "bevel", lit(0.0f));
+    const float v_l = v_left.luma(11, 140) - v_left.luma(20, 140);
+    const float v_r = v_right.luma(11, 140) - v_right.luma(20, 140);
+    INFO("horizontal top-bottom: light above " << h_up << ", below " << h_down
+                                               << "; vertical left-right: light left " << v_l
+                                               << ", right " << v_r);
+    CHECK(h_up > 8.0f);
+    CHECK(h_down < -8.0f);
+    CHECK(v_l > 8.0f);
+    CHECK(v_r < -8.0f);
+#else
+    SUCCEED("chart preset renders require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("faders without a chart render as before", "[view][shader][chart-preset][fader]") {
+#ifdef PULP_HAS_SKIA
+    if (!raw_rgba_render_available())
+        SKIP("this build has no raw RGBA render backend");
+    // A fader whose chart was installed and then removed takes the stock path
+    // again, pixel for pixel, at every orientation; and a chart does change
+    // the render, so the comparison is not blind.
+    for (bool vertical : {true, false}) {
+        INFO((vertical ? "vertical" : "horizontal"));
+        const auto stock = render_fader(vertical, 0.4f, nullptr);
+        const auto cleared = render_fader(vertical, 0.4f, "bevel", {}, nullptr, true);
+        const auto charted = render_fader(vertical, 0.4f, "bevel");
+        CHECK(stock.rgba == cleared.rgba);
+        CHECK(count_differing(stock.rgba, charted.rgba) > 40);
+    }
+#else
+    SUCCEED("chart preset renders require PULP_HAS_SKIA");
+#endif
+}
