@@ -342,9 +342,19 @@ CPU only: their `capability_report()` reports the `Cpu` path and provider with
 `gpu_kernel_available` false, and `epoch()` stays zero because no GPU delivery
 epoch is ever opened. A WaveNet model whose provider cannot be prepared uses the same
 CPU-only contract. Its status reports a GPU request that was degraded to the
-CPU, and preparation still succeeds. Models are built by Pulp's private,
-host-only model factory from a verified neural model manifest, and each model
-binds to one node.
+CPU, and preparation still succeeds. Build a model with
+`make_gpu_neural_model()` from `<pulp/gpu_audio/gpu_neural_model.hpp>`. Pass
+it a provenance manifest, the family's shape, and one `GpuNeuralCpuKernel`
+per channel. For WaveNet you can also pass a GPU session configuration. The
+factory reports why it refused a request and never throws. Each model binds
+to one node.
+
+On the GPU path the node detects device loss through the provider's loss
+query, which outranks the failed completions the loss causes. It detects a
+hung provider with a completion watchdog: `Config::watchdog_blocks` callback
+blocks with nothing completed while work is in flight. Both report
+`Unavailable`, with `ProviderLost` or `ProviderUnresponsive` as the reason,
+and the CPU model carries the stream.
 
 Where the shadow runs is `Config::shadow_policy`. The policy governs only
 what happens on a realtime GPU miss:
