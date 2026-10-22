@@ -4460,6 +4460,9 @@ pass `windows_runner_selector_json` with that slot's labels. The schedule has no
 inputs, so the nightly stays on `windows-latest`. A run with either input set skips
 `tracking-issues`, so a red result on a new runner never files or closes the main
 tracking issue. Read where the job actually ran from the job's `runner_name`.
+The selector passes through `tools/scripts/windows_runner_selector.py` first, which
+refuses macOS, Linux, gate-pool and preamble labels. A dispatch with either input set
+runs in its own concurrency group, so it never displaces a pending nightly.
 
 **Before "fixing" this by putting Windows back on merge_group**, note the trade was
 explicit: up to ~24 h of latency on a Windows regression, bought with merge-queue

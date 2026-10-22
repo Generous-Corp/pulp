@@ -234,16 +234,24 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
             "runs-on: ${{ fromJSON(matrix.runs_on_json) }}", consumer
         )
 
-    def test_scheduled_cross_platform_suite_stays_on_latest(self) -> None:
+    def test_cross_platform_windows_takes_a_policed_selector_with_hosted_fallback(self) -> None:
+        # The Windows job's runner comes only from the resolver job, which runs
+        # tools/scripts/windows_runner_selector.py over the dispatch input. The
+        # hosted label is the fallback for an empty input (the schedule passes
+        # none), not a hard-coded runs-on.
         windows = job(self.nightly, "windows")
-        # Only a dispatch input can move the job; the schedule has no inputs,
-        # so the nightly always resolves to the fallback.
-        self.assertIn(
-            """runs-on: ${{ fromJSON(inputs.windows_runner_selector_json || '"windows-latest"') }}""",
-            windows,
-        )
-        self.assertNotIn("vars.", windows.split("runs-on:", 1)[1].split("\n", 1)[0])
+        self.assertIn("needs: windows-runner", windows)
+        self.assertIn("runs-on: ${{ fromJSON(needs.windows-runner.outputs.runs_on) }}", windows)
         self.assertNotIn("windows-2022", windows)
+        resolver = job(self.nightly, "windows-runner")
+        self.assertIn("runs-on: ubuntu-latest", resolver)
+        self.assertIn("tools/scripts/windows_runner_selector.py --selector", resolver)
+        self.assertIn("SELECTOR: ${{ inputs.windows_runner_selector_json || '' }}", resolver)
+        fallback = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "tools/scripts/windows_runner_selector.py"), "--selector", ""],
+            capture_output=True, text=True, encoding="utf-8", check=True,
+        ).stdout.strip()
+        self.assertEqual(fallback, 'runs_on="windows-latest"')
         triggers = yaml.safe_load(self.nightly)[True]
         self.assertEqual(
             triggers["workflow_dispatch"]["inputs"]["windows_runner_selector_json"]["default"], ""

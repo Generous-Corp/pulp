@@ -20,9 +20,11 @@ EnvironmentFile=/etc/pulp/windows-runner-%i.env
 ExecStart=/usr/local/sbin/pulp-windows-ephemeral-runner.sh
 Restart=always
 RestartSec=30
-# A job can run for hours; on stop, the supervisor waits for a busy runner and
-# then resets the VM, so give it room before systemd escalates to SIGKILL.
-TimeoutStopSec=600
+# On stop, the supervisor lets a running job finish (up to its 4800 s busy
+# wait), then shuts the VM down and rolls it back. The timeout covers all of
+# that, so systemd never SIGKILLs a draining job; a kill would leave the VM
+# running and the next start would have to wait the job out.
+TimeoutStopSec=5400
 User=root
 
 [Install]
