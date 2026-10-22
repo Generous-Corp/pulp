@@ -19,6 +19,15 @@
 using namespace pulp::gpu_audio;
 namespace {
 
+// Every status a test reads must pass the public validator.
+GpuAudioStatus checked_status(const GpuWaveNetRealtimeNode& node) {
+    const auto status = node.status_snapshot();
+    const auto validation = validate_gpu_audio_status(status);
+    INFO("validate_gpu_audio_status error " << static_cast<int>(validation.error));
+    CHECK(validation.accepted());
+    return status;
+}
+
 TEST_CASE("realtime provider identity fails closed for an untyped node",
           "[gpu_audio][realtime][provider]") {
     const auto identity = detail::realtime_gpu_provider_identity(nullptr);
@@ -1086,7 +1095,7 @@ TEST_CASE("WaveNet recovery diagnostics latch the first reason and sequence",
     CHECK(detail::WaveNetRealtimeTestAccess::recovery_sequence(h.node) == 37);
     CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderFailure);
     CHECK(h.node.recovery_sequence() == 37);
-    const auto status = h.node.status_snapshot();
+    const auto status = checked_status(h.node);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
     CHECK(status.recovery_sequence == 37);
     CHECK(status.diagnostics_available);
@@ -1108,13 +1117,13 @@ TEST_CASE("WaveNet status projection is truthful across prepare and release",
     config.channels = 1;
     config.lead_blocks = 1;
     GpuWaveNetRealtimeNode node(config);
-    auto initial = node.status_snapshot();
+    auto initial = checked_status(node);
     CHECK(initial.schema_version == GpuAudioStatus::kSchemaVersion);
     CHECK(initial.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK_FALSE(initial.diagnostics_available);
     CHECK(initial.recovery_reason == GpuAudioRecoveryReason::None);
     CHECK(node.release());
-    auto released = node.status_snapshot();
+    auto released = checked_status(node);
     CHECK(released.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK_FALSE(released.diagnostics_available);
 }
@@ -1126,7 +1135,7 @@ TEST_CASE("WaveNet status telemetry remains available without trace recording",
         (void)h.callback(static_cast<float>(block + 1));
         (void)h.service();
     }
-    const auto status = h.node.status_snapshot();
+    const auto status = checked_status(h.node);
     CHECK(status.diagnostics_available);
     CHECK(status.produced_blocks + status.missed_blocks > 0);
 }
@@ -1155,7 +1164,7 @@ TEST_CASE("WaveNet public recovery diagnostics preserve every recovery reason",
         // the unfenced state is Degraded rather than Ready.
         const bool unavailable =
             recovery == Recovery::ProviderLost || recovery == Recovery::ProviderUnresponsive;
-        CHECK(h.node.status_snapshot().provider_state ==
+        CHECK(checked_status(h.node).provider_state ==
               (unavailable ? GpuAudioProviderState::Unavailable : GpuAudioProviderState::Degraded));
         CHECK(h.node.recovery_sequence() ==
               (recovery == Recovery::None ? std::numeric_limits<std::uint64_t>::max() : 91));
@@ -1292,7 +1301,7 @@ TEST_CASE("WaveNet device loss outranks the completion failures it causes",
             CHECK(h.node.recovery_reason() == (lose ? GpuAudioRecoveryReason::ProviderLost
                                                     : GpuAudioRecoveryReason::ProviderFailure));
             CHECK(h.node.recovery_sequence() == 0);
-            const auto status = h.node.status_snapshot();
+            const auto status = checked_status(h.node);
             CHECK(status.provider_state ==
                   (lose ? GpuAudioProviderState::Unavailable : GpuAudioProviderState::Degraded));
             CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
@@ -1327,7 +1336,7 @@ TEST_CASE("WaveNet device loss latches at the oldest in-flight block without a c
     h.service();
     CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
     CHECK(h.node.recovery_sequence() == 0);
-    CHECK(h.node.status_snapshot().provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(checked_status(h.node).provider_state == GpuAudioProviderState::Unavailable);
 }
 
 TEST_CASE("WaveNet submission refused by a lost device latches ProviderLost",
@@ -1396,7 +1405,7 @@ HangRun run_hang(const Tweak& tweak, std::uint32_t callbacks, std::uint32_t pump
     }
     run.reason = h.node.recovery_reason();
     run.sequence = h.node.recovery_sequence();
-    run.state = h.node.status_snapshot().provider_state;
+    run.state = checked_status(h.node).provider_state;
     return run;
 }
 } // namespace
@@ -1460,7 +1469,7 @@ TEST_CASE("WaveNet results are late only once their consuming callback has finis
             h.service();
             h.service();
         }
-        const auto status = h.node.status_snapshot();
+        const auto status = checked_status(h.node);
         const auto late = static_cast<std::size_t>(GpuAudioTerminalDisposition::LateRejected);
         CHECK(missed == 0);
         CHECK(ready == 22);
@@ -1478,7 +1487,7 @@ TEST_CASE("WaveNet results are late only once their consuming callback has finis
         CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
         h.controls[0].complete = true;
         h.service();
-        const auto status = h.node.status_snapshot();
+        const auto status = checked_status(h.node);
         CHECK(status.terminal_counts[static_cast<std::size_t>(
                   GpuAudioTerminalDisposition::LateRejected)] == 1);
         // Late is a miss, not a provider fault.
@@ -1666,7 +1675,7 @@ TEST_CASE("WaveNet provider that completes late through the shared-I/O plan is s
             (void)path.service(path.context, 0);
             (void)path.service(path.context, 0);
         }
-        const auto status = node.status_snapshot();
+        const auto status = checked_status(node);
         INFO("polls " << slow->polls << " completions " << slow->completions);
         CHECK(slow->completions > 0);
         const auto delivered = status.terminal_counts[static_cast<std::size_t>(
@@ -1701,12 +1710,12 @@ TEST_CASE("WaveNet device loss replaces an earlier symptom it caused",
         h.controls[0].fail = true;
         h.service();
         REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderFailure);
-        CHECK(h.node.status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+        CHECK(checked_status(h.node).provider_state == GpuAudioProviderState::Degraded);
         h.controls[0].lost = true;
         h.service();
         CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
         CHECK(h.node.recovery_sequence() == 0);
-        CHECK(h.node.status_snapshot().provider_state == GpuAudioProviderState::Unavailable);
+        CHECK(checked_status(h.node).provider_state == GpuAudioProviderState::Unavailable);
     }
     SECTION("an unresponsive provider that later reports loss") {
         Harness h;
@@ -1728,11 +1737,11 @@ TEST_CASE("WaveNet device loss replaces an earlier symptom it caused",
             h.callback(float(i));
         h.service();
         REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
-        CHECK(h.node.status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+        CHECK(checked_status(h.node).provider_state == GpuAudioProviderState::Degraded);
         h.controls[0].lost = true;
         h.service();
         CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
-        CHECK(h.node.status_snapshot().provider_state == GpuAudioProviderState::Unavailable);
+        CHECK(checked_status(h.node).provider_state == GpuAudioProviderState::Unavailable);
     }
 }
 
@@ -1751,7 +1760,7 @@ TEST_CASE("WaveNet status reports schema v3 epoch, terminals and provider facts"
     h.callback(4);
     h.service();
     // Delivering: blocks 0-3 retired as delivered, block 4 in flight.
-    auto status = h.node.status_snapshot();
+    auto status = checked_status(h.node);
     CHECK(status.schema_version == 3);
     CHECK(status.epoch == 1);
     CHECK(status.delivery_epoch_active);
@@ -1766,7 +1775,7 @@ TEST_CASE("WaveNet status reports schema v3 epoch, terminals and provider facts"
 
     // Fenced: the in-flight block is cancelled and delivery stops.
     REQUIRE(h.path.fence(h.path.context));
-    status = h.node.status_snapshot();
+    status = checked_status(h.node);
     CHECK(status.epoch == 1);
     CHECK_FALSE(status.delivery_epoch_active);
     CHECK(count(status, GpuAudioTerminalDisposition::Cancelled) == 1);
@@ -1778,7 +1787,7 @@ TEST_CASE("WaveNet status reports schema v3 epoch, terminals and provider facts"
     std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
     providers.push_back(std::make_unique<Channel>(h.controls[0]));
     REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(h.node, std::move(providers), h.sequence));
-    status = h.node.status_snapshot();
+    status = checked_status(h.node);
     CHECK(status.epoch == 2);
     CHECK(status.delivery_epoch_active);
     CHECK(count(status, GpuAudioTerminalDisposition::GpuDelivered) == 0);
@@ -1791,7 +1800,7 @@ TEST_CASE("WaveNet status counts a failed block under its miss policy",
     h.service();
     h.controls[0].fail = true;
     h.service();
-    const auto status = h.node.status_snapshot();
+    const auto status = checked_status(h.node);
     CHECK(status.terminal_counts[static_cast<std::size_t>(GpuAudioTerminalDisposition::Silence)] ==
           1);
     CHECK(status.terminal_counts[static_cast<std::size_t>(
@@ -1814,7 +1823,7 @@ TEST_CASE("WaveNet status reports the configured completion mode",
         std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
         providers.push_back(std::make_unique<Channel>(control));
         REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
-        CHECK(node.status_snapshot().completion_mode == mode);
+        CHECK(checked_status(node).completion_mode == mode);
     }
 }
 
@@ -1846,4 +1855,67 @@ TEST_CASE("WaveNet watchdog stays quiet while a concurrent worker admits mid-cal
     INFO("blocks " << h.sequence << " reason " << int(h.node.recovery_reason()));
     CHECK(h.sequence >= 100);
     CHECK(h.node.recovery_reason() != GpuAudioRecoveryReason::ProviderUnresponsive);
+}
+
+TEST_CASE("WaveNet status names the engine producing audio and counts fallback once delivered",
+          "[gpu_audio][wavenet][diagnostic]") {
+    class ShadowNode final : public GpuWaveNetRealtimeNode {
+      public:
+        using GpuWaveNetRealtimeNode::GpuWaveNetRealtimeNode;
+        bool cpu_fallback_prepared() const noexcept override {
+            return true;
+        }
+        void prime_fallback(const pulp::audio::BufferView<const float>&,
+                            std::uint32_t) noexcept override {}
+        void process_cpu_fallback(const pulp::audio::BufferView<const float>&,
+                                  pulp::audio::BufferView<float>& out,
+                                  std::uint32_t n) noexcept override {
+            std::fill_n(out.channel_ptr(0), n, 0.5f);
+        }
+    };
+    const auto count = [](const GpuAudioStatus& status, GpuAudioTerminalDisposition disposition) {
+        return status.terminal_counts[static_cast<std::size_t>(disposition)];
+    };
+    Shape shape;
+    auto config = shape.config(2);
+    config.miss_policy = MissPolicy::CpuFallback;
+    config.supports_cpu_fallback = true;
+    Control control;
+    ShadowNode node(config);
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(control));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {}));
+    std::array<float, 2> input{1, 1}, output{};
+    const float* ip = input.data();
+    float* op = output.data();
+    pulp::audio::BufferView<const float> in(&ip, 1, 2);
+    pulp::audio::BufferView<float> out(&op, 1, 2);
+    const auto block = [&] {
+        transport.process(in, out, 2);
+        transport.pump();
+        transport.pump();
+    };
+    for (int i = 0; i < 4; ++i)
+        block();
+    auto status = checked_status(node);
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded); // fake, unauthenticated
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(count(status, GpuAudioTerminalDisposition::GpuDelivered) == status.produced_blocks);
+
+    // The next submitted block fails. Its consumer is two callbacks away.
+    control.fail = true;
+    transport.process(in, out, 2);
+    transport.pump();
+    transport.pump();
+    status = checked_status(node);
+    REQUIRE(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(count(status, GpuAudioTerminalDisposition::CpuFallback) == 0);
+    for (int i = 0; i < 3; ++i)
+        block();
+    status = checked_status(node);
+    CHECK(count(status, GpuAudioTerminalDisposition::CpuFallback) == 1);
+    CHECK(status.fallback_blocks >= 1);
 }

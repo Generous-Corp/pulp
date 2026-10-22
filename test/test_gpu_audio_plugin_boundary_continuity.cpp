@@ -814,9 +814,14 @@ TEST_CASE("GPU-audio plug-in output stays continuous across simulated provider f
                                      : GpuAudioRecoveryReason::ProviderFailure;
     CHECK(gpu.gpu()->node()->recovery_reason() == expected_reason);
     const bool needs_new_provider = expected_reason != GpuAudioRecoveryReason::ProviderFailure;
-    CHECK(gpu.gpu()->node()->status_snapshot().provider_state ==
-          (needs_new_provider ? GpuAudioProviderState::Unavailable
-                              : GpuAudioProviderState::Degraded));
+    const auto node_status = gpu.gpu()->node()->status_snapshot();
+    INFO("validate_gpu_audio_status error "
+         << static_cast<int>(validate_gpu_audio_status(node_status).error));
+    CHECK(validate_gpu_audio_status(node_status).accepted());
+    CHECK(node_status.provider_state == (needs_new_provider ? GpuAudioProviderState::Unavailable
+                                                            : GpuAudioProviderState::Degraded));
+    // Fenced with a primed CPU shadow: the CPU is the engine producing audio.
+    CHECK(node_status.selected_engine == GpuAudioEngine::Cpu);
     CHECK_FALSE(gpu.gpu()->plan().sequence_gap_seen);
     CHECK(gpu.callback_allocations() == 0);
     require_null(gpu, cpu);

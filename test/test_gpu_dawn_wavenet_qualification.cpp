@@ -265,6 +265,7 @@ struct NodeFaultRun {
         pulp::gpu_audio::GpuAudioProviderState::Uninitialized;
     std::uint64_t sequence = 0;
     std::uint64_t blocks = 0;
+    bool status_valid = false;
     std::string reason_text;
 };
 
@@ -352,7 +353,10 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
     }
     run.reason = node.recovery_reason();
     run.sequence = node.recovery_sequence();
-    run.state = node.status_snapshot().provider_state;
+    const auto status = node.status_snapshot();
+    run.state = status.provider_state;
+    run.status_valid = ga::validate_gpu_audio_status(status).accepted() &&
+                       status.selected_engine != ga::GpuAudioEngine::Gpu;
     run.reason_text = std::string(recovery_name(run.reason));
     if (!node.release())
         run.reason_text += ":release_retained";
@@ -368,14 +372,16 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
     result.node_loss_sequence = loss.sequence;
     result.node_loss_blocks = loss.blocks;
     result.node_loss_receipt = loss.ran && loss.reason == ga_reason::ProviderLost &&
-                               loss.sequence == 0 && loss.state == ga_state::Unavailable;
+                               loss.sequence == 0 && loss.state == ga_state::Unavailable &&
+                               loss.status_valid;
     const auto hang =
         run_node_fault(fixture, proc_table, DawnSharedIoProvider::Fault::DelayCompletion);
     result.node_hang_reason = hang.reason_text;
     result.node_hang_sequence = hang.sequence;
     result.node_hang_blocks = hang.blocks;
     result.node_hang_receipt = hang.ran && hang.reason == ga_reason::ProviderUnresponsive &&
-                               hang.sequence == 0 && hang.state == ga_state::Unavailable;
+                               hang.sequence == 0 && hang.state == ga_state::Unavailable &&
+                               hang.status_valid;
 }
 
 Result run() {
