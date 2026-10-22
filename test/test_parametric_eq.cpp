@@ -97,7 +97,8 @@ TEST_CASE("ParametricEq block processing matches the sample path through a cross
     // which differs from the per-sample cascade by its float round-off.
     float worst = 0.0f;
     for (std::size_t i = 0; i < a.size(); ++i) {
-        if (!std::isfinite(b[i])) continue;
+        if (!std::isfinite(b[i]))
+            continue;
         worst = std::max(worst, std::abs(a[i] - b[i]));
     }
     // The paths differ by the cascade's float round-off (up to about

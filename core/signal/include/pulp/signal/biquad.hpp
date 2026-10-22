@@ -251,7 +251,8 @@ public:
     // snap. Subnormal residency is therefore bounded by one chunk however long
     // the buffer is.
     void process(SampleType* buffer, int num_samples) {
-        if (num_samples <= 0) return;
+        if (num_samples <= 0)
+            return;
         dispatch_fixed<1>(this, nullptr, buffer, nullptr, static_cast<std::size_t>(num_samples));
     }
 
@@ -262,7 +263,8 @@ public:
     // coefficients. Both buffers must hold num_samples samples.
     static void process_stereo(BiquadT& left, BiquadT& right, SampleType* left_buffer,
                                SampleType* right_buffer, int num_samples) {
-        if (num_samples <= 0) return;
+        if (num_samples <= 0)
+            return;
         // Below about 64 samples two separate calls already overlap in the
         // out-of-order window and the lane path measured no faster.
         if (num_samples < kStereoLaneMinSamples) {
@@ -306,8 +308,8 @@ public:
                               std::size_t num_samples) noexcept {
         std::size_t first = 0;
         while (first < count) {
-            const std::size_t n = count - first < kChainSectionsPerPass ? count - first
-                                                                         : kChainSectionsPerPass;
+            const std::size_t n =
+                count - first < kChainSectionsPerPass ? count - first : kChainSectionsPerPass;
             dispatch_pass(n, sections + first, nullptr, buffer, nullptr, num_samples);
             first += n;
         }
@@ -323,8 +325,8 @@ public:
 #if defined(__GNUC__) || defined(__clang__)
         std::size_t first = 0;
         while (first < count) {
-            const std::size_t n = count - first < kChainSectionsPerPass ? count - first
-                                                                         : kChainSectionsPerPass;
+            const std::size_t n =
+                count - first < kChainSectionsPerPass ? count - first : kChainSectionsPerPass;
             // The two channels' passes must take the same form to share
             // lanes; otherwise they run one after the other.
             if (pass_form(left + first, n) == pass_form(right + first, n)) {
@@ -376,16 +378,18 @@ public:
         history_valid_ = true;
     }
 
-private:
+  private:
     enum class BlockForm { sample_order, feedback_last, wide_df1 };
 
     // The form a pass of `count` sections takes (see process_chain()).
     static BlockForm pass_form(const BiquadT* sections, std::size_t count) noexcept {
         if constexpr (std::is_same_v<SampleType, float>) {
-            if (count <= kWideStateMaxSections) return BlockForm::wide_df1;
+            if (count <= kWideStateMaxSections)
+                return BlockForm::wide_df1;
         }
         for (std::size_t k = 0; k < count; ++k)
-            if (sections[k].sample_path_order_in_block_) return BlockForm::sample_order;
+            if (sections[k].sample_path_order_in_block_)
+                return BlockForm::sample_order;
         return BlockForm::feedback_last;
     }
 
@@ -403,37 +407,52 @@ private:
                 bool ok = true;
                 for (std::size_t k = 0; k < Count; ++k) {
                     ok = left[k].prepare_history() && ok;
-                    if (right) ok = right[k].prepare_history() && ok;
+                    if (right)
+                        ok = right[k].prepare_history() && ok;
                 }
                 if (ok) {
-                    if (right) pair_pass<Count, BlockForm::wide_df1>(left, right, left_buffer, right_buffer, num_samples);
-                    else scalar_pass<Count, BlockForm::wide_df1>(left, left_buffer, num_samples);
+                    if (right)
+                        pair_pass<Count, BlockForm::wide_df1>(left, right, left_buffer,
+                                                              right_buffer, num_samples);
+                    else
+                        scalar_pass<Count, BlockForm::wide_df1>(left, left_buffer, num_samples);
                     return;
                 }
                 form = BlockForm::sample_order;
             }
         }
         if (form == BlockForm::feedback_last) {
-            if (right) pair_pass<Count, BlockForm::feedback_last>(left, right, left_buffer, right_buffer, num_samples);
-            else scalar_pass<Count, BlockForm::feedback_last>(left, left_buffer, num_samples);
+            if (right)
+                pair_pass<Count, BlockForm::feedback_last>(left, right, left_buffer, right_buffer,
+                                                           num_samples);
+            else
+                scalar_pass<Count, BlockForm::feedback_last>(left, left_buffer, num_samples);
         } else {
-            if (right) pair_pass<Count, BlockForm::sample_order>(left, right, left_buffer, right_buffer, num_samples);
-            else scalar_pass<Count, BlockForm::sample_order>(left, left_buffer, num_samples);
+            if (right)
+                pair_pass<Count, BlockForm::sample_order>(left, right, left_buffer, right_buffer,
+                                                          num_samples);
+            else
+                scalar_pass<Count, BlockForm::sample_order>(left, left_buffer, num_samples);
         }
     }
 
     static void dispatch_pass(std::size_t count, BiquadT* l, BiquadT* r, SampleType* lb,
                               SampleType* rb, std::size_t n) noexcept {
         switch (count) {
-#define PULP_BIQUAD_PASS_CASE(C) \
-            case C: dispatch_fixed<C>(l, r, lb, rb, n); return;
-            PULP_BIQUAD_PASS_CASE(1) PULP_BIQUAD_PASS_CASE(2) PULP_BIQUAD_PASS_CASE(3)
-            PULP_BIQUAD_PASS_CASE(4) PULP_BIQUAD_PASS_CASE(5) PULP_BIQUAD_PASS_CASE(6)
-            PULP_BIQUAD_PASS_CASE(7) PULP_BIQUAD_PASS_CASE(8) PULP_BIQUAD_PASS_CASE(9)
-            PULP_BIQUAD_PASS_CASE(10) PULP_BIQUAD_PASS_CASE(11) PULP_BIQUAD_PASS_CASE(12)
-            PULP_BIQUAD_PASS_CASE(13) PULP_BIQUAD_PASS_CASE(14) PULP_BIQUAD_PASS_CASE(15)
+#define PULP_BIQUAD_PASS_CASE(C)                                                                   \
+    case C:                                                                                        \
+        dispatch_fixed<C>(l, r, lb, rb, n);                                                        \
+        return;
+            PULP_BIQUAD_PASS_CASE(1)
+            PULP_BIQUAD_PASS_CASE(2) PULP_BIQUAD_PASS_CASE(3) PULP_BIQUAD_PASS_CASE(4)
+                PULP_BIQUAD_PASS_CASE(5) PULP_BIQUAD_PASS_CASE(6) PULP_BIQUAD_PASS_CASE(7)
+                    PULP_BIQUAD_PASS_CASE(8) PULP_BIQUAD_PASS_CASE(9) PULP_BIQUAD_PASS_CASE(10)
+                        PULP_BIQUAD_PASS_CASE(11) PULP_BIQUAD_PASS_CASE(12)
+                            PULP_BIQUAD_PASS_CASE(13) PULP_BIQUAD_PASS_CASE(14)
+                                PULP_BIQUAD_PASS_CASE(15)
 #undef PULP_BIQUAD_PASS_CASE
-            default: dispatch_fixed<16>(l, r, lb, rb, n); return;
+                                    default : dispatch_fixed<16>(l, r, lb, rb, n);
+            return;
         }
     }
 
@@ -474,16 +493,23 @@ private:
             double b0[Count], b1[Count], b2[Count], na1[Count], na2[Count];
             double x1[Count], x2[Count], y1[Count], y2[Count];
             for (std::size_t k = 0; k < Count; ++k) {
-                b0[k] = sec[k].b0_; b1[k] = sec[k].b1_; b2[k] = sec[k].b2_;
-                na1[k] = -static_cast<double>(sec[k].a1_); na2[k] = -static_cast<double>(sec[k].a2_);
-                x1[k] = sec[k].hx1_; x2[k] = sec[k].hx2_; y1[k] = sec[k].hy1_; y2[k] = sec[k].hy2_;
+                b0[k] = sec[k].b0_;
+                b1[k] = sec[k].b1_;
+                b2[k] = sec[k].b2_;
+                na1[k] = -static_cast<double>(sec[k].a1_);
+                na2[k] = -static_cast<double>(sec[k].a2_);
+                x1[k] = sec[k].hx1_;
+                x2[k] = sec[k].hx2_;
+                y1[k] = sec[k].hy1_;
+                y2[k] = sec[k].hy2_;
             }
             for (std::size_t start = 0; start < num_samples; start += kSnap) {
                 const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
                 for (std::size_t i = start; i < end; ++i) {
                     double v = buffer[i];
                     for (std::size_t k = 0; k < Count; ++k)
-                        v = df1_step(v, b0[k], b1[k], b2[k], na1[k], na2[k], x1[k], x2[k], y1[k], y2[k]);
+                        v = df1_step(v, b0[k], b1[k], b2[k], na1[k], na2[k], x1[k], x2[k], y1[k],
+                                     y2[k]);
                     buffer[i] = static_cast<SampleType>(v);
                 }
                 for (std::size_t k = 0; k < Count; ++k) {
@@ -494,18 +520,25 @@ private:
             for (std::size_t k = 0; k < Count; ++k)
                 sec[k].store_history(x1[k], x2[k], y1[k], y2[k]);
         } else {
-            SampleType b0[Count], b1[Count], b2[Count], a1[Count], na1[Count], a2[Count], s1[Count], s2[Count];
+            SampleType b0[Count], b1[Count], b2[Count], a1[Count], na1[Count], a2[Count], s1[Count],
+                s2[Count];
             for (std::size_t k = 0; k < Count; ++k) {
-                b0[k] = sec[k].b0_; b1[k] = sec[k].b1_; b2[k] = sec[k].b2_;
-                a1[k] = sec[k].a1_; na1[k] = -sec[k].a1_; a2[k] = sec[k].a2_;
-                s1[k] = sec[k].s1_; s2[k] = sec[k].s2_;
+                b0[k] = sec[k].b0_;
+                b1[k] = sec[k].b1_;
+                b2[k] = sec[k].b2_;
+                a1[k] = sec[k].a1_;
+                na1[k] = -sec[k].a1_;
+                a2[k] = sec[k].a2_;
+                s1[k] = sec[k].s1_;
+                s2[k] = sec[k].s2_;
             }
             for (std::size_t start = 0; start < num_samples; start += kSnap) {
                 const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
                 for (std::size_t i = start; i < end; ++i) {
                     SampleType x = buffer[i];
                     for (std::size_t k = 0; k < Count; ++k)
-                        x = df2t_step<Form>(x, b0[k], b1[k], b2[k], a1[k], na1[k], a2[k], s1[k], s2[k]);
+                        x = df2t_step<Form>(x, b0[k], b1[k], b2[k], a1[k], na1[k], a2[k], s1[k],
+                                            s2[k]);
                     buffer[i] = x;
                 }
                 for (std::size_t k = 0; k < Count; ++k) {
@@ -550,7 +583,8 @@ private:
                 for (std::size_t i = start; i < end; ++i) {
                     WidePair v = {static_cast<double>(lb[i]), static_cast<double>(rb[i])};
                     for (std::size_t k = 0; k < Count; ++k)
-                        v = df1_step(v, b0[k], b1[k], b2[k], na1[k], na2[k], x1[k], x2[k], y1[k], y2[k]);
+                        v = df1_step(v, b0[k], b1[k], b2[k], na1[k], na2[k], x1[k], x2[k], y1[k],
+                                     y2[k]);
                     lb[i] = static_cast<SampleType>(v[0]);
                     rb[i] = static_cast<SampleType>(v[1]);
                 }
@@ -566,7 +600,8 @@ private:
                 r[k].store_history(x1[k][1], x2[k][1], y1[k][1], y2[k][1]);
             }
         } else {
-            Pair b0[Count], b1[Count], b2[Count], a1[Count], na1[Count], a2[Count], s1[Count], s2[Count];
+            Pair b0[Count], b1[Count], b2[Count], a1[Count], na1[Count], a2[Count], s1[Count],
+                s2[Count];
             for (std::size_t k = 0; k < Count; ++k) {
                 b0[k] = Pair{l[k].b0_, r[k].b0_};
                 b1[k] = Pair{l[k].b1_, r[k].b1_};
@@ -582,7 +617,8 @@ private:
                 for (std::size_t i = start; i < end; ++i) {
                     Pair v = {lb[i], rb[i]};
                     for (std::size_t k = 0; k < Count; ++k)
-                        v = df2t_step<Form>(v, b0[k], b1[k], b2[k], a1[k], na1[k], a2[k], s1[k], s2[k]);
+                        v = df2t_step<Form>(v, b0[k], b1[k], b2[k], a1[k], na1[k], a2[k], s1[k],
+                                            s2[k]);
                     lb[i] = v[0];
                     rb[i] = v[1];
                 }
@@ -618,7 +654,8 @@ private:
     // same future output in exact arithmetic. Returns false for a degenerate
     // section whose state no history reproduces.
     bool prepare_history() noexcept {
-        if (history_valid_) return true;
+        if (history_valid_)
+            return true;
         const double b1 = b1_, b2 = b2_, a1 = a1_, a2 = a2_;
         const double s1 = s1_, s2 = s2_;
         // s2 = b2 x1 - a2 y1;  s1 = b1 x1 - a1 y1 + b2 x2 - a2 y2
