@@ -701,3 +701,43 @@ TEST_CASE("Convolver overlap-add nulls against a direct convolution for long IRs
         REQUIRE(null_db < -120.0);
     }
 }
+
+TEST_CASE("FFT transforms stay exact across every split placement",
+          "[signal][fft][real]") {
+    // The float transform places its vDSP split buffers on or off a 64-byte
+    // boundary depending on the size and the transform; both placements, and
+    // the switch-over sizes either side of each threshold, must round-trip.
+    for (const int n : {256, 512, 2048, 4096}) {
+        const auto x = real_fft_stimulus<float>(n);
+        Fft fft(n);
+        REQUIRE(fft.ready());
+        std::vector<std::complex<float>> bins(static_cast<std::size_t>(n / 2 + 1));
+        fft.forward_real_half(x.data(), bins.data());
+        std::vector<float> back(static_cast<std::size_t>(n));
+        fft.inverse_real_half(bins.data(), back.data());
+        INFO("n=" << n);
+        REQUIRE(signal_error_db(back.data(), x) < -130.0);
+
+        std::vector<std::complex<float>> c(static_cast<std::size_t>(n));
+        for (int i = 0; i < n; ++i)
+            c[static_cast<std::size_t>(i)] = {x[static_cast<std::size_t>(i)],
+                                              x[static_cast<std::size_t>(n - 1 - i)]};
+        const auto original = c;
+        fft.forward(c.data());
+        fft.inverse(c.data());
+        double err = 0.0, ref = 0.0;
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            err += std::norm(c[i] - original[i]);
+            ref += std::norm(original[i]);
+        }
+        REQUIRE(10.0 * std::log10(err / ref) < -130.0);
+
+        // A moved transform keeps its placement valid.
+        Fft moved(std::move(fft));
+        REQUIRE(moved.ready());
+        std::vector<float> again(static_cast<std::size_t>(n));
+        moved.forward_real_half(x.data(), bins.data());
+        moved.inverse_real_half(bins.data(), again.data());
+        REQUIRE(again == back);
+    }
+}

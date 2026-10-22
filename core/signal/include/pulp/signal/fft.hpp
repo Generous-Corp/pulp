@@ -35,6 +35,11 @@ inline constexpr std::size_t fft_twiddle_index(int phase_index, int stride) noex
 /// not own this allocation and therefore charge zero.
 inline constexpr std::uint64_t kVdspFftSetupChargeBytesPerPoint = 64;
 
+/// Floats a float FftT's vDSP split buffer holds beyond its two N-point
+/// halves: up to 15 to reach a 64-byte boundary plus a 4-float (16-byte)
+/// step off it, which is how the halves' placement is pinned (see FftT).
+inline constexpr std::uint64_t kVdspSplitPaddingFloats = 20;
+
 template <typename SampleType>
 inline bool checked_fft_platform_setup_bytes(std::uint64_t fft_size,
                                              std::uint64_t target_max_bytes,
@@ -64,7 +69,8 @@ inline bool checked_fft_retained_bytes(std::uint64_t fft_size,
         return false;
 #if PULP_FFT_HAS_VDSP
     if constexpr (std::is_same_v<SampleType, float>) {
-        if (!charge.add<float>(fft_size) || !charge.add<float>(fft_size))
+        if (fft_size > (UINT64_MAX - kVdspSplitPaddingFloats) / 2u
+            || !charge.add<float>(2u * fft_size + kVdspSplitPaddingFloats))
             return false;
     }
 #endif
@@ -103,7 +109,7 @@ public:
         : size_(other.size_), twiddles_(std::move(other.twiddles_))
 #if PULP_FFT_HAS_VDSP
         , log2n_(other.log2n_), vdsp_setup_(other.vdsp_setup_)
-        , split_real_(std::move(other.split_real_)), split_imag_(std::move(other.split_imag_))
+        , split_(std::move(other.split_)), split_base_(other.split_base_)
 #endif
     {
 #if PULP_FFT_HAS_VDSP
@@ -119,8 +125,8 @@ public:
             vdsp_setup_ = other.vdsp_setup_;
             other.vdsp_setup_ = nullptr;
             log2n_ = other.log2n_;
-            split_real_ = std::move(other.split_real_);
-            split_imag_ = std::move(other.split_imag_);
+            split_ = std::move(other.split_);
+            split_base_ = other.split_base_;
 #endif
             size_ = other.size_;
             other.size_ = 0;
@@ -135,8 +141,11 @@ public:
         if constexpr (std::is_same_v<SampleType, float>) {
             log2n_ = 0;
             for (int n = size; n > 1; n >>= 1) ++log2n_;
-            split_real_.resize(size);
-            split_imag_.resize(size);
+            split_.resize(2 * static_cast<std::size_t>(size) + kVdspSplitPaddingFloats);
+            // First element on a 64-byte boundary; vector storage moves with
+            // the vector, so the offset stays valid across moves.
+            const auto address = reinterpret_cast<std::uintptr_t>(split_.data());
+            split_base_ = ((64u - address % 64u) % 64u) / sizeof(float);
         }
 #endif
         // Pre-compute twiddle factors (used as fallback on non-Apple)
@@ -172,8 +181,8 @@ public:
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             return vdsp_setup_ != nullptr
-                && split_real_.size() == static_cast<std::size_t>(size_)
-                && split_imag_.size() == static_cast<std::size_t>(size_);
+                && split_.size() == 2 * static_cast<std::size_t>(size_)
+                                        + kVdspSplitPaddingFloats;
         }
 #endif
         return true;
@@ -297,13 +306,40 @@ private:
 #if PULP_FFT_HAS_VDSP
     int log2n_ = 0;
     FFTSetup vdsp_setup_ = nullptr;
-    mutable std::vector<float> split_real_;
-    mutable std::vector<float> split_imag_;
+    // One buffer holds both split halves so their placement can be chosen.
+    // vDSP takes a separate code path when both halves of a split complex
+    // array sit on 64-byte boundaries, and which path is faster depends on the
+    // transform and the chip. Measured with vDSP_fft_zrip / vDSP_fft_zip:
+    //   * real, 512-2048 points: off-boundary is 1.4-1.9x faster on M5
+    //     Ultra and M5 Max; M3 Ultra prefers the boundary from 1024 points
+    //     (up to 1.3x at 2048). Off-boundary is used: it is the newer chips'
+    //     win and the larger one.
+    //   * real, 4096 points and up: on-boundary, 1.3-1.6x faster on all three.
+    //   * complex, 512 points and up: on-boundary, up to 1.6x faster on all
+    //     three; below 512 off-boundary, up to 1.6x faster on M5.
+    // Two separate allocations left the placement to the allocator, so the
+    // same transform's speed changed with where the buffers landed.
+    mutable std::vector<float> split_;
+    std::size_t split_base_ = 0;
+    static_assert(kVdspSplitPaddingFloats >= 64 / sizeof(float) - 1 + 4,
+                  "split padding must cover the 64-byte alignment slack plus the 4-float step");
 #endif
 
 #if PULP_FFT_HAS_VDSP
+    // N-point halves for complex transforms: on 64-byte boundaries from 512
+    // points up, 16 bytes past one below that.
     DSPSplitComplex split() const {
-        return {split_real_.data(), split_imag_.data()};
+        const std::size_t offset = size_ >= 512 ? 0 : 4;
+        float* base = split_.data() + split_base_ + offset;
+        return {base, base + size_};
+    }
+
+    // N/2-point halves for real transforms: on 64-byte boundaries from 4096
+    // points up, 16 bytes past one below that.
+    DSPSplitComplex real_split() const {
+        const std::size_t offset = size_ >= 4096 ? 0 : 4;
+        float* base = split_.data() + split_base_ + offset;
+        return {base, base + size_ / 2};
     }
 
     void forward_vdsp(std::complex<float>* data) const {
@@ -338,7 +374,7 @@ private:
     // imaginary) and runs vDSP's real transform, whose result is twice the
     // DFT with Nyquist's real part parked in imagp[0].
     void forward_real_packed_vdsp(const float* input) const {
-        DSPSplitComplex z = split();
+        DSPSplitComplex z = real_split();
         vDSP_ctoz(reinterpret_cast<const DSPComplex*>(input), 2, &z, 1,
                   static_cast<vDSP_Length>(size_ / 2));
         vDSP_fft_zrip(vdsp_setup_, &z, 1, log2n_, kFFTDirection_Forward);
@@ -350,8 +386,9 @@ private:
         const int half = size_ / 2;
         const float s = 0.5f * scale;
         auto* out = reinterpret_cast<float*>(output);
-        interleave_scaled(split_real_.data(), split_imag_.data(), out, half, s);
-        out[2 * half] = s * split_imag_[0]; // Nyquist
+        const DSPSplitComplex z = real_split();
+        interleave_scaled(z.realp, z.imagp, out, half, s);
+        out[2 * half] = s * z.imagp[0]; // Nyquist
         out[2 * half + 1] = 0.0f;
         out[1] = 0.0f;                      // DC has no imaginary part
     }
@@ -360,14 +397,14 @@ private:
                                 float scale) const {
         const int half = size_ / 2;
         const auto* in = reinterpret_cast<const float*>(input);
-        float* re = split_real_.data();
-        float* im = split_imag_.data();
+        DSPSplitComplex z = real_split();
+        float* re = z.realp;
+        float* im = z.imagp;
         for (int k = 0; k < half; ++k) {
             re[k] = in[2 * k];
             im[k] = in[2 * k + 1];
         }
         im[0] = in[2 * half]; // Nyquist's real part rides in imagp[0]
-        DSPSplitComplex z = split();
         vDSP_fft_zrip(vdsp_setup_, &z, 1, log2n_, kFFTDirection_Inverse);
         // The packed inverse of the DFT is N times the signal, split as even
         // samples in realp and odd samples in imagp.
@@ -379,11 +416,12 @@ private:
         // vDSP_fft_zrip packs result: realp[0] = DC, imagp[0] = Nyquist, and
         // carries an implicit 2x scale. Unpack, mirror, and scale in one pass.
         const int half = size_ / 2;
-        output[0] = {split_real_[0] * 0.5f, 0.0f};
-        output[half] = {split_imag_[0] * 0.5f, 0.0f};
+        const DSPSplitComplex z = real_split();
+        output[0] = {z.realp[0] * 0.5f, 0.0f};
+        output[half] = {z.imagp[0] * 0.5f, 0.0f};
         for (int i = 1; i < half; ++i) {
-            const float re = split_real_[i] * 0.5f;
-            const float im = split_imag_[i] * 0.5f;
+            const float re = z.realp[i] * 0.5f;
+            const float im = z.imagp[i] * 0.5f;
             output[i] = {re, im};
             // Conjugate symmetry: X[N-k] = conj(X[k])
             output[size_ - i] = {re, -im};

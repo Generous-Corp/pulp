@@ -53,7 +53,8 @@ RetainedChargeOracle exact_owned_store_charge(
 #if PULP_FFT_HAS_VDSP
     result.platform_fft_setups =
         2u * fft_size * kVdspFftSetupChargeBytesPerPoint;
-    const auto platform_split_buffers = 4u * store_bytes<float>(fft_size);
+    const auto platform_split_buffers =
+        2u * store_bytes<float>(2u * fft_size + kVdspSplitPaddingFloats);
 #else
     const std::uint64_t platform_split_buffers = 0;
 #endif
