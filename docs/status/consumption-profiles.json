@@ -1151,6 +1151,7 @@
       "pulp/state/preset_manager.hpp",
       "pulp/state/properties_file.hpp",
       "pulp/state/sequencer_state_channel.hpp",
+      "pulp/state/stable_sort.hpp",
       "pulp/state/state.hpp",
       "pulp/state/state_migration.hpp",
       "pulp/state/state_tree.hpp",
