@@ -720,6 +720,9 @@ TEST_CASE("PresetManager save and rename reject names that leave the presets dir
     REQUIRE_FALSE(fs::exists(outside / "bank" / "Mix.json"));
     REQUIRE_FALSE(pm.save(std::string("nul\0name", 8)));
     REQUIRE_FALSE(pm.save(".."));
+    REQUIRE_FALSE(pm.save("NUL"));
+    REQUIRE_FALSE(pm.save("com1.json"));
+    REQUIRE_FALSE(pm.save("Mix", "con"));
     REQUIRE_FALSE(pm.save(""));
     REQUIRE(pm.current_preset_name().empty());
 

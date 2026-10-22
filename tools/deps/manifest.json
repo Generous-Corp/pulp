@@ -882,11 +882,11 @@
       "version": "2021-03-27",
       "source_kind": "transitive-fetchcontent",
       "repository": "https://github.com/bellard/quickjs.git",
-      "upstream": { "kind": "git-tag", "ref": "2021-03-27" },
+      "upstream": { "kind": "git-branch", "ref": "master" },
       "external_names": ["quickjs"],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Default JS engine, embedded whole inside CHOC's choc/javascript/choc_javascript_QuickJS.h rather than fetched on its own; the version is that header's CONFIG_VERSION, so a QuickJS bump only arrives through a CHOC pin bump. Listed separately so --check-upstream reports QuickJS drift instead of hiding it behind CHOC.",
+      "notes": "Default JS engine, embedded whole inside CHOC's choc/javascript/choc_javascript_QuickJS.h rather than fetched on its own; the version is that header's CONFIG_VERSION (bellard/quickjs publishes release snapshots, not tags, so the upstream reference is the master branch and the audit reports its tip), so a QuickJS bump only arrives through a CHOC pin bump. Listed separately so --check-upstream reports QuickJS drift instead of hiding it behind CHOC.",
       "source_files": [
         "tools/cmake/PulpDependencies.cmake",
         "core/view/src/js_quickjs_engine.cpp"

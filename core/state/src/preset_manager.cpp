@@ -1,3 +1,4 @@
+#include <cctype>
 #include <pulp/state/preset_manager.hpp>
 #include <pulp/runtime/system.hpp>
 #include <choc/text/choc_JSON.h>
@@ -17,8 +18,20 @@ namespace {
 // A preset name or folder is a single path component chosen in the UI. A
 // separator, a parent reference, an embedded NUL, or (on Windows) a drive
 // colon would resolve outside the presets directory.
+// Windows reserves device names (CON, NUL, COM1, ...) with or without an
+// extension; a preset so named cannot be written there, so refuse it everywhere.
+bool is_windows_device_name(std::string_view value) {
+    std::string stem(value.substr(0, value.find('.')));
+    for (char& c : stem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL") return true;
+    if (stem.size() == 4 && (stem.compare(0, 3, "COM") == 0 || stem.compare(0, 3, "LPT") == 0) &&
+        stem[3] >= '1' && stem[3] <= '9')
+        return true;
+    return false;
+}
+
 bool is_safe_path_component(std::string_view value) {
-    if (value.empty() || value == "." || value == "..")
+    if (value.empty() || value == "." || value == ".." || is_windows_device_name(value))
         return false;
     for (char c : value) {
         if (c == '/' || c == '\0')

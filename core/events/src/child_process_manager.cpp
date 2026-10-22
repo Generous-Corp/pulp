@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <optional>
 #include <pulp/events/child_process_manager.hpp>
+#include <pulp/runtime/log.hpp>
 #include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/scope_guard.hpp>
 #include <random>
@@ -27,11 +28,17 @@ std::filesystem::path private_pipe_directory() {
     const auto owner = static_cast<std::uint64_t>(::geteuid());
     const auto directory = tmp / ("pulp-ipc-" + std::to_string(owner));
     struct stat status{};
-    if (::mkdir(directory.c_str(), 0700) != 0 && errno != EEXIST)
+    if (::mkdir(directory.c_str(), 0700) != 0 && errno != EEXIST) {
+        runtime::log_warn("[child-process] cannot create private pipe dir {}; using {}",
+                          directory.string(), tmp.string());
         return tmp;
+    }
     if (::lstat(directory.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) ||
-        status.st_uid != ::geteuid() || (status.st_mode & 0077) != 0)
+        status.st_uid != ::geteuid() || (status.st_mode & 0077) != 0) {
+        runtime::log_warn("[child-process] private pipe dir {} is not owner-only; using {}",
+                          directory.string(), tmp.string());
         return tmp;
+    }
     return directory;
 }
 #endif
