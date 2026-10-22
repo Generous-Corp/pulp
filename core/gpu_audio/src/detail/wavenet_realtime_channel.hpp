@@ -9,11 +9,19 @@ namespace pulp::gpu_audio::detail {
 class WaveNetRealtimeChannel {
   public:
     virtual ~WaveNetRealtimeChannel() = default;
-    virtual bool submit(std::span<const float>, std::uint64_t) noexcept = 0;
+    // `deadline_ns` is a steady-clock instant; a completion observed after it
+    // is reported late. Zero disables late marking.
+    virtual bool submit(std::span<const float>, std::uint64_t sequence,
+                        std::uint64_t deadline_ns) noexcept = 0;
     virtual void service(std::uint64_t) noexcept = 0;
     virtual void service_until(std::uint64_t now_ns, std::uint64_t deadline_ns) noexcept = 0;
     virtual std::optional<GpuWaveNetBlockResult> receive(std::span<float>) noexcept = 0;
     virtual bool release() noexcept = 0;
+    // Serialized worker diagnostic: the provider's device is gone, so nothing
+    // submitted to this channel will complete successfully again.
+    virtual bool lost() const noexcept {
+        return false;
+    }
 };
 struct WaveNetRealtimeTestAccess {
     static void

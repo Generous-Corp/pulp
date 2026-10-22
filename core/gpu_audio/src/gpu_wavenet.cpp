@@ -17,6 +17,7 @@ struct GpuWaveNetSession::Impl {
     std::unique_ptr<detail::SharedIoProgramSession> session;
 #endif
     std::uint32_t block_size = 0;
+    std::uint64_t outstanding = 0;
     GpuWaveNetCompletionPolicy completion_policy = GpuWaveNetCompletionPolicy::ProcessEvents;
     bool completion_policy_supported = true;
 };
@@ -157,8 +158,10 @@ bool GpuWaveNetSession::submit_block(std::span<const float> input, std::uint64_t
         return false;
     std::memcpy(lease->bytes.data(), input.data(), lease->bytes.size());
     const detail::SharedIoProgramSession::SubmitToken token{lease->token, deadline_ns};
-    if (impl_->session->submit(token))
+    if (impl_->session->submit(token)) {
+        ++impl_->outstanding;
         return true;
+    }
     (void)impl_->session->cancel(token);
     return false;
 #endif
@@ -199,6 +202,8 @@ std::optional<GpuWaveNetBlockResult> GpuWaveNetSession::receive(std::span<float>
     const auto completion = impl_->session->pop_completion();
     if (!completion)
         return std::nullopt;
+    if (impl_->outstanding != 0)
+        --impl_->outstanding;
 
     GpuWaveNetBlockResult result{
         .sequence = completion->token.slot.stream_sequence,
@@ -229,10 +234,27 @@ bool GpuWaveNetSession::release() noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (!impl_ || !impl_->session)
         return true;
-    return impl_->session->release();
+    if (!impl_->session->release())
+        return false;
+    // Physical drain retired every admitted slot; nothing remains to receive.
+    impl_->outstanding = 0;
+    return true;
 #else
     return true;
 #endif
+}
+
+bool GpuWaveNetSession::device_lost() const noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (impl_ && impl_->session)
+        if (const auto* provider = impl_->session->owned_provider())
+            return provider->device_lost();
+#endif
+    return false;
+}
+
+std::uint64_t GpuWaveNetSession::outstanding_blocks() const noexcept {
+    return impl_ ? impl_->outstanding : 0;
 }
 
 } // namespace pulp::gpu_audio
