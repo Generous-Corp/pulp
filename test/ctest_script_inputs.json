@@ -1971,6 +1971,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-neural-cpu-simd": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/neural/example.nam"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-node-pack": {
    "data": "none",
    "inputs": [],
@@ -2751,6 +2765,7 @@
   "pulp-test-native-metal-compute",
   "pulp-test-negative-path",
   "pulp-test-network-service-discovery",
+  "pulp-test-neural-cpu-simd",
   "pulp-test-node-pack",
   "pulp-test-notary-env",
   "pulp-test-nsis-installer",
