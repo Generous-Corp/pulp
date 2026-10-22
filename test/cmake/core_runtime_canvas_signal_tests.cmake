@@ -666,6 +666,24 @@ pulp_test_data(pulp-test-nam-tcn-adapter
     PATHS test/fixtures/neural/example.nam
     SOURCES test_nam_tcn_adapter.cpp)
 
+# Private SIMD neural CPU kernels: scalar-vs-NEON nulls per family, nulls
+# against the per-sample references, and the allocation/lock trap on the
+# adapter callback. "[neural-simd-perf]" prints the per-block cost receipt.
+pulp_add_test_suite(pulp-test-neural-cpu-simd
+    SOURCES test_neural_cpu_simd.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_test_data(pulp-test-neural-cpu-simd
+    PATHS test/fixtures/neural/example.nam
+    SOURCES test_neural_cpu_simd.cpp)
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    target_compile_definitions(pulp-test-neural-cpu-simd PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
+endif()
+
 # Private synthetic LSTM/GRU CPU-family contract. This is deliberately separate
 # from provider capability and product-model registration.
 pulp_add_test_suite(pulp-test-recurrent-cpu-adapter

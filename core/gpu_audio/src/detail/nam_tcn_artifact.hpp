@@ -6,6 +6,7 @@
 // off the callback.  The prepared object only mutates fixed-size causal state.
 
 #include "nam_tcn_adapter.hpp"
+#include "nam_wavenet_block_engine.hpp"
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
 
 #include <algorithm>
@@ -22,6 +23,13 @@
 #include <choc/text/choc_JSON.h>
 
 namespace pulp::gpu_audio::detail {
+
+/// Which CPU forward NamTcnArtifact::process() runs.
+///   Reference:   the per-sample scalar oracle with std::tanh.
+///   BlockScalar: the layer-major block engine on portable four-float lanes.
+///   BlockSimd:   the same engine on NEON (arm64); equal to BlockScalar elsewhere.
+/// The block kernels use a bounded rational tanh within 3e-7 of std::tanh.
+enum class NamCpuKernel : std::uint8_t { Reference, BlockScalar, BlockSimd };
 
 class NamTcnArtifact final {
   public:
@@ -150,6 +158,8 @@ class NamTcnArtifact final {
         Model candidate;
         if (!candidate.configure(parsed, weights, scale, error))
             return false;
+        NamWaveNetBlockEngine engine;
+        engine.configure(candidate.engine_arrays(), candidate.head_scale);
         const auto sample_rate =
             root.hasObjectMember("sample_rate") ? number(root["sample_rate"]) : -1.0;
         if (!(sample_rate > 0.0) || !std::isfinite(sample_rate))
@@ -158,6 +168,7 @@ class NamTcnArtifact final {
         // passed validation. A failed replacement must leave the live
         // artifact, including its metadata and causal state, untouched.
         arrays_ = std::move(candidate.arrays);
+        engine_ = std::move(engine);
         head_scale_ = candidate.head_scale;
         sample_rate_ = sample_rate;
         receptive_field_ = candidate.receptive_field;
@@ -228,9 +239,31 @@ class NamTcnArtifact final {
     void reset() noexcept {
         for (auto& array : arrays_)
             array.reset();
+        engine_.reset();
+    }
+
+    /// Control thread only. Resets causal state, since the kernels keep
+    /// separate histories. Topologies the block engine does not cover run the
+    /// reference whatever is requested; cpu_kernel() reports what runs.
+    void set_cpu_kernel(NamCpuKernel kernel) noexcept {
+        requested_kernel_ = kernel;
+        reset();
+    }
+    NamCpuKernel cpu_kernel() const noexcept {
+        return engine_.configured() ? requested_kernel_ : NamCpuKernel::Reference;
     }
 
     void process(const float* input, float* output, std::uint32_t frames) noexcept {
+        switch (cpu_kernel()) {
+        case NamCpuKernel::BlockSimd:
+            engine_.process<neural_simd::DefaultIsa>(input, output, frames);
+            return;
+        case NamCpuKernel::BlockScalar:
+            engine_.process<neural_simd::ScalarIsa>(input, output, frames);
+            return;
+        case NamCpuKernel::Reference:
+            break;
+        }
         for (std::uint32_t i = 0; i < frames; ++i)
             output[i] = process_sample(input[i]);
     }
@@ -480,6 +513,37 @@ class NamTcnArtifact final {
                     state_bytes += layer.convolution.history.size() * sizeof(float);
             return true;
         }
+        /// Views of the loaded weights for the block engine to repack.
+        std::vector<NamWaveNetEngineArray> engine_arrays() const {
+            std::vector<NamWaveNetEngineArray> result;
+            for (const auto& array : arrays) {
+                const auto& c = array.config;
+                NamWaveNetEngineArray e;
+                e.input_size = static_cast<std::uint32_t>(c.input_size);
+                e.channels = static_cast<std::uint32_t>(c.channels);
+                e.kernel = static_cast<std::uint32_t>(c.kernel_size);
+                e.head_size = static_cast<std::uint32_t>(c.head_size);
+                e.gated = c.gated;
+                e.activation = c.activation == "ReLU"       ? NamActivation::ReLU
+                               : c.activation == "Hardtanh" ? NamActivation::Hardtanh
+                               : c.activation == "Sigmoid"  ? NamActivation::Sigmoid
+                               : c.activation == "Identity" ? NamActivation::Identity
+                                                            : NamActivation::Tanh;
+                e.rechannel = array.rechannel.weights.data();
+                e.head = array.head_rechannel.weights.data();
+                e.head_bias = c.head_bias ? array.head_rechannel.biases.data() : nullptr;
+                for (const auto& layer : array.layers)
+                    e.layers.push_back(
+                        {.conv = layer.convolution.weights.data(),
+                         .conv_bias = layer.convolution.biases.data(),
+                         .mixin = layer.mixin.weights.data(),
+                         .residual = layer.residual.weights.data(),
+                         .residual_bias = layer.residual.biases.data(),
+                         .dilation = static_cast<std::uint32_t>(layer.convolution.dilation)});
+                result.push_back(std::move(e));
+            }
+            return result;
+        }
     };
 
     static bool active(const choc::value::ValueView& value, const char* key) {
@@ -537,6 +601,8 @@ class NamTcnArtifact final {
     }
 
     std::vector<Array> arrays_;
+    NamWaveNetBlockEngine engine_;
+    NamCpuKernel requested_kernel_ = NamCpuKernel::Reference;
     double sample_rate_ = -1.0;
     float head_scale_ = 1.0f;
     std::uint32_t receptive_field_ = 0;
@@ -572,6 +638,9 @@ class NamTcnArtifactAdapter final : public StreamingModel {
         std::string error;
         if (!artifact_.load(artifact_path_, &error))
             return false;
+        // The shadow runs the block engine; the artifact's default stays the
+        // reference so it remains a GPU oracle for direct callers.
+        artifact_.set_cpu_kernel(NamCpuKernel::BlockSimd);
         if (artifact_.sample_rate() != static_cast<double>(spec_.sample_rate) ||
             artifact_.receptive_field() != spec_.receptive_field_samples ||
             artifact_.state_bytes() != spec_.state_bytes)
