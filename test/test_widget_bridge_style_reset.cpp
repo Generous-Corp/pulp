@@ -13,6 +13,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/script_engine.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
