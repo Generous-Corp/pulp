@@ -89,9 +89,9 @@ std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 ///
 /// Lifetime: while a GpuAudioTransport hosts a pipelining GpuConvolver
 /// (descriptor().worker_pipeline_blocks > 0), the transport's release() opts
-/// the node back out of pipelining, so the node must outlive that call (or the
-/// transport must be released first). A non-pipelining node is never touched
-/// by release().
+/// the node back out of pipelining. A node destroyed first detaches itself
+/// from the transport, so release() then touches nothing; a non-pipelining
+/// node is never touched by release().
 ///
 /// CPU fallback (MissPolicy::CpuFallback). The fallback is a zero-latency
 /// `signal::FixedIrConvolver` per channel that the transport keeps
