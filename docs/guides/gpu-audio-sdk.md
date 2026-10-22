@@ -16,6 +16,10 @@ The callback contract is real-time-safe; GPU scheduling itself is not a hard
 real-time guarantee. This guide is the developer surface: the compute
 primitives, the real-time transport, and the ready-made processors.
 
+For what happens when the GPU is slow, hung or lost on macOS, how a host reads
+it, and what has been validated in real DAWs, see
+[GPU audio reliability on macOS](gpu-audio-macos-reliability.md).
+
 ## The model in one paragraph
 
 The runtime has two transport costs to manage: payload movement and scheduling.
@@ -413,6 +417,12 @@ Any latched cause, including one invalid callback, fences GPU delivery until
 the host prepares the node again. The shadow carries the stream until then.
 `last_prepare_error()` reports why `prepare()` failed.
 
+The node's GPU path does not yet detect device loss or a hung provider. A real
+loss latches `ProviderFailure` (`Degraded`) rather than `ProviderLost`, and a
+hung provider eventually latches `InputSaturated`. Both still fence GPU
+delivery. Loss and hang detection is currently provided by
+`GpuWaveNetRealtimeNode` and, for loss, the shared-I/O `GpuConvolver`.
+
 When a host has already prepared a transport, pass its
 `GpuAudioCapabilityReport` to the two-argument overload of
 `validate_gpu_audio_program()`. That overload binds the declaration to the
@@ -778,11 +788,18 @@ The convolver family reports the same status directly. `GpuConvolver`,
 `GpuMultiConvolver` and `GpuConvolutionReverb` each gain `status_snapshot()`,
 `recovery_reason()` and `fenced()`. A staged convolver reports `provider` and
 `selected_engine` as `Unknown`, because a live `GpuCompute` device identifies
-neither. Without a device, the engine is reported as `Cpu`. A lost staged device
-is `Unavailable` with `ProviderLost`. `GpuMultiConvolver` declares
+neither. Without a device, the engine is reported as `Cpu`, and so is a
+tripped breaker or a lost device, because the worker's CPU convolution then
+delivers every block. A lost staged device is `Unavailable` with `ProviderLost`,
+and `recovery_sequence` is the worker block at which the cause latched. `GpuMultiConvolver` declares
 `fallback_policy == Silence` and `fallback_available == false`, so a lost device
 explains silent blocks. `GpuConvolutionReverb::status_snapshot()` returns the
 least healthy lane, and `report().lanes[i].status` carries each lane.
+
+Check a quiescent snapshot with `validate_gpu_audio_status()`. The
+[reliability page](gpu-audio-macos-reliability.md#reading-health) lists which
+node produces each recovery reason today, and which values are reserved with no
+producer yet.
 
 ### Keep host controls separate from callback execution
 
@@ -800,6 +817,10 @@ with a stable producer lifetime. No such broker operation is supplied by these
 C++ reports. Include the counter's unit when presenting product-specific
 diagnostics: host callbacks and internal processing quantums are not
 interchangeable.
+
+A GPU-audio health read operation for the control protocol and MCP is planned
+but has not landed. Until it does, read `GpuAudioTransport::status_snapshot()`
+from the host.
 
 ### Interpret worker timing separately
 
