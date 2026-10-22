@@ -44,11 +44,13 @@ endfunction()
 # passing the name avoids copying the string table on every lookup.
 function(_pulp_binary_contains strings_var marker out_var)
     string(LENGTH "${marker}" _marker_length)
+    # `;` is excluded because the runs are joined into a CMake list with `;`,
+    # so a marker containing one could match across two runs.
     if(_marker_length LESS _pulp_marker_min_length
-       OR NOT marker MATCHES "^[!-~]+$")
+       OR NOT marker MATCHES "^[!-:<-~]+$")
         message(FATAL_ERROR
-            "control shipping marker must be printable ASCII without spaces "
-            "and at least ${_pulp_marker_min_length} bytes: ${marker}")
+            "control shipping marker must be printable ASCII without spaces or "
+            "semicolons and at least ${_pulp_marker_min_length} bytes: ${marker}")
     endif()
     string(FIND "${${strings_var}}" "${marker}" _marker_position)
     if(_marker_position GREATER_EQUAL 0)
