@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-ux-gpu-hygiene-watch",
+  "created_at": "2026-10-22T06:57:27Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Three generic GPU-hygiene changes cross these families. RuntimeEffectCache refuses SkSL locals named pos in main(), which break only on Graphite, and a Graphite readback test pins every name-alike case against a control ramp. The iOS render loop requests the ProMotion rate while animating and the iOS AUv3 host Info.plist template sets CADisableMinimumFrameDurationOnPhone, so the request takes effect on iPhone. A test-only frame-identity stamp (test/support/frame_stamp.*) and its decoder (tools/motion/visual/frame_stamp_decode.py) prove which committed update a capture shows. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "tests": [
+    "ctest --test-dir build -R 'DisplayRateBoost'",
+    "ctest --test-dir build -R 'Frame stamp'",
+    "ctest --test-dir build -R 'Runtime-effect names Graphite reserves are refused or render as written'",
+    "ctest --test-dir build -R 'compile_sksl refuses a local named pos in main on every backend'",
+    "ctest --test-dir build -R 'ios-auv3 HostApp template opts out of the 60 Hz iPhone frame cap'",
+    "ctest --test-dir build -R 'pulp-motion-frame-stamp'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-ux-gpu-hygiene",
+  "kind": "change",
+  "created_at": "2026-10-22T06:57:27Z",
+  "slices": [
+    "canvas-kernel",
+    "render-skia-dawn"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); RuntimeEffectCache refuses caller SkSL that declares a local named pos in main(), which on the pinned Skia breaks only on Graphite (compile failure then a crash in the recording submit, or shadowed coordinates rendering black), with a line-numbered diagnostic on every backend; the iOS CADisplayLink render loop requests the screen's maximum frame rate while frames are drawn and returns to the default after sustained idle, through a pure DisplayRateBoost policy beside RenderLoopState. No public API is removed and no design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'DisplayRateBoost'",
+    "ctest --test-dir build -R 'Runtime-effect names Graphite reserves are refused or render as written'",
+    "ctest --test-dir build -R 'compile_sksl refuses a local named pos in main on every backend'",
+    "ctest --test-dir build -R 'ios-auv3 HostApp template opts out of the 60 Hz iPhone frame cap'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}
