@@ -8,11 +8,14 @@
   "capability_families": [
     "render-assets-and-backends"
   ],
-  "rationale": "Adds a content-keyed decode and upload cache for inline encoded image bytes drawn by ImageView data URIs and SceneImage blobs. Keyed draws decode and upload once per (SHA-256 of the bytes, backend) through the existing ImageFileCache, preserving pixel output; backends without a cache draw exactly as before. Pulp continues to own this editable canvas target under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits this generic cache when that target adopts the Vellum package. No source-routing or authority boundary moves.",
+  "rationale": "Adds a content-keyed decode and upload cache for inline encoded image bytes drawn by ImageView data URIs and SceneImage blobs. Keyed draws decode and upload once per (SHA-256 of the bytes, backend) in an ImageFileCache pool separate from file images, bounded by bytes with LRU eviction; an image over the budget draws uncached. Pixel output is preserved; backends without a cache draw exactly as before. Pulp continues to own this editable canvas target under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits this generic cache when that target adopts the Vellum package. No source-routing or authority boundary moves.",
   "tests": [
+    "ctest --test-dir build -R 'An inline image larger than the byte budget'",
     "ctest --test-dir build -R 'Disabling the image cache rebuilds keyed inline bytes'",
     "ctest --test-dir build -R 'ImageView data URI decodes once across Graphite paints'",
+    "ctest --test-dir build -R 'Inline pool stays within its byte budget'",
     "ctest --test-dir build -R 'Keyed inline'",
+    "ctest --test-dir build -R 'Many inline images leave file-image hits untouched'",
     "ctest --test-dir build -R 'Recording canvas records keyed inline bytes'",
     "ctest --test-dir build -R 'SceneImage encoded bytes decode once across Graphite paints'",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",

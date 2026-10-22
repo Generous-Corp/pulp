@@ -6,13 +6,16 @@
   "slices": [
     "canvas-kernel"
   ],
-  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); inline encoded image bytes (an ImageView data:image source, a SceneImage blob) decoded and uploaded a fresh texture on every Skia paint. Canvas gains draw_image_from_keyed_data[_rect] taking a SHA-256 content key; the base forwards to the unkeyed draw so CoreGraphics and recording backends are unchanged, and SkiaCanvas reuses ImageFileCache under a NUL-prefixed inline-sha256 key scoped by backend, never by buffer address. Cached frames are pixel-identical to uncached ones. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); inline encoded image bytes (an ImageView data:image source, a SceneImage blob) decoded and uploaded a fresh texture on every Skia paint. Canvas gains draw_image_from_keyed_data[_rect] taking a SHA-256 content key; the base forwards to the unkeyed draw so CoreGraphics and recording backends are unchanged. SkiaCanvas keeps keyed images in an ImageFileCache pool separate from the file-path pool, keyed by content digest and backend and never by buffer address, bounded by a byte budget (retained encoded copy plus decoded or uploaded pixels) with least-recently-used eviction; an image larger than the budget is drawn uncached, so inline images cannot evict file images. Cached frames are pixel-identical to uncached ones. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",
+    "ctest --test-dir build -R 'An inline image larger than the byte budget'",
     "ctest --test-dir build -R 'Disabling the image cache rebuilds keyed inline bytes'",
     "ctest --test-dir build -R 'ImageView data URI decodes once across Graphite paints'",
+    "ctest --test-dir build -R 'Inline pool stays within its byte budget'",
     "ctest --test-dir build -R 'Keyed inline'",
+    "ctest --test-dir build -R 'Many inline images leave file-image hits untouched'",
     "ctest --test-dir build -R 'Recording canvas records keyed inline bytes'",
     "ctest --test-dir build -R 'SceneImage encoded bytes decode once across Graphite paints'"
   ],

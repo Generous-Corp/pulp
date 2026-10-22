@@ -4,7 +4,7 @@
   "slices": [
     "render-assets-and-backends"
   ],
-  "vellum_obligation": "Carry the content-keyed inline encoded-image decode and upload cache into Vellum's native rendering asset path when the corresponding Pulp target adopts Vellum; never key it by buffer address.",
+  "vellum_obligation": "Carry the content-keyed inline encoded-image decode and upload cache into Vellum's native rendering asset path when the corresponding Pulp target adopts Vellum: keyed by content, never buffer address; separate from file-path images; bounded by bytes, with over-budget images drawn uncached.",
   "evidence": [
     ".github/vellum-expansion-watch-events/20261022-inline-image-content-cache-20261022-watch.json",
     "pulp-test-inline-image-cache-gpu"

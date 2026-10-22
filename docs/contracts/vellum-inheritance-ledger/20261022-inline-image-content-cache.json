@@ -4,7 +4,7 @@
   "slices": [
     "canvas-kernel"
   ],
-  "vellum_obligation": "Vellum's canvas kernel must offer a draw entry for encoded image bytes under a caller-supplied immutable content key that decodes and uploads once per (key, backend) and is never keyed by buffer address; the recording and CPU backends may decline to cache but must draw identically.",
+  "vellum_obligation": "Vellum's canvas kernel must offer a draw entry for encoded image bytes under a caller-supplied immutable content key that decodes and uploads once per (key, backend) and is never keyed by buffer address; those entries must live in a pool separate from file-path images, bounded by bytes (encoded copy plus decoded or uploaded pixels) with LRU eviction, and an image larger than the budget must draw uncached rather than evict the pool; the recording and CPU backends may decline to cache but must draw identically.",
   "evidence": [
     ".github/vellum-change-events/20261022-inline-image-content-cache.json",
     "pulp-test-inline-image-cache-gpu",
