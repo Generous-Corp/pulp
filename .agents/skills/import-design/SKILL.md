@@ -20,6 +20,29 @@ The rebuild control must replay the complete fixture state, including secondary
 meter state such as the `peak` value; matching only a primary value changes the
 rendered workload and invalidates retained-versus-rebuild comparisons.
 
+`--warmup-frames` excludes warmup frames from every statistic, the cumulative
+counters (`paint_calls`, `paint_commands_total`, `layout_passes`, bridge and
+invalidation counts) included: they start at the first sampled frame.
+
+### A DOM node's own layout row: one rule per language
+
+Chromium's DOMSnapshot emits several layout rows for one DOM node: a
+`::before`/`::after` box is followed by a zero-size generated-content row, a
+list marker by its paint record, and a split inline by one row per line box.
+The node's own box is the first row with positive area (a node whose rows are
+all empty keeps its first). In C++ that rule is
+`CapturedStyleIndex::own_layout_row`, which every per-node lookup and the
+document-canvas proof read; in the differential lab it is
+`principal_layout_rows`, read through `snapshot.DomSnapshot`. Never build a
+`{node: row}` map from `layout.nodeIndex` directly: the last row wins and a
+split inline's continuation or a pseudo's empty row silently stands in for
+the node. `test/fixtures/browser-capture-layout-rows` pins both readers to the
+same rows.
+
+The lab's `rescore` subcommand replays a finished corpus's stored artifacts
+through `compare_one` with no browser or importer build. Compare two
+`rescore.json` files with `cmp` to prove a scoring refactor changed nothing.
+
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
 ### Preconverted vector artwork is validation-only
