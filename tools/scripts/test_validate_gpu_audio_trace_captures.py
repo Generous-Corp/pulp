@@ -360,6 +360,32 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
         self.assertIn("queue_not_drained", [row[0] for row in self.rows("capture_issues")])
         self.require_unqualified()
 
+    def test_counters_telemetry_receipt_classification(self) -> None:
+        # The setUp counters row is a legacy producer without telemetry fields:
+        # both values are SQL NULL and the capture stays clean.
+        self.assertIsNone(self.arguments[self.counter].get("debug.telemetry_error"))
+        self.assertEqual(self.rows("capture_issues"), [])
+        fields = {key.removeprefix("debug."): value for key, value in
+                  self.arguments[self.counter].items()
+                  if key not in ("debug.schema", "debug.engine_id", "debug.generation")}
+        # (telemetry_valid, telemetry_error) -> flagged. 0 = None, 12 =
+        # RetirementsExceedSubmissions, 13 = TelemetryValidationDeferred.
+        # An inconsistent pair is flagged even when its error code alone is
+        # acceptable: (0, 0) claims no error yet is not valid, (1, 13) claims
+        # validity for a deferred snapshot.
+        cases = {(1, 0): False, (0, 13): False, (0, 12): True, (0, 0): True,
+                 (1, 13): True, (1, None): True, (None, 0): True}
+        for (valid, error), flagged in cases.items():
+            with self.subTest(valid=valid, error=error):
+                row = self.add("counters", **fields)
+                for key, value in (("telemetry_valid", valid), ("telemetry_error", error)):
+                    if value is not None:
+                        self.arguments[row][f"debug.{key}"] = value
+                issues = [issue for issue, *_ in self.rows("capture_issues")]
+                self.assertEqual("invalid_telemetry" in issues, flagged)
+                self.db.execute("DELETE FROM slice WHERE id = ?", (row,))
+                del self.arguments[row]
+
     def test_loss_and_legacy_schema_fail_closed(self) -> None:
         self.arguments[4]["debug.schema"] = 1
         self.require_unqualified()
