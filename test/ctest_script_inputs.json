@@ -6539,6 +6539,13 @@
    ],
    "kind": "python"
   },
+  "import-validation-chrome-gradient-oracle-selftest": {
+   "entry": "tools/import-validation/test_chrome_gradient_oracle.py",
+   "inputs": [
+    "tools/import-validation/test_chrome_gradient_oracle.py"
+   ],
+   "kind": "python"
+  },
   "import-validation-diff-against-reference-regions-selftest": {
    "entry": "tools/import-validation/test_diff_against_reference_regions.py",
    "inputs": [
