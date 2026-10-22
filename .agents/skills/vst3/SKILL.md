@@ -1487,6 +1487,14 @@ Sample-accurate automation is the default: `Processor::wants_sample_accurate_par
 `IParamValueQueue`'s last point only, writes the store once and leaves
 `param_events_` empty and unsorted. Opted in, it does what follows.
 
+Sample-accurate is the default, and block-rate the opt-out, because an opt-in
+default would silently zipper existing plug-ins: a processor that reads the
+queue would get an empty one and step its automation once per block, with
+nothing failing or warning. An opted-out processor that still reads
+`param_events()` is recorded on the audio thread (`Processor::param_events()`
+does one relaxed store) and logged once by `report_param_events_while_opted_out()`
+in `setActive(false)` and `terminate()`.
+
 VST3 delivers one time-ordered `IParamValueQueue` per parameter, so a block's
 `param_events_` arrive as one sorted run per parameter. An insertion sort over
 those interleaved runs was quadratic (about 28 us for 32 parameters x 16

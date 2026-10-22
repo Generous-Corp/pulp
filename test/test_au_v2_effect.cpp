@@ -1405,7 +1405,11 @@ TEST_CASE("AU v2 effect renders scheduled automation in one call for a block-rat
     REQUIRE(value == Catch::Approx(0.4f));
     REQUIRE(effect.GetParameter(3, kAudioUnitScope_Global, 0, value) == noErr);
     REQUIRE(value == Catch::Approx(0.5f)); // 48 of the ramp's 96 frames
+    // Its ParamCursor read the queue while opted out: recorded, and
+    // reported once when the host cleans the unit up.
+    REQUIRE(DenseAutomationProcessor::last->read_param_events_while_opted_out());
     effect.DoCleanup();
+    REQUIRE_FALSE(DenseAutomationProcessor::last->report_param_events_while_opted_out());
 }
 
 TEST_CASE("AU v2 PulpGain at 0 dB is bit-transparent, including after a round trip",

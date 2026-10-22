@@ -1310,6 +1310,20 @@ that render so the render path keeps the queue. The `[parity]` cases in
 (`test/support/step_gain_fixture.hpp`) and require the same output to the bit,
 and a schedule one sample late must differ.
 
+Sample-accurate is the default, and block-rate the opt-out, because an opt-in
+default would silently zipper existing plug-ins: a processor that reads the
+queue would get an empty one and step its automation once per block, with
+nothing failing or warning. An opted-out processor that still reads
+`param_events()` is recorded on the audio thread (`Processor::param_events()`
+does one relaxed store) and logged once by `report_param_events_while_opted_out()`
+in `Cleanup()`.
+
+The per-slice render is the AU v2 default for the same reason: rendering a
+sample-accurate processor once per buffer changes the output of one that reads
+the store inside each slice, so render-once is the
+`wants_au_scheduled_parameter_slices()` opt-out for processors that read
+automation only through `param_events()`.
+
 The per-slice render described below runs for a sample-accurate processor
 that keeps `wants_au_scheduled_parameter_slices()` at its default of true: it
 may read the store inside each slice instead of `param_events()`. Tests that

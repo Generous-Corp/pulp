@@ -3142,10 +3142,16 @@ TEST_CASE("CLAP delivers automation points only to a processor that asks for the
             REQUIRE(g_observing_param_ingress->observed_param_event_count == 3);
             REQUIRE(g_observing_param_ingress->observed_last_sample_offset == 20);
             REQUIRE(writes == 3);
+            REQUIRE_FALSE(g_observing_param_ingress->read_param_events_while_opted_out());
         } else {
             REQUIRE(g_observing_param_ingress->observed_param_event_count == 0);
             // One store write per parameter per block: the last value only.
             REQUIRE(writes == 1);
+            // Reading the empty queue while opted out is recorded and
+            // reported once.
+            REQUIRE(g_observing_param_ingress->read_param_events_while_opted_out());
+            REQUIRE(g_observing_param_ingress->report_param_events_while_opted_out());
+            REQUIRE_FALSE(g_observing_param_ingress->report_param_events_while_opted_out());
         }
         listener.reset();
     }

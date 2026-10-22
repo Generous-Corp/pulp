@@ -1316,3 +1316,11 @@ a revisioned atomic store and a listener call each time: 6.5 us per block for
 `header.time` and written through as before. Test processors that depend on either mode should set the flag explicitly;
 `ObservingParamIngressProcessor` in `test_clap_midi_events.cpp` shows the
 pattern.
+
+Sample-accurate is the default, and block-rate the opt-out, because an opt-in
+default would silently zipper existing plug-ins: a processor that reads the
+queue would get an empty one and step its automation once per block, with
+nothing failing or warning. An opted-out processor that still reads
+`param_events()` is recorded on the audio thread (`Processor::param_events()`
+does one relaxed store) and logged once by `report_param_events_while_opted_out()`
+in `clap_deactivate()` and `clap_destroy()`.

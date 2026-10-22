@@ -921,7 +921,25 @@ public:
     /// nullptr when the current host path did not provide a parameter-event
     /// queue; an empty queue means the adapter participated but the block had
     /// no parameter events.
-    const state::ParameterEventQueue* param_events() const { return param_events_; }
+    ///
+    /// In VST3, AU v2 and CLAP the queue is always empty for a processor whose
+    /// wants_sample_accurate_parameters() returns false. A read in that state
+    /// is a mistake (the processor opted out of the points it is looking
+    /// for), so it is recorded (one relaxed store, safe on the audio thread)
+    /// and the adapter logs it once, off the audio thread, naming the
+    /// override.
+    const state::ParameterEventQueue* param_events() const {
+        if (param_events_block_rate_)
+            param_events_read_while_block_rate_.store(true, std::memory_order_relaxed);
+        return param_events_;
+    }
+
+    /// True once this processor read param_events() in an adapter that
+    /// delivers it block-rate values only, because its
+    /// wants_sample_accurate_parameters() returns false.
+    bool read_param_events_while_opted_out() const {
+        return param_events_read_while_block_rate_.load(std::memory_order_relaxed);
+    }
 
     /// Timestamped host modulation events for the current block. CLAP
     /// PARAM_MOD events retain their sample offsets here; the StateStore
@@ -968,6 +986,16 @@ public:
     void set_ump_input(const midi::UmpBuffer* ump) { ump_input_ = ump; }
     /// @internal Called by format adapters before process().
     void set_param_events(const state::ParameterEventQueue* events) { param_events_ = events; }
+    /// @internal Called by the VST3, AU v2 and CLAP adapters, which leave the
+    /// queue empty for a processor that opted out of sample-accurate
+    /// parameters, so a read of it can be reported.
+    void set_param_events_block_rate(bool block_rate) {
+        param_events_block_rate_ = block_rate;
+    }
+    /// @internal Logs, once per processor, that it read param_events() while
+    /// opted out. Main thread only (adapters call it on deactivation and
+    /// teardown). Returns true when it logged.
+    bool report_param_events_while_opted_out();
     /// @internal Called by format adapters before process().
     void set_modulation_events(const state::ModulationEventQueue* events) {
         modulation_events_ = events;
@@ -1195,6 +1223,9 @@ private:
     const midi::MpeBuffer* mpe_input_ = nullptr;
     const midi::UmpBuffer* ump_input_ = nullptr;
     const state::ParameterEventQueue* param_events_ = nullptr;
+    bool param_events_block_rate_ = false;
+    mutable std::atomic<bool> param_events_read_while_block_rate_{false};
+    bool param_events_misuse_reported_ = false;
     const state::ModulationEventQueue* modulation_events_ = nullptr;
     state::ParameterEventQueue* output_param_events_ = nullptr;
     audio::Buffer<float> f64_fallback_input_scratch_;

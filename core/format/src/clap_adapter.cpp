@@ -266,6 +266,7 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->processor = self->factory();
     if (!self->processor) return false;
     self->sample_accurate_params = self->processor->wants_sample_accurate_parameters();
+    self->processor->set_param_events_block_rate(!self->sample_accurate_params);
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
     request_editor_prewarm(*self->processor);
@@ -358,6 +359,8 @@ bool clap_init(const clap_plugin_t* plugin) {
 
 void clap_destroy(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    if (self->processor)
+        self->processor->report_param_events_while_opted_out();
     self->owner_alive.retire();
     self->store.set_gesture_callbacks({}, {});
     self->outbound_param_listener.reset();
@@ -580,6 +583,8 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
 
 void clap_deactivate(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    if (self->processor)
+        self->processor->report_param_events_while_opted_out();
     // Cleared before anything else: a latency change raised from here on is
     // seen by an INACTIVE plugin, which needs no restart. Note that
     // `latency_restart_pending` deliberately survives deactivation — the

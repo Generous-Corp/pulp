@@ -1408,9 +1408,13 @@ TEST_CASE("VST3 gives a block-rate processor each parameter's last value and no 
     REQUIRE_THAT(test_processor->state().get_value(kGainParamId), WithinAbs(-10.0f, 1e-3));
     REQUIRE_THAT(test_processor->state().get_value(9), WithinAbs(0.75f, 1e-6));
     REQUIRE(writes.load() == 2);
+    // It read the (empty) queue while opted out: recorded, then reported
+    // once when the host deactivates it.
+    REQUIRE(test_processor->read_param_events_while_opted_out());
 
     listener.reset();
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE_FALSE(test_processor->report_param_events_while_opted_out());
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 

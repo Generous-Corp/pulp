@@ -177,6 +177,13 @@ each point at its offset in the block. AU v2 renders one call per slice
 between scheduled events, with each slice's points relative to the slice. AU
 v3, LV2, AAX and the standalone and headless hosts deliver every point too.
 
+Sample-accurate delivery is the default, and the speedup is an opt-out rather
+than an opt-in, because a processor that reads `param_events()` and silently
+received an empty queue would step its automation once per block (zipper noise
+on sweeps) with nothing failing, warning, or refusing to compile. The AU v2
+per-slice render is the default for the same reason: rendering once per buffer
+changes the output of a processor that reads the store inside each slice.
+
 A processor that reads its parameters once per block, through
 `state().get_value()`, opts out:
 
@@ -191,8 +198,13 @@ sample-accurate processor that reads automation only through `param_events()`
 can also override `wants_au_scheduled_parameter_slices()` to return false: AU
 v2 then renders the buffer in one call with every point at its buffer offset
 (a scheduled ramp arrives as a step to the ramp's starting value plus a ramp
-to its value at the block's end), as VST3 and CLAP do. See
-[the 0.1005.0 migration note](../migrations/v0.1005.0.md).
+to its value at the block's end), as VST3 and CLAP do.
+
+Opting out a processor that does read `param_events()` is the one way to get
+this wrong. The VST3, AU v2 and CLAP adapters record such a read on the audio
+thread (one relaxed atomic store) and log a warning once per processor, when
+the host deactivates or releases it, naming the processor and the override to
+remove. See [the 0.1005.0 migration note](../migrations/v0.1005.0.md).
 
 ```cpp
 void process(audio::BufferView<float>& output,

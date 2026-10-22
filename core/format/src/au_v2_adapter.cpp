@@ -43,6 +43,7 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
         processor_ = factory();
         if (processor_) {
             sample_accurate_params_ = processor_->wants_sample_accurate_parameters();
+            processor_->set_param_events_block_rate(!sample_accurate_params_);
             slice_scheduled_params_ =
                 sample_accurate_params_ && processor_->wants_au_scheduled_parameter_slices();
             processor_->set_state_store(&store_);
@@ -858,7 +859,10 @@ void PulpAUEffect::warm_render_path() {
 
 void PulpAUEffect::Cleanup()
 {
-    if (processor_) processor_->release();
+    if (processor_) {
+        processor_->report_param_events_while_opted_out();
+        processor_->release();
+    }
     AUEffectBase::Cleanup();
 }
 

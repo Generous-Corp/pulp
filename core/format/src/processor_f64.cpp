@@ -1,9 +1,22 @@
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/log.hpp>
 
 #include <algorithm>
 #include <span>
 
 namespace pulp::format {
+
+bool Processor::report_param_events_while_opted_out() {
+    if (param_events_misuse_reported_ || !read_param_events_while_opted_out())
+        return false;
+    param_events_misuse_reported_ = true;
+    runtime::log_warn(
+        "'{}' read param_events() but its wants_sample_accurate_parameters() returns false; "
+        "VST3, AU v2 and CLAP give it an empty queue and block-rate values. Remove that "
+        "override (the default is true) to receive every automation point.",
+        descriptor().name);
+    return true;
+}
 
 void Processor::prepare_f64_fallback_scratch(const PrepareContext& context) {
     const auto desc = descriptor();
