@@ -2599,6 +2599,8 @@
   "pulp-test-gpu-health-provider",
   "pulp-test-gpu-health-read-result",
   "pulp-test-gpu-health-result",
+  "pulp-test-gpu-neural-plugin-boundary-continuity",
+  "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-shared-io-convolution-pipeline",

@@ -2,6 +2,7 @@
 #include "realtime_gpu_health_mirror.hpp"
 
 #include <pulp/gpu_audio/gpu_convolver.hpp>
+#include <pulp/gpu_audio/gpu_neural_realtime_node.hpp>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 
 namespace pulp::gpu_audio::detail {
@@ -30,6 +31,16 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
                 .next_sequence = &GpuWaveNetRealtimeNode::next_sequence,
                 .health = &wavenet_health};
     }
+    auto* neural = dynamic_cast<GpuNeuralRealtimeNode*>(node);
+    if (neural != nullptr && neural->ready()) {
+        return {.context = neural,
+                .process = &GpuNeuralRealtimeNode::process,
+                .service = &GpuNeuralRealtimeNode::service,
+                .fence = &GpuNeuralRealtimeNode::fence,
+                .delivered = &GpuNeuralRealtimeNode::delivered,
+                .next_sequence = &GpuNeuralRealtimeNode::next_sequence,
+                .health = &GpuNeuralRealtimeNode::health};
+    }
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     auto* convolver = dynamic_cast<GpuConvolver*>(node);
     if (convolver != nullptr && convolver->has_realtime_shared_io()) {
@@ -48,13 +59,17 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
 }
 
 bool requires_realtime_gpu_path(GpuAudioNode* node) noexcept {
-    return dynamic_cast<GpuWaveNetRealtimeNode*>(node) != nullptr;
+    return dynamic_cast<GpuWaveNetRealtimeNode*>(node) != nullptr ||
+           dynamic_cast<GpuNeuralRealtimeNode*>(node) != nullptr;
 }
 
 GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept {
     if (auto* wavenet = dynamic_cast<GpuWaveNetRealtimeNode*>(node))
         return wavenet->authenticated_provider() ? GpuAudioProvider::Dawn
                                                  : GpuAudioProvider::Unknown;
+    if (auto* neural = dynamic_cast<GpuNeuralRealtimeNode*>(node))
+        return neural->authenticated_provider() ? GpuAudioProvider::Dawn
+                                                : GpuAudioProvider::Unknown;
     // The existing friend builds this path only for the concrete, prepared
     // Dawn convolver. Reuse that decision without exposing node internals.
     return realtime_gpu_node_path(node).active() ? GpuAudioProvider::Dawn
