@@ -52,19 +52,22 @@ its default, so it does not yet bound teardown.
 Pulp's audio GPU provider owns its own Dawn device; it does not share the
 editor's render device. Today:
 
-- **Loss on the shared-I/O path.** `GpuWaveNetRealtimeNode` and the shared-I/O
-  `GpuConvolver` session detect device loss through the provider's loss
-  callback and loss query, latch it and fence.
+- **Loss on the shared-I/O path.** `GpuWaveNetRealtimeNode`, the GPU path of
+  `GpuNeuralRealtimeNode` (WaveNet is the only family with one) and the
+  shared-I/O `GpuConvolver` session detect device loss through the provider's
+  loss query, latch it and fence.
 - **Loss on the staged path.** The staged `GpuConvolver` latches
   `ProviderLost` and routes every later block to its CPU convolution, so the
   output continues exactly. `GpuMultiConvolver` refuses a lost device and is
   silent, as its `Silence` policy declares. `GpuStft`, `GpuSpectralStack`,
   `GpuSpectralFreeze` and `GpuSpectralMorph` refuse a borrowed device that is
   lost or has a new generation, and write a silent frame.
-- **Hang.** `GpuWaveNetRealtimeNode` alone runs a completion watchdog. It
-  latches `ProviderUnresponsive` when the provider completes nothing for
-  `watchdog_blocks` callback blocks while work is in flight. A worker that is
-  starved while its provider keeps completing is not reported as unresponsive.
+- **Hang.** `GpuWaveNetRealtimeNode` and the GPU path of
+  `GpuNeuralRealtimeNode` run a completion watchdog. Each latches
+  `ProviderUnresponsive` when the provider completes nothing for
+  `Config::watchdog_blocks` callback blocks (default `capacity - 1`) while work
+  is in flight. On `GpuWaveNetRealtimeNode`, a worker that is starved while its
+  provider keeps completing is tested not to be reported as unresponsive.
 - **Slow but alive.** The staged `GpuConvolver` trips a circuit breaker after a
   run of late results and moves to the CPU, reporting `SustainedDeadlineMisses`.
 - **Fence.** On the stamped shared-I/O nodes (both WaveNet nodes and the shared
@@ -84,12 +87,8 @@ Not covered:
   provider. Render-owner loss propagation, resource replay, teardown callback
   suppression and authenticated render-loss DAW continuity are gated on the
   Vellum render-owner seam and are **not proven**;
-- a hung provider behind any node other than `GpuWaveNetRealtimeNode`;
-- device loss or a hang on `GpuNeuralRealtimeNode`'s GPU path. Its WaveNet
-  backend detects neither yet. A real loss latches `ProviderFailure`
-  (`Degraded`), not `ProviderLost`, and a hung provider eventually latches
-  `InputSaturated`. Either cause still fences GPU delivery, and the shadow
-  carries the audio.
+- a hung provider behind the convolvers: only the two WaveNet GPU paths run a
+  watchdog.
 
 **Coming:** automatic re-acquire of a lost provider and a warm provider pool.
 
@@ -167,19 +166,20 @@ latched (`UINT64_MAX` when nothing has latched).
 | `recovery_reason` | `provider_state` | Produced by |
 | --- | --- | --- |
 | `None` | `Ready` (GPU delivering, or a CPU-only neural family), or `Degraded` (staged path, or no provider) | every node |
-| `SequenceGap`, `InvalidCallback` | `Degraded` | both WaveNet nodes, the shared `GpuConvolver`, and the CPU-only neural families |
+| `SequenceGap`, `InvalidCallback` | `Degraded` | both WaveNet GPU paths and the shared `GpuConvolver` |
 | `InputSaturated`, `OfflineFence` | `Degraded` | both WaveNet nodes and the shared `GpuConvolver` |
-| `ProviderFailure` | `Degraded`, or `Unavailable` once a loss is also observed | a failed provider completion; a staged `GpuConvolver` map failure or non-finite readback; a WaveNet model whose GPU provider could not be prepared. `GpuNeuralRealtimeNode` also reports a real device loss this way for now |
-| `ProviderLost` | `Unavailable` | `GpuWaveNetRealtimeNode`, both `GpuConvolver` paths, `GpuMultiConvolver`. Not `GpuNeuralRealtimeNode` yet |
-| `ProviderUnresponsive` | `Unavailable` | `GpuWaveNetRealtimeNode`'s watchdog only |
+| `ProviderFailure` | `Degraded`, or `Unavailable` once a loss is also observed | a failed provider completion; a staged `GpuConvolver` map failure or non-finite readback; a WaveNet model whose GPU provider could not be prepared |
+| `ProviderLost` | `Unavailable` | both WaveNet GPU paths, both `GpuConvolver` paths, `GpuMultiConvolver` |
+| `ProviderUnresponsive` | `Unavailable` | the watchdog on the two WaveNet GPU paths |
 | `SustainedDeadlineMisses` | `Degraded` | the staged `GpuConvolver`'s circuit breaker |
 | `ProviderReacquired` | informational | reserved; nothing produces it. **Coming** with automatic re-acquire |
 
 The first cause wins, with two exceptions where a loss outranks the failures it
 caused:
 
-- On `GpuWaveNetRealtimeNode`, once `ProviderLost` is observed it replaces an
-  earlier `ProviderFailure` or `ProviderUnresponsive`. An independent earlier
+- On `GpuWaveNetRealtimeNode` and the GPU path of `GpuNeuralRealtimeNode`,
+  once `ProviderLost` is observed it replaces an earlier `ProviderFailure` or
+  `ProviderUnresponsive`. An independent earlier
   cause, such as `InputSaturated`, stays the reported reason, and the state is
   still `Unavailable`.
 - On the staged `GpuConvolver`, `ProviderLost` replaces any other cause.
@@ -197,9 +197,11 @@ health sample, because an unsampled session is reported as `Degraded`. A
 transport samples immediately at `prepare()`, so this only affects a convolver
 read directly before it is hosted.
 
-A CPU-only neural node starts `Ready`. A single invalid callback or sequence
-gap latches `InvalidCallback` or `SequenceGap` and moves it to `Degraded` for
-the rest of the preparation, although its CPU output continues unchanged.
+A CPU-only neural node (TCN, SSM, LSTM, GRU, or WaveNet built without a GPU
+session) has nothing to fence. An invalid or out-of-sequence callback is
+counted in `callback_contract_violations()` instead of being latched, so the
+node stays `Ready` while its CPU output continues. On the GPU path the same
+violation fences GPU delivery and is reported as the recovery reason.
 
 ### Which engine is delivering
 
@@ -284,9 +286,9 @@ it does not show that a ready provider met a realtime deadline.
 
 | Model family | Node | GPU path | Miss handling | Reports |
 | --- | --- | --- | --- | --- |
-| WaveNet (NAM) | `GpuNeuralRealtimeNode` with `NeuralFamily::WaveNet` | Dawn shared-I/O | built-in CPU shadow, per `shadow_policy` | `gpu_kernel_available = true` while the backend is prepared; no loss or hang detection yet |
+| WaveNet (NAM) | `GpuNeuralRealtimeNode` with `NeuralFamily::WaveNet` and a GPU session | Dawn shared-I/O | built-in CPU shadow, per `shadow_policy` | `gpu_kernel_available = true` while the backend is prepared; `ProviderLost`; watchdog |
 | WaveNet (NAM) | `GpuWaveNetRealtimeNode` (derive from it) | Dawn shared-I/O | your CPU shadow | `gpu_kernel_available = true`; `ProviderLost`; watchdog |
-| TCN, SSM, LSTM, GRU | `GpuNeuralRealtimeNode` | none | the CPU model is the output, always inline | path `Cpu`, provider `Cpu`, `selected_engine = Cpu`, `gpu_kernel_available = false`, epoch 0; `Ready` until a callback-contract cause latches |
+| TCN, SSM, LSTM, GRU | `GpuNeuralRealtimeNode` | none | the CPU model is the output, always inline | path `Cpu`, provider `Cpu`, `selected_engine = Cpu`, `gpu_kernel_available = false`, epoch 0, `Ready`; callback-contract violations are counted, not latched |
 
 - **No recurrent GPU kernels.** LSTM, GRU and SSM run one dependent step per
   sample, so a single-instance GPU kernel cannot beat the CPU at small blocks.
@@ -296,10 +298,16 @@ it does not show that a ready provider met a realtime deadline.
   It reports `Degraded` with `ProviderFailure`, not `Ready`.
 - **Non-finite input.** NaN and infinite samples are replaced with zero before
   either the GPU or the shadow sees them. `sanitized_input_samples()` counts them.
-- **Recovery.** Any latched cause, including a single invalid callback, fences
-  GPU delivery until the host prepares the node again.
-- **Model construction.** `GpuNeuralModel` handles come from Pulp's private,
-  host-only model factory. There is no public model loader yet.
+- **Recovery.** On the GPU path, any latched cause, including a single invalid
+  callback, fences GPU delivery until the host prepares the node again.
+- **Model construction.** Build a model on the host thread with
+  `make_gpu_neural_model()` from `<pulp/gpu_audio/gpu_neural_model.hpp>`. You
+  supply a provenance manifest, the family's shape and one
+  `GpuNeuralCpuKernel` per channel; the kernels are the CPU model the node runs
+  as its output or shadow. Only a WaveNet request may also carry a GPU session
+  configuration; the factory refuses one for any other family. It never
+  throws and reports a refusal as a `GpuNeuralModelError`. Each model binds to
+  one node.
 
 ### Shadow policy
 

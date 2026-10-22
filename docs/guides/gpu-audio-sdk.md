@@ -417,12 +417,6 @@ Any latched cause, including one invalid callback, fences GPU delivery until
 the host prepares the node again. The shadow carries the stream until then.
 `last_prepare_error()` reports why `prepare()` failed.
 
-The node's GPU path does not yet detect device loss or a hung provider. A real
-loss latches `ProviderFailure` (`Degraded`) rather than `ProviderLost`, and a
-hung provider eventually latches `InputSaturated`. Both still fence GPU
-delivery. Loss and hang detection is currently provided by
-`GpuWaveNetRealtimeNode` and, for loss, the shared-I/O `GpuConvolver`.
-
 When a host has already prepared a transport, pass its
 `GpuAudioCapabilityReport` to the two-argument overload of
 `validate_gpu_audio_program()`. That overload binds the declaration to the
