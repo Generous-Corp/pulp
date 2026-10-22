@@ -22,8 +22,10 @@ namespace {
 // extension; a preset so named cannot be written there, so refuse it everywhere.
 bool is_windows_device_name(std::string_view value) {
     std::string stem(value.substr(0, value.find('.')));
-    for (char& c : stem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL") return true;
+    for (char& c : stem)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL")
+        return true;
     if (stem.size() == 4 && (stem.compare(0, 3, "COM") == 0 || stem.compare(0, 3, "LPT") == 0) &&
         stem[3] >= '1' && stem[3] <= '9')
         return true;
