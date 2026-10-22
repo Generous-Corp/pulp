@@ -49,7 +49,7 @@ enum class FaultKind : std::uint8_t {
     MissingCompletion,
     RenderForceLoss,
     // Positive control: fires at the sample, takes the same snapshots, faults
-    // nothing. Named "none" in requests and receipts.
+    // nothing. Named "positive_control" in requests and receipts.
     Control,
 };
 

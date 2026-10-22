@@ -1489,7 +1489,7 @@ def _finish_gpu_fault(lib, run_dir: Path, args: argparse.Namespace, *, transport
         analysis={"tolerance": args.null_tolerance, "render_frames": render_frames,
                   "window": {"pre": args.window_pre, "post": args.window_post}},
         bounce_artifact=bounce.name if bounce is not None and bounce.name in artifacts else None,
-        realtime_artifact="realtime.wav" if "realtime.wav" in artifacts else None,
+        host_realtime_artifact="realtime.wav" if "realtime.wav" in artifacts else None,
         preflight=preflight,
         host_quiet=preflight["quiet_host"],
         artifacts=artifacts,
@@ -1581,9 +1581,9 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
     if args.fault_delay_ms is not None:
         fault_request["delay_ms"] = args.fault_delay_ms
     if args.planted:
-        fault_request["planted"] = args.planted
+        fault_request["planted_negative"] = args.planted
     if args.stimulus == "internal":
-        fault_request["stimulus"] = "internal"
+        fault_request["input"] = "internal"
     request.write_text(json.dumps(fault_request) + "\n", encoding="utf-8")
     go = run_dir / "go"
 
@@ -1748,9 +1748,9 @@ def build_parser() -> argparse.ArgumentParser:
     fault_group.add_argument("--gpu-fault",
                              choices=["force_loss_before", "force_loss_between",
                                       "force_loss_after", "delay_completion", "worker_stall",
-                                      "missing_completion", "render_force_loss", "none"],
+                                      "missing_completion", "render_force_loss", "positive_control"],
                              help="The fault to inject. render_force_loss loses the editor's "
-                                  "render device, not the audio device; none is the positive "
+                                  "render device, not the audio device; positive_control is the "
                                   "control.")
     fault_group.add_argument("--planted",
                              choices=["no_fallback", "fallback_misaligned", "fallback_stale"],

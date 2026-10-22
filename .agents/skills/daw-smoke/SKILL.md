@@ -106,7 +106,7 @@ companion gates; screenshots alone do not prove audio or performance.
     `missing_completion`.
   - `render_force_loss` loses the EDITOR's render device; a REAPER crash there
     is a FAIL finding.
-  - `none` is the positive control.
+  - `positive_control` is the positive control (fires, faults nothing).
   - PASS needs three nulls across the fault window: the plug-in capture,
     REAPER's realtime render (`realtime.wav`, primary), and an offline bounce
     of the reopened project (cross-check only). It also needs the v2 capture's

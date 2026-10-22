@@ -1,4 +1,9 @@
 #include "gpu_fault_continuity.hpp"
+
+// Test-only: this plug-in fires GPU faults on request and must never ship.
+#if !defined(PULP_GPU_FAULT_TEST_ONLY)
+#error "the GPU fault-continuity test plug-in builds only with PULP_GPU_FAULT_TEST_ONLY"
+#endif
 #include "gpu_fault_interposer.hpp"
 #include "gpu_fault_seam.hpp"
 
@@ -59,7 +64,7 @@ constexpr std::array<std::pair<FaultKind, const char*>, 8> kFaultNames{{
     {FaultKind::WorkerStall, "worker_stall"},
     {FaultKind::MissingCompletion, "missing_completion"},
     {FaultKind::RenderForceLoss, "render_force_loss"},
-    {FaultKind::Control, "none"},
+    {FaultKind::Control, "positive_control"},
 }};
 
 constexpr std::array<std::pair<Planted, const char*>, 3> kPlantedNames{{
@@ -454,7 +459,7 @@ void GpuFaultContinuityProcessor::process(audio::BufferView<float>& output,
     const bool capture = harness_ && n <= max_block_;
     if (harness_ && !capture)
         ring_.note_drop();
-    // The input this callback uses: the host's, or with "stimulus":"internal"
+    // The input this callback uses: the host's, or with "input":"internal"
     // a deterministic noise the plug-in makes itself, so nothing from a host
     // input (a live template's microphone) can reach the capture.
     float* in_plane[kChannels];
@@ -613,7 +618,7 @@ void GpuFaultContinuityProcessor::poll_request() {
     const std::int64_t after = json_int(body, "after_project_sample");
     const std::int64_t delay = json_int(body, "delay_ms");
     const bool audio = kind != FaultKind::RenderForceLoss && kind != FaultKind::Control;
-    const std::string planted_name = json_string(body, "planted");
+    const std::string planted_name = json_string(body, "planted_negative");
     Planted planted = Planted::Off;
     for (const auto& [p, name] : kPlantedNames)
         if (planted_name == name)
@@ -639,7 +644,7 @@ void GpuFaultContinuityProcessor::poll_request() {
     // stall for seconds. Either way the callback must not notice.
     delay_ms_ = delay > 0 ? static_cast<std::uint32_t>(std::min<std::int64_t>(delay, 60'000))
                           : (kind == FaultKind::WorkerStall ? 3000u : 100u);
-    const bool internal = json_string(body, "stimulus") == "internal";
+    const bool internal = json_string(body, "input") == "internal";
     planted_.store(static_cast<std::uint8_t>(planted), std::memory_order_relaxed);
     internal_stimulus_.store(internal, std::memory_order_relaxed);
     fault_at_.store(at, std::memory_order_release);
@@ -648,8 +653,10 @@ void GpuFaultContinuityProcessor::poll_request() {
     std::snprintf(line, sizeof(line),
                   "{\"event\":\"fault_armed\",\"fault\":\"%s\",\"at_project_sample\":%" PRId64
                   ",\"after_project_sample\":%" PRId64
-                  ",\"planted\":\"%s\",\"stimulus\":\"%s\",\"gpu_off\":%s}",
-                  fault_name(kind), at, after, planted_name.empty() ? "none" : planted_name.c_str(),
+                  ",\"planted_negative\":%s,\"input\":\"%s\",\"gpu_off\":%s}",
+                  fault_name(kind), at, after,
+                  gpu_off_ ? "\"gpu_off\""
+                           : (planted_name.empty() ? "null" : ("\"" + planted_name + "\"").c_str()),
                   internal ? "internal" : "host", gpu_off_ ? "true" : "false");
     emit(line);
 }

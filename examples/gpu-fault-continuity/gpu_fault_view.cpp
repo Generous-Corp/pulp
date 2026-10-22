@@ -11,6 +11,11 @@
 
 #include "gpu_fault_continuity.hpp"
 
+// Test-only: this plug-in fires GPU faults on request and must never ship.
+#if !defined(PULP_GPU_FAULT_TEST_ONLY)
+#error "the GPU fault-continuity test plug-in builds only with PULP_GPU_FAULT_TEST_ONLY"
+#endif
+
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/view/plugin_view_host.hpp>

@@ -640,7 +640,7 @@ class GpuFaultMode(unittest.TestCase):
         ap = rs.build_parser()
         for kind in ("force_loss_before", "force_loss_between", "force_loss_after",
                      "delay_completion", "worker_stall", "missing_completion",
-                     "render_force_loss", "none"):
+                     "render_force_loss", "positive_control"):
             args = ap.parse_args(["--mode", "gpu-fault", "--gpu-fault", kind, "--dry-run"])
             rs.validate_mode_args(ap, args)
 

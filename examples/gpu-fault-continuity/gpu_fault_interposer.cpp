@@ -289,7 +289,16 @@ bool arm_provider_fault(FaultKind kind, std::uint32_t delay_ms, std::string& det
         detail = "the provider fault interposer is not installed";
         return false;
     }
-    if (kind == FaultKind::None || kind == FaultKind::RenderForceLoss) {
+    // Only the six provider faults; anything else would sit armed forever.
+    switch (kind) {
+    case FaultKind::ForceLossBefore:
+    case FaultKind::ForceLossBetween:
+    case FaultKind::ForceLossAfter:
+    case FaultKind::DelayCompletion:
+    case FaultKind::WorkerStall:
+    case FaultKind::MissingCompletion:
+        break;
+    default:
         detail = "not a provider fault";
         return false;
     }

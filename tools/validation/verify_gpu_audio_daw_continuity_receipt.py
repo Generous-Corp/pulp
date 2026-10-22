@@ -147,7 +147,7 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     bounce_name = receipt.get("bounce_artifact")
     if bounce_name is not None:
         _require(bounce_name in artifacts, "bounce artifact not digest-bound")
-    _require(receipt.get("realtime_artifact") == "realtime.wav",
+    _require(receipt.get("host_realtime_artifact") == "realtime.wav",
              "the host's realtime render is not the bound realtime.wav")
     floor = gfc.MIN_WINDOW_POST if live else gfc.MIN_WINDOW_POST_DRY_RUN
     _require(window["post"] >= floor, f"analysis.window.post is shorter than {floor} samples")
@@ -155,6 +155,18 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     # the harness renders the whole stimulus plus the post-fault window.
     _, stimulus = gfc.read_wav(run_dir / "stimulus.wav")
     render_frames = len(stimulus[0]) + window["post"]
+    # M6: no host input may be in the capture. With the track item as input,
+    # the captured input must BE the bound stimulus wherever the plug-in played;
+    # anything else (a live input, a microphone) makes the receipt invalid.
+    controls = receipt.get("controls") or {}
+    if controls.get("input", "host") == "host":
+        try:
+            capture = gfc.read_capture(run_dir / "capture.bin")
+        except ValueError as exc:
+            raise ReceiptError(f"capture.bin unreadable: {exc}") from exc
+        foreign = gfc.captured_input_matches_stimulus(capture, stimulus[0])
+        _require(foreign is None, f"captured input is not the bound stimulus (first difference "
+                                  f"at project sample {foreign}); it may hold host input")
     _require(analysis.get("render_frames") == render_frames,
              "analysis.render_frames does not match the bound stimulus")
     # host_alive stays self-attested (a crash is a FAIL either way), but only
@@ -168,12 +180,13 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
         render_frames=render_frames, nonce=nonce, reaper_pid=reaper_pid,
         listed=list(artifacts), realtime_path=run_dir / "realtime.wav")
     for key in ("fault", "pdc_samples", "plugin_identity", "capture", "nulls", "health",
-                "delivery", "controls", "host_alive", "verdict", "verdict_reasons"):
+                "delivery", "controls", "offline_records_in_bounce", "offline_path_checked",
+                "host_alive", "verdict", "verdict_reasons"):
         _require(_close(receipt.get(key), recomputed.get(key)),
                  f"{key} does not re-derive from the artifacts")
     _require(recomputed["verdict"] in gfc.VERDICTS, "verdict outside the closed set")
     if recomputed["verdict"] == "pass":
-        _require(all(recomputed["nulls"][k] is not None for k in ("plugin", "realtime", "bounce")),
+        _require(all(recomputed["nulls"][k] is not None for k in ("plugin", "host_realtime", "bounce")),
                  "a PASS needs the plug-in, realtime-render and bounce nulls")
         _require(bool(recomputed["delivery"] and recomputed["delivery"].get("met")),
                  "a PASS needs the per-block delivery requirements met")

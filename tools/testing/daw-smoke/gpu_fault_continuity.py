@@ -43,11 +43,11 @@ SCHEMA = "pulp.gpu-audio.daw-continuity.v1"
 # separate Dawn device from the audio one.
 # worker_stall sleeps the provider's worker (completions arrive late; the GPU is
 # fine); missing_completion swallows one completion callback (the hung-device
-# route). "none" is the positive control: it fires and faults nothing.
+# route). "positive_control" fires at the sample and faults nothing.
 AUDIO_FAULTS = ("force_loss_before", "force_loss_between", "force_loss_after",
                 "delay_completion", "worker_stall", "missing_completion")
 RENDER_FAULTS = ("render_force_loss",)
-CONTROL_FAULTS = ("none",)
+CONTROL_FAULTS = ("positive_control",)
 FAULT_KINDS = AUDIO_FAULTS + RENDER_FAULTS + CONTROL_FAULTS
 LOSS_FAULTS = ("force_loss_before", "force_loss_between", "force_loss_after")
 STALL_FAULTS = ("delay_completion", "worker_stall", "missing_completion")
@@ -529,6 +529,49 @@ def gpu_delivered(snapshot: dict) -> int:
     return int(snapshot.get("produced_blocks", 0))
 
 
+def captured_input_matches_stimulus(capture: "Capture", stimulus: Sequence[float],
+                                    tolerance: float = 1e-6) -> int | None:
+    """M6: the plug-in's captured INPUT must be exactly the bound stimulus at
+    every played position inside it, and silence past it, on every channel.
+    Returns the first offending project sample, or None. A mismatch means
+    audio other than the track item (a live input, a microphone) reached the
+    capture."""
+    for c in range(capture.channels):
+        plane = capture.inputs[c]
+        for i, p in enumerate(capture.positions):
+            if p < 0:
+                continue
+            want = stimulus[p] if p < len(stimulus) else 0.0
+            if abs(plane[i] - want) > tolerance:
+                return p
+    return None
+
+
+def delivery_disposition(capture: "Capture", fault_sample: int,
+                         applied_project_sample: int | None, lead_blocks: int, *,
+                         fault: str = "force_loss_after", quantum: int | None = None,
+                         window_post: int = DEFAULT_WINDOW_POST) -> dict[str, Any]:
+    """WP-K's view of delivery_analysis, under the names its v2 verifier reads.
+    The quantum defaults to the capture's own record length."""
+    if quantum is None:
+        quantum = next((r["frames"] for r in capture.records if r["position"] >= 0), 1)
+    d = delivery_analysis(capture, fault=fault, fault_sample=fault_sample,
+                          applied_sample=applied_project_sample, quantum=quantum,
+                          lead_blocks=lead_blocks, window_post=window_post)
+    first = d.get("first_fallback_project_sample")
+    applied = applied_project_sample if applied_project_sample is not None else fault_sample
+    return {**d, "pre_window_gpu_share": d.get("pre_fault_gpu_share"),
+            "pre_window_quanta": d.get("pre_fault_quanta"),
+            "gpu_frozen_after_applied": d.get("available", False)
+            and d.get("gpu_blocks_after_takeover") == 0 and first is not None,
+            "all_fallback_after": d.get("available", False) and first is not None
+            and d.get("gpu_blocks_after_takeover") == 0 and d.get("silence_blocks") == 0,
+            "silence_blocks_delta": d.get("silence_blocks"),
+            "first_fallback_quanta_after_applied":
+                None if first is None else (first - applied) // max(1, quantum),
+            "lead_blocks": lead_blocks}
+
+
 def health_expectation(fault: str, snapshots: dict[str, dict]) -> tuple[bool, str]:
     """Did the fault take effect, as seen by the transport's own snapshots?
     A null that passes because the fault never landed is not evidence. The
@@ -666,7 +709,7 @@ def decide(*, fault: str, plugin_null: dict | None, bounce_null: dict | None,
         return "fail", ["host process died during the run"]
     if mismatches:
         return "fail", list(mismatches) + list(preconditions)
-    for name, result in (("plugin", plugin_null), ("realtime render", realtime_null),
+    for name, result in (("plugin", plugin_null), ("host realtime render", realtime_null),
                          ("bounce", bounce_null)):
         if result is None:
             reasons.append(f"{name} null not computed")
@@ -811,7 +854,8 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
          "pid": pid, "prepare_index": 1, "provider_device": device},
         {"event": "fault_armed", "fault": fault, "at_project_sample": fault_sample,
          "after_project_sample": fault_sample + (tail if window_post is None else window_post),
-         "planted": planted if planted in PLANTED else "none", "stimulus": "host",
+         "planted_negative": planted if planted in PLANTED + PATH_NEGATIVES else None,
+         "input": "host",
          "gpu_off": planted == "gpu_off"},
         {"event": "fault_fired", "fault": fault, "at_project_sample": fault_sample,
          "issued_project_sample": fault_sample + block, "offline": False},
@@ -921,7 +965,8 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
     # The run directory's claim names the process that owns it; it must be the
     # one every prepared event came from.
     if usable("claim"):
-        claim_pid = (run_dir / "claim").read_text(encoding="utf-8").strip()
+        # "<pid>\n" or "<pid>\n<claimed_unix_us>\n"
+        claim_pid = (run_dir / "claim").read_text(encoding="utf-8").splitlines()[0].strip()
         if any(str(e.get("pid")) != claim_pid for e in prepares):
             mismatches.append("the run directory was claimed by a different process")
     if reaper_pid is not None and any(e.get("pid") != reaper_pid for e in prepares):
@@ -986,18 +1031,18 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
     # S2: a stimulus that is near-silent over the fault window would let a
     # silence substitution null, and a host that fed the plug-in silence
     # instead of the stimulus tested nothing. Either makes the run INCONCLUSIVE.
-    for name, result in (("plug-in", plugin_null), ("realtime render", realtime_null)):
+    for name, result in (("plug-in", plugin_null), ("host realtime render", realtime_null)):
         if result is not None and result["window_reference_rms"] < WINDOW_RMS_FLOOR:
             preconditions.append(f"the {name} reference is near-silent over the fault window "
                                  "(the stimulus did not reach the plug-in)")
     if capture is not None and stimulus and stimulus[0] and \
-            (armed or {}).get("stimulus", "host") == "host":
-        stim = stimulus[0]
-        bad = next((i for i, p in enumerate(capture.positions)
-                    if 0 <= p < len(stim) and abs(capture.inputs[0][i] - stim[p]) > 1e-6), None)
+            (armed or {}).get("input", "host") == "host":
+        bad = captured_input_matches_stimulus(capture, stimulus[0])
         if bad is not None:
+            # The harness reports it as INCONCLUSIVE; the verifier refuses the
+            # receipt outright (see verify()), because it may hold foreign audio.
             preconditions.append(f"the host did not feed the stimulus to the plug-in (first "
-                                 f"difference at project sample {capture.positions[bad]})")
+                                 f"difference at project sample {bad})")
     applied_event = first_event(events, "provider_fault_applied")
     delivery = None
     if capture is not None:
@@ -1069,10 +1114,14 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
             "truncated_tail_bytes": capture.truncated_tail_bytes if capture else 0,
         },
         "delivery": delivery,
-        "controls": {"planted": armed.get("planted") if armed else None,
-                     "stimulus": armed.get("stimulus") if armed else None,
+        "controls": {"planted_negative": armed.get("planted_negative") if armed else None,
+                     "input": armed.get("input") if armed else None,
                      "gpu_off": bool(armed.get("gpu_off")) if armed else False},
-        "nulls": {"plugin": plugin_null, "realtime": realtime_null, "bounce": bounce_null,
+        # The bounce comes from a fresh, unclaimed instance that records nothing,
+        # so whether REAPER flagged its blocks offline is not observable here.
+        "offline_records_in_bounce": None,
+        "offline_path_checked": False,
+        "nulls": {"plugin": plugin_null, "host_realtime": realtime_null, "bounce": bounce_null,
                   "bounce_lag_estimate": bounce_lag},
         "health": {"snapshots": snaps, "expectation_met": health_ok, "note": health_note},
         "host_alive": host_alive,

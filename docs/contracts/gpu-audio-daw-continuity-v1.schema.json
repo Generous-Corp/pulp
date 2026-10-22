@@ -27,9 +27,11 @@
     "verdict",
     "verdict_reasons",
     "receipt_sha256",
-    "realtime_artifact",
+    "host_realtime_artifact",
     "delivery",
-    "controls"
+    "controls",
+    "offline_records_in_bounce",
+    "offline_path_checked"
   ],
   "properties": {
     "schema": {
@@ -251,7 +253,7 @@
             "worker_stall",
             "missing_completion",
             "render_force_loss",
-            "none"
+            "positive_control"
           ]
         },
         "requested_project_sample": {
@@ -358,7 +360,7 @@
       "type": "object",
       "required": [
         "plugin",
-        "realtime",
+        "host_realtime",
         "bounce",
         "bounce_lag_estimate"
       ],
@@ -375,7 +377,7 @@
             "null"
           ]
         },
-        "realtime": {
+        "host_realtime": {
           "$ref": "#/$defs/null_result"
         }
       }
@@ -439,13 +441,6 @@
     "anticipative_fx": {
       "type": "boolean"
     },
-    "realtime_artifact": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "The host's own realtime render of the fault pass (REAPER: an online render). The primary host-side evidence; a PASS needs its null."
-    },
     "delivery": {
       "type": [
         "object",
@@ -498,13 +493,13 @@
       "type": "object",
       "description": "Which test shape ran: a planted negative (must FAIL), the internal stimulus, or the gpu_off path negative (must be INCONCLUSIVE).",
       "properties": {
-        "planted": {
+        "planted_negative": {
           "type": [
             "string",
             "null"
           ]
         },
-        "stimulus": {
+        "input": {
           "type": [
             "string",
             "null"
@@ -514,6 +509,24 @@
           "type": "boolean"
         }
       }
+    },
+    "host_realtime_artifact": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The host's own realtime render of the fault pass (REAPER: an online render). The primary host-side evidence; a PASS needs its null."
+    },
+    "offline_records_in_bounce": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Offline-flagged blocks the plug-in saw during the bounce; null when the bouncing instance does not record (REAPER: a fresh, unclaimed instance)."
+    },
+    "offline_path_checked": {
+      "type": "boolean",
+      "description": "Whether the bounce provably ran the plug-in's offline path."
     }
   },
   "$defs": {

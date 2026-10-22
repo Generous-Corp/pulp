@@ -81,7 +81,7 @@ class DaWContinuityReceipt(unittest.TestCase):
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT)
         # The host compensates PDC, so in its realtime render the dropout starts
         # PDC samples earlier; the fault-free offline bounce still nulls.
-        self.assertEqual(receipt["nulls"]["realtime"]["first_deviating_sample"],
+        self.assertEqual(receipt["nulls"]["host_realtime"]["first_deviating_sample"],
                          FAULT - receipt["pdc_samples"])
         self.assertTrue(receipt["nulls"]["bounce"]["passed"])
 
@@ -383,6 +383,45 @@ class DaWContinuityReceipt(unittest.TestCase):
                       realtime_path=run / "realtime.wav")
         self.assertEqual(evidence["verdict"], "fail")
         self.assertIn("applied at", evidence["verdict_reasons"][0])
+
+    def test_foreign_input_in_the_capture_is_rejected(self):
+        # M6: plant "microphone" audio into the captured input of one block.
+        # The output still nulls against its own input, so only the input check
+        # can tell; the verifier must refuse the receipt.
+        run = self.copy_run(self.good)
+        cap = gfc.read_capture(run / "capture.bin")
+        blocks = []
+        for r in cap.records:
+            start, n = r["stream"], r["frames"]
+            inputs = [list(cap.inputs[c][start:start + n]) for c in range(cap.channels)]
+            if r["position"] == FAULT - FAULT % 128:
+                inputs[1][5] += 0.25  # a foreign sample on the second channel
+            flags = ((gfc.FLAG_PLAYING if r["position"] >= 0 else 0) |
+                     ((gfc.FLAG_SEGMENT_START | (1 << gfc.PREPARE_INDEX_SHIFT))
+                      if r["segment_start"] else 0))
+            blocks.append({"position": None if r["position"] < 0 else r["position"],
+                           "flags": flags, "inputs": inputs,
+                           "outputs": [list(cap.outputs[c][start:start + n])
+                                       for c in range(cap.channels)],
+                           "counters": (r["gpu"], r["fallback"], r["silence"], r["priming"]),
+                           "host_time_ns": r["host_time_ns"]})
+        gfc.write_capture(run / "capture.bin", 48000, blocks)
+        receipt = load(run)
+        receipt["artifacts"]["capture.bin"] = gfc.sha256_file(run / "capture.bin")
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "not the bound stimulus"):
+            self.verify(resign(receipt), run)
+        # Positive control: the untouched capture is accepted.
+        self.assertEqual(self.verify(load(self.good), self.good), "pass")
+
+    def test_wpk_disposition_view(self):
+        cap = gfc.read_capture(self.good / "capture.bin")
+        d = gfc.delivery_disposition(cap, FAULT, FAULT + 128, 2, fault="force_loss_between",
+                                     window_post=POST)
+        self.assertEqual(d["pre_window_gpu_share"], 1.0)
+        self.assertTrue(d["gpu_frozen_after_applied"])
+        self.assertTrue(d["all_fallback_after"])
+        self.assertEqual(d["silence_blocks_delta"], 0)
+        self.assertLessEqual(d["first_fallback_quanta_after_applied"], d["lead_blocks"] + 1)
 
     def test_a_fault_on_another_device_is_a_mismatch(self):
         # S1: the applied fault must name this plug-in's provider device.

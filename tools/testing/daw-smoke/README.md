@@ -113,7 +113,7 @@ plug-in fires one fault when the playhead crosses `--fault-at-sample`:
 - `render_force_loss` loses the **editor's render** device through the
   surface's existing device accessor. Audio owns a separate Dawn device, so the
   expectation is "audio continues"; a REAPER crash is recorded as FAIL.
-- `none` is the positive control: it fires at the sample and faults nothing.
+- `positive_control` fires at the sample and faults nothing.
 
 A PASS needs three nulls against an independent CPU reference, each covering
 the whole fault window:
@@ -135,8 +135,13 @@ block. From them a PASS further requires:
 Controls: `--planted no_fallback|fallback_misaligned|fallback_stale` are planted
 negatives that keep audio flowing but wrong (or absent), and must FAIL.
 `--gpu-off` (the staged path) is the path negative and must be INCONCLUSIVE.
-`--stimulus internal` has the plug-in make its own input, so nothing from a
-host input can reach the capture. The run directory holds every artifact plus a
+`--stimulus internal` has the plug-in make its own input. With the default host
+input, the verifier requires the plug-in's captured input to equal the bound
+stimulus at every played sample, and silence past it. Any other audio, such as a
+live input or a microphone, makes the receipt invalid, so no host input can hide
+in `capture.bin`. The capture-producing source files (`gpu_fault_continuity.cpp`,
+`gpu_fault_view.cpp` and `gpu_fault_interposer.cpp`) refuse to compile without
+`PULP_GPU_FAULT_TEST_ONLY`, which only this plug-in's targets define. The run directory holds every artifact plus a
 `pulp.gpu-audio.daw-continuity.v1` receipt
 ([schema](../../../docs/contracts/gpu-audio-daw-continuity-v1.schema.json)).
 

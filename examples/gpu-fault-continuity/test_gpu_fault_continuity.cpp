@@ -435,11 +435,11 @@ TEST_CASE("planted negatives keep audio flowing but break the null", "[gpu-fault
             const auto r =
                 run_request(std::string(R"({"fault": "force_loss_after",)") +
                             R"( "at_project_sample": 4000, "after_project_sample": 9000,)" +
-                            R"( "planted": ")" + planted + R"("})");
+                            R"( "planted_negative": ")" + planted + R"("})");
             if (!r.shared)
                 SKIP("no shared-I/O GPU provider on this host");
             INFO(r.events);
-            CHECK(r.events.find(std::string("\"planted\":\"") + planted + "\"") !=
+            CHECK(r.events.find(std::string("\"planted_negative\":\"") + planted + "\"") !=
                   std::string::npos);
             CHECK(r.run.allocations == 0);
             // The planted shape must be caught: the output no longer nulls.
@@ -450,23 +450,24 @@ TEST_CASE("planted negatives keep audio flowing but break the null", "[gpu-fault
 }
 
 TEST_CASE("the positive control fires and faults nothing", "[gpu-fault-continuity]") {
-    const auto r = run_request(
-        R"({"fault": "none", "at_project_sample": 4000, "after_project_sample": 9000})");
+    const auto r = run_request(R"({"fault": "positive_control", "at_project_sample": 4000,)"
+                               R"( "after_project_sample": 9000})");
     if (!r.shared)
         SKIP("no shared-I/O GPU provider on this host");
     INFO(r.events);
-    CHECK(r.events.find("\"event\":\"fault_fired\",\"fault\":\"none\"") != std::string::npos);
+    CHECK(r.events.find("\"event\":\"fault_fired\",\"fault\":\"positive_control\"") !=
+          std::string::npos);
     CHECK(r.events.find("\"event\":\"provider_fault_applied\"") == std::string::npos);
     CHECK(max_error(r.run.output,
                     reference(make_input(), make_ir(), static_cast<std::size_t>(r.pdc))) < 1e-4);
 }
 
 TEST_CASE("an internal stimulus replaces whatever the host feeds", "[gpu-fault-continuity]") {
-    const auto r = run_request(R"({"fault": "none", "at_project_sample": 4000,)"
-                               R"( "after_project_sample": 9000, "stimulus": "internal"})");
+    const auto r = run_request(R"({"fault": "positive_control", "at_project_sample": 4000,)"
+                               R"( "after_project_sample": 9000, "input": "internal"})");
     if (!r.shared)
         SKIP("no shared-I/O GPU provider on this host");
-    CHECK(r.events.find("\"stimulus\":\"internal\"") != std::string::npos);
+    CHECK(r.events.find("\"input\":\"internal\"") != std::string::npos);
     // The output is the convolution of the plug-in's own noise, not of the
     // host input, so it does not null against the host-input reference.
     CHECK(max_error(r.run.output,
