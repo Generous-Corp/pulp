@@ -110,15 +110,13 @@ TEST_CASE("HalfBandAllpassSection allpass magnitude is unity for all freqs",
     }
 }
 
-TEST_CASE("HalfBandUpsampler2x default has 3 sections per path",
-          "[signal][halfband]") {
+TEST_CASE("HalfBandUpsampler2x default has 3 sections per path", "[signal][halfband]") {
     HalfBandUpsampler2x up;
     REQUIRE(up.sections_a() == 3);
     REQUIRE(up.sections_b() == 3);
 }
 
-TEST_CASE("HalfBandDownsampler2x default has 3 sections per path",
-          "[signal][halfband]") {
+TEST_CASE("HalfBandDownsampler2x default has 3 sections per path", "[signal][halfband]") {
     HalfBandDownsampler2x dn;
     REQUIRE(dn.sections_a() == 3);
     REQUIRE(dn.sections_b() == 3);
@@ -146,9 +144,9 @@ TEST_CASE("Half-band design is equiripple at the rejection its order predicts",
         double edge;
         double stop_db;
     };
-    for (const Case c : {Case{2, 0.21, -32.78}, Case{6, 0.21, -94.85}, Case{8, 0.21, -125.89},
-                         Case{3, 0.105, -101.19}, Case{11, 0.225, -146.34},
-                         Case{5, 0.1, -167.48}}) {
+    for (const Case c :
+         {Case{2, 0.21, -32.78}, Case{6, 0.21, -94.85}, Case{8, 0.21, -125.89},
+          Case{3, 0.105, -101.19}, Case{11, 0.225, -146.34}, Case{5, 0.1, -167.48}}) {
         const auto design = design_halfband_iir(c.count, c.edge);
         const double stop = halfband_iir_stopband_db(design);
         INFO("count=" << c.count << " edge=" << c.edge << " stop=" << stop);
@@ -170,8 +168,7 @@ TEST_CASE("Half-band design is equiripple at the rejection its order predicts",
     REQUIRE_FALSE(design_halfband_iir(4, 0.0).valid());
 }
 
-TEST_CASE("Measured half-band upsampler image matches the design response",
-          "[signal][halfband]") {
+TEST_CASE("Measured half-band upsampler image matches the design response", "[signal][halfband]") {
     // Least-squares projection of the image a 2x interpolator leaves at
     // 1 - f (in input-rate cycles) must equal |H| there to within a fraction
     // of a dB, at a depth (-95 to -150 dB) only a double build can show.
@@ -197,9 +194,10 @@ TEST_CASE("Measured half-band upsampler image matches the design response",
         std::array<double, 4> r{};
         for (std::size_t i = 4096; i < y.size(); ++i) {
             const double t = static_cast<double>(i);
-            const std::array<double, 4> basis = {
-                std::sin(2.0 * std::numbers::pi * tone * t), std::cos(2.0 * std::numbers::pi * tone * t),
-                std::sin(2.0 * std::numbers::pi * image * t), std::cos(2.0 * std::numbers::pi * image * t)};
+            const std::array<double, 4> basis = {std::sin(2.0 * std::numbers::pi * tone * t),
+                                                 std::cos(2.0 * std::numbers::pi * tone * t),
+                                                 std::sin(2.0 * std::numbers::pi * image * t),
+                                                 std::cos(2.0 * std::numbers::pi * image * t)};
             for (std::size_t row = 0; row < 4; ++row) {
                 r[row] += basis[row] * y[i];
                 for (std::size_t col = 0; col < 4; ++col)
@@ -290,7 +288,8 @@ TEST_CASE("HalfBandDownsampler2x rejects energy past its stopband edge by its de
         constexpr std::size_t kN = 8192;
         std::vector<float> x(kN);
         for (std::size_t i = 0; i < kN; ++i)
-            x[i] = static_cast<float>(std::sin(2.0 * std::numbers::pi * f * static_cast<double>(i)));
+            x[i] =
+                static_cast<float>(std::sin(2.0 * std::numbers::pi * f * static_cast<double>(i)));
         std::vector<float> y(kN / 2, 0.0f);
         dn.process_block(x, y);
         const float in_rms = trailing_rms(x, kN / 4);

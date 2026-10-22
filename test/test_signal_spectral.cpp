@@ -349,8 +349,8 @@ template <typename T> std::vector<T> real_fft_stimulus(int n) {
     for (int i = 0; i < n; ++i) {
         state = state * 1664525u + 1013904223u;
         const double noise = static_cast<double>(state >> 8) / 16777216.0 - 0.5;
-        x[static_cast<std::size_t>(i)] = static_cast<T>(
-            0.6 * std::sin(0.31 * i) + 0.25 * std::cos(2.9 * i + 0.4) + 0.1 * noise);
+        x[static_cast<std::size_t>(i)] =
+            static_cast<T>(0.6 * std::sin(0.31 * i) + 0.25 * std::cos(2.9 * i + 0.4) + 0.1 * noise);
     }
     return x;
 }
@@ -364,8 +364,7 @@ std::vector<std::complex<long double>> reference_dft(const std::vector<double>& 
     for (std::size_t k = 0; k < out.size(); ++k) {
         long double re = 0, im = 0;
         for (std::size_t t = 0; t < x.size(); ++t) {
-            const long double phase =
-                -two_pi * static_cast<long double>((k * t) % x.size()) / n;
+            const long double phase = -two_pi * static_cast<long double>((k * t) % x.size()) / n;
             re += x[t] * std::cos(phase);
             im += x[t] * std::sin(phase);
         }
@@ -388,8 +387,7 @@ double spectrum_error_db(const C* actual, const std::vector<std::complex<long do
     return 10.0 * std::log10(static_cast<double>(err / ref) + 1e-300);
 }
 
-template <typename T>
-double signal_error_db(const T* actual, const std::vector<T>& expected) {
+template <typename T> double signal_error_db(const T* actual, const std::vector<T>& expected) {
     double err = 0, ref = 0;
     for (std::size_t i = 0; i < expected.size(); ++i) {
         const double d = static_cast<double>(actual[i]) - static_cast<double>(expected[i]);
@@ -706,8 +704,7 @@ TEST_CASE("Convolver overlap-add keeps the whole tail of an IR longer than one b
     }
 }
 
-TEST_CASE("FFT transforms stay exact across every split placement",
-          "[signal][fft][real]") {
+TEST_CASE("FFT transforms stay exact across every split placement", "[signal][fft][real]") {
     // The float transform places its vDSP split buffers on or off a 64-byte
     // boundary depending on the size and the transform; both placements, and
     // the switch-over sizes either side of each threshold, must round-trip.

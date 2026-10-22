@@ -139,12 +139,24 @@ struct HalfBandIirDesign {
     std::size_t count = 0;
     double passband_edge = 0.0;
 
-    [[nodiscard]] bool valid() const noexcept { return count > 0; }
-    [[nodiscard]] std::size_t path_a_count() const noexcept { return (count + 1) / 2; }
-    [[nodiscard]] std::size_t path_b_count() const noexcept { return count / 2; }
-    [[nodiscard]] double path_a(std::size_t i) const noexcept { return coefficients[2 * i]; }
-    [[nodiscard]] double path_b(std::size_t i) const noexcept { return coefficients[2 * i + 1]; }
-    [[nodiscard]] double stopband_edge() const noexcept { return 0.5 - passband_edge; }
+    [[nodiscard]] bool valid() const noexcept {
+        return count > 0;
+    }
+    [[nodiscard]] std::size_t path_a_count() const noexcept {
+        return (count + 1) / 2;
+    }
+    [[nodiscard]] std::size_t path_b_count() const noexcept {
+        return count / 2;
+    }
+    [[nodiscard]] double path_a(std::size_t i) const noexcept {
+        return coefficients[2 * i];
+    }
+    [[nodiscard]] double path_b(std::size_t i) const noexcept {
+        return coefficients[2 * i + 1];
+    }
+    [[nodiscard]] double stopband_edge() const noexcept {
+        return 0.5 - passband_edge;
+    }
 };
 
 /// Closed-form elliptic half-band design (see the file comment).
@@ -177,8 +189,7 @@ inline HalfBandIirDesign design_halfband_iir(std::size_t coefficient_count,
         double numerator = 0.0;
         double sign = 1.0;
         for (int m = 0; m < 32; ++m) {
-            const double term =
-                sign * std::pow(q, m * (m + 1)) * std::sin((2 * m + 1) * angle);
+            const double term = sign * std::pow(q, m * (m + 1)) * std::sin((2 * m + 1) * angle);
             numerator += term;
             if (std::abs(term) < 1e-30)
                 break;
@@ -211,9 +222,8 @@ namespace detail {
 // (cycles per sample at the 2x rate). Each section (a + z^-2)/(1 + a z^-2)
 // has unit magnitude and group delay 2(1 - a^2)/(1 + 2a cos 2w + a^2).
 template <typename Coefficient>
-inline void halfband_path_response(const HalfBandIirDesign& design, bool path_a,
-                                   double frequency, std::complex<double>& response,
-                                   double& group_delay) noexcept {
+inline void halfband_path_response(const HalfBandIirDesign& design, bool path_a, double frequency,
+                                   std::complex<double>& response, double& group_delay) noexcept {
     constexpr double kPi = 3.14159265358979323846;
     const double w = 2.0 * kPi * frequency;
     const std::complex<double> z2(std::cos(2.0 * w), -std::sin(2.0 * w)); // z^-2
@@ -251,8 +261,8 @@ inline std::complex<double> halfband_iir_response(const HalfBandIirDesign& desig
 template <typename Coefficient = double>
 inline double halfband_iir_magnitude_db(const HalfBandIirDesign& design,
                                         double frequency) noexcept {
-    return 20.0 * std::log10(std::max(std::abs(halfband_iir_response<Coefficient>(design, frequency)),
-                                      1e-300));
+    return 20.0 * std::log10(std::max(
+                      std::abs(halfband_iir_response<Coefficient>(design, frequency)), 1e-300));
 }
 
 /// Group delay of H(z) in samples of the filter's own rate. Both paths are
@@ -260,8 +270,7 @@ inline double halfband_iir_magnitude_db(const HalfBandIirDesign& design,
 /// Re((tau_A A + (tau_B + 1) z^-1 B) / (A + z^-1 B)) with no numeric
 /// differentiation.
 template <typename Coefficient = double>
-inline double halfband_iir_group_delay(const HalfBandIirDesign& design,
-                                       double frequency) noexcept {
+inline double halfband_iir_group_delay(const HalfBandIirDesign& design, double frequency) noexcept {
     constexpr double kPi = 3.14159265358979323846;
     std::complex<double> a, b;
     double ta = 0.0, tb = 0.0;
@@ -361,7 +370,9 @@ template <typename SampleType> class HalfBandIirStage {
         down_ = {};
     }
 
-    std::size_t coefficient_count() const noexcept { return count_; }
+    std::size_t coefficient_count() const noexcept {
+        return count_;
+    }
 
     /// `n` input samples -> `2n` output samples. `output` must not overlap
     /// `input`.
@@ -398,23 +409,56 @@ template <typename SampleType> class HalfBandIirStage {
 
     template <typename Fn> static void dispatch(std::size_t count, Fn&& fn) noexcept {
         switch (count) {
-        case 1: fn(Count<1>{}, Count<0>{}); break;
-        case 2: fn(Count<1>{}, Count<1>{}); break;
-        case 3: fn(Count<2>{}, Count<1>{}); break;
-        case 4: fn(Count<2>{}, Count<2>{}); break;
-        case 5: fn(Count<3>{}, Count<2>{}); break;
-        case 6: fn(Count<3>{}, Count<3>{}); break;
-        case 7: fn(Count<4>{}, Count<3>{}); break;
-        case 8: fn(Count<4>{}, Count<4>{}); break;
-        case 9: fn(Count<5>{}, Count<4>{}); break;
-        case 10: fn(Count<5>{}, Count<5>{}); break;
-        case 11: fn(Count<6>{}, Count<5>{}); break;
-        case 12: fn(Count<6>{}, Count<6>{}); break;
-        case 13: fn(Count<7>{}, Count<6>{}); break;
-        case 14: fn(Count<7>{}, Count<7>{}); break;
-        case 15: fn(Count<8>{}, Count<7>{}); break;
-        case 16: fn(Count<8>{}, Count<8>{}); break;
-        default: break;
+        case 1:
+            fn(Count<1>{}, Count<0>{});
+            break;
+        case 2:
+            fn(Count<1>{}, Count<1>{});
+            break;
+        case 3:
+            fn(Count<2>{}, Count<1>{});
+            break;
+        case 4:
+            fn(Count<2>{}, Count<2>{});
+            break;
+        case 5:
+            fn(Count<3>{}, Count<2>{});
+            break;
+        case 6:
+            fn(Count<3>{}, Count<3>{});
+            break;
+        case 7:
+            fn(Count<4>{}, Count<3>{});
+            break;
+        case 8:
+            fn(Count<4>{}, Count<4>{});
+            break;
+        case 9:
+            fn(Count<5>{}, Count<4>{});
+            break;
+        case 10:
+            fn(Count<5>{}, Count<5>{});
+            break;
+        case 11:
+            fn(Count<6>{}, Count<5>{});
+            break;
+        case 12:
+            fn(Count<6>{}, Count<6>{});
+            break;
+        case 13:
+            fn(Count<7>{}, Count<6>{});
+            break;
+        case 14:
+            fn(Count<7>{}, Count<7>{});
+            break;
+        case 15:
+            fn(Count<8>{}, Count<7>{});
+            break;
+        case 16:
+            fn(Count<8>{}, Count<8>{});
+            break;
+        default:
+            break;
         }
     }
 
@@ -434,23 +478,41 @@ template <typename SampleType> class HalfBandIirStage {
     void upsample_kernel(const SampleType* input, SampleType* output, std::size_t n) noexcept {
         SampleType xa[NA > 0 ? NA : 1], ya[NA > 0 ? NA : 1];
         SampleType xb[NB > 0 ? NB : 1], yb[NB > 0 ? NB : 1];
-        for (std::size_t k = 0; k < NA; ++k) { xa[k] = up_.a.x[k]; ya[k] = up_.a.y[k]; }
-        for (std::size_t k = 0; k < NB; ++k) { xb[k] = up_.b.x[k]; yb[k] = up_.b.y[k]; }
+        for (std::size_t k = 0; k < NA; ++k) {
+            xa[k] = up_.a.x[k];
+            ya[k] = up_.a.y[k];
+        }
+        for (std::size_t k = 0; k < NB; ++k) {
+            xb[k] = up_.b.x[k];
+            yb[k] = up_.b.y[k];
+        }
         for (std::size_t i = 0; i < n; ++i) {
             const SampleType v = input[i];
             output[2 * i] = run<NA>(a_, xa, ya, v);
             output[2 * i + 1] = run<NB>(b_, xb, yb, v);
         }
-        for (std::size_t k = 0; k < NA; ++k) { up_.a.x[k] = xa[k]; up_.a.y[k] = ya[k]; }
-        for (std::size_t k = 0; k < NB; ++k) { up_.b.x[k] = xb[k]; up_.b.y[k] = yb[k]; }
+        for (std::size_t k = 0; k < NA; ++k) {
+            up_.a.x[k] = xa[k];
+            up_.a.y[k] = ya[k];
+        }
+        for (std::size_t k = 0; k < NB; ++k) {
+            up_.b.x[k] = xb[k];
+            up_.b.y[k] = yb[k];
+        }
     }
 
     template <std::size_t NA, std::size_t NB>
     void downsample_kernel(const SampleType* input, SampleType* output, std::size_t n) noexcept {
         SampleType xa[NA > 0 ? NA : 1], ya[NA > 0 ? NA : 1];
         SampleType xb[NB > 0 ? NB : 1], yb[NB > 0 ? NB : 1];
-        for (std::size_t k = 0; k < NA; ++k) { xa[k] = down_.a.x[k]; ya[k] = down_.a.y[k]; }
-        for (std::size_t k = 0; k < NB; ++k) { xb[k] = down_.b.x[k]; yb[k] = down_.b.y[k]; }
+        for (std::size_t k = 0; k < NA; ++k) {
+            xa[k] = down_.a.x[k];
+            ya[k] = down_.a.y[k];
+        }
+        for (std::size_t k = 0; k < NB; ++k) {
+            xb[k] = down_.b.x[k];
+            yb[k] = down_.b.y[k];
+        }
         for (std::size_t i = 0; i < n; ++i) {
             const SampleType even = input[2 * i];
             const SampleType odd = input[2 * i + 1];
@@ -458,8 +520,14 @@ template <typename SampleType> class HalfBandIirStage {
             const SampleType pb = run<NB>(b_, xb, yb, even);
             output[i] = SampleType{0.5f} * (pa + pb);
         }
-        for (std::size_t k = 0; k < NA; ++k) { down_.a.x[k] = xa[k]; down_.a.y[k] = ya[k]; }
-        for (std::size_t k = 0; k < NB; ++k) { down_.b.x[k] = xb[k]; down_.b.y[k] = yb[k]; }
+        for (std::size_t k = 0; k < NA; ++k) {
+            down_.a.x[k] = xa[k];
+            down_.a.y[k] = ya[k];
+        }
+        for (std::size_t k = 0; k < NB; ++k) {
+            down_.b.x[k] = xb[k];
+            down_.b.y[k] = yb[k];
+        }
     }
 };
 

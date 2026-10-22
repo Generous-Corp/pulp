@@ -524,10 +524,9 @@ double polyphase_rejection_db(Oversampler64::Quality quality, Oversampler64::Fac
     double energy = 0.0;
     for (std::size_t i = 0; i < frames; ++i) {
         const double output = oversampler.process(0.0, [&](double) {
-            const double value =
-                tone ? std::sin(2.0 * kPi * oversampled_frequency *
-                                static_cast<double>(callback_frame))
-                     : 0.0;
+            const double value = tone ? std::sin(2.0 * kPi * oversampled_frequency *
+                                                 static_cast<double>(callback_frame))
+                                      : 0.0;
             ++callback_frame;
             return value;
         });
@@ -559,7 +558,8 @@ constexpr std::array<Oversampler64::Factor, 4> kFactors = {
 
 TEST_CASE("Polyphase IIR stage designs meet their analytic floors",
           "[signal][oversampling][polyphase_iir][stopband]") {
-    for (const auto quality : {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
         const bool pristine = quality == Oversampler64::Quality::pristine;
         for (int stage = 0; stage < 4; ++stage) {
             const auto design = Oversampler64::polyphase_stage_design(quality, stage);
@@ -582,9 +582,9 @@ TEST_CASE("Polyphase IIR rejects callback content folding into the base band at 
     // pins every stage independently. Offsets crowd toward the stopband edge,
     // where an equiripple design is no better than anywhere else but where a
     // mis-designed one is weakest.
-    constexpr std::array<double, 8> kOffsets = {0.0005, 0.003, 0.01, 0.03, 0.08,
-                                                0.15,   0.25,  0.4};
-    for (const auto quality : {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+    constexpr std::array<double, 8> kOffsets = {0.0005, 0.003, 0.01, 0.03, 0.08, 0.15, 0.25, 0.4};
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
         const bool pristine = quality == Oversampler64::Quality::pristine;
         const double edge = pristine ? 0.45 : 0.42;
         const double floor_db = pristine ? 140.0 : 94.0;
@@ -622,21 +622,22 @@ TEST_CASE("Polyphase IIR rejection gate sits above the analyzer floor and below 
     REQUIRE(silent > 250.0);
     // Positive control: a passband tone injected in the callback comes straight
     // back, so the same instrument reads ~0 dB rather than a flattering number.
-    const double passband = polyphase_rejection_db(Oversampler64::Quality::standard,
-                                                   Oversampler64::Factor::x2, 0.2);
+    const double passband =
+        polyphase_rejection_db(Oversampler64::Quality::standard, Oversampler64::Factor::x2, 0.2);
     REQUIRE_THAT(passband, WithinAbs(0.0, 0.01));
     // The biquad lane's ~9 dB at the same kind of probe shows the gate fails on
     // a filter that does not reject.
     REQUIRE(injected_tone_rejection_db(Oversampler64::Kind::fir_biquad,
-                                       Oversampler64::Quality::standard,
-                                       Oversampler64::Factor::x2, 0.6) < 30.0);
+                                       Oversampler64::Quality::standard, Oversampler64::Factor::x2,
+                                       0.6) < 30.0);
 }
 
 TEST_CASE("Polyphase IIR interpolator rejects base-band images by its design floor",
           "[signal][oversampling][polyphase_iir][stopband]") {
     // A base tone f appears in the oversampled stream at f and at k*Fs +/- f.
     // Project each image by least squares and compare to the tone itself.
-    for (const auto quality : {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
         const bool pristine = quality == Oversampler64::Quality::pristine;
         for (const auto factor : {Oversampler64::Factor::x2, Oversampler64::Factor::x4}) {
             for (const double frequency : {0.05, 0.2, pristine ? 0.449 : 0.419}) {
@@ -662,7 +663,8 @@ TEST_CASE("Polyphase IIR interpolator rejects base-band images by its design flo
                 std::vector<double> residual(tail.begin(), tail.end());
                 for (std::size_t n = 0; n < residual.size(); ++n) {
                     const double phase = 2.0 * kPi * frequency / f * static_cast<double>(n);
-                    residual[n] -= main.sin_gain * std::sin(phase) + main.cos_gain * std::cos(phase);
+                    residual[n] -=
+                        main.sin_gain * std::sin(phase) + main.cos_gain * std::cos(phase);
                 }
                 double worst_db = -1e9;
                 for (int k = 1; k < f; ++k) {
@@ -671,7 +673,8 @@ TEST_CASE("Polyphase IIR interpolator rejects base-band images by its design flo
                             continue;
                         worst_db = std::max(
                             worst_db, 20.0 * std::log10(fit_tone(residual, image / f).amplitude /
-                                                            main.amplitude + 1e-300));
+                                                            main.amplitude +
+                                                        1e-300));
                     }
                 }
                 INFO("pristine=" << pristine << " factor=" << f << " f=" << frequency
@@ -684,7 +687,8 @@ TEST_CASE("Polyphase IIR interpolator rejects base-band images by its design flo
 
 TEST_CASE("Polyphase IIR passband is flat to its advertised edge",
           "[signal][oversampling][polyphase_iir][passband]") {
-    for (const auto quality : {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
         const double edge = quality == Oversampler64::Quality::pristine ? 0.45 : 0.42;
         for (const auto factor : kFactors) {
             for (const double frequency : {0.01, 0.1, 0.3, edge - 0.001}) {
@@ -754,8 +758,8 @@ TEST_CASE("Block processing is identical to per-sample processing for every kind
     auto shaper = [](float sample) { return std::tanh(2.0f * sample); };
     for (const auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir,
                             Oversampler::Kind::linear_phase_fir}) {
-        for (const auto factor : {Oversampler::Factor::x2, Oversampler::Factor::x4,
-                                  Oversampler::Factor::x16}) {
+        for (const auto factor :
+             {Oversampler::Factor::x2, Oversampler::Factor::x4, Oversampler::Factor::x16}) {
             Oversampler per_sample;
             per_sample.set_kind(kind);
             per_sample.set_factor(factor);

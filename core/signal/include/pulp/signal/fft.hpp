@@ -69,8 +69,8 @@ inline bool checked_fft_retained_bytes(std::uint64_t fft_size,
         return false;
 #if PULP_FFT_HAS_VDSP
     if constexpr (std::is_same_v<SampleType, float>) {
-        if (fft_size > (UINT64_MAX - kVdspSplitPaddingFloats) / 2u
-            || !charge.add<float>(2u * fft_size + kVdspSplitPaddingFloats))
+        if (fft_size > (UINT64_MAX - kVdspSplitPaddingFloats) / 2u ||
+            !charge.add<float>(2u * fft_size + kVdspSplitPaddingFloats))
             return false;
     }
 #endif
@@ -108,8 +108,9 @@ public:
     FftT(FftT&& other) noexcept
         : size_(other.size_), twiddles_(std::move(other.twiddles_))
 #if PULP_FFT_HAS_VDSP
-        , log2n_(other.log2n_), vdsp_setup_(other.vdsp_setup_)
-        , split_(std::move(other.split_)), split_base_(other.split_base_)
+          ,
+          log2n_(other.log2n_), vdsp_setup_(other.vdsp_setup_), split_(std::move(other.split_)),
+          split_base_(other.split_base_)
 #endif
     {
 #if PULP_FFT_HAS_VDSP
@@ -180,9 +181,8 @@ public:
             return false;
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
-            return vdsp_setup_ != nullptr
-                && split_.size() == 2 * static_cast<std::size_t>(size_)
-                                        + kVdspSplitPaddingFloats;
+            return vdsp_setup_ != nullptr &&
+                   split_.size() == 2 * static_cast<std::size_t>(size_) + kVdspSplitPaddingFloats;
         }
 #endif
         return true;
@@ -231,7 +231,9 @@ public:
     }
 
     /// Independent bins of a real transform of size(): DC through Nyquist.
-    int real_bins() const { return size_ / 2 + 1; }
+    int real_bins() const {
+        return size_ / 2 + 1;
+    }
 
     /// Real-input forward transform. Reads size() real samples and writes
     /// real_bins() bins, X[k] = scale * sum_n x[n] e^(-2 pi i k n / N) for
@@ -390,7 +392,7 @@ private:
         interleave_scaled(z.realp, z.imagp, out, half, s);
         out[2 * half] = s * z.imagp[0]; // Nyquist
         out[2 * half + 1] = 0.0f;
-        out[1] = 0.0f;                      // DC has no imaginary part
+        out[1] = 0.0f; // DC has no imaginary part
     }
 
     void inverse_real_half_vdsp(const std::complex<float>* input, float* output,
@@ -540,7 +542,8 @@ private:
 
     void bit_reverse(std::complex<SampleType>* data, int count) const {
         int bits = 0;
-        for (int n = count; n > 1; n >>= 1) ++bits;
+        for (int n = count; n > 1; n >>= 1)
+            ++bits;
 
         for (int i = 0; i < count; ++i) {
             int j = 0;

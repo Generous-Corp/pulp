@@ -340,7 +340,7 @@ public:
         return state_ && !state_->ir_spectra.empty();
     }
 
-private:
+  private:
     // Fold one input block into the shared history: copy it into the upper
     // half of the real overlap window and take its real forward transform into
     // the current ring slot (DC..Nyquist only; every spectrum here is the

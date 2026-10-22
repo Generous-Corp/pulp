@@ -318,8 +318,8 @@ TEST_CASE("Convolver: output nulls against a long-double direct convolution",
         std::size_t block;
         std::size_t ir_length;
     };
-    for (const Case c : {Case{2, 37}, Case{32, 64}, Case{128, 4096}, Case{512, 512},
-                         Case{512, 9000}}) {
+    for (const Case c :
+         {Case{2, 37}, Case{32, 64}, Case{128, 4096}, Case{512, 512}, Case{512, 9000}}) {
         const std::size_t frames = c.block * ((3 * c.ir_length) / c.block + 8);
         const auto in64 = lcg_signal(frames, 0x1234567u, 0.0);
         const auto ir64 = lcg_signal(c.ir_length, 0xBEEFu, 4.0 / static_cast<double>(c.ir_length));

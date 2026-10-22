@@ -170,8 +170,9 @@ template <typename SampleType = float> class OversamplerT {
             } else {
                 // Both biquads of a stage see the full high-rate stream and the
                 // decimator keeps even-phase samples.
-                total += 2.0 * biquad_group_delay(
-                                   biquad_up_stages_[static_cast<std::size_t>(stage)].coefficients(), f) /
+                total += 2.0 *
+                         biquad_group_delay(
+                             biquad_up_stages_[static_cast<std::size_t>(stage)].coefficients(), f) /
                          rate;
             }
         }
@@ -192,7 +193,8 @@ template <typename SampleType = float> class OversamplerT {
         const double base_edge = pristine ? 0.225 : 0.21;
         const auto index = static_cast<std::size_t>(std::clamp(stage, 0, int(kMaxStages) - 1));
         const double edge = base_edge / static_cast<double>(1u << index);
-        return design_halfband_iir(pristine ? kPristineCounts[index] : kStandardCounts[index], edge);
+        return design_halfband_iir(pristine ? kPristineCounts[index] : kStandardCounts[index],
+                                   edge);
     }
 
     // Process a single sample with oversampled callback.
