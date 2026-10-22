@@ -1011,13 +1011,13 @@ pulp_add_test_suite(pulp-test-file-search-path GROUP pulp-test-group-core-runtim
 # Sync-primitive hammer for the TSan-focused race regression.
 # Runs under the tag-scoped TSan subset via the [concurrent][race]
 # tags embedded in each TEST_CASE (matches the 'Race|Concurrent'
-# alternation in sanitizers.yml's --tests-regex).
-# `slow`: N-thread race smoke. Sanitizer builds also pick this
-# up via the dedicated sanitizers.yml workflow, so fast-CI doesn't
-# need to re-run it.
+# alternation in sanitizers.yml's --tests-regex). Not `slow`: the
+# three hammers take about 1.5 s together and assert only that both
+# sides made progress, so the pull-request affected-test step can run
+# them when a diff edits a sync primitive (its runtime-sync-hammers
+# path family) and the merge queue runs them with the full suite.
 pulp_add_test_suite(pulp-test-sync-race-hammer GROUP pulp-test-group-core-runtime
-    LIBRARIES pulp::runtime
-    PROPERTIES LABELS slow)
+    LIBRARIES pulp::runtime)
 
 # Events tests
 pulp_add_test_suite(pulp-test-events GROUP pulp-test-group-core-events
