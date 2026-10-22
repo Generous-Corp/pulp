@@ -1193,13 +1193,18 @@ fft.magnitude_db(freq.data(), magnitudes.data(), 512);
 | `size()` | FFT size. |
 | `forward(complex<float>*)` | In-place forward FFT. |
 | `inverse(complex<float>*)` | In-place inverse FFT (with 1/N scaling). |
-| `forward_real(float* in, complex<float>* out)` | Real input to complex frequency domain. |
+| `forward_real(float* in, complex<float>* out)` | Real input to all N bins, upper half mirrored. |
+| `real_bins()` | `size() / 2 + 1`: the independent bins of a real transform. |
+| `forward_real_half(float* in, complex<float>* out, float scale = 1)` | Real input to DC..Nyquist only, scaled in the same pass. Prefer this when you read no further than Nyquist. |
+| `inverse_real_half(complex<float>* in, float* out[, float scale])` | DC..Nyquist back to N real samples (default scale 1/N). `out` may reuse `in`'s storage. |
 | `magnitude_db(complex<float>*, float*, int)` | Compute magnitude spectrum in dB. |
 | `magnitude(complex<float>*, float*, int)` | Compute magnitude spectrum (linear). |
 
 **Sample rate dependency:** None (operates in sample domain). To convert bin index to frequency: `bin * sample_rate / fft_size`.
 
-**Caveat:** The constructor allocates twiddle factor storage. Create `Fft` objects in `prepare()`, not on the audio thread. `forward()`, `inverse()`, `forward_real()`, and magnitude helpers are real-time safe after construction when callers provide output buffers.
+**Caveat:** The constructor allocates twiddle factor storage. Create `Fft` objects in `prepare()`, not on the audio thread. `forward()`, `inverse()`, `forward_real()`, `forward_real_half()`, `inverse_real_half()`, and magnitude helpers are real-time safe after construction when callers provide output buffers.
+
+The half-spectrum pair moves N/2 + 1 bins through an N/2-point complex transform, so it is roughly a quarter faster than `forward_real()` and about twice as fast as a complex transform of the same real data; `PartitionedConvolver`, `Convolver`, the STFT, and the spectral frame engine all run on it.
 
 ---
 
