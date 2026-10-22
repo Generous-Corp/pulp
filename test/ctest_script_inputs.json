@@ -3432,6 +3432,21 @@
    ],
    "kind": "python"
   },
+  "bump-fastpath-selftest": {
+   "entry": "tools/scripts/test_bump_fastpath.py",
+   "inputs": [
+    ".github/rulesets/main-protection.json",
+    ".github/workflows/build.yml",
+    ".github/workflows/bump-fastpath-weekly.yml",
+    ".github/workflows/control-shipping-native.yml",
+    ".github/workflows/coverage.yml",
+    ".github/workflows/examples-validation.yml",
+    ".github/workflows/intel-portability.yml",
+    "tools/scripts/bump_fastpath_report.py",
+    "tools/scripts/test_bump_fastpath.py"
+   ],
+   "kind": "python"
+  },
   "bundled-font-lists-agree": {
    "entry": "tools/scripts/check_bundled_font_lists.py",
    "inputs": [
