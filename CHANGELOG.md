@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09962"></a>
+## [0.996.2] - 2026-10-22
+
+- release/version bump ([#10629](https://github.com/Generous-Corp/pulp/pull/10629))
+- feature/gpu audio fault injection controls 20261021 ([#10627](https://github.com/Generous-Corp/pulp/pull/10627))
+- fix/nonuniform convolver alias 20261021 ([#10625](https://github.com/Generous-Corp/pulp/pull/10625))
+- feature/gpu audio telemetry snapshot overflow 20261021 ([#10622](https://github.com/Generous-Corp/pulp/pull/10622))
+- feature/gpu audio receipt health hardening 20261021 ([#10621](https://github.com/Generous-Corp/pulp/pull/10621))
+
 <a id="v09961"></a>
 ## [0.996.1] - 2026-10-21
 
@@ -11172,6 +11181,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.996.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.996.2
 [0.996.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.996.1
 [0.996.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.996.0
 [0.995.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.995.1
