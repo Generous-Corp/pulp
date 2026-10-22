@@ -2620,7 +2620,7 @@ class DawnGpuCompute : public GpuCompute {
         wgpu::CommandEncoderDescriptor enc_desc{};
         auto encoder = device_.CreateCommandEncoder(&enc_desc);
         // Marker passes carry the begin/end timestamps so the span covers every
-        // instance's dispatches and history copies, whatever their encoder kind.
+        // instance's dispatches and the output copies after them.
         const bool timed = do_ts && ensure_timestamp_marker();
         if (timed) encode_timestamp_marker(encoder, true);
         {
@@ -3850,7 +3850,9 @@ private:
                             const float* const* weights, uint32_t weights_len,
                             const float* head_scales, uint32_t count, uint32_t block_size,
                             WavenetPlan& plan) {
-        if (!ready_for_work() || !arrays || !weights || !head_scales || count == 0)
+        // The group rides the dispatch y dimension, which WebGPU caps at 65535.
+        if (!ready_for_work() || !arrays || !weights || !head_scales || count == 0 ||
+            count > 65535u)
             return false;
         for (uint32_t i = 0; i < count; ++i)
             if (!weights[i]) return false;

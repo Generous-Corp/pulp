@@ -413,7 +413,7 @@ public:
     // chained array→array. The whole block's samples compute in PARALLEL (the
     // net is feedforward), every pass encodes into ONE submit over
     // device-resident activations, and only the final mono block is read back —
-    // the round-trip is paid once per block. Dilation history slides across
+    // the round-trip is paid once per block. Dilation history carries across
     // calls so streaming blocks are continuous. Not real-time-safe (blocks on
     // the readback); run on the GPU worker / offline. It is the GPU counterpart
     // to a streaming CPU WaveNet and drives neural waveshaping / amp inference.
