@@ -100,6 +100,11 @@ export const COMPUTED_STYLES = [
   "padding-right",
   "padding-bottom",
   "padding-left",
+  // Masked text. Chromium paints a run under `-webkit-text-security` other
+  // than `none` as one mask glyph per character, on any element, while the
+  // snapshot still carries the clear string. Without this property a control
+  // masked by CSS rather than by `type=password` would be drawn in clear.
+  "-webkit-text-security",
   // SVG paint. An inline `<svg>` icon carries its colour three different ways —
   // a presentation attribute, a stylesheet rule, or `currentColor` inherited
   // from the box around it — and only the browser knows which one won. Reading

@@ -57,6 +57,14 @@ std::optional<ControlValueText> control_value_text(
     } else {
         return std::nullopt;
     }
+    // A control under `-webkit-text-security` paints a mask glyph per
+    // character, whatever its type, and its captured value is the secret the
+    // mask hides. It is never drawn. A capture that predates the property
+    // records no value for it and is read as unmasked, as it always was.
+    if (const auto security = computed.find("-webkit-text-security");
+        security != computed.end() && !security->second.empty() &&
+        security->second != "none")
+        return std::nullopt;
     // Without padding the content box is unknown — a capture that predates it
     // would place the string on the border, so it is not drawn at all.
     for (const char* edge : {"padding-top", "padding-right", "padding-bottom",

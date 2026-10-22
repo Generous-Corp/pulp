@@ -3989,3 +3989,68 @@ TEST_CASE("form controls draw the string their own state holds",
     });
     CHECK(unresolved == 1);
 }
+
+namespace {
+
+/// True when `needle` appears in any text run, name, or attribute value of the
+/// lowered tree.
+bool tree_mentions(const IRNode& node, const std::string& needle) {
+    if (node.text_content.find(needle) != std::string::npos) return true;
+    if (node.name.find(needle) != std::string::npos) return true;
+    for (const auto& [key, value] : node.attributes) {
+        if (value.find(needle) != std::string::npos) return true;
+    }
+    for (const auto& child : node.children) {
+        if (tree_mentions(child, needle)) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("a control masked by -webkit-text-security never draws its value",
+          "[browser-capture][native-lowering][form-controls][security]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=text] under
+    // `-webkit-text-security: disc`, 4 INPUT[type=text] unmasked. Both are text
+    // fields Chrome lays out identically; only the mask differs.
+    //
+    // Row order: display, appearance, padding (top, right, bottom, left),
+    // border widths (top, right, bottom, left), font-size, color, text-align,
+    // -webkit-text-security.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,2]",
+        .attributes = "[[],[],[],[4,5],[4,5]]",
+        .layout_nodes = "[1,2,3,4]",
+        .styles = "[[8,17,10,10,10,10,10,10,10,10,13,14,15,17],"
+                  "[8,17,10,10,10,10,10,10,10,10,13,14,15,17],"
+                  "[8,9,11,12,11,12,11,11,11,11,13,14,15,16],"
+                  "[8,9,11,12,11,12,11,11,11,11,13,14,15,17]]",
+        .bounds = "[[0,0,200,80],[0,0,200,80],[10,10,150,24],[10,40,150,24]]",
+        .paint_orders = "[0,1,2,3]",
+        .computed_names =
+            R"(["display","appearance","padding-top","padding-right",)"
+            R"("padding-bottom","padding-left","border-top-width",)"
+            R"("border-right-width","border-bottom-width","border-left-width",)"
+            R"("font-size","color","text-align","-webkit-text-security"])",
+        .strings =
+            R"J("#document","HTML","BODY","INPUT","type","text","hunter2",)J"
+            R"J("visible-value","block","auto","0px","1px","6px","13px",)J"
+            R"J("rgb(31, 41, 51)","start","disc","none")J",
+        .extra_nodes =
+            R"(,"nodeValue":[-1,-1,-1,-1,-1])"
+            R"(,"inputValue":{"index":[3,4],"value":[6,7]})",
+        .extra_top =
+            R"(,"formControlTheme":{"controls":[)"
+            R"({"node_index":3,"theme":"native"},)"
+            R"({"node_index":4,"theme":"native"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "masked-control-value");
+
+    // The unmasked twin is the positive control: the same lowering on the same
+    // shape does draw a value, so an absent secret is the mask's doing.
+    CHECK(find_by_text(lowered.root, "visible-value") != nullptr);
+    CHECK(lowered.counts.control_value_text == 1);
+    CHECK_FALSE(tree_mentions(lowered.root, "hunter2"));
+}
