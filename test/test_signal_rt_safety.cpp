@@ -886,6 +886,15 @@ TEST_CASE("Dynamics and filter signal helpers are allocation-free after configur
     tpt.prepare(48000.0f);
     tpt.set_cutoff(800.0f);
 
+    LadderBank<8> ladder_bank;
+    ladder_bank.set_sample_rate(48000.0f);
+    SvfBank<8> svf_bank;
+    for (std::size_t v = 0; v < 8; ++v) {
+        ladder_bank.set_frequency(v, 1000.0f);
+        ladder_bank.set_resonance(v, 0.5f);
+        svf_bank.configure(v, Svf::Mode::lowpass, 48000.0f, 1000.0f, 0.707f);
+    }
+
     require_allocates_no_memory([&] {
         std::array<float, 64> signal {};
         std::array<float, 64> sidechain {};
@@ -917,6 +926,10 @@ TEST_CASE("Dynamics and filter signal helpers are allocation-free after configur
         (void)tpt.process_highpass(0.1f);
         (void)tpt.process_allpass(0.1f);
         tpt.process_lowpass(signal.data(), static_cast<int>(signal.size()));
+        ladder_bank.process(signal.data(), signal.data());
+        svf_bank.process(signal.data(), signal.data());
+        ladder_bank.reset();
+        svf_bank.reset(3);
         tpt.process_highpass(signal.data(), static_cast<int>(signal.size()));
         tpt.process_allpass(signal.data(), static_cast<int>(signal.size()));
         compressor.reset();

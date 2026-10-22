@@ -33,6 +33,23 @@ public:
         update();
     }
 
+    /// The TPT state-variable coefficients for a sample rate, cutoff and
+    /// resonance (Q): g = tan(pi fc / fs), k = 1 / Q, a1 = 1 / (1 + g (g + k)),
+    /// a2 = g a1, a3 = g a2.
+    struct Coefficients {
+        SampleType g, k, a1, a2, a3;
+    };
+
+    static Coefficients design(SampleType sample_rate, SampleType frequency, SampleType resonance) {
+        Coefficients c{};
+        c.g = std::tan(SampleType{3.14159265f} * frequency / sample_rate);
+        c.k = SampleType{1.0f} / resonance;
+        c.a1 = SampleType{1.0f} / (SampleType{1.0f} + c.g * (c.g + c.k));
+        c.a2 = c.g * c.a1;
+        c.a3 = c.g * c.a2;
+        return c;
+    }
+
     SampleType process(SampleType input) {
         SampleType v3 = input - ic2_;
         SampleType v1 = a1_ * ic1_ + a2_ * v3;
@@ -115,11 +132,12 @@ private:
     }
 
     void update() {
-        g_ = std::tan(SampleType{3.14159265f} * freq_ / sample_rate_);
-        k_ = SampleType{1.0f} / q_;
-        a1_ = SampleType{1.0f} / (SampleType{1.0f} + g_ * (g_ + k_));
-        a2_ = g_ * a1_;
-        a3_ = g_ * a2_;
+        const Coefficients c = design(sample_rate_, freq_, q_);
+        g_ = c.g;
+        k_ = c.k;
+        a1_ = c.a1;
+        a2_ = c.a2;
+        a3_ = c.a3;
     }
 };
 
