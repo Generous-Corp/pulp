@@ -10,7 +10,7 @@
     "design-source-ingest",
     "render-assets-and-backends"
   ],
-  "rationale": "The baked C++ lane's fidelity report no longer notes mix-blend-mode normal or filter, backdrop-filter, clip-path and transform none as unlowered; it changes diagnostics only, not lowering, rendering or authority.",
+  "rationale": "The baked C++ lane's fidelity report no longer notes style values it already renders as unlowered: mix-blend-mode normal; filter, backdrop-filter, clip-path and transform none; text-overflow clip; pointer-events auto; a solid or widthless border. It changes diagnostics only, not lowering, rendering or authority.",
   "tests": [
     "ctest --test-dir build -R 'generate_pulp_cpp does not report a style property set to its initial keyword'",
     "ctest --test-dir build -R 'generate_pulp_cpp reports the style properties it cannot lower'",
