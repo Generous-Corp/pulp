@@ -72,6 +72,25 @@ function(_pulp_skia_subset_icu_data libs_var)
         message(STATUS "Skia ICU data subset: ${_stdout}")
     endif()
 
+    # The rewrite above runs at configure time. Declare a build rule for the
+    # same file too, so a build that finds it deleted (a cleaned directory,
+    # tools/scripts/confirm_failure.sh removing a target's build-dir inputs)
+    # regenerates it rather than failing with "no known rule to make it".
+    if(NOT TARGET pulp-skia-icu-subset)
+        add_custom_command(
+            OUTPUT "${_out}"
+            COMMAND "${Python3_EXECUTABLE}" "${_script}"
+                --archive "${_src}"
+                --output "${_out}"
+                --work-dir "${_dir}/work"
+                --report "${_dir}/report.json"
+            COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_dir}/work"
+            DEPENDS "${_src}" "${_script}"
+            COMMENT "Rewriting Skia's libskunicode_icu.a with trimmed ICU data"
+            VERBATIM)
+        add_custom_target(pulp-skia-icu-subset DEPENDS "${_out}")
+    endif()
+
     list(TRANSFORM _libs REPLACE "^.*/libskunicode_icu\\.a$" "${_out}")
     set(${libs_var} "${_libs}" PARENT_SCOPE)
 endfunction()
