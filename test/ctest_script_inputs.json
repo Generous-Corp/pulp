@@ -2662,6 +2662,7 @@
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-shared-io-convolution-pipeline",
   "pulp-test-gpu-shared-io-convolution-session",
+  "pulp-test-gpu-shared-io-provider-conformance",
   "pulp-test-gpu-shared-io-slot-ledger",
   "pulp-test-gpu-shared-io-wavenet-spec",
   "pulp-test-gpu-surface",
@@ -5197,6 +5198,20 @@
    "entry": "tools/validation/test_verify_gpu_audio_p5_receipt.py",
    "inputs": [
     "tools/validation/test_verify_gpu_audio_p5_receipt.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-provider-conformance-fake-receipt-verify": {
+   "entry": "tools/validation/verify_gpu_audio_provider_conformance.py",
+   "inputs": [
+    "tools/validation/verify_gpu_audio_provider_conformance.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-provider-conformance-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_provider_conformance.py",
+   "inputs": [
+    "tools/validation/test_verify_gpu_audio_provider_conformance.py"
    ],
    "kind": "python"
   },
