@@ -6,11 +6,11 @@
 // what the reverb does. These cases pin it three ways:
 //
 //  1. An output fingerprint: the 40 ms RMS envelope of the impulse response,
-//     per rail, for three voicings, recorded from a sample-at-a-time
-//     evaluation of the same DSP graph with double-precision filters and
-//     per-sample sanitizing. The block engine reproduces it within 1e-4 dB;
-//     the tolerance here is 0.01 dB, and a 2% decay change moves it by half a
-//     decibel (the negative control).
+//     per rail, for nine voicings (every mode, drive and flutter), recorded
+//     from v0.1004.0's sample-at-a-time engine by
+//     tools/audio/fdn_reference/generate.sh. The block engine reproduces every
+//     one within 1e-4 dB on Apple clang; the tolerance here is 0.01 dB, and a
+//     2% decay change moves it by half a decibel (the negative control).
 //  2. Decay and density measured with support/reverb_metrics.hpp — band T60
 //     and the echo-density mixing time — against the same reference, each with
 //     a control that moves the metric past its tolerance.
@@ -93,6 +93,88 @@ constexpr std::array<Reference, 3> kReference = {{
       -66.7075, -67.5477, -68.3903, -69.6236, -70.3704, -71.2100,
       -72.5625, -73.1030, -74.1067, -75.4661, -76.2582, -77.0998},
      2.51962, 2.50413, 0.07733},
+}};
+// The remaining voicings, from the same generator (envelopes only).
+struct EnvelopeReference {
+    const char* name;
+    void (*configure)(FdnReverb&);
+    std::array<double, kWindows> left;
+    std::array<double, kWindows> right;
+};
+
+constexpr std::array<EnvelopeReference, 6> kMoreReferences = {{
+    {"room",
+     [](FdnReverb& r) { r.set_mode(Mode::room); },
+     {-80.6152, -59.5934, -58.4752, -61.1033, -65.2718, -68.4765,
+      -72.0831, -75.5593, -78.9685, -82.7017, -85.4579, -88.8504,
+      -92.3395, -95.9880, -98.8941, -101.5667, -105.3639, -108.7650,
+      -111.7683, -114.4612, -117.5526, -120.9987, -122.7366, -127.3621,
+      -130.0350, -132.7234, -136.3755, -138.2379, -141.5210, -145.2811},
+     {-81.2608, -60.5894, -59.3050, -61.0369, -64.6375, -68.4057,
+      -71.9772, -75.5668, -79.3109, -82.4557, -85.7137, -88.9274,
+      -91.0236, -95.0229, -98.3087, -101.6514, -104.2282, -108.7574,
+      -111.8103, -114.3132, -116.3910, -119.7283, -123.9075, -127.5605,
+      -129.5189, -132.6223, -136.2065, -138.3407, -141.0855, -146.0242}},
+    {"galaxy",
+     [](FdnReverb& r) { r.set_mode(Mode::galaxy); },
+     {-99.7426, -62.3611, -58.6184, -58.0071, -57.0647, -57.9492,
+      -58.5116, -58.9888, -58.7455, -59.7163, -59.8555, -60.3967,
+      -60.3248, -60.6352, -60.6890, -60.7859, -61.2582, -61.5063,
+      -61.7467, -61.8398, -62.1185, -62.8569, -62.1082, -62.6519,
+      -62.2101, -62.7959, -63.5152, -63.5705, -63.6065, -63.6486},
+     {-100.6690, -64.1386, -59.0311, -58.4780, -57.5890, -57.5334,
+      -58.2421, -58.9928, -59.3919, -59.9835, -60.0980, -60.3829,
+      -60.1653, -60.8192, -60.6450, -61.1962, -61.3219, -61.1581,
+      -61.4589, -62.2069, -62.0689, -62.4085, -62.2578, -62.4261,
+      -63.0284, -63.2343, -63.2242, -63.7272, -63.5885, -63.9808}},
+    {"shimmer",
+     [](FdnReverb& r) { r.set_mode(Mode::shimmer); },
+     {-90.9875, -59.8908, -56.7148, -56.4462, -56.4804, -57.8595,
+      -58.8153, -59.4874, -60.0219, -60.9448, -61.7002, -62.1805,
+      -63.3067, -63.9803, -64.2804, -64.9873, -65.5679, -66.0034,
+      -66.7943, -67.1573, -67.6497, -68.4880, -69.0206, -69.6945,
+      -70.2721, -70.9778, -71.0672, -72.4559, -72.2807, -73.1471},
+     {-91.7600, -60.4835, -57.3462, -56.7612, -56.4198, -57.6684,
+      -58.5634, -59.4705, -60.0088, -60.9309, -61.3621, -62.2080,
+      -62.3843, -63.3539, -64.3429, -64.6605, -65.5150, -65.8005,
+      -66.5210, -67.2686, -67.3935, -68.5511, -69.1565, -69.1527,
+      -69.9588, -70.6600, -71.3418, -71.4879, -72.1983, -73.0147}},
+    {"lofi",
+     [](FdnReverb& r) { r.set_mode(Mode::lofi); },
+     {-94.7825, -61.7090, -59.6326, -60.8255, -62.0081, -65.1333,
+      -66.3125, -68.8784, -71.4593, -72.7248, -75.1548, -76.2048,
+      -77.7439, -79.1622, -81.9790, -83.9325, -85.2368, -87.4373,
+      -89.6565, -89.8870, -91.8885, -93.0108, -95.3338, -96.6210,
+      -100.2722, -100.8219, -101.5672, -103.1099, -103.7911, -108.0916},
+     {-94.0741, -61.9865, -60.0902, -60.9949, -61.7480, -64.6967,
+      -66.9662, -69.2085, -70.9180, -72.2332, -74.6629, -77.0121,
+      -78.6389, -79.9660, -81.2122, -83.3029, -86.0180, -86.6128,
+      -89.6996, -90.4304, -91.4587, -93.7122, -95.3753, -95.2237,
+      -98.1693, -100.2926, -102.0624, -102.8367, -105.3403, -105.7316}},
+    {"defaults driven",
+     [](FdnReverb& r) { r.set_parameter(Param::drive, 0.7); },
+     {-83.9635, -58.7697, -55.9580, -55.5101, -56.5272, -57.9388,
+      -59.2603, -60.6122, -62.2463, -62.8687, -63.8816, -65.3605,
+      -66.6686, -67.9820, -68.2320, -69.9570, -71.1885, -71.0567,
+      -72.8955, -73.8711, -74.5619, -75.6148, -77.7442, -78.1178,
+      -79.6248, -79.9419, -80.3777, -83.3082, -82.9463, -83.9982},
+     {-85.3370, -59.0748, -56.8132, -56.3349, -56.7774, -57.2905,
+      -58.5064, -59.8092, -61.3134, -62.7906, -63.7950, -64.5814,
+      -66.0991, -67.5642, -68.6173, -69.2711, -70.4417, -71.5509,
+      -73.1097, -73.1922, -74.9594, -76.3081, -76.4721, -78.3734,
+      -79.4875, -80.1326, -80.7429, -82.1653, -83.0230, -84.5290}},
+    {"defaults with flutter",
+     [](FdnReverb& r) { r.set_flutter(true); },
+     {-87.2515, -61.6439, -59.2536, -59.3314, -61.0718, -62.5313,
+      -64.3303, -64.4143, -66.6346, -67.3980, -68.6467, -70.3064,
+      -70.6131, -72.0923, -73.4497, -74.1803, -75.3149, -76.5290,
+      -77.9636, -78.4236, -79.7526, -80.8947, -81.4338, -82.8471,
+      -83.6377, -85.7717, -86.0696, -87.4540, -87.3059, -88.6177},
+     {-88.1232, -62.9358, -60.2359, -59.2127, -59.4567, -62.4746,
+      -63.9784, -65.0614, -65.7650, -67.0883, -68.6882, -69.1816,
+      -70.7343, -71.7413, -73.3456, -74.5951, -75.9647, -76.7907,
+      -77.1129, -78.3545, -79.9737, -80.9294, -81.4725, -82.8786,
+      -83.7472, -85.0235, -86.4868, -86.4210, -88.1000, -88.2068}},
 }};
 // clang-format on
 
@@ -230,5 +312,23 @@ TEST_CASE("fdn reverb block engine is exact across host block partitions",
                 REQUIRE(split.right == whole.right);
             }
         }
+    }
+}
+
+TEST_CASE("fdn reverb block engine reproduces every mode, drive and flutter envelope",
+          "[fdn][reverb][regression]") {
+    for (const auto& reference : kMoreReferences) {
+        FdnReverb reverb;
+        reverb.prepare(kHostRate, kBlock);
+        reference.configure(reverb);
+        reverb.snap_parameters();
+        reverb.reset();
+        const auto out = render(reverb, impulse(static_cast<std::size_t>(kHostRate * 3.0)));
+        const double left = worst_envelope_difference(out.left, reference.left);
+        const double right = worst_envelope_difference(out.right, reference.right);
+        INFO(reference.name << ": worst 40 ms envelope difference L " << left << " dB, R " << right
+                            << " dB");
+        CHECK(left < kEnvelopeToleranceDb);
+        CHECK(right < kEnvelopeToleranceDb);
     }
 }
