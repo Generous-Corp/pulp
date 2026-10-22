@@ -66,8 +66,9 @@ std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 /// each audio block, not only on misses. A fallback fed only on misses would
 /// have gaps in its history, so a substituted block would not continue the
 /// convolution (its IR tail energy from the preceding audio would be missing):
-/// an audible discontinuity, not merely lower precision. Because the priming path is zero-latency but the transport reports
-/// `latency_blocks` of PDC for the GPU pipeline, the fallback's output is pushed
+/// an audible discontinuity, not merely lower precision. Because the priming
+/// path is zero-latency but the transport reports `latency_blocks` of PDC for
+/// the GPU pipeline, the fallback's output is pushed
 /// through a matching `latency_blocks`-deep delay so a miss substitute equals the
 /// wet block the worker ring would have returned (input(t-L) convolved) — the
 /// seam is sample-aligned, never a dry glitch and never a block early/late.

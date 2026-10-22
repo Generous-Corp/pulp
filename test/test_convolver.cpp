@@ -281,7 +281,7 @@ TEST_CASE("FixedIrConvolver direct and partitioned paths match a streamed FIR",
         double expected = 0.0;
         for (std::size_t k = 0; k < ir.size() && k <= n; ++k)
             expected += static_cast<double>(ir[k]) * input[n - k];
-        REQUIRE_THAT(output[n], WithinAbs(expected, 3e-3));
+        REQUIRE_THAT(output[n], WithinAbs(expected, 2e-5));
     }
 }
 

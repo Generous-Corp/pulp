@@ -1047,8 +1047,8 @@ int run_convolver_crossover(const std::string& path) {
         };
         return std::array<double, 4>{reps[2], pct(0.5), pct(0.99), per.back()};
     };
-    for (const int B : {16, 32, 64, 128, 256, 512, 1024}) {
-        std::vector<float> input(std::size_t(B) * 64);
+    for (const int B : {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}) {
+        std::vector<float> input(std::size_t(B) * 64 + 64);
         for (std::size_t i = 0; i < input.size(); ++i)
             input[i] = 0.5f * std::sin(0.013f * float(i)) + 0.25f * std::sin(0.31f * float(i));
         for (const int taps :

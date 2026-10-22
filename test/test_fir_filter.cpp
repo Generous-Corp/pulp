@@ -254,3 +254,17 @@ TEST_CASE("FirFilter in-place and separate-output block processing are identical
         REQUIRE(data == output);
     }
 }
+
+TEST_CASE("FirFilter with no coefficients passes blocks through like the per-sample path",
+          "[signal][fir]") {
+    FirFilterT<float> fir;
+    const std::vector<float> input = {0.5f, -0.25f, 0.125f, 1.0f, -1.0f};
+    std::vector<float> output(input.size(), -9.0f);
+    fir.process(input.data(), output.data(), static_cast<int>(input.size()));
+    REQUIRE(output == input);
+    std::vector<float> in_place = input;
+    fir.process(in_place.data(), static_cast<int>(in_place.size()));
+    REQUIRE(in_place == input);
+    for (const float x : input)
+        REQUIRE(fir.process(x) == x);
+}
