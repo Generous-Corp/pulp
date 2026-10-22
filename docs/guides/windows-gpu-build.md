@@ -5,6 +5,30 @@ against a prebuilt Skia/Dawn SDK. It is intended for a disposable Proxmox or
 UTM development VM. It does not register a runner and it does not change the
 macOS CI pool.
 
+## Retained ARM UTM desktop
+
+The retained ARM64EC guest is a development/demo VM, not a runner. Open its
+desktop through the installed macOS helper so the guest uses the active RDP
+session rather than UTM's emulated framebuffer:
+
+```sh
+cd "$HOME/Library/Application Support/Pulp/WindowsDemo"
+./tools/windows/open-utm-rdp.sh
+```
+
+The helper starts the guest when needed, repairs RDP over the authenticated SSH
+channel, and reads the credential from
+`~/.config/pulp/secrets/spectr-windows-utm-admin`. The retained forwarding is
+SSH `127.0.0.1:50476` and RDP `127.0.0.1:53490`; the Windows account is
+`PULP-WIN\\admin`. Once the RDP desktop is visible, start REAPER from its
+shortcut and insert `VST3: Spectr (Pulp)`.
+
+Interactive evidence must be driven from that RDP desktop. An SSH service
+session cannot safely create a visible plugin window, so a successful SSH
+command or Task Scheduler result is not a screenshot or interaction receipt.
+Keep the guest running only for the bounded test/demo session; stop Proxmox VM
+300 when its owned build and host processes have returned to idle.
+
 ## Inputs
 
 Keep the source checkout and the large SDK/build directories on a dedicated
