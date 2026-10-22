@@ -159,6 +159,56 @@ class ExpectedLibraryPath(unittest.TestCase):
                 ]), 2)
 
 
+class WindowsArm64ToolchainReceipt(unittest.TestCase):
+    def _write_receipt(self, root: pathlib.Path, **overrides: str) -> None:
+        receipt = {
+            "target": {"platform": "windows", "architecture": "arm64"},
+            "producer": {
+                "msvc_toolset_version": "14.51.36231",
+                "windows_sdk_version": "10.0.26100.0",
+                "skia_gn_compiler": {"version": "19.51.36231"},
+                "dawn_cmake_compiler": {"version": "19.51.36231"},
+            },
+        }
+        for key, value in overrides.items():
+            receipt["producer"][key] = value
+        path = root / "build" / "win-gpu" / "msvc-toolchain.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    def test_accepts_complete_native_arm64_receipt(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._write_receipt(pathlib.Path(td))
+            fetch_skia.validate_windows_arm64_toolchain_receipt(pathlib.Path(td))
+
+    def test_rejects_unknown_toolchain_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            self._write_receipt(root, msvc_toolset_version="unknown")
+            with self.assertRaisesRegex(ValueError, "unproven MSVC/STL provenance"):
+                fetch_skia.validate_windows_arm64_toolchain_receipt(root)
+
+    def test_rejects_missing_receipt(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(ValueError, "missing.*msvc-toolchain"):
+                fetch_skia.validate_windows_arm64_toolchain_receipt(pathlib.Path(td))
+
+    def test_cold_cache_is_not_valid_rather_than_an_error(self):
+        # The keyed-cache path asks cache_generation_valid() before anything is
+        # downloaded; a cold generation must read as "fetch it", not raise.
+        with tempfile.TemporaryDirectory() as td:
+            dest = pathlib.Path(td) / "windows-arm64-generation"
+            self.assertFalse(
+                fetch_skia.cache_generation_valid(dest, "windows-arm64", "a" * 64))
+
+    def test_warm_generation_with_unproven_receipt_is_not_valid(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            self._write_receipt(root, msvc_toolset_version="unknown")
+            self.assertFalse(
+                fetch_skia.cache_generation_valid(root, "windows-arm64", "a" * 64))
+
+
 class CachePublicationLock(unittest.TestCase):
     def test_live_owner_times_out_bounded(self):
         with _in_tempdir() as td:
