@@ -3320,6 +3320,13 @@ SETTINGS_DEFAULTS = {
     # does not own, because that would be a purchase. "none" disables silent
     # downloads entirely for anyone who wants the machine left alone.
     "auto_download": "entitled",
+    # Whether the person has answered the app's one-time download notice.
+    # Only the interactive app consults it: until it is True, an automatic
+    # download in a run the app launched is held and reported rather than
+    # performed, so the notice comes BEFORE the first third-party plugin
+    # arrives. A run nobody is watching (no FORGE_INTERACTIVE_DOWNLOADS) is
+    # unaffected and follows auto_download as it always has.
+    "auto_download_acknowledged": False,
     # Fetch the VCV Rack SDK automatically the first time a module build
     # needs it. The SDK is VCV's and GPLv3: no Forge artifact ever ships a
     # copy, and the fetch happens on the user's own machine, from vcvrack.com
@@ -3702,7 +3709,8 @@ def settings() -> dict:
 # silently carries and every reader has to defend against.
 SETTING_CHOICES = {
     "module_source": ("prefer_existing", "balanced", "prefer_generated"),
-    "auto_download": ("entitled", "none"),
+    "auto_download": ("entitled", "ask", "none"),
+    "auto_download_acknowledged": (True, False),
     "auto_fill_gaps": (True, False),
     "auto_download_free": (True, False),
     "auto_restart_rack": (True, False),
@@ -6404,6 +6412,33 @@ def named_fetch_plan(prompt: str, inv: dict, cat: dict, midx: dict,
     return plan
 
 
+# The line a held download prints, for the app to read back out of the log.
+DOWNLOAD_CONSENT_PREFIX = "FORGE-DOWNLOAD-CONSENT "
+
+
+def downloads_held(st: dict) -> bool:
+    """True when an automatic download has to wait for the person to agree.
+
+    "ask" holds every one. Otherwise only a run the app launched for a person
+    (FORGE_INTERACTIVE_DOWNLOADS=1) holds, and only until that person has
+    answered the one-time notice. Unattended runs never hold on the notice:
+    they follow auto_download, which their operator set.
+    """
+    if st.get("auto_download") == "ask":
+        return True
+    return (os.environ.get("FORGE_INTERACTIVE_DOWNLOADS") == "1" and
+            not st.get("auto_download_acknowledged"))
+
+
+def hold_download(plugin: str, version: str, modules, why: str) -> None:
+    """Report a download that is waiting for consent instead of doing it."""
+    print(f"  {plugin} would be downloaded for {why}; it is waiting for your "
+          f"OK, so this patch is built without it.", flush=True)
+    print(DOWNLOAD_CONSENT_PREFIX + json.dumps(
+        {"plugin": plugin, "version": version or "", "modules": modules,
+         "why": why}, sort_keys=True), flush=True)
+
+
 def ensure_named_installed(prompt: str, inv: dict, cat: dict, midx: dict,
                            mentions: dict,
                            maker_resolution: maker_intent.Resolution | None = None
@@ -6430,7 +6465,12 @@ def ensure_named_installed(prompt: str, inv: dict, cat: dict, midx: dict,
     for line in plan["blocked"]:
         print(f"  {line}", flush=True)
     fetched = []
+    held = downloads_held(st)
     for item in plan["fetch"]:
+        if held:
+            hold_download(item["plugin"], item["version"], item["modules"],
+                          item["why"])
+            continue
         print(f"  you named {item['why']} and it is not installed — fetching "
               f"{item['plugin']} ({item['modules']} modules)…", flush=True)
         ok, msg = install_module(item["plugin"], item["version"],
@@ -8543,6 +8583,10 @@ def main(argv):
                         continue
                     version = (cat.get(best["plugin"], {}) or {}).get("version")
                     if not version:
+                        continue
+                    if downloads_held(st):
+                        hold_download(best["plugin"], version, None,
+                                      f"a {tag.lower()} module")
                         continue
                     print(f"  no {tag.lower()} module installed — fetching "
                           f"{best['plugin']}/{best['module']}…", flush=True)

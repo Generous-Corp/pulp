@@ -44,6 +44,20 @@ Change the engine in Forge, and test the app-to-generator boundary there
 against these tools. A stub generator in a Forge test must read
 `--prompt-file`, not `sys.argv[2]`, once the engine passes it.
 
+## Automatic plugin downloads can be held for consent
+
+`ensure_named_installed()` (modules a prompt names) and the lint gap-fill both
+ask `downloads_held(settings())` before calling `install_module()`. A held
+download prints a readable line and then
+`FORGE-DOWNLOAD-CONSENT {"plugin","version","modules","why"}` (JSON) for the
+app to read from the log, and the patch is built without that plugin. Two
+things hold one: `auto_download: "ask"`, or a run the app launched with
+`FORGE_INTERACTIVE_DOWNLOADS=1` while `auto_download_acknowledged` is still
+false (the app's one-time notice is unanswered). A run without that variable
+never holds on the notice, so CI, agents and the CLI keep following
+`auto_download` as before. `patch.py install <slug>` is an explicit request
+and is never held. `test_download_consent.py` holds the matrix.
+
 ## One generation per output directory, held by an OS lock
 
 `patch.py build` and `generate.py` take `generation_lock.acquire_or_exit()` on
