@@ -1246,11 +1246,8 @@ TEST_CASE("WaveNet transport status reports a recoverable cause as Degraded",
     transport.release();
 }
 
-// Hidden until GpuWaveNetRealtimeNode::status_snapshot() fills the v3 epoch,
-// delivery-epoch and terminal-count fields that the transport republishes;
-// remove the `[.]` tag once it does.
 TEST_CASE("WaveNet transport status carries the node epoch and terminal counts",
-          "[.][pending-wp-b][gpu_audio][wavenet][status][health]") {
+          "[gpu_audio][wavenet][status][health]") {
     Harness h;
     GpuAudioTransport transport;
     REQUIRE(transport.prepare(&h.node, {8}));
