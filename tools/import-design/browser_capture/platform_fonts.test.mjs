@@ -111,8 +111,11 @@ function runMeasure(style, canvasFont = {}) {
           fontStretch: "normal",
           get font() { return this._font; },
           set font(value) {
-            if (canvasFont.reject) return;
-            this._font = value;
+            // A rejecting canvas still takes the probe font, which any real
+            // canvas parses.
+            if (canvasFont.reject && value !== "13px serif") return;
+            // A real canvas reads back the request in canonical form.
+            this._font = canvasFont.normalize ? canvasFont.normalize(value) : value;
           },
           measureText() {
             return { fontBoundingBoxAscent: 15, fontBoundingBoxDescent: 4 };
@@ -145,4 +148,20 @@ test("a font request the canvas rejects measures nothing", () => {
 test("a stretch or size adjustment the canvas cannot express measures nothing", () => {
   assert.equal(runMeasure({ ...baseStyle, fontStretch: "93%" }), null);
   assert.equal(runMeasure({ ...baseStyle, fontSizeAdjust: "0.5" }), null);
+});
+
+test("a request that serializes to the canvas default still measures", () => {
+  // "normal 400 10px sans-serif" reads back as "10px sans-serif", the very
+  // font a fresh canvas starts with, yet it was accepted.
+  const normalize = (value) =>
+    value.replace(/^normal (?:normal )?400 /u, "");
+  const style = { ...baseStyle, fontSize: "10px", fontFamily: "sans-serif" };
+  assert.deepEqual({ ...runMeasure(style, { normalize }) },
+    { ascent: 15, descent: 4 });
+  // Nor is a request equal to the second probe font mistaken for a rejection.
+  const serif = { ...baseStyle, fontSize: "13px", fontFamily: "serif" };
+  assert.deepEqual({ ...runMeasure(serif, { normalize }) },
+    { ascent: 15, descent: 4 });
+  // Control: the same canonicalising canvas still rejects what it rejects.
+  assert.equal(runMeasure(style, { normalize, reject: true }), null);
 });

@@ -129,11 +129,18 @@ export const LINE_METRICS_FUNCTION = `function(pseudo) {
   if (!ctx) return null;
   const request = s.fontStyle + ' ' + s.fontWeight + ' ' + s.fontSize + ' ' +
                   s.fontFamily;
-  const sentinel = ctx.font;
-  ctx.font = request;
   // An unparseable request leaves the previous font in place, which would
-  // report the canvas default's metrics as this element's.
-  if (ctx.font === sentinel && request !== sentinel) return null;
+  // report that font's metrics as this element's. Comparing the result with
+  // the font it replaced cannot tell a rejection from a request that
+  // serializes to the same string (\`normal 400 10px sans-serif\` is the
+  // canvas default), so the request is applied over two different fonts: an
+  // accepted request reads back the same either way, a rejected one reads back
+  // whichever font was already there.
+  ctx.font = request;
+  const overDefault = ctx.font;
+  ctx.font = '13px serif';
+  ctx.font = request;
+  if (ctx.font !== overDefault) return null;
   ctx.fontStretch = stretch;
   const m = ctx.measureText('H');
   const ascent = m.fontBoundingBoxAscent;
