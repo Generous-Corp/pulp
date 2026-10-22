@@ -939,6 +939,12 @@ TEST_CASE("GPU-off convolver nodes expose fail-closed provider status",
     CHECK(convolver.recovery_reason() == GpuAudioRecoveryReason::None);
     CHECK_FALSE(convolver.fenced());
 
+    // With no shared provider the convolver binds no realtime path (the
+    // no-render build's override returns false); the staged worker serves it.
+    CHECK_FALSE(detail::realtime_gpu_node_path(&convolver).active());
+    CHECK_FALSE(detail::requires_realtime_gpu_path(&convolver));
+    CHECK(detail::realtime_gpu_provider(&convolver) == GpuAudioProvider::Unknown);
+
     GpuConvolver unprepared(1, 32, 48000, {1.0f});
     CHECK(unprepared.status_snapshot().provider_state == GpuAudioProviderState::Uninitialized);
     CHECK(validate_gpu_audio_status(unprepared.status_snapshot()).accepted());
@@ -990,6 +996,28 @@ TEST_CASE("GpuConvolver status is Uninitialized before prepare and fenced",
     CHECK(status.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK(convolver.recovery_reason() == GpuAudioRecoveryReason::None);
     CHECK(convolver.fenced());
+}
+
+TEST_CASE("GpuConvolver registers its shared path and provider identity through the registry",
+          "[gpu_audio][convolver][registry]") {
+    // Negative: an unprepared convolver binds no realtime path and claims no
+    // provider; it does not require one either (its staged worker serves it).
+    GpuConvolver unprepared(1, kHealthBlock, 48000, std::vector<float>{1.0f});
+    CHECK_FALSE(pulp::gpu_audio::detail::realtime_gpu_node_path(&unprepared).active());
+    CHECK_FALSE(pulp::gpu_audio::detail::requires_realtime_gpu_path(&unprepared));
+    CHECK(pulp::gpu_audio::detail::realtime_gpu_provider(&unprepared) == GpuAudioProvider::Unknown);
+
+    LossProvider* provider = nullptr;
+    auto convolver = convolver_with_loss_provider(provider);
+    if (!convolver)
+        SKIP("shared-I/O provider state is not compiled into this build");
+    // Positive: with a shared session it binds the path, and the provider kind
+    // comes from the provider's own identity.
+    CHECK(pulp::gpu_audio::detail::realtime_gpu_node_path(convolver.get()).active());
+    CHECK_FALSE(pulp::gpu_audio::detail::requires_realtime_gpu_path(convolver.get()));
+    CHECK(pulp::gpu_audio::detail::realtime_gpu_provider(convolver.get()) ==
+          GpuAudioProvider::Dawn);
+    CHECK(validated(convolver->status_snapshot()).provider == GpuAudioProvider::Dawn);
 }
 
 TEST_CASE("GpuConvolver shared-path status reports provider loss through the transport",

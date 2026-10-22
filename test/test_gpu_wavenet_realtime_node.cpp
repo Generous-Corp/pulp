@@ -806,6 +806,22 @@ TEST_CASE("WaveNet owned trace closes each worker admission without inventing GP
     CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(h.node).attempted == stats.attempted);
 }
 
+TEST_CASE("WaveNet node registers its realtime path through the registry",
+          "[gpu_audio][wavenet][registry]") {
+    // Negative: an unprepared node requires the realtime path but has none.
+    Shape shape;
+    GpuWaveNetRealtimeNode unprepared(shape.config());
+    CHECK(detail::requires_realtime_gpu_path(&unprepared));
+    CHECK_FALSE(detail::realtime_gpu_node_path(&unprepared).active());
+    CHECK(detail::realtime_gpu_provider(&unprepared) == GpuAudioProvider::Unknown);
+    // Positive: prepared, it binds an active path. Injected test channels carry
+    // no provider identity, so no GPU provider is claimed.
+    Harness h(1);
+    CHECK(detail::requires_realtime_gpu_path(&h.node));
+    CHECK(detail::realtime_gpu_node_path(&h.node).active());
+    CHECK(detail::realtime_gpu_provider(&h.node) == GpuAudioProvider::Unknown);
+}
+
 TEST_CASE("WaveNet rejects a completion carrying another generation's admission ticket",
           "[gpu_audio][wavenet][realtime][ticket]") {
     // Production path: the node's own collection, fed by a channel that hands

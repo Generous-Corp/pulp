@@ -290,6 +290,21 @@ TEST_CASE("every neural family callback performs no allocations", "[gpu_audio][n
     CHECK(control > 0);
 }
 
+TEST_CASE("neural node registers its realtime path and CPU provider through the registry",
+          "[gpu_audio][neural][registry]") {
+    Rig rig(kTcn);
+    // Negative: an unprepared node still requires the realtime path (it has no
+    // staged fallback) but has no active path and no provider yet.
+    CHECK(detail::requires_realtime_gpu_path(rig.node.get()));
+    CHECK_FALSE(detail::realtime_gpu_node_path(rig.node.get()).active());
+    CHECK(detail::realtime_gpu_provider(rig.node.get()) == GpuAudioProvider::Unknown);
+    // Positive: once prepared it binds an active path and its CPU identity.
+    REQUIRE(rig.prepare());
+    CHECK(detail::realtime_gpu_node_path(rig.node.get()).active());
+    CHECK(detail::realtime_gpu_provider(rig.node.get()) == GpuAudioProvider::Cpu);
+    CHECK(detail::realtime_gpu_provider_identity(rig.node.get()).provider == GpuAudioProvider::Cpu);
+}
+
 TEST_CASE("CPU-only families report CPU execution and never open a GPU epoch",
           "[gpu_audio][neural][status]") {
     const auto c = GENERATE(kWaveNetCpu, kTcn, kNamTcn, kSsm, kLstm, kGru, kCustom);
