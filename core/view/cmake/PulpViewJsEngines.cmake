@@ -49,6 +49,7 @@ set(PULP_V8_EXPECTED_RUNTIME_VERSION "")
 set(PULP_JS_ENGINE_SOURCES
     src/js_quickjs_engine.cpp
     src/js_engine_factory.cpp
+    src/script_bytecode_blob.cpp
 )
 
 set(_pulp_ubsan_enabled OFF)
