@@ -623,7 +623,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 for bundle in plugin_bundles
             ]
             self._last_strip_argv = (
-                strip_argv_capture.read_text() if strip_argv_capture.is_file() else ""
+                strip_argv_capture.read_text(encoding="utf-8") if strip_argv_capture.is_file() else ""
             )
             self._last_plugin_mains_unmodified = all(
                 not (bundle / "Contents" / "MacOS" / bundle.stem)
