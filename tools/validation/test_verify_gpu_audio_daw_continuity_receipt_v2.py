@@ -20,6 +20,7 @@ import copy
 import importlib.util
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -298,6 +299,8 @@ class V2Receipt(unittest.TestCase):
                                 mode="auhostingservice_arrow")
 
     def test_staged_timestamped_wavenet_rows_are_excluded_until_10736_is_in(self):
+        # The fixture's code_under_test ("b" * 40) is no commit at all, so
+        # whether #10736 is in it cannot be shown: excluded.
         run, receipt = self._defect_run("wavenet-staged-ts", node="wavenet", storage="staged",
                                         timestamps=True)
         self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
@@ -332,6 +335,21 @@ class V2Receipt(unittest.TestCase):
         run, receipt = self._defect_run("real-prepared-wavenet",
                                         **{k: bad[k] for k in ("node", "storage", "timestamps")})
         self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
+
+    def test_the_10736_fix_is_judged_by_real_ancestry(self):
+        fix = hosts.KNOWN_DEFECTS[0]["fixed_by"]
+        self.assertEqual(fix, "590bee7a5232a07484c170a9a0690208ec241c1b")  # #10736 on main
+        pre = "9c566f733766d82a4ab6f5b7046aa1cf6b6ad101"  # #10736's first parent
+        have = all(subprocess.run(["git", "-C", str(HERE), "cat-file", "-e", f"{c}^{{commit}}"],
+                                  capture_output=True).returncode == 0 for c in (fix, pre))
+        if not have:
+            self.skipTest("this checkout lacks the #10736 commits (shallow clone)")
+        bad = [{"event": "prepared", "node": "wavenet", "storage": "staged", "timestamps": True}]
+        # The fix itself (and so anything descending from it) is not excluded.
+        self.assertEqual(hosts.known_defect(bad, {"commit": fix}, hosts.git_is_ancestor), "")
+        # The commit just before it still is.
+        self.assertTrue(hosts.known_defect(bad, {"commit": pre}, hosts.git_is_ancestor)
+                        .startswith("excluded: #10736"))
 
     def test_other_configurations_are_not_excluded(self):
         for fields in ({}, dict(node="wavenet", storage="shared", timestamps=True),
