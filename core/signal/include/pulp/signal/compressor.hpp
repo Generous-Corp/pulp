@@ -17,25 +17,29 @@ namespace pulp::signal {
 /// How CompressorT smooths the gain reduction its static curve asks for, in
 /// the log (dB) domain after the gain computer (the two detector forms of
 /// Giannoulis, Massberg and Reiss, "Digital Dynamic Range Compressor Design",
-/// JAES 2012). attack_ms and release_ms are one-pole time constants (tau) in
-/// both, so a steady-level step moves from 10% to 90% in about 2.2 tau.
+/// JAES 2012). attack_ms and release_ms are one-pole time constants (tau).
 ///
-/// - `decoupled` (the default): a peak hold that decays with the release
-///   time, followed by an attack one-pole. The hold sits at each cycle's
-///   peak, so attack follows the knob on tones as on steps, the reduction
-///   settles on the static curve, and the attack stage filters the release
-///   droop between peaks. Measured at 5/100 ms with a -6 dBFS tone: THD+N
-///   -48.8 / -60.3 dB at 50 / 100 Hz.
-/// - `branching`: one one-pole that uses the attack coefficient while more
-///   reduction is asked for and the release coefficient otherwise (the
-///   default before the decoupled detector existed). On a tone
-///   the per-sample detector rides the waveform: only samples near each peak
-///   pull toward more reduction and release acts between them, so attack is
-///   slower than the knob (about 2x at 1 kHz with 5/100 ms), the reduction
-///   settles short of the static curve, and the gain ripples at twice the
-///   tone frequency: THD+N -39.5 / -45.5 dB at 50 / 100 Hz under the same
-///   conditions.
-enum class CompressorBallistics : std::uint8_t { decoupled, branching };
+/// - `branching` (the default): one one-pole that uses the attack
+///   coefficient while more reduction is asked for and the release
+///   coefficient otherwise. A steady-level step moves from 10% to 90% in
+///   ln(9) tau = 2.2 tau in either direction. On a tone the per-sample
+///   detector rides the waveform: only samples near each peak pull toward
+///   more reduction and release acts between them, so attack is slower than
+///   the knob (about 2x at 1 kHz with 5/100 ms), the reduction settles short
+///   of the static curve, and the gain ripples at twice the tone frequency.
+///   Measured at 5/100 ms with a -6 dBFS tone: THD+N -39.5 / -45.5 dB at
+///   50 / 100 Hz.
+/// - `decoupled` (opt in with set_ballistics()): a peak hold that decays with
+///   the release time, followed by an attack one-pole. The hold sits at each
+///   cycle's peak, so attack follows the knob on tones as on steps (2.2 tau),
+///   the reduction settles on the static curve, and the attack stage filters
+///   the release droop between peaks: THD+N -48.8 / -60.3 dB under the same
+///   conditions. Its release is the release hold and the attack one-pole in
+///   series, so a level step releases in about 2.2 x release only while
+///   attack is much shorter than release. Measured 10%-90% release (knob
+///   2.2 tau in brackets): 5/100 ms 220 ms (220), 20/100 ms 227 ms (220),
+///   30/60 ms 155 ms (132), 50/50 ms 168 ms (110), 100/100 ms 336 ms (220).
+enum class CompressorBallistics : std::uint8_t { branching, decoupled };
 
 // Feed-forward compressor with adjustable attack/release.
 //
@@ -80,6 +84,10 @@ public:
     /// Select how gain reduction is smoothed (see CompressorBallistics). Takes
     /// effect from the next sample; the detector state carries over.
     void set_ballistics(CompressorBallistics ballistics) noexcept {
+        // Selecting the current form again is a no-op, so a host may call
+        // this every block without disturbing the decoupled peak hold.
+        if (ballistics == ballistics_)
+            return;
         ballistics_ = ballistics;
         hold_db_ = envelope_db_;
     }
@@ -222,7 +230,7 @@ private:
     SampleType envelope_db_ = SampleType{0.0f};
     // Peak hold of the decoupled detector (gain change in dB, <= 0).
     SampleType hold_db_ = SampleType{0.0f};
-    CompressorBallistics ballistics_ = CompressorBallistics::decoupled;
+    CompressorBallistics ballistics_ = CompressorBallistics::branching;
 
     SampleType attack_coeff_ = ballistic_coeff(params_.attack_ms, sample_rate_);
     SampleType release_coeff_ = ballistic_coeff(params_.release_ms, sample_rate_);

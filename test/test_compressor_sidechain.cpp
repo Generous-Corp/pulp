@@ -560,3 +560,68 @@ TEST_CASE("Compressor decoupled detector distorts low tones less",
         CHECK(decoupled < branching - 8.0);
     }
 }
+
+TEST_CASE("Compressor defaults to the branching ballistics", "[signal][compressor][compat]") {
+    // The default keeps the previous detector, so existing products and
+    // saved patches render exactly as before; decoupled is opt-in.
+    const auto input = loud_program(16384, 48000.0f);
+    for (const auto& k : kCompressorCases) {
+        Compressor by_default;
+        Compressor explicit_branching;
+        configure(by_default, k, 48000.0f);
+        configure(explicit_branching, k, 48000.0f);
+        explicit_branching.set_ballistics(CompressorBallistics::branching);
+        CHECK(by_default.ballistics() == CompressorBallistics::branching);
+        auto a = input;
+        auto b = input;
+        by_default.process(a.data(), static_cast<int>(a.size()));
+        explicit_branching.process(b.data(), static_cast<int>(b.size()));
+        CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
+    }
+    CHECK(CompressorBallistics{} == CompressorBallistics::branching);
+}
+
+TEST_CASE("Compressor decoupled release is the release hold and attack pole in series",
+          "[signal][compressor][timing]") {
+    // With attack comparable to release the decoupled form releases slower
+    // than 2.197 tau, because the release hold is filtered again by the
+    // attack one-pole; branching releases at 2.197 tau. Measured 10%-90%
+    // release at 48 kHz: 30/60 ms 155.4 ms, 50/50 ms 167.9 ms.
+    struct Case {
+        float attack, release;
+        double decoupled_release_ms;
+    };
+    for (const Case c : {Case{30.0f, 60.0f, 155.4}, Case{50.0f, 50.0f, 167.9}}) {
+        INFO("attack " << c.attack << " release " << c.release);
+        const auto branching =
+            step_timing(CompressorBallistics::branching, c.attack, c.release, 48000.0, 0.0);
+        const auto decoupled =
+            step_timing(CompressorBallistics::decoupled, c.attack, c.release, 48000.0, 0.0);
+        CHECK_THAT(branching.attack_ms, WithinRel(2.197 * c.attack, 0.02));
+        CHECK_THAT(branching.release_ms, WithinRel(2.197 * c.release, 0.02));
+        CHECK_THAT(decoupled.attack_ms, WithinRel(2.197 * c.attack, 0.02));
+        CHECK_THAT(decoupled.release_ms, WithinRel(c.decoupled_release_ms, 0.02));
+        CHECK(decoupled.release_ms > 1.15 * branching.release_ms);
+    }
+}
+
+TEST_CASE("Compressor set_ballistics with the current form leaves state untouched",
+          "[signal][compressor][compat]") {
+    // Hosts select the form every block; re-selecting must not reseed the
+    // decoupled peak hold.
+    const auto input = loud_program(8192, 48000.0f);
+    Compressor once;
+    Compressor every_block;
+    for (auto* c : {&once, &every_block}) {
+        configure(*c, kCompressorCases[0], 48000.0f);
+        c->set_ballistics(CompressorBallistics::decoupled);
+    }
+    auto a = input;
+    auto b = input;
+    for (std::size_t pos = 0; pos < input.size(); pos += 256) {
+        once.process(a.data() + pos, 256);
+        every_block.set_ballistics(CompressorBallistics::decoupled);
+        every_block.process(b.data() + pos, 256);
+    }
+    CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
+}

@@ -1,15 +1,22 @@
 {
   "id": "signal-dynamics-saturation-reverb-tiers",
-  "title": "Decoupled compressor detector, minimax ladder saturator, and a classic reverb tier",
+  "title": "Opt-in decoupled compressor ballistics with a Forge control, minimax ladder saturator, and a classic reverb tier",
   "classification": "public_sdk",
   "delivery_state": "pending",
   "claim_id": "signal-dynamics-saturation-reverb-tiers-20261022",
   "owned_paths": [
+    "core/host/include/pulp/host/detail/forge_compressor_ballistics.hpp",
     "core/signal/include/pulp/signal/classic_reverb.hpp",
     "docs/guides/signal-processing.md",
     "docs/status/sequencer-exposure/rows/signal-dynamics-saturation-reverb-tiers.json"
   ],
   "evidence": [
+    {
+      "path": "core/host/include/pulp/host/detail/forge_compressor_ballistics.hpp",
+      "needles": [
+        "inline ForgeParamDescriptor ballistics_descriptor(state::ParamID id)"
+      ]
+    },
     {
       "path": "core/signal/include/pulp/signal/classic_reverb.hpp",
       "needles": [
@@ -19,7 +26,7 @@
     {
       "path": "docs/guides/signal-processing.md",
       "needles": [
-        "| `set_ballistics(CompressorBallistics)` | Select the gain-reduction detector (`decoupled` default, or `branching`). |",
+        "| `set_ballistics(CompressorBallistics)` | Select how gain reduction is smoothed (`branching` default, or `decoupled`). |",
         "### ClassicReverb",
         "### MultiChannelMeter"
       ]
@@ -28,12 +35,21 @@
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "The public signal headers add a selectable compressor detector (decoupled by default), a minimax tanh for the realtime-efficient ladder saturator, a second-order ADAA saturator policy, and the ClassicReverb tier behind FdnReverb's controls. This pending source receipt does not establish a released SDK artifact.",
+      "rationale": "The public signal headers add selectable compressor ballistics (branching by default, decoupled opt-in), a minimax tanh for the realtime-efficient ladder saturator, a second-order ADAA saturator policy, and the ClassicReverb tier behind FdnReverb's controls. The Forge lo-fi, sidechain and multiband compressor nodes expose the ballistics as a baked 'ballistics' control defaulting to branching. This pending source receipt does not establish a released SDK artifact.",
       "evidence": [
         {
           "kind": "sdk_header",
           "path": "core/signal/include/pulp/signal/classic_reverb.hpp",
-          "needles": ["Classic reverb tier"]
+          "needles": [
+            "Classic reverb tier"
+          ]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/detail/forge_compressor_ballistics.hpp",
+          "needles": [
+            "inline ForgeParamDescriptor ballistics_descriptor(state::ParamID id)"
+          ]
         }
       ],
       "authority": {
@@ -53,7 +69,7 @@
     },
     "live_product_control": {
       "disposition": "not_applicable",
-      "rationale": "No remote control operation is added; the Forge FDN reverb node's tier is a baked node parameter driven like its other controls."
+      "rationale": "No remote control operation is added; the Forge FDN reverb node's tier and the compressor nodes' ballistics are baked node parameters driven like their other controls."
     },
     "design_time_agent_manifest": {
       "disposition": "not_applicable",

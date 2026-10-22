@@ -791,7 +791,7 @@ float gr = comp.gain_reduction_db();  // for metering
 | `process(float)` | Compress one sample. |
 | `process(float*, int)` | Compress buffer in-place. |
 | `gain_reduction_db()` | Current gain reduction (for meters). |
-| `set_ballistics(CompressorBallistics)` | Select the gain-reduction detector (`decoupled` default, or `branching`). |
+| `set_ballistics(CompressorBallistics)` | Select how gain reduction is smoothed (`branching` default, or `decoupled`). |
 | `reset()` | Reset envelope to 0. |
 
 **Params struct:**
@@ -807,29 +807,33 @@ float gr = comp.gain_reduction_db();  // for metering
 
 **Sample rate dependency:** `set_sample_rate()` required (used for attack/release coefficients).
 
-**Attack, release and the detector.** The level detector is per sample
+**Attack, release and the ballistics.** The level detector is per sample
 (instantaneous peak), and the gain reduction the static curve asks for is
-smoothed in the dB domain by one of two detectors (Giannoulis, Massberg and
-Reiss, "Digital Dynamic Range Compressor Design", JAES 2012). In both,
-`attack_ms` and `release_ms` are one-pole time constants: a steady-level step
-moves from 10% to 90% of its gain change in about 2.2x the setting (11 ms and
-220 ms at 5 / 100 ms).
+smoothed in the dB domain by one of two forms (Giannoulis, Massberg and
+Reiss, "Digital Dynamic Range Compressor Design", JAES 2012). `attack_ms` and
+`release_ms` are one-pole time constants.
 
-- `decoupled` (default): a peak hold that decays at the release time, then an
-  attack one-pole. On tones it behaves like a step: attack follows the knob,
-  the reduction lands on the static curve, and the gain stays steady within
-  each cycle.
-- `branching`: a single one-pole that switches between the attack and release
-  coefficients. On a tone it rides the waveform: attack measures about twice
-  the knob at 1 kHz, the reduction settles short of the static curve, and the
-  gain ripples at twice the tone frequency, which is harmonic distortion on low
+- `branching` (default): a single one-pole that switches between the attack
+  and release coefficients. A steady-level step moves from 10% to 90% of its
+  gain change in 2.2x the setting either way (11 ms and 220 ms at 5 / 100 ms).
+  On a tone it rides the waveform: attack measures about twice the knob at
+  1 kHz, the reduction settles short of the static curve, and the gain
+  ripples at twice the tone frequency, which is harmonic distortion on low
   tones.
+- `decoupled` (opt in with `set_ballistics(CompressorBallistics::decoupled)`):
+  a peak hold that decays at the release time, then an attack one-pole. On
+  tones it behaves like a step: attack follows the knob (2.2x), the reduction
+  lands on the static curve, and the gain stays steady within each cycle. Its
+  release is the hold and the attack pole in series, so a step releases in
+  2.2x `release_ms` only while attack is much shorter than release: 220 ms at
+  5 / 100 ms, but 155 ms at 30 / 60 ms and 168 ms at 50 / 50 ms (branching:
+  132 and 110 ms).
 
-| -6 dBFS tone, 5 / 100 ms, -20 dB 4:1 hard knee | `decoupled` | `branching` |
+| -6 dBFS tone, 5 / 100 ms, -20 dB 4:1 hard knee | `branching` | `decoupled` |
 |---|---|---|
-| 1 kHz attack, 10% to 90% (knob gives 11.0 ms) | 11.0 ms | 21.5 ms |
-| Settled reduction (static curve -10.50 dB) | -10.49 dB | -9.75 dB |
-| THD+N at 50 / 100 / 1000 Hz | -48.8 / -60.3 / -99.8 dB | -39.5 / -45.5 / -65.5 dB |
+| 1 kHz attack, 10% to 90% (knob gives 11.0 ms) | 21.5 ms | 11.0 ms |
+| Settled reduction (static curve -10.50 dB) | -9.75 dB | -10.49 dB |
+| THD+N at 50 / 100 / 1000 Hz | -39.5 / -45.5 / -65.5 dB | -48.8 / -60.3 / -99.8 dB |
 
 ---
 
