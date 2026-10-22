@@ -414,11 +414,11 @@ pulp_plugin_drag_deliverer(pulp::view::View* root, pulp::view::ViewCapture* drag
 // and on release but never DURING the drag.
 //
 // The sample is HELD for the next presented frame rather than delivered now
-// (see host_drag_coalescer.hpp). Returns whether the caller should arm a
-// repaint: exactly once per held run, not once per raw AppKit event. One
-// request per frame marks the surface dirty and keeps the frame driver's
-// dispatch gate open, which is all a flush needs; one per sample is precisely
-// the O(events) cost coalescing exists to remove.
+// (see host_drag_coalescer.hpp). Returns whether the caller should arm the
+// frame driver: exactly once per held run, not once per raw AppKit event. One
+// signal per frame keeps the frame driver's dispatch gate open, which is all a
+// flush needs (what the flushed motion changes repaints itself); one per
+// sample is precisely the O(events) cost coalescing exists to remove.
 bool pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event, pulp::view::Point pt,
                             pulp::view::ViewCapture* drag_target,
                             pulp::view::HostDragCoalescer* coalescer) {
@@ -1225,12 +1225,14 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     return _dragCoalescer.frame_driver_running() ? YES : NO;
 }
 - (void)mouseDragged:(NSEvent*)event {
-    // One dirty signal per HELD RUN, not per raw AppKit event: -setNeedsDisplay:
-    // both marks the surface dirty and re-opens the display link's dispatch
-    // gate, and one request per frame is enough for both.
+    // Held motion only needs the display link's dispatch gate opened: the next
+    // tick delivers it, and whatever it moves asks for its own (bounded)
+    // repaint. Marking the whole view here re-rasterized the editor at the
+    // pointer's event rate, on top of the frame that drew the drag.
     if (pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget,
-                               &_dragCoalescer))
-        [self setNeedsDisplay:YES];
+                               &_dragCoalescer) &&
+        self.onNeedsDisplay)
+        self.onNeedsDisplay();
 }
 - (void)mouseUp:(NSEvent*)event {
     pulp_plugin_mouse_up(self.rootView, event, [self localPoint:event], &_dragTarget,
@@ -1562,19 +1564,42 @@ public:
     }
 
     void repaint() override {
-        if (in_idle_half_) {
-            // A repaint the idle work asks for (the document mount above all)
-            // waits for this tick's paint half. Marking the view now would let
-            // AppKit's own display pass, which runs before the main queue is
-            // drained again, draw it ahead of a host resize queued meanwhile.
-            display_deferred_to_paint_ = true;
+        // A plain repaint() carries no damage of its own: it is whole-view.
+        if (!damage_.is_full() && !damage_.has_bounds()) damage_.mark_full();
+        if (in_idle_half_ || render_link_.is_open()) {
+            // While the display link runs, a request waits for its paint half
+            // as damage. Marking the view now would let AppKit's own display
+            // pass, which runs before the main queue drains again, draw it
+            // ahead of a host resize queued meanwhile (the idle work, the
+            // document mount above all); and it would re-rasterize at the end
+            // of every run-loop turn that carries a request, so a 120 Hz
+            // automation stream or pointer drag redrew at the event rate. A
+            // bounded request (a knob following automation) stays bounded.
+            link_state_->needs_repaint.store(true, std::memory_order_relaxed);
             return;
         }
-        // A bounded request (View::request_repaint(Rect) -> mark_dirty_region)
-        // invalidates only its rect, so AppKit re-rasterizes that region of
-        // the backing store instead of the whole editor. AppKit keeps the
-        // region until it draws, so the damage is taken here.
+        invalidate_pending_damage();
+    }
+
+    // The content-first frame goes to AppKit now rather than at the next tick:
+    // this is the host asking to see the mounted document, so it must not wait
+    // a vsync behind the deferral above.
+    bool present_first_frame() override {
+        damage_.mark_full();
+        invalidate_pending_damage();
+        return false;
+    }
+
+    // Hand the pending damage to AppKit. A bounded request
+    // (View::request_repaint(Rect) -> mark_dirty_region) invalidates only its
+    // rect, so AppKit re-rasterizes that region of the backing store instead of
+    // the whole editor. Several requests in one frame union into one rect,
+    // which is also what AppKit does with several -setNeedsDisplayInRect:
+    // calls on a layer-backed view. AppKit keeps the region until it draws, so
+    // the damage is taken here.
+    void invalidate_pending_damage() {
         const auto damage = damage_.take();
+        if (!damage.is_full() && !damage.has_bounds()) return;  // nothing pending
         @autoreleasepool {
             if (damage.is_bounded())
                 [view_ setNeedsDisplayInRect:view_rect_for_root_rect(damage.bounds())];
@@ -1765,10 +1790,6 @@ public:
     // half. Releases the link's `queued` flag on every path.
     void paint_tick(double frame_time) {
         auto& link = *link_state_;
-        if (display_deferred_to_paint_) {
-            display_deferred_to_paint_ = false;
-            if (view_) [view_ setNeedsDisplay:YES];  // also arms link.needs_repaint
-        }
         // Frame-tick focus reconciliation — the event-independent cadence.
         // syncKeyFocus is only called on discrete key/mouse events, so a
         // focus slot that clears WITHOUT a following event (a failed/rejected
@@ -1818,6 +1839,15 @@ public:
                 // repaint the whole editor every vsync. A subscriber whose
                 // content moved already marked the view while it advanced.
                 if (tick.animating) [view_ setNeedsDisplay:YES];
+                // The requests this frame collected (repaint() defers them
+                // while the link runs). Marking the view re-arms the gate
+                // through -setNeedsDisplay:; this frame draws them, so the
+                // next vsync must not be dispatched for them again.
+                {
+                    const bool armed = link.needs_repaint.load(std::memory_order_relaxed);
+                    invalidate_pending_damage();
+                    link.needs_repaint.store(armed, std::memory_order_relaxed);
+                }
                 // DRIVE the paint from the display-link tick — the CPU
                 // analogue of the GPU host presenting from render_frame().
                 // AppKit only services a pending -setNeedsDisplay: on its
@@ -1975,9 +2005,9 @@ private:
     };
     std::shared_ptr<FrameLink> link_state_ = std::make_shared<FrameLink>();
     // True while the render link runs the idle callback; a repaint() requested
-    // then is held for that tick's paint half (display_deferred_to_paint_).
+    // then is held as damage for that tick's paint half.
     bool in_idle_half_ = false;
-    bool display_deferred_to_paint_ = false;
+
     // Design viewport: when (>0, >0) root paints at design size and the
     // canvas applies translate+scale to fit the host bounds. Mouse coords
     // are inverse-mapped via window_to_root_point().

@@ -527,8 +527,10 @@ namespace smoke {
 
 /// Counts every paint the host drives through the tree.
 class PaintCountingView : public view::View {
-public:
-    void paint(canvas::Canvas&) override { paints.fetch_add(1, std::memory_order_relaxed); }
+  public:
+    void paint(canvas::Canvas&) override {
+        paints.fetch_add(1, std::memory_order_relaxed);
+    }
     std::atomic<int> paints{0};
 };
 
@@ -545,15 +547,17 @@ TEST_CASE("a silent source-bound meter editor stops painting on both mac plugin 
     for (const bool gpu : {false, true}) {
         DYNAMIC_SECTION((gpu ? "GPU" : "CPU") << " host") {
             @autoreleasepool {
-                NSWindow* window = [[NSWindow alloc]
-                    initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
-                              styleMask:NSWindowStyleMaskTitled
-                                backing:NSBackingStoreBuffered
-                                  defer:NO];
-                if (!window || !window.contentView) SKIP("No Cocoa window available.");
+                NSWindow* window =
+                    [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                                styleMask:NSWindowStyleMaskTitled
+                                                  backing:NSBackingStoreBuffered
+                                                    defer:NO];
+                if (!window || !window.contentView)
+                    SKIP("No Cocoa window available.");
 
                 auto root = std::make_unique<view::View>();
-                if (gpu) root->set_requires_gpu_host(true);
+                if (gpu)
+                    root->set_requires_gpu_host(true);
                 auto counting = std::make_unique<smoke::PaintCountingView>();
                 auto* counter = counting.get();
                 counter->set_bounds({0, 0, 40, 40});
@@ -597,12 +601,12 @@ TEST_CASE("a silent source-bound meter editor stops painting on both mac plugin 
                 smoke::pump_run_loop(10);
                 const int paints_before = counter->paints.load();
                 const int ticks_before = ticks->load();
-                smoke::pump_run_loop(25);  // ~0.5 s
+                smoke::pump_run_loop(25); // ~0.5 s
                 const int quiet_ticks = ticks->load() - ticks_before;
                 const int quiet_paints = counter->paints.load() - paints_before;
                 INFO("ticks during the quiet window: " << quiet_ticks
-                     << ", paints: " << quiet_paints);
-                REQUIRE(quiet_ticks >= 5);  // the editor is live and being pumped
+                                                       << ", paints: " << quiet_paints);
+                REQUIRE(quiet_ticks >= 5); // the editor is live and being pumped
                 CHECK(quiet_paints == 0);
 
                 // Control: a real level must paint.
@@ -629,14 +633,16 @@ namespace smoke {
 /// host's NSView, valid only inside its drawRect:) while the CPU host paints
 /// the tree.
 class ClipProbeView : public view::View {
-public:
+  public:
     void paint(canvas::Canvas&) override {
-        if (!host_view) return;
+        if (!host_view)
+            return;
         const NSRect* rects = nullptr;
         NSInteger count = 0;
         [host_view getRectsBeingDrawn:&rects count:&count];
         NSRect u = NSZeroRect;
-        for (NSInteger i = 0; i < count; ++i) u = NSUnionRect(u, rects[i]);
+        for (NSInteger i = 0; i < count; ++i)
+            u = NSUnionRect(u, rects[i]);
         last_clip = u;
         ++paints;
     }
@@ -655,12 +661,13 @@ TEST_CASE("the mac CPU plugin host redraws only a bounded repaint's rect",
     // reaches -setNeedsDisplayInRect: and only that region is redrawn.
     smoke::clear_no_editor_env();
     @autoreleasepool {
-        NSWindow* window = [[NSWindow alloc]
-            initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
-                      styleMask:NSWindowStyleMaskTitled
-                        backing:NSBackingStoreBuffered
-                          defer:NO];
-        if (!window || !window.contentView) SKIP("No Cocoa window available.");
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView)
+            SKIP("No Cocoa window available.");
 
         auto root = std::make_unique<view::View>();
         auto probe_owned = std::make_unique<smoke::ClipProbeView>();
@@ -705,7 +712,8 @@ TEST_CASE("the mac CPU plugin host redraws only a bounded repaint's rect",
         knob->set_value(knob->value() > 0.5f ? 0.1f : 0.9f);
         smoke::pump_run_loop(5);
         REQUIRE(probe->paints > before);
-        INFO("bounded clip: " << probe->last_clip.size.width << "x" << probe->last_clip.size.height);
+        INFO("bounded clip: " << probe->last_clip.size.width << "x"
+                              << probe->last_clip.size.height);
         CHECK(probe->last_clip.size.width <= 64 + 16);
         CHECK(probe->last_clip.size.height <= 64 + 16);
         CHECK(probe->last_clip.size.width >= 64);
@@ -717,6 +725,208 @@ TEST_CASE("the mac CPU plugin host redraws only a bounded repaint's rect",
         REQUIRE(probe->paints > before_full);
         CHECK(probe->last_clip.size.width >= smoke::kW);
         CHECK(probe->last_clip.size.height >= smoke::kH);
+
+        // A bounded request made from the idle half of a tick (host automation
+        // reaching the editor through the store listeners) stays bounded too.
+        auto from_idle = std::make_shared<std::atomic<bool>>(false);
+        host->set_idle_callback([from_idle, knob]() {
+            if (from_idle->exchange(false))
+                knob->set_value(knob->value() > 0.5f ? 0.15f : 0.85f);
+        });
+        smoke::pump_run_loop(3);
+        const int before_idle = probe->paints;
+        from_idle->store(true);
+        smoke::pump_run_loop(5);
+        if (from_idle->load()) {
+            // The idle half only runs from the display link, which does not
+            // fire while the display sleeps.
+            host->set_idle_callback({});
+            host->detach();
+            host.reset();
+            root.reset();
+            [window close];
+            SKIP("No display link fired; the idle-half request was not exercised.");
+        } else {
+            REQUIRE(probe->paints > before_idle);
+            INFO("idle-half clip: " << probe->last_clip.size.width << "x"
+                                    << probe->last_clip.size.height);
+            CHECK(probe->last_clip.size.width <= 64 + 16);
+            CHECK(probe->last_clip.size.height <= 64 + 16);
+        }
+        host->set_idle_callback({});
+
+        host->detach();
+        host.reset();
+        root.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("the mac CPU plugin host draws at the display rate, not the request rate",
+          "[plugin-host][mac][display-link][partial-repaint]") {
+    // Host automation and pointer drags arrive faster than the display
+    // refreshes. Each request used to mark the NSView at once, and AppKit
+    // re-rasterized at the end of every run-loop turn that carried one; the
+    // CPU host now holds requests for its display-link tick.
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView)
+            SKIP("No Cocoa window available.");
+
+        auto root = std::make_unique<view::View>();
+        auto counting = std::make_unique<smoke::PaintCountingView>();
+        auto* counter = counting.get();
+        counter->set_bounds({0, 0, 40, 40});
+        root->add_child(std::move(counting));
+
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = false;
+        auto host = view::PluginViewHost::create(*root, opts);
+        REQUIRE(host != nullptr);
+        auto ticks = std::make_shared<std::atomic<int>>(0);
+        host->set_idle_callback([ticks]() { ticks->fetch_add(1); });
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        int frames = 0;
+        while (ticks->load() == 0 && frames < 200) {
+            smoke::pump_run_loop(1);
+            ++frames;
+        }
+        if (ticks->load() == 0) {
+            host->detach();
+            host.reset();
+            [window close];
+            SKIP("No display link fired (no active CGDisplay).");
+        }
+        smoke::pump_run_loop(5);
+
+        // 40 requests, one per ~1 ms run-loop turn: about 40 ms, a handful of
+        // vsyncs at any refresh rate.
+        const int before = counter->paints.load();
+        const int ticks_before = ticks->load();
+        for (int i = 0; i < 40; ++i) {
+            root->request_repaint();
+            @autoreleasepool {
+                [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                         beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
+            }
+        }
+        smoke::pump_run_loop(3);
+        const int paints = counter->paints.load() - before;
+        const int link_ticks = ticks->load() - ticks_before;
+        INFO("paints: " << paints << " for 40 requests over " << link_ticks << " link ticks");
+        CHECK(paints >= 1);
+        CHECK(paints <= link_ticks + 1);
+        CHECK(paints < 20);
+
+        host->detach();
+        host.reset();
+        root.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("a knob drag on the mac CPU plugin host redraws the knob once per frame",
+          "[plugin-host][mac][display-link][partial-repaint][drag]") {
+    // Pointer motion is held for the next display-link frame. The held run used
+    // to mark the whole NSView, so AppKit redrew the full editor mid-frame and
+    // again when the frame delivered the motion; now only the gate opens and
+    // the knob's own bounded repaint is drawn, once per frame.
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView)
+            SKIP("No Cocoa window available.");
+
+        auto root = std::make_unique<view::View>();
+        auto probe_owned = std::make_unique<smoke::ClipProbeView>();
+        auto* probe = probe_owned.get();
+        probe_owned->set_position(view::View::Position::absolute);
+        probe_owned->flex().preferred_width = static_cast<float>(smoke::kW);
+        probe_owned->flex().preferred_height = static_cast<float>(smoke::kH);
+        probe_owned->set_hit_testable(false);
+        root->add_child(std::move(probe_owned));
+        auto knob_owned = std::make_unique<view::Knob>();
+        auto* knob = knob_owned.get();
+        knob_owned->set_position(view::View::Position::absolute);
+        knob_owned->set_left(20);
+        knob_owned->set_top(20);
+        knob_owned->flex().preferred_width = 64;
+        knob_owned->flex().preferred_height = 64;
+        root->add_child(std::move(knob_owned));
+
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = false;
+        auto host = view::PluginViewHost::create(*root, opts);
+        REQUIRE(host != nullptr);
+        auto ticks = std::make_shared<std::atomic<int>>(0);
+        host->set_idle_callback([ticks]() { ticks->fetch_add(1); });
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        NSView* hv = (__bridge NSView*)host->native_handle();
+        probe->host_view = hv;
+        int frames = 0;
+        while (ticks->load() == 0 && frames < 200) {
+            smoke::pump_run_loop(1);
+            ++frames;
+        }
+        if (ticks->load() == 0) {
+            host->detach();
+            host.reset();
+            [window close];
+            SKIP("No display link fired (no active CGDisplay).");
+        }
+        smoke::pump_run_loop(5);
+
+        // The knob's centre, in window coordinates (the view is unflipped).
+        const NSPoint centre = [hv convertPoint:NSMakePoint(52, smoke::kH - 52) toView:nil];
+        auto mouse = [&](NSEventType type, NSPoint p) {
+            return [NSEvent mouseEventWithType:type
+                                      location:p
+                                 modifierFlags:0
+                                     timestamp:[[NSProcessInfo processInfo] systemUptime]
+                                  windowNumber:window.windowNumber
+                                       context:nil
+                                   eventNumber:0
+                                    clickCount:1
+                                      pressure:1.0];
+        };
+        const float before_value = knob->value();
+        [hv mouseDown:mouse(NSEventTypeLeftMouseDown, centre)];
+        smoke::pump_run_loop(2);
+        const int paints_before = probe->paints;
+        const int ticks_before = ticks->load();
+        for (int i = 1; i <= 40; ++i) {
+            [hv mouseDragged:mouse(NSEventTypeLeftMouseDragged,
+                                   NSMakePoint(centre.x, centre.y + i))];
+            @autoreleasepool {
+                [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                         beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
+            }
+        }
+        smoke::pump_run_loop(3);
+        const int paints = probe->paints - paints_before;
+        const int link_ticks = ticks->load() - ticks_before;
+        const NSRect clip = probe->last_clip;
+        [hv mouseUp:mouse(NSEventTypeLeftMouseUp, NSMakePoint(centre.x, centre.y + 40))];
+        smoke::pump_run_loop(2);
+
+        INFO("paints " << paints << " over " << link_ticks << " ticks; last clip "
+                       << clip.size.width << "x" << clip.size.height);
+        REQUIRE(knob->value() != before_value); // the drag reached the knob
+        CHECK(paints >= 1);
+        CHECK(paints <= link_ticks + 1);
+        CHECK(clip.size.width <= 64 + 16);
+        CHECK(clip.size.height <= 64 + 16);
 
         host->detach();
         host.reset();
