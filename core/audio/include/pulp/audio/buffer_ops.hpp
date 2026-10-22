@@ -25,6 +25,7 @@
 
 #include <cstddef>
 #include <span>
+#include <type_traits>
 
 namespace pulp::audio::buffer_ops {
 
@@ -48,6 +49,34 @@ inline void map_samples(const float* in, float* out, std::size_t n, Fn&& fn) {
     } else {
         for (std::size_t i = 0; i < n; ++i) out[i] = fn(in[i]);
     }
+}
+
+/// Call `fn` once with the channel count, as a compile-time constant when it is
+/// one of `Counts...` and as a runtime `std::size_t` otherwise.
+///
+/// A sample-outer loop over a runtime channel count (`for i … for ch <
+/// channels`) cannot be unrolled across channels, so per-channel state is
+/// re-addressed every sample and independent channel work is not overlapped.
+/// Dispatching once per block lets the common layouts compile with a constant
+/// count while any other count still runs:
+///
+/// @code
+/// buffer_ops::with_channel_count<1, 2>(channels, [&](auto count) {
+///     for (std::size_t i = 0; i < n; ++i)
+///         for (std::size_t ch = 0; ch < count; ++ch)
+///             out[ch][i] = step(ch, in[ch][i]);
+/// });
+/// @endcode
+///
+/// `count` is a `std::integral_constant<std::size_t, N>` for a listed count,
+/// which converts to `std::size_t`, so the same generic lambda body serves both.
+template <std::size_t... Counts, typename Fn>
+inline void with_channel_count(std::size_t channels, Fn&& fn) {
+    const bool matched =
+        ((channels == Counts
+              ? (fn(std::integral_constant<std::size_t, Counts>{}), true)
+              : false) || ...);
+    if (!matched) fn(channels);
 }
 
 /// Apply a constant gain to a single channel of samples in place.

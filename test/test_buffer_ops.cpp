@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -409,4 +410,51 @@ TEST_CASE("buffer_ops::map_samples with zero samples does nothing",
     ops::map_samples(&sample, &sample, 0, [&](float x) { ++calls; return x; });
     REQUIRE(calls == 0);
     REQUIRE(sample == 3.0f);
+}
+
+// ── with_channel_count ──────────────────────────────────────────────────
+
+namespace {
+struct ChannelDispatchRecord {
+    int calls = 0;
+    bool constant = false;
+    std::size_t value = 0;
+};
+
+template <std::size_t... Counts>
+ChannelDispatchRecord dispatch_record(std::size_t channels) {
+    ChannelDispatchRecord record;
+    ops::with_channel_count<Counts...>(channels, [&](auto count) {
+        ++record.calls;
+        record.constant = !std::is_same_v<decltype(count), std::size_t>;
+        record.value = count;
+    });
+    return record;
+}
+} // namespace
+
+TEST_CASE("buffer_ops::with_channel_count passes a listed count as a constant",
+          "[audio][buffer_ops][channel_dispatch]") {
+    for (std::size_t channels : {1u, 2u}) {
+        const auto record = dispatch_record<1, 2>(channels);
+        INFO("channels = " << channels);
+        REQUIRE(record.calls == 1);
+        REQUIRE(record.constant);
+        REQUIRE(record.value == channels);
+    }
+}
+
+TEST_CASE("buffer_ops::with_channel_count passes any other count at run time",
+          "[audio][buffer_ops][channel_dispatch]") {
+    for (std::size_t channels : {0u, 3u, 8u}) {
+        const auto record = dispatch_record<1, 2>(channels);
+        INFO("channels = " << channels);
+        REQUIRE(record.calls == 1);
+        REQUIRE_FALSE(record.constant);
+        REQUIRE(record.value == channels);
+    }
+    const auto none_listed = dispatch_record<>(2);
+    REQUIRE(none_listed.calls == 1);
+    REQUIRE_FALSE(none_listed.constant);
+    REQUIRE(none_listed.value == 2);
 }
