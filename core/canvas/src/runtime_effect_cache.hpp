@@ -164,12 +164,20 @@ public:
             if (param == "pos")
                 return {};
 
+            // `parens` holds the token before each open `(`: a comma inside a
+            // call or constructor separates arguments, while a comma at
+            // statement level or in a `for` header separates declarators.
             size_t body_depth = 0;
+            std::vector<std::string_view> parens;
             for (size_t k = j + 1; k < tokens.size(); ++k) {
                 if (tokens[k].text == "{")
                     ++body_depth;
                 else if (tokens[k].text == "}" && --body_depth == 0)
                     break;
+                else if (tokens[k].text == "(")
+                    parens.push_back(tokens[k - 1].text);
+                else if (tokens[k].text == ")" && !parens.empty())
+                    parens.pop_back();
                 if (tokens[k].text != "pos" || k + 1 >= tokens.size())
                     continue;
                 const auto& prev = tokens[k - 1];
@@ -178,7 +186,8 @@ public:
                 const bool after_type =
                     (prev.identifier && !runtime_effect_lint::is_statement_keyword(prev.text)) ||
                     prev.text == "]";
-                const bool after_comma = prev.text == "," && next == "=";
+                const bool in_declarator_list = parens.empty() || parens.back() == "for";
+                const bool after_comma = prev.text == "," && in_declarator_list;
                 if (declarator && (after_type || after_comma)) {
                     return "line " + std::to_string(tokens[k].line) +
                            ": a local named 'pos' in main() collides with the coordinate "

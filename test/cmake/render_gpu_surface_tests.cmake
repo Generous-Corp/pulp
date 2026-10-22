@@ -92,7 +92,8 @@
         ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # Caller SkSL whose locals share Graphite's runtime-effect parameter names
-    # (pos, inColor, destColor), drawn and read back on offscreen Graphite.
+    # (pos, inColor, destColor), drawn and read back on offscreen Graphite,
+    # plus a direct SkRuntimeEffect draw proving the hazard still exists.
     add_executable(pulp-test-runtime-effect-names-gpu
         test_runtime_effect_names_gpu.cpp)
     target_link_libraries(pulp-test-runtime-effect-names-gpu PRIVATE
@@ -100,6 +101,9 @@
     if(PULP_HAS_SKIA)
         target_compile_definitions(pulp-test-runtime-effect-names-gpu PRIVATE
             PULP_HAS_SKIA=1)
+        # The negative control compiles SkSL with SkRuntimeEffect directly.
+        target_include_directories(pulp-test-runtime-effect-names-gpu PRIVATE
+            ${SKIA_INCLUDE_DIRS})
     endif()
     catch_discover_tests(pulp-test-runtime-effect-names-gpu
         ${PULP_GPU_TEST_DISCOVERY_ARGS})

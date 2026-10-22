@@ -27,8 +27,18 @@
 #include <vector>
 
 #if defined(PULP_HAS_SKIA) && defined(__APPLE__)
+#include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
+
+#include "include/core/SkImage.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkSurface.h"
+#include "include/effects/SkRuntimeEffect.h"
+#include "include/gpu/graphite/Context.h"
+#include "include/gpu/graphite/Recorder.h"
+#include "include/gpu/graphite/Recording.h"
+#include "include/gpu/graphite/Surface.h"
 #endif
 
 #if defined(PULP_HAS_SKIA) && defined(__APPLE__)
@@ -75,6 +85,11 @@ constexpr NamedShader kAccepted[] = {
     {"global const pos read in main",
      "const float2 pos = float2(16.0, 16.0); "
      "half4 main(float2 xy) { return half4(half((xy.x - pos.x + 16.0) / 64.0), 0, 0, 1); }"},
+    // A uniform named pos keeps its own (zero) value; Graphite's coordinate
+    // parameter does not shadow it.
+    {"uniform pos read in main",
+     "uniform float2 pos; "
+     "half4 main(float2 xy) { return half4(half((xy.x + pos.x) / 64.0), 0, 0, 1); }"},
     {"global pos beside a uniform",
      "uniform float value; float2 pos = float2(16.0, 16.0); "
      "half4 main(float2 xy) { return half4(half((xy.x - pos.x + 16.0) / 64.0), 0, 0, 1); }"},
@@ -205,6 +220,81 @@ TEST_CASE("Runtime-effect names Graphite reserves are refused or render as writt
             CHECK(std::abs(int(got[1]) - int(want[1])) <= 1);
             CHECK(std::abs(int(got[2]) - int(want[2])) <= 1);
         }
+    }
+}
+
+// The lint is only justified while the linked Skia still mis-renders the
+// shadowing case. This compiles the nested-block shader with
+// SkRuntimeEffect directly, bypassing RuntimeEffectCache, draws it on
+// Graphite, and requires the wrong (black) result. If it ever renders the
+// ramp, Graphite no longer renames into author scope and the lint refuses
+// valid shaders on every backend for nothing: remove it. The crashing case
+// (a local pos directly in main) is not drawn here, because it takes the
+// process down.
+TEST_CASE("Graphite still shadows the coordinates with an author local named pos",
+          "[gpu][skia][sksl][runtime-effect]") {
+    auto f = make_fixture(2 * kCell, kCell);
+    if (!f.gpu || !f.skia || !f.skia->is_available())
+        SKIP("Dawn/Graphite unavailable on this host.");
+    skgpu::graphite::Context* ctx = f.skia->graphite_context();
+    REQUIRE(ctx != nullptr);
+    std::unique_ptr<skgpu::graphite::Recorder> recorder = ctx->makeRecorder();
+    REQUIRE(recorder != nullptr);
+
+    // Renders one shader on its own Graphite surface and returns the image.
+    auto render_raw = [&](const char* sksl) -> sk_sp<SkImage> {
+        auto result = SkRuntimeEffect::MakeForShader(SkString(sksl));
+        INFO(result.errorText.c_str());
+        REQUIRE(result.effect != nullptr); // the CPU-side compile accepts it
+        sk_sp<SkSurface> surface =
+            SkSurfaces::RenderTarget(recorder.get(), SkImageInfo::MakeN32Premul(kCell, kCell));
+        REQUIRE(surface != nullptr);
+        SkPaint paint;
+        paint.setShader(result.effect->makeShader(nullptr, {}));
+        REQUIRE(paint.getShader() != nullptr);
+        surface->getCanvas()->clear(SK_ColorBLUE);
+        surface->getCanvas()->drawRect(SkRect::MakeWH(kCell, kCell), paint);
+        return surface->makeImageSnapshot();
+    };
+    sk_sp<SkImage> control = render_raw(kControl.sksl);
+    sk_sp<SkImage> shadowed = render_raw(kRefused[1].sksl);
+    REQUIRE(control != nullptr);
+    REQUIRE(shadowed != nullptr);
+    {
+        std::unique_ptr<skgpu::graphite::Recording> recording = recorder->snap();
+        REQUIRE(recording != nullptr);
+        skgpu::graphite::InsertRecordingInfo info{};
+        info.fRecording = recording.get();
+        REQUIRE(ctx->insertRecording(info) == skgpu::graphite::InsertStatus::kSuccess);
+        ctx->submit(skgpu::graphite::SyncToCpu::kYes);
+    }
+
+    REQUIRE(f.gpu->begin_frame());
+    auto* canvas = static_cast<canvas::SkiaCanvas*>(f.skia->begin_frame());
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->draw_skia_image(control, 0, 0, kCell, kCell));
+    REQUIRE(canvas->draw_skia_image(shadowed, kCell, 0, kCell, kCell));
+    f.skia->end_frame();
+    f.gpu->end_frame();
+    Frame frame;
+    if (!f.skia->read_current_rgba(frame.px, frame.w, frame.h))
+        SKIP("GPU readback failed (no adapter).");
+    REQUIRE(frame.w == 2 * kCell);
+
+    // The bypass path itself must render: the control column is the ramp.
+    const uint8_t* control_mid = pixel(frame, 48, kCell / 2);
+    if (control_mid[2] > 200 && control_mid[0] < 8)
+        SKIP("Offscreen GPU composited no shader output (no real adapter).");
+    REQUIRE(std::abs(int(control_mid[0]) - 191) <= 3);
+
+    // The shadowed shader must still come out wrong: black, not the ramp.
+    for (uint32_t local_x : {32u, 56u}) {
+        const uint8_t* got = pixel(frame, kCell + local_x, kCell / 2);
+        const uint8_t* ramp = pixel(frame, local_x, kCell / 2);
+        INFO("local x " << local_x << ": shadowed r=" << int(got[0]) << " ramp r=" << int(ramp[0])
+                        << ". A match means Graphite fixed the rename and the "
+                           "pos lint in RuntimeEffectCache is obsolete.");
+        CHECK(std::abs(int(got[0]) - int(ramp[0])) > 32);
     }
 }
 
