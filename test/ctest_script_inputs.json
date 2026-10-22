@@ -1489,7 +1489,8 @@
    ],
    "inputs": [
     "examples/design-tool/*.js",
-    "templates/ios-auv3/HostApp/ContentView.swift"
+    "templates/ios-auv3/HostApp/ContentView.swift",
+    "templates/ios-auv3/HostApp/Info.plist.in"
    ],
    "kind": "compiled",
    "sources": [
@@ -2566,6 +2567,7 @@
   "pulp-test-forge-synthesis-catalog",
   "pulp-test-forge-tape-catalog",
   "pulp-test-format-core-only-consumer",
+  "pulp-test-frame-stamp",
   "pulp-test-gesture-threading",
   "pulp-test-golden",
   "pulp-test-golden-effect",
@@ -2806,6 +2808,7 @@
   "pulp-test-render-scenario",
   "pulp-test-routing-primitives",
   "pulp-test-runtime",
+  "pulp-test-runtime-effect-names-gpu",
   "pulp-test-runtime-slot",
   "pulp-test-sample-heritage",
   "pulp-test-sample-heritage-live-cyclic",
@@ -7472,6 +7475,20 @@
    "entry": "test/test_pulp_mcp_binary_smoke.py",
    "inputs": [
     "test/test_pulp_mcp_binary_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-motion-frame-stamp-decode-cpp-frames": {
+   "entry": "tools/motion/visual/test_frame_stamp_decode.py",
+   "inputs": [
+    "tools/motion/visual/test_frame_stamp_decode.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-motion-frame-stamp-decode-selftest": {
+   "entry": "tools/motion/visual/test_frame_stamp_decode.py",
+   "inputs": [
+    "tools/motion/visual/test_frame_stamp_decode.py"
    ],
    "kind": "python"
   },
