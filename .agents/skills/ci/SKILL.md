@@ -1143,7 +1143,10 @@ registration → `wide-non-native-selftest`; any source-selftest lane entry
 script → the `source-selftest-lane-*` contract; a GPU-audio provider-identity
 producer — `core/gpu_audio/CMakeLists.txt`, `PulpGpuAudioProvider*.cmake`, the
 identity script, the deps manifest — → the `pulp-gpu-*` provider probes, whose
-compiled-in Dawn identity no source edge reaches). Direct edges are added even when
+compiled-in Dawn identity no source edge reaches; any non-Markdown file under
+`experimental/pulp-rs/` → `pulp-rust-cli-cargo-tests`, because cargo, not a
+CMake target, builds that crate, so the projection never reaches it and a Rust
+failure otherwise surfaces only in the merge group). Direct edges are added even when
 the projection is too wide or the diff is docs-only: tests whose declared inputs
 (`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
 rules select, the tests running a program whose own source changed, and the

@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,7 @@ NAMES = {
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
     "cmake-ios-auv3-control-shipping": set(),
     "pulp-test-cli-migration-index": set(),
+    "pulp-rust-cli-cargo-tests": set(), "pulp-rust-cli-doc-tests": set(),
     "TripleBuffer hammer: writer + reader for 500ms": set(),
     "SeqLock hammer: 1 writer + 2 readers for 500ms": set(),
     "SpscQueue hammer: producer + consumer for 500ms": set(),
@@ -139,6 +141,31 @@ class SelectionTests(unittest.TestCase):
                           "core/audio/src/buffer.cpp"], selection("focused", ["unit-a"]))
         self.assertEqual(plan["merge_only"], [])
         self.assertEqual(plan["tests"], ["unit-a"])
+
+    def test_a_pulp_rs_edit_runs_the_cargo_tests_first(self) -> None:
+        # The crate owns no CMake sources, so the projection selects nothing.
+        for path in ("experimental/pulp-rs/src/main.rs", "experimental/pulp-rs/Cargo.toml",
+                     "experimental/pulp-rs/tests/cli_smoke.rs"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", ["unit-a"]))
+                self.assertEqual(plan["merge_only"], ["pulp-rust-cli-cargo-tests"])
+                self.assertEqual(plan["tests"], ["pulp-rust-cli-cargo-tests", "unit-a"])
+
+    def test_the_pulp_rs_family_names_a_test_the_crate_registers(self) -> None:
+        # A rename of the ctest would leave the family selecting nothing.
+        registered = re.findall(r"add_test\(NAME\s+(\S+)",
+                                (REPO / "experimental/pulp-rs/CMakeLists.txt").read_text())
+        test_re = next(t for f, _, t in step.PATH_FAMILIES if f == "pulp-rs-cargo")
+        self.assertEqual([n for n in registered if test_re.search(n)],
+                         ["pulp-rust-cli-cargo-tests"])
+
+    def test_control_non_pulp_rs_paths_do_not_run_the_cargo_tests(self) -> None:
+        for path in ("tools/cli/src/main.cpp", "experimental/other/src/main.rs",
+                     "experimental/pulp-rs/README.md", "docs/reference/pulp-rs/cli.rs"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", ["unit-a"]))
+                self.assertNotIn("pulp-rust-cli-cargo-tests", plan["tests"])
+                self.assertNotIn("pulp-rs-cargo", plan["families"])
 
     def test_no_editor_fixture_reaches_its_artifact_probe(self) -> None:
         plan = self.plan(["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],

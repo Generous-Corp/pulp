@@ -19,7 +19,8 @@ with the Shipyard changed-surface families), plus these rules:
     about 12 minutes on a third of pull requests);
   * path families the projection cannot see: `tools/cmake/**` reaches the
     `cmake-*` fixture tests, and the wide non-native tier's manifest, classifier
-    or any ctest registration under `test/` reaches `wide-non-native-selftest`;
+    or any ctest registration under `test/` reaches `wide-non-native-selftest`,
+    and `experimental/pulp-rs/**` reaches `pulp-rust-cli-cargo-tests`;
   * `pr-fast` members already ran and are left out;
   * the extra time is capped: tests run in batches, no batch starts once the
     budget is spent, and every test that did not run is listed as skipped;
@@ -107,6 +108,14 @@ PATH_FAMILIES = (
     ("no-editor-link-floor",
      re.compile(r"^test/fixtures/no_editor_link_floor/"),
      re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
+    # The Rust CLI is built and tested by cargo, not by CMake targets, so the
+    # crate owns no CMake sources and the projection never reaches its cargo
+    # test. Without this an edit under experimental/pulp-rs/ runs that test
+    # only in the merge group, where a failure ejects the whole batch. The
+    # crate embeds no Markdown, so its notes select nothing.
+    ("pulp-rs-cargo",
+     re.compile(r"^experimental/pulp-rs/(?!.*\.md$)"),
+     re.compile(r"^pulp-rust-cli-cargo-tests$")),
     # The sync primitives are included by most of the tree, so an edit to one
     # selects thousands of tests and the budget reaches their own concurrency
     # hammers only by luck. The hammers are the one proof those edits did not
