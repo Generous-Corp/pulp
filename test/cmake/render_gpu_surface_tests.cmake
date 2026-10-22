@@ -91,6 +91,23 @@
     catch_discover_tests(pulp-test-headless-surface
         ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # Caller SkSL whose locals share Graphite's runtime-effect parameter names
+    # (pos, inColor, destColor), drawn and read back on offscreen Graphite,
+    # plus a direct SkRuntimeEffect draw proving the hazard still exists.
+    add_executable(pulp-test-runtime-effect-names-gpu
+        test_runtime_effect_names_gpu.cpp)
+    target_link_libraries(pulp-test-runtime-effect-names-gpu PRIVATE
+        pulp::render pulp::canvas Catch2::Catch2WithMain)
+    if(PULP_HAS_SKIA)
+        target_compile_definitions(pulp-test-runtime-effect-names-gpu PRIVATE
+            PULP_HAS_SKIA=1)
+        # The negative control compiles SkSL with SkRuntimeEffect directly.
+        target_include_directories(pulp-test-runtime-effect-names-gpu PRIVATE
+            ${SKIA_INCLUDE_DIRS})
+    endif()
+    catch_discover_tests(pulp-test-runtime-effect-names-gpu
+        ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
     # Direct native Metal availability/timing probe. This is test-only: it
     # establishes the host capability before any production backend integration.
     if(APPLE AND NOT IOS AND NOT PULP_IOS)
@@ -823,3 +840,10 @@
     add_executable(pulp-gpu-roofline-harness
         "${PROJECT_SOURCE_DIR}/tools/gpu_roofline/gpu_roofline_harness.cpp")
     target_link_libraries(pulp-gpu-roofline-harness PRIVATE pulp::render pulp::signal)
+
+    # Multi-instance WaveNet scaling bench (tooling, not a test): per-period wall,
+    # thread CPU and GPU-busy time for N streams via per-instance or batched
+    # forwards, each stream checked against a double-precision CPU reference.
+    add_executable(pulp-gpu-wavenet-scaling-bench
+        "${PROJECT_SOURCE_DIR}/tools/gpu_roofline/gpu_wavenet_scaling_bench.cpp")
+    target_link_libraries(pulp-gpu-wavenet-scaling-bench PRIVATE pulp::render pulp::runtime)

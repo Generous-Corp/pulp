@@ -47,7 +47,12 @@ namespace pulp::signal::drum {
 /// RT contract: `prepare()` allocates nothing; every other method, including
 /// `note_on` and `process`, allocates nothing and takes no locks.
 class TomVoice : public Voice {
-public:
+  public:
+    /// The noise ladder's saturator, chosen per voice. Each value runs the
+    /// LadderSaturation of the same meaning explicitly, so the voice does not
+    /// follow the build-time kDefaultLadderSaturation: reference is
+    /// LadderSaturation::exact (std::tanh) and realtime_efficient is
+    /// LadderSaturation::realtime_efficient (the Padé FastMath::tanh).
     enum class LadderMathProfile : std::uint8_t {
         reference,
         realtime_efficient,

@@ -311,6 +311,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/child_process.hpp
     include/pulp/runtime/crypto.hpp
     include/pulp/runtime/detail/durable_file_replacement.hpp
+    include/pulp/runtime/dispatch_count.hpp
     include/pulp/runtime/dynamic_library.hpp
     include/pulp/runtime/exceptions.hpp
     include/pulp/runtime/expression.hpp

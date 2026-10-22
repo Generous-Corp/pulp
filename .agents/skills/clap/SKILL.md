@@ -1140,6 +1140,11 @@ atomics from `process()` instead.
   a non-finite parse. Keep the locale-independent fallback (`parse_double_c_locale`)
   for plain-numeric params. Test: `test/test_clap_entry.cpp`
   ("text_to_value routes through ParamInfo::from_string").
+- `params_text_to_value` must accept everything `params_value_to_text` shows.
+  An unlabeled Toggle or Enum (PulpGain's Bypass) is shown as "0"/"1", so the
+  shared parser accepts the number unless the parameter declares
+  `value_labels`. clap-validator's param-conversions test requires text
+  conversion for all parameters or none and fails the whole plug-in otherwise.
 - CLAP delivers `CLAP_EVENT_PARAM_GESTURE_BEGIN/END` on the process/flush path
   and calls `store.begin_gesture/end_gesture` directly. Those StateStore entry
   points are main-thread-only (they forward to host undo grouping). A background

@@ -134,7 +134,7 @@ http_download("https://example.com/ir.wav", "/tmp/impulse.wav");
 
 ### Crypto — Hashing and encryption
 
-SHA-256, MD5, AES-256-CBC via Mbed TLS (Apache 2.0). Use for license validation, integrity checks, secure preset storage.
+SHA-256 (Pulp's own implementation: the ARMv8 SHA-2 instructions on arm64 targets that have them, portable rounds elsewhere, identical digests), plus MD5 and AES-256-CBC via Mbed TLS (Apache 2.0). Use for license validation, integrity checks, secure preset storage.
 
 ```cpp
 #include <pulp/runtime/crypto.hpp>
@@ -944,9 +944,11 @@ a working convolution and would hide the bug. Assert
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
 | [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting, plus causal minimum-phase reconstruction |
 | [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
-| Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter with saturation |
+| Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter; the per-stage saturator is a `LadderSaturation` choice (`exact` `std::tanh`, default `accurate` `FastMath::tanh_accurate`, or `realtime_efficient` Padé) |
+| Ladder Bank | `ladder_bank.hpp` | `LadderBankT<T, Voices>`: a fixed number of independent ladder voices advanced in lockstep as SIMD lanes (`process()` one sample, `process_voices()` a block; one sample rate for all voices), each bit-identical to a `LadderFilterT` with the default saturator |
 | Linkwitz-Riley | `linkwitz_riley.hpp` | Phase-aligned crossover filter for splitting audio into frequency bands |
 | State Variable (TPT) | `svf.hpp` / `tpt_filter.hpp` | Topology-preserving transform filter — simultaneous LP/HP/BP/notch outputs |
+| SVF Bank | `svf_bank.hpp` | `SvfBankT<T, Voices>`: a fixed number of independent SVF voices, each with its own mode, advanced in lockstep (`process()` one sample, `process_voices()` a block); each voice is bit-identical to `SvfT::process(sample)`. Coefficients come from the pure `SvfT::design()` |
 
 #### Effects
 
@@ -1117,7 +1119,7 @@ nonadjacent islands followed by exact total mute through `find_package(Pulp)`.
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Bias | `bias.hpp` | Shift a signal's DC offset — useful for asymmetric waveshaping |
-| Fast Math | `fast_math.hpp` | Scalar DSP math helpers; approximations are explicitly labeled, while `exp2` follows standard float edge semantics and exact representable integer powers under the ambient FP mode (audio-callback FTZ/FZ may flush subnormals) |
+| Fast Math | `fast_math.hpp` | Scalar DSP math helpers; approximations are explicitly labeled, while `exp2` follows standard float edge semantics and exact representable integer powers under the ambient FP mode (audio-callback FTZ/FZ may flush subnormals). `FastMath::tanh_accurate` is a branch-free rational tanh within 3.0e-7 of `std::tanh` (3.6e-7 without fused multiply-add) for every float input; `log10_accurate`, `exp10_accurate`, `gain_to_db_accurate` and `db_to_gain_accurate` are branch-free decibel conversions within a few ulps of libm |
 | Interpolator | `interpolator.hpp` | Lagrange and Hermite interpolation for fractional-sample delay and resampling |
 | Log Ramped Value | `log_ramped_value.hpp` | Logarithmic smoothing for perceptually linear parameter transitions |
 | Lookup Table | `lookup_table.hpp` | Pre-computed function table for fast repeated evaluation of expensive functions |

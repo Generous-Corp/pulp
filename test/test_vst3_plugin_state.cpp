@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <array>
+#include "../examples/pulp-gain/pulp_gain.hpp"
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -208,6 +209,11 @@ struct TestVst3Config {
     // even when the block is bypassed.
     bool add_reset_trigger_param = false;
     int gain_group_id = 8;
+    // When set, an inline listener registered before the adapter's edit bridge
+    // answers an editor write to Gain with a host automation write to this
+    // value, so the store already holds the host's value when the bridge
+    // reports the edit.
+    std::optional<float> automation_during_editor_edit;
 };
 
 class TestVst3Processor : public pulp::format::Processor {
@@ -228,6 +234,16 @@ public:
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
+        if (const auto automated = config_.automation_during_editor_edit) {
+            automation_listener_ = store.add_listener(
+                [&store, automated = *automated](pulp::state::ParamID id, float) {
+                    if (id != kGainParamId || pulp::format::in_non_editor_parameter_write())
+                        return;
+                    const pulp::format::ScopedHostParameterWrite host_write;
+                    store.set_value(kGainParamId, automated);
+                },
+                pulp::state::ListenerThread::Audio);
+        }
         store.add_group({.id = 7, .name = "Dynamics"});
         store.add_group({.id = 8, .name = "Advanced", .parent_id = 7});
         store.add_group({.id = 20, .name = "Cycle A", .parent_id = 21});
@@ -344,6 +360,7 @@ public:
 private:
     TestVst3Config config_;
     mutable int bus_layout_check_count_ = 0;
+    pulp::state::ListenerToken automation_listener_;
 };
 
 TestVst3Processor* TestVst3Processor::g_last_processor = nullptr;
@@ -1012,6 +1029,33 @@ TEST_CASE("VST3 does not echo host automation back during an open gesture",
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
+TEST_CASE("VST3 reports the editor's value even if automation lands before the report",
+          "[vst3][editor][gesture][automation]") {
+    // The edit bridge reports an editor write from a listener on that write.
+    // Another listener on the same write can run a host automation write
+    // first, so the store already holds the host's value when the report is
+    // built. The host must still receive the value the user set.
+    TestVst3Config config;
+    config.automation_during_editor_edit = 6.0f;
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    GestureEditRecorder recorder;
+    REQUIRE(processor.setComponentHandler(&recorder) == Steinberg::kResultOk);
+    auto& store = TestVst3Processor::g_last_processor->state();
+
+    store.begin_gesture(kGainParamId);
+    store.set_value(kGainParamId, -12.0f);
+    REQUIRE_FALSE(recorder.edits.empty());
+    // The edit, -12 dB on -60..24, not the automated +6 dB (66/84).
+    REQUIRE(recorder.edits.front().id == kGainParamId);
+    REQUIRE(recorder.edits.front().value == Catch::Approx(48.0 / 84.0).margin(1e-9));
+    store.end_gesture(kGainParamId);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
 TEST_CASE("VST3 setState reports a preset restore to nobody",
           "[vst3][editor][automation][wah-5]") {
     // A preset/session restore rewrites every parameter on the MAIN thread —
@@ -1125,6 +1169,157 @@ TEST_CASE("VST3 survives repeated initialize activate process deactivate termina
         REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
         REQUIRE(processor.terminate() == Steinberg::kResultOk);
     }
+}
+
+TEST_CASE("VST3 stores a host's exact value for a continuous parameter with a step",
+          "[vst3][param][host]") {
+    // Gain is continuous with a 0.1 dB step and advertises stepCount 0. A host
+    // writing -19.963 dB must store -19.963 dB through both write paths, as
+    // AU and CLAP store it from a plain value; snapping to -20.0 made the same
+    // automation produce different audio per format.
+    constexpr int kFrames = 64;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = inputs;
+    Steinberg::Vst::AudioBusBuffers output_bus{};
+    output_bus.numChannels = 2;
+    output_bus.channelBuffers32 = outputs;
+
+    reset_test_processor(TestVst3Config{});
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    ParameterInfo gain{};
+    REQUIRE(processor.getParameterInfo(0, gain) == Steinberg::kResultOk);
+    REQUIRE(gain.id == kGainParamId);
+    REQUIRE(gain.stepCount == 0);
+
+    const pulp::state::ParamRange range{-60.0f, 24.0f, 0.0f, 0.1f};
+    constexpr float kTarget = -19.963f;
+
+    REQUIRE(processor.setParamNormalized(kGainParamId, range.normalize(kTarget)) ==
+            Steinberg::kResultOk);
+    REQUIRE_THAT(test_processor->state().get_value(kGainParamId), WithinAbs(kTarget, 1e-3));
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = kFrames;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    constexpr float kQueued = 3.337f;
+    Steinberg::Vst::ParameterChanges input_params(1);
+    Steinberg::int32 queue_index = 0;
+    auto* queue = input_params.addParameterData(kGainParamId, queue_index);
+    REQUIRE(queue != nullptr);
+    Steinberg::int32 point_index = 0;
+    REQUIRE(queue->addPoint(0, range.normalize(kQueued), point_index) == Steinberg::kResultTrue);
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample32;
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = &input_bus;
+    data.outputs = &output_bus;
+    data.inputParameterChanges = &input_params;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    REQUIRE_THAT(test_processor->state().get_value(kGainParamId), WithinAbs(kQueued, 1e-3));
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 PulpGain at 0 dB is bit-transparent, including after a round trip",
+          "[vst3][param][null-test]") {
+    // Evaluators null-test a gain plug-in at unity. A host-normalized 0 dB
+    // that lands a hair off zero (a 0.1 dB step snap left 2.4e-6 dB) makes the
+    // gain 1 + 2 ulp and the null fails.
+    constexpr int kFrames = 256;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    std::uint32_t seed = 1;
+    for (int i = 0; i < kFrames; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        in_l[static_cast<std::size_t>(i)] = static_cast<float>(seed >> 8) / 16777216.0f - 0.5f;
+        in_r[static_cast<std::size_t>(i)] = -in_l[static_cast<std::size_t>(i)] * 0.731f;
+    }
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = inputs;
+    Steinberg::Vst::AudioBusBuffers output_bus{};
+    output_bus.numChannels = 2;
+    output_bus.channelBuffers32 = outputs;
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(pulp::examples::create_pulp_gain);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = kFrames;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    const auto render = [&](Steinberg::Vst::ParameterChanges* changes) {
+        Steinberg::Vst::ProcessData data{};
+        data.symbolicSampleSize = Steinberg::Vst::kSample32;
+        data.numSamples = kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = &input_bus;
+        data.outputs = &output_bus;
+        data.inputParameterChanges = changes;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    };
+    const auto require_null = [&](const char* stage) {
+        INFO(stage);
+        for (int i = 0; i < kFrames; ++i) {
+            REQUIRE(out_l[static_cast<std::size_t>(i)] == in_l[static_cast<std::size_t>(i)]);
+            REQUIRE(out_r[static_cast<std::size_t>(i)] == in_r[static_cast<std::size_t>(i)]);
+        }
+    };
+    // A host's own normalized value for a dB reading on the -60..24 range.
+    const auto normalized_db = [](double db) { return (db + 60.0) / 84.0; };
+    const auto write_both_gains = [&](double normalized) {
+        Steinberg::Vst::ParameterChanges changes(2);
+        Steinberg::int32 queue_index = 0, point_index = 0;
+        for (const auto id : {pulp::examples::kInputGain, pulp::examples::kOutputGain}) {
+            auto* queue = changes.addParameterData(id, queue_index);
+            REQUIRE(queue != nullptr);
+            REQUIRE(queue->addPoint(0, normalized, point_index) == Steinberg::kResultTrue);
+        }
+        render(&changes);
+    };
+
+    render(nullptr);
+    require_null("untouched defaults");
+
+    write_both_gains(normalized_db(6.0));
+    REQUIRE(out_l[1] != in_l[1]);
+    write_both_gains(normalized_db(0.0));
+    require_null("back to 0 dB through automation");
+
+    ParameterInfo info{};
+    REQUIRE(processor.getParameterInfo(0, info) == Steinberg::kResultOk);
+    write_both_gains(normalized_db(-12.0));
+    for (const auto id : {pulp::examples::kInputGain, pulp::examples::kOutputGain})
+        REQUIRE(processor.setParamNormalized(id, info.defaultNormalizedValue) ==
+                Steinberg::kResultOk);
+    render(nullptr);
+    require_null("the reported default written back by the host");
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
 TEST_CASE("VST3 lifecycle churn preserves state and tolerates bypass toggles",

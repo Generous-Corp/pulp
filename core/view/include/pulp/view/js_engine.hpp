@@ -88,7 +88,7 @@ public:
     // (QuickJS, JSC) and forward-compatibility callers degrade cleanly.
 
     // The engine's own reported runtime version string (e.g. V8's
-    // "15.3.76.5"). Empty when the backend does not report one.
+    // "15.7.112.5"). Empty when the backend does not report one.
     virtual std::string runtime_version() const { return {}; }
 
     // Where the runtime came from, as wired at build time: "v8builder" for the
@@ -306,8 +306,11 @@ void reset_js_engine_creation_stats_for_tests();
 /// keeps the bytecode; every later realm in the same process that evaluates
 /// byte-identical source reads the bytecode back instead of parsing again.
 /// Keyed by the full source text, so a hit is never a different script.
-/// Process-local and in-memory only: bytecode is never written to disk,
-/// because QuickJS does not validate untrusted bytecode.
+/// Process-local and in-memory only: bytecode is never written to or read
+/// from disk, because QuickJS does not validate untrusted bytecode. The one
+/// other source is bytecode compiled at build time and embedded in the
+/// product binary itself (see register_embedded_script_bytecode()), which is
+/// covered by the binary's own code signature.
 /// `PULP_JS_BYTECODE_CACHE=0` disables it.
 struct ScriptBytecodeCacheStats {
     std::uint64_t compiles = 0;   ///< scripts compiled and stored
@@ -315,6 +318,7 @@ struct ScriptBytecodeCacheStats {
     std::uint64_t bypassed = 0;   ///< too small to cache, or cache disabled
     std::uint64_t precompiled = 0;  ///< of `compiles`, done by precompile_scripts()
     std::uint64_t waits = 0;      ///< evaluations that waited for an in-flight compile
+    std::uint64_t embedded = 0;   ///< misses served from build-time bytecode, not compiled
     std::size_t entries = 0;
     std::size_t bytes = 0;        ///< bytecode + key bytes held
 };
@@ -337,12 +341,46 @@ std::size_t precompile_scripts(const std::vector<std::string>& sources,
 /// True when byte-identical `source` has stored bytecode (tests, diagnostics).
 bool script_bytecode_cached(const std::string& source);
 
+/// Build-time script bytecode (QuickJS backend).
+///
+/// `build_embedded_script_bytecode()` compiles `source` exactly as
+/// `evaluate_script()` would and wraps the bytecode in a self-describing blob:
+/// the SHA-256 and length of the source it was compiled from, and the
+/// engine's bytecode fingerprint. A product embeds the blob in its binary at
+/// build time (`pulp_add_js_bytecode()` in CMake) and hands it to
+/// `register_embedded_script_bytecode()` before its editor opens. On a
+/// bytecode-cache miss for a source of the registered length whose SHA-256
+/// matches, the cache takes the embedded bytecode instead of compiling, so a
+/// fresh process skips the parse of a large UI runtime entirely.
+///
+/// A blob is only ever used for the exact source it was compiled from, and
+/// only by an engine whose fingerprint matches the one that compiled it;
+/// anything else (another engine build, a stale or corrupt blob, a source that
+/// changed since the build) is ignored and the source compiles as before.
+///
+/// The blob must stay valid for the process lifetime (it normally lives in
+/// the binary's read-only data). It is trusted code: never register bytes read
+/// from a writable location.
+///
+/// Returns an empty vector when the source does not compile or the backend is
+/// not QuickJS.
+std::vector<std::uint8_t> build_embedded_script_bytecode(const std::string& source);
+/// Returns false (and registers nothing) for a malformed blob, or one whose
+/// engine fingerprint differs from this process's engine.
+bool register_embedded_script_bytecode(const std::uint8_t* blob, std::size_t size);
+/// The engine's bytecode fingerprint: the QuickJS version plus a digest of the
+/// bytecode this engine emits for a fixed probe script, so any change to the
+/// bytecode format or opcode/atom numbering changes it.
+std::string script_bytecode_engine_fingerprint();
+
 namespace detail {
 /// Tests only: called by precompile_scripts() on its own thread after it has
 /// claimed `source` and before it compiles it, so a test can hold a compile in
 /// flight deterministically. Pass an empty function to clear it.
 void set_precompile_claim_hook_for_tests(std::function<void(const std::string&)> hook);
 std::function<void(const std::string&)> precompile_claim_hook_for_tests();
+/// Tests only: forget every registered embedded bytecode blob.
+void clear_embedded_script_bytecode_for_tests();
 }  // namespace detail
 
 } // namespace pulp::view

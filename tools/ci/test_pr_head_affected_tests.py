@@ -39,14 +39,23 @@ NAMES = {
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
     "cmake-ios-auv3-control-shipping": set(),
     "pulp-test-cli-migration-index": set(),
+    "TripleBuffer hammer: writer + reader for 500ms": set(),
+    "SeqLock hammer: 1 writer + 2 readers for 500ms": set(),
+    "SpscQueue hammer: producer + consumer for 500ms": set(),
+    "TripleBuffer<MeterFrame> never tears a frame under a 2-thread hammer": set(),
+    "TripleBuffer basic read/write": set(),
+    "buffer_ops::apply_gain scales every sample in a span": set(),
+    "buffer_ops SIMD-equivalence: clip matches scalar baseline": set(),
 }
 
 
 class SelectionTests(unittest.TestCase):
     def plan(self, paths: list[str], projected: step.inventory.Selection,
              *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = (),
-             rebuilt: list[str] = (), registered: list[str] = ()) -> dict:
+             rebuilt: list[str] = (), registered: list[str] = (),
+             cases: list[str] = ()) -> dict:
         with mock.patch.object(step, "project", return_value=projected) as project, \
+                mock.patch.object(step, "edited_case_tests", return_value=list(cases)), \
                 mock.patch.object(step, "script_reference_tests", return_value=list(scripts)), \
                 mock.patch.object(step, "script_input_tests", return_value=list(inputs)), \
                 mock.patch.object(step, "own_tests", return_value=list(own)), \
@@ -106,6 +115,30 @@ class SelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = self.plan([path], selection("all", []))
                 self.assertIn("cmake-ios-auv3-control-shipping", plan["tests"])
+
+    def test_a_sync_primitive_header_runs_its_hammers_first(self) -> None:
+        for header in ("triple_buffer", "seqlock", "spsc_queue"):
+            with self.subTest(header=header):
+                plan = self.plan([f"core/runtime/include/pulp/runtime/{header}.hpp"],
+                                 selection("focused", ["unit-a", "TripleBuffer basic read/write"]))
+                hammers = sorted(n for n in NAMES if "hammer" in n)
+                self.assertEqual(sorted(plan["merge_only"]), hammers)
+                self.assertEqual(sorted(plan["tests"][:len(hammers)]), hammers)
+
+    def test_buffer_ops_runs_its_own_cases_first(self) -> None:
+        for path in ("core/audio/include/pulp/audio/buffer_ops.hpp",
+                     "core/audio/src/buffer_ops.cpp"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", ["unit-a"]))
+                cases = sorted(n for n in NAMES if n.startswith("buffer_ops"))
+                self.assertEqual(sorted(plan["merge_only"]), cases)
+                self.assertEqual(plan["tests"][-1], "unit-a")
+
+    def test_control_other_runtime_and_audio_files_do_not_reach_them(self) -> None:
+        plan = self.plan(["core/runtime/include/pulp/runtime/simd.hpp",
+                          "core/audio/src/buffer.cpp"], selection("focused", ["unit-a"]))
+        self.assertEqual(plan["merge_only"], [])
+        self.assertEqual(plan["tests"], ["unit-a"])
 
     def test_no_editor_fixture_reaches_its_artifact_probe(self) -> None:
         plan = self.plan(["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],
@@ -203,6 +236,17 @@ class SelectionTests(unittest.TestCase):
                          own=["unit-a"], inputs=["sample-region-compat-baseline"])
         self.assertEqual(plan["tests"], ["sample-region-compat-baseline", "unit-a", "unit-b"])
 
+    def test_edited_cases_run_after_merge_only_checks_and_before_the_projection(self) -> None:
+        # A header edit can make the projection select thousands of tests; the
+        # cases the diff itself writes must not depend on the budget reaching
+        # them in projection order.
+        plan = self.plan(["core/x/a.hpp", "test/test_a.cpp"],
+                         selection("focused", ["unit-a", "other", "unit-b"]),
+                         inputs=["sample-region-compat-baseline"], cases=["unit-b"])
+        self.assertEqual(plan["tests"],
+                         ["sample-region-compat-baseline", "unit-b", "unit-a", "other"])
+        self.assertEqual(plan["edited_cases"], 1)
+
     def test_control_a_plan_without_merge_only_checks_keeps_its_order(self) -> None:
         plan = self.plan(["core/x/a.cpp"], selection("focused", ["unit-a"]), rebuilt=["unit-b"])
         self.assertEqual(plan["merge_only"], [])
@@ -241,6 +285,126 @@ if(_arm_only)
     add_test(NAME arm-control COMMAND pulp-probe --arm)
 endif()
 """
+
+
+class RequiredFamilyTests(unittest.TestCase):
+    """The required families against the real test sources, not a fixture."""
+
+    SOURCES = ("test/test_sync_race_hammer.cpp", "test/test_buffer_ops.cpp",
+               "test/test_meter_source.cpp")
+
+    def real_case_names(self, rename: tuple[str, str] | None = None) -> list[str]:
+        names = []
+        for rel in self.SOURCES:
+            text = (REPO / rel).read_text(encoding="utf-8")
+            if rename:
+                text = text.replace(*rename)
+            names.extend(name for _line, name in step.catch_case_names(text))
+        return names
+
+    def resolve(self, names: list[str]) -> dict[str, list[str]]:
+        paths = {"runtime-sync-hammers": "core/runtime/include/pulp/runtime/seqlock.hpp",
+                 "audio-buffer-ops": "core/audio/include/pulp/audio/buffer_ops.hpp"}
+        out = {}
+        for family, path in paths.items():
+            out.update({k: v for k, v in step.family_tests([path], names).items()
+                        if k == family})
+        return out
+
+    def test_every_required_family_resolves_against_the_real_sources(self) -> None:
+        resolved = self.resolve(self.real_case_names())
+        self.assertEqual(set(resolved), set(step.REQUIRED_FAMILIES))
+        self.assertEqual(step.empty_required_families(resolved), [])
+        hammers = resolved["runtime-sync-hammers"]
+        for primitive in ("TripleBuffer", "SeqLock", "SpscQueue"):
+            self.assertTrue(any(h.startswith(primitive) for h in hammers), (primitive, hammers))
+        self.assertGreaterEqual(len(resolved["audio-buffer-ops"]), 1)
+
+    def test_planted_rename_of_the_hammers_is_detected(self) -> None:
+        # Negative control: rename every hammer case the way a refactor might.
+        resolved = self.resolve(self.real_case_names(rename=(" hammer", " stress run")))
+        self.assertEqual(resolved["runtime-sync-hammers"], [])
+        self.assertEqual(step.empty_required_families(resolved), ["runtime-sync-hammers"])
+
+    def test_planted_rename_of_the_buffer_ops_cases_is_detected(self) -> None:
+        resolved = self.resolve(self.real_case_names(rename=('"buffer_ops', '"bufferops')))
+        self.assertEqual(step.empty_required_families(resolved), ["audio-buffer-ops"])
+
+    def test_select_reports_an_empty_required_family(self) -> None:
+        names = {"unit-a": set()}
+        with mock.patch.object(step, "project", return_value=selection("focused", ["unit-a"])), \
+                mock.patch.object(step, "script_reference_tests", return_value=[]), \
+                mock.patch.object(step, "script_input_tests", return_value=[]), \
+                mock.patch.object(step, "own_tests", return_value=[]), \
+                mock.patch.object(step, "rebuilt_binary_tests", return_value=[]), \
+                mock.patch.object(step, "registration_tests", return_value=[]), \
+                mock.patch.object(step, "edited_case_tests", return_value=[]):
+            plan = step.select(Path("/b"), ["core/runtime/include/pulp/runtime/seqlock.hpp"],
+                               names)
+        self.assertEqual(plan["empty_required_families"], ["runtime-sync-hammers"])
+
+
+class EditedCaseTests(unittest.TestCase):
+    SOURCE = (
+        '#include <catch2/catch_test_macros.hpp>\n'   # 1
+        '\n'                                         # 2
+        'TEST_CASE("first case", "[x]") {\n'         # 3
+        '    REQUIRE(true);\n'                       # 4
+        '}\n'                                        # 5
+        '\n'                                         # 6
+        'TEST_CASE("second \\"quoted\\" case",\n'  # 7
+        '          "[x]") {\n'                       # 8
+        '    REQUIRE(1 == 1);\n'                     # 9
+        '}\n'                                        # 10
+        '\n'                                         # 11
+        'TEMPLATE_TEST_CASE("templated", "[x]", int, float) {\n'  # 12
+        '    REQUIRE(TestType{} == TestType{});\n'   # 13
+        '}\n'                                        # 14
+        '\n'                                         # 15
+        'TEST_CASE_METHOD(audio::Fixture, "fixture case", "[x]") {\n'  # 16
+        '    REQUIRE(ready());\n'                     # 17
+        '}\n'                                        # 18
+    )
+    # catch_discover_tests registers the unescaped literal, and each template
+    # instantiation as "name - Type".
+    NAMES = {"first case": set(), 'second "quoted" case': set(),
+             'gain: second "quoted" case': set(), "templated - int": set(),
+             "templated - float": set(), "fixture case": set(), "unrelated": set()}
+
+    def cases(self, rel: str, touched: set[int]) -> list[str]:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "test").mkdir()
+            (root / "test" / "test_x.cpp").write_text(self.SOURCE, encoding="utf-8")
+            return step.edited_case_tests([rel], self.NAMES, {rel: (touched, [])}, root)
+
+    def test_a_touched_line_selects_the_case_that_contains_it(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {9}),
+                         ['gain: second "quoted" case', 'second "quoted" case'])
+
+    def test_a_template_case_selects_every_instantiation(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {13}),
+                         ["templated - float", "templated - int"])
+
+    def test_a_namespaced_fixture_case_owns_its_own_lines(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {17}), ["fixture case"])
+
+    def test_a_touched_case_header_selects_that_case(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {3}), ["first case"])
+
+    def test_control_lines_before_the_first_case_select_nothing(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {1, 2}), [])
+
+    def test_control_a_non_test_path_selects_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "core").mkdir()
+            (root / "core" / "x.cpp").write_text(self.SOURCE, encoding="utf-8")
+            self.assertEqual(step.edited_case_tests(
+                ["core/x.cpp"], self.NAMES, {"core/x.cpp": ({3, 9}, [])}, root), [])
+
+    def test_control_no_line_changes_selects_nothing(self) -> None:
+        self.assertEqual(step.edited_case_tests(["test/test_x.cpp"], self.NAMES, None), [])
 
 
 class RegistrationImpactTests(unittest.TestCase):
@@ -778,6 +942,48 @@ class ExitCodeTests(unittest.TestCase):
                 contextlib.redirect_stdout(out):
             self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 1)
         self.assertIn("SKIPPED, NOT RUN", out.getvalue())
+
+    def _main_plan(self, plan: dict, results: dict, *, dry_run: bool = False) -> int:
+        out = io.StringIO()
+        argv = ["--build-dir", "/nonexistent"] + (["--dry-run"] if dry_run else [])
+        with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=plan), \
+                mock.patch.object(step, "run_budgeted", return_value=results), \
+                contextlib.redirect_stdout(out):
+            code = step.main(argv)
+        self.output = out.getvalue()
+        return code
+
+    def test_a_required_family_that_selects_nothing_fails_the_step(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r",
+                "families": {"runtime-sync-hammers": 0}, "tests": [], "merge_only": [],
+                "empty_required_families": ["runtime-sync-hammers"],
+                "required_family_tests": []}
+        results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": [], "seconds": 0.0}
+        self.assertEqual(self._main_plan(plan, results), 1)
+        self.assertIn("path family runtime-sync-hammers matched this diff but selected no test",
+                      self.output)
+        self.assertEqual(self._main_plan(plan, results, dry_run=True), 1)
+
+    def test_a_required_family_test_excluded_by_label_fails_the_step(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r",
+                "families": {"runtime-sync-hammers": 1}, "tests": ["hammer"],
+                "merge_only": ["hammer"], "empty_required_families": [],
+                "required_family_tests": ["hammer"]}
+        results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": ["hammer"], "seconds": 0.0}
+        self.assertEqual(self._main_plan(plan, results), 1)
+        self.assertIn('"required_family_excluded": 1', self.output)
+
+    def test_control_other_excluded_tests_stay_neutral(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
+                "tests": ["slow-one"], "merge_only": ["slow-one"],
+                "empty_required_families": [], "required_family_tests": []}
+        results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": ["slow-one"], "seconds": 0.0}
+        self.assertEqual(self._main_plan(plan, results), 0)
 
     def test_control_a_real_failure_still_fails_beside_ordinary_deferrals(self) -> None:
         self.assertEqual(self._main({"a": (False, "passes on base")}, skipped=["c"]), 1)

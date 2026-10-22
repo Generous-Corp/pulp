@@ -711,6 +711,141 @@ ghapp api repos/Generous-Corp/pulp/actions/runners \
 Its 2 GB fits beside one build slot and the 10 GB Windows VM, but a second
 build slot does not, so check `macpro-governor.sh status` before enabling one.
 
+### The Windows x64 slot
+
+macpro also runs one Windows x64 runner. It owns a single VM and resets it to a
+golden snapshot before and after every job, instead of cloning: a Windows guest
+with the MSVC toolchain is a 130 GB disk set, so a clone per job would exhaust
+the thin pool. Nothing a job writes reaches the next job, and a job cannot change
+the golden.
+
+| | |
+|---|---|
+| Unit | `pulp-windows-ephemeral-pool@1.service` |
+| Supervisor | `tools/ci/proxmox-ephemeral-runner-windows.sh` → `/usr/local/sbin/pulp-windows-ephemeral-runner.sh` |
+| Profile | `/etc/pulp/windows-runner-1.env`: `PULP_WINDOWS_VMID=300`, `PULP_WINDOWS_GOLDEN_SNAPSHOT=<name>` |
+| VM | VMID 300, 4 cores, 9216 MB, Windows Server 2022 evaluation, LAN DHCP |
+| Labels | `["self-hosted","Windows","X64","pulp-build-windows-x64","pulp-host-macpro"]` |
+| Routing | `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON`, dispatch only; distinct from the ARM64 QEMU `PULP_LOCAL_WINDOWS_*` lanes |
+
+Each invocation:
+
+1. Waits while any registration named `pulp-win-ephemeral-<vmid>-*` is busy
+   (exit 75), and deregisters idle leftovers through the same fence as the Linux
+   supervisor.
+2. Stops the VM and rolls it back to the golden snapshot.
+3. Asks `macpro-governor.sh can-start <vmid>` for admission. A refusal waits about
+   five minutes, then exits 75.
+4. Boots the VM, reads its address from the QEMU guest agent, and connects over
+   SSH as an administrator. The guest's host key is pinned under the alias
+   `pulp-windows-vm-<vmid>` in `/var/lib/pulp/windows-runner/known_hosts`.
+5. Mints a repository-scoped JIT configuration with the existing runner
+   credential, writes it into the guest over stdin, and runs one job.
+6. Fences the registration and rolls back again.
+
+The VM belongs to the slot. Anything else that stops it (`qm shutdown 300` from
+another tool or session) kills the running job. The supervisor watches the VM
+while a job runs. When it stops without the supervisor stopping it, the
+supervisor ends the job wait at once, then fences and resets as usual. It
+reports what stopped the VM in three places:
+
+- the journal line `VM 300 stopped externally during the job: ...`;
+- syslog, tag `pulp-windows-runner`;
+- one line per event in `/var/lib/pulp/windows-runner/external-stops.log`.
+
+Each report names the Proxmox stop task with its user and time, and every
+address that opened a root SSH session in the two minutes before it:
+
+```sh
+ssh macpro tail /var/lib/pulp/windows-runner/external-stops.log
+```
+
+It registers at repository scope, like the generic Linux pool, so it serves only
+workflows that name its labels. Labels reserved for automatic PR routing
+(`pulp-auto-*`, `pulp-pr-safe-*`) are refused.
+
+Memory is sized so the slot fits beside both Linux build slots and the preamble
+slot: 8192 + 8192 + 2048 + 9216 MB is within the governor's 27968 MB, so a cycling
+Linux slot is always re-admitted. Do not raise the VM's memory without rechecking
+`macpro-governor.sh status`.
+
+#### What the golden snapshot carries
+
+- the toolchain (VS Build Tools, CMake, Ninja, Git with bash, Python with a
+  `python3` alias, LLVM `clang++`, which `setup.sh` probes for a C++20 compiler);
+- the x64 Actions runner at `B:\actions-runner`, on the second disk, which
+  Defender excludes;
+- `root@macpro`'s key in `C:\ProgramData\ssh\administrators_authorized_keys`;
+- every root-folder scheduled task disabled, and Windows Update set to
+  `NoAutoUpdate`, so the image cannot change itself during a job;
+- long paths enabled, for Windows and for Git.
+
+`qm rollback` reverts every disk of the VM, the 30 GB `B:` disk included: a marker
+file written to both `C:` and `B:` before a rollback was gone from both after it.
+Recheck that if a disk is ever added outside `local-lvm`, because a disk on
+storage without snapshots would carry state from one job to the next.
+
+#### What the golden removed from the earlier interactive VM
+
+VM 300 was used interactively before it became a CI slot. Its state at that point
+is the snapshot `pre-ci-dedicate-20261022`. To recover anything below without
+disturbing the CI slot, make a full clone from that snapshot
+(`qm clone 300 <new-vmid> --snapname pre-ci-dedicate-20261022 --full`, after
+checking thin-pool room with `macpro-governor.sh status`). The golden changed
+only this:
+
+- **Scheduled tasks disabled (none deleted):** `CaptureCurrent`, `ci-setup`,
+  `CodexIntelAudio20261018`, `DialogOnce`, `DismissCleanX64UI20261015`,
+  `DismissReaperModalX6420261015`, `DismissReaperModalX6420261015b`, `Enum4104`,
+  `Enum5512`, `EnumOnce`, `GuiProbe`, `GuiProbe2`, `GuiTest`, `IntelEnumNow`,
+  `IntelTest`, `LuaProbe`, `MicrosoftEdgeUpdateTaskMachineCore`,
+  `MicrosoftEdgeUpdateTaskMachineUA`, `OpenActionsX6420261015`,
+  `OpenCurrentProject`, `pulp-build`, `PulpCloseDialogs`, `PulpReaperInteractive`,
+  `PulpSourceRefreshWeekly`, `PulpSpectrX64Smoke`, `PulpTsconTemp`,
+  `PulpVS18UpdateWeekly`, `PulpVSUpdateWeekly`, `ScreenshotOnce`,
+  `SpectrCurrentNormalOnce`, `SpectrCurrentProjectOnce`, `SpectrCurrentUIOnce`,
+  `SpectrCurrentX64Diagnose20261017`, `SpectrCurrentX64Exact20261017`,
+  `SpectrCurrentX64Exact20261017b`, `SpectrCurrentX64PackageSmoke`, `SpectrEnum`,
+  `SpectrIntelLive`, `SpectrIntelLiveD0`, `SpectrIntelShot`,
+  `SpectrNormalScanEditorX6420261015`, `SpectrReaperCurrentProject`,
+  `SpectrReaperInteractive`, `SpectrReaperWetProject`,
+  `SpectrRunLua2X6420261015`, `SpectrRunLua3X6420261015`,
+  `SpectrRunLuaX6420261015`, `SpectrTaskProbe`, `SpectrX64CreateDry20261015`,
+  `SpectrX64CreateWet20261015`, `SpectrX64DummyRender20261015`,
+  `SpectrX64EmptyRender20261015`, `SpectrX64OfflineRender20261015`,
+  `SpectrX64RenderDismiss20261015`, `SpectrX64RenderPid20261015`,
+  `SpectrX64SmokeInteractive`.
+- **Deleted from `C:`:** `C:\pulp-probe` (an earlier build trial, 19 GB).
+- **Deleted from `B:` (`PulpBuildCache`), every top-level entry:** the Pulp
+  FetchContent caches (`pulp-fetchcontent`, `pulp-fc-cache-20261015`), the Pulp
+  and Spectr build, package, install-backup, REAPER and diagnostic trees dated
+  2026-10-13 to 2026-10-17, `vst3sdk`, `skia-m153-x64-20261015`, `receipts`,
+  `temp`, and the loose `.cmd`/`.ps1`/`.log`/`.zip`/`.patch`/`.bundle`/`.dmp`
+  files beside them.
+- **Kept:** every user account, including `ci` and `pulp-rdp`, and their profiles;
+  `C:\ci-setup`; the Spectr trees on `C:`; the installed toolchains.
+
+#### Refreshing the golden
+
+Because nothing updates itself, the golden goes stale on purpose. To refresh it:
+
+```sh
+ssh macpro systemctl stop pulp-windows-ephemeral-pool@1    # waits for a running job
+ssh macpro 'qm rollback 300 <current-golden> && /usr/local/sbin/macpro-governor.sh can-start 300 && qm start 300'
+# Update in the guest over SSH: VS installer update, runner version, tools.
+# Verify: cl, clang++, cmake, ninja, python3, bash and git all answer, and
+# B:\actions-runner\bin\Runner.Listener.exe --version prints the new version.
+ssh macpro 'qm shutdown 300 && qm snapshot 300 ci-runner-golden-<YYYYMMDD> --description "<what changed>"'
+# Point the slot at it, then restart.
+ssh macpro "sed -i 's/^PULP_WINDOWS_GOLDEN_SNAPSHOT=.*/PULP_WINDOWS_GOLDEN_SNAPSHOT=ci-runner-golden-<YYYYMMDD>/' /etc/pulp/windows-runner-1.env"
+ssh macpro systemctl start pulp-windows-ephemeral-pool@1
+```
+
+Use a new dated name every time and keep the previous snapshot until a job has
+run green on the new one; rolling back to it is the recovery. The evaluation
+license expires 180 days after installation (`slmgr /dlv` shows the time left),
+so install a fresh evaluation into a new golden before then.
+
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
@@ -730,6 +865,27 @@ Need Windows on a specific change before the nightly? Dispatch it:
 ```sh
 ghapp workflow run build.yml --ref <branch>
 ```
+
+A `build.yml` dispatch always includes the macOS leg, so it also takes a macOS gate
+VM. To run only the full Windows suite, dispatch the nightly instead. Its Windows
+job takes an optional runner selector, which is how the Mac Pro Windows x64 slot is
+proven without touching the gate hosts:
+
+```sh
+ghapp workflow run cross-platform-check.yml --ref <branch> -f windows_only=true \
+  -f windows_runner_selector_json='["self-hosted","Windows","X64","pulp-build-windows-x64","pulp-host-macpro"]'
+```
+
+The schedule passes no inputs, so the nightly stays on `windows-latest`. A run with
+either input set never opens or closes the per-platform tracking issues, because
+it did not measure the nightly's configuration.
+
+A small `Resolve Windows runner` job checks the selector before any runner is
+chosen. It runs `tools/scripts/windows_runner_selector.py`, which refuses anything
+that is not a Windows selector, such as macOS or Linux labels, the gate pool, or
+the preamble slot, so a pasted selector cannot put a Windows build on a gate VM.
+Such a dispatch also gets its own concurrency group per run, so a long proof on
+`main` never holds back a pending nightly.
 
 This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
 exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an

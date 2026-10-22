@@ -1699,10 +1699,10 @@ jobs:
             echo "::error::mise candidate requires an ARM64 runner (RUNNER_ARCH=${RUNNER_ARCH:-unset})"
             exit 1
           }
-          mise="$HOME/.local/opt/mise-2026.10.11/bin/mise"
+          mise="$HOME/.local/opt/mise-2026.10.17/bin/mise"
           test -x "$mise" || { echo "::error::mise candidate binary is missing: $mise"; exit 1; }
-          expected_mise_version="2026.10.11"
-          expected_mise_sha="25e38f796fff67fc5f4c44f6963d4b8ed15be82a5d9244f693cc55d40a245ee3"
+          expected_mise_version="2026.10.17"
+          expected_mise_sha="284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc"
           actual_mise_sha="$(shasum -a 256 "$mise" | awk '{print $1}')"
           test "$actual_mise_sha" = "$expected_mise_sha" || {
             echo "::error::mise candidate sha256 mismatch: $actual_mise_sha"; exit 1;
@@ -1715,6 +1715,10 @@ jobs:
           export MISE_ENV=toolchain
           export MISE_TRUSTED_CONFIG_PATHS="$GITHUB_WORKSPACE"
           export MISE_DISABLE_UPDATE_WARNING=1
+          # Environment settings apply whether or not mise trusts the checkout,
+          # so no step can resolve or install a tool mid-build.
+          export MISE_LOCKED=1
+          export MISE_AUTO_INSTALL=0
           "$mise" exec -- "$mise" --version
           # shellcheck disable=SC2016
           tool_path="$("$mise" exec -- sh -c 'printf "%s" "$PATH"')"
@@ -1722,7 +1726,9 @@ jobs:
             echo "MISE_ENV=toolchain"
             echo "MISE_TRUSTED_CONFIG_PATHS=$GITHUB_WORKSPACE"
             echo "MISE_DISABLE_UPDATE_WARNING=1"
-            echo "PATH=$HOME/.local/opt/mise-2026.10.11/bin:$HOME/.cargo/bin:$tool_path"
+            echo "MISE_LOCKED=1"
+            echo "MISE_AUTO_INSTALL=0"
+            echo "PATH=$HOME/.local/opt/mise-2026.10.17/bin:$HOME/.cargo/bin:$tool_path"
           } >> "$GITHUB_ENV"
           echo "mise candidate active: $tool_path"
 

@@ -9,7 +9,7 @@ Linux is Pulp's third supported platform. This guide covers dependencies, buildi
 - CMake 3.24+
 - ALSA development libraries
 
-The pinned m153 V8 provider has different portability evidence by architecture:
+The pinned m157 V8 provider has different portability evidence by architecture:
 `linux-x64` is measured at GLIBC 2.34, while `linux-arm64` V8 is measured at
 GLIBC 2.39 / GLIBCXX 3.4.32 and the combined Skia/Dawn/V8 ARM64 floor is still
 unknown. ARM64 packaging must measure the final binary; do not apply the x64
@@ -39,7 +39,7 @@ sudo pacman -S base-devel cmake git alsa-lib
 
 ```bash
 # VST3 SDK (MIT) — cloned at configure time
-git clone --depth 1 --recursive --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk
+git clone --depth 1 --recursive --branch v3.8.1_build_84 https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk
 cd external/vst3sdk && git submodule update --init --recursive --depth 1
 
 # CLAP (MIT) — fetched automatically via CMake FetchContent

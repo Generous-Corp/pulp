@@ -619,6 +619,7 @@ private:
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/gpu_surface.hpp>
+#include <pulp/render/render_loop.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
@@ -1081,9 +1082,11 @@ public:
             advance_host_frame(&root_, frame_clock_, tick_result.dt);
             needs_repaint_.store(true, std::memory_order_relaxed);
         }
-        if (needs_repaint_.exchange(false, std::memory_order_relaxed)) {
+        const bool draw = needs_repaint_.exchange(false, std::memory_order_relaxed);
+        render::apply_display_rate_change((__bridge void*)display_link_,
+                                          rate_boost_.on_vsync(draw));
+        if (draw)
             render_frame();
-        }
     }
 
     void set_size(uint32_t w, uint32_t h) override {
@@ -1209,6 +1212,8 @@ private:
     FrameClock frame_clock_;
     // Measured-dt source, fed by the CADisplayLink's targetTimestamp.
     HostFramePump frame_pump_;
+    // Requests the panel maximum frame rate while frames are drawn.
+    render::DisplayRateBoost rate_boost_;
     std::atomic<bool> needs_repaint_{false};
     CADisplayLink* display_link_ = nil;
     PulpIOSPluginDisplayLinkTarget* display_link_target_ = nil;
@@ -1274,6 +1279,7 @@ private:
 
     void stop_display_link() {
         frame_pump_.suspend();
+        render::apply_display_rate_change((__bridge void*)display_link_, rate_boost_.on_stop());
         @autoreleasepool {
             if (display_link_) {
                 [display_link_ invalidate];

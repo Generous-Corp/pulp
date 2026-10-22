@@ -67,8 +67,10 @@ What the full create path does:
 3. Scaffolds source files from built-in templates or an explicitly named local template kit (processor, format entries, test, CMakeLists.txt)
 4. In in-tree mode: adds the project to `examples/CMakeLists.txt`
 5. In standalone product mode: generates `pulp.toml` with `sdk_version = "latest"` by default, an exact SDK version when `--pin` is passed, and local SDK hints when created from a checkout
-6. Configures, builds the generated test target plus the default platform outputs, and runs tests
+6. Configures (with `-G Ninja` when `ninja` is on `PATH` and the build dir is new, as `pulp build` does), builds the generated test target plus the default platform outputs, and runs tests
 7. Leaves the project ready for `pulp build`, which you use for rebuilds, explicit targets, or optional deliverables after changing configuration
+
+The generated test target uses Catch2 3. When CMake can find an installed Catch2 3 (for example from `brew install catch2`, or a prefix on `CMAKE_PREFIX_PATH`), the project uses it and skips downloading and compiling Catch2; otherwise configure downloads the pinned Catch2 release archive and checks its SHA-256.
 
 Notes:
 - `pulp create` is meant to prove that a fresh machine and fresh project can scaffold, configure, build the default native outputs, and pass the generated tests.
@@ -91,6 +93,8 @@ and Ubuntu do not support AAX.
 **Status**: usable
 
 Configure and build the project. Auto-detects when CMake reconfiguration is needed. Works with both repo-based and standalone projects.
+
+A standalone project's first configure (or one after the build dir's cache was moved aside) passes `-DCMAKE_PREFIX_PATH=<sdk>` for the SDK its `pulp.toml` selects: `sdk_path` when it holds that version, a local SDK built from `sdk_checkout`, or the cached download under `~/.pulp/sdk/<version>`; `sdk_version = "latest"` means the newest one installed. When none of those is on disk, `pulp build` hands the build to `pulp-cpp`, which downloads the pinned SDK or builds one from the checkout. Later configures keep the prefix the cache recorded.
 
 ```bash
 pulp build                    # Build the targets affected by your diff (source checkout)
@@ -1150,13 +1154,15 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 
 `doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `~/.config/pulp/secrets/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
 
-`sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist`.
+`ship` runs in a Pulp source checkout or in an SDK consumer project (`pulp.toml`, no `core/`); both package from `<project>/build`. The signing preflight (`tools/scripts/ensure_signing_ready.sh` in a checkout) and the default entitlements (`ship/templates/entitlements.plist`) come, in a consumer project, from the selected SDK's `share/pulp/ship/`. An SDK installed before that directory existed has neither, and `ship doctor` / `ship sign` name the missing path.
+
+`sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist` (from the SDK in a consumer project).
 `--path` signs exactly one explicit desktop artifact instead of scanning the build dirs:
 macOS `.app`/`.dmg`/plugin bundles, or Windows `.exe`/plugin bundles. `.pkg`
 installers are signed at creation time with a Developer ID **Installer**
 identity, not here.
 
-`package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Windows, it packages VST3/CLAP bundles as an NSIS `.exe` installer; `--per-user` switches plugin destinations to `%LOCALAPPDATA%\Programs\Common\...`, and plugin-only installers do not create Start Menu shortcuts. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary. For Android, `--target android` runs the Gradle package flow and copies APK/AAB outputs into `artifacts/`.
+`package` creates per-format `.pkg` files using `pkgbuild` on macOS, or `.dmg` files with `--dmg`. On Windows, it packages VST3/CLAP bundles as an NSIS `.exe` installer; `--per-user` switches plugin destinations to `%LOCALAPPDATA%\Programs\Common\...`, and plugin-only installers do not create Start Menu shortcuts. On Linux, it packages VST3/CLAP/LV2 bundles as a `.deb` using `dpkg-deb`, with a `.tar.gz` fallback when `dpkg-deb` is unavailable. If no Linux plugin bundles are present, it reports `no VST3/CLAP/LV2 plugins found` instead of creating an empty macOS-style artifact summary. On macOS, `package` exits 1 when any installer fails to build (each failure prints a `FAILED` line) or when it finds nothing to package, so `release` and scripts can rely on the exit code. For Android, `--target android` runs the Gradle package flow and copies APK/AAB outputs into `artifacts/`.
 
 For notarization, prefer `pulp ship release` for the end-to-end sign/package/notarize flow, or `pulp ship notarize --path <artifact>` for one packaged upload container (`.pkg`, `.dmg`, or `.zip`). Raw `.app` bundles are rejected with a pointer to `share`; raw plugin bundle directories should be packaged before distribution.
 

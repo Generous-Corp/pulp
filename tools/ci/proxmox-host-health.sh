@@ -56,6 +56,7 @@ MANIFEST="$(cat <<'EOF'
 proxmox-ephemeral-runner-linux.sh            /usr/local/sbin/pulp-ephemeral-runner.sh                    0755
 proxmox-trusted-ephemeral-runner-linux.sh    /usr/local/sbin/proxmox-trusted-ephemeral-runner-linux.sh   0755
 proxmox-pr-safe-ephemeral-runner-linux.sh    /usr/local/sbin/proxmox-pr-safe-ephemeral-runner-linux.sh   0755
+proxmox-ephemeral-runner-windows.sh          /usr/local/sbin/pulp-windows-ephemeral-runner.sh            0755
 proxmox-ephemeral-reap-linux.sh              /usr/local/sbin/pulp-ephemeral-reap.sh                      0755
 configure-proxmox-ci-network.sh              /usr/local/sbin/configure-proxmox-ci-network                0755
 macpro-governor.sh                           /usr/local/sbin/macpro-governor.sh                          0755
@@ -65,6 +66,7 @@ pulp-ephemeral-pool@.service                 /etc/systemd/system/pulp-ephemeral-
 pulp-trusted-ephemeral-pool@.service         /etc/systemd/system/pulp-trusted-ephemeral-pool@.service    0644
 pulp-pr-safe-ephemeral-pool@.service         /etc/systemd/system/pulp-pr-safe-ephemeral-pool@.service    0644
 proxmox-ephemeral-pool@.service              /etc/systemd/system/proxmox-ephemeral-pool@.service         0644
+pulp-windows-ephemeral-pool@.service         /etc/systemd/system/pulp-windows-ephemeral-pool@.service    0644
 pulp-ephemeral-reap.service                  /etc/systemd/system/pulp-ephemeral-reap.service             0644
 pulp-ephemeral-reap.timer                    /etc/systemd/system/pulp-ephemeral-reap.timer               0644
 EOF
@@ -222,7 +224,8 @@ do_check() {
         findings=$((findings + 1))
     done < <("$SYSTEMCTL" list-units --failed --plain --no-legend \
         'pulp-ephemeral-pool@*' 'pulp-trusted-ephemeral-pool@*' \
-        'pulp-pr-safe-ephemeral-pool@*' 'proxmox-ephemeral-pool@*' 2>/dev/null)
+        'pulp-pr-safe-ephemeral-pool@*' 'proxmox-ephemeral-pool@*' \
+        'pulp-windows-ephemeral-pool@*' 2>/dev/null)
 
     if [ -x "${ROOT_PREFIX}${GOVERNOR}" ]; then
         data_pct="$("${ROOT_PREFIX}${GOVERNOR}" status 2>/dev/null \

@@ -100,7 +100,9 @@ Advisory only — never blocks. Full contract + override knobs live in the
 On a workstation, `codesign` and `notarytool` can pop a macOS **keychain "allow
 access"** dialog or a **1Password** prompt — which silently wedges any headless,
 SSH, or CI sign. Two root causes, two durable fixes, both codified in
-`pulp ship doctor` (script: `tools/scripts/ensure_signing_ready.sh`):
+`pulp ship doctor` (script: `tools/scripts/ensure_signing_ready.sh`; in an SDK
+consumer project, the copy the selected SDK installs at
+`share/pulp/ship/ensure_signing_ready.sh`):
 
 1. **Signing key in the *login* keychain** → `codesign`/1Password prompt. Fix:
    sign from a **dedicated keychain** whose key is authorized for `codesign` via
@@ -353,7 +355,15 @@ component-selectable `.pkg` — it collects every built bundle (Standalone →
 `create_combined_pkg` call so the user is never forced to install every format.
 `--separate` restores the legacy behavior (one `.pkg` per format); `--dmg`
 produces disk images instead. The routing lives in the `pulp ship package`
-branch of `tools/cli/cmd_ship.cpp`.
+branch of `tools/cli/cmd_ship.cpp`. A failed installer or an empty run exits 1;
+do not read "Created N .pkg" as success, read the exit code.
+
+**`pulp ship` in an SDK consumer project.** `ship` works in a project made by
+`pulp create` (`pulp.toml`, no `core/`), not only in the Pulp checkout. The
+signing preflight and the default `entitlements.plist` come from the selected
+SDK's `share/pulp/ship/`. An SDK older than that directory has neither, so
+`ship doctor` / `ship sign` report the missing path: upgrade the SDK (`pulp sdk
+install`) rather than copying the script into the project.
 
 **Start every array in `build_combined_installer.sh` as `=()`.** The script runs under `set -u`, and bash 4.4 or later reports `${#X[@]}` of a declared-but-unassigned array as unbound, while macOS's `/bin/bash` 3.2 does not. A bare `declare -a X` passes every macOS run and fails on Linux (where the Python coverage pass runs the recipe tests) or under a newer bash on PATH.
 
@@ -1368,7 +1378,7 @@ renders `CHANGELOG.md` in the bump commit) install through
 
 Pulp's notarized macOS release workflow clones the Steinberg VST3 SDK directly
 inside `.github/workflows/sign-and-release.yml`. Keep that workflow pinned to
-the same upstream tag used everywhere else in the repo: `v3.8.0_build_66`.
+the same upstream tag used everywhere else in the repo: `v3.8.1_build_84`.
 The shortened `v3.8.0` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.

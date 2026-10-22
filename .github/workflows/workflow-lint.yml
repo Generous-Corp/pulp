@@ -43,6 +43,8 @@ on:
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/test_codeql_workflow_concurrency.py'
       - 'tools/scripts/test_cross_platform_check_concurrency.py'
+      - 'tools/scripts/windows_runner_selector.py'
+      - 'tools/scripts/test_windows_runner_selector.py'
       - 'tools/scripts/windows_cli_compile_scope.py'
       - 'tools/scripts/test_windows_cli_compile_scope.py'
       - 'tools/scripts/windows_cli_release_precheck.py'
@@ -176,6 +178,8 @@ on:
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/test_codeql_workflow_concurrency.py'
       - 'tools/scripts/test_cross_platform_check_concurrency.py'
+      - 'tools/scripts/windows_runner_selector.py'
+      - 'tools/scripts/test_windows_runner_selector.py'
       - 'tools/scripts/windows_cli_compile_scope.py'
       - 'tools/scripts/test_windows_cli_compile_scope.py'
       - 'tools/scripts/windows_cli_release_precheck.py'
@@ -521,6 +525,8 @@ jobs:
           # Proof-branch dispatches run per ref; only main touches the
           # cross-platform tracking issues.
           python3 tools/scripts/test_cross_platform_check_concurrency.py
+          # A dispatch-routed Windows job never lands on a macOS or Linux pool.
+          python3 tools/scripts/test_windows_runner_selector.py
           # Pulp #47 — guard the linux-arm64 Skia manifest entry against
           # silent regressions (parallel to the linux-x64 / mac-arm64
           # entries enforced by tests/test_skia_determinism.py).

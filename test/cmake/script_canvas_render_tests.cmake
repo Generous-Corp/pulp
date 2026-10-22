@@ -73,6 +73,24 @@ pulp_add_test_suite(pulp-test-scripted-ui-runtime-eval GROUP pulp-test-group-scr
 pulp_add_test_suite(pulp-test-js-engine GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
 
+# Build-time script bytecode: pulp_add_js_bytecode() end to end (generator,
+# embedding, registration) plus the blob checks.
+include("${CMAKE_SOURCE_DIR}/tools/cmake/PulpJsBytecode.cmake")
+set(_pulp_js_bytecode_fixture "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/js-bytecode/embedded_fixture.js")
+configure_file("${_pulp_js_bytecode_fixture}"
+    "${CMAKE_CURRENT_BINARY_DIR}/js-bytecode/embedded_bridge_fixture.js" COPYONLY)
+pulp_add_js_bytecode(js_bytecode_embed_fixture
+    SOURCES "${_pulp_js_bytecode_fixture}")
+pulp_add_js_bytecode(js_bytecode_embed_bridge_fixture
+    SOURCES "${CMAKE_CURRENT_BINARY_DIR}/js-bytecode/embedded_bridge_fixture.js"
+    NAMESPACE js_bytecode_embed_fixture
+    WIDGET_BRIDGE_SCRIPT)
+pulp_add_test_suite(pulp-test-js-bytecode-embed
+    LIBRARIES pulp::view js_bytecode_embed_fixture js_bytecode_embed_bridge_fixture
+    COMPILE_DEFINITIONS PULP_TEST_JS_BYTECODE_FIXTURE="${_pulp_js_bytecode_fixture}")
+pulp_test_data(pulp-test-js-bytecode-embed NO_DEFINE
+    PATHS test/fixtures/js-bytecode/embedded_fixture.js)
+
 # Cooperative-interrupt (runaway-abort) tests for the QuickJS backend
 pulp_add_test_suite(pulp-test-js-engine-interrupt GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)

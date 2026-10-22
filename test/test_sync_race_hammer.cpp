@@ -24,8 +24,11 @@
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <thread>
 
 using namespace std::chrono_literals;
@@ -88,6 +91,69 @@ TEST_CASE("TripleBuffer hammer: writer + reader for 500ms", "[concurrent][race][
     INFO("writes=" << write_count.load() << " reads=" << read_count.load());
     REQUIRE(write_count.load() > 0);
     REQUIRE(read_count.load() > 0);
+}
+
+TEST_CASE("TripleBuffer hammer: millions of frames, never torn, never backwards",
+          "[concurrent][race][triple_buffer]") {
+    // A multi-word frame: every word is derived from the sequence number, so
+    // a frame assembled from two publications cannot pass the check.
+    struct Frame {
+        std::uint64_t seq = 0;
+        std::array<std::uint64_t, 15> words{};
+    };
+    constexpr std::uint64_t kFrames = 2'000'000;
+    TripleBuffer<Frame> buf;
+    std::atomic<int> started{0};
+    std::atomic<std::uint64_t> torn{0};
+    std::atomic<std::uint64_t> backwards{0};
+    std::atomic<std::uint64_t> reads{0};
+    std::atomic<std::uint64_t> last_seen{0};
+
+    std::thread writer([&] {
+        started.fetch_add(1, std::memory_order_release);
+        for (std::uint64_t seq = 1; seq <= kFrames; ++seq) {
+            buf.write_with([seq](Frame& f) noexcept {
+                f.seq = seq;
+                for (std::size_t w = 0; w < f.words.size(); ++w)
+                    f.words[w] = seq * 0x9E3779B97F4A7C15ull + w;
+            });
+        }
+    });
+
+    std::thread reader([&] {
+        started.fetch_add(1, std::memory_order_release);
+        std::uint64_t previous = 0;
+        std::uint64_t n = 0;
+        // Runs until the final publication becomes visible, so the loop also
+        // proves the last value always reaches the reader.
+        const auto deadline = std::chrono::steady_clock::now() + 60s;
+        while (previous != kFrames) {
+            if ((n & 0xFFF) == 0 && std::chrono::steady_clock::now() > deadline)
+                break;
+            const Frame& f = buf.read();
+            ++n;
+            for (std::size_t w = 0; w < f.words.size(); ++w) {
+                if (f.words[w] != (f.seq == 0 ? 0 : f.seq * 0x9E3779B97F4A7C15ull + w)) {
+                    torn.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                }
+            }
+            if (f.seq < previous)
+                backwards.fetch_add(1, std::memory_order_relaxed);
+            previous = f.seq;
+        }
+        reads.store(n, std::memory_order_relaxed);
+        last_seen.store(previous, std::memory_order_relaxed);
+    });
+
+    writer.join();
+    reader.join();
+    REQUIRE(started.load() == 2);
+    INFO("reads=" << reads.load());
+    REQUIRE(torn.load() == 0);
+    REQUIRE(backwards.load() == 0);
+    REQUIRE(last_seen.load() == kFrames);
+    REQUIRE(buf.read().seq == kFrames);
 }
 
 TEST_CASE("SeqLock hammer: 1 writer + 2 readers for 500ms", "[concurrent][race][seqlock]") {

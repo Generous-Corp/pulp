@@ -421,6 +421,44 @@ inline bool is_discrete_param(const ParamInfo& info) {
     return info.kind != ParamKind::Continuous;
 }
 
+/// The plain value a host means by a normalized write. A host sees a
+/// continuous parameter as continuous (no step count), so its value is kept
+/// exactly: `range.step` quantizes what a UI control emits, not host
+/// automation, and plain-value formats (AU, CLAP) store the same exact value.
+/// Discrete parameters still snap to their steps.
+///
+/// Hosts hand normalized values as doubles. A linear range is mapped in
+/// double precision and rounded once, so a host's own 0 dB on a -60..24 range
+/// lands on 0.0f rather than a single-precision (or fused multiply-add) residue
+/// such as 1.4e-6 dB -- which is a gain of 1 + 1 ulp, and a failed null test.
+inline float value_from_host_normalized(const ParamInfo& info, double normalized) {
+    const ParamRange& range = info.range;
+    if (is_discrete_param(info))
+        return range.denormalize(static_cast<float>(normalized));
+    if (!range.is_linear()) {
+        ParamRange exact = range;
+        exact.step = 0.0f;
+        return exact.denormalize(static_cast<float>(normalized));
+    }
+    const double n = std::clamp(normalized, 0.0, 1.0);
+    const double plain = static_cast<double>(range.min) +
+                         n * (static_cast<double>(range.max) - static_cast<double>(range.min));
+    return std::clamp(static_cast<float>(plain), range.min, range.max);
+}
+
+/// The normalized value to report to a host for @p value: the inverse of
+/// value_from_host_normalized(), in double precision for a linear range, so a
+/// value the host reads back (a default, an output parameter) maps to exactly
+/// the same plain value when the host writes it again.
+inline double host_normalized_from_value(const ParamInfo& info, float value) {
+    const ParamRange& range = info.range;
+    if (!range.is_linear() || range.max == range.min)
+        return static_cast<double>(range.normalize(value));
+    const double span = static_cast<double>(range.max) - static_cast<double>(range.min);
+    return std::clamp((static_cast<double>(value) - static_cast<double>(range.min)) / span, 0.0,
+                      1.0);
+}
+
 inline bool is_boolean_param(const ParamInfo& info) {
     return info.kind == ParamKind::Toggle;
 }

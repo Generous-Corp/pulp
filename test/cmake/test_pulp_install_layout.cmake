@@ -78,6 +78,39 @@ if(NOT _header_parity_rc EQUAL 0)
         "${_header_parity_stdout}${_header_parity_stderr}")
 endif()
 
+# `pulp ship` in an SDK consumer project resolves its signing preflight and
+# default entitlements from the selected SDK, so both must be installed
+# byte-identical, and the preflight must stay executable.
+foreach(_ship_pair IN ITEMS
+        "tools/scripts/ensure_signing_ready.sh|ensure_signing_ready.sh"
+        "ship/templates/entitlements.plist|entitlements.plist")
+    string(REPLACE "|" ";" _ship_pair "${_ship_pair}")
+    list(GET _ship_pair 0 _ship_source_rel)
+    list(GET _ship_pair 1 _ship_installed_name)
+    set(_ship_installed "${_prefix}/share/pulp/ship/${_ship_installed_name}")
+    if(NOT EXISTS "${_ship_installed}")
+        message(FATAL_ERROR
+            "pulp ship support file is missing from the installed SDK:\n"
+            "${_ship_installed}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${CMAKE_CURRENT_LIST_DIR}/../../${_ship_source_rel}" "${_ship_installed}"
+        RESULT_VARIABLE _ship_compare_rc)
+    if(NOT _ship_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed ${_ship_installed_name} differs from ${_ship_source_rel}.")
+    endif()
+endforeach()
+if(NOT WIN32)
+    execute_process(
+        COMMAND test -x "${_prefix}/share/pulp/ship/ensure_signing_ready.sh"
+        RESULT_VARIABLE _ship_script_exec_rc)
+    if(NOT _ship_script_exec_rc EQUAL 0)
+        message(FATAL_ERROR "Installed ensure_signing_ready.sh is not executable.")
+    endif()
+endif()
+
 # Installed CLI/MCP consumers must be able to locate the exact versioned
 # machine contract without a Pulp checkout. Check both presence and bytes so a
 # stale generated copy cannot silently diverge from the implementation corpus.

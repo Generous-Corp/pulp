@@ -521,6 +521,17 @@ install(PROGRAMS
     "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
     DESTINATION "share/pulp/capability-control")
 
+# `pulp ship` in an SDK consumer project has no source checkout to take these
+# from: the unattended-signing preflight that `ship sign` and `ship doctor` run,
+# and the default codesign entitlements. The CLI resolves them from the
+# project's selected SDK under share/pulp/ship.
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/ensure_signing_ready.sh"
+    DESTINATION "share/pulp/ship")
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/ship/templates/entitlements.plist"
+    DESTINATION "share/pulp/ship")
+
 # Stable machine-readable GPU health contracts. Installed CLI and MCP
 # consumers need the exact versioned shapes selected by their SDK, not a
 # floating documentation URL or an inferred response.
@@ -791,6 +802,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFindPluginval.cmake"
 
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUiAssets.cmake"
+    # Included by PulpUtils.cmake: pulp_add_js_bytecode().
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpJsBytecode.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstall.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReload.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMidiTuning.cmake"
@@ -881,6 +894,9 @@ install(FILES
 # so find_package(Pulp) consumers can use the function.
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/encode_binary_data.py"
+    # pulp_add_js_bytecode() builds its generator from this source against
+    # the installed Pulp libraries, so the bytecode matches the product's engine.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_js_bytecode_main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_portable_binary.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_bundle_relocatable.py"
     # G3 universal-build arch/signature gate. pulp_validate_bundle_architectures

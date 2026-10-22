@@ -163,12 +163,12 @@ int main() {
                 cfg.C + double(cfg.H) * cfg.C;
             const double macs = per_sample * B;
             const double gmacs = macs / (ms * 1e6);
-            // Block-parallel geometry: one workgroup per sample (B workgroups) of
-            // WG=64 lanes; the dominant conv phase fills min(Z,WG) lanes each.
-            // (Pre-fix this was a single workgroup of 256 lanes, B busy → 25% at
-            // B=64 — see the git history of this file / gpu_compute.cpp.)
+            // Block-parallel geometry: each WG=64-lane workgroup covers
+            // S = 64/Z samples (1 when Z > 32), so ceil(B/S) workgroups run and the
+            // dominant conv phase fills S*min(Z,WG) lanes of each.
             const uint32_t WG = 64u;
-            const uint32_t wg = B;
+            const uint32_t S = Z <= WG ? WG / Z : 1u;
+            const uint32_t wg = (B + S - 1u) / S;
             const uint32_t active_ch = std::min(Z, WG);  // channels worked in parallel
             const uint64_t busy = static_cast<uint64_t>(B) * active_ch;
             // serialMAC = the reduction ONE lane walks alone. Post-fix the conv is

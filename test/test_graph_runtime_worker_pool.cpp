@@ -110,14 +110,19 @@ void square_task(void* ctx, std::uint32_t i) noexcept {
 // is woken by the event it is waiting for. Each keeps the deadline the poll it
 // replaced already used, so what changed is the waiting mechanism and not the
 // length of the fuse.
-constexpr auto kParkTimeout = std::chrono::seconds(2);
+// A worker parks after a few milliseconds without work, but only once the
+// scheduler runs it. These workers have not joined a workgroup, so they run at
+// normal priority, while the workers of other pools in concurrently running
+// tests spin at realtime priority and can hold every core for seconds. The
+// bound is a failsafe against a worker that never parks, so it is sized for
+// that contention rather than for an idle machine.
+constexpr auto kParkTimeout = std::chrono::seconds(30);
 // A loaded gate VM (12 cores, two VMs per host) can take seconds to schedule
 // the first batch, and a tight bound turns that scheduling delay into a failed
 // race assertion on unrelated pull requests. The bound is a failsafe against a
 // pool that never progresses, which no timeout length rescues, so it is sized
 // for the slowest machine rather than the fastest.
 constexpr auto kFirstBatchTimeout = std::chrono::seconds(30);
-constexpr auto kBatchProgressTimeout = std::chrono::seconds(10);
 // A pool that can park does so within a few milliseconds, so this bounds a wait
 // that must NOT be satisfied by one that easily could have been.
 constexpr auto kNoParkTimeout = std::chrono::milliseconds(250);
@@ -232,6 +237,11 @@ TEST_CASE("WorkerPool receipt binds static ready frontiers to worker admission",
     GraphRuntimeWorkerPool pool;
     SchedulingReceiptProbe probe;
     pool.set_scheduling_receipt_hook_for_test(record_scheduling_receipt, &probe);
+    // A worker that sees no batch for the hot idle window parks, and run() then
+    // executes inline by design. On a loaded host the caller can be descheduled
+    // for longer than that window between batches, so admission is only
+    // deterministic when parking is suppressed.
+    pool.keep_workers_hot_for_test();
     pool.set_audio_workgroup(nullptr);
     REQUIRE(pool.start(4));
 
@@ -842,7 +852,11 @@ TEST_CASE("WorkerPool rapid back-to-back batches from a separate thread are race
             progressed.publish();
         }
     });
-    CHECK(progressed.wait(kBatchProgressTimeout));
+    // The first block includes the first batch: every one of the 15 workers
+    // must be scheduled to acknowledge the workgroup and then to join each of
+    // three barriers. On a loaded host that alone can take more than ten
+    // seconds, so this waits on the first-batch hang guard.
+    CHECK(progressed.wait(kFirstBatchTimeout));
     CHECK(blocks.load() > 0);
     stop.store(true, std::memory_order_relaxed);
     driver.join();
