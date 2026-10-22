@@ -90,6 +90,50 @@ pulp_add_test_suite(pulp-test-text-run-planner-parallel GROUP pulp-test-group-ca
 pulp_add_test_suite(pulp-test-text-run-planner-icu GROUP pulp-test-group-canvas-text
     LIBRARIES pulp::canvas)
 
+# CoreText face registry (Apple): the CoreGraphics canvas paints the face
+# TextShaper measures, with and without Skia.
+pulp_add_test_suite(pulp-test-coretext-text GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
+pulp_test_data(pulp-test-coretext-text NO_DEFINE PATHS external/fonts/Inter-Regular.ttf)
+if(APPLE)
+    target_include_directories(pulp-test-group-canvas-text PRIVATE
+        ${PULP_ROOT_DIR}/core/canvas/src)
+    target_compile_definitions(pulp-test-group-canvas-text PRIVATE
+        PULP_TEST_INTER_TTF="${PULP_ROOT_DIR}/external/fonts/Inter-Regular.ttf")
+    target_link_libraries(pulp-test-group-canvas-text PRIVATE
+        "-framework CoreText" "-framework CoreGraphics")
+endif()
+
+# Break iteration through the trimmed ICU data Pulp links (FindSkia,
+# PulpSkiaIcuData.cmake). Expectations are the untrimmed data's boundaries.
+pulp_add_test_suite(pulp-test-icu-data-breaks GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
+
+# The binary above must actually carry the trimmed ICU data; without this the
+# break tests would pass just as well against the full package.
+if(APPLE AND PULP_HAS_SKIA AND PULP_ICU_DATA_SUBSET AND Python3_EXECUTABLE)
+    add_test(NAME icu-data-subset-linked
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/plugin_footprint_check.py"
+            --profile icu-data "$<TARGET_FILE:pulp-test-group-canvas-text>")
+    set_tests_properties(icu-data-subset-linked PROPERTIES
+        LABELS "footprint"
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77)
+    # Rewriting the same archive twice must produce the same bytes: ar and
+    # ranlib file times would otherwise reach every linked binary.
+    if(PULP_SKIA_ICU_SOURCE_ARCHIVE)
+        add_test(NAME icu-data-subset-deterministic
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/icu_data_subset.py"
+                --archive "${PULP_SKIA_ICU_SOURCE_ARCHIVE}" --output unused
+                --verify-deterministic)
+        set_tests_properties(icu-data-subset-deterministic PROPERTIES
+            LABELS "footprint"
+            TIMEOUT 120)
+    endif()
+endif()
+
 # Async font lifecycle (register_font_url).
 pulp_add_test_suite(pulp-test-font-async-lifecycle GROUP pulp-test-group-canvas-text
     LIBRARIES pulp::canvas)

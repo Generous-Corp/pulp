@@ -223,6 +223,64 @@ def load_entry(path: pathlib.Path) -> Entry:
     )
 
 
+# Notes for a change that has not been released yet. Their author cannot know
+# the version: version-at-land assigns it after the change lands, so a note
+# keyed to a guessed version goes stale whenever another release lands first.
+# An unreleased note carries no `version` or `applies_if`; the bump commit
+# folds it into `v<assigned>.md` (tools/scripts/fold_migration_notes.py), which
+# is the first point at which the version exists. Until then it is validated
+# here but not emitted, because no released CLI can be upgraded to it.
+UNRELEASED_DIRNAME = "unreleased"
+UNRELEASED_FORBIDDEN_FIELDS = ("version", "applies_if")
+
+
+@dataclass
+class UnreleasedNote:
+    breaking: bool
+    summary: str
+    body: str
+    source_path: pathlib.Path
+
+
+def load_unreleased(path: pathlib.Path) -> UnreleasedNote:
+    raw = path.read_text(encoding="utf-8")
+    m = FRONTMATTER_RE.match(raw)
+    if not m:
+        _fatal(path, "missing or malformed TOML frontmatter block "
+                     "(expected `---\\n...\\n---`)")
+    frontmatter = _parse_toml_frontmatter(m.group(1), path)
+    for key in UNRELEASED_FORBIDDEN_FIELDS:
+        if key in frontmatter:
+            _fatal(path, f"an unreleased note must not set `{key}`: the version is "
+                         "assigned when the change is released, and the release step "
+                         "writes both fields when it folds this note into vX.Y.Z.md")
+    unknown = sorted(k for k in frontmatter if k not in SUPPORTED_FIELDS)
+    if unknown:
+        _fatal(path, f"unsupported frontmatter field(s) {unknown}; an unreleased note "
+                     "takes only `breaking` and `summary`")
+    breaking = frontmatter.get("breaking", False)
+    if not isinstance(breaking, bool):
+        _fatal(path, f"`breaking` must be a boolean (true|false), got {breaking!r}.")
+    summary = frontmatter.get("summary", "")
+    if not isinstance(summary, str) or not summary.strip():
+        _fatal(path, "`summary` is required: it is the line `pulp upgrade --notes` prints")
+    if "\n" in summary:
+        _fatal(path, "`summary` must be one line")
+    body = m.group(2).strip("\n")
+    if not body.strip():
+        _fatal(path, "the note has no body; say what breaks and how to migrate")
+    return UnreleasedNote(breaking=breaking, summary=summary.strip(), body=body,
+                          source_path=path)
+
+
+def load_unreleased_dir(directory: pathlib.Path) -> list[UnreleasedNote]:
+    """Every unreleased note in ``directory``, in file-name order."""
+    if not directory.is_dir():
+        return []
+    return [load_unreleased(md) for md in sorted(directory.glob("*.md"))
+            if md.name.lower() != "readme.md"]
+
+
 SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[.\-+].*)?$")
 
 
@@ -485,6 +543,10 @@ def main(argv: list[str]) -> int:
         entries.append(entry)
 
     entries.sort(key=lambda e: semver_key(e.version))
+
+    # Validated so a malformed note fails its own pull request, not the bump
+    # commit that folds it; not emitted, because no release carries it yet.
+    load_unreleased_dir(docs_dir / UNRELEASED_DIRNAME)
 
     # Detect duplicate versions — they would silently shadow each other.
     seen: dict[str, pathlib.Path] = {}

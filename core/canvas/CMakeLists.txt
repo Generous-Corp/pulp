@@ -127,6 +127,9 @@ if(APPLE)
         # Retained Path draws + handle-based compositing layers (offscreen
         # CGBitmapContexts sealed to CGImageRefs that outlive the frame).
         platform/mac/cg_canvas_path.mm
+        # CoreText face registry + measurement shared by CG paint and the
+        # non-Skia TextShaper, so a label is measured with the face it paints.
+        platform/mac/coretext_text.mm
     )
     target_link_libraries(pulp-canvas PRIVATE
         "-framework CoreGraphics"
@@ -138,6 +141,42 @@ if(APPLE)
 endif()
 
 target_link_libraries(pulp-canvas PUBLIC pulp::runtime)
+
+if(PULP_HAS_SKIA OR APPLE)
+    # Embed external/fonts/*.ttf into a static lib that pulp-canvas links
+    # privately. The Skia prebuilt does not export SkFontMgr_New_Custom_Data
+    # (FreeType is not linked in), so with Skia these become SkTypefaces via the
+    # platform font manager at runtime (bundled_fonts.cpp). On Apple the same
+    # bytes also feed the CoreText registry the CoreGraphics canvas paints and
+    # measures with (platform/mac/coretext_text.mm), with or without Skia.
+    # Keep the SOURCES list aligned with the bundled_blobs() table in
+    # src/bundled_font_blobs.cpp; the C++ side names the symbols directly.
+    #
+    # PulpEmbedData provides pulp_add_binary_data() in isolation from the
+    # rest of PulpUtils.cmake (which fails fast unless format/view targets
+    # already exist). Pulled in directly so the canvas subdir doesn't have
+    # to wait for the parent to inject the helper.
+    include("${PULP_ROOT_DIR}/tools/cmake/PulpEmbedData.cmake")
+    pulp_add_binary_data(pulp-bundled-fonts
+        SOURCES
+            ${PULP_ROOT_DIR}/external/fonts/Inter-Regular.ttf
+            ${PULP_ROOT_DIR}/external/fonts/JetBrainsMono-Regular.ttf
+            ${PULP_ROOT_DIR}/external/fonts/Jost-Regular.ttf
+            ${PULP_ROOT_DIR}/external/fonts/Jost-Medium.ttf
+            ${PULP_ROOT_DIR}/external/fonts/Jost-SemiBold.ttf
+            ${PULP_ROOT_DIR}/external/fonts/Jost-Bold.ttf
+        NAMESPACE pulp_bundled_fonts
+    )
+    target_link_libraries(pulp-canvas PRIVATE pulp-bundled-fonts)
+    # Mark for the parent CMakeLists.txt install() loop. pulp-canvas exports
+    # through PulpTargets and CMake refuses to export a target that links
+    # PRIVATEly to a static lib outside the export set, so the parent has
+    # to add pulp-bundled-fonts to PULP_SDK_TARGETS for installs.
+    set_target_properties(pulp-bundled-fonts PROPERTIES
+        EXPORT_NAME bundled-fonts)
+    target_sources(pulp-canvas PRIVATE src/bundled_font_blobs.cpp)
+endif()
+
 
 # Skia Graphite GPU rendering backend
 if(PULP_HAS_SKIA)
@@ -168,35 +207,6 @@ if(PULP_HAS_SKIA)
         src/text_font_context.cpp
     )
 
-    # Embed external/fonts/*.ttf into a static lib that pulp-canvas links
-    # privately. The Skia prebuilt does not export SkFontMgr_New_Custom_Data
-    # (FreeType is not linked in), so we materialise these into SkTypefaces
-    # via the platform font manager at runtime — see bundled_fonts.cpp.
-    # Keep the SOURCES list aligned with the bundled_blobs() table in
-    # bundled_fonts.cpp; the C++ side names the symbols directly.
-    #
-    # PulpEmbedData provides pulp_add_binary_data() in isolation from the
-    # rest of PulpUtils.cmake (which fails fast unless format/view targets
-    # already exist). Pulled in directly so the canvas subdir doesn't have
-    # to wait for the parent to inject the helper.
-    include("${PULP_ROOT_DIR}/tools/cmake/PulpEmbedData.cmake")
-    pulp_add_binary_data(pulp-bundled-fonts
-        SOURCES
-            ${PULP_ROOT_DIR}/external/fonts/Inter-Regular.ttf
-            ${PULP_ROOT_DIR}/external/fonts/JetBrainsMono-Regular.ttf
-            ${PULP_ROOT_DIR}/external/fonts/Jost-Regular.ttf
-            ${PULP_ROOT_DIR}/external/fonts/Jost-Medium.ttf
-            ${PULP_ROOT_DIR}/external/fonts/Jost-SemiBold.ttf
-            ${PULP_ROOT_DIR}/external/fonts/Jost-Bold.ttf
-        NAMESPACE pulp_bundled_fonts
-    )
-    target_link_libraries(pulp-canvas PRIVATE pulp-bundled-fonts)
-    # Mark for the parent CMakeLists.txt install() loop. pulp-canvas exports
-    # through PulpTargets and CMake refuses to export a target that links
-    # PRIVATEly to a static lib outside the export set, so the parent has
-    # to add pulp-bundled-fonts to PULP_SDK_TARGETS for installs.
-    set_target_properties(pulp-bundled-fonts PROPERTIES
-        EXPORT_NAME bundled-fonts)
 
     # Optional bundled Noto Color Emoji typeface — gated by the
     # PULP_BUNDLE_NOTO_COLOR_EMOJI option so macOS / Windows release

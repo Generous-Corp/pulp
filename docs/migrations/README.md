@@ -5,13 +5,31 @@ the `pulp` CLI binary. `pulp upgrade --notes` filters this set against
 the hop the user is performing (from the installed version to the
 target) and prints only the entries that actually apply.
 
+## Writing a note for a change: use `unreleased/`
+
+A pull request does not pick a version. Version-at-land assigns it after the
+change lands, in merge order, so a note filed as `vX.Y.Z.md` by its author
+goes stale whenever another release lands first, and two PRs guessing the same
+version collide. Write `unreleased/<topic>.md` instead, with only `breaking`
+and `summary` in its frontmatter (see [`unreleased/README.md`](unreleased/README.md)).
+The bump commit that assigns the next SDK/CLI version folds every unreleased
+note into `v<version>.md` and writes `version` and `applies_if` for it
+(`tools/scripts/fold_migration_notes.py`, called by
+`tools/scripts/version_at_land.py`). If `v<version>.md` already exists, the
+unreleased notes are appended to it. Unreleased notes are validated when
+`pulp-cli` builds but are not embedded until they are folded.
+
 ## File layout
 
-One file per release that ships notes:
+One file per release that ships notes, plus the unreleased notes waiting for
+the next release:
 
 ```
 docs/migrations/
 ├── README.md          (this file — never emitted into the binary)
+├── unreleased/        (notes for changes not yet released; folded at the bump)
+│   ├── README.md
+│   └── <topic>.md
 ├── v0.24.0.md
 ├── v0.25.0.md
 └── ...

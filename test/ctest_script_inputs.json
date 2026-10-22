@@ -1518,6 +1518,7 @@
   "pulp-test-group-canvas-text": {
    "data": "declared",
    "detected_sources": [
+    "test/test_coretext_text.cpp",
     "test/test_font_woff2.cpp"
    ],
    "inputs": [
@@ -1528,6 +1529,7 @@
    ],
    "kind": "compiled",
    "sources": [
+    "test/test_coretext_text.cpp",
     "test/test_font_woff2.cpp"
    ],
    "undeclared_sources": []
@@ -2602,6 +2604,8 @@
   "pulp-test-gpu-health-provider",
   "pulp-test-gpu-health-read-result",
   "pulp-test-gpu-health-result",
+  "pulp-test-gpu-neural-plugin-boundary-continuity",
+  "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-shared-io-convolution-pipeline",
@@ -4830,6 +4834,15 @@
    ],
    "kind": "python"
   },
+  "fold-migration-notes-selftest": {
+   "entry": "tools/scripts/test_fold_migration_notes.py",
+   "inputs": [
+    "tools/scripts/build_migration_index.py",
+    "tools/scripts/fold_migration_notes.py",
+    "tools/scripts/test_fold_migration_notes.py"
+   ],
+   "kind": "python"
+  },
   "forced-restore-lint": {
    "entry": "tools/scripts/forced_restore_lint.py",
    "inputs": [
@@ -6376,6 +6389,28 @@
    ],
    "kind": "shell"
   },
+  "icu-data-subset-deterministic": {
+   "entry": "tools/cmake/scripts/icu_data_subset.py",
+   "inputs": [
+    "tools/cmake/scripts/icu_data_subset.py"
+   ],
+   "kind": "python"
+  },
+  "icu-data-subset-linked": {
+   "entry": "tools/scripts/plugin_footprint_check.py",
+   "inputs": [
+    "tools/scripts/plugin_footprint_check.py"
+   ],
+   "kind": "python"
+  },
+  "icu-data-subset-selftest": {
+   "entry": "tools/cmake/scripts/test_icu_data_subset.py",
+   "inputs": [
+    "tools/cmake/scripts/icu_data_subset.py",
+    "tools/cmake/scripts/test_icu_data_subset.py"
+   ],
+   "kind": "python"
+  },
   "import-design-external-asset-localized": {
    "entry": "test/test_import_design_external_asset.py",
    "inputs": [
@@ -7022,6 +7057,14 @@
     "core/timeline/schema/timeline_schema.json",
     "tools/scripts/negative_capability_allowlist.json",
     "tools/scripts/negative_capability_check.py"
+   ],
+   "kind": "python"
+  },
+  "plugin-footprint-check-selftest": {
+   "entry": "tools/scripts/test_plugin_footprint_check.py",
+   "inputs": [
+    "tools/scripts/plugin_footprint_check.py",
+    "tools/scripts/test_plugin_footprint_check.py"
    ],
    "kind": "python"
   },
@@ -12264,7 +12307,9 @@
     ".github/workflows",
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/status/pulp-tooling-disposition.json",
+    "tools/scripts/build_migration_index.py",
     "tools/scripts/connected_git_history.py",
+    "tools/scripts/fold_migration_notes.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/gate_test_support.py",
     "tools/scripts/gpu_handoff_provenance.py",

@@ -9,6 +9,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v010060"></a>
+## [0.1006.0] - 2026-10-22
+
+- fix/svf bank coeff fold 20261022 ([#10713](https://github.com/Generous-Corp/pulp/pull/10713))
+- release/version bump ([#10718](https://github.com/Generous-Corp/pulp/pull/10718))
+- fix/worker pool park hang guard ([#10711](https://github.com/Generous-Corp/pulp/pull/10711))
+- fix/speaker cabinet float bound 20261022 ([#10710](https://github.com/Generous-Corp/pulp/pull/10710))
+- fix/two flakes rapid batches and git maintenance ([#10707](https://github.com/Generous-Corp/pulp/pull/10707))
+- perf/launch cache 20261022 ([#10699](https://github.com/Generous-Corp/pulp/pull/10699))
+- release/version bump ([#10708](https://github.com/Generous-Corp/pulp/pull/10708))
+- feature/windows runner drain hardening ([#10702](https://github.com/Generous-Corp/pulp/pull/10702))
+
 <a id="v010050"></a>
 ## [0.1005.0] - 2026-10-22
 
@@ -11269,6 +11281,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.1006.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1006.0
 [0.1005.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1005.0
 [0.1004.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1004.0
 [0.1003.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1003.0

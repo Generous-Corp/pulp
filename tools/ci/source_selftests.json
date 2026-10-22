@@ -516,6 +516,13 @@
       "timeout": 300.0
     },
     {
+      "name": "icu-data-subset-selftest",
+      "argv": [
+        "{repo}/tools/cmake/scripts/test_icu_data_subset.py"
+      ],
+      "timeout": 60.0
+    },
+    {
       "name": "import-design-ir-observe-provider-boundary",
       "argv": [
         "{repo}/test/test_design_ir_observe_provider_boundary.py",
@@ -605,6 +612,13 @@
         "{repo}/tools/scripts/negative_capability_check.py",
         "--selftest"
       ]
+    },
+    {
+      "name": "plugin-footprint-check-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_plugin_footprint_check.py"
+      ],
+      "timeout": 60.0
     },
     {
       "name": "pr-check-triage-selftest",
@@ -1086,6 +1100,12 @@
       "name": "verify-rendered-panel-selftest",
       "argv": [
         "{repo}/tools/scripts/test_verify_rendered_panel.py"
+      ]
+    },
+    {
+      "name": "fold-migration-notes-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_fold_migration_notes.py"
       ]
     },
     {

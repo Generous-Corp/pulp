@@ -1573,6 +1573,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME bump-fastpath-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_bump_fastpath.py")
 
+    # Unreleased migration notes: their validation in the index generator and
+    # the fold the version-at-land bump runs to key them to the version it
+    # assigns. Pure file fixtures in a temporary directory.
+    add_test(NAME fold-migration-notes-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fold_migration_notes.py")
+
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued
     # PR as ejected. Fails if any tracked query selects it, and proves the scan

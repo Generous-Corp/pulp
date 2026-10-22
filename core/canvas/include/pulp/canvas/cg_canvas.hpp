@@ -198,6 +198,10 @@ public:
     void set_blend_mode(BlendMode mode) override;
 
     void set_font(const std::string& family, float size) override;
+    void set_font_full(const std::string& family, float size, int weight, int slant,
+                       float letter_spacing) override;
+    void set_font_features(std::vector<FontFeature> features) override;
+    void clear_font_features() override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
     // Canvas2D fillText(text,x,y,maxWidth) + strokeText(text,x,y,maxWidth).
@@ -267,6 +271,9 @@ private:
     Color stroke_color_ = Color::rgba(1.0f, 1.0f, 1.0f);
     std::string font_family_ = "Helvetica";
     float font_size_ = 14.0f;
+    int font_weight_ = 400;
+    int font_slant_ = 0;
+    std::vector<FontFeature> font_features_;
     TextAlign text_align_ = TextAlign::left;
 
     // Canvas2D path-building state. Owned, retained CG mutable path; null until

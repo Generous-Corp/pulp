@@ -196,6 +196,23 @@ line on the captured box` in `test/test_widgets_label.cpp`.
 
 ## Gotchas
 
+- **On Apple the CoreGraphics canvas paints through a CoreText registry, not
+  CTFontCreateWithName.** CoreText answers `CTFontCreateWithName("Inter")` with
+  Helvetica, because Inter (Pulp's default UI family) is bundled, not
+  installed. So an AutoUi editor measured Inter (through Skia) and painted
+  Helvetica, and without Skia it was not measured at all (0.85 em / 0.6 em
+  guesses), putting labels 2-4 pt high. `core/canvas/platform/mac/coretext_text.mm`
+  holds the bundled fonts and every `register_font()` face; the CG canvas
+  paints through it and TextShaper measures through it when Skia is absent,
+  with Skia's CoreText metric definitions (bounding-box extents). The faces live
+  in Pulp's own table, never `CTFontManagerRegisterGraphicsFont`, so a plug-in
+  cannot add fonts to its host. What holds it: the PulpGain editor renders
+  pixel-identically with and without Skia; `test_coretext_text.cpp` pins the
+  Skia and CoreText metrics to within 0.01; and the AutoUi Skia-vs-CoreGraphics
+  case in `test_auto_ui.cpp` compares every label's ink box. The two rasterizers
+  still differ by about one device pixel vertically (baseline rounding), which
+  is not a measurement drift.
+
 - **`SkiaCanvas::fill_text` must land the baseline exactly on `y`, and
   SkParagraph rounds it.** SkParagraph draws a line's glyphs `round(ascent)`
   below the paragraph's top, regardless of `ParagraphStyle`'s rounding hack,

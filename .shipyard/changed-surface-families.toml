@@ -791,6 +791,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-195278294183"
+paths = ["tools/scripts/plugin_footprint_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "icu-data-subset-linked",
+  "plugin-footprint-check-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = [
+  "pulp-cli",
+  "pulp-test-group-canvas-text",
+]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-15eb421ce8ec"
 paths = ["tools/scripts/pr_fast_tier_check.py"]
 tests = [
@@ -2637,6 +2675,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-12bb9a84f1ec"
+paths = ["tools/scripts/test_fold_migration_notes.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "fold-migration-notes-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-ba90831aeafd"
 paths = ["tools/scripts/test_fork_pr_runner_routing.py"]
 tests = [
@@ -3950,6 +4022,40 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "planning-gitlink-guard-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-eeb9fdd596dd"
+paths = ["tools/scripts/test_plugin_footprint_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "plugin-footprint-check-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
@@ -6877,6 +6983,7 @@ paths = [
   "tools/scripts/msvc_string_literal_guard.py",
   "tools/scripts/pch_wiring_check.py",
   "tools/scripts/pending_intent_liveness.py",
+  "tools/scripts/plugin_footprint_check.py",
   "tools/scripts/pr_fast_tier_check.py",
   "tools/scripts/prepare_logic_hostbench_au.py",
   "tools/scripts/queue_admission_guard.py",
@@ -7006,6 +7113,7 @@ paths = [
   "tools/scripts/test_findskia_arch_assert.py",
   "tools/scripts/test_findskia_windows_arm64_slice.py",
   "tools/scripts/test_fleet_snapshot.py",
+  "tools/scripts/test_fold_migration_notes.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
   "tools/scripts/test_foundation_include_lint.py",
@@ -7096,6 +7204,7 @@ paths = [
   "tools/scripts/test_pch_wiring_check.py",
   "tools/scripts/test_pending_intent_liveness.py",
   "tools/scripts/test_planning_gitlink_guard.py",
+  "tools/scripts/test_plugin_footprint_check.py",
   "tools/scripts/test_pr_batch_advisor.py",
   "tools/scripts/test_pr_check_triage.py",
   "tools/scripts/test_pr_fast_tier_check.py",
@@ -7431,6 +7540,7 @@ paths = [
   "tools/scripts/msvc_string_literal_guard.py",
   "tools/scripts/pch_wiring_check.py",
   "tools/scripts/pending_intent_liveness.py",
+  "tools/scripts/plugin_footprint_check.py",
   "tools/scripts/pr_fast_tier_check.py",
   "tools/scripts/prepare_logic_hostbench_au.py",
   "tools/scripts/queue_admission_guard.py",
@@ -7560,6 +7670,7 @@ paths = [
   "tools/scripts/test_findskia_arch_assert.py",
   "tools/scripts/test_findskia_windows_arm64_slice.py",
   "tools/scripts/test_fleet_snapshot.py",
+  "tools/scripts/test_fold_migration_notes.py",
   "tools/scripts/test_fork_pr_runner_routing.py",
   "tools/scripts/test_format_baseline_diff.py",
   "tools/scripts/test_foundation_include_lint.py",
@@ -7650,6 +7761,7 @@ paths = [
   "tools/scripts/test_pch_wiring_check.py",
   "tools/scripts/test_pending_intent_liveness.py",
   "tools/scripts/test_planning_gitlink_guard.py",
+  "tools/scripts/test_plugin_footprint_check.py",
   "tools/scripts/test_pr_batch_advisor.py",
   "tools/scripts/test_pr_check_triage.py",
   "tools/scripts/test_pr_fast_tier_check.py",
