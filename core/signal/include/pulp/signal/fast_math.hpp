@@ -45,22 +45,20 @@ enum class FastTrigProfile : std::uint8_t {
 /// Pulp's contraction policy (tools/cmake/PulpFloatingPointContraction.cmake:
 /// Clang contracts within an expression, GCC does not).
 ///
-/// Choosing a tanh — one family, four points on the cost/accuracy curve
-/// (worst absolute error over every float input; cost per element relative to
-/// `tanh()` in a 128-sample loop on an M5 Ultra, all measured in one run):
+/// Choosing a tanh: one family, ordered from cheapest to most accurate (worst
+/// absolute error over the float inputs the tests scan; relative cost is
+/// tracked by the DSP throughput benchmark, not stated here):
 ///
-/// | Function                 | Worst error | Cost  | Clamp                         |
-/// |--------------------------|-------------|-------|-------------------------------|
-/// | `tanh()`                 | 6.7e-4      | 1x    | at 4: a 6.7e-4 step (a seam)  |
-/// | `tanh_minimax()` block   | 3.8e-6      | 0.8x  | at 7: slope-matched           |
-/// | `tanh_minimax()` scalar  | 3.8e-6      | 1.2x  | at 7: slope-matched           |
-/// | `tanh_accurate()`        | 3.0e-7      | 1.3x  | at 9, branch-free             |
-/// | `std::tanh`              | exact       | 7.4x  | none                          |
+/// | Function                 | Worst error | Clamp                         |
+/// |--------------------------|-------------|-------------------------------|
+/// | `tanh()`                 | < 7e-4      | at 4: a step of over 6e-4     |
+/// | `tanh_minimax()`         | < 3.8e-6    | at 7: slope-matched           |
+/// | `tanh_accurate()`        | < 3.6e-7    | at 9, branch-free             |
+/// | `std::tanh`              | exact       | none                          |
 ///
-/// The bare [7/6] Padé without `tanh()`'s clamp costs 0.7x but is not a tanh
-/// outside a small range: it is 1e-4 off by |x| = 5, exceeds 1 there and
-/// grows without bound (about x/28), so every bounded entry above pays for
-/// its clamp on purpose. The block form is within 1.15x of it.
+/// The bare [7/6] Padé without `tanh()`'s clamp is not a tanh outside a small
+/// range: it exceeds 1 and grows without bound, so every bounded entry above
+/// pays for its clamp on purpose.
 ///
 /// `tanh()` keeps its results for existing callers; prefer `tanh_minimax()`
 /// where it would be used, and `tanh_accurate()` inside a resonant recursion
@@ -224,8 +222,8 @@ struct FastMath {
         return x * p / q;
     }
 
-    /// Constrained-minimax [7/6] rational tanh: the evaluation cost of
-    /// `tanh()` above, about 180x lower worst-case error, and no seam.
+    /// Constrained-minimax [7/6] rational tanh: the same rational order as
+    /// `tanh()` above, more than 150x lower worst-case error, and no seam.
     ///
     /// `tanh()` truncates Lambert's continued fraction, so its error is tiny
     /// near the origin and grows toward the clamp, where the curve jumps from
@@ -250,9 +248,8 @@ struct FastMath {
     /// 3.8e-6 (the tail beyond the clamp contributes 1 − tanh(7) = 1.7e-6),
     /// odd, and bounded by ±1 exactly. The clamps are branches, as in `tanh()`:
     /// inside a serial recursion such as a ladder they are predicted off the
-    /// critical path, where min/max instructions would sit on it and cost
-    /// 6-65% in a ladder (more under heavy drive, where a predicted branch
-    /// skips the division). Over a buffer use the block overload below, which
+    /// critical path, where min/max instructions would sit on it. Over a
+    /// buffer use the block overload below, which
     /// clamps branch-free. A NaN input returns NaN.
     static float tanh_minimax(float x) {
         if (x < -kTanhMinimaxClamp)
@@ -549,9 +546,8 @@ public:
 ///   drive `accurate` can be faster, because this form's division is on the
 ///   recursion's critical path for every argument below 7. The Lambert
 ///   `FastMath::tanh` is not offered here: its clamp at |x| = 4 is a 6.7e-4
-///   step that a hard-driven ladder crosses every cycle (about -63 dBFS
-///   pointwise, -69 dBFS in the filtered output at +10 dBFS drive and high
-///   resonance).
+///   step that a hard-driven ladder crosses every cycle (more than 1e-4 away
+///   from the exact ladder at +9.5 dBFS drive and resonance 0.9).
 enum class LadderSaturation { exact, accurate, realtime_efficient };
 
 /// Selecting the default ladder saturator at build time:
