@@ -581,7 +581,10 @@ class GpuFaultMode(unittest.TestCase):
                 "--window-pre", "1000", "--window-post", str(self.POST),
                 "--out-dir", str(tmp / "run")]
         args = ap.parse_args(argv)
-        rs.validate_mode_args(ap, args)
+        # The mocked "live" runs here are synthetic, so they use the dry-run
+        # window floor to keep the pure-Python reference fast.
+        with mock.patch.object(rs, "LIVE_WINDOW_POST_FLOOR", rs.DRY_RUN_WINDOW_POST_FLOOR):
+            rs.validate_mode_args(ap, args)
         return args
 
     def fake_session(self, tmp: pathlib.Path, args, *, crash=False, refuse=False,
@@ -643,6 +646,14 @@ class GpuFaultMode(unittest.TestCase):
     def test_a_fault_kind_is_required(self):
         ap = rs.build_parser()
         args = ap.parse_args(["--mode", "gpu-fault", "--dry-run"])
+        with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
+            rs.validate_mode_args(ap, args)
+
+    def test_a_live_run_needs_a_one_second_window(self):
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "gpu-fault", "--gpu-fault", "hang",
+                              "--plugin-name", "X", "--plugin-path", __file__,
+                              "--window-post", "4800"])
         with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
             rs.validate_mode_args(ap, args)
 

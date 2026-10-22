@@ -143,8 +143,8 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     bounce_name = receipt.get("bounce_artifact")
     if bounce_name is not None:
         _require(bounce_name in artifacts, "bounce artifact not digest-bound")
-    _require(window["post"] >= gfc.MIN_WINDOW_POST,
-             f"analysis.window.post is shorter than {gfc.MIN_WINDOW_POST} samples")
+    floor = gfc.MIN_WINDOW_POST if live else gfc.MIN_WINDOW_POST_DRY_RUN
+    _require(window["post"] >= floor, f"analysis.window.post is shorter than {floor} samples")
     # The render length comes from the bound stimulus, not from the receipt:
     # the harness renders the whole stimulus plus the post-fault window.
     _, stimulus = gfc.read_wav(run_dir / "stimulus.wav")

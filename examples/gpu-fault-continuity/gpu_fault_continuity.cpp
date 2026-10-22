@@ -330,19 +330,30 @@ void GpuFaultContinuityProcessor::prepare_engine() {
     // SharedRequired: the shared-I/O GPU path or nothing. The spectral nodes'
     // shared-device refusal (WP-D) does not apply to the convolver, which is
     // why it is the h1 vehicle.
+    std::string interposer_detail = "not a harness run";
+    if (harness_) {
+        if (!provider_fault_interposer_installed()) {
+            // The provider installs Dawn's native table once per process, on
+            // its first prepare. Let a throwaway node make that installation,
+            // so the interposer can be in place before this node prepares and
+            // see which device is this instance's.
+            gpu_audio::GpuConvolver warm(1, quantum_, sample_rate_, {1.0f});
+            if (warm.set_provider_policy(gpu_audio::GpuConvolver::ProviderPolicy::SharedRequired) &&
+                warm.prepare())
+                install_provider_fault_interposer(interposer_detail);
+        }
+        begin_provider_fault_target_capture();
+    }
     const bool node_ok =
         node_->set_provider_policy(gpu_audio::GpuConvolver::ProviderPolicy::SharedRequired) &&
         node_->prepare();
+    if (harness_ && provider_fault_interposer_installed())
+        end_provider_fault_target_capture(interposer_detail);
     const gpu_audio::GpuAudioTransport::Config config{
         .ring_blocks = 8,
         .run_worker_thread = true,
         .wake_on_write = true,
     };
-    // Install the provider fault interposer once the provider has made its
-    // one process-wide proc-table installation, and before the worker starts.
-    std::string interposer_detail = "not a harness run";
-    if (harness_ && node_ok)
-        install_provider_fault_interposer(interposer_detail);
     const bool transport_ok = node_ok && transport_->prepare(node_.get(), config);
     latency_samples_ =
         quantum_ + (transport_ok ? transport_->latency_samples()

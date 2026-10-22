@@ -36,7 +36,7 @@ inline FaultSeamResult inject_audio_fault(FaultKind kind, std::uint32_t delay_ms
 }
 
 inline bool audio_fault_seam_available() noexcept {
-    return provider_fault_interposer_installed();
+    return provider_fault_interposer_installed() && provider_fault_target_captured();
 }
 
 } // namespace pulp::examples::gpu_fault

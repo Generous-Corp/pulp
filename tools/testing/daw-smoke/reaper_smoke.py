@@ -1384,6 +1384,12 @@ def run_sequence_loop_seek_mode(reaper: Path, args: argparse.Namespace) -> int:
 # stamps into its events. The analysis lives in gpu_fault_continuity.py so the
 # dry run and the verifier share it with the live run.
 
+# The shortest post-fault windows the verifier accepts (1 s live, 100 ms for a
+# synthetic dry run); see gpu_fault_continuity.MIN_WINDOW_POST*.
+LIVE_WINDOW_POST_FLOOR = 48000
+DRY_RUN_WINDOW_POST_FLOOR = 4800
+
+
 def _gpu_fault_lib():
     import importlib.util
     spec = importlib.util.spec_from_file_location("gpu_fault_continuity",
@@ -1762,9 +1768,10 @@ def validate_mode_args(ap: argparse.ArgumentParser, args: argparse.Namespace) ->
             ap.error("gpu-fault mode requires --plugin-name and --plugin-path (or --dry-run)")
         if not 0 < args.fault_at_sample < args.stimulus_frames:
             ap.error("--fault-at-sample must fall inside the stimulus")
-        if args.window_post < 4800:
-            ap.error("--window-post must be at least 4800 samples (100 ms): the verifier "
-                     "refuses a shorter post-fault window")
+        floor = DRY_RUN_WINDOW_POST_FLOOR if args.dry_run else LIVE_WINDOW_POST_FLOOR
+        if args.window_post < floor:
+            ap.error(f"--window-post must be at least {floor} samples (1 s for a live run, "
+                     "100 ms for a dry run): the verifier refuses a shorter window")
         if args.fault_at_sample < args.window_pre:
             ap.error("--fault-at-sample must leave room for --window-pre before it: the "
                      "fault window has to lie entirely inside the compared audio")

@@ -294,6 +294,7 @@ TEST_CASE("provider faults fire in the running GPU path and audio stays continuo
         const char* fault;
         const char* point;
         bool loss;
+        bool reprepare = false;
     };
     const Case cases[] = {
         {"force_loss_before", "before_submit", true},
@@ -301,9 +302,12 @@ TEST_CASE("provider faults fire in the running GPU path and audio stays continuo
         {"force_loss_after", "after_completion_registration", true},
         {"delay_completion", "process_events_stall", false},
         {"hang", "process_events_stall", false},
+        // A host that prepares again (the VST3 adapter does, repeatedly) gets
+        // a new device; the fault must hit that one, never the freed one.
+        {"force_loss_after", "after_completion_registration", true, true},
     };
     for (const auto& c : cases) {
-        DYNAMIC_SECTION(c.fault) {
+        DYNAMIC_SECTION(c.fault << (c.reprepare ? " after a re-prepare" : "")) {
             RunDir dir;
             const auto ir = make_ir();
             write_ir(dir.path, ir);
@@ -321,6 +325,11 @@ TEST_CASE("provider faults fire in the running GPU path and audio stays continuo
                 REQUIRE(wait_for(events, "\"event\":\"prepared\""));
                 if (!on_shared_path(events))
                     SKIP("no shared-I/O GPU provider on this host");
+                if (c.reprepare) {
+                    p.release();
+                    p.prepare(prepare_context());
+                    REQUIRE(wait_for(events, "\"prepare_index\":2"));
+                }
                 REQUIRE(wait_for(events, "\"event\":\"fault_armed\""));
                 pdc = p.latency_samples();
                 run = drive(p, x, /*paced=*/true);

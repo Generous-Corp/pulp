@@ -222,14 +222,21 @@ class DaWContinuityReceipt(unittest.TestCase):
         receipt["analysis"]["render_frames"] = FAULT + 1
         with self.assertRaisesRegex(VERIFY.ReceiptError, "window.post is shorter"):
             self.verify(resign(receipt), run)
-        receipt["analysis"]["window"]["post"] = gfc.MIN_WINDOW_POST
+        receipt["analysis"]["window"]["post"] = gfc.MIN_WINDOW_POST_DRY_RUN
         with self.assertRaisesRegex(VERIFY.ReceiptError, "render_frames does not match"):
             self.verify(resign(receipt), run)
         # And a legal-length window that differs from what the plug-in was
         # asked to observe is a mismatch.
-        receipt["analysis"]["render_frames"] = FRAMES + gfc.MIN_WINDOW_POST
+        receipt["analysis"]["render_frames"] = FRAMES + gfc.MIN_WINDOW_POST_DRY_RUN
         with self.assertRaisesRegex(VERIFY.ReceiptError, "re-derive"):
             self.verify(resign(receipt), run)
+
+    def test_the_analysed_window_must_be_the_one_the_plugin_observed(self):
+        evidence = gfc.evaluate_run(self.good, fault="force_loss_between", fault_sample=FAULT,
+                                    tolerance=1e-4, window_pre=PRE, window_post=POST - 100,
+                                    host_alive=True, bounce_path=self.good / "bounce.wav")
+        self.assertEqual(evidence["verdict"], "fail")
+        self.assertTrue(any("observes until" in r for r in evidence["verdict_reasons"]))
 
     def test_a_capture_overflow_is_inconclusive_not_an_audio_fail(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -244,6 +251,19 @@ class DaWContinuityReceipt(unittest.TestCase):
             self.assertIsNone(result["nulls"]["plugin"])
             self.assertEqual(result["verdict"], "inconclusive")
 
+    def test_a_corrupt_capture_is_inconclusive_not_an_audio_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            gfc.synthesize_run(run, fault="hang", fault_sample=FAULT, frames=FRAMES, tail=POST)
+            blob = bytearray((run / "capture.bin").read_bytes())
+            blob[20 + 8:20 + 12] = (1 << 30).to_bytes(4, "little")  # absurd frame count
+            (run / "capture.bin").write_bytes(bytes(blob))
+            result = gfc.evaluate_run(run, fault="hang", fault_sample=FAULT, tolerance=1e-4,
+                                      window_pre=PRE, window_post=POST, host_alive=True,
+                                      bounce_path=None)
+            self.assertIsNone(result["nulls"]["plugin"])
+            self.assertEqual(result["verdict"], "inconclusive")
+
     def test_a_relabeled_fault_kind_is_a_mismatch(self):
         receipt = load(self.good)
         receipt["fault"]["kind"] = "delay_completion"
@@ -254,6 +274,30 @@ class DaWContinuityReceipt(unittest.TestCase):
                                     host_alive=True, bounce_path=self.good / "bounce.wav")
         self.assertEqual(evidence["verdict"], "fail")
         self.assertIn("names fault", evidence["verdict_reasons"][0])
+
+    def test_a_live_receipt_needs_a_one_second_window(self):
+        run = self.copy_run(self.good)
+        (run / "reaper.out.txt").write_text("CLAP: initialized 'dry-run'\n", encoding="utf-8")
+        receipt = load(run)
+        receipt["trigger_transport"] = "in_process_file"
+        receipt["host"]["reaper_version"] = "7.82"
+        receipt["host"]["reaper_pid"] = 4242
+        receipt["plugin"]["executable_sha256"] = "0" * 64
+        receipt["artifacts"]["reaper.out.txt"] = gfc.sha256_file(run / "reaper.out.txt")
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "shorter than 48000"):
+            VERIFY.verify(resign(receipt), run)
+
+    def test_a_fault_applied_at_the_wrong_call_site_is_a_mismatch(self):
+        # Re-review probe3: a loss fault whose applied point is a stall.
+        run = self.copy_run(self.good)
+        events = (run / "events.jsonl").read_text(encoding="utf-8").replace(
+            gfc.FAULT_POINTS["force_loss_between"], "process_events_stall")
+        (run / "events.jsonl").write_text(events, encoding="utf-8")
+        evidence = gfc.evaluate_run(run, fault="force_loss_between", fault_sample=FAULT,
+                                    tolerance=1e-4, window_pre=PRE, window_post=POST,
+                                    host_alive=True, bounce_path=run / "bounce.wav")
+        self.assertEqual(evidence["verdict"], "fail")
+        self.assertIn("applied at", evidence["verdict_reasons"][0])
 
     def test_a_foreign_nonce_is_a_mismatch(self):
         receipt = load(self.good)

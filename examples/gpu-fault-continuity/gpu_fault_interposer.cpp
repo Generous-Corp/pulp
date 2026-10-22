@@ -28,10 +28,11 @@
 //    forwards to the native function, so a call sees either one. ThreadSanitizer
 //    will still report it. If the editor reinstalls the native table between
 //    arm and apply, the fault is never applied and the run is INCONCLUSIVE.
-//  - The fault goes to the first matching call off the main thread, whoever
-//    makes it. In the harness only one instance processes audio, and the
-//    verdict ties the effect to this plug-in's own transport: its GPU delivery
-//    must freeze after a loss, and its fallback must take over at a stall.
+//  - Faults are targeted: the plug-in captures its own provider's device (the
+//    one whose queue is fetched while its node prepares) and the instance
+//    behind it, and a fault is taken only by a call on that device or
+//    instance. Another plug-in instance or Dawn client in the process is never
+//    faulted.
 //
 // Only calls made off the main thread are faulted. The shared-I/O provider is
 // driven from the transport's worker thread, while the editor's Skia/Dawn
@@ -73,6 +74,13 @@ std::mutex g_queues_mutex;
 std::array<std::pair<WGPUQueue, WGPUDevice>, 64> g_queues{};
 std::size_t g_queues_next = 0;
 
+// This plug-in instance's provider, captured while its node prepares.
+// Only the thread that is preparing this instance's node captures, so a
+// device another thread creates meanwhile is never mistaken for ours.
+thread_local bool t_capturing = false;
+std::atomic<WGPUDevice> g_target_device{nullptr};
+std::atomic<WGPUInstance> g_target_instance{nullptr};
+
 // The device whose command encoder this thread created last. Covers a queue
 // fetched before the interposer was installed (a single prepare), when the
 // provider records its encoders on the submitting worker thread.
@@ -111,6 +119,10 @@ bool take(FaultKind kind, bool ready = true) noexcept {
            g_armed.compare_exchange_strong(expected, 0, std::memory_order_acq_rel);
 }
 
+bool is_target(WGPUDevice device) noexcept {
+    return device != nullptr && device == g_target_device.load(std::memory_order_acquire);
+}
+
 void applied(const char* point) noexcept {
     g_applied_point.store(point, std::memory_order_release);
     g_applied.fetch_add(1, std::memory_order_acq_rel);
@@ -124,6 +136,8 @@ void force_loss(WGPUDevice device, const char* point) noexcept {
 
 WGPUQueue get_queue(WGPUDevice device) {
     WGPUQueue queue = g_native.deviceGetQueue(device);
+    if (t_capturing && g_target_device.load(std::memory_order_acquire) == nullptr)
+        g_target_device.store(device, std::memory_order_release);
     std::lock_guard lock(g_queues_mutex);
     for (auto& [q, d] : g_queues) {
         if (q == queue) {
@@ -136,16 +150,16 @@ WGPUQueue get_queue(WGPUDevice device) {
 }
 
 void queue_submit(WGPUQueue queue, size_t count, WGPUCommandBuffer const* commands) {
-    if (WGPUDevice device = device_for(queue); take(FaultKind::ForceLossBefore, device != nullptr))
+    if (WGPUDevice device = device_for(queue); take(FaultKind::ForceLossBefore, is_target(device)))
         force_loss(device, "before_submit");
     g_native.queueSubmit(queue, count, commands);
 }
 
 WGPUFuture on_submitted_work_done(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo info) {
     WGPUDevice device = device_for(queue);
-    if (take(FaultKind::ForceLossBetween, device != nullptr))
+    if (take(FaultKind::ForceLossBetween, is_target(device)))
         force_loss(device, "between_submit_and_completion_registration");
-    const bool after = take(FaultKind::ForceLossAfter, device != nullptr);
+    const bool after = take(FaultKind::ForceLossAfter, is_target(device));
     const WGPUFuture future = g_native.queueOnSubmittedWorkDone(queue, info);
     if (after)
         force_loss(device, "after_completion_registration");
@@ -153,7 +167,9 @@ WGPUFuture on_submitted_work_done(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo
 }
 
 void process_events(WGPUInstance instance) {
-    if (take(FaultKind::DelayCompletion) || take(FaultKind::Hang)) {
+    const bool mine =
+        instance != nullptr && instance == g_target_instance.load(std::memory_order_acquire);
+    if (take(FaultKind::DelayCompletion, mine) || take(FaultKind::Hang, mine)) {
         applied("process_events_stall");
         std::this_thread::sleep_for(
             std::chrono::milliseconds(g_delay_ms.load(std::memory_order_acquire)));
@@ -186,6 +202,47 @@ bool install_provider_fault_interposer(std::string& detail) {
     detail = "built without Dawn headers";
     return false;
 #endif
+}
+
+void begin_provider_fault_target_capture() noexcept {
+#if defined(PULP_GPU_FAULT_HAS_DAWN)
+    if (!g_installed)
+        return;
+    // The editor may have reinstalled the native table since the last arm.
+    dawnProcSetProcs(&g_wrapped);
+    g_target_device.store(nullptr, std::memory_order_release);
+    g_target_instance.store(nullptr, std::memory_order_release);
+    t_capturing = true;
+#endif
+}
+
+bool end_provider_fault_target_capture(std::string& detail) {
+#if defined(PULP_GPU_FAULT_HAS_DAWN)
+    t_capturing = false;
+    WGPUDevice device = g_target_device.load(std::memory_order_acquire);
+    if (device == nullptr) {
+        detail = "the provider's device was not seen while the node prepared";
+        return false;
+    }
+    // The instance the provider services completions on, for the stall faults.
+    WGPUAdapter adapter = g_native.deviceGetAdapter(device);
+    WGPUInstance instance = adapter ? g_native.adapterGetInstance(adapter) : nullptr;
+    g_target_instance.store(instance, std::memory_order_release);
+    if (instance != nullptr)
+        g_native.instanceRelease(instance);
+    if (adapter != nullptr)
+        g_native.adapterRelease(adapter);
+    detail = instance != nullptr ? "dawn proc-table interposer installed; provider targeted"
+                                 : "provider device captured but not its instance";
+    return instance != nullptr;
+#else
+    detail = "built without Dawn headers";
+    return false;
+#endif
+}
+
+bool provider_fault_target_captured() noexcept {
+    return g_target_instance.load(std::memory_order_acquire) != nullptr;
 }
 
 bool provider_fault_interposer_installed() noexcept {
@@ -224,6 +281,8 @@ void disarm_provider_fault() noexcept {
     std::lock_guard lock(g_queues_mutex);
     g_queues = {};
     g_queues_next = 0;
+    g_target_device.store(nullptr, std::memory_order_release);
+    g_target_instance.store(nullptr, std::memory_order_release);
 #endif
 }
 

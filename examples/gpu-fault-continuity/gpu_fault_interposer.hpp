@@ -13,6 +13,13 @@ namespace pulp::examples::gpu_fault {
 bool install_provider_fault_interposer(std::string& detail);
 bool provider_fault_interposer_installed() noexcept;
 
+// Host thread, around this instance's node prepare: the device whose queue the
+// provider fetches in between (and that device's instance) become the only
+// targets a fault may hit. Returns false when no target was captured.
+void begin_provider_fault_target_capture() noexcept;
+bool end_provider_fault_target_capture(std::string& detail);
+bool provider_fault_target_captured() noexcept;
+
 // Any non-audio thread. Arms one provider fault; it is applied, once, at the
 // provider's next matching Dawn call on a non-main thread. `delay_ms` is the
 // stall for delay_completion and hang.

@@ -61,8 +61,19 @@ DEFAULT_TOLERANCE = 1e-4
 DEFAULT_WINDOW_PRE = 4800    # 100 ms before the fault sample
 DEFAULT_WINDOW_POST = 48000  # 1 s after it
 # The shortest post-fault window a receipt may use: long enough that a lost
-# device's silence or a stalled worker's late blocks are inside it.
-MIN_WINDOW_POST = 4800  # 100 ms
+# device's silence or a stalled worker's late blocks are inside it. A dry run is
+# synthetic and never DAW evidence, so its self-tests may use a shorter one.
+MIN_WINDOW_POST = SAMPLE_RATE  # 1 s
+MIN_WINDOW_POST_DRY_RUN = 4800  # 100 ms
+
+# Where the plug-in's interposer applies each audio fault.
+FAULT_POINTS = {
+    "force_loss_before": "before_submit",
+    "force_loss_between": "between_submit_and_completion_registration",
+    "force_loss_after": "after_completion_registration",
+    "delay_completion": "process_events_stall",
+    "hang": "process_events_stall",
+}
 
 CAPTURE_MAGIC = b"PGFC"
 CAPTURE_VERSION = 1
@@ -646,7 +657,7 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
          "issued_project_sample": fault_sample + block, "offline": False},
     ] + ([{"event": "render_loss", "performed": True, "detail": "dry run"}]
          if fault in RENDER_FAULTS else
-         [{"event": "provider_fault_applied", "point": "dry_run",
+         [{"event": "provider_fault_applied", "point": FAULT_POINTS[fault],
            "project_sample": fault_sample + block}]) + [{"event": "health", "phase": p, "status": s} for p, s in health.items()]
     with (out_dir / "events.jsonl").open("w", encoding="utf-8") as stream:
         for event in events:
@@ -735,6 +746,10 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
     if armed is not None and armed.get("after_project_sample") != fault_sample + window_post:
         mismatches.append(f"fault_armed observes until {armed.get('after_project_sample')}, the "
                           f"analysis window ends at {fault_sample + window_post}")
+    applied_event = first_event(events, "provider_fault_applied")
+    if applied_event is not None and applied_event.get("point") != FAULT_POINTS.get(fault):
+        mismatches.append(f"the fault was applied at {applied_event.get('point')!r}, not where "
+                          f"{fault} is applied ({FAULT_POINTS.get(fault)!r})")
     if nonce is not None and any(e.get("nonce") != nonce for e in prepares):
         mismatches.append("the plug-in's events carry a different run nonce")
     if reaper_pid is not None and any(e.get("pid") != reaper_pid for e in prepares):
@@ -750,7 +765,14 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
         # the audio for a harness-side drop. No plug-in null is computed.
         plugin_note = "capture records were dropped; no plug-in null"
     if usable("capture.bin") and prepares and not overflow:
-        capture = read_capture(run_dir / "capture.bin")
+        try:
+            capture = read_capture(run_dir / "capture.bin")
+        except ValueError as exc:
+            # A corrupt record is a harness-side failure, never an audio FAIL.
+            capture = None
+            plugin_note = f"capture unreadable ({exc}); no plug-in null"
+            preconditions.append("the plug-in capture is corrupt")
+    if capture is not None:
         # Pair each capture segment with the prepare it follows. A host may
         # prepare several times before processing again; only the last of
         # those owns audio.
