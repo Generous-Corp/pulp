@@ -168,21 +168,18 @@ latched (`UINT64_MAX` when nothing has latched).
 | `None` | `Ready` (GPU delivering, or a CPU-only neural family), or `Degraded` (staged path, or no provider) | every node |
 | `SequenceGap`, `InvalidCallback` | `Degraded` | both WaveNet GPU paths and the shared `GpuConvolver` |
 | `InputSaturated`, `OfflineFence` | `Degraded` | both WaveNet nodes and the shared `GpuConvolver` |
-| `ProviderFailure` | `Degraded`, or `Unavailable` once a loss is also observed | a failed provider completion; a staged `GpuConvolver` map failure or non-finite readback; a WaveNet model whose GPU provider could not be prepared |
+| `ProviderFailure` | `Degraded` | a failed provider completion; a staged `GpuConvolver` map failure or non-finite readback; a WaveNet model whose GPU provider could not be prepared |
 | `ProviderLost` | `Unavailable` | both WaveNet GPU paths, both `GpuConvolver` paths, `GpuMultiConvolver` |
 | `ProviderUnresponsive` | `Unavailable` | the watchdog on the two WaveNet GPU paths |
 | `SustainedDeadlineMisses` | `Degraded` | the staged `GpuConvolver`'s circuit breaker |
 | `ProviderReacquired` | informational | reserved; nothing produces it. **Coming** with automatic re-acquire |
 
-The first cause wins, except that a device loss outranks the failures it
-causes. When a node reports its device lost after it latched
-`ProviderFailure`, `ProviderUnresponsive` or `SustainedDeadlineMisses`, the
-reported reason is `ProviderLost`. `recovery_sequence` still marks where
-delivery first stopped. An independent earlier cause (`SequenceGap`,
-`InputSaturated`, `InvalidCallback` or `OfflineFence`) stays the reported
-reason, and the state is still `Unavailable`. This applies to the transport's
-status for every hosted node and to the shared `GpuConvolver`'s own status. On
-the staged `GpuConvolver`, `ProviderLost` replaces any other cause.
+Every node reports a device loss observed after a failure, a stall or
+sustained misses (`ProviderFailure`, `ProviderUnresponsive` or
+`SustainedDeadlineMisses`) as `ProviderLost`, both in its own status and in the
+transport's. Independent causes (`SequenceGap`, `InputSaturated`,
+`InvalidCallback` or `OfflineFence`) stay first: a node that latched one of
+those and then lost its device keeps that reason and reports `Unavailable`.
 
 On the staged `GpuConvolver` and `GpuMultiConvolver`, `recovery_sequence` is
 the worker block at which the reason latched. A loss the worker has not reached
@@ -230,10 +227,13 @@ a valid combination.
   `status_snapshot()` fills them only while trace recording is enabled.
 - `epoch` and `delivery_epoch_active` identify the GPU delivery epoch. A
   CPU-only node stays at epoch 0.
-- `gpu_kernel_available` is true for `GpuWaveNetRealtimeNode`, for the shared
+- `gpu_kernel_available` means a GPU kernel is prepared, not that it is
+  usable. It is true for `GpuWaveNetRealtimeNode`, for the shared
   `GpuConvolver`, for a staged `GpuConvolver` that has a device, and for
-  `GpuNeuralRealtimeNode` while its GPU backend is prepared. It is false for a
-  family with no GPU kernel.
+  `GpuNeuralRealtimeNode` while its GPU backend is prepared, and false for a
+  family with no GPU kernel. A staged `GpuConvolver` keeps it true after its
+  device is lost, while its status reports `Unavailable`; read
+  `provider_state` for usability.
 - `completion_mode` and `timestamps_available` are reported only by
   `GpuWaveNetRealtimeNode`; other nodes leave `Unknown` and `false`. This
   provider path records no GPU timestamps, so `timestamps_available` is always
@@ -324,7 +324,13 @@ governs only realtime GPU misses:
   `USER_INTERACTIVE` QoS.
 - `None` makes a realtime GPU miss silent. The model keeps running on the
   shadow thread so that an offline render can continue it. It is rejected
-  (`ShadowRequired`) for a family without a GPU kernel.
+  (`ShadowRequired`) for a family without a GPU kernel. While `None` is in
+  effect, the node's own `status_snapshot()` and `capability_report()` report
+  `fallback_policy = Silence` and `fallback_available = false`; once an offline
+  fence moves the shadow inline they report `CpuFallback` again. The
+  transport's status still reports the descriptor's `CpuFallback` for such a
+  node, so read the node's status or `shadow_mode` to see that misses are
+  silent.
 - `Auto`, the default, times one block of the CPU model at `prepare()`. It
   picks `Inline` when that cost times the channel count is at most
   `kAutoInlineMaxCostPct` (15%) of the block period, and `Worker` otherwise.

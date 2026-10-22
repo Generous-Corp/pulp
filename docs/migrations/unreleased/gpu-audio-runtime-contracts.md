@@ -149,7 +149,12 @@ reports its default until the node in question supplies it.
   authoritative count of silent blocks; the transport's `CpuFallbackDelivered`
   label only means the fallback path ran. `ShadowStatus` / `shadow_status()`
   add the requested policy, per-channel and total cost, queue drops, resyncs
-  and workgroup membership.
+  and workgroup membership. While `ShadowPolicy::None` is in effect, the
+  node's own `status_snapshot()` and `capability_report()` report
+  `fallback_policy = Silence` and `fallback_available = false` (back to
+  `CpuFallback` once an offline fence moves the shadow inline); the
+  transport's status still reports the descriptor's `CpuFallback` for that
+  node.
 - **Preparation.** `PrepareError` appends `ShadowRequired` and
   `ShadowModelMismatch`.
 

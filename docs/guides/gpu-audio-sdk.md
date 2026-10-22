@@ -370,7 +370,9 @@ what happens on a realtime GPU miss:
   GPU and the shadow miss is silent.
 - `None` makes a realtime GPU miss silent. The model is still kept running on
   the shadow thread, so an offline render can continue it. It requires a
-  family with a GPU kernel.
+  family with a GPU kernel. While it is in effect the node's own status and
+  capability report `fallback_policy = Silence` with no fallback available;
+  the transport's status still reports the descriptor's `CpuFallback`.
 - `Auto`, the default, times one block of the CPU model for one channel at
   `prepare()`. It picks `Inline` when that cost times the channel count is at
   most 15% of the block period, and `Worker` otherwise.
@@ -755,10 +757,9 @@ silence for a node that declared no fallback. A lost provider (`ProviderLost`, o
 `ProviderUnresponsive`) is `Unavailable`, because nothing in the current
 preparation can bring it back. A loss observed after the `ProviderFailure`,
 `ProviderUnresponsive` or `SustainedDeadlineMisses` it caused is reported as
-`ProviderLost`, with `recovery_sequence` still marking where delivery first
-stopped. A node that latched an independent earlier cause, such as
-`InputSaturated`, still reports `Unavailable` and keeps that cause. Whenever the state is not
-`Ready`, `selected_engine` names the engine that actually delivers. That is
+`ProviderLost`. A node that latched an independent earlier cause, such as
+`InputSaturated`, still reports `Unavailable` and keeps that cause. Whenever
+the state is not `Ready`, `selected_engine` names the engine that actually delivers. That is
 `Cpu` for a node with a CPU fallback, and `Unknown` for a node that emits
 silence; it is never `Gpu`. `provider` still names the provider that was
 prepared. `epoch`,
