@@ -83,6 +83,12 @@ TEST_CASE("GpuAudioStatus v3 fields default to unreported", "[gpu_audio][status]
     CHECK_FALSE(status.timestamps_available);
     CHECK(status.last_delivery_ns == 0);
     CHECK_FALSE(status.gpu_kernel_available);
+    CHECK(status.shadow_mode == GpuAudioShadowMode::None);
+    CHECK(status.shadow_inline_cost_pct == 0.0f);
+    CHECK(status.shadow_delivered_blocks == 0);
+    CHECK(status.shadow_late_blocks == 0);
+    CHECK(status.shadow_double_miss_blocks == 0);
+    CHECK_FALSE(status.shadow_model_differs);
 }
 
 TEST_CASE("GpuAudioStatus v2 positional prefix still aggregate-initializes",
@@ -134,6 +140,10 @@ TEST_CASE("GPU audio contract enums append without renumbering", "[gpu_audio][st
     CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderUnresponsive) == 7);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderReacquired) == 8);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::SustainedDeadlineMisses) == 9);
+    CHECK(static_cast<int>(GpuAudioTerminalDisposition::Cancelled) == 7);
+    CHECK(static_cast<std::uint32_t>(GpuAudioTerminalDisposition::kCount) ==
+          GpuAudioStatus::kTerminalDispositionCount);
+    CHECK(static_cast<int>(GpuAudioShadowMode::Worker) == 2);
     CHECK(static_cast<int>(GpuAudioProvider::Metal) == 2);
     CHECK(static_cast<int>(GpuAudioProvider::Cpu) == 3);
     const GpuAudioCapabilityReport report;
