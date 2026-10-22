@@ -908,6 +908,16 @@ echo "== the CHOC patch set is idempotent on its own output"
         s.WriteUtf8 (isolate, result.data(), len);
         return result;
     }
+            {
+                using IteratorType = decltype (iterator);
+
+                propNames.ToLocalChecked()->Iterate (c, +[] (uint32_t, v8::Local<v8::Value> key, void* i)
+                {
+                    (*static_cast<IteratorType*> (i)) (key);
+                    return v8::Array::CallbackResult::kContinue;
+                },
+                std::addressof (iterator));
+            }
 EOF
     cat > "$tmp/choc/choc/text/choc_JSON.h" <<'EOF'
                     hadExponent = true;
@@ -926,6 +936,10 @@ EOF
     check "$twice" "$once" "a second configure leaves the patched headers unchanged"
     check "$(grep -c 'Utf8LengthV2' "$tmp/choc/choc/javascript/choc_javascript_V8.h")" "1" \
         "the V8 string patch is applied exactly once"
+    check "$(grep -c -- '->Iterate (' "$tmp/choc/choc/javascript/choc_javascript_V8.h")" "0" \
+        "the v8ToChoc property walk no longer uses Array::Iterate"
+    check "$(grep -c 'i < names->Length()' "$tmp/choc/choc/javascript/choc_javascript_V8.h")" "1" \
+        "the index-loop property walk is applied exactly once"
 
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))

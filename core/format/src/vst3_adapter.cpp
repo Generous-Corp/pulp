@@ -564,7 +564,7 @@ tresult PLUGIN_API PulpVst3Processor::getParamStringByValue(
     const auto* info = store_.info(static_cast<state::ParamID>(tag));
     if (info) {
         const float plain =
-            info->range.denormalize(static_cast<float>(valueNormalized));
+            state::value_from_host_normalized(*info, static_cast<double>(valueNormalized));
         const std::string text = format_parameter_text(*info, plain);
         if (text.empty()) return kResultFalse;
         // fromAscii matches the rest of this adapter's String128 handling
@@ -735,16 +735,20 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // and snapshots the normalized value ONCE per reported edit, so
     // performEdit and setParamNormalized can no longer disagree.
     edit_bridge_ = std::make_unique<HostParameterEditBridge>(
-        store_,
-        HostParameterEditBridge::Callbacks{
-            [this](state::ParamID id) { beginEdit(static_cast<ParamID>(id)); },
-            [this](state::ParamID id, float normalized) {
-                performEdit(static_cast<ParamID>(id),
-                            static_cast<ParamValue>(normalized));
-                setParamNormalized(static_cast<ParamID>(id),
-                                   static_cast<ParamValue>(normalized));
-            },
-            [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
+        store_, HostParameterEditBridge::Callbacks{
+                    [this](state::ParamID id) { beginEdit(static_cast<ParamID>(id)); },
+                    [this](state::ParamID id, float normalized, float plain) {
+                        // Report the edited value (the bridge's snapshot, never a
+                        // re-read of the store) in double precision so the host
+                        // writes back exactly what the editor set; a
+                        // float-normalized 0 dB comes back 1.4e-6 dB off.
+                        ParamValue host_value = static_cast<ParamValue>(normalized);
+                        if (const auto* info = store_.info(id))
+                            host_value = state::host_normalized_from_value(*info, plain);
+                        performEdit(static_cast<ParamID>(id), host_value);
+                        setParamNormalized(static_cast<ParamID>(id), host_value);
+                    },
+                    [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
 
     // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux).
     // PluginDescriptor carries channel counts rather than speaker positions, so
@@ -873,8 +877,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         Steinberg::UString(pinfo.title, 128).fromAscii(param.name.c_str());
         Steinberg::UString(pinfo.units, 128).fromAscii(param.unit.c_str());
         pinfo.stepCount = step_count;
-        pinfo.defaultNormalizedValue = static_cast<ParamValue>(
-            param.range.normalize(param.range.default_value));
+        pinfo.defaultNormalizedValue =
+            state::host_normalized_from_value(param, param.range.default_value);
         pinfo.flags = flags;
         pinfo.unitId = param_groups_->find(param.group_id)
             ? static_cast<Steinberg::Vst::UnitID>(param.group_id)
@@ -1651,12 +1655,12 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                         // the store both want the plain (denormalized) value.
                         // Denormalize once here so the shared dual-write pushes
                         // the same plain value to the sample-accurate queue and
-                        // to the RT-safe store path (set_value_rt): identical to
-                        // the prior push + set_normalized_rt pair, which
-                        // denormalized the same value through the same range.
+                        // to the RT-safe store path (set_value_rt). A continuous
+                        // parameter keeps the host's exact value, as it does in
+                        // the plain-value formats.
                         float plain_value = static_cast<float>(value);
                         if (const auto* info = store_.info(param_id)) {
-                            plain_value = info->range.denormalize(plain_value);
+                            plain_value = state::value_from_host_normalized(*info, value);
                         }
                         boundary::apply_param_value(
                             param_events_, store_, param_id,
@@ -2240,8 +2244,9 @@ void PulpVst3Processor::process_publish_output_params(
             }
             if (queue) {
                 int32 pt_index = 0;
-                float normalized = all_params[idx].range.normalize(ev.value);
-                queue->addPoint(offset, static_cast<ParamValue>(normalized), pt_index);
+                const ParamValue normalized =
+                    state::host_normalized_from_value(all_params[idx], ev.value);
+                queue->addPoint(offset, normalized, pt_index);
             }
             output_param_has_event_[idx] = 1;
         }
@@ -2251,7 +2256,8 @@ void PulpVst3Processor::process_publish_output_params(
                 // Keep the VST3 parameter system synced to the final value even
                 // though we reported the sample-accurate points above.
                 setParamNormalized(static_cast<ParamID>(all_params[i].id),
-                                   static_cast<ParamValue>(store_.get_normalized(all_params[i].id)));
+                                   state::host_normalized_from_value(
+                                       all_params[i], store_.get_value(all_params[i].id)));
                 continue;
             }
             float current = store_.get_value(all_params[i].id);
@@ -2261,12 +2267,12 @@ void PulpVst3Processor::process_publish_output_params(
                     static_cast<ParamID>(all_params[i].id), index);
                 if (queue) {
                     int32 pt_index = 0;
-                    float normalized = store_.get_normalized(all_params[i].id);
-                    queue->addPoint(0, static_cast<ParamValue>(normalized), pt_index);
+                    queue->addPoint(0, state::host_normalized_from_value(all_params[i], current),
+                                    pt_index);
                 }
                 // Sync to VST3 parameter system too
                 setParamNormalized(static_cast<ParamID>(all_params[i].id),
-                                   static_cast<ParamValue>(store_.get_normalized(all_params[i].id)));
+                                   state::host_normalized_from_value(all_params[i], current));
             }
         }
     }
@@ -2725,7 +2731,14 @@ tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id, ParamValue 
         // The same guard setState() uses: a host-originated write must not be
         // echoed back at the host as editor automation.
         const ScopedHostParameterWrite host_write;
-        store_.set_normalized(static_cast<state::ParamID>(id), static_cast<float>(value));
+        const auto param_id = static_cast<state::ParamID>(id);
+        // An echo of the store's own value (the editor reporting an edit) maps
+        // back to it exactly; skip the write rather than replace it with the
+        // double round trip, which can differ from it in the last bit.
+        if (const auto* info = store_.info(param_id);
+            info && state::host_normalized_from_value(*info, store_.get_value(param_id)) != value)
+            store_.set_value(param_id,
+                             state::value_from_host_normalized(*info, static_cast<double>(value)));
     }
     return result;
 }
@@ -2768,11 +2781,13 @@ tresult PLUGIN_API PulpVst3Processor::setState(IBStream* stream) {
             return kResultFalse;
     }
 
-    // Sync restored values back to VST3 parameter system
+    // Sync the VST3 parameter objects to the restored values. Only the
+    // objects: the store already holds the restored values, and writing them
+    // back through a normalized round trip could change their last bit.
     for (const auto& param : store_.all_params()) {
-        float normalized = store_.get_normalized(param.id);
-        setParamNormalized(static_cast<ParamID>(param.id),
-                           static_cast<ParamValue>(normalized));
+        SingleComponentEffect::setParamNormalized(
+            static_cast<ParamID>(param.id),
+            state::host_normalized_from_value(param, store_.get_value(param.id)));
     }
     return kResultOk;
 }

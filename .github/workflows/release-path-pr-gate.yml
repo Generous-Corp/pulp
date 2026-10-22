@@ -373,3 +373,32 @@ jobs:
             -DEXPECTED_VERSION="$expected_version" \
             -P examples/threejs-native-demo/provider_identity_test.cmake
         shell: bash
+
+      # The required macos job builds QuickJS only, so the cross-engine
+      # [js_engine] suite never meets the sealed V8 there. Run it against the
+      # pinned V8 here, including choc's V8 value bridge, and refuse a run in
+      # which the V8 identity case skipped (V8 not linked).
+      - name: Run [js_engine] suite against the sealed V8
+        if: matrix.platform == 'darwin-arm64'
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-v8-tests \
+            -DSKIA_DIR="$PWD/external/skia-build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_DESIGN_IMPORT=ON \
+            -DPULP_BUILD_RUST_CLI=OFF \
+            -DPULP_JS_ENGINE=v8
+          tools/ci/governed-build.sh cmake --build build-v8-tests --config Release \
+            --target pulp-test-group-script-view
+          carrier="$(find build-v8-tests -name pulp-test-group-script-view -type f -perm -u+x | head -1)"
+          test -n "$carrier"
+          "$carrier" "[js_engine]"
+          identity="$("$carrier" "V8 engine reports a non-empty runtime version and provider identity" 2>&1)"
+          printf '%s\n' "$identity"
+          if printf '%s\n' "$identity" | grep -qi "skipped"; then
+            echo "::error::V8 identity case skipped: the sealed V8 is not linked into the test carrier"
+            exit 1
+          fi
+        shell: bash

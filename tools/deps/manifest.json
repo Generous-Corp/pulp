@@ -166,13 +166,13 @@
       "name": "Dawn",
       "category": "render",
       "license": "BSD-3-Clause",
-      "version": "chrome/m153 deps (bundled in Skia toolchain)",
+      "version": "chrome/m157 deps (bundled in Skia toolchain)",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://dawn.googlesource.com/dawn",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Bundled through the Skia chrome/m153 prebuilt toolchain (danielraffel/skia-builder fork). Exact Dawn revision tracks Skia's DEPS file at 8b8c3872fbc03f025855db96ce683f34ec98a815; the bundled build reports Dawn SHA1 f91da75afe31d4d6f47a6da307e1fbabd1b1691a (include/dawn/dawn_version.h).",
+      "notes": "Bundled through the Skia chrome/m157 prebuilt toolchain (danielraffel/skia-builder fork). Exact Dawn revision tracks Skia's DEPS file at b94213a11b3a2edadfae89f0c57a7f4ab72772c9; the bundled build reports Dawn SHA1 ada567700e13aecf7989d78b21f7d330b522ea80 (include/dawn/dawn_version.h).",
       "source_files": [
         "CMakeLists.txt",
         "tools/build-skia.sh",
@@ -500,10 +500,10 @@
       "name": "mise",
       "category": "developer-tooling",
       "license": "MIT",
-      "version": "2026.10.11",
+      "version": "2026.10.17",
       "source_kind": "developer-supplied",
       "repository": "https://github.com/jdx/mise",
-      "upstream": { "kind": "git-tag", "ref": "v2026.10.11", "tag_pattern": "v\\d{4}\\.\\d{1,2}\\.\\d{1,3}" },
+      "upstream": { "kind": "git-tag", "ref": "v2026.10.17", "tag_pattern": "v\\d{4}\\.\\d{1,2}\\.\\d{1,3}" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "external_names": ["mise"],
@@ -994,60 +994,60 @@
       "name": "Skia",
       "category": "canvas",
       "license": "BSD-3-Clause",
-      "version": "chrome/m153",
+      "version": "chrome/m157",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://skia.googlesource.com/skia.git",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m153 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
+      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m157 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "determinism": {
-        "skia_branch": "chrome/m153",
-        "skia_commit": "8b8c3872fbc03f025855db96ce683f34ec98a815",
-        "built_dawn": "f91da75afe31d4d6f47a6da307e1fbabd1b1691a",
-        "skia_builder_ref": "1f8c8d2c343f360a653bce92d11f8ded9a515208",
+        "skia_branch": "chrome/m157",
+        "skia_commit": "b94213a11b3a2edadfae89f0c57a7f4ab72772c9",
+        "built_dawn": "ada567700e13aecf7989d78b21f7d330b522ea80",
+        "skia_builder_ref": "f710b2834eaf37dbf1bd39408f9361d10d85eda2",
         "skia_builder_fork": "https://github.com/danielraffel/skia-builder",
         "skia_python_smoke_version": "144.0.post2",
         "release_assets": {
           "ios-device-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-ios-device-arm64-gpu-release.zip",
-            "sha256": "0edf6728aec9986508c5f99255188bad7889276b4aa286478a5d2947bc37c39a"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-ios-device-arm64-gpu-release.zip",
+            "sha256": "7c9986329c1d85321ae5331851d6166e7036825739451c11ffa097c61e478e86"
           },
           "ios-simulator-arm64-x86_64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-ios-simulator-arm64-x86_64-gpu-release.zip",
-            "sha256": "428750198cca64307914ebec5adac41be5ae7e07c3ab3c2ddcba047838cbdc3b"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-ios-simulator-arm64-x86_64-gpu-release.zip",
+            "sha256": "c80ce9aff94b0be79306d44271b539fab601b7fe0d3917652db57e6e5602764c"
           },
           "linux-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-linux-arm64-gpu-release.zip",
-            "sha256": "a829984ce35141ac1e8f608e29496f69ad24bd2e5215f2899a071dc6c2e0ed0e"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-linux-arm64-gpu-release.zip",
+            "sha256": "e591268124be249b2a2f56c5042e1e7865bd04556d509c6e4937a04251964435"
           },
           "linux-x64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-linux-x64-gpu-release.zip",
-            "sha256": "b132db47979f116a2b35720c6e4e8c7128505499e52b218cc64546f87b0bb363"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-linux-x64-gpu-release.zip",
+            "sha256": "bf74ae1bfd5abd9f49e57c3c6ae6d94c580bbbfe575256fa5077272e1ce0c187"
           },
           "mac-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-mac-universal-gpu-release.zip",
-            "sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "bb24c74f05699fa084df6d68ecb9a427802c3df49ce85d8a7dc696aeb9e19a86"
           },
           "mac-universal": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-mac-universal-gpu-release.zip",
-            "sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "bb24c74f05699fa084df6d68ecb9a427802c3df49ce85d8a7dc696aeb9e19a86"
           },
           "mac-x86_64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-mac-x86_64-gpu-release.zip",
-            "sha256": "0aeb3a4879d59bf42bb4a42a21cda292b6c5401fa24377b241623a600664471d"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-mac-x86_64-gpu-release.zip",
+            "sha256": "67e801d2e1ca0c8e5a3fc3b26e253fd608348ceae0d0964efe4d7d6d342649e6"
           },
           "wasm-wasm32": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-wasm-wasm32-gpu-release.zip",
-            "sha256": "a5218b84266b0d79dd9c1ce514be6d06f8898085aaa9309a9830442f29ca4887"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-wasm-wasm32-gpu-release.zip",
+            "sha256": "400e04a3fb71358fa83bbb7be97c2f17a6b5749f434c4ee7c4edca9dfa5d30c1"
           },
           "win-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-arm64-gpu-release.zip",
-            "sha256": "18e57481e84992fecccbc4ac0f8f283c4a68d90d7978a61ce2e68f21dd34a9c7"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-win-arm64-gpu-release.zip",
+            "sha256": "7424b8225f553b3e4dcf292141b49f4e5a6a4506e0c78e6c932350dc5ceedda1"
           },
           "win-x64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m153/skia-build-win-x64-gpu-release.zip",
-            "sha256": "9480972c67f07d0762183e962ec3483210eb446ff10ca4e9ddf83ad188f0d11b"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m157/skia-build-win-x64-gpu-release.zip",
+            "sha256": "b744f5583ea2351d6b0607785da8e4ce5a95c669e8bd4a01990e05f32b48a57b"
           }
         },
         "web_toolchain": {
@@ -1175,7 +1175,7 @@
       "name": "V8",
       "category": "view",
       "license": "BSD-3-Clause",
-      "version": "v8-m153-15.3.76.5-26cef0256b0e",
+      "version": "v8-m157-15.7.112.5-3362da6c495d",
       "external_names": ["v8-build"],
       "source_kind": "prebuilt-toolchain",
       "repository": "https://chromium.googlesource.com/v8/v8.git",
@@ -1187,60 +1187,60 @@
         "tools/cmake/PulpV8Windows.cmake",
         "tools/scripts/fetch_v8_for_release.py"
       ],
-      "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC is opt-in on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on supported desktop/mobile backends. The m153 Android provider has NDK API level 29, so V8 selection fails closed below Android API 29 while Pulp's general QuickJS-capable Android floor remains 26. V8 remains unavailable as a Pulp iOS runtime, where QuickJS and JSC are supported; the published jitless simulator framework is retained only for provider/header provenance validation and is marked library=false so Pulp cannot select it. This V8 release is milestone-matched to Pulp's active Skia chrome/m153 and built-Dawn generation. paired_skia and paired_dawn are the exact revisions actually built into the validated chrome/m153 provider pair; chromium_dawn records Chromium M153's separate Dawn DEPS pin, and dawn_matches_chromium states whether they coincide. The provider-identity/ODR gate remains mandatory even for matched milestones. Re-bake CI goldens when either provider pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
+      "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC is opt-in on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on supported desktop/mobile backends. The m157 Android provider has NDK API level 29, so V8 selection fails closed below Android API 29 while Pulp's general QuickJS-capable Android floor remains 26. V8 remains unavailable as a Pulp iOS runtime, where QuickJS and JSC are supported; the published jitless simulator framework is retained only for provider/header provenance validation and is marked library=false so Pulp cannot select it. This V8 release is milestone-matched to Pulp's active Skia chrome/m157 and built-Dawn generation. paired_skia and paired_dawn are the exact revisions actually built into the validated chrome/m157 provider pair; chromium_dawn records Chromium M157's separate Dawn DEPS pin, and dawn_matches_chromium states whether they coincide. The provider-identity/ODR gate remains mandatory even for matched milestones. Re-bake CI goldens when either provider pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
       "determinism": {
         "v8_builder_fork": "https://github.com/danielraffel/v8-builder",
-        "v8_builder_ref": "292bd8144a454afa246fc08c4e5416f2cdfe9f10",
-        "v8_builder_tag_ref_url": "https://api.github.com/repos/danielraffel/v8-builder/git/ref/tags/v8-m153-15.3.76.5-26cef0256b0e",
+        "v8_builder_ref": "87c5ec04f9ef71b6dc2f326351fdabc9d4716315",
+        "v8_builder_tag_ref_url": "https://api.github.com/repos/danielraffel/v8-builder/git/ref/tags/v8-m157-15.7.112.5-3362da6c495d",
         "pair_kind": "chromium-milestone",
-        "milestone": 153,
-        "skia_release_tag": "chrome/m153",
-        "built_revision": "26cef0256b0e37363dd84d4714bce4cd3689817f",
-        "release_metadata_url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/release-metadata.json",
-        "release_metadata_sha256": "03a3690bedefd77b73ccf444dd640c2b042b6e6ecffebd0685018a44482a694f",
+        "milestone": 157,
+        "skia_release_tag": "chrome/m157",
+        "built_revision": "3362da6c495dd8f91cbdf750993ae9a594d82a2c",
+        "release_metadata_url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m157-15.7.112.5-3362da6c495d/release-metadata.json",
+        "release_metadata_sha256": "400af0e88ebdf26e4aea56271b2259c57ac6fc20529cab2d5ef329a2201f3f96",
         "release_immutable": false,
-        "pair_manifest_sha256": "f7831fe7626654719fa3c64ea2dbeda64e4d6f9f0160be51a7f77d054036f330",
-        "chromium_revision": "818aa77f91b88555c95377abdad8e0bcadd08d93",
-        "chromium_deps_blob": "5382a7740f7185ebf3d4de20f98f283d3769f924",
-        "chromium_branch": "8010",
-        "chromium_skia": "9d07e5bad9e3e21da2426946e589daa647218271",
-        "paired_skia": "8b8c3872fbc03f025855db96ce683f34ec98a815",
-        "skia_matches_chromium": false,
-        "paired_dawn": "f91da75afe31d4d6f47a6da307e1fbabd1b1691a",
-        "chromium_dawn": "50c9f7b4ee3fef0bdc9166056098271ea85ef9fc",
+        "pair_manifest_sha256": "8421f31dbe665dd66cf3e7ba92522f5401b79197faccc25a7f8a7d8ee66ec751",
+        "chromium_revision": "04cb05b645636b450ce7c85bc0c7aa96625bbbde",
+        "chromium_deps_blob": "c148260fa5865f7f2d5aa10e5c089aa3fe316127",
+        "chromium_branch": "8103",
+        "chromium_skia": "b94213a11b3a2edadfae89f0c57a7f4ab72772c9",
+        "paired_skia": "b94213a11b3a2edadfae89f0c57a7f4ab72772c9",
+        "skia_matches_chromium": true,
+        "paired_dawn": "ada567700e13aecf7989d78b21f7d330b522ea80",
+        "chromium_dawn": "088a8d00efd1c70b58c549d355401d115904b648",
         "dawn_matches_chromium": false,
         "release_assets": {
           "mac-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-mac-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "54c82625b96a9c1b15a6ab3ba0e407ea5fc6ba565bb770c32769c035569019a2"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m157-15.7.112.5-3362da6c495d/v8-mac-arm64-m157-15.7.112.5-3362da6c495d.zip",
+            "sha256": "31ef9d81e15a9646e717db9794bcc0eeb6d13e589bf83719d8a69b531fe99c43"
           },
           "mac-x86_64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-mac-x86_64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "c4c525be3f061d397f2facf25038222ea6ecf1c444a7f082ee98c78647299060"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m157-15.7.112.5-3362da6c495d/v8-mac-x86_64-m157-15.7.112.5-3362da6c495d.zip",
+            "sha256": "8445dea3c918498caa7387d6938b32d0be344a69a9d87406233c735a4c6c1052"
           },
           "linux-x64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-linux-x64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "e3558bad6684f30f12849c9fabfc8f8e5fd9a2f99c2f532b953a6754a6d5eb58"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m157-15.7.112.5-3362da6c495d/v8-linux-x64-m157-15.7.112.5-3362da6c495d.zip",
+            "sha256": "34efffb13b1a245982bf15471076fc7b8529a7a740e8632086c042cdc58bf6da"
           },
           "linux-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-linux-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "6c5cde373628c16b34832b8739b9de137f28bf50a1c3dc6b41f452462e18631a"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m157-15.7.112.5-3362da6c495d/v8-linux-arm64-m157-15.7.112.5-3362da6c495d.zip",
+            "sha256": "507face44ddb77be076f0da7355a4f6e55e7b28b448fac854319e553bc6c4581"
           },
           "win-x64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-win-x64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "d8dceac57a4b614cd2171e47d2f6fc76853f0412a32eb51c92e6c1394ff14c78"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m157-15.7.112.5-3362da6c495d/v8-win-x64-m157-15.7.112.5-3362da6c495d.zip",
+            "sha256": "4ecd8ae0672089053122b51aae7709eccf54062cf8ce4dfd7768d51d6333fa4d"
           },
           "win-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-win-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "fe37083683a125678421ca683a8cef830805f6f61aff807331863ef9bf5c790b"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m157-15.7.112.5-3362da6c495d/v8-win-arm64-m157-15.7.112.5-3362da6c495d.zip",
+            "sha256": "878a6fe40c97ced5465711b98b3da49e0f1b2b058b85c47822d12b9cc8535445"
           },
           "android-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-android-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "53e63224d89104eb064f14336a5800f65174ce1b35dc16753255ba0a86cec2e0"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m157-15.7.112.5-3362da6c495d/v8-android-arm64-m157-15.7.112.5-3362da6c495d.zip",
+            "sha256": "68f76cae2d2cf5a2eb2301a30843ab1dfd985465525b53e066ddc965bc2ecd77"
           },
           "ios-simulator-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-ios-simulator-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "46eef1d81a1fd5193ef0404ac6c131151b110b2dcf04f93e1b04962c9dbbf206",
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m157-15.7.112.5-3362da6c495d/v8-ios-simulator-arm64-m157-15.7.112.5-3362da6c495d.zip",
+            "sha256": "bdd0885c8362b213390390cf757947d08d1b8baeb489948155d83fc26601e293",
             "library": false
           }
         }
