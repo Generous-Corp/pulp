@@ -831,6 +831,26 @@ TEST_CASE("shared session offline fence refuses reprime until a fresh preparatio
     REQUIRE(fresh.session.release());
 }
 
+TEST_CASE("released shared session cannot be prepared again",
+          "[gpu_audio][shared_io][session][recovery]") {
+    // The session is single-use: its pipeline prepares once. Recovery after an
+    // offline fence is therefore a new session, which starts unfenced. If this
+    // ever changes, prepare() must clear offline_fenced_ (it does today, but
+    // nothing can reach that path), and this test should become a re-prepare
+    // test that asserts GPU admission reopens.
+    Fixture fixture;
+    fixture.prepare();
+    REQUIRE(fixture.session.fence_for_offline());
+    REQUIRE(fixture.session.release());
+    auto owner = std::make_unique<FakeProvider>(fixture.state);
+    auto program = std::make_unique<FakeProgram>(*owner, fixture.state);
+    CHECK_FALSE(fixture.session.prepare(
+        {std::move(owner), std::move(program)},
+        {.pipeline = {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+         .slots = 2}));
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+}
+
 TEST_CASE("shared session offline fence refuses reprime behind an earlier recovery reason",
           "[gpu_audio][shared_io][session][recovery]") {
     Fixture fixture;
