@@ -50,8 +50,8 @@ A caller blending the oversampled path with a dry path can align the dry path
 with `group_delay_samples()`, or select `linear_phase_fir` for a constant,
 reportable latency.
 
-`polyphase_iir` became the default in v0.997.0; see the
-[migration note](../migrations/v0.997.0.md) for the consequences and how to
+`polyphase_iir` became the default in v0.997.2; see the
+[migration note](../migrations/v0.997.2.md) for the consequences and how to
 keep `fir_biquad`.
 
 ### Silence

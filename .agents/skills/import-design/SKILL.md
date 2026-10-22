@@ -561,6 +561,35 @@ knowing before you touch that file:
   since the tweaks layer replays edits ACROSS captures. A hoisted node keeps its
   DOM anchor: hoisting is a rendering accommodation, not a claim about
   structure.
+- **A `data-pulp-key` sibling key replaces the ordinal.** An element whose
+  `data-pulp-key` no sibling shares gets the segment `tag[key=<key>]`, so a
+  reorder carries the anchor (and any stored edit) with the node; an ordinal
+  stays with the slot and would hand Drive's edit to whatever row moved into
+  first place. Ordinals are then counted over the siblings WITHOUT a usable key,
+  so reordering keyed rows never renumbers an unkeyed neighbour. A key declared
+  twice under one parent identifies neither sibling: both keep positional
+  anchors, and the collision is reported on the IR root
+  (`native_keyed_duplicate_keys`) and as an import warning, never silently.
+  The raw values ride along as `pulp_key` / `pulp_id` node attributes;
+  `data-pulp-id` is the page-wide source id the materialized lane maps, and it
+  does NOT change the anchor.
+- **Anchors change for documents that already declare `data-pulp-key`, and
+  there is no ordinal-to-key alias.** Every keyed node, and every node under
+  one, gets a new anchor. A stored edit (`pulp-tweaks.json`) on the old
+  ordinal path finds no node and surfaces as an `orphaned-tweak` drift; re-store
+  it against the new path once. An alias is deliberately not offered: an
+  ordinal named a SLOT at the time the edit was stored, and nothing records
+  which keyed node held that slot then, so the alias would guess, which is the
+  misapplied edit keys exist to prevent. The one case that does not orphan: in
+  a parent that mixes keyed and unkeyed same-signature siblings, the unkeyed
+  ones renumber over the unkeyed set only, so an old `li[0]` edit that belonged
+  to a keyed row now resolves onto the first UNKEYED row. Every such parent is
+  reported on the IR root (`native_keyed_mixed_siblings`, as
+  `<parent anchor> <signature>`) and as an import warning; re-check stored edits
+  under each one by hand. A duplicated key makes its siblings positional, so a
+  duplicate beside a usable key is reported in both lists. The update planner treats `pulp_key` and
+  `pulp_id` as immutable contract attributes (they start with `pulp`), so the
+  same anchor whose `data-pulp-id` changed is rebuilt, not retained.
 
 - When improving the offline/native HTML importer, use the development-only
   Importer Differential Lab rather than changing the authoritative browser

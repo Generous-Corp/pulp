@@ -2054,7 +2054,7 @@ it with the index, so adding an unindexed pack or retaining an entry for a
 removed pack fails closed. Downstream consumers should derive their Pulp catalog
 header set from this index instead of maintaining another manual list.
 
-Three things bite when adding a pack:
+These bite when adding a pack:
 
 - **A control signal is an ordinary audio port.** The convention across every
   pack is a unipolar `[0, 1]` signal on a normal port — a source declares
@@ -2080,6 +2080,23 @@ Three things bite when adding a pack:
   `#include`, the name in the list, **and** `N`. Forgetting `N` is a compile error,
   so it fails closed; it is only worth knowing so the error reads as expected rather
   than mysterious.
+
+- **A node that reads its controls once per block should call the DSP class's
+  buffer overload, not loop over its per-sample one.** The graph is only as fast as
+  the node body: a `signal::*` class can gain a vectorized block path and a baked
+  graph sees none of it if the node still calls `process(sample)` per sample. The
+  compressor nodes (lo-fi, sidechain, multiband) were in exactly that state, running
+  at the per-sample cost while direct `Compressor::process(buffer, n)` users got
+  roughly 2.5x. Copy into the output and process in place; a multi-band split
+  writes each band into stack scratch in fixed-size chunks so the node never
+  allocates and never depends on the prepared block size. Two things to keep:
+  a node whose output buffer can alias a SECOND input (a sidechain key) must not
+  copy the main input over it before detection; and a node that retunes per sample
+  (the lo-fi SVF nodes take `value_at(id, k)` every sample for sample-accurate
+  sweeps) cannot take a block path at all, because `BakedParamView` cannot report
+  that a control held still for the block. Pin a block-path node to its DSP class
+  driven directly, over irregular block sizes and with the output aliasing each
+  input (`test_forge_spectral_dynamics_catalogs.cpp`).
 
 **A CV pack works in VOLTS, and that is a deliberate exception to the `[0,1]`
 convention above.** `forge_eurorack_utility_catalog.hpp` holds the modular

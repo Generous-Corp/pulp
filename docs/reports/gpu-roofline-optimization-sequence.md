@@ -105,10 +105,15 @@ device's memory-bandwidth roofline doing work it should not be doing at all.
 
 **Consequence for the record:** the SuperConvolver v1.2 GPU-KILL verdict was
 measured against this kernel while the CPU comparator had already been upgraded
-to a partitioned real-FFT FDL. That comparison is asymmetric. The measured
-baseline is now in; the go/no-go on building a GPU-resident partitioned FDL
-(≈500 lines; predicted **10–20×**, *not yet built or measured*) is an owner
-decision, and landing it re-opens the KILL verdict.
+to a partitioned real-FFT FDL. That comparison is asymmetric. The GPU-resident
+partitioned FDL has since been built in #5974: `GpuCompute::prepare_multi_fdl`
+and `GpuCompute::multi_fdl_convolve`, gated by mono and multi-IR golden tests
+against `signal::PartitionedConvolver` (`test/test_gpu_compute.cpp`) and
+benchmarked in `examples/super-convolver/bench.cpp`. The #5974 wall-clock
+bench put the CPU/FDL crossover at about 24 rooms (1 s IR), with the FDL ahead
+of the non-partitioned kernel at every room count. That reopens the KILL
+verdict, but the product path has not adopted it: `GpuMultiConvolver` still
+calls `multi_convolve`, and there is no GPU-busy timed FDL variant yet.
 
 ### 2.2 "Small-buffer collapse" is a serialized-ALU constant (WaveNet / conv_stack)
 
@@ -136,7 +141,7 @@ trusted or used to size a downstream decision.
 | 5 | `GpuConvolver` did serial per-channel round trips; `convolve_batch` unused | wall time dominated by per-channel map round trips | **2.02× stereo / 7.45× 8-ch measured** | **Shipped #5883** |
 | 3 | Spectral smear was O(n·radius·layers) brute force (CPU **and** GPU) | CPU cost; GPU blur term in harness | **16.8× measured on the smear term** (O(n·r·L)→O(n) running sum; float drift 7e-7) | **Shipped #5927** (CPU); GPU shared-memory tile is a follow-up |
 | 2 | `conv_stack_forward` = WaveNet one-thread-per-sample geometry (2nd instance) | low occupancy + high serial MAC depth | **10–100× parallelism predicted**; block-parallel WaveNet kernel landed | **Shipped #5878** (WaveNet); occupancy follow-ups #5967. `conv_stack` reparallelization remains |
-| 1 | Multi-IR conv: full-length FFT ping-pong at the bandwidth roofline | `multi_convolve_timed` busy/wall → 1.0 | **10–20× predicted** (GPU partitioned FDL, ≈500 lines) | **Measured & confirmed** (#5944); FDL **not built** — owner go/no-go, re-opens KILL verdict |
+| 1 | Multi-IR conv: full-length FFT ping-pong at the bandwidth roofline | `multi_convolve_timed` busy/wall → 1.0 | **10–20× predicted** (GPU-busy); #5974 wall-clock bench: FDL 1.35–2.23× over `multi_convolve` at 8 IRs, CPU crossover ≈24 rooms | **Measured & confirmed** (#5944); FDL **built** (#5974, `multi_fdl_convolve`); not yet used by `GpuMultiConvolver`, no timed variant |
 | 6 | Stockham FFT issues one global-memory round trip per radix-2 stage + recomputes twiddles | taxes every FFT-based verdict | **5–10× predicted** on FFT paths (workgroup-shared-memory stage fusion) | Open (2–3 d) |
 | 7 | CPU FFT taxes: complex-FFT-of-real, scalar radix-2 off-Apple, decorative Highway | CPU-side | **~2× predicted** for the real-FFT refactor (1–2 d, touches the IR-swap struct); deinterleave/Highway downgraded to cleanups | Re-scoped; deferred pending decision |
 | 8 | Latent: granular re-upload, untiled matmul, per-call buffer creation | not on a product path today | n/a | Document or gate |
@@ -203,7 +208,7 @@ These prior claims were measured through under-running kernels and should be
 read with this document:
 
 - SuperConvolver v1.2 KILL verdict — measured asymmetrically (partitioned CPU vs
-  non-partitioned GPU); contingent on a GPU FDL.
+  non-partitioned GPU). The GPU FDL it was contingent on landed in #5974 (§2.1).
 - "The dominant cost is dispatch + sync + copy overhead, not FLOPs" — for the
   multi-IR path this is substantially a kernel artifact (§2.1).
 - NAM 9.4×→2.7× buffer collapse — a serialized-ALU constant, not amortized API

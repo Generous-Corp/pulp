@@ -2039,6 +2039,46 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         }
         record_if("native_nodes_type_scaled", tree.type_scaled);
         record_if("native_nodes_type_scale_refused", tree.type_scale_refused);
+        record_if("native_nodes_keyed_anchors", tree.keyed_anchors);
+        // A duplicated `data-pulp-key` cannot identify either sibling, so both
+        // keep positional anchors and a reorder would move edits between them.
+        // Said on the IR and as a warning, because the anchors themselves look
+        // valid and nothing downstream can tell a refused key from no key.
+        if (!tree.duplicate_keys.empty()) {
+            std::string joined;
+            for (const auto& duplicate : tree.duplicate_keys) {
+                if (!joined.empty())
+                    joined += ",";
+                joined += duplicate;
+            }
+            ir.root.attributes["native_keyed_duplicate_keys"] = joined;
+            for (const auto& duplicate : tree.duplicate_keys) {
+                result.warnings.push_back("duplicate sibling key under " + duplicate +
+                                          ": those siblings keep positional anchors, so a reorder "
+                                          "does not carry their edits. Give each sibling a "
+                                          "distinct data-pulp-key.");
+            }
+        }
+        // Positional ordinals beside keyed siblings count only the unkeyed
+        // ones, so a key added or removed there hands a stored edit to a
+        // different node whose anchor still resolves. Reported so the drift
+        // is findable instead of silent.
+        if (!tree.mixed_keyed_siblings.empty()) {
+            std::string joined;
+            for (const auto& mixed : tree.mixed_keyed_siblings) {
+                if (!joined.empty())
+                    joined += ",";
+                joined += mixed;
+            }
+            ir.root.attributes["native_keyed_mixed_siblings"] = joined;
+            for (const auto& mixed : tree.mixed_keyed_siblings) {
+                result.warnings.push_back(
+                    "keyed and unkeyed siblings mixed under " + mixed +
+                    ": the unkeyed ones are numbered without the keyed ones, so "
+                    "adding or removing a key moves their stored edits to another "
+                    "node. Give every sibling a data-pulp-key, or none.");
+            }
+        }
     }
 
     int styled_controls = 0;

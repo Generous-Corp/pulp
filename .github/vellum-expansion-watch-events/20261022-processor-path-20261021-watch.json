@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-processor-path-20261021-watch",
+  "created_at": "2026-10-22T02:49:01Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Processor-path performance work touches value channels and buffer helpers under a watched render/UI tree: the meter publish path fills its slot in place and the publish counter avoids an atomic read-modify-write. Performance and documentation only; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-buffer-ops",
+    "ctest --test-dir build -R pulp-test-meter-source",
+    "ctest --test-dir build -R pulp-test-state",
+    "ctest --test-dir build -R pulp-test-sync-primitives",
+    "python3 tools/scripts/test_verify_create_templates.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

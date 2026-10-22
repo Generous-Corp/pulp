@@ -85,6 +85,9 @@ pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
     # The package dependency root is found by a packages.lock.json probe.
     ABSENT packages.lock.json)
 
+# Every `pulp create` plugin template, expanded and built with its own test.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/create_template_tests.cmake")
+
 # CLI import substrate tests — detection engine, JSON-over-stdio SPI runner,
 # install-hint path, and the vendor-agnostic source guard. Links the import
 # logic directly (pure functions) and shells out to the built CLI for the

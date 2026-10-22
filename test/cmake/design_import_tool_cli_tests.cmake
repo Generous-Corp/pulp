@@ -188,7 +188,8 @@ pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
     SOURCES test_browser_capture_backdrop_filter.cpp test_browser_capture_ir.cpp
         test_browser_capture_text_metrics.cpp test_browser_capture_tree.cpp
         test_browser_capture_svg_render.cpp
-    PATHS "test/fixtures/browser-capture-*")
+    PATHS "test/fixtures/browser-capture-*"
+        test/fixtures/import-differential/18-keyed-list-panel.identity.json)
 target_include_directories(pulp-test-browser-capture-import PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)
