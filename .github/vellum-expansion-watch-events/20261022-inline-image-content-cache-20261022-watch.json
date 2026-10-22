@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-inline-image-content-cache-20261022-watch",
+  "created_at": "2026-10-22T05:05:42Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds a content-keyed decode and upload cache for inline encoded image bytes drawn by ImageView data URIs and SceneImage blobs. Keyed draws decode and upload once per (SHA-256 of the bytes, backend) through the existing ImageFileCache, preserving pixel output; backends without a cache draw exactly as before. Pulp continues to own this editable canvas target under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits this generic cache when that target adopts the Vellum package. No source-routing or authority boundary moves.",
+  "tests": [
+    "ctest --test-dir build -R 'Disabling the image cache rebuilds keyed inline bytes'",
+    "ctest --test-dir build -R 'ImageView data URI decodes once across Graphite paints'",
+    "ctest --test-dir build -R 'Keyed inline'",
+    "ctest --test-dir build -R 'Recording canvas records keyed inline bytes'",
+    "ctest --test-dir build -R 'SceneImage encoded bytes decode once across Graphite paints'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-inline-image-content-cache",
+  "kind": "change",
+  "created_at": "2026-10-22T05:05:41Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); inline encoded image bytes (an ImageView data:image source, a SceneImage blob) decoded and uploaded a fresh texture on every Skia paint. Canvas gains draw_image_from_keyed_data[_rect] taking a SHA-256 content key; the base forwards to the unkeyed draw so CoreGraphics and recording backends are unchanged, and SkiaCanvas reuses ImageFileCache under a NUL-prefixed inline-sha256 key scoped by backend, never by buffer address. Cached frames are pixel-identical to uncached ones. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'Disabling the image cache rebuilds keyed inline bytes'",
+    "ctest --test-dir build -R 'ImageView data URI decodes once across Graphite paints'",
+    "ctest --test-dir build -R 'Keyed inline'",
+    "ctest --test-dir build -R 'Recording canvas records keyed inline bytes'",
+    "ctest --test-dir build -R 'SceneImage encoded bytes decode once across Graphite paints'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}
