@@ -15,11 +15,14 @@
 
 #include "include/core/SkImage.h"
 #include "include/core/SkBitmap.h"
+#include "include/core/SkImageGenerator.h"
 #include "include/core/SkSurface.h"
 
 #include <array>
 #include <atomic>
 #include <condition_variable>
+#include <limits>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -168,6 +171,41 @@ TEST_CASE("An inline image larger than the byte budget draws correctly uncached"
     CHECK(stats.size == 1);        // and the resident entry was not evicted
     cache.get_or_build_inline("resident", nullptr, 0, [] { return make_image(1, 1); });
     CHECK(cache.inline_stats().hits == 1);
+}
+
+TEST_CASE("Inline entry cost saturates instead of wrapping to a small value",
+          "[canvas][image-cache][inline-image]") {
+    CacheDefaults restore;
+    // A lazily generated image with the largest valid dimensions: it is never
+    // decoded, but its pixel size (about 2^60 bytes) is what the pool charges.
+    struct HugeGenerator : SkImageGenerator {
+        HugeGenerator()
+            : SkImageGenerator(SkImageInfo::MakeN32Premul((1 << 29) - 1, (1 << 29) - 1)) {}
+    };
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const std::size_t max = std::numeric_limits<std::size_t>::max();
+    cache.set_inline_byte_budget(max - 1);
+    std::size_t pixel_bytes = 0;
+    auto build = [&] {
+        auto image = SkImages::DeferredFromGenerator(std::make_unique<HugeGenerator>());
+        if (image)
+            pixel_bytes = image->imageInfo().computeMinByteSize();
+        return image;
+    };
+
+    // An encoded size that passes the budget on its own but overflows size_t
+    // once the pixel bytes are added.
+    const std::size_t encoded = max - (std::size_t{1} << 59);
+    auto image = cache.get_or_build_inline("huge", nullptr, encoded, build);
+    REQUIRE(image != nullptr);
+    REQUIRE(pixel_bytes > (std::size_t{1} << 59)); // the sum really overflows
+    const auto stats = cache.inline_stats();
+    CHECK(stats.over_budget == 1);
+    CHECK(stats.size == 0);
+    CHECK(stats.bytes == 0);
 }
 
 TEST_CASE("Static embedded sprite decodes once across canvas frames",

@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <limits>
 #include <list>
 #include <mutex>
 #include <string>
@@ -48,6 +49,8 @@ std::uint64_t fnv1a(const std::string& s) noexcept {
     return h;
 }
 
+constexpr std::size_t kSaturated = std::numeric_limits<std::size_t>::max();
+
 // One LRU pool. The path pool is bounded by entry count; the inline pool is
 // bounded by bytes, so many distinct inline images cannot evict file images
 // or pin unbounded encoded copies and textures.
@@ -82,8 +85,10 @@ struct Pool {
         map.erase(it);
     }
 
+    // A saturated cost (SIZE_MAX) never fits: it means the true size is
+    // unknown and at least as large as anything the budget could hold.
     bool fits(std::size_t cost) const {
-        return byte_budget == 0 || cost <= byte_budget;
+        return byte_budget == 0 || (cost != kSaturated && cost <= byte_budget);
     }
 
     sk_sp<SkImage> get_or_build(const std::string& path, const void* backend_key,
@@ -94,9 +99,16 @@ struct Pool {
     void set_enabled(bool on);
 };
 
-// Bytes an image holds once built: its pixels, decoded or uploaded.
+// Bytes an image holds once built: its pixels, decoded or uploaded. Skia
+// reports SIZE_MAX when the size does not fit in size_t.
 std::size_t image_cost(const SkImage& image) {
     return image.imageInfo().computeMinByteSize();
+}
+
+// Entry costs add an encoded size to a pixel size; clamp at SIZE_MAX rather
+// than wrap to a small value that would admit a huge entry.
+std::size_t saturating_add(std::size_t a, std::size_t b) {
+    return a > kSaturated - b ? kSaturated : a + b;
 }
 
 sk_sp<SkImage> Pool::get_or_build(const std::string& path, const void* backend_key,
@@ -159,7 +171,7 @@ sk_sp<SkImage> Pool::get_or_build(const std::string& path, const void* backend_k
         building.erase(key);
         // Re-check enabled under the mutex before publishing. If disabled
         // while the build was running, do not retain the result.
-        const std::size_t cost = image ? encoded_cost + image_cost(*image) : 0;
+        const std::size_t cost = image ? saturating_add(encoded_cost, image_cost(*image)) : 0;
         if (enabled && image && !fits(cost)) {
             over_budget.fetch_add(1, std::memory_order_relaxed);
         } else if (enabled && image) {
@@ -168,7 +180,7 @@ sk_sp<SkImage> Pool::get_or_build(const std::string& path, const void* backend_k
                 erase(existing);
             lru.push_front(key);
             map.emplace(key, Entry{path, image, lru.begin(), cost});
-            bytes += cost;
+            bytes = saturating_add(bytes, cost);
             while ((map.size() > capacity || (byte_budget != 0 && bytes > byte_budget)) &&
                    lru.size() > 1)
                 erase(map.find(lru.back()));
