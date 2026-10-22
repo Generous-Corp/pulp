@@ -122,6 +122,17 @@ Below that line the CPU is faster — so pick per workload:
 **Keep on the CPU** (too small to beat the round-trip; latency-sensitive):
 - Simple gain, biquad filters, compressors
 - Small delays, envelope followers, MIDI processing
+- Recurrent neural models (LSTM, GRU) — a deliberate choice, see below
+
+**Why recurrent models stay on the CPU.** A recurrent layer's state at sample
+*t* depends on its state at *t − 1*, so a block cannot be computed in parallel
+across time the way a feedforward WaveNet block can: the GPU would walk the block
+one sample at a time inside a persistent kernel. That only pays off when many
+streams are batched side by side to fill the GPU; for one stream, the GPU round
+trip alone costs more than running the small recurrent model on the CPU. Pulp's
+GPU neural path is therefore feedforward-only (WaveNet), and LSTM/GRU captures
+run on the CPU engine. Revisit this only with a batched multi-stream design and a
+measured win over the CPU at the stream counts that matter.
 
 Rule of thumb: if it's a tight per-sample scalar op, leave it on the CPU. If it's
 a block-wide transform or a bank you can batch, the GPU can win — and the
@@ -168,6 +179,9 @@ zero-copy. `capabilities()` reports backend, limits, and optional features
 | Magnitude / complex-mul | `compute_magnitude`, `complex_multiply`, `batch_magnitude` | spectral building blocks |
 | Dense matmul | `matmul` | neural layers, matrix DSP (ambisonics, mixing) |
 | Dense layer | `dense_tanh` | neural inference (NAM dense / LSTM gates) |
+| WaveNet | `prepare_wavenet` + `wavenet_forward` | feedforward dilated-conv neural amp inference; one submit + readback per block, history kept on the GPU across blocks |
+| WaveNet batch | `wavenet_forward_batch` | several prepared instances in one submit and one readback (any mix of shapes) |
+| WaveNet group | `prepare_wavenet_group` + `wavenet_forward_group` | many same-shape instances in shared buffers: one dispatch per pass for the whole group, so the per-block command count does not grow with the instance count. `pulp-gpu-wavenet-scaling-bench` measures per-block wall, CPU and GPU-busy time for the three paths |
 | Additive synth | `additive_synth` | sum of sinusoidal partials |
 | Modal synth | `modal_strike` | struck/plucked resonant-mode banks |
 | Granular | `granular_cloud` | windowed pitch-shifted grain clouds |
