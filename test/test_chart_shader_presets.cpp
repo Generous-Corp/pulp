@@ -604,6 +604,13 @@ TEST_CASE("faders without a chart render as before", "[view][shader][chart-prese
         const auto stock = render_fader(vertical, 0.4f, nullptr);
         const auto cleared = render_fader(vertical, 0.4f, "bevel", {}, nullptr, true);
         const auto charted = render_fader(vertical, 0.4f, "bevel");
+        // A digest of the stock render, printed so two builds can be compared
+        // pixel for pixel.
+        std::uint64_t digest = 1469598103934665603ull;
+        for (auto byte : stock.rgba)
+            digest = (digest ^ byte) * 1099511628211ull;
+        INFO("stock fader digest " << (vertical ? "vertical " : "horizontal ") << std::hex
+                                   << digest);
         CHECK(stock.rgba == cleared.rgba);
         CHECK(count_differing(stock.rgba, charted.rgba) > 40);
     }
