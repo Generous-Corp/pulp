@@ -520,7 +520,16 @@ The retained plan qualifies only if all of these hold on the same trace:
 - allocation count and peak RSS no higher than `baked-native`.
 
 Lower layout, invalidation, or paint-command counters without the wall-time
-result do not qualify. `bridge_calls` is zero for every native lane and is not
+result do not qualify.
+
+Measurement scope as run: every lane is warm (2 s of idle rendering, then 60
+discarded warmup frames); a cold first-update comparison was not measured.
+`rss_high_water_bytes` is the process-lifetime `ru_maxrss`, so it includes
+startup materialization and plan compilation, and a difference of a few 16 KB
+pages is within run-to-run noise. The allocation probe replaces global
+`operator new` in the benchmark binary, so absolute frame and update times are
+not comparable with benchmark JSON produced before that instrumentation;
+ratios between lanes of one build are. `bridge_calls` is zero for every native lane and is not
 a discriminating counter; paint commands are RecordingCanvas counts, not GPU
 draw or resource measurements.
 
