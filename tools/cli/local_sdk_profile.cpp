@@ -239,7 +239,10 @@ std::vector<std::string> configure_arguments(const fs::path& source, const fs::p
         // Tests OFF already implies this; it is passed explicitly because the
         // staged-install validator asserts the cache value, and a consumer
         // reads the matching `bridge_exec` provenance key.
-        "-DPULP_DEV_BRIDGE_EXEC=OFF"};
+        "-DPULP_DEV_BRIDGE_EXEC=OFF",
+        // Explicit so the cache records the profile the provenance claims;
+        // dev, not release, because this SDK keeps development surfaces on.
+        std::string("-DPULP_PROFILE=") + kBuildProfile};
     if (identity.tracing) {
         // Deliberately the SAME feature set as forge-dev, plus Perfetto. A
         // traced SDK built with GPU or design-import off would produce traces
@@ -304,6 +307,13 @@ Validation validate_staged_install(const fs::path& prefix, const fs::path& build
             "the shell exec/execAsync JS bridge must be compiled out of the SDK "
             "(PULP_DEV_BRIDGE_EXEC missing or ON)",
             out);
+    // Same shape: the provenance below records `build_profile`, so the cache
+    // must carry the profile the configure was pinned to. Missing means a source
+    // tree that predates PULP_PROFILE; any other value is a different SDK.
+    require(cache.find("PULP_PROFILE") != cache.end() && cache.at("PULP_PROFILE") == kBuildProfile,
+            std::string("the SDK must be configured with PULP_PROFILE=") + kBuildProfile +
+                " (PULP_PROFILE missing or different)",
+            out);
 
     // Tracing is checked in BOTH directions, and that symmetry is the point.
     //
@@ -356,6 +366,10 @@ std::string serialize_provenance(const Identity& i, const std::string& fingerpri
         << "  \"kind\": \"development\",\n"
         << "  \"profile\": " << json_string(profile_name_for(i)) << ",\n"
         << "  \"profile_revision\": " << profile_revision_for(i)
+        << ",\n"
+        // The PULP_PROFILE the configure was pinned to; the staged-install
+        // validator proves the cache agrees before this text is written.
+        << "  \"build_profile\": " << json_string(kBuildProfile)
         << ",\n"
         // Always false, for both profiles. PulpSdkProvenance.cmake fails closed
         // on a development SDK that claims eligibility, and a traced SDK must

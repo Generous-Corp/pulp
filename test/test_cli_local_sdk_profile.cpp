@@ -85,7 +85,8 @@ void plant_install(const fs::path& prefix, const fs::path& build,
                                          "PULP_HAS_CLAP:INTERNAL=TRUE\n"
                                          "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
                                          "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
-                                         "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n");
+                                         "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
+                                         "PULP_PROFILE:STRING=dev\n");
 }
 
 } // namespace
@@ -161,6 +162,10 @@ TEST_CASE("forge development SDK configure profile pins required capabilities",
     REQUIRE(contains("-DPULP_DEV_BRIDGE_EXEC=OFF"));
     REQUIRE(contains("-DPULP_BUILD_TESTS=OFF"));
     REQUIRE(contains("-DPULP_BUILD_EXAMPLES=OFF"));
+    // A development SDK: design import and the GPU stay on, so it is pinned to
+    // the dev profile explicitly rather than inheriting whatever the cache held.
+    REQUIRE(contains("-DPULP_PROFILE=dev"));
+    REQUIRE_FALSE(contains("-DPULP_PROFILE=release"));
     REQUIRE(contains("-DCMAKE_INSTALL_PREFIX=/stage with spaces"));
     REQUIRE(contains("-DCMAKE_OSX_DEPLOYMENT_TARGET=13.4"));
     REQUIRE(contains("-DSKIA_DIR=/source with spaces/external/skia-build"));
@@ -271,6 +276,7 @@ TEST_CASE("forge development SDK provenance is explicitly non-distributable",
     REQUIRE(json.find("\"architectures\": [\"arm64\"]") != std::string::npos);
     REQUIRE(json.find("\"webview\": true") != std::string::npos);
     REQUIRE(json.find("\"bridge_exec\": false") != std::string::npos);
+    REQUIRE(json.find("\"build_profile\": \"dev\"") != std::string::npos);
     REQUIRE(json.find(tmp.path.string()) == std::string::npos);
 
     std::string error;
@@ -318,6 +324,46 @@ TEST_CASE("forge development SDK validation rejects a shell exec bridge in the a
                                                             "/source/external/skia-build")));
 }
 
+TEST_CASE("forge development SDK validation requires the dev build profile in the cache",
+          "[cli][sdk][forge-dev]") {
+    TempDir tmp;
+    const auto expected = identity();
+    const auto prefix = tmp.path / "prefix";
+    const auto build = tmp.path / "build";
+    plant_install(prefix, build, expected);
+    const auto profile_error = [](const local_sdk::Validation& v) {
+        return std::find_if(v.errors.begin(), v.errors.end(), [](const std::string& e) {
+                   return e.find("PULP_PROFILE=dev") != std::string::npos;
+               }) != v.errors.end();
+    };
+
+    // Control: the planted cache says dev, so nothing below fails for another reason.
+    REQUIRE(
+        local_sdk::validate_staged_install(prefix, build, expected, "/source/external/skia-build")
+            .ok);
+
+    auto cache = read_file(build / "CMakeCache.txt");
+    const auto dev = cache.find("PULP_PROFILE:STRING=dev\n");
+    REQUIRE(dev != std::string::npos);
+
+    // release: the provenance would say dev while the configure was held to the
+    // release set, which is a different SDK.
+    auto release = cache;
+    release.replace(dev, std::string("PULP_PROFILE:STRING=dev\n").size(),
+                    "PULP_PROFILE:STRING=release\n");
+    write_file(build / "CMakeCache.txt", release);
+    REQUIRE(profile_error(local_sdk::validate_staged_install(prefix, build, expected,
+                                                             "/source/external/skia-build")));
+
+    // Absent: a source tree that predates PULP_PROFILE, so the recorded profile
+    // would be a claim the configure never made.
+    auto absent = cache;
+    absent.erase(dev, std::string("PULP_PROFILE:STRING=dev\n").size());
+    write_file(build / "CMakeCache.txt", absent);
+    REQUIRE(profile_error(local_sdk::validate_staged_install(prefix, build, expected,
+                                                             "/source/external/skia-build")));
+}
+
 TEST_CASE("forge development SDK provenance rejects a different source commit",
           "[cli][sdk][forge-dev]") {
     TempDir tmp;
@@ -363,6 +409,7 @@ void plant_tracing_evidence(const fs::path& prefix, const fs::path& build) {
                              "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
                              "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
                              "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
+                             "PULP_PROFILE:STRING=dev\n"
                              "PULP_TRACING:BOOL=ON\n");
     write_file(build / "CMakeCache.txt", cache);
     write_file(prefix / "lib/cmake/Pulp/PulpTargets.cmake",
@@ -499,6 +546,7 @@ TEST_CASE("trace SDK provenance records the profile and stays non-distributable"
 
     REQUIRE(json.find("\"kind\": \"development\"") != std::string::npos);
     REQUIRE(json.find("\"profile\": \"trace\"") != std::string::npos);
+    REQUIRE(json.find("\"build_profile\": \"dev\"") != std::string::npos);
     REQUIRE(json.find("\"tracing\": true") != std::string::npos);
     REQUIRE(json.find("\"distribution_eligible\": false") != std::string::npos);
 

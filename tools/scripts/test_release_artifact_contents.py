@@ -1917,6 +1917,39 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_provenance_claiming_a_development_profile_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            sdk_path = root / rac.sdk_asset_name("linux-x64")
+            with rac.Archive(sdk_path) as archive:
+                members = set(archive.members)
+            original_payload = member_payload
+
+            def profile_payload(profile: str):
+                def payload(name: str, platform: str = "linux-x64") -> bytes:
+                    if name == "pulp-sdk/sdk-provenance.json":
+                        marker = json.loads(original_payload(name, platform))
+                        marker["build_profile"] = profile
+                        return json.dumps(marker).encode()
+                    return original_payload(name, platform)
+                return payload
+
+            # Control: the key present and `release` is accepted, so the
+            # rejection below is the value and not the key's presence.
+            with mock.patch(__name__ + ".member_payload", side_effect=profile_payload("release")):
+                write_archive(sdk_path, members, as_zip=False)
+            rac.verify_platform(
+                root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+            )
+
+            with mock.patch(__name__ + ".member_payload", side_effect=profile_payload("dev")):
+                write_archive(sdk_path, members, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "unsafe SDK provenance.*build_profile"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
     def test_negative_control_provenance_claiming_tracing_on_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

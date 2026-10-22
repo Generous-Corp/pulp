@@ -39,6 +39,7 @@ class SdkProvenanceTests(unittest.TestCase):
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
             "PULP_ENABLE_INSPECTOR:BOOL=ON\n"
             "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
+            "PULP_PROFILE:STRING=release\n"
             "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE\n"
             "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=FALSE\n",
             encoding="utf-8",
@@ -319,6 +320,83 @@ class SdkProvenanceTests(unittest.TestCase):
                 expected_source_sha=self.sha,
             )
 
+    def test_build_without_the_release_profile_cannot_mint_release_provenance(self) -> None:
+        # Control: the fixture cache says release and mints cleanly, recording it.
+        self.assertEqual(self.marker()["build_profile"], "release")
+
+        path = self.build / "CMakeCache.txt"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "PULP_PROFILE:STRING=release\n", "PULP_PROFILE:STRING=dev\n"
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "PULP_PROFILE=release"):
+            self.marker()
+
+        # A cache from the command line before set(CACHE) typed it still reads.
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "PULP_PROFILE:STRING=dev\n", "PULP_PROFILE:UNINITIALIZED=release\n"
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(self.marker()["build_profile"], "release")
+
+        # A source tree that predates the profile never had its option set
+        # enforced; a missing key must not read as release.
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "PULP_PROFILE:UNINITIALIZED=release\n", ""
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "PULP_PROFILE is missing"):
+            self.marker()
+
+    def test_overridden_release_profile_cannot_mint_release_provenance(self) -> None:
+        path = self.build / "CMakeCache.txt"
+        # Control: an explicit OFF behaves like the absent key and mints.
+        path.write_text(
+            path.read_text(encoding="utf-8") + "PULP_PROFILE_OVERRIDDEN:INTERNAL=OFF\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(self.marker()["build_profile"], "release")
+
+        # PULP_PROFILE still says release, but an enforced option was overridden.
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "PULP_PROFILE_OVERRIDDEN:INTERNAL=OFF\n", "PULP_PROFILE_OVERRIDDEN:INTERNAL=ON\n"
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "PULP_PROFILE_ALLOW_OVERRIDE"):
+            self.marker()
+
+    def test_verify_rejects_a_marker_claiming_a_development_profile(self) -> None:
+        marker = self.marker()
+        marker["build_profile"] = "dev"
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        with self.assertRaisesRegex(provenance.ProvenanceError, "build_profile is 'dev'"):
+            provenance.verify_release_marker(
+                self.prefix,
+                expected_platform="darwin-arm64",
+                expected_source_sha=self.sha,
+            )
+
+    def test_verify_accepts_a_marker_minted_before_the_build_profile_key_existed(self) -> None:
+        marker = self.marker()
+        del marker["build_profile"]
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        self.assertEqual(
+            provenance.verify_release_marker(
+                self.prefix,
+                expected_platform="darwin-arm64",
+                expected_source_sha=self.sha,
+            ),
+            marker,
+        )
+
     def test_verify_accepts_a_marker_minted_before_the_bridge_exec_key_existed(self) -> None:
         marker = self.marker()
         del marker["features"]["bridge_exec"]
@@ -549,6 +627,7 @@ class SdkProvenanceTests(unittest.TestCase):
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
             "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
             "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
+            "PULP_PROFILE:STRING=release\n"
             "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE\n"
             "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=FALSE\n",
             encoding="utf-8",

@@ -96,6 +96,23 @@ def git(source, *args):
     return subprocess.check_output(['git', '-C', str(source), *args], text=True).strip()
 
 
+def build_profile_of(cache):
+    """The PULP_PROFILE the build was configured under.
+
+    A cache without PULP_PROFILE comes from a source tree that predates the
+    profile; nothing enforced a release option set there, so it is `dev`. A
+    release profile with PULP_PROFILE_OVERRIDDEN=ON kept an enforced option on
+    (PULP_PROFILE_ALLOW_OVERRIDE), so it is `dev` too.
+    """
+    value = cache.get('PULP_PROFILE')
+    if value is None:
+        return 'dev'
+    overridden = cache.get('PULP_PROFILE_OVERRIDDEN', 'OFF').strip().upper()
+    if overridden in ('ON', 'TRUE', '1', 'YES', 'Y'):
+        return 'dev'
+    return value.strip()
+
+
 def inspect(source, build, prefix, sha):
     source, build, prefix = (p.resolve(strict=True) for p in (source, build, prefix))
     require(re.fullmatch('[0-9a-f]{40}', sha), 'expected exact source SHA')
@@ -147,6 +164,7 @@ def inspect(source, build, prefix, sha):
             'cache_sha256': digest(cache_bytes),
             'cache_features': {k: cache[k] for k in FEATURE_KEYS if k in cache},
             'bridge_exec': bridge_exec_compiled_in(cache),
+            'build_profile': build_profile_of(cache),
             'artifacts_sha256': artifacts,
             'build_gpu_archive_sha256': digest(built_archive),
             'gpu_archive_identity_sha256': archive_identity(built_archive)}

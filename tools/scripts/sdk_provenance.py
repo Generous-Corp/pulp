@@ -24,6 +24,8 @@ from sdk_capability_handoff import (
 
 SCHEMA = "pulp.sdk-provenance.v1"
 PROFILE = "official-release"
+# The PULP_PROFILE a release configure is held to; recorded as `build_profile`.
+BUILD_PROFILE = "release"
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 PLATFORM_RE = re.compile(r"(?:darwin|linux|windows)-(?:arm64|x64)")
@@ -308,6 +310,24 @@ def _cache_bool(build_dir: Path, name: str) -> bool:
     return value in {"ON", "TRUE"}
 
 
+def _cache_bool_or(build_dir: Path, name: str, default: bool) -> bool:
+    """Like _cache_bool, but an absent key reads as `default`."""
+    cache = _read_text(build_dir / "CMakeCache.txt")
+    if not re.search(rf"(?m)^{re.escape(name)}:(?:BOOL|INTERNAL)=", cache):
+        return default
+    return _cache_bool(build_dir, name)
+
+
+def _cache_string(build_dir: Path, name: str) -> str:
+    cache = _read_text(build_dir / "CMakeCache.txt")
+    match = re.search(
+        rf"(?m)^{re.escape(name)}:(?:STRING|INTERNAL|UNINITIALIZED)=(.*)$", cache
+    )
+    if not match:
+        raise ProvenanceError(f"{name} is missing from {build_dir / 'CMakeCache.txt'}")
+    return match.group(1).strip()
+
+
 # Optional for historical SDKs. When present, bind producer capabilities to the
 # installed config/archive rather than trusting consumer CMake cache switches.
 GPU_AUDIO_CAPABILITIES = {
@@ -459,6 +479,24 @@ def build_release_marker(
             "official release SDK feature contract requires bridge_exec=OFF; this "
             "build was configured with PULP_DEV_BRIDGE_EXEC=ON and is development-only"
         )
+    # PULP_PROFILE=release is the one authoritative statement of the shipped
+    # option set (tools/cmake/PulpProfiles.cmake); the per-option checks above
+    # stay as independent evidence. A cache without the key predates the
+    # profile and _cache_string refuses it, so an old tag cannot be re-minted.
+    build_profile = _cache_string(build_dir, "PULP_PROFILE")
+    if build_profile != BUILD_PROFILE:
+        raise ProvenanceError(
+            f"official release SDK requires PULP_PROFILE={BUILD_PROFILE}; this build "
+            f"was configured with PULP_PROFILE={build_profile!r} and is development-only"
+        )
+    # PULP_PROFILE_ALLOW_OVERRIDE leaves PULP_PROFILE=release in the cache but
+    # publishes PULP_PROFILE_OVERRIDDEN=ON; such a build kept an enforced
+    # option on and is a dev build whatever the profile key says.
+    if _cache_bool_or(build_dir, "PULP_PROFILE_OVERRIDDEN", False):
+        raise ProvenanceError(
+            "official release SDK requires an unoverridden release profile; this "
+            "build was configured with PULP_PROFILE_ALLOW_OVERRIDE and is development-only"
+        )
     has_vellum_d15 = _cache_bool(build_dir, "PULP_GPU_AUDIO_HAS_VELLUM_D15")
     vellum_d15_release_eligible = _cache_bool(
         build_dir, "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE"
@@ -478,6 +516,7 @@ def build_release_marker(
         "schema": SCHEMA,
         "kind": "release",
         "profile": PROFILE,
+        "build_profile": BUILD_PROFILE,
         "distribution_eligible": True,
         "sdk_version": version,
         "source_git_ref": release_tag,
@@ -578,6 +617,13 @@ def verify_release_marker(
         expected_features["bridge_exec"] = False
     if features != expected_features:
         raise ProvenanceError(f"{path}: release feature contract is unsafe")
+    # `build_profile` is newer than bridge_exec. Absent on older markers; when
+    # present it must name the release profile, because only a
+    # PULP_PROFILE=release configure can mint one.
+    if "build_profile" in marker and marker["build_profile"] != BUILD_PROFILE:
+        raise ProvenanceError(
+            f"{path}: build_profile is {marker['build_profile']!r}, expected {BUILD_PROFILE!r}"
+        )
     if _installed_gpu_audio_capability_schema(prefix) and "gpu_audio" not in marker:
         raise ProvenanceError("missing GPU-audio capability receipt")
     if "gpu_audio" in marker:

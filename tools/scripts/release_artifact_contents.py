@@ -1167,6 +1167,12 @@ def verify_sdk_archive(
                 "build_type": "Release",
                 "features": expected_features,
             }
+            # `build_profile` (the PULP_PROFILE the SDK was configured under)
+            # is absent from archives minted before the profile existed and
+            # binding when present: a release archive can only come from a
+            # release-profile configure.
+            if "build_profile" in provenance:
+                expected["build_profile"] = "release"
             mismatches = {
                 key: (provenance.get(key), value)
                 for key, value in expected.items()
