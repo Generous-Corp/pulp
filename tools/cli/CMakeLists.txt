@@ -35,7 +35,9 @@ set(_pulp_migration_index_src "${CMAKE_CURRENT_BINARY_DIR}/generated/migration_i
 file(GLOB _pulp_migration_docs
      LIST_DIRECTORIES FALSE
      CONFIGURE_DEPENDS
-     "${CMAKE_SOURCE_DIR}/docs/migrations/*.md")
+     "${CMAKE_SOURCE_DIR}/docs/migrations/*.md"
+     # Validated by the generator but not emitted; listed so an edit re-runs it.
+     "${CMAKE_SOURCE_DIR}/docs/migrations/unreleased/*.md")
 
 add_custom_command(
     OUTPUT  "${_pulp_migration_index_src}"

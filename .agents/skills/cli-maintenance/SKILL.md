@@ -962,6 +962,23 @@ for the delegated branches. The same split bites status output: a `pulp status`
 line added only to the Rust fallback never reaches installed users, because
 installed status delegates to `pulp-cpp status`.
 
+### A standalone `pulp build` configure needs the SDK prefix
+
+The C++ `cmd_build` always passed `-DCMAKE_PREFIX_PATH=<resolved SDK>` for a
+standalone project; the Rust `pulp build` did not, so `pulp create --no-build`
+then `pulp build` (or any fresh build dir) let `find_package(Pulp)` take
+whatever Pulp package was first on CMake's search path. With `~/.pulp/bin` on
+`PATH`, that was the stale `~/.pulp/lib/cmake/Pulp` left by an old install,
+which failed the version check. `experimental/pulp-rs/src/standalone_sdk.rs`
+now finds an installed SDK in the same order as the C++
+`resolve_standalone_sdk(materialize=false)` (`sdk_path`, the `sdk_checkout`
+local build, `~/.pulp/sdk/<version>`, `latest` = newest installed), and when
+none is on disk the build is delegated to `pulp-cpp`, which can download one.
+Keep the two lookups in step. Only a fresh or migrated cache needs the prefix:
+CMake keeps the cached value across reconfigures. The orchestrate unit-test
+fixture `standalone_project` names an `sdk_path` so its configures stay
+in-process; the shell-out cases are in `tests/orchestrate_parity_test.rs`.
+
 ### Configure defaults live in two parsers — change both
 
 A fresh `pulp build` configure (and the `cmd_build` bootstrap that `pulp dev` /
@@ -1215,11 +1232,23 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   installer by unpacking its `Distribution` (`xar -xf … Distribution`) and
   checking for `<options customize="allow">` + one `<line choice>` per format —
   a flat `Bom/Payload/PackageInfo` archive is a bare `pkgbuild` with NO Customize.
+- `pulp ship package` (macOS) exits 1 when any installer fails or nothing was
+  packaged. It used to print `FAILED to create combined installer` / `Created
+  0 .pkg` and exit 0, so `release` went on to notarize nothing and a script saw
+  success. Every `FAILED` branch bumps `failed_count`; a new packaging branch
+  must do the same.
+- `pulp ship` resolves its root with `resolve_active_project_root()`, so it runs
+  in an SDK consumer project (`pulp.toml`, no `core/`) as well as the checkout.
+  Anything it takes from Pulp itself goes through `ship_support_file()`: the
+  checkout path first, then the selected SDK's `share/pulp/ship/` (installed by
+  `PulpInstallRules.cmake`, asserted by `test_pulp_install_layout.cmake`). A
+  new checkout-relative path in `cmd_ship.cpp` (scripts, templates) needs the
+  same treatment, or `ship` breaks for every consumer project again.
 - A subcommand that must work BEFORE a build exists (e.g. `pulp ship doctor`,
   which makes signing non-interactive) has to be dispatched *above*
   `cmd_ship`'s `build/CMakeCache.txt` guard — that early-return fires first and
   would otherwise reject it with "Build directory not found." Put such handlers
-  right after `find_project_root()`.
+  right after the root resolution.
 - `pulp ship doctor` shells out to `tools/scripts/ensure_signing_ready.sh` (the
   canonical logic + its own `test_ensure_signing_ready.sh`); the C++ side is a
   thin pass-through, and macOS `ship sign` invokes it as a **mandatory quiet
@@ -3134,7 +3163,15 @@ Key layout:
   `breaking` (bool), `applies_if` (expression string), `summary`.
   `docs/migrations/README.md` is the schema reference; the codegen
   skips it. Only write a note when a reasonable pro developer needs
-  to change code / config / habits — not every PR.
+  to change code / config / habits — not every PR. A PR never writes
+  this file itself: it writes `docs/migrations/unreleased/<topic>.md`
+  (`breaking` + `summary` only), and the version-at-land bump that
+  assigns the SDK version folds it into `v<assigned>.md`
+  (`tools/scripts/fold_migration_notes.py`). A guessed `vX.Y.Z.md`
+  goes stale whenever another release lands first.
+- **`docs/migrations/unreleased/*.md`** — validated by the codegen
+  (refused if it sets `version` or `applies_if`) but not embedded,
+  because no released CLI can be upgraded to it yet.
 - **`tools/scripts/build_migration_index.py`** — standalone Python
   codegen. Parses the TOML frontmatter, escapes the Markdown body for
   a C++ string literal, sorts entries by parsed semver, and writes
@@ -3290,6 +3327,10 @@ Gotchas:
     - `validate-build.sh` keeps Debug — that's the validator's job (catches debug-only assertion failures).
     - `cli_common.cpp`'s SDK install path already used Release.
   Follow-up scope (not done yet): `pulp build --debug` / `--release` that force a reconfigure of an existing `build/` directory.
+- Standalone `pulp create` passes `-G Ninja` when `configure_ninja_available()`
+  and the build dir has no `CMakeCache.txt`, matching `pulp build`'s fresh
+  configure; before that it silently got Makefiles unless `CMAKE_GENERATOR` was
+  set in the caller's shell.
 - Standalone `pulp create` configure/test shell commands live in
   `tools/cli/create_build_commands.{hpp,cpp}` so path quoting is tested without
   running a full scaffold build. Keep every path-bearing command argument

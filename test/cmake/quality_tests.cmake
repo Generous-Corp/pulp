@@ -1267,6 +1267,12 @@ if(Python3_Interpreter_FOUND)
     # else's unrelated PR, which is exactly the signal nobody attributes here.
     add_test(NAME gpu-test-resource-locks COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_test_resource_locks.py")
+    # Realtime worker-pool lock policy: a suite that starts a graph worker pool
+    # serializes on RESOURCE_LOCK pulp_realtime_worker_pool, because its
+    # workers spin at realtime priority and starve every normal-priority test
+    # running beside them. Manifest-only, like the GPU policy above.
+    add_test(NAME realtime-pool-resource-locks COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_realtime_pool_resource_locks.py")
     add_test(NAME gpu-audio-provider-identity-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_provider_identity.py")
     add_test(NAME gpu-audio-p2-campaign-contract-selftest COMMAND ${Python3_EXECUTABLE}
@@ -1558,6 +1564,12 @@ if(Python3_Interpreter_FOUND)
     # otherwise inherit. 3x the worst run observed on 2026-09-13, rounded up.
     set_tests_properties(version-at-land-selftest PROPERTIES
         TIMEOUT 180)
+
+    # Unreleased migration notes: their validation in the index generator and
+    # the fold the version-at-land bump runs to key them to the version it
+    # assigns. Pure file fixtures in a temporary directory.
+    add_test(NAME fold-migration-notes-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fold_migration_notes.py")
 
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued

@@ -227,7 +227,9 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
         std::cout << *gpu_elapsed_ns;
     else
         std::cout << "null";
-    std::cout << ",\"fault_injections\":" << stats.fault_injections << ",\"hardware_model\":\""
+    std::cout << ",\"device_lost_callback_ns\":" << stats.device_lost_callback_ns
+              << ",\"device_lost_reason\":" << stats.device_lost_reason
+              << ",\"fault_injections\":" << stats.fault_injections << ",\"hardware_model\":\""
               << json_escape(hardware_model()) << "\""
               << ",\"os\":\"" << json_escape(have_system_info ? system_info.sysname : "unknown")
               << "\""
@@ -690,6 +692,24 @@ int main(int argc, char** argv) {
         stats.wait_any_unsupported != 0) {
         passed = false;
         reason = "timed_wait_any_unsupported";
+    }
+    const bool forced_loss =
+        scenario->fault == DawnSharedIoProvider::Fault::ForceLossBeforeSubmit ||
+        scenario->fault ==
+            DawnSharedIoProvider::Fault::ForceLossBetweenSubmitAndCompletionRegistration ||
+        scenario->fault == DawnSharedIoProvider::Fault::ForceLossAfterCompletionRegistration;
+    // Keep an earlier failure's reason; these only explain a run that was
+    // otherwise passing.
+    if (forced_loss && (stats.device_lost_callback_ns == 0 || stats.device_lost_reason == 0)) {
+        if (passed)
+            reason = "device_lost_callback_not_recorded";
+        passed = false;
+    }
+    if (scenario->name == "baseline" &&
+        (stats.device_lost_callback_ns != 0 || stats.device_lost_reason != 0)) {
+        if (passed)
+            reason = "device_lost_callback_recorded_without_loss";
+        passed = false;
     }
     if (scenario->name == "wait-any-timeout" && stats.wait_any_timeouts == 0) {
         passed = false;

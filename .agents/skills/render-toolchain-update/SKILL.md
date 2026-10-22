@@ -280,6 +280,14 @@ retain those fields in the PR/landing evidence.
 
 ## Common traps
 
+- **A Skia bump can move the ICU Pulp ships.** Skia's `libskunicode_icu.a`
+  carries ICU code and data (`icudt<NN>_dat`; `icuver.res` names the exact
+  version, 78.2 for `chrome/m153` and `chrome/m157`). When the symbol or version changes, update
+  the ICU entry in NOTICE.md from that release's `LICENSE` (verbatim, shipped
+  sections only), the ICU rows in DEPENDENCIES.md, `docs/reference/licensing.md`
+  and `tools/deps/manifest.json`, and re-check that
+  `tools/cmake/scripts/icu_data_subset.py` still rewrites the new archive
+  (`icu-data-subset-deterministic`, `pulp-test-icu-data-breaks`).
 - A V8 bump can break choc's V8 bridge without any Pulp change: the release-path
   cube capture is the canary, and the m153 to m157 move tripped it. V8 15.4
   (commit `3186b30e34b4`) runs the `v8::Array::Iterate` callback inside its own

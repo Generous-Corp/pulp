@@ -22,6 +22,7 @@
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpMacosArchiveFloor.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpSkiaDawnProvider.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpSkiaIcuData.cmake")
 
 # Start from "Skia supplies no Dawn" so every early return below leaves the
 # recorded provider decision false rather than stale from a previous configure.
@@ -425,6 +426,19 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
             "Skia (wasm): excluding libskottie.a/libsksg.a — the published slice "
             "leaves skjson::* undefined and ships no jsonreader/skresources "
             "archive, so Lottie is unavailable on this backend")
+    endif()
+
+    # libskunicode_icu.a embeds the full ICU data package (~10.9 MB), the
+    # largest single contributor to a Pulp binary. Link a copy whose data
+    # object keeps only the items the linked ICU code can read (break
+    # iteration, normalization, properties, locale resolution); see
+    # scripts/icu_data_subset.py for the policy. PULP_ICU_DATA_SUBSET=OFF
+    # links the archive unchanged. Any structural surprise falls back to the
+    # unchanged archive with a warning.
+    option(PULP_ICU_DATA_SUBSET
+        "Link Skia's ICU archive with the ICU data trimmed to what Pulp's text stack reads" ON)
+    if(APPLE AND PULP_ICU_DATA_SUBSET)
+        _pulp_skia_subset_icu_data(_skia_all_libs)
     endif()
 
     set(SKIA_LIBRARIES ${_skia_all_libs})

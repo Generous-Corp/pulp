@@ -293,6 +293,23 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   `stop_display_link()` / `start_display_link()`: a UI that idled at 0 fps for 30 s
   must not resume with a 30-second dt — that would teleport any animation that
   starts on wake straight to its end state.
+- **A CADisplayLink runs at 60 Hz on ProMotion unless it asks for more.** Every
+  iOS host that owns a link feeds `render::DisplayRateBoost` (in
+  `pulp/render/render_loop.hpp`) once per tick with whether it drew, and passes
+  the result to `render::apply_display_rate_change(link, change)`, which sets
+  `preferredFrameRateRange` to the panel maximum while drawing and back to the
+  default after 30 idle ticks; `stop_display_link()` feeds `on_stop()`. On an
+  iPhone the request is ignored unless the Info.plist of the process that owns
+  the link sets `CADisableMinimumFrameDurationOnPhone`. An AUv3 editor's link
+  runs in the extension process, so both `templates/ios-auv3/HostApp/Info.plist.in`
+  and the appex's `templates/ios-auv3/Info.plist.in` (top-level dict, not inside
+  `NSExtension`) set it. Which bundle iOS actually reads for an out-of-process
+  extension is unverified on device. An iOS standalone app built without these
+  templates gets no key and stays at 60 Hz on iPhone. `IOSRenderLoop`
+  is not what the window and plug-in view hosts use; they hand-roll their links,
+  so a change made only in `render_loop_apple.mm` never reaches a shipping
+  editor. Proof is device-only: log `link.targetTimestamp` deltas (8.3 ms at
+  120 Hz) while animating.
 - **`window_host_ios.mm` used to own no FrameClock at all** (only
   `plugin_view_host_ios.mm` did), so a *standalone* iOS app advanced nothing but
   gesture recognizers — no FrameClock subscribers, no widget animations, no CSS

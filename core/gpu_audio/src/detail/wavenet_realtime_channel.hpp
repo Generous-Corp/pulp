@@ -14,6 +14,11 @@ class WaveNetRealtimeChannel {
     virtual void service_until(std::uint64_t now_ns, std::uint64_t deadline_ns) noexcept = 0;
     virtual std::optional<GpuWaveNetBlockResult> receive(std::span<float>) noexcept = 0;
     virtual bool release() noexcept = 0;
+    // Serialized worker diagnostic: the provider's device is gone, so nothing
+    // submitted to this channel will complete successfully again.
+    virtual bool lost() const noexcept {
+        return false;
+    }
 };
 struct WaveNetRealtimeTestAccess {
     static void

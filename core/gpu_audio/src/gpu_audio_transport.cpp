@@ -2,6 +2,7 @@
 
 #include "detail/gpu_audio_transport_trial_observer.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
 
 #include <algorithm>
@@ -33,6 +34,77 @@ bool configure_gpu_audio_transport_trial_observer(
     transport.trial_observer_context_ = context;
     transport.trial_observer_ = observer;
     return true;
+}
+
+namespace detail {
+
+// Everything capability_report() and status_snapshot() need from a prepared
+// node, copied at prepare() so neither read touches the node again.
+struct GpuAudioTransportConfiguration {
+    bool prepared = false;
+    bool realtime_health = false;
+    bool staged_health = false;
+    GpuAudioProvider provider = GpuAudioProvider::Unknown;
+    MissPolicy miss_policy = MissPolicy::Silence;
+    std::uint32_t sample_rate = 0;
+    std::uint32_t block_size = 0;
+    std::uint32_t latency_blocks = 0;
+};
+
+struct GpuAudioTransportDiagnostics {
+    SeqlockCell<GpuAudioTransportConfiguration> configuration;
+    RealtimeGpuHealthMirror health;
+    // Host-written at prepare/release, callback-read: the prepared node's
+    // primary path is its CPU model, so a CPU-delivered block is not a miss.
+    bool cpu_primary = false;
+};
+
+} // namespace detail
+
+GpuAudioTransport::GpuAudioTransport()
+    : diagnostics_(std::make_unique<detail::GpuAudioTransportDiagnostics>()) {
+    (void)diagnostics_->configuration.publish({});
+}
+
+GpuAudioTransport::~GpuAudioTransport() {
+    release();
+}
+
+void GpuAudioTransport::refresh_node_health() noexcept {
+    detail::RealtimeGpuHealth health;
+    if (realtime_gpu_health_ != nullptr) {
+        if (realtime_gpu_health_(realtime_gpu_context_, health))
+            (void)diagnostics_->health.publish(health);
+        return;
+    }
+    if (!sample_staged_health_ || node_ == nullptr)
+        return;
+    // The base default (Uninitialized) carries no health to publish.
+    const auto status = node_->status_snapshot();
+    if (status.provider_state != GpuAudioProviderState::Uninitialized)
+        (void)diagnostics_->health.publish(detail::health_from_status(status));
+}
+
+void GpuAudioTransport::publish_prepared_configuration() noexcept {
+    detail::GpuAudioTransportConfiguration configuration;
+    if (prepared_ && node_ != nullptr) {
+        configuration.prepared = true;
+        configuration.realtime_health = realtime_gpu_health_ != nullptr;
+        configuration.staged_health = sample_staged_health_;
+        // Generic private/test hooks cannot establish provider identity. The
+        // concrete shared path helper returns Dawn only after identifying the
+        // exact provider-backed node; future providers must add equivalent
+        // proof.
+        configuration.provider = detail::realtime_gpu_provider(node_);
+        configuration.miss_policy = miss_policy_;
+        configuration.sample_rate = sample_rate_;
+        configuration.block_size = block_size_;
+        configuration.latency_blocks = latency_blocks_;
+    }
+    diagnostics_->cpu_primary = configuration.provider == GpuAudioProvider::Cpu;
+    // Host-only writer, while neither the worker nor a pump caller runs.
+    while (!diagnostics_->configuration.publish(configuration)) {
+    }
 }
 
 bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
@@ -76,8 +148,10 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         realtime_gpu_service_ = realtime_path.service;
         realtime_gpu_fence_ = realtime_path.fence;
         realtime_gpu_delivered_ = realtime_path.delivered;
+        realtime_gpu_health_ = realtime_path.health;
         callback_sequence_ = realtime_path.next_sequence(realtime_path.context);
     }
+    sample_staged_health_ = !realtime_path.active();
 
     const std::uint64_t cap = static_cast<std::uint64_t>(ring_blocks_) * block_size_;
     if (!input_ring_.prepare(channels_, cap) || !output_ring_.prepare(channels_, cap)) {
@@ -137,6 +211,9 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     worker_workgroup_joined_.store(false, std::memory_order_relaxed);
     worker_workgroup_join_failures_.store(0, std::memory_order_relaxed);
     prepared_ = true;
+    // Quiescent host reads: neither the callback nor the worker has started.
+    refresh_node_health();
+    publish_prepared_configuration();
 
     if (config.run_worker_thread) {
         // Poll a few times per block so the worker reliably keeps the output
@@ -230,6 +307,9 @@ void GpuAudioTransport::release() noexcept {
     realtime_gpu_service_ = nullptr;
     realtime_gpu_fence_ = nullptr;
     realtime_gpu_delivered_ = nullptr;
+    realtime_gpu_health_ = nullptr;
+    sample_staged_health_ = false;
+    diagnostics_->health.reset();
     trial_observer_context_ = nullptr;
     trial_observer_ = nullptr;
     callback_sequence_ = 0;
@@ -239,6 +319,7 @@ void GpuAudioTransport::release() noexcept {
     worker_workgroup_joined_.store(false, std::memory_order_release);
     channels_ = block_size_ = sample_rate_ = latency_blocks_ = ring_blocks_ = 0;
     prepared_ = false;
+    publish_prepared_configuration();
 }
 
 void GpuAudioTransport::process(const audio::BufferView<const float>& input,
@@ -386,7 +467,8 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
         output.clear();
         delivered = SharedIoDeliveryDisposition::Priming;
     } else if (status != detail::kRealtimeGpuReady) {
-        miss_blocks_.fetch_add(1, std::memory_order_relaxed);
+        if (!diagnostics_->cpu_primary)
+            miss_blocks_.fetch_add(1, std::memory_order_relaxed);
         switch (miss_policy_) {
         case MissPolicy::Silence:
             output.clear();
@@ -455,8 +537,10 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
     std::lock_guard<std::mutex> lock(pump_mutex_);
 
     if (realtime_gpu_fence_ != nullptr) {
-        if (!realtime_gpu_fenced_for_offline_)
+        if (!realtime_gpu_fenced_for_offline_) {
             realtime_gpu_fenced_for_offline_ = realtime_gpu_fence_(realtime_gpu_context_);
+            refresh_node_health();
+        }
         // A failed barrier retains its owner and stays CPU-only. The same
         // continuously primed fallback carries the RT/offline timeline.
         process_shared(input, output, n, sequence, input_valid, monotonic_now_ns(), false);
@@ -516,6 +600,9 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
             static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch())
                     .count()));
+        // The service step is where a node observes provider loss or failure;
+        // publish what it saw before the next host/UI read.
+        refresh_node_health();
         if (produced != detail::kRealtimeGpuServiceInactive) {
             const auto block_ns =
                 static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -576,6 +663,7 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
         produced_blocks_.fetch_add(1, std::memory_order_relaxed);
         ++done;
     }
+    refresh_node_health();
 }
 
 void GpuAudioTransport::record_delivery(std::uint8_t disposition, bool worker_output) noexcept {
@@ -630,10 +718,42 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     return s;
 }
 
+namespace {
+
+GpuAudioCapabilityReport
+capability_from(const detail::GpuAudioTransportConfiguration& configuration) noexcept {
+    GpuAudioCapabilityReport report;
+    if (!configuration.prepared)
+        return report;
+    report.provider = configuration.provider;
+    report.path = report.provider == GpuAudioProvider::Cpu ? GpuAudioExecutionPath::Cpu
+                  : report.provider != GpuAudioProvider::Unknown
+                      ? GpuAudioExecutionPath::SharedMemory
+                      : GpuAudioExecutionPath::Staged;
+    report.eligibility = GpuAudioEligibility::Eligible;
+    report.fallback_policy = configuration.miss_policy;
+    report.prepared_latency_blocks = configuration.latency_blocks;
+    // `latency_blocks` is the transport's fixed PDC delay. It is also the
+    // algorithmic lead for authenticated concrete shared providers, but a
+    // generic staged node has no lead declaration at this boundary.
+    report.prepared_lead_blocks =
+        report.provider == GpuAudioProvider::Unknown ? 0 : configuration.latency_blocks;
+    report.prepared = true;
+    report.fallback_available = configuration.miss_policy == MissPolicy::CpuFallback;
+    report.diagnostics_available = true;
+    return report;
+}
+
+} // namespace
+
 GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
-    const auto capability = capability_report();
-    const auto timing = stats();
-    const auto delivery = delivery_snapshot();
+    // Reads only transport-owned atomics and the two coherent copies in
+    // `diagnostics_`; never `node_` or the plain prepared fields, which a
+    // host may change concurrently by re-preparing or destroying the node.
+    detail::GpuAudioTransportConfiguration configuration;
+    if (!diagnostics_->configuration.read(configuration))
+        configuration = {};
+    const auto capability = capability_from(configuration);
 
     GpuAudioStatus status;
     status.provider = capability.provider;
@@ -641,23 +761,24 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
     status.prepared_lead_blocks = capability.prepared_lead_blocks;
     status.fallback_available = capability.fallback_available;
     status.diagnostics_available = capability.diagnostics_available;
-    status.produced_blocks = timing.produced_blocks;
-    status.missed_blocks = timing.miss_blocks;
-    status.fallback_blocks = delivery.cpu_fallback_blocks;
-    status.resynced_blocks = timing.resynced_blocks;
-    status.input_dropped_frames = timing.input_dropped_frames;
-    status.last_block_us = timing.last_block_us;
-    status.avg_block_us = timing.avg_block_us;
+    status.produced_blocks = produced_blocks_.load(std::memory_order_relaxed);
+    status.missed_blocks = miss_blocks_.load(std::memory_order_relaxed);
+    status.fallback_blocks = delivery_fallback_.load(std::memory_order_relaxed);
+    status.resynced_blocks = resynced_blocks_.load(std::memory_order_relaxed);
+    status.input_dropped_frames =
+        input_dropped_blocks_.load(std::memory_order_relaxed) * configuration.block_size;
+    status.last_block_us = last_block_ns_.load(std::memory_order_relaxed) / 1000.0;
+    status.avg_block_us = avg_block_ns_.load(std::memory_order_relaxed) / 1000.0;
 
-    if (!prepared_ || node_ == nullptr) {
+    if (!configuration.prepared) {
         status.selected_engine = GpuAudioEngine::Unknown;
         status.provider_state = GpuAudioProviderState::Uninitialized;
         return status;
     }
 
-    status.sample_rate = sample_rate_;
-    status.block_size = block_size_;
-    status.latency_samples = latency_samples();
+    status.sample_rate = configuration.sample_rate;
+    status.block_size = configuration.block_size;
+    status.latency_samples = configuration.latency_blocks * configuration.block_size;
 
     // A prepared transport is not, by itself, evidence that work executes on
     // a GPU. Generic GpuAudioNode implementations use the staged worker path
@@ -683,32 +804,40 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
     } else {
         status.provider_state = GpuAudioProviderState::Ready;
     }
+
+    // Node health can only lower the state established above. The enum values
+    // are ordered Ready < Degraded < Unavailable for a prepared transport.
+    const auto lower_to = [&status](GpuAudioProviderState state) noexcept {
+        if (static_cast<std::uint8_t>(state) > static_cast<std::uint8_t>(status.provider_state))
+            status.provider_state = state;
+    };
+    detail::RealtimeGpuHealth health;
+    const bool sampled = (configuration.realtime_health || configuration.staged_health) &&
+                         diagnostics_->health.read(health);
+    if (sampled) {
+        lower_to(detail::provider_state_for_health(health));
+        status.recovery_reason = detail::reported_recovery_reason(health);
+        status.recovery_sequence = health.recovery_sequence;
+        status.epoch = health.epoch;
+        status.delivery_epoch_active = health.delivery_epoch_active;
+        for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
+            status.terminal_counts[i] = health.terminal_counts[i];
+    } else if (configuration.realtime_health) {
+        // No coherent health copy: never report an unverified provider as
+        // Ready, and claim no recovery cause that was not observed. A staged
+        // node that reports no health keeps the staged state above.
+        lower_to(GpuAudioProviderState::Degraded);
+    }
+    status.selected_engine = detail::delivering_engine(
+        status.provider_state, status.selected_engine, status.fallback_policy);
     return status;
 }
 
 GpuAudioCapabilityReport GpuAudioTransport::capability_report() const noexcept {
-    GpuAudioCapabilityReport report;
-    if (!prepared_ || node_ == nullptr)
-        return report;
-
-    // Generic private/test hooks cannot establish provider identity. The
-    // concrete shared path helper returns Dawn only after identifying the
-    // exact provider-backed node; future providers must add equivalent proof.
-    report.provider = detail::realtime_gpu_provider(node_);
-    report.path = report.provider != GpuAudioProvider::Unknown ? GpuAudioExecutionPath::SharedMemory
-                                                               : GpuAudioExecutionPath::Staged;
-    report.eligibility = GpuAudioEligibility::Eligible;
-    report.fallback_policy = miss_policy_;
-    report.prepared_latency_blocks = latency_blocks_;
-    // `latency_blocks_` is the transport's fixed PDC delay. It is also the
-    // algorithmic lead for authenticated concrete shared providers, but a
-    // generic staged node has no lead declaration at this boundary.
-    report.prepared_lead_blocks =
-        report.provider == GpuAudioProvider::Unknown ? 0 : latency_blocks_;
-    report.prepared = true;
-    report.fallback_available = miss_policy_ == MissPolicy::CpuFallback;
-    report.diagnostics_available = true;
-    return report;
+    detail::GpuAudioTransportConfiguration configuration;
+    if (!diagnostics_->configuration.read(configuration))
+        return {};
+    return capability_from(configuration);
 }
 
 } // namespace pulp::gpu_audio

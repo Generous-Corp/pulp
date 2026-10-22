@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/gpu_audio_status.hpp>
 #include <pulp/signal/convolver.hpp>
 
 namespace pulp::render {
@@ -32,6 +33,8 @@ class GpuConvolver;
 
 namespace detail {
 struct RealtimeGpuNodePath;
+struct RealtimeGpuHealth;
+struct GpuConvolverTestAccess;
 struct SharedIoProviderIdentity;
 SharedIoProviderIdentity realtime_gpu_provider_identity(GpuAudioNode*) noexcept;
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
@@ -190,6 +193,22 @@ class GpuConvolver : public GpuAudioNode {
         return fft_size_;
     }
 
+    /// Allocation-free provider-neutral lifecycle projection, safe to call
+    /// from a host or UI thread while a transport runs this node (not
+    /// concurrently with prepare()). The authenticated shared path reports
+    /// the health its transport last sampled after a service step: a fenced
+    /// session is `Degraded`, a lost provider is `Unavailable`, each with the
+    /// first latched recovery reason. The staged path reports what it can
+    /// prove: provider and engine are `Unknown` while the staged GpuCompute
+    /// device is live, the engine is `Cpu` when no device initialized, and a
+    /// lost device is `Unavailable` with `ProviderLost`.
+    GpuAudioStatus status_snapshot() const noexcept override;
+    /// First latched recovery cause, or None. Same snapshot as status_snapshot().
+    GpuAudioRecoveryReason recovery_reason() const noexcept;
+    /// True before preparation, or once GPU delivery was fenced or its
+    /// provider lost. A diagnostic snapshot, not a promise about the next block.
+    bool fenced() const noexcept;
+
   protected:
     /// Allocate + load the CPU fallback machinery (both the RT miss fallback and
     /// the no-GPU worker fallback) and the latency-alignment delay ring. Shared
@@ -260,6 +279,11 @@ class GpuConvolver : public GpuAudioNode {
                                             std::uint64_t callback_end_ns,
                                             std::uint64_t result_visible_ns) noexcept;
     static std::uint64_t next_realtime_shared_io_sequence(void*) noexcept;
+    // Serialized non-RT (transport worker or quiescent host). Also republishes
+    // the sample for status_snapshot() readers on other threads.
+    static bool realtime_shared_io_health(const void* self, detail::RealtimeGpuHealth&) noexcept;
+    // Host-thread safe: the staged GpuCompute loss query is atomic.
+    GpuAudioRecoveryReason staged_recovery_reason() const noexcept;
     bool has_realtime_shared_io() const noexcept;
     detail::SharedIoProviderIdentity provider_identity_for_diagnostics() const noexcept;
 
@@ -275,6 +299,7 @@ class GpuConvolver : public GpuAudioNode {
     friend bool detail::drain_gpu_convolver_trial_admissions(
         GpuConvolver&, std::vector<detail::SharedIoTraceAdmission>&) noexcept;
     friend std::uint64_t detail::gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
+    friend struct detail::GpuConvolverTestAccess;
 
     struct SharedIoState;
 

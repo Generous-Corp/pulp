@@ -730,6 +730,13 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
     LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Architecture-neutral neural node: every family nulls against its private
+# adapter through the transport, with a fake WaveNet provider seam.
+pulp_add_test_suite(pulp-test-gpu-neural-realtime-node
+    SOURCES test_gpu_neural_realtime_node.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Plug-in-boundary continuity: a GPU-audio effect driven through the real CLAP
 # adapter and HeadlessHost must null against a CPU reference across injected
 # provider failure/loss, worker starvation, reactivation, bypass, and state
@@ -737,6 +744,13 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
 if(PULP_HAS_CLAP)
     pulp_add_test_suite(pulp-test-gpu-audio-plugin-boundary-continuity
         SOURCES test_gpu_audio_plugin_boundary_continuity.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::gpu-audio pulp::format pulp::audio-analysis clap
+        COMPILE_DEFINITIONS PULP_CLAP_GUI=1
+        INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+    # The same boundary for the architecture-neutral neural node, over a
+    # GPU-backed (fake provider) family and CPU-only families.
+    pulp_add_test_suite(pulp-test-gpu-neural-plugin-boundary-continuity
+        SOURCES test_gpu_neural_plugin_boundary_continuity.cpp harness/rt_allocation_probe.cpp
         LIBRARIES pulp::gpu-audio pulp::format pulp::audio-analysis clap
         COMPILE_DEFINITIONS PULP_CLAP_GUI=1
         INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
@@ -866,7 +880,7 @@ if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
         COMPILE_DEFINITIONS PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
 endif()
 pulp_add_test_suite(pulp-test-gpu-convolver GROUP pulp-test-group-core-gpu-audio-private
-    SOURCES test_gpu_convolver.cpp
+    SOURCES test_gpu_convolver.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
     ${_pulp_gpu_convolver_defs}
@@ -1155,3 +1169,12 @@ pulp_test_spawns(pulp-test-group-core-platform NONE REASON "dlopens the system l
 pulp_test_spawns(pulp-test-group-core-runtime-http NONE REASON "runs /bin/echo, /bin/sh, /bin/pwd and powershell, nothing the tree builds")
 pulp_test_spawns(pulp-test-streaming-model-contract NONE REASON "forks itself without exec and loads nothing the tree builds")
 pulp_test_spawns(pulp-test-group-core-gpu-audio-private NONE REASON "forks itself without exec and loads nothing the tree builds")
+
+# One translation unit per GPU-audio contract header, each including that
+# header first, so an include-order dependence between them fails to compile.
+pulp_add_test_suite(pulp-test-gpu-audio-header-standalone
+    SOURCES test_gpu_audio_header_standalone_status.cpp
+            test_gpu_audio_header_standalone_capability.cpp
+            test_gpu_audio_header_standalone_node.cpp
+            test_gpu_audio_header_standalone_program.cpp
+    GROUP pulp-test-group-core-gpu-audio-private)

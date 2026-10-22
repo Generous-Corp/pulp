@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/gpu_audio_status.hpp>
 #include <pulp/gpu_audio/flow_pans.hpp>
 
 namespace pulp::render {
@@ -73,6 +74,18 @@ public:
     bool gpu_available() const { return gpu_ != nullptr; }
     /// The live compute backend ("Metal"/"D3D12"/"Vulkan"), or "" if CPU-only.
     std::string backend() const;
+
+    /// Allocation-free lifecycle projection, safe from a host or UI thread
+    /// while a transport runs this node (not concurrently with prepare()).
+    /// The staged GpuCompute device does not identify its provider, so
+    /// provider and engine stay `Unknown`. The declared miss policy is
+    /// `Silence` with no fallback; a lost device reports `Unavailable` with
+    /// `ProviderLost`, which is why blocks go silent.
+    GpuAudioStatus status_snapshot() const noexcept override;
+    /// First latched recovery cause, or None. Same snapshot as status_snapshot().
+    GpuAudioRecoveryReason recovery_reason() const noexcept;
+    /// True before preparation or once the device was lost.
+    bool fenced() const noexcept;
     uint32_t num_ir() const { return num_ir_; }
     uint32_t fft_size() const { return fft_size_; }
 

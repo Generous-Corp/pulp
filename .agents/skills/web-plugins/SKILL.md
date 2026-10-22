@@ -412,6 +412,16 @@ ceiling. If you write or vendor another JS runtime shim for a Pulp wasm module,
 only correct if the module is also linked with `ALLOW_MEMORY_GROWTH=0`, and none
 of them are.
 
+## Landmine: the web UI's canvas source list is hand-maintained
+
+`tools/cmake/PulpWebUi.cmake` lists the canvas sources it compiles into the
+wasm UI module (`_PULP_WEBUI_CANVAS_SOURCES`) by hand; it does not follow the
+native `pulp-canvas` target. A new file under `core/canvas/src/` that another
+canvas source calls (for example a table moved into its own `.cpp`) links
+natively and still fails every web UI module with `wasm-ld: undefined symbol`.
+Add the file to that list in the same change, and build one web UI target
+(the `WAMv2 + WebCLAP` lane builds `super-convolver-ui`) before pushing.
+
 ## Landmines that make a *rendering* build fail silently
 
 Both live in the `skia-gpu-build` skill's wasm section; know they exist:

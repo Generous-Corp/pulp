@@ -173,6 +173,9 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_registry_stubs.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_flight_recorder.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/bundled_fonts.cpp
+    # The embedded font table bundled_fonts.cpp reads (Skia-free, shared with
+    # the desktop CoreText registry).
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/bundled_font_blobs.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/noto_color_emoji_stub.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/sdf_atlas.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/msdf_atlas.cpp
