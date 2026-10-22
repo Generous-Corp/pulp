@@ -7,7 +7,7 @@
     "canvas-kernel",
     "render-skia-dawn"
   ],
-  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); RuntimeEffectCache refuses caller SkSL that declares a local named pos in main(), which on the pinned Skia breaks only on Graphite (compile failure then a crash in the recording submit, or shadowed coordinates rendering black), with a line-numbered diagnostic on every backend; the iOS CADisplayLink render loop requests the screen's maximum frame rate while frames are drawn and returns to the default after sustained idle, through a pure DisplayRateBoost policy beside RenderLoopState. No public API is removed and no design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); RuntimeEffectCache refuses caller SkSL that declares a local named pos in main(), which on the pinned Skia breaks only on Graphite (compile failure then a crash in the recording submit, or shadowed coordinates rendering black), with a line-numbered diagnostic on every backend; every iOS CADisplayLink (IOSRenderLoop and the window and plug-in view hosts) requests the screen's maximum frame rate while frames are drawn and returns to the default after sustained idle, through a pure DisplayRateBoost policy in pulp/render/render_loop.hpp and an iOS-only apply_display_rate_change helper. No public API is removed and no design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",

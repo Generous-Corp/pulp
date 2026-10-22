@@ -10,7 +10,7 @@
     "render-assets-and-backends",
     "visual-proof-harness"
   ],
-  "rationale": "Three generic GPU-hygiene changes cross these families. RuntimeEffectCache refuses SkSL locals named pos in main(), which break only on Graphite, and a Graphite readback test pins every name-alike case against a control ramp. The iOS render loop requests the ProMotion rate while animating and the iOS AUv3 host Info.plist template sets CADisableMinimumFrameDurationOnPhone, so the request takes effect on iPhone. A test-only frame-identity stamp (test/support/frame_stamp.*) and its decoder (tools/motion/visual/frame_stamp_decode.py) prove which committed update a capture shows. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "rationale": "Three generic GPU-hygiene changes cross these families. RuntimeEffectCache refuses SkSL locals named pos in main(), which break only on Graphite, and a Graphite readback test pins every name-alike case against a control ramp. Every iOS display link (render loop, window host and plug-in view host) requests the ProMotion rate while animating and the iOS AUv3 host Info.plist template sets CADisableMinimumFrameDurationOnPhone, so the request takes effect on iPhone. A test-only frame-identity stamp (test/support/frame_stamp.*) and its decoder (tools/motion/visual/frame_stamp_decode.py) prove which committed update a capture shows. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
   "tests": [
     "ctest --test-dir build -R 'DisplayRateBoost'",
     "ctest --test-dir build -R 'Frame stamp'",
