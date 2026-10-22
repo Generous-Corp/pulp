@@ -403,8 +403,8 @@ copy its runtime, and add metadata to Pulp's existing DesignIR instead.
 
 - **Child-shape metadata, not a new runtime.** Inferno's `VNodeFlags` / `ChildFlags` inspired recording each node's child shape (text, single child, keyed list, unkeyed list) as metadata over DesignIR, so code generation can pick a tight path without normalizing children at run time.
 - **No silent guessing.** Those flags are only safe when compiler and runtime agree, so the plans require an unknown shape to take an explicit, reported fallback rather than a guessed flag.
-- **Measured, not assumed.** Inferno's normalization-free paths and keyed (LIS) diffing are adopted only where measurement justifies them; a general LIS reconciler is deferred because imported lists are small.
-- **Explicit keyed and unkeyed paths.** Following Inferno's separate keyed and non-keyed child patching, Pulp's DesignIR child-update planner matches unique anchors by key and, when anchors are missing or duplicated, reports `ambiguous_keys` and replaces the sibling set wholesale rather than reusing anything by position.
+- **Measured, not assumed.** Inferno's normalization-free paths and keyed (LIS) diffing are adopted only where measurement justifies them. The child-update planner keeps a shared prefix and suffix and the longest increasing run of surviving children in place and moves only the rest, after a named keyed-mutation corpus (after uibench) showed the earlier position-by-position loop moving 49 of 50 children for a single move-to-end.
+- **Explicit keyed and unkeyed paths.** Following Inferno's separate keyed and non-keyed child patching, Pulp's DesignIR child-update planner matches unique anchors by key and, when anchors are missing or duplicated, reports `ambiguous_keys` with a per-child reason (duplicate, missing, or mixed keys) and replaces the sibling set wholesale rather than reusing anything by position.
 
 Pulp contains no Inferno code and does not depend on Inferno.
 

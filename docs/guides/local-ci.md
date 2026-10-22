@@ -731,6 +731,20 @@ Need Windows on a specific change before the nightly? Dispatch it:
 ghapp workflow run build.yml --ref <branch>
 ```
 
+A `build.yml` dispatch always includes the macOS leg, so it also takes a macOS gate
+VM. To run only the full Windows suite, dispatch the nightly instead. Its Windows
+job takes an optional runner selector, which is how the Mac Pro Windows x64 slot is
+proven without touching the gate hosts:
+
+```sh
+ghapp workflow run cross-platform-check.yml --ref <branch> -f windows_only=true \
+  -f windows_runner_selector_json='["self-hosted","Windows","X64","pulp-build-windows-x64","pulp-host-macpro"]'
+```
+
+The schedule passes no inputs, so the nightly stays on `windows-latest`. A run with
+either input set never opens or closes the per-platform tracking issues, because
+it did not measure the nightly's configuration.
+
 This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
 exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an
 active workstream rather than a background one.

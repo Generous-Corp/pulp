@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-keyed-child-update-lis-watch",
+  "created_at": "2026-10-22T05:00:25Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The DesignIR child-update planner (core/view/src/design_update.cpp and its header) now keeps the shared prefix, suffix and longest increasing run of surviving keyed children in place and reports per-child key diagnostics when keys are ambiguous. It is a pure planning function with no production caller; the plan contract (removals first, directly applicable indices) and the wholesale-replace fallback are unchanged. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'ambiguous keys report the reason and location of each offender'",
+    "ctest --test-dir build -R 'keyed mutation corpus moves only children outside the longest increasing run'",
+    "ctest --test-dir build -R 'keyed update indices remain safe for direct application'",
+    "ctest --test-dir build -R 'seeded random keyed permutations match the reference minimum'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

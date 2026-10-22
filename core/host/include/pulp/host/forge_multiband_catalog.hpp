@@ -29,6 +29,9 @@ inline constexpr state::ParamID kReleaseMs = 7;
 inline constexpr state::ParamID kLowMakeupDb = 8;
 inline constexpr state::ParamID kHighMakeupDb = 9;
 
+// Samples per band-split pass of the process callback.
+inline constexpr int kBandChunk = 256;
+
 struct Instance {
     signal::LinkwitzRiley crossover;
     signal::Compressor low;
@@ -108,10 +111,22 @@ inline CustomNodeType make_multiband_compressor_node() {
             params.value_at(kAttackMs, 0), params.value_at(kReleaseMs, 0),
             params.value_at(kHighMakeupDb, 0)));
 
-        for (int k = 0; k < n; ++k) {
-            const auto split = s->crossover.process(input[static_cast<std::size_t>(k)]);
-            output[static_cast<std::size_t>(k)] =
-                s->low.process(split.low) + s->high.process(split.high);
+        // Split a chunk into its two bands, compress each band through the
+        // compressor's buffer path, then sum. Stack scratch keeps the node free
+        // of allocation and independent of the prepared block size.
+        float low[kBandChunk];
+        float high[kBandChunk];
+        for (int start = 0; start < n; start += kBandChunk) {
+            const int count = std::min(kBandChunk, n - start);
+            for (int k = 0; k < count; ++k) {
+                const auto split = s->crossover.process(input[static_cast<std::size_t>(start + k)]);
+                low[k] = split.low;
+                high[k] = split.high;
+            }
+            s->low.process(low, count);
+            s->high.process(high, count);
+            for (int k = 0; k < count; ++k)
+                output[static_cast<std::size_t>(start + k)] = low[k] + high[k];
         }
     };
     return t;

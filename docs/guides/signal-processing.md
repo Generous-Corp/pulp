@@ -1083,15 +1083,15 @@ os.process_block(input, output, num_samples, [&](float s) {
 |---|---|
 | `set_factor(Factor)` | `Factor::x2`, `Factor::x4`, `Factor::x8`, or `Factor::x16`. |
 | `set_sample_rate(float)` | Set base sample rate. Configures anti-aliasing filters. |
-| `set_kind(Kind)` | Select the legacy Biquad, minimum-phase polyphase IIR, or linear-phase FIR lane. |
-| `set_quality(Quality)` | Select `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist) for the linear-phase lane. |
+| `set_kind(Kind)` | Select the minimum-phase polyphase IIR lane (the default), the linear-phase FIR lane, or the legacy Biquad lane. |
+| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist). Polyphase lane: `standard` (94.8 dB from 0.58 Fs, flat to 0.42 Fs) or `pristine` (146 dB from 0.55 Fs, flat to 0.45 Fs). No effect on the Biquad lane. |
 | `latency()` | Return host-rounded and exact base-rate latency plus whether the delay is constant. |
 | `latency_samples()` | Return the integer base-rate delay for `Processor::latency_samples()`. |
 | `process(float, callback)` | Upsample, process via callback, downsample. |
 | `process_block(const float*, float*, size_t, callback)` | Process a contiguous block; input and output may alias. |
 | `reset()` | Clear filter states. |
 
-The default anti-aliasing lane cascades one Butterworth Biquad pair per 2x stage, each cutting at `0.4 *` its own stage's input rate — the boundary that stage's decimation actually folds around. `Kind::polyphase_iir` uses cascaded half-band allpass stages. Both are low-latency minimum-phase choices, but their group delay varies with frequency and therefore cannot truthfully expose one exact compensation value. When you need the actual delay of a minimum-phase lane rather than a scalar it cannot honestly provide, measure the curve: the offline Audio Doctor's `measure_group_delay()` (`test/support/audio_doctor.hpp`) reports unwrapped phase and group delay in samples or seconds per frequency, and reports a stopband as undefined instead of inventing a number for it. See the [`audio-harness`](../reference/skills.md) skill.
+The default anti-aliasing lane, `Kind::polyphase_iir`, cascades elliptic half-band allpass stages (see [Oversampling filters and the real-input FFT](../reference/oversampling-and-real-fft.md) for its rejection, passband and delay). `Kind::fir_biquad` cascades one Butterworth Biquad pair per 2x stage, each cutting at `0.4 *` its own stage's input rate — the boundary that stage's decimation actually folds around. Both are low-latency minimum-phase choices, but their group delay varies with frequency and therefore cannot truthfully expose one exact compensation value. When you need the actual delay of a minimum-phase lane rather than a scalar it cannot honestly provide, measure the curve: the offline Audio Doctor's `measure_group_delay()` (`test/support/audio_doctor.hpp`) reports unwrapped phase and group delay in samples or seconds per frequency, and reports a stopband as undefined instead of inventing a number for it. See the [`audio-harness`](../reference/skills.md) skill.
 
 Be clear-eyed about what the Biquad lane buys you: a single biquad cannot reject much near the fold boundary, so its worst-case alias rejection is only about 7 dB (measured just above base Nyquist, improving to ~9 dB by 0.55 of the base rate), and its passband is already about -1.9 dB at 0.3 of the base rate. Those figures are the same at every factor — **raising the factor gives the callback's own harmonics more room before they fold, it does not give you a better filter.** (Nor should it cost you tone: a chain that lowpassed harder at each added stage would post a flattering rejection number while quietly muffling the top of the band, so the regression suite pins the passband and the rejection together.) When the anti-aliasing itself has to be good, use `polyphase_iir` or `linear_phase_fir` — not a higher factor on the Biquad lane.
 
@@ -1201,7 +1201,7 @@ fft.magnitude_db(freq.data(), magnitudes.data(), 512);
 
 ### Convolver
 
-Frequency-domain convolver using overlap-add. Loads an impulse response and convolves input signal in blocks.
+Frequency-domain convolver using overlap-add. Loads an impulse response and convolves input signal in blocks. Output is delayed by exactly one block: a block is transformed once it has filled, and its result is read out while the next one fills.
 
 ```cpp
 signal::Convolver conv;
@@ -1224,7 +1224,7 @@ conv.process(input_buf, output_buf, num_samples);
 | `process(float* in, float* out, int n)` | Convolve a buffer. |
 | `reset()` | Clear all internal buffers. |
 
-The FFT size is automatically chosen as the next power of 2 >= `block_size + ir_length`. Processing happens in blocks: samples accumulate until `block_size` is reached, then a full FFT-multiply-IFFT cycle runs.
+The FFT size is automatically chosen as the next power of 2 >= `block_size + ir_length`. Processing happens in blocks: samples accumulate until `block_size` is reached, then a real-input FFT-multiply-IFFT cycle runs. An impulse response longer than the block spreads each block's tail over several later blocks; the pending overlap is accumulated across blocks, so the output is the full convolution, one block late.
 
 **Sample rate dependency:** The IR itself is sample-rate dependent. If you change sample rate, reload the IR at the new rate.
 
