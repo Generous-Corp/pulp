@@ -91,6 +91,17 @@ records three agreeing source, importer, observer, font, capture, PNG, layout,
 and native render receipt digests. Short campaigns remain unverified, and the
 raw visual threshold is not relaxed by calibration or renderer disagreement.
 
+### Captured line metrics travel as one `LineMetrics`
+
+The capture's measured ascent/descent ride the line-box basis as
+`std::optional<LineMetrics>` (`pulp/view/text_line_metrics.hpp`), and every
+producer and consumer gates on `LineMetrics::valid()`: the sidecar parse, the
+IR JSON parse, `Label::set_cached_line_metrics` and the bridge. The basis's
+JSON (`lineBoxes` / `lineBoxBasis`) is read and written in
+`design_ir_json_text.cpp`, with the shared field readers and member writers in
+`design_ir_json_primitives.hpp`; add a basis field there, not in
+`design_ir_json.cpp`, which is a frozen hotspot.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
