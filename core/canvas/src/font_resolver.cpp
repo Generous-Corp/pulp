@@ -13,6 +13,7 @@
 #include "pulp/canvas/font_flight_recorder.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <iterator>
@@ -35,7 +36,39 @@
 
 namespace pulp::canvas {
 
+namespace {
+// Generic-keyword mappings a test stood in; see set_css_generic_family_override.
+std::atomic<bool> g_generic_overrides_present{false};
+std::mutex g_generic_overrides_mutex;
+std::unordered_map<std::string, std::string>& generic_overrides() {
+    static std::unordered_map<std::string, std::string> overrides;
+    return overrides;
+}
+}  // namespace
+
+void set_css_generic_family_override(const std::string& keyword,
+                                     const std::string& family) {
+    std::string lower = keyword;
+    for (auto& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::lock_guard<std::mutex> lock(g_generic_overrides_mutex);
+    auto& overrides = generic_overrides();
+    if (family.empty()) overrides.erase(lower);
+    else overrides[lower] = family;
+    g_generic_overrides_present.store(!overrides.empty(),
+                                      std::memory_order_release);
+}
+
 std::string platform_family_for_css_generic(const std::string& css_family) {
+    if (g_generic_overrides_present.load(std::memory_order_acquire)) {
+        std::string lower = css_family;
+        for (auto& c : lower)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        std::lock_guard<std::mutex> lock(g_generic_overrides_mutex);
+        const auto& overrides = generic_overrides();
+        if (auto it = overrides.find(lower); it != overrides.end())
+            return it->second;
+    }
 #if defined(__APPLE__)
     // Chromium's macOS defaults for each generic family, as reported by
     // CSS.getPlatformFontsForNode. Keywords Chromium does not support on this
@@ -65,6 +98,15 @@ std::string platform_family_for_css_generic(const std::string& css_family) {
 #endif
     return {};
 }
+
+namespace {
+std::string lower_ascii(std::string_view s) {
+    std::string out(s);
+    for (auto& c : out)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+}  // namespace
 
 CssFontFamily parse_css_font_family(std::string_view entry) {
     constexpr std::string_view kSpace = " \t\n\r\f\v";
@@ -111,6 +153,17 @@ std::string platform_family_for_css_family(std::string_view entry) {
             return generic;
     }
     return std::move(family.name);
+}
+
+bool platform_face_is_family(std::string_view platform_family,
+                             std::string_view actual_family) {
+    if (platform_family.empty() || actual_family.empty()) return false;
+    const std::string want = lower_ascii(platform_family);
+    const std::string got = lower_ascii(actual_family);
+    if (want.find(got) != std::string::npos ||
+        got.find(want) != std::string::npos)
+        return true;
+    return want.front() == '.' && got.front() == '.';
 }
 
 const char* to_string(FallbackOrigin o) noexcept {
@@ -358,18 +411,13 @@ ResolvedFont resolve_one_family(const std::string& entry,
             // Honor v1's "did we get a generic fallback?" check: if the
             // platform returned a default face whose name doesn't relate
             // to the requested family, mark it as failed so the caller
-            // can try the next family in the stack.
-            std::string lo_a(actual.c_str(), actual.size());
-            for (auto& c : lo_a) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            std::string lo_f = platform_family;
-            for (auto& c : lo_f) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            // A generic's platform family can report a different name than
-            // the one it was asked by (".AppleSystemUIFont" answers ".SF NS"),
-            // and the mapping already says it is the right face.
-            bool name_overlap = !generic.empty()
-                                 || lo_a == lo_f
-                                 || lo_a.find(lo_f) != std::string::npos
-                                 || lo_f.find(lo_a) != std::string::npos;
+            // can try the next family in the stack. A generic keyword is
+            // held to the family it maps to: when that family is missing
+            // the face is the matcher's default, not the generic's.
+            const bool name_overlap =
+                system_ui ||
+                platform_face_is_family(platform_family,
+                                        std::string(actual.c_str(), actual.size()));
 
             // In Deterministic mode we refuse any platform face whose
             // name doesn't overlap the requested family — bug-compatible

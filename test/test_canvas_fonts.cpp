@@ -2086,3 +2086,64 @@ TEST_CASE("a quoted generic family is a literal name on every text path",
     }
 #endif
 }
+
+// ── A generic is held to the family it maps to ──────────────────────────────
+//
+// When a generic's platform family is missing, the font manager answers with
+// its default face. Accepting any face for a generic stopped the list walk
+// there, so `math, Inter` drew the default and never tried Inter, and the
+// generic exemption also let the face through Deterministic mode.
+TEST_CASE("a generic whose platform family is missing falls through the list",
+          "[canvas][skia][text][generic-family]") {
+    CHECK(platform_face_is_family("Helvetica", "Helvetica Neue"));
+    CHECK(platform_face_is_family("helvetica neue", "Helvetica"));
+    CHECK(platform_face_is_family(".AppleSystemUIFont", ".SF NS"));
+    CHECK_FALSE(platform_face_is_family("STIX Two Math", "Helvetica"));
+    CHECK_FALSE(platform_face_is_family("", "Helvetica"));
+
+    struct Override {
+        Override() {
+            set_css_generic_family_override("math", "Pulp Absent Family 2c1f");
+            FontResolver::instance().clear_cache();
+        }
+        ~Override() {
+            set_css_generic_family_override("math", "");
+            FontResolver::instance().clear_cache();
+        }
+    } override_math;
+    REQUIRE(platform_family_for_css_family("math") == "Pulp Absent Family 2c1f");
+
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    auto width_in = [&](const char* family) {
+        canvas.set_font_full(family, 20.0f, 400, 0, 0.0f);
+        return canvas.measure_text("Hamburgefons");
+    };
+    const float inter = width_in("Inter");
+    // Control: the face a lone `math` gets is not Inter, so landing on Inter
+    // below is the walk moving on, not the two faces agreeing.
+    REQUIRE(std::abs(width_in("math") - inter) > 1.0f);
+    CHECK(width_in("math, Inter") == Catch::Approx(inter).margin(0.01));
+
+    FontOptions options;
+    options.family_stack = {"math", "Inter"};
+    options.fallback_mode = FallbackMode::Deterministic;
+    CHECK(FontResolver::instance().resolve_family_list(options).actual_family ==
+          "Inter");
+
+#if defined(__APPLE__)
+    // CoreText returns nothing for an unknown name, so the resolver never sees
+    // a face for the absent family above. It does answer "System Font" with a
+    // face of another family, .SF NS, which is the case the generic exemption
+    // waved through Deterministic mode.
+    set_css_generic_family_override("math", "System Font");
+    FontResolver::instance().clear_cache();
+    CHECK(FontResolver::instance().resolve_family_list(options).actual_family ==
+          "Inter");
+    CHECK(width_in("math, Inter") == Catch::Approx(inter).margin(0.01));
+#endif
+}

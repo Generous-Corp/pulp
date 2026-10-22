@@ -136,28 +136,17 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
     for (const auto& fam : families) {
         resolved = get_cached_typeface_single(fam, weight, slant);
         if (resolved) {
-            // We need to check whether the resolution is the GENUINE
-            // family or the SkFontMgr's "no match → null fallback".
-            // get_cached_typeface_single's last step does
-            // matchFamilyStyle(nullptr) when matchFamilyStyle(family)
-            // returns null — that fallback typeface has a name that
-            // doesn't match `fam`. Compare and reject the fallback so
-            // we keep walking the list to give later families a chance.
+            // The resolver hands back the font manager's default face when
+            // `fam` matched nothing. Keep walking past it so later families
+            // get their chance — including past a generic keyword whose
+            // platform family the host lacks.
             SkString actual_name;
             resolved->getFamilyName(&actual_name);
-            // Case-insensitive containment either way ("Helvetica" vs
-            // "Helvetica Neue"); a generic keyword's face never shares its name.
-            std::string actual(actual_name.c_str(), actual_name.size());
-            auto lower = [](std::string s) {
-                for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                return s;
-            };
-            std::string a = lower(actual), f = lower(parse_css_font_family(fam).name);
-            if (a == f || a.find(f) != std::string::npos || f.find(a) != std::string::npos ||
-                !platform_family_for_css_generic(fam).empty()) {
+            if (platform_face_is_family(
+                    platform_family_for_css_family(fam),
+                    std::string_view(actual_name.c_str(), actual_name.size()))) {
                 return resolved;
             }
-            // Else: SkFontMgr returned a default — keep walking.
         }
     }
     // No exact match across the list — return the last attempted resolution
