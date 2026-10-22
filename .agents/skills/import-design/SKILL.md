@@ -573,6 +573,19 @@ knowing before you touch that file:
   say. Never translate the browser nodes as well; that registers the panel
   twice.
 
+  **Counter gotcha:** the observer's render receipt carries its own work
+  counters (`pulp-design-ir-observer-counters-v1`), phased as `build`,
+  `first_frame` and `readback`, plus views constructed/destroyed and a
+  terminal `live_views_after_teardown` read after the tree is destroyed. The
+  lab gates eligibility on a zero teardown residue and zero unmarked paint
+  mutations in `readback` only: materialization and the first layout set
+  paint state on views that have never been drawn (~80 "unmarked" mutations on
+  an 8-view card), which stales nothing. Gating those would block every
+  fixture for a non-defect; ungating `readback` would let a read-back that
+  mutates the painted tree pass. Raw DOM-snapshot hashes differ per capture
+  only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
+  runs, not the raw binding.
+
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by
   `backendNodeId` when both sides provide one and fail closed on a mismatch;

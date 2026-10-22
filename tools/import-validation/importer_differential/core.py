@@ -253,6 +253,25 @@ def canonical_json_sha256(source: Path | bytes) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
+    """Hash a DOM snapshot with only its capture-local CDP frame IDs removed.
+
+    Every other byte of the snapshot -- nodes, layout, styles, text -- is
+    covered, so three captures of one source agreeing here is evidence of a
+    deterministic DOM, which the raw binding (frame IDs differ per capture)
+    cannot show.
+    """
+    snapshot = json.loads(snapshot_bytes)
+    strings = list(snapshot.get("strings", []))
+    for document in snapshot.get("documents", []):
+        index = document.get("frameId")
+        if isinstance(index, int) and 0 <= index < len(strings):
+            strings[index] = "<capture-local-frame-id>"
+    snapshot["strings"] = strings
+    canonical = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=False) + "\n", encoding="utf-8")
@@ -1048,12 +1067,52 @@ def classify_gaps(
     return result
 
 
+OBSERVER_COUNTER_SCHEMA = "pulp-design-ir-observer-counters-v1"
+
+
+def work_counter_gate(render_receipt: dict[str, Any]) -> dict[str, Any]:
+    """Judge the observer's own work counters for this render.
+
+    The counters come from the digest-bound render receipt, so they describe
+    the exact native render that was scored. A receipt without them, a tree
+    that outlived its teardown, or a paint change after the first frame that
+    staled a cache without requesting a repaint each blocks threshold
+    eligibility. Build and first-frame mutations are reported but not gated:
+    until a frame has been painted there is no painted state to stale.
+    """
+    counters = render_receipt.get("counters")
+    if not isinstance(counters, dict) or counters.get("schema") != OBSERVER_COUNTER_SCHEMA:
+        return {"status": "absent", "counters": None,
+                "failures": ["observer receipt carries no work counters"]}
+    failures: list[str] = []
+    try:
+        constructed = int(counters["views_constructed"])
+        destroyed = int(counters["views_destroyed"])
+        live = int(counters["live_views_after_teardown"])
+        unmarked = int(counters["readback"]["unmarked_paint_mutations"])
+        for phase in ("build", "first_frame"):
+            int(counters[phase]["unmarked_paint_mutations"])
+    except (KeyError, TypeError, ValueError):
+        return {"status": "absent", "counters": counters,
+                "failures": ["observer work counters are incomplete"]}
+    if constructed <= 0:
+        failures.append("observer built no views")
+    if live != 0 or destroyed != constructed:
+        failures.append(
+            f"{constructed - destroyed} of {constructed} views outlived teardown")
+    if unmarked != 0:
+        failures.append(f"{unmarked} unmarked paint mutations after the first frame")
+    return {"status": "fail" if failures else "pass", "counters": counters,
+            "failures": failures}
+
+
 def promotion_recommendation(
     unsupported: list[str],
     structural: dict[str, Any],
     geometry: dict[str, Any],
     typography: dict[str, Any],
     visual: dict[str, Any],
+    work_counters: dict[str, Any],
 ) -> dict[str, Any]:
     scores = {
         "structural": structural["score"],
@@ -1065,7 +1124,10 @@ def promotion_recommendation(
         name for name, threshold in PROMOTION_THRESHOLDS.items()
         if scores[name] < threshold
     ]
-    threshold_eligible = not unsupported and not failed
+    counter_failures = (
+        [] if work_counters.get("status") == "pass"
+        else list(work_counters.get("failures") or ["work counters not evaluated"]))
+    threshold_eligible = not unsupported and not failed and not counter_failures
     if unsupported:
         classification = "browser-required"
         reasons = [f"unsupported dynamic features: {', '.join(unsupported)}"]
@@ -1073,8 +1135,8 @@ def promotion_recommendation(
         classification = "native-with-browser-validation"
         reasons = (
             [f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}"
-             for name in failed]
-            if failed else
+             for name in failed] + counter_failures
+            if failed or counter_failures else
             ["threshold-eligible, but production promotion is disabled until "
              "a candidate-only classifier passes a frozen holdout corpus"])
     return {
@@ -1503,8 +1565,9 @@ def compare_one(
     blockers = unsupported_features(recognition)
     classifications = classify_gaps(
         recognition, structural, geometry, typography, visual)
+    work_counters = work_counter_gate(render_receipt)
     recommendation = promotion_recommendation(
-        blockers, structural, geometry, typography, visual)
+        blockers, structural, geometry, typography, visual, work_counters)
     timings = {
         "browser_import_ms": browser_run.elapsed_ms,
         "native_import_ms": native_run.elapsed_ms,
@@ -1527,6 +1590,8 @@ def compare_one(
         "native_capture_sha256": hashlib.sha256(native_capture_bytes).hexdigest(),
         "browser_snapshot_binding": browser_snapshot_binding,
         "native_snapshot_binding": native_snapshot_binding,
+        "browser_snapshot_semantic_sha256": snapshot_semantic_sha256(browser_snapshot_bytes),
+        "native_snapshot_semantic_sha256": snapshot_semantic_sha256(native_snapshot_bytes),
         "browser_ir_canonical_sha256": canonical_json_sha256(browser_ir),
         "native_ir_canonical_sha256": canonical_json_sha256(native_ir),
         "browser_capture_canonical_sha256": canonical_json_sha256(capture_bytes),
@@ -1643,6 +1708,7 @@ def compare_one(
             "visual": visual,
             "viewport_dpr_audit": viewport_dpr,
             "page_background": page_background,
+            "work_counters": work_counters,
         },
         "classifications": classifications,
         "promotion": recommendation,

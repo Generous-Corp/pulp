@@ -81,8 +81,13 @@ both captures sign (`comparison.geometry.registration`), and fills the page
 around it with the canvas colour Chromium paints, resolved from the verified
 DOM snapshot by CSS background propagation (`comparison.page_background`). A
 page background the rule cannot resolve is left unpainted and reported
-`unresolved`, so it shows up as a residual instead of being guessed. The
-receipt paths are relative to
+`unresolved`, so it shows up as a residual instead of being guessed.
+`comparison.work_counters` judges the observer's own counters from the
+digest-bound render receipt: a tree that outlives its teardown, or a paint
+mutation after the first frame that requested no repaint, makes the fixture
+ineligible. `integrity.*_snapshot_semantic_sha256` hashes each DOM snapshot
+with only its capture-local CDP frame ID removed, which is the digest to
+compare across repeated runs. The receipt paths are relative to
 each fixture output, so they can be copied under `/tmp/pulp-p0a-8458/receipts/`
 without exposing machine-local paths.
 

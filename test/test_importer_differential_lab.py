@@ -1013,16 +1013,58 @@ class DifferentialLabTests(unittest.TestCase):
 
     def test_promotion_is_conservative_and_advisory(self) -> None:
         perfect = {"score": 1.0}
+        counted = {"status": "pass", "failures": []}
         result = LAB.promotion_recommendation(
-            ["canvas"], perfect, perfect, perfect, perfect)
+            ["canvas"], perfect, perfect, perfect, perfect, counted)
         self.assertEqual(result["classification"], "browser-required")
         self.assertTrue(result["advisory_only"])
         result = LAB.promotion_recommendation(
-            [], perfect, perfect, perfect, perfect)
+            [], perfect, perfect, perfect, perfect, counted)
         self.assertEqual(
             result["classification"], "native-with-browser-validation")
         self.assertTrue(result["threshold_eligible"])
         self.assertFalse(result["production_promotion_enabled"])
+
+    def test_work_counters_gate_threshold_eligibility(self) -> None:
+        perfect = {"score": 1.0}
+        clean = {"schema": LAB.OBSERVER_COUNTER_SCHEMA, "views_constructed": 9,
+                 "views_destroyed": 9, "live_views_after_teardown": 0,
+                 "build": {"layout_passes": 0, "damage_requests": 4,
+                           "unmarked_paint_mutations": 83},
+                 "first_frame": {"layout_passes": 1, "damage_requests": 0,
+                                 "unmarked_paint_mutations": 7},
+                 "readback": {"layout_passes": 0, "damage_requests": 0,
+                              "unmarked_paint_mutations": 0}}
+        self.assertEqual(LAB.work_counter_gate({"counters": clean})["status"], "pass")
+        planted = {
+            "no counters": {},
+            "wrong schema": {"counters": {**clean, "schema": "other"}},
+            "leaked view": {"counters": {**clean, "views_destroyed": 8,
+                                         "live_views_after_teardown": 1}},
+            "unmarked mutation": {"counters": {**clean, "readback": {
+                **clean["readback"], "unmarked_paint_mutations": 2}}},
+            "empty tree": {"counters": {**clean, "views_constructed": 0,
+                                        "views_destroyed": 0}},
+            "incomplete": {"counters": {"schema": LAB.OBSERVER_COUNTER_SCHEMA}},
+        }
+        for name, receipt in planted.items():
+            with self.subTest(name):
+                gate = LAB.work_counter_gate(receipt)
+                self.assertNotEqual(gate["status"], "pass")
+                result = LAB.promotion_recommendation(
+                    [], perfect, perfect, perfect, perfect, gate)
+                self.assertFalse(result["threshold_eligible"])
+                self.assertTrue(result["reasons"])
+
+    def test_semantic_snapshot_digest_ignores_only_the_frame_id(self) -> None:
+        def snapshot(frame: str, text: str) -> bytes:
+            return json.dumps({"strings": ["#document", frame, text],
+                               "documents": [{"frameId": 1, "nodes": {"nodeValue": [2]}}]}
+                              ).encode("utf-8")
+        self.assertEqual(LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signal")),
+                         LAB.snapshot_semantic_sha256(snapshot("BBBB", "Signal")))
+        self.assertNotEqual(LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signal")),
+                            LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signals")))
 
     def test_corpus_aggregation_ranks_repeated_impact(self) -> None:
         report = {

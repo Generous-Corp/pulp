@@ -14,6 +14,7 @@
 
 #endif
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -414,7 +415,57 @@ struct RenderReport {
 #if defined(PULP_HAS_SKIA)
     pulp::render::GpuSurface::AdapterInfo adapter;
 #endif
+    // Work this run did, from building the native tree to destroying it.
+    // Absent until the tree has been torn down, so a receipt that carries
+    // counters always carries the terminal readback with them.
+    struct Phase {
+        std::uint64_t layout_passes = 0;
+        std::uint64_t damage_requests = 0;
+        std::uint64_t unmarked_paint_mutations = 0;
+    };
+    struct Counters {
+        // Materialization and interaction replay. Paint state set here has no
+        // earlier frame to stale.
+        Phase build;
+        // The tree's first layout and paint -- the render itself.
+        Phase first_frame;
+        // Everything that reads the painted tree back: the layout and text
+        // observations. A paint mutation here would stale a frame that exists.
+        Phase readback;
+        std::uint64_t views_constructed = 0;
+        std::uint64_t views_destroyed = 0;
+        std::uint64_t live_views_after_teardown = 0;
+    };
+    std::optional<Counters> counters;
 };
+
+// Process-wide View counters at one instant; differences between two
+// snapshots attribute work to the code that ran between them.
+struct ViewCounterSnapshot {
+    std::uint64_t constructed = pulp::view::View::constructed_count();
+    std::uint64_t destroyed = pulp::view::View::destroyed_count();
+    std::uint64_t layout_passes = pulp::view::View::layout_pass_count();
+    std::uint64_t damage_requests = pulp::view::View::damage_request_count();
+    std::uint64_t unmarked = pulp::view::View::unmarked_paint_mutation_count();
+};
+
+RenderReport::Phase phase_between(const ViewCounterSnapshot& from,
+                                  const ViewCounterSnapshot& to) {
+    return {to.layout_passes - from.layout_passes,
+            to.damage_requests - from.damage_requests, to.unmarked - from.unmarked};
+}
+
+choc::value::Value phase_json(const RenderReport::Phase& phase) {
+    auto out = choc::value::createObject("");
+    out.addMember("layout_passes",
+                  choc::value::createInt64(static_cast<std::int64_t>(phase.layout_passes)));
+    out.addMember("damage_requests",
+                  choc::value::createInt64(static_cast<std::int64_t>(phase.damage_requests)));
+    out.addMember("unmarked_paint_mutations",
+                  choc::value::createInt64(
+                      static_cast<std::int64_t>(phase.unmarked_paint_mutations)));
+    return out;
+}
 
 #if defined(PULP_HAS_SKIA)
 const char* adapter_type_name(pulp::render::GpuSurface::AdapterType type) {
@@ -573,6 +624,26 @@ std::string render_receipt_json(const RenderReport& report) {
         receipt.addMember("gpu", gpu);
     }
 #endif
+    if (report.counters) {
+        const auto& c = *report.counters;
+        auto counters = choc::value::createObject("");
+        counters.addMember("schema",
+                           choc::value::createString("pulp-design-ir-observer-counters-v1"));
+        // The observer materializes DesignIR as native views; no script
+        // context is created, so there is no bridge traffic to count.
+        counters.addMember("script_bridge", choc::value::createString("not-instantiated"));
+        counters.addMember("views_constructed",
+                           choc::value::createInt64(static_cast<std::int64_t>(c.views_constructed)));
+        counters.addMember("views_destroyed",
+                           choc::value::createInt64(static_cast<std::int64_t>(c.views_destroyed)));
+        counters.addMember("live_views_after_teardown",
+                           choc::value::createInt64(
+                               static_cast<std::int64_t>(c.live_views_after_teardown)));
+        counters.addMember("build", phase_json(c.build));
+        counters.addMember("first_frame", phase_json(c.first_frame));
+        counters.addMember("readback", phase_json(c.readback));
+        receipt.addMember("counters", counters);
+    }
     return choc::json::toString(receipt, true);
 }
 
@@ -734,6 +805,7 @@ int main(int argc, char** argv) {
     // relative local_paths resolve against it, and a local_path that no longer
     // points at its bytes is recovered by content hash from the asset folders
     // beside it. Without this the tool depends on the process CWD.
+    const ViewCounterSnapshot before_build;
     auto root = pulp::view::build_native_view_tree(
         ir, ir.asset_manifest,
         {.asset_base_directory = input_path.parent_path()});
@@ -784,6 +856,7 @@ int main(int argc, char** argv) {
     // the same pixels when the reflow happens to agree — and only one of those
     // is the mechanism working.
     pulp::view::Label::reset_line_break_path_counts();
+    const ViewCounterSnapshot before_render;
     RenderReport report;
     report.requested = backend == Backend::gpu ? "gpu" : "skia";
     report.fault = gpu_fault_name(gpu_fault);
@@ -810,6 +883,7 @@ int main(int argc, char** argv) {
         report.error = "this build has no GPU backend (PULP_HAS_SKIA is off)";
 #endif
     }
+    const ViewCounterSnapshot after_first_frame;
     report.ok = !png.empty();
     if (!report.ok) {
         // Never substitute another backend: a missing GPU render is a
@@ -846,6 +920,27 @@ int main(int argc, char** argv) {
         !write_text(text_diagnostics_path,
                     pulp::import_design::observe_text(*root, input_path.string()))) {
         std::cerr << "Error: could not write text observation\n";
+        return 1;
+    }
+
+    const ViewCounterSnapshot after_render;
+    // Tear the tree down before reading the lifetime counters, so the
+    // receipt's terminal readback describes a destroyed tree rather than a
+    // live one.
+    root.reset();
+    const ViewCounterSnapshot after_teardown;
+    RenderReport::Counters counters;
+    counters.build = phase_between(before_build, before_render);
+    counters.first_frame = phase_between(before_render, after_first_frame);
+    counters.readback = phase_between(after_first_frame, after_render);
+    counters.views_constructed = after_teardown.constructed - before_build.constructed;
+    counters.views_destroyed = after_teardown.destroyed - before_build.destroyed;
+    counters.live_views_after_teardown =
+        counters.views_constructed - std::min(counters.views_constructed,
+                                              counters.views_destroyed);
+    report.counters = counters;
+    if (!write_receipt()) {
+        std::cerr << "Error: could not write render receipt\n";
         return 1;
     }
     return 0;

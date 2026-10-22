@@ -102,7 +102,9 @@ std::uint64_t next_clock_walk_token() noexcept {
 View::View()
     : import_binding_instance_id_(next_import_binding_instance_id()),
       import_binding_lifetime_token_(std::make_shared<const std::uint64_t>(
-          import_binding_instance_id_)) {}
+          import_binding_instance_id_)) {
+    constructed_count_.fetch_add(1, std::memory_order_relaxed);
+}
 
 void ViewCapture::set(View* view) noexcept {
     view_ = view;
@@ -187,6 +189,7 @@ View::~View() {
     assert(dispatch_depth_ == 0 &&
            "View destroyed while one of its callbacks is executing; "
            "route ownership through View::retire()");
+    destroyed_count_.fetch_add(1, std::memory_order_relaxed);
     destroying_ = true;
     // Anything still parked on this root's retirement chain dies with it. Drain
     // iteratively so a long chain cannot recurse the stack through member
@@ -691,6 +694,8 @@ std::atomic<std::uint64_t> View::layout_generation_{1};
 std::atomic<std::uint64_t> View::layout_pass_count_{0};
 std::atomic<std::uint64_t> View::damage_request_count_{0};
 std::atomic<std::uint64_t> View::unmarked_paint_mutation_count_{0};
+std::atomic<std::uint64_t> View::constructed_count_{0};
+std::atomic<std::uint64_t> View::destroyed_count_{0};
 
 std::uint64_t View::tree_layout_generation() const noexcept {
     auto* root = this;

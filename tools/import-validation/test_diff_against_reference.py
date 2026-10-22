@@ -138,6 +138,7 @@ class HelperScoringTests(unittest.TestCase):
             geometry,
             {"score": 1.0},
             {"score": 1.0},
+            {"status": "pass", "failures": []},
         )
         self.assertFalse(recommendation["threshold_eligible"])
         self.assertFalse(recommendation["production_promotion_enabled"])

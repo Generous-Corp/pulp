@@ -246,6 +246,30 @@ TEST_CASE("retire outside any callback destroys immediately",
     REQUIRE(destructions == 1);
 }
 
+TEST_CASE("lifetime counters advance once per view constructed and destroyed",
+          "[view][lifecycle][counters]") {
+    const auto constructed = View::constructed_count();
+    const auto destroyed = View::destroyed_count();
+    auto root = std::make_unique<View>();
+    auto owned_branch = std::make_unique<View>();
+    View* branch = owned_branch.get();
+    root->add_child(std::move(owned_branch));
+    branch->add_child(std::make_unique<View>());
+    branch->add_child(std::make_unique<View>());
+    auto survivor = std::make_unique<View>();
+    CHECK(View::constructed_count() - constructed == 5);
+    CHECK(View::destroyed_count() - destroyed == 0);
+
+    // Destroying the root takes its whole subtree, and nothing else.
+    root.reset();
+    CHECK(View::destroyed_count() - destroyed == 4);
+    CHECK(View::constructed_count() - View::destroyed_count() ==
+          constructed - destroyed + 1);
+
+    survivor.reset();
+    CHECK(View::destroyed_count() - destroyed == 5);
+}
+
 TEST_CASE("frame-clock propagation visits every original child exactly once",
           "[view][lifecycle][frame-clock]") {
     View root;
