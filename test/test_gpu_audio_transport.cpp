@@ -9,6 +9,7 @@
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "harness/rt_allocation_probe.hpp"
+#include "support/thread_progress.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1908,7 +1909,9 @@ TEST_CASE("GpuAudioTransport status reads stay coherent while the worker republi
     std::atomic<std::uint64_t> torn{0};
     std::atomic<std::uint64_t> reads{0};
     std::thread reader([&] {
-        while (!done.load(std::memory_order_acquire)) {
+        const auto deadline = std::chrono::steady_clock::now() + pulp::test::kProgressDeadline;
+        while (!done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
             const auto status = h.transport.status_snapshot();
             // Every published sample keeps epoch, sequence and the terminal
             // count equal. Any mix of two samples breaks that invariant.
@@ -1927,8 +1930,8 @@ TEST_CASE("GpuAudioTransport status reads stay coherent while the worker republi
         h.node.health.terminal_counts[slot(GpuAudioTerminalDisposition::DeviceLost)] = i;
         h.transport.pump();
     }
-    while (reads.load(std::memory_order_relaxed) < 1000)
-        std::this_thread::yield();
+    CHECK(pulp::test::wait_for_condition(
+        [&] { return reads.load(std::memory_order_relaxed) >= 1000; }));
     done.store(true, std::memory_order_release);
     reader.join();
     CHECK(torn.load() == 0);
