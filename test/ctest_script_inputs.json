@@ -251,7 +251,8 @@
     "test/test_browser_capture_tree.cpp"
    ],
    "inputs": [
-    "test/fixtures/browser-capture-*"
+    "test/fixtures/browser-capture-*",
+    "test/fixtures/import-differential/18-keyed-list-panel.identity.json"
    ],
    "kind": "compiled",
    "sources": [
