@@ -512,7 +512,7 @@ class GovernedBuildTests(unittest.TestCase):
             ["bash", str(SCRIPT), "sh", "-c",
              'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL"; for a in "$@"; do echo "ARG=$a"; done',
              "sh", *args],
-            capture_output=True, text=True, check=False, env=env)
+            capture_output=True, text=True, encoding="utf-8", check=False, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
         argv = [l[4:] for l in r.stdout.splitlines() if l.startswith("ARG=")]
         return self._granted(r), argv
@@ -1284,7 +1284,7 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
             r = subprocess.run(
                 ["bash", str(SCRIPT), "sh", "-c",
                  'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL"'],
-                capture_output=True, text=True, check=False, env=env)
+                capture_output=True, text=True, encoding="utf-8", check=False, env=env)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("JOBS=3", r.stdout, r.stderr)
             expected_qos = "TASKPOLICY=-c" if "utility QoS" in r.stderr else "TASKPOLICY=-b"
@@ -1345,7 +1345,7 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
             r = subprocess.run(
                 ["bash", str(SCRIPT), "sh", "-c",
                  'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL"'],
-                capture_output=True, text=True, check=False, env=env)
+                capture_output=True, text=True, encoding="utf-8", check=False, env=env)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             # Non-gate budget 6, 4 held by the validation: 2 fit.
             self.assertIn("JOBS=2", r.stdout, r.stderr)
@@ -1431,7 +1431,7 @@ class BuildMetricRecordTests(unittest.TestCase):
         return subprocess.run(
             ["bash", str(SCRIPT), "sh", "-c", f"exit {exit_code}", "sh",
              "--target", "pulp-test-widgets"],
-            capture_output=True, text=True, check=False, env=env)
+            capture_output=True, text=True, encoding="utf-8", check=False, env=env)
 
     def _recorded(self) -> list[str]:
         # The record runs detached in the background.
