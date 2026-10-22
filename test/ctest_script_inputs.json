@@ -7258,9 +7258,10 @@
    "kind": "node"
   },
   "pulp-browser-capture-node-unit": {
-   "entry": "tools/import-design/browser_capture/health.test.mjs",
+   "entry": "tools/import-design/browser_capture/form_control_theme.test.mjs",
    "inputs": [
-    "tools/import-design/browser_capture/health.mjs",
+    "tools/import-design/browser_capture/form_control_theme.mjs",
+    "tools/import-design/browser_capture/form_control_theme.test.mjs",
     "tools/import-design/browser_capture/health.test.mjs",
     "tools/import-design/browser_capture/interactions.test.mjs",
     "tools/import-design/browser_capture/lifecycle.test.mjs",
@@ -7271,6 +7272,7 @@
     "tools/import-design/browser_capture/materialized_text_bindings.test.mjs",
     "tools/import-design/browser_capture/native_text_diagnostics.test.mjs",
     "tools/import-design/browser_capture/network_dependencies.test.mjs",
+    "tools/import-design/browser_capture/platform_fonts.test.mjs",
     "tools/import-design/browser_capture/renderers.test.mjs",
     "tools/import-design/browser_capture/run_integration.test.mjs",
     "tools/import-design/browser_capture/security.test.mjs",
