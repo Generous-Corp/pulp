@@ -438,22 +438,23 @@ public:
 
     static void dispatch_pass(std::size_t count, BiquadT* l, BiquadT* r, SampleType* lb,
                               SampleType* rb, std::size_t n) noexcept {
+        // clang-format off
         switch (count) {
 #define PULP_BIQUAD_PASS_CASE(C)                                                                   \
     case C:                                                                                        \
         dispatch_fixed<C>(l, r, lb, rb, n);                                                        \
         return;
-            PULP_BIQUAD_PASS_CASE(1)
-            PULP_BIQUAD_PASS_CASE(2) PULP_BIQUAD_PASS_CASE(3) PULP_BIQUAD_PASS_CASE(4)
-                PULP_BIQUAD_PASS_CASE(5) PULP_BIQUAD_PASS_CASE(6) PULP_BIQUAD_PASS_CASE(7)
-                    PULP_BIQUAD_PASS_CASE(8) PULP_BIQUAD_PASS_CASE(9) PULP_BIQUAD_PASS_CASE(10)
-                        PULP_BIQUAD_PASS_CASE(11) PULP_BIQUAD_PASS_CASE(12)
-                            PULP_BIQUAD_PASS_CASE(13) PULP_BIQUAD_PASS_CASE(14)
-                                PULP_BIQUAD_PASS_CASE(15)
+            PULP_BIQUAD_PASS_CASE(1)  PULP_BIQUAD_PASS_CASE(2)  PULP_BIQUAD_PASS_CASE(3)
+            PULP_BIQUAD_PASS_CASE(4)  PULP_BIQUAD_PASS_CASE(5)  PULP_BIQUAD_PASS_CASE(6)
+            PULP_BIQUAD_PASS_CASE(7)  PULP_BIQUAD_PASS_CASE(8)  PULP_BIQUAD_PASS_CASE(9)
+            PULP_BIQUAD_PASS_CASE(10) PULP_BIQUAD_PASS_CASE(11) PULP_BIQUAD_PASS_CASE(12)
+            PULP_BIQUAD_PASS_CASE(13) PULP_BIQUAD_PASS_CASE(14) PULP_BIQUAD_PASS_CASE(15)
 #undef PULP_BIQUAD_PASS_CASE
-                                    default : dispatch_fixed<16>(l, r, lb, rb, n);
+        default:
+            dispatch_fixed<16>(l, r, lb, rb, n);
             return;
         }
+        // clang-format on
     }
 
     // One section's recurrence on a lane type V (a scalar or a vector of

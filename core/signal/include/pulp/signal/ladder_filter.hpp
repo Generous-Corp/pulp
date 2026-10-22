@@ -14,6 +14,12 @@ namespace pulp::signal {
 //
 // RT contract: setters, process paths, and reset are scalar/fixed-array only
 // and allocate no memory.
+//
+// One voice is bound by the latency of its serial stage chain, so separate
+// instances in a voice loop are fast only when the compiler happens to
+// vectorize across them (it may not without FMA contraction). For many voices
+// in lockstep, LadderBankT runs them as explicit SIMD lanes with identical
+// output.
 template <typename SampleType = float>
 class LadderFilterT {
 public:
