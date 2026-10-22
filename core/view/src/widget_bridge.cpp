@@ -1378,6 +1378,7 @@ void WidgetBridge::register_api() {
         // Extended API: containers, layout, all widgets, themes, canvas.
         {std::nullopt,                     &BridgeRegistrars::register_widget_factory_container_api},
         {std::nullopt,                     &BridgeRegistrars::register_layout_flex_api},
+        {std::nullopt,                     &BridgeRegistrars::register_style_reset_api},
         {std::nullopt,                     &BridgeRegistrars::register_dom_api},
         {std::nullopt,                     &BridgeRegistrars::register_layout_query_api},
         {std::nullopt,                     &BridgeRegistrars::register_widget_style_interaction_api},

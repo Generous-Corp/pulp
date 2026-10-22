@@ -1,5 +1,6 @@
 #include <pulp/view/widget_bridge.hpp>
 #include "bridge_dispatch.hpp"
+#include "layout_baselines.hpp"
 
 #include <choc/text/choc_JSON.h>
 
@@ -119,6 +120,7 @@ void WidgetBridge::forget_widget_subtree(
                     owned.instance_id);
             }),
         owned_widgets_.end());
+    forget_layout_baselines(instance_ids);
 
     if (notify_js && !ids.empty())
         forget_js_widget_subtree(

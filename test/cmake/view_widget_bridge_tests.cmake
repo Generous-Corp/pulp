@@ -1031,6 +1031,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-css-misc GROUP pulp-test-group-view-
 # *interaction* still fails first.
 pulp_add_test_suite(pulp-test-spectr-regression GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
+# Widget bridge — removal resets. resetStyleProperty restores a widget's
+# starting layout slots.
+pulp_add_test_suite(pulp-test-widget-bridge-style-reset GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+
 # Typography inheritance for the CSS-style cascade
 pulp_add_test_suite(pulp-test-typography-inheritance GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
