@@ -297,7 +297,9 @@ struct P { in_ch:u32, out_ch:u32, B:u32, woff:u32, src_mask:u32, dst_mask:u32, s
  }
 }
 )wgsl";
-// One layer. Each 64-lane workgroup covers S = p.S consecutive samples
+// One layer. The gated sigmoid stays a named reciprocal multiplied after tanh;
+// written as a * (1 / x) the shader compiler contracts it differently and gated
+// outputs move by a few ULP. Each 64-lane workgroup covers S = p.S consecutive samples
 // (64 / Z, or 1 when Z > 32) with lane items over (sample, channel), so narrow
 // models fill the lanes; every output keeps its serial reduction order.
 // head_init = 1 (first layer of the first array) assigns the head sum instead
@@ -318,8 +320,8 @@ var<workgroup> zbuf:array<f32,128>; var<workgroup> abuf:array<f32,64>;
   var acc=wts[p.conv_b+oc]; for(var k=0u;k<K;k++){let back=p.dil*(K-1u-k);let base=((n-back)&p.in_mask)*C;let wb=p.conv_w+oc*C*K+k;for(var ic=0u;ic<C;ic++){acc+=wts[wb+ic*K]*ina[base+ic];}}
   acc+=wts[p.mix_w+oc]*cond[t]; zbuf[i]=acc;}}
  workgroupBarrier();
- for(var i=lane;i<S*C;i+=64u){let s=i/C; let c=i-s*C; if(t0+s<p.B){let a=tanh(clamp(zbuf[s*Z+c],-15.0,15.0));
-  if(p.gated==0u){abuf[i]=a;}else{abuf[i]=a*(1.0/(1.0+exp(-zbuf[s*Z+C+c])));}}}
+ for(var i=lane;i<S*C;i+=64u){let s=i/C; let c=i-s*C; if(t0+s<p.B){
+  if(p.gated==0u){abuf[i]=tanh(clamp(zbuf[s*Z+c],-15.0,15.0));}else{let g=1.0/(1.0+exp(-zbuf[s*Z+C+c]));abuf[i]=tanh(clamp(zbuf[s*Z+c],-15.0,15.0))*g;}}}
  workgroupBarrier();
  for(var i=lane;i<S*C;i+=64u){let s=i/C; let oc=i-s*C; let t=t0+s; if(t<p.B){
   if(p.head_init==1u){headacc[t*C+oc]=abuf[i];}else{headacc[t*C+oc]=headacc[t*C+oc]+abuf[i];}
