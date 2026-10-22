@@ -254,6 +254,7 @@ paths = [
   "tools/scripts/test_windows_cli_compile_workflow.py",
   "tools/scripts/test_windows_cli_release_precheck.py",
   "tools/scripts/test_windows_runner_policy.py",
+  "tools/scripts/test_windows_runner_selector.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",
   "tools/scripts/test_workflow_runner_selector_audit.py",
@@ -270,6 +271,7 @@ paths = [
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",
   "tools/scripts/windows_cli_release_precheck.py",
+  "tools/scripts/windows_runner_selector.py",
 ]
 tests = [
   "build-parallelism-guard",
@@ -7194,6 +7196,7 @@ paths = [
   "tools/scripts/test_windows_cli_release_precheck.py",
   "tools/scripts/test_windows_posix_shims.py",
   "tools/scripts/test_windows_runner_policy.py",
+  "tools/scripts/test_windows_runner_selector.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",
   "tools/scripts/test_workflow_runner_selector_audit.py",
@@ -7229,6 +7232,7 @@ paths = [
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",
   "tools/scripts/windows_cli_release_precheck.py",
+  "tools/scripts/windows_runner_selector.py",
 ]
 tests = [
   "build-parallelism-guard",
@@ -7745,6 +7749,7 @@ paths = [
   "tools/scripts/test_windows_cli_release_precheck.py",
   "tools/scripts/test_windows_posix_shims.py",
   "tools/scripts/test_windows_runner_policy.py",
+  "tools/scripts/test_windows_runner_selector.py",
   "tools/scripts/test_workflow_build_dirs.py",
   "tools/scripts/test_workflow_lint.py",
   "tools/scripts/test_workflow_runner_selector_audit.py",
@@ -7780,6 +7785,7 @@ paths = [
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",
   "tools/scripts/windows_cli_release_precheck.py",
+  "tools/scripts/windows_runner_selector.py",
 ]
 tests = [
   "agent-capability-manifest-check",
