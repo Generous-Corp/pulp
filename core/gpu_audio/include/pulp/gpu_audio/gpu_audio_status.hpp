@@ -61,6 +61,15 @@ enum class GpuAudioCompletionMode : std::uint8_t {
     TimedWaitAny = 3,
 };
 
+/// How a node runs its CPU shadow alongside the GPU path. None means the node
+/// keeps no shadow; Inline runs it on the audio callback; Worker runs it off
+/// the callback and delivers it only when it is ready in time.
+enum class GpuAudioShadowMode : std::uint8_t {
+    None = 0,
+    Inline = 1,
+    Worker = 2,
+};
+
 /// Versioned, allocation-free status shared by native hosts and UI adapters.
 /// A web or plugin-specific status object may project this into JSON, but must
 /// preserve the distinction between GPU production and CPU fallback.  In
@@ -105,6 +114,20 @@ struct GpuAudioStatus {
     bool timestamps_available = false;
     std::uint64_t last_delivery_ns = 0;
     bool gpu_kernel_available = false;
+    // CPU shadow reporting. Still schema v3: these were appended before any
+    // release carried v3, so kSchemaVersion does not move for them.
+    GpuAudioShadowMode shadow_mode = GpuAudioShadowMode::None;
+    /// Inline shadow cost as a percentage of the callback budget.
+    float shadow_inline_cost_pct = 0.0f;
+    /// Blocks delivered from the shadow instead of the GPU result.
+    std::uint64_t shadow_delivered_blocks = 0;
+    /// Blocks whose shadow result was not ready in time.
+    std::uint64_t shadow_late_blocks = 0;
+    /// Blocks where both the GPU result and the shadow missed the deadline.
+    std::uint64_t shadow_double_miss_blocks = 0;
+    /// The shadow runs a different model from the GPU path, so its output is
+    /// a substitute rather than a bit-identical fallback.
+    bool shadow_model_differs = false;
 };
 
 } // namespace pulp::gpu_audio
