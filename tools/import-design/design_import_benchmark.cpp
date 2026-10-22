@@ -948,7 +948,9 @@ class IrBoundFixture final : public BenchmarkFixture {
             for (std::size_t c = 0; c < view.child_count(); ++c) self(self, *view.child_at(c));
         };
         visit(visit, *root_);
-        if (retained_.empty()) retained_ = resolved_;
+        // Only the retained lane writes through the Labels of its first tree;
+        // the rebuild lane replaces that tree, so it keeps no such pointers.
+        if (!rebuild_each_step_ && retained_.empty()) retained_ = resolved_;
     }
 
     LoadedIr loaded_;
@@ -1003,6 +1005,7 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     const auto constructed_start = View::constructed_count();
     const auto destroyed_start = View::destroyed_count();
     const auto identity_start = fixture.slot_identity_change_count();
+    double verify_cpu_ms = 0.0;
     const auto mismatch_start = fixture.slot_text_mismatch_count();
     std::vector<double> frame_ms;
     std::vector<double> frame_cpu_ms;
@@ -1023,7 +1026,11 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
         ++metrics.paint_calls;
         const auto frame_cpu_end = std::clock();
         const auto frame_end = Clock::now();
-        if (interactive) fixture.verify(frame);
+        if (interactive) {
+            const auto verify_cpu_start = std::clock();
+            fixture.verify(frame);
+            verify_cpu_ms += cpu_clock_delta_ms(verify_cpu_start, std::clock());
+        }
         frame_ms.push_back(elapsed_ms(frame_start, frame_end));
         frame_cpu_ms.push_back(cpu_clock_delta_ms(frame_cpu_start, frame_cpu_end));
         const auto rss = current_rss_bytes();
@@ -1058,7 +1065,8 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
         metrics.rss_p99_bytes = static_cast<std::uint64_t>(std::llround(percentile(rss_bytes, 99.0)));
     }
     const auto cpu_end = std::clock();
-    metrics.cpu_ms = cpu_clock_delta_ms(cpu_start, cpu_end);
+    // Verification is the benchmark checking itself, not work under test.
+    metrics.cpu_ms = std::max(0.0, cpu_clock_delta_ms(cpu_start, cpu_end) - verify_cpu_ms);
     metrics.bridge_calls = fixture.bridge_call_count() - bridge_calls_start;
     metrics.layout_passes = View::layout_pass_count() - layout_passes_start;
     metrics.invalidation_requests = View::damage_request_count() - invalidation_start;
