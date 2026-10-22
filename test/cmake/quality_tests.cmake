@@ -1565,6 +1565,14 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(version-at-land-selftest PROPERTIES
         TIMEOUT 180)
 
+    # The release bot's bump: build.yml's classify step reports whether the
+    # exact-generated-bump fast path was taken (run in Bash with a fake
+    # verifier), bump_fastpath_report.py counts those reports, and the four
+    # advisory workflows skip every job on release/version-bump while every
+    # other pull request still runs them and none of their contexts is required.
+    add_test(NAME bump-fastpath-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_bump_fastpath.py")
+
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued
     # PR as ejected. Fails if any tracked query selects it, and proves the scan
