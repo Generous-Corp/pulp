@@ -5,6 +5,7 @@
 /// lockstep.
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/svf.hpp>
 
 #include <algorithm>
@@ -100,14 +101,17 @@ template <typename SampleType = float, std::size_t Voices = 16> class SvfBankT {
             const SampleType v3 = input - ic2_[v];
             const SampleType v1 = a1_[v] * ic1_[v] + a2_[v] * v3;
             const SampleType v2 = ic2_[v] + a2_[v] * ic1_[v] + a3_[v] * v3;
-            ic1_[v] = snap_to_zero(SampleType{2.0f} * v1 - ic1_[v]);
-            ic2_[v] = snap_to_zero(SampleType{2.0f} * v2 - ic2_[v]);
+            ic1_[v] = detail::snap_to_zero_bits(SampleType{2.0f} * v1 - ic1_[v]);
+            ic2_[v] = detail::snap_to_zero_bits(SampleType{2.0f} * v2 - ic2_[v]);
             const SampleType highpass = input - k_[v] * v1 - v2;
             const SampleType notch = input - k_[v] * v1;
             const int mode = mode_[v];
-            const SampleType low_or_high = mode == kHighpass ? highpass : v2;
-            const SampleType band_or_notch = mode == kNotch ? notch : v1;
-            out[v] = mode == kBandpass || mode == kNotch ? band_or_notch : low_or_high;
+            // Bit-operation selects (same values as conditionals) keep this
+            // loop free of control flow, so it vectorizes under GCC too.
+            const SampleType low_or_high = detail::select_bits(mode == kHighpass, highpass, v2);
+            const SampleType band_or_notch = detail::select_bits(mode == kNotch, notch, v1);
+            const bool band_family = (mode == kBandpass) | (mode == kNotch);
+            out[v] = detail::select_bits(band_family, band_or_notch, low_or_high);
         }
     }
 

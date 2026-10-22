@@ -570,3 +570,26 @@ TEST_CASE("exp10_float stays within a few parts in 1e7 of libm and saturates lik
     CHECK(sub > 0.0f);
     CHECK(std::abs(static_cast<double>(sub) - 1.0e-40) / 1.0e-40 < 1.0e-3);
 }
+
+TEST_CASE("Bit-operation selects match the conditionals they replace",
+          "[signal][fast-math][select]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    CHECK(pulp::signal::detail::select_bits(true, 1.5f, -2.0f) == 1.5f);
+    CHECK(pulp::signal::detail::select_bits(false, 1.5f, -2.0f) == -2.0f);
+    CHECK(std::isnan(pulp::signal::detail::select_bits(true, nan, 0.0f)));
+    CHECK(std::signbit(pulp::signal::detail::select_bits(false, 0.0f, -0.0f)));
+    CHECK(pulp::signal::detail::select_bits(true, 2.0, 3.0) == 2.0);
+    std::size_t mismatches = 0;
+    for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 4099) {
+        for (const float sign : {1.0f, -1.0f}) {
+            const float x = sign * std::bit_cast<float>(bits);
+            mismatches += std::bit_cast<std::uint32_t>(pulp::signal::detail::tanh_accurate_bits(x)) !=
+                          std::bit_cast<std::uint32_t>(FastMath::tanh_accurate(x));
+            mismatches += std::bit_cast<std::uint32_t>(pulp::signal::detail::snap_to_zero_bits(x)) !=
+                          std::bit_cast<std::uint32_t>(pulp::signal::snap_to_zero(x));
+        }
+    }
+    CHECK(mismatches == 0);
+    CHECK(std::isnan(pulp::signal::detail::tanh_accurate_bits(nan)));
+    CHECK(std::isnan(pulp::signal::detail::snap_to_zero_bits(nan)));
+}

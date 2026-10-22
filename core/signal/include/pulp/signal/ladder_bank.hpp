@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
+#include <type_traits>
 
 namespace pulp::signal {
 
@@ -29,6 +30,10 @@ namespace pulp::signal {
 ///   - The per-stage coefficient and the saturator are the ones LadderFilterT
 ///     exposes (stage_coefficient(), saturate()), so a widget or test can
 ///     reproduce a voice without running the bank.
+///
+/// Selects inside the per-voice loops are bit operations (detail::
+/// select_bits) with the same values as the scalar filter's conditionals, so
+/// the loops vectorize under GCC's default -ftrapping-math too.
 ///
 /// Why it is faster: a ladder sample is a chain of five dependent
 /// saturations, so one voice at a time is latency-bound. The bank computes
@@ -97,7 +102,7 @@ template <typename SampleType = float, std::size_t Voices = 16> class LadderBank
             SampleType* stage = stage_[i];
             SampleType* saturated = saturated_stage_[i];
             for (std::size_t v = 0; v < Voices; ++v) {
-                stage[v] = snap_to_zero(stage[v] + g_[v] * (prev[v] - saturated[v]));
+                stage[v] = detail::snap_to_zero_bits(stage[v] + g_[v] * (prev[v] - saturated[v]));
                 saturated[v] = saturate(stage[v]);
                 prev[v] = saturated[v];
             }
@@ -136,8 +141,15 @@ template <typename SampleType = float, std::size_t Voices = 16> class LadderBank
     }
 
   private:
+    // The scalar filter's saturator; for the accurate float saturator, its
+    // bit-operation form, so the per-stage loop over voices vectorizes under
+    // GCC as well as Clang (same values).
     static SampleType saturate(SampleType x) {
-        return Filter::template saturate<kDefaultLadderSaturation>(x);
+        if constexpr (std::is_same_v<SampleType, float> &&
+                      kDefaultLadderSaturation == LadderSaturation::accurate)
+            return detail::tanh_accurate_bits(x);
+        else
+            return Filter::template saturate<kDefaultLadderSaturation>(x);
     }
 
     void update(std::size_t voice) {
