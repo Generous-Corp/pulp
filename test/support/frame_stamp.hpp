@@ -33,7 +33,8 @@ struct FrameStampLayout {
     int bits = 16;
 };
 
-/// Paints `index` (taken modulo 2^bits) as the stamp grid.
+/// Paints `index` (taken modulo 2^bits) as the stamp grid. Paints nothing when
+/// `bits` is outside 1..30, the range the decoders accept.
 void paint_frame_stamp(canvas::Canvas& canvas, uint32_t index, const FrameStampLayout& layout = {});
 
 /// Decodes the stamp from tightly packed RGBA8 pixels captured at `scale`

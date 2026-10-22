@@ -20,8 +20,10 @@ clearly white, or a bit that agrees with its complement, makes the whole
 capture unreadable (-1); an unreadable capture is never counted exact and
 never contributes a held or skipped verdict.
 
-The due index of capture i is `start + i * step`. `--start-index` defaults
-to the value implied by the first readable capture. Without
+The due index of capture i is `start + i * step`, modulo 2**bits.
+`--start-index` defaults to the value implied by the first readable capture;
+pass it whenever the producer's first index is known, because a first capture
+that is itself late or held otherwise misaligns every later one. Without
 `--timestamps-json` the captures are taken as one refresh period apart.
 
 Usage:
@@ -138,10 +140,24 @@ class StampReport:
 def analyze(indices: Sequence[int], step: int = 1,
             start_index: Optional[int] = None,
             timestamps_ms: Optional[Sequence[float]] = None,
-            refresh_ms: Optional[float] = None) -> StampReport:
-    """Score a decoded index sequence against the due schedule."""
+            refresh_ms: Optional[float] = None,
+            bits: int = StampLayout.bits) -> StampReport:
+    """Score a decoded index sequence against the due schedule.
+
+    Indices wrap at 2**bits, as the painter's do, so a run that crosses the
+    wrap is scored on the advance modulo 2**bits: an advance of more than half
+    the range is a regression.
+    """
     if step < 1:
         raise ValueError("step must be >= 1")
+    if bits < 1 or bits > 30:
+        raise ValueError("bits must be in 1..30")
+    span = 1 << bits
+
+    def advance(old: int, new: int) -> int:
+        """Signed advance from old to new, modulo 2**bits."""
+        delta = (new - old) % span
+        return delta - span if delta > span // 2 else delta
     if timestamps_ms is not None and len(timestamps_ms) != len(indices):
         raise ValueError("timestamps and captures differ in length")
 
@@ -159,7 +175,7 @@ def analyze(indices: Sequence[int], step: int = 1,
     report.start_index = start_index
 
     def due(i: int) -> int:
-        return start_index + i * step
+        return (start_index + i * step) % span
 
     report.exact = sum(1 for i, v in readable if v == due(i))
     report.exact_pct = round(100.0 * report.exact / len(indices), 3)
@@ -171,7 +187,7 @@ def analyze(indices: Sequence[int], step: int = 1,
             continue
         if cur == prev:
             report.held += 1
-        elif cur < prev:
+        elif advance(prev, cur) < 0:
             report.regressed += 1
 
     shown = {v for _, v in readable}
@@ -197,8 +213,8 @@ def analyze(indices: Sequence[int], step: int = 1,
         for pos, val in readable[1:]:
             if val == last_val:
                 continue
-            if val > last_val:
-                expected = (val - last_val) / step * period
+            if advance(last_val, val) > 0:
+                expected = advance(last_val, val) / step * period
                 actual = times[pos] - times[last_pos]
                 if abs(actual - expected) > JUDDER_PERIODS * period:
                     report.judder += 1
@@ -269,7 +285,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     layout = StampLayout(args.x, args.y, args.cell, args.bits)
     try:
         indices = decode_files(paths, args.scale, layout)
-        report = analyze(indices, args.step, args.start_index, timestamps, args.refresh_ms)
+        report = analyze(indices, args.step, args.start_index, timestamps, args.refresh_ms,
+                         args.bits)
     except (OSError, ValueError) as exc:
         print(f"frame_stamp_decode: {exc}", file=sys.stderr)
         return 2

@@ -121,6 +121,11 @@ class AnalyzeTests(unittest.TestCase):
         self.assertEqual((r.readable, r.exact, r.start_index), (0, 0, None))
         self.assertEqual(r.problems, ["unreadable"])
 
+    def test_wraparound_is_an_advance_not_a_regression(self):
+        r = fsd.analyze([65534, 65535, 0, 1], bits=16)
+        self.assertEqual((r.exact, r.regressed, r.skipped, r.judder), (4, 0, 0, 0))
+        self.assertEqual(r.problems, [])
+
     def test_regression_is_reported(self):
         r = fsd.analyze([0, 1, 2, 1, 4])
         self.assertEqual(r.regressed, 1)

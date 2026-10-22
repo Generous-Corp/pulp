@@ -11,8 +11,12 @@ namespace {
 constexpr double kBlackMax = 64.0;
 constexpr double kWhiteMin = 191.0;
 
+// Both decoders return the index as a non-negative int beside -1, so the
+// painter refuses the same widths they do.
+constexpr int kMaxBits = 30;
+
 uint32_t stamp_mask(int bits) {
-    return bits >= 32 ? 0xffffffffu : ((1u << bits) - 1u);
+    return (1u << bits) - 1u;
 }
 
 // Mean luminance over the central half of one cell; -1 when the sampled
@@ -44,6 +48,8 @@ double cell_luminance(const uint8_t* rgba, uint32_t width, uint32_t height, floa
 } // namespace
 
 void paint_frame_stamp(canvas::Canvas& canvas, uint32_t index, const FrameStampLayout& layout) {
+    if (layout.bits <= 0 || layout.bits > kMaxBits)
+        return;
     const uint32_t value = index & stamp_mask(layout.bits);
     const auto white = canvas::Color::rgba8(255, 255, 255, 255);
     const auto black = canvas::Color::rgba8(0, 0, 0, 255);
@@ -60,7 +66,7 @@ void paint_frame_stamp(canvas::Canvas& canvas, uint32_t index, const FrameStampL
 
 int decode_frame_stamp(const uint8_t* rgba, uint32_t width, uint32_t height, float scale,
                        const FrameStampLayout& layout) {
-    if (!rgba || layout.bits <= 0 || layout.bits > 30 || layout.cell <= 0.0f || scale <= 0.0f)
+    if (!rgba || layout.bits <= 0 || layout.bits > kMaxBits || layout.cell <= 0.0f || scale <= 0.0f)
         return -1;
     uint32_t value = 0;
     for (int col = 0; col < layout.bits; ++col) {

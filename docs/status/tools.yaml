@@ -420,7 +420,7 @@ tools:
   invocation: python3 -m tools.motion.visual.frame_stamp_decode --frames-dir <captures> --scale 2
   inputs: A PNG capture sequence of frames that paint `pulp::test_support::FrameStampView` (test/support/frame_stamp.hpp) or `paint_frame_stamp` at a known layout; optionally per-capture timestamps and the refresh period.
   outputs: JSON with the decoded index per capture (-1 when unreadable), exact count and percentage, held, skipped, unknown, judder, regressed and distinct counts, and the list of problems; --min-exact-pct turns it into a gate (exit 1).
-  caveat: Sees only frames that carry the stamp; it proves which update a capture shows, never that the rest of the frame is drawn right. A capture that crops, scales or color-manages the stamp off its declared layout decodes as -1, so a run that is all -1 says the instrument is blind, not that nothing presented. Without --timestamps-json the captures are assumed one refresh apart, so judder is measured in capture slots, not time; and an unreadable capture is reported as unknown rather than counted held or skipped.
+  caveat: Sees only frames that carry the stamp; it proves which update a capture shows, never that the rest of the frame is drawn right. A capture that crops, scales or color-manages the stamp off its declared layout decodes as -1, so a run that is all -1 says the instrument is blind, not that nothing presented. Without --timestamps-json the captures are assumed one refresh apart, so judder is measured in capture slots, not time; and an unreadable capture is reported as unknown rather than counted held or skipped. It needs Pillow and exits 3 (a ctest skip) without it.
   availability: always
   skill: motion
   docs: guides/motion-observability.md
