@@ -1940,6 +1940,20 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-js-preludes": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_js_preludes.cpp"
+   ],
+   "inputs": [
+    "core/view/js/*.js"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_js_preludes.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-lv2-host-discovery": {
    "data": "none",
    "inputs": [],
@@ -2849,6 +2863,7 @@
   "pulp-test-ipc",
   "pulp-test-isolated-scanner",
   "pulp-test-js-bytecode-embed",
+  "pulp-test-js-preludes",
   "pulp-test-latency-contract",
   "pulp-test-lfo-sampling",
   "pulp-test-live-dsp-telemetry",

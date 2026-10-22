@@ -846,6 +846,14 @@ pulp_add_test_suite(pulp-test-widget-bridge GROUP pulp-test-group-view-widgets L
 # Named chart-shader presets: pure source generation plus raster renders.
 pulp_add_test_suite(pulp-test-chart-shader-presets GROUP pulp-test-group-view-widgets
     LIBRARIES ${_pulp_widget_bridge_test_libs})
+# The JS preludes ship zlib-compressed: each must inflate to its source file
+# byte for byte, and a damaged stream must throw rather than evaluate.
+if(PULP_ENABLE_JS)
+    pulp_add_test_suite(pulp-test-js-preludes
+        LIBRARIES pulp::view-script pulp::runtime
+        INCLUDE_DIRS $<TARGET_PROPERTY:pulp-view-script,BINARY_DIR>)
+    pulp_test_data(pulp-test-js-preludes PATHS core/view/js/*.js)
+endif()
 # The late GPU/lifetime and stderr-diagnostic cases use the same private support
 # but compile as a second translation unit, keeping the original bridge suite
 # behavior and Catch2 names while limiting per-file rebuild cost.

@@ -23,6 +23,19 @@ into `web_compat_preludes_gen.hpp` and evaluated in order by
 `WidgetBridge`. The current set covers everything React 18 dev (and most
 similar frameworks) feature-detect on construction:
 
+The preludes ship compressed. `embed_js.py` stores each one as a zlib stream
+(about 600 KB of text becomes about 160 KB in every scripted-UI binary), and
+`preludes::source(preludes::<name>)` inflates it at the `eval_or_throw` call,
+about 1.5 ms for the whole set on an M5. Two consequences:
+
+- The generated `web_compat_preludes_gen.cpp` holds byte arrays, not script
+  text, so grepping it for a JS change finds nothing. Grep the `.js` file, or
+  inflate with `preludes::source()` in a test (`test/test_js_preludes.cpp`
+  already proves every prelude round-trips to its file byte for byte).
+- Each `EmbeddedPrelude` carries the SHA-256 of its text. A cache keyed by
+  that digest can skip the inflate entirely; the bytecode cache today keys on
+  the full source, so every open still inflates.
+
 | Surface | Where | Why |
 |---------|-------|-----|
 | `Element.nodeType` (=1) / `nodeName` (=tagName) | `web-compat-element.js` | React reconciler walks every node and bails before first commit without DOM-compatible node identity. |
@@ -825,8 +838,8 @@ tools/scripts/confirm_failure.sh \
 ```
 
 The `--object` flag is documented in the script's own header for exactly this
-case. Counting the changed text inside the generated file still works as a
-manual positive control, but it is no longer the only route to a verdict.
+case. The generated file holds compressed bytes, so counting changed text
+inside it is no longer a positive control.
 
 Note also that `core/view/js/web-compat.js` is a monolith that is **not**
 embedded. The embedded lane is the split `web-compat-*.js` set listed above,
