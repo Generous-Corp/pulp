@@ -2001,8 +2001,10 @@ TEST_CASE("WaveNet completions seen only in the bounded-wait tail pass keep the 
     auto config = shape.config(3, 1, 500'000, 4);
     config.capacity = 8;
     config.watchdog_blocks = 3;
-    GpuWaveNetRealtimeNode node(config);
+    // The channel reads `control` when the node releases it, so `control`
+    // must outlive `node`.
     Control control;
+    GpuWaveNetRealtimeNode node(config);
     control.tail_only = true;
     control.slow_every = 4;
     control.completion_lag = 3;
