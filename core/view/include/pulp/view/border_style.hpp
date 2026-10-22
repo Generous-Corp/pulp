@@ -53,6 +53,30 @@ Color border_band_color(View::BorderStyle style, BorderEdge side,
 /// four 3D styles) rather than as one stroke.
 bool is_banded_border_style(View::BorderStyle style);
 
+/// A box's corner radii, each corner with a horizontal and a vertical radius.
+struct CornerRadii {
+    float tl_x = 0.0f, tl_y = 0.0f;
+    float tr_x = 0.0f, tr_y = 0.0f;
+    float br_x = 0.0f, br_y = 0.0f;
+    float bl_x = 0.0f, bl_y = 0.0f;
+
+    /// Four circular corners.
+    static CornerRadii circular(float tl, float tr, float br, float bl) {
+        return {tl, tl, tr, tr, br, br, bl, bl};
+    }
+};
+
+/// `radii` fitted to a `width` x `height` box the way CSS fits border radii
+/// (CSS Backgrounds 3, "Overlapping Curves"): a negative radius is 0, and when
+/// the two radii along any side sum to more than that side, every radius is
+/// scaled by f = min over the four sides of (side length / sum of its two
+/// radii), so adjacent curves meet instead of crossing. One factor for all
+/// eight values keeps a circular corner circular, and radii that already fit
+/// come back unchanged. The background, the clip and every border style shape
+/// their corners from this, so a border's outer edge and the background under
+/// it are the same curve.
+CornerRadii fit_corner_radii(float width, float height, CornerRadii radii);
+
 /// A banded border in its own border box, origin at the top-left corner.
 struct BandedBorder {
     View::BorderStyle style = View::BorderStyle::outset;
@@ -66,7 +90,7 @@ struct BandedBorder {
     Color right_color;
     Color bottom_color;
     Color left_color;
-    float radius_tl = 0.0f;  ///< outer corner radii
+    float radius_tl = 0.0f;  ///< outer corner radii, fitted by fit_corner_radii
     float radius_tr = 0.0f;
     float radius_br = 0.0f;
     float radius_bl = 0.0f;

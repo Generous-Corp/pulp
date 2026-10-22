@@ -796,3 +796,81 @@ TEST_CASE("only double and the 3D styles are banded",
     for (B s : {B::solid, B::dashed, B::dotted, B::none, B::hidden})
         CHECK_FALSE(is_banded_border_style(s));
 }
+
+TEST_CASE("fit_corner_radii scales overlapping radii by one CSS factor",
+          "[view][border][border-radius]") {
+    // 120x40 with 30px corners: the left and right sides want 60 of their 40,
+    // so f = 40/60 and every corner becomes a 20px circle.
+    const auto pill = fit_corner_radii(120.0f, 40.0f,
+                                       CornerRadii::circular(30, 30, 30, 30));
+    CHECK(pill.tl_x == 20.0f);
+    CHECK(pill.tl_y == 20.0f);
+    CHECK(pill.br_x == 20.0f);
+    CHECK(pill.br_y == 20.0f);
+
+    // Radii that fit are kept as given, even past half a side: 80 + 20 along
+    // a 100px top edge meet exactly, so nothing is scaled.
+    const auto fits = fit_corner_radii(100.0f, 100.0f,
+                                       CornerRadii::circular(80, 20, 0, 0));
+    CHECK(fits.tl_x == 80.0f);
+    CHECK(fits.tr_x == 20.0f);
+
+    // The tightest side sets the factor for all four corners: the left side
+    // wants 80 of its 50, so f = 0.625 and the top-right shrinks with it.
+    const auto tight = fit_corner_radii(200.0f, 50.0f,
+                                        CornerRadii::circular(40, 16, 0, 40));
+    CHECK(tight.tl_x == 25.0f);
+    CHECK(tight.tr_x == 10.0f);
+    CHECK(tight.bl_y == 25.0f);
+
+    // A negative radius is no radius.
+    CHECK(fit_corner_radii(10.0f, 10.0f, CornerRadii::circular(-4, 0, 0, 0)).tl_x
+          == 0.0f);
+}
+
+TEST_CASE("a banded border's outer curve is the background's curve",
+          "[view][border][border-radius]") {
+    // `width: 120px; height: 40px; border-radius: 30px; border: 4px outset
+    // black; background: red`. The radius overlaps, so CSS fits every corner
+    // to a 20px circle. The background did; the banded border fitted each
+    // axis on its own and drew a 30x20 ellipse, so the red background showed
+    // outside the border along the top and bottom of every corner.
+    View v;
+    v.set_bounds({0.0f, 0.0f, 120.0f, 40.0f});
+    v.set_background_color(paint(kRed));
+    v.set_border(paint(Rgb{0, 0, 0}), 4.0f, 30.0f);
+    v.set_border_style(View::BorderStyle::outset);
+    Pixels px;
+    uint32_t w = 0, h = 0;
+    px.rgba = render_to_rgba(v, 120, 40, kScale, &w, &h);
+    REQUIRE(!px.rgba.empty());
+    px.width = static_cast<int>(w);
+    px.height = static_cast<int>(h);
+    REQUIRE(px.width == 240);
+    REQUIRE(px.height == 80);
+
+    // Device (34,2) is CSS (17.25,1.25): inside the 20px circle, outside the
+    // 30x20 ellipse. It is border, at every corner.
+    for (auto [x, y] : {std::pair{34, 2}, std::pair{205, 2}, std::pair{34, 77},
+                        std::pair{205, 77}}) {
+        INFO("pixel (" << x << "," << y << ")");
+        CHECK_FALSE(same(px.at(x, y), kRed));
+    }
+    const Rgb light{168, 168, 168};
+    CHECK(same(px.at(34, 2), light));
+    // Control: CSS (4.25,1.25) is outside the circle, so neither the border
+    // nor the background reaches it.
+    CHECK_FALSE(same(px.at(8, 2), kRed));
+    CHECK_FALSE(same(px.at(8, 2), light));
+
+    // No pixel of solid background lies within the 4px (8 device px) border.
+    int leaked = 0;
+    for (int y = 0; y < px.height; ++y)
+        for (int x = 0; x < px.width; ++x)
+            if (same(px.at(x, y), kRed) &&
+                (x < 8 || y < 8 || x >= px.width - 8 || y >= px.height - 8))
+                ++leaked;
+    CHECK(leaked == 0);
+    // ...and the background is still painted inside it.
+    CHECK(same(px.at(120, 40), kRed));
+}

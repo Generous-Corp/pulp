@@ -152,6 +152,30 @@ bool is_banded_border_style(View::BorderStyle style) {
            style == BorderStyle::outset;
 }
 
+CornerRadii fit_corner_radii(float width, float height, CornerRadii r) {
+    for (float* v : {&r.tl_x, &r.tl_y, &r.tr_x, &r.tr_y, &r.br_x, &r.br_y,
+                     &r.bl_x, &r.bl_y})
+        *v = std::max(0.0f, *v);
+    // Double precision, so a uniform overflowing radius lands exactly on half
+    // the side instead of an ulp either side of it.
+    double f = 1.0;
+    const auto limit = [&f](float side, float a, float b) {
+        const double sum = static_cast<double>(a) + static_cast<double>(b);
+        if (sum > static_cast<double>(side))
+            f = std::min(f, std::max(0.0, static_cast<double>(side)) / sum);
+    };
+    limit(width, r.tl_x, r.tr_x);
+    limit(width, r.bl_x, r.br_x);
+    limit(height, r.tl_y, r.bl_y);
+    limit(height, r.tr_y, r.br_y);
+    if (f < 1.0) {
+        for (float* v : {&r.tl_x, &r.tl_y, &r.tr_x, &r.tr_y, &r.br_x, &r.br_y,
+                         &r.bl_x, &r.bl_y})
+            *v = static_cast<float>(static_cast<double>(*v) * f);
+    }
+    return r;
+}
+
 namespace {
 
 /// A rectangle given by its insets from the border box.
@@ -160,26 +184,28 @@ struct Insets {
 };
 
 /// Add a closed rounded-rectangle subpath for the border box inset by `in`,
-/// with each outer radius shrunk by the inset on its own axis, clockwise.
-/// Corners are quarter ellipses, so unequal side widths give the elliptical
-/// inner corner CSS does. Built from cubics, which every backend draws.
+/// clockwise. Each corner radius is the fitted outer radius `outer` shrunk by
+/// the inset on its own axis, so unequal side widths give the elliptical inner
+/// corner CSS does, then fitted again to the inset box. Built from cubics,
+/// which every backend draws.
 void add_inset_rounded_rect(canvas::Canvas& canvas, const BandedBorder& b,
-                            const Insets& in) {
+                            const CornerRadii& outer, const Insets& in) {
     const float x0 = in.left, y0 = in.top;
     const float x1 = b.width - in.right, y1 = b.height - in.bottom;
     if (x1 <= x0 || y1 <= y0) return;
-    const float half_w = (x1 - x0) * 0.5f, half_h = (y1 - y0) * 0.5f;
-    const auto radius = [](float r, float inset, float limit) {
-        return std::clamp(r - inset, 0.0f, limit);
+    const auto shrink = [](float r, float inset) {
+        return std::max(0.0f, r - inset);
     };
-    const float tlx = radius(b.radius_tl, in.left, half_w);
-    const float tly = radius(b.radius_tl, in.top, half_h);
-    const float trx = radius(b.radius_tr, in.right, half_w);
-    const float try_ = radius(b.radius_tr, in.top, half_h);
-    const float brx = radius(b.radius_br, in.right, half_w);
-    const float bry = radius(b.radius_br, in.bottom, half_h);
-    const float blx = radius(b.radius_bl, in.left, half_w);
-    const float bly = radius(b.radius_bl, in.bottom, half_h);
+    const CornerRadii inner = fit_corner_radii(
+        x1 - x0, y1 - y0,
+        {shrink(outer.tl_x, in.left), shrink(outer.tl_y, in.top),
+         shrink(outer.tr_x, in.right), shrink(outer.tr_y, in.top),
+         shrink(outer.br_x, in.right), shrink(outer.br_y, in.bottom),
+         shrink(outer.bl_x, in.left), shrink(outer.bl_y, in.bottom)});
+    const float tlx = inner.tl_x, tly = inner.tl_y;
+    const float trx = inner.tr_x, try_ = inner.tr_y;
+    const float brx = inner.br_x, bry = inner.br_y;
+    const float blx = inner.bl_x, bly = inner.bl_y;
     constexpr float k = 0.5522847498f;  // cubic quarter-ellipse handle
     canvas.move_to(x0 + tlx, y0);
     canvas.line_to(x1 - trx, y0);
@@ -236,9 +262,15 @@ void paint_banded_border(canvas::Canvas& canvas, const BandedBorder& b) {
     const BorderEdge edges[4] = {BorderEdge::top, BorderEdge::right,
                                  BorderEdge::bottom, BorderEdge::left};
 
+    // The outer corners, fitted to the border box as the background is.
+    const CornerRadii radii = fit_corner_radii(
+        w, h, CornerRadii::circular(b.radius_tl, b.radius_tr, b.radius_br,
+                                    b.radius_bl));
+
     // The four mitre lines, outer corner → beyond the padding-box corner.
-    const float max_r = std::max({b.radius_tl, b.radius_tr, b.radius_br,
-                                  b.radius_bl});
+    const float max_r = std::max({radii.tl_x, radii.tl_y, radii.tr_x,
+                                  radii.tr_y, radii.br_x, radii.br_y,
+                                  radii.bl_x, radii.bl_y});
     const MitrePoint tl = mitre_end(0, 0, 1, 1, b.left, b.top, max_r, w, h);
     const MitrePoint tr = mitre_end(w, 0, -1, 1, b.right, b.top, max_r, w, h);
     const MitrePoint br = mitre_end(w, h, -1, -1, b.right, b.bottom, max_r, w, h);
@@ -261,8 +293,8 @@ void paint_banded_border(canvas::Canvas& canvas, const BandedBorder& b) {
         }
         const auto ring = [&] {
             canvas.begin_path();
-            add_inset_rounded_rect(canvas, b, outer);
-            add_inset_rounded_rect(canvas, b, inner);
+            add_inset_rounded_rect(canvas, b, radii, outer);
+            add_inset_rounded_rect(canvas, b, radii, inner);
             canvas.fill_current_path(canvas::FillRule::evenodd);
         };
         bool done[4] = {false, false, false, false};
