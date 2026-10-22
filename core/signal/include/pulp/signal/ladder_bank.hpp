@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 
 namespace pulp::signal {
 
