@@ -88,6 +88,69 @@ Add `--check-config` to honor the opt-in toggle (SKIP unless enabled) — CI/gat
 Use `--reaper-bin /Applications/REAPER.app/Contents/MacOS/REAPER` when a receipt
 must bind one exact host executable; an invalid or symlinked path fails closed.
 
+### `gpu-fault` — audio continuity through one injected GPU fault (WP-h1)
+Loads the GPU fault-continuity test plug-in (`examples/gpu-fault-continuity`,
+built only with `-DPULP_GPU_AUDIO_FAULT_HOOKS=ON`) on its shared-I/O GPU path,
+floats its editor, and plays a known stimulus in realtime while the plug-in fires
+one fault when the playhead crosses `--fault-at-sample`:
+
+- `force_loss_before|force_loss_between|force_loss_after|delay_completion|hang`
+  hit the **audio** device through WP-A2's `gpu_audio_fault_inject` seam;
+- `render_force_loss` loses the **editor's render** device through the
+  surface's existing device accessor. Audio owns a separate Dawn device, so the
+  expectation is "audio continues"; a REAPER crash is recorded as FAIL.
+
+The plug-in captures every callback's input and output from a host thread, and
+both that capture and REAPER's bounce are nulled against an independent CPU
+reference (stimulus convolved with the same IR, delayed by the reported PDC for
+the capture, PDC-compensated for the bounce) over the whole run and in a window
+around the fault sample. Transport health is snapshotted before, at, and after
+the fault. The run directory holds every artifact plus a
+`pulp.gpu-audio.daw-continuity.v1` receipt
+([schema](../../../docs/contracts/gpu-audio-daw-continuity-v1.schema.json)):
+
+Build it with the shared-I/O convolver compiled in; without these flags
+`SharedRequired` refuses and every run is INCONCLUSIVE:
+
+```bash
+cmake -S . -B build -DPULP_BUILD_EXAMPLES=ON -DPULP_GPU_AUDIO_FAULT_HOOKS=ON \
+  -DPULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON \
+  -DPULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=ON
+cmake --build build --target PulpGpuFaultContinuity_CLAP PulpGpuFaultContinuity_VST3
+```
+
+```bash
+python3 tools/testing/daw-smoke/reaper_smoke.py --mode gpu-fault \
+  --gpu-fault force_loss_between --format clap \
+  --plugin-name "Pulp GPU Fault Continuity" \
+  --plugin-path "build/CLAP/Pulp GPU Fault Continuity.clap" \
+  --out-dir /tmp/gpu-fault-run --reaper-bin /Applications/REAPER.app/Contents/MacOS/REAPER
+python3 tools/validation/verify_gpu_audio_daw_continuity_receipt.py /tmp/gpu-fault-run/receipt.json
+```
+
+The verifier re-derives every null, counter expectation and the verdict from the
+digest-bound artifacts; edited numbers or swapped files are rejected (exit 2).
+The receipt labels host quietness from `gpu_audio_p2_host_preflight.py`;
+`--require-quiet-host` and `--require-control-op` make those binding. A fault
+that reached the plug-in through the request file (`in_process_file`) proves the
+audio claim but not the control operation. A run is INCONCLUSIVE, never PASS,
+when the plug-in is not on the shared-I/O path, refuses the fault, drops a
+capture record, or fires the fault on an offline block. After playback the track
+is bounced with an offline render, so the bounce null covers the post-fault
+provider state through REAPER's own render path.
+
+The harness turns off REAPER's anticipative FX processing for the test track.
+With it on, REAPER runs the plug-in ahead of playback in back-to-back bursts,
+the GPU never meets its lead (which is counted in callbacks), and every block is
+CPU fallback; the receipt then says the GPU delivered nothing before the fault
+and the run is INCONCLUSIVE. `--anticipative-fx` keeps it on to show exactly
+that. The plug-in's transport quantum is the host's whole prepared block for the
+same reason: smaller quanta run back to back inside one callback.
+
+`--dry-run` runs the whole evidence chain on synthetic captures with no REAPER;
+`--dry-run --dry-run-break-fallback` is the planted negative (silence after the
+fault) and must come back FAIL at the fault sample.
+
 ## Audio etiquette
 This launches REAPER with a Pulp plugin on a track and may press Play, so audio
 can be active out of the default device during the run. The harness **announces**

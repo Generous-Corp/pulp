@@ -375,6 +375,12 @@
       ]
     },
     {
+      "name": "gpu-audio-daw-continuity-receipt-verifier-selftest",
+      "argv": [
+        "{repo}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py"
+      ]
+    },
+    {
       "name": "gpu-audio-trace-validator-selftest",
       "argv": [
         "{repo}/tools/scripts/test_validate_gpu_audio_trace_captures.py"

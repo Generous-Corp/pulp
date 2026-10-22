@@ -94,6 +94,20 @@ companion gates; screenshots alone do not prove audio or performance.
   `test/test_plugin_key_routing.cpp` (the shared policy) and the
   `[host-forward]` case in `test_plugin_view_host_key_focus.mm` (the real
   `PulpPluginView` seam, counting what reaches the host view).
+- **`gpu-fault`** — GPU-audio continuity at the DAW boundary (WP-h1). Loads the
+  test-only GPU fault-continuity plug-in (`examples/gpu-fault-continuity`, built
+  with `-DPULP_GPU_AUDIO_FAULT_HOOKS=ON`) on its shared-I/O path, floats its
+  editor, and plays a known stimulus in realtime while the plug-in fires one
+  `--gpu-fault` when the playhead crosses `--fault-at-sample`. The plug-in's
+  own capture and REAPER's bounce are nulled against an independent CPU
+  reference, health is snapshotted before/at/after, and a
+  `pulp.gpu-audio.daw-continuity.v1` receipt is written; only
+  `tools/validation/verify_gpu_audio_daw_continuity_receipt.py`, which
+  re-derives everything from the artifacts, can accept it. `render_force_loss`
+  loses the EDITOR's render device via the surface's device accessor; a REAPER
+  crash there is a FAIL finding, never hidden. A fault delivered by the request
+  file (`in_process_file`) is not control-op evidence. `--dry-run` (and
+  `--dry-run-break-fallback`, the planted negative) needs no REAPER.
 - All modes share the same REAPER lifecycle (`ReaperSession`): fresh portable
   dir, temp scan path, pre-warm scan, scripted insert+float, guaranteed teardown.
   They differ only in what they SEED, the TRIGGER they fire once the FX is shown,

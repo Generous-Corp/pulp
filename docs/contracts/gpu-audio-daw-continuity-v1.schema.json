@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.dev/contracts/gpu-audio-daw-continuity-v1.schema.json",
+  "title": "pulp.gpu-audio.daw-continuity.v1",
+  "description": "One GPU fault injected while the GPU fault-continuity test plug-in runs in REAPER with its editor open, and the null of the plug-in's own output and REAPER's bounce against an independent CPU reference. Produced by tools/testing/daw-smoke/reaper_smoke.py --mode gpu-fault; accepted only by tools/validation/verify_gpu_audio_daw_continuity_receipt.py, which re-derives every number below from the digest-bound artifacts. It does not prove render-owner loss propagation, resource replay or teardown callback suppression.",
+  "type": "object",
+  "required": [
+    "schema", "created_at", "trigger_transport", "control_op", "analysis", "bounce_artifact",
+    "preflight", "host_quiet", "artifacts", "host", "plugin", "fault", "pdc_samples",
+    "plugin_identity", "capture", "nulls", "health", "host_alive", "verdict",
+    "verdict_reasons", "receipt_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "pulp.gpu-audio.daw-continuity.v1"},
+    "created_at": {"type": "string"},
+    "trigger_transport": {
+      "description": "control_op: WP-A2's gpu_audio_fault_inject. in_process_file: the plug-in read a request file and called the same seam; it proves the audio claim, not the control surface. dry_run: synthetic, never DAW evidence.",
+      "enum": ["control_op", "in_process_file", "dry_run"]
+    },
+    "control_op": {
+      "type": ["object", "null"],
+      "properties": {
+        "operation": {"const": "gpu_audio_fault_inject"},
+        "request": {"type": "object"},
+        "response": {"type": ["object", "null"]},
+        "returncode": {"type": "integer"}
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "required": ["tolerance", "window"],
+      "properties": {
+        "tolerance": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.01},
+        "window": {
+          "type": "object",
+          "required": ["pre", "post"],
+          "properties": {
+            "pre": {"type": "integer", "minimum": 0},
+            "post": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "bounce_artifact": {"type": ["string", "null"]},
+    "preflight": {
+      "type": "object",
+      "required": ["status", "quiet_host", "reasons"],
+      "properties": {
+        "status": {"type": ["string", "null"]},
+        "quiet_host": {"type": "boolean"},
+        "reasons": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "host_quiet": {"type": "boolean"},
+    "artifacts": {
+      "type": "object",
+      "required": ["stimulus.wav", "ir.f32", "events.jsonl"],
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "host": {
+      "type": "object",
+      "properties": {
+        "reaper_version": {"type": ["string", "null"]},
+        "reaper_bin": {"type": "string"},
+        "machine": {"type": "string"},
+        "os": {"type": "string"}
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "required": ["format", "name", "executable_sha256"],
+      "properties": {
+        "format": {"enum": ["clap", "vst3", "au"]},
+        "name": {"type": "string"},
+        "bundle": {"type": "string"},
+        "executable_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "fault": {
+      "type": "object",
+      "required": ["kind", "requested_project_sample", "fired", "fired_project_sample",
+                   "issued_project_sample", "realtime_block", "render_loss"],
+      "properties": {
+        "kind": {"enum": ["force_loss_before", "force_loss_between", "force_loss_after",
+                          "delay_completion", "hang", "render_force_loss"]},
+        "requested_project_sample": {"type": "integer", "minimum": 0},
+        "fired": {"type": "boolean"},
+        "fired_project_sample": {"type": ["integer", "null"]},
+        "issued_project_sample": {"type": ["integer", "null"]},
+        "realtime_block": {"type": "boolean"},
+        "render_loss": {"type": ["object", "null"]}
+      }
+    },
+    "pdc_samples": {"type": "integer"},
+    "plugin_identity": {
+      "type": "object",
+      "properties": {
+        "provider": {"type": ["string", "null"]},
+        "path": {"type": ["string", "null"]},
+        "quantum": {"type": ["integer", "null"]},
+        "lead_blocks": {"type": ["integer", "null"]},
+        "ir_taps": {"type": ["integer", "null"]}
+      }
+    },
+    "capture": {
+      "type": "object",
+      "required": ["frames", "segments", "offline_samples"],
+      "properties": {
+        "frames": {"type": "integer", "minimum": 0},
+        "segments": {"type": "integer", "minimum": 0},
+        "offline_samples": {"type": "integer", "minimum": 0},
+        "truncated_tail_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "nulls": {
+      "type": "object",
+      "required": ["plugin", "bounce", "bounce_lag_estimate"],
+      "properties": {
+        "plugin": {"$ref": "#/$defs/null_result"},
+        "bounce": {"$ref": "#/$defs/null_result"},
+        "bounce_lag_estimate": {"type": ["integer", "null"]}
+      }
+    },
+    "health": {
+      "type": "object",
+      "required": ["snapshots", "expectation_met", "note"],
+      "properties": {
+        "snapshots": {
+          "type": "object",
+          "description": "Transport status before, at and after the fault, with WP-A2 gpu-audio-health-read-v1 field names and enum spellings.",
+          "properties": {
+            "before": {"type": "object"},
+            "at": {"type": "object"},
+            "after": {"type": "object"}
+          }
+        },
+        "expectation_met": {"type": "boolean"},
+        "note": {"type": "string"}
+      }
+    },
+    "host_alive": {"type": "boolean"},
+    "verdict": {"enum": ["pass", "fail", "inconclusive"]},
+    "verdict_reasons": {"type": "array", "items": {"type": "string"}},
+    "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "null_result": {
+      "type": ["object", "null"],
+      "required": ["passed", "tolerance", "max_abs_error", "window_max_abs_error",
+                   "non_finite_samples", "first_deviating_sample", "last_deviating_sample",
+                   "deviating_samples", "window", "compared_samples", "reference_rms",
+                   "candidate_rms"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "tolerance": {"type": "number"},
+        "max_abs_error": {"type": ["number", "null"]},
+        "window_max_abs_error": {"type": ["number", "null"]},
+        "non_finite_samples": {"type": "integer", "minimum": 0},
+        "first_deviating_sample": {"type": ["integer", "null"]},
+        "last_deviating_sample": {"type": ["integer", "null"]},
+        "deviating_samples": {"type": "integer", "minimum": 0},
+        "window": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
+        "compared_samples": {"type": "integer", "minimum": 0},
+        "reference_rms": {"type": "number"},
+        "candidate_rms": {"type": "number"}
+      }
+    }
+  }
+}

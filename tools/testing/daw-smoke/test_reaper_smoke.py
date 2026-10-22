@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import pathlib
 import subprocess
@@ -555,6 +556,213 @@ class KeyboardRoutingMode(unittest.TestCase):
             self.assertIn(needed, text,
                           f"the keyboard-routing lua must read {needed}")
 
+
+
+class GpuFaultMode(unittest.TestCase):
+    """WP-h1: one GPU fault mid-render, audio nulled against a CPU reference.
+
+    The live path is driven here with a mocked REAPER session whose "plug-in"
+    writes the same artifacts a real one would (the dry-run synthesizer), so
+    the harness's own sequencing — scan-instance cleanup, arming handshake,
+    render wait, crash detection, receipt — is exercised without REAPER.
+    """
+
+    FRAMES, FAULT, POST = 6000, 3000, 2400
+
+    def args(self, tmp: pathlib.Path, **kw):
+        ap = rs.build_parser()
+        bundle = tmp / "Fault.clap"
+        (bundle / "Contents" / "MacOS").mkdir(parents=True, exist_ok=True)
+        (bundle / "Contents" / "MacOS" / "Fault").write_bytes(b"binary")
+        argv = ["--mode", "gpu-fault", "--gpu-fault", kw.pop("fault", "force_loss_between"),
+                "--plugin-name", "Pulp GPU Fault Continuity", "--plugin-path", str(bundle),
+                "--format", "clap", "--timeout", "5",
+                "--stimulus-frames", str(self.FRAMES), "--fault-at-sample", str(self.FAULT),
+                "--window-post", str(self.POST), "--out-dir", str(tmp / "run")]
+        args = ap.parse_args(argv)
+        rs.validate_mode_args(ap, args)
+        return args
+
+    def fake_session(self, tmp: pathlib.Path, args, *, crash=False, refuse=False,
+                     break_fallback=False):
+        lib = rs._gpu_fault_lib()
+        session = mock.MagicMock()
+        session.place_plugin.return_value = None
+        session.portable = tmp / "portable"
+        session.portable.mkdir(exist_ok=True)
+        session.reaper_out = tmp / "reaper.out.txt"
+        session.reaper_out.write_text("REAPER stdout\n")
+        run_dir = pathlib.Path(args.out_dir)
+        status = session.portable / "status.txt"
+
+        def shown(env, status_path, script, before_scripted):
+            # A stale claim from the scan launch must be gone before the real one.
+            (run_dir / "claim").write_text("scan")
+            before_scripted()
+            assert not (run_dir / "claim").exists()
+            assert env["PULP_GPU_FAULT_STIMULUS"].endswith("stimulus.wav")
+            assert env["PULP_GPU_FAULT_REQUEST"].endswith("fault-request.json")
+            lib.synthesize_run(run_dir, fault=args.gpu_fault, fault_sample=args.fault_at_sample,
+                               frames=args.stimulus_frames, break_fallback=break_fallback)
+            if refuse:
+                (run_dir / "events.jsonl").write_text(
+                    '{"event":"prepared","path":"shared_memory"}\n'
+                    '{"event":"fault_refused","reason":"no seam"}\n')
+            status_path.write_text("RENDER_DONE file=x")
+            return None
+
+        session.run_until_fx_shown.side_effect = shown
+        session.proc.poll.return_value = 139 if crash else None
+        session.proc.returncode = 139 if crash else None
+        return session
+
+    def run_mode(self, tmp, **kw):
+        flags = {k: kw.pop(k) for k in ("crash", "refuse", "break_fallback") if k in kw}
+        args = self.args(tmp, **kw)
+        session = self.fake_session(tmp, args, **flags)
+        preflight = ({"status": "blocked", "quiet_host": False, "reasons": ["load"]}, None)
+        with mock.patch.object(rs, "ReaperSession", return_value=session), \
+                mock.patch.object(rs, "_host_preflight", return_value=preflight), \
+                mock.patch.object(rs, "_reaper_version", return_value="7.79"):
+            rc = rs.run_gpu_fault_mode(pathlib.Path("/reaper"), args)
+        session.cleanup.assert_called_once_with()
+        receipt = pathlib.Path(args.out_dir) / "receipt.json"
+        return rc, (json.loads(receipt.read_text()) if receipt.exists() else None)
+
+    def test_mode_and_fault_kinds_are_offered(self):
+        ap = rs.build_parser()
+        for kind in ("force_loss_before", "force_loss_between", "force_loss_after",
+                     "delay_completion", "hang", "render_force_loss"):
+            args = ap.parse_args(["--mode", "gpu-fault", "--gpu-fault", kind, "--dry-run"])
+            rs.validate_mode_args(ap, args)
+
+    def test_a_fault_kind_is_required(self):
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "gpu-fault", "--dry-run"])
+        with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
+            rs.validate_mode_args(ap, args)
+
+    def test_the_fault_must_fall_inside_the_stimulus(self):
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "gpu-fault", "--gpu-fault", "hang", "--dry-run",
+                              "--stimulus-frames", "100", "--fault-at-sample", "100"])
+        with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
+            rs.validate_mode_args(ap, args)
+
+    def test_continuous_audio_through_the_fault_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, receipt = self.run_mode(pathlib.Path(tmp))
+        self.assertEqual(rc, rs.EXIT_PASS)
+        self.assertEqual(receipt["verdict"], "pass")
+        self.assertEqual(receipt["trigger_transport"], "in_process_file")
+        self.assertFalse(receipt["host_quiet"])
+        self.assertEqual(receipt["host"]["reaper_version"], "7.79")
+
+    def test_silence_after_the_fault_fails_at_the_fault_sample(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, receipt = self.run_mode(pathlib.Path(tmp), break_fallback=True)
+        self.assertEqual(rc, rs.EXIT_FAIL)
+        self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], self.FAULT)
+
+    def test_a_host_crash_on_render_loss_is_recorded_as_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, receipt = self.run_mode(pathlib.Path(tmp), fault="render_force_loss",
+                                        crash=True)
+        self.assertEqual(rc, rs.EXIT_FAIL)
+        self.assertFalse(receipt["host_alive"])
+        self.assertEqual(receipt["verdict_reasons"], ["host process died during the run"])
+
+    def test_a_refused_fault_is_inconclusive_and_writes_no_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, receipt = self.run_mode(pathlib.Path(tmp), refuse=True)
+        self.assertEqual(rc, rs.EXIT_INCONCLUSIVE)
+        self.assertIsNone(receipt)
+
+    def test_every_exit_runs_full_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = self.args(pathlib.Path(tmp))
+            session = mock.MagicMock()
+            session.place_plugin.return_value = rs.EXIT_FAIL
+            with mock.patch.object(rs, "ReaperSession", return_value=session), \
+                    mock.patch.object(rs, "_host_preflight",
+                                      return_value=({"status": "x", "quiet_host": False,
+                                                     "reasons": []}, None)):
+                self.assertEqual(rs.run_gpu_fault_mode(pathlib.Path("/reaper"), args),
+                                 rs.EXIT_FAIL)
+            session.cleanup.assert_called_once_with()
+
+    def test_the_lua_handshakes_and_renders_only_after_go(self):
+        lua = rs.GPU_FAULT_LUA.read_text()
+        for needle in ("FX_SHOWN", "PLAYING", "RENDERING", "RENDER_DONE", "GO_TIMEOUT",
+                       "PULP_GPU_FAULT_GO", "OnPlayButton", "Main_OnCommand(41824",
+                       "TrackFX_Show"):
+            self.assertIn(needle, lua)
+        # Armed first, then realtime playback (where the fault fires), then the bounce.
+        self.assertLess(lua.index("file_exists(go_path)"), lua.index("OnPlayButton()"))
+        # The bounce runs only once playback has stopped.
+        self.assertIn("reaper.OnStopButton()\n    reaper.defer(wait_for_stop)", lua)
+        self.assertEqual(lua.count("bounce_track()"), 2)  # definition + the one call
+
+    def test_preconditions_make_a_clean_null_inconclusive(self):
+        lib = rs._gpu_fault_lib()
+        cases = {
+            "staged": ('"path": "shared_memory"', '"path": "staged"'),
+            "overflow": (None, '{"event": "capture_overflow", "dropped_records": 1}'),
+            "render loss not performed": (None, None),
+        }
+        for name, (old, new) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                run = pathlib.Path(tmp)
+                fault = "render_force_loss" if name.startswith("render") else "hang"
+                lib.synthesize_run(run, fault=fault, fault_sample=self.FAULT,
+                                   frames=self.FRAMES)
+                events = (run / "events.jsonl").read_text()
+                if name.startswith("render"):
+                    events = events.replace('"performed": true', '"performed": false')
+                elif old:
+                    events = events.replace(old, new)
+                else:
+                    events += new + "\n"
+                (run / "events.jsonl").write_text(events)
+                result = lib.evaluate_run(run, fault=fault, fault_sample=self.FAULT,
+                                          tolerance=1e-4, window_pre=100, window_post=self.POST,
+                                          host_alive=True, bounce_path=run / "bounce.wav")
+                self.assertEqual(result["verdict"], "inconclusive", result["verdict_reasons"])
+                # Positive control: the untouched run passes.
+                lib.synthesize_run(run, fault=fault, fault_sample=self.FAULT, frames=self.FRAMES)
+                result = lib.evaluate_run(run, fault=fault, fault_sample=self.FAULT,
+                                          tolerance=1e-4, window_pre=100, window_post=self.POST,
+                                          host_alive=True, bounce_path=run / "bounce.wav")
+                self.assertEqual(result["verdict"], "pass", result["verdict_reasons"])
+
+    def test_dry_run_needs_no_reaper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = subprocess.run(
+                [sys.executable, str(MODULE_PATH), "--mode", "gpu-fault", "--gpu-fault", "hang",
+                 "--dry-run", "--stimulus-frames", str(self.FRAMES), "--fault-at-sample",
+                 str(self.FAULT), "--window-post", str(self.POST), "--out-dir", tmp,
+                 "--reaper-bin", "/nonexistent/REAPER"],
+                capture_output=True, text=True, check=False).returncode
+        self.assertEqual(rc, rs.EXIT_PASS)
+
+
+class PreWarmCache(unittest.TestCase):
+    """The pre-warm must wait for a scanned entry, not a section header."""
+
+    HEADER_ONLY = "[Pulp GPU Fault Continuity.clap]\n_=801A5C0AEB61DD01\n\n"
+    SCANNED = HEADER_ONLY.rstrip("\n") + (
+        "\ncom.pulp.gpu-fault-continuity=0|Pulp GPU Fault Continuity (Pulp)\n")
+
+    def test_a_section_header_alone_is_not_published(self):
+        self.assertFalse(rs.cache_publishes(self.HEADER_ONLY, "Pulp GPU Fault Continuity"))
+
+    def test_a_scanned_entry_is_published(self):
+        self.assertTrue(rs.cache_publishes(self.SCANNED, "pulp gpu fault continuity"))
+
+    def test_vst3_cache_entry_is_published(self):
+        vst3 = "[vstcache]\nPulpGain.vst3=00A1,1234{ABCD,PulpGain (Pulp)\n"
+        self.assertTrue(rs.cache_publishes(vst3, "PulpGain"))
+        self.assertFalse(rs.cache_publishes("[vstcache]\n", "PulpGain"))
 
 class FormatIsAsked(unittest.TestCase):
     """--format has to decide which plugin REAPER inserts.

@@ -32,6 +32,17 @@ MODES  (--mode, default reload)
                        of this mode is the headless continuity test
                        (test/test_signal_graph_live_swap_continuity.cpp); this
                        mode is the local-only in-host proof.
+    gpu-fault          Load the GPU fault-continuity test plug-in on its shared-I/O
+                       GPU path, float its editor, and play a known stimulus while
+                       the plug-in fires one GPU fault (--gpu-fault) at a recorded
+                       project sample. The plug-in's own output capture and REAPER's
+                       bounce are both nulled against an independent CPU reference
+                       around the fault sample, transport health is snapshotted
+                       before/at/after, and a pulp.gpu-audio.daw-continuity.v1
+                       receipt is written (verify it with
+                       tools/validation/verify_gpu_audio_daw_continuity_receipt.py).
+                       A REAPER crash on render_force_loss is recorded as FAIL, not
+                       hidden. --dry-run runs the evidence chain with no REAPER.
     sequence-loop-seek Load a Pulp plugin that embeds a sequence, set a loop region
                        on the REAPER timeline, start playback, and perform a scripted
                        series of seeks (into/out of the loop and across the loop
@@ -73,6 +84,7 @@ DESIGN NOTES (adversarial)
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import re
@@ -90,6 +102,7 @@ HERE = Path(__file__).resolve().parent
 LUA = HERE / "insert_and_float.lua"
 SEQ_LOOP_LUA = HERE / "sequence_loop_seek.lua"
 KEY_ROUTING_LUA = HERE / "keyboard_routing.lua"
+GPU_FAULT_LUA = HERE / "gpu_fault.lua"
 
 # Default log markers for the live-plugin-swap mode. The success marker is
 # emitted by the host plugin's NodeLiveSwapPolicy::on_instance_swapped observer
@@ -220,6 +233,26 @@ def kill_reaper() -> None:
         "(set PULP_DAW_SMOKE_KILL_ALL=1 on a machine with nobody at it)")
 
 
+def cache_publishes(cache_text: str, target: str) -> bool:
+    """True once a REAPER plug-in cache holds a scanned ENTRY naming `target`.
+
+    REAPER writes a bundle's `[<file>.clap]` section header before it has
+    scanned the bundle, and a bundle is usually named after its plug-in, so
+    matching the header let the pre-warm kill REAPER with an empty section.
+    The scripted launch then did not know the plug-in and the run ended
+    INCONCLUSIVE ("could not find/insert the FX"). Only an entry line
+    (`id=...|Name (Vendor)`) counts.
+    """
+    target = target.casefold()
+    for line in cache_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("[") or "=" not in stripped:
+            continue
+        if target in stripped.split("=", 1)[1].casefold():
+            return True
+    return False
+
+
 class ReaperSession:
     """Shared REAPER lifecycle for every mode: fresh portable dir, temp plugin
     scan path (or a transient AU install), a pre-warm scan launch, and the
@@ -235,6 +268,8 @@ class ReaperSession:
         self.reaper_out = self.portable / "reaper.out.txt"
         self.au_installed: Path | None = None
         self.proc: subprocess.Popen | None = None
+        # Extra portable reaper.ini keys a mode needs (never written back).
+        self.extra_ini: dict[str, str] = {}
 
     def place_plugin(self) -> int | None:
         """Put the plugin where REAPER finds it without touching real folders.
@@ -299,6 +334,7 @@ class ReaperSession:
         for line in arch_lines:
             key, _, value = line.partition("=")
             ours[key] = value
+        ours.update(getattr(self, "extra_ini", {}))
 
         base = ""
         real_ini = real_dir / "reaper.ini"
@@ -373,7 +409,8 @@ class ReaperSession:
             subprocess.run(["killall", "-9", "AudioComponentRegistrar"], capture_output=True)
         return None
 
-    def run_until_fx_shown(self, env: dict, status: Path, script: Path = LUA) -> int | None:
+    def run_until_fx_shown(self, env: dict, status: Path, script: Path = LUA,
+                           before_scripted=None) -> int | None:
         """Pre-warm scan (a launch we kill so the scripted run finds the FX), then
         the scripted REAPER run (`script`, default insert+float). Returns an EXIT_*
         code on a non-PASS terminal outcome, or None once the FX is shown and
@@ -400,7 +437,7 @@ class ReaperSession:
             caches.extend(self.portable.glob("reaper-*vst*.ini"))
             for cache in caches:
                 try:
-                    if target in cache.read_text(errors="replace").casefold():
+                    if cache_publishes(cache.read_text(errors="replace"), target):
                         cache_ready = True
                         break
                 except OSError:
@@ -412,6 +449,8 @@ class ReaperSession:
                 "cache before timeout; scripted launch may remain inconclusive.")
         stop_reaper_process(warm)
 
+        if before_scripted is not None:
+            before_scripted()
         with open(self.reaper_out, "a") as out:
             self.proc = subprocess.Popen(
                 [str(self.reaper), "-cfgfile", str(self.portable / "reaper.ini"), str(script)],
@@ -1334,24 +1373,308 @@ def run_sequence_loop_seek_mode(reaper: Path, args: argparse.Namespace) -> int:
         session.cleanup()
 
 
+# ── gpu-fault mode ───────────────────────────────────────────────────────
+#
+# The plug-in under test is the GPU fault-continuity test plug-in
+# (test/support/gpu_fault_continuity_plugin). It reads three env vars REAPER
+# passes through: the run directory it writes its capture and events into,
+# the impulse response the harness chose, and the fault request file. The
+# analysis lives in gpu_fault_continuity.py so the dry run and the verifier
+# share it with the live run.
+
+def _gpu_fault_lib():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gpu_fault_continuity",
+                                                  HERE / "gpu_fault_continuity.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _host_preflight() -> tuple[dict, dict | None]:
+    """Summarise the P2 quiet-host preflight. An unavailable preflight is a
+    not-quiet host, never a quiet one."""
+    import importlib.util
+    path = HERE.parents[1] / "scripts" / "gpu_audio_p2_host_preflight.py"
+    try:
+        spec = importlib.util.spec_from_file_location("gpu_audio_p2_host_preflight", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        full = mod.collect()
+    except Exception as exc:  # noqa: BLE001 - the label must survive any probe failure
+        return {"status": "unavailable", "quiet_host": False,
+                "reasons": [f"preflight_error: {exc}"]}, None
+    return {"status": full.get("status"), "quiet_host": bool(full.get("quiet_host")),
+            "reasons": list(full.get("reasons", [])),
+            "load1": full.get("load1"), "ncpu": full.get("ncpu"),
+            "raw_observations_sha256": full.get("raw_observations_sha256")}, full
+
+
+def _reaper_version(reaper: Path) -> str | None:
+    try:
+        import plistlib
+        plist = reaper.parents[1] / "Info.plist"
+        with open(plist, "rb") as f:
+            return str(plistlib.load(f).get("CFBundleShortVersionString"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _bundle_executable(bundle: Path) -> Path | None:
+    macos = bundle / "Contents" / "MacOS"
+    found = [p for p in macos.iterdir() if p.is_file()] if macos.is_dir() else []
+    return found[0] if len(found) == 1 else None
+
+
+def _invoke_control_fault(args: argparse.Namespace, fault: str, sample: int) -> dict:
+    """Run the operator-supplied gpu_audio_fault_inject command. Kept to one
+    seam so the control op's final shape is a one-place change."""
+    import shlex
+    argv = [a.format(fault=fault, sample=sample) for a in shlex.split(args.control_inject_cmd)]
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=30, check=False)
+    try:
+        response = json.loads(proc.stdout) if proc.stdout.strip() else None
+    except json.JSONDecodeError:
+        response = None
+    return {"operation": "gpu_audio_fault_inject", "argv": argv,
+            "request": {"fault": fault, "at_project_sample": sample},
+            "returncode": proc.returncode, "response": response,
+            "stderr_tail": proc.stderr[-2000:]}
+
+
+def _wait_for_event(events: Path, names, timeout: float, proc) -> dict | None:
+    lib = sys.modules.get("gpu_fault_continuity") or _gpu_fault_lib()
+    names = (names,) if isinstance(names, str) else tuple(names)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        found = next((e for e in lib.load_events(events) if e.get("event") in names), None)
+        if found is not None:
+            return found
+        if proc is not None and proc.poll() is not None:
+            return None
+        time.sleep(0.25)
+    return None
+
+
+def _wait_for_stable_file(path: Path, deadline: float, proc, settle: float = 3.0) -> bool:
+    """The render action can hand control back while REAPER is still writing
+    the file, and stopping REAPER then leaves a bounce whose second half is
+    silence. Wait until the file has stopped changing for `settle` seconds."""
+    last, since = None, time.time()
+    while time.time() < deadline:
+        size = path.stat().st_size if path.exists() else -1
+        if size != last:
+            last, since = size, time.time()
+        elif size > 0 and time.time() - since >= settle:
+            return True
+        if proc is not None and proc.poll() is not None:
+            return size > 0
+        time.sleep(0.5)
+    return False
+
+
+def _finish_gpu_fault(lib, run_dir: Path, args: argparse.Namespace, *, transport: str,
+                      host_alive: bool, bounce: Path | None, identity: dict,
+                      preflight: dict, control: dict | None) -> int:
+    evidence = lib.evaluate_run(run_dir, fault=args.gpu_fault, fault_sample=args.fault_at_sample,
+                                tolerance=args.null_tolerance, window_pre=args.window_pre,
+                                window_post=args.window_post, host_alive=host_alive,
+                                bounce_path=bounce)
+    names = ["stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json",
+             "reaper.out.txt"] + ([bounce.name] if bounce is not None else [])
+    receipt = lib.build_receipt(
+        created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        trigger_transport=transport,
+        control_op=control,
+        analysis={"tolerance": args.null_tolerance,
+                  "window": {"pre": args.window_pre, "post": args.window_post}},
+        bounce_artifact=bounce.name if bounce is not None and bounce.exists() else None,
+        preflight=preflight,
+        host_quiet=bool(preflight.get("quiet_host")),
+        artifacts=lib.artifact_digests(run_dir, names),
+        **identity, **evidence)
+    out = run_dir / "receipt.json"
+    out.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    log(f"receipt: {out}")
+    log(f"host quiet: {receipt['host_quiet']} ({', '.join(preflight.get('reasons', [])) or 'no reasons'})")
+    for name, result in evidence["nulls"].items():
+        if isinstance(result, dict):
+            log(f"{name} null: passed={result['passed']} max_abs_error={result['max_abs_error']} "
+                f"window_max={result['window_max_abs_error']} "
+                f"first={result['first_deviating_sample']} last={result['last_deviating_sample']}")
+    log(f"health: {evidence['health']['note']}")
+    verdict = evidence["verdict"]
+    reasons = "; ".join(evidence["verdict_reasons"]) or "all checks held"
+    log(f"gpu-fault {args.gpu_fault}: {verdict.upper()} — {reasons}")
+    return {"pass": EXIT_PASS, "fail": EXIT_FAIL}.get(verdict, EXIT_INCONCLUSIVE)
+
+
+def run_gpu_fault_dry_run(args: argparse.Namespace) -> int:
+    """The whole evidence chain without REAPER: synthetic capture and bounce
+    built from the reference, then the same analysis, receipt and verifier a
+    live run uses. --dry-run-break-fallback plants the negative (silence after
+    the fault) and must come back FAIL."""
+    lib = _gpu_fault_lib()
+    run_dir = Path(args.out_dir or tempfile.mkdtemp(prefix="pulp-gpu-fault-dry-"))
+    lib.synthesize_run(run_dir, fault=args.gpu_fault, fault_sample=args.fault_at_sample,
+                       frames=args.stimulus_frames, break_fallback=args.dry_run_break_fallback)
+    preflight = {"status": "dry_run", "quiet_host": False, "reasons": ["dry_run"]}
+    (run_dir / "preflight.json").write_text(json.dumps(preflight) + "\n")
+    identity = {"host": {"reaper_version": None, "machine": platform.machine(),
+                         "os": platform.platform()},
+                "plugin": {"format": args.format, "name": args.plugin_name or "dry-run",
+                           "executable_sha256": None}}
+    return _finish_gpu_fault(lib, run_dir, args, transport="dry_run", host_alive=True,
+                             bounce=run_dir / "bounce.wav", identity=identity,
+                             preflight=preflight, control=None)
+
+
+def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
+    lib = _gpu_fault_lib()
+    plugin = Path(os.path.expanduser(args.plugin_path))
+    bad = _validate_inputs([plugin, GPU_FAULT_LUA])
+    if bad is not None:
+        return bad
+    executable = _bundle_executable(plugin)
+    if executable is None:
+        log(f"{plugin} has no single bundle executable — FAIL")
+        return EXIT_FAIL
+
+    run_dir = Path(args.out_dir or tempfile.mkdtemp(prefix="pulp-gpu-fault-"))
+    run_dir.mkdir(parents=True, exist_ok=True)
+    preflight, full = _host_preflight()
+    (run_dir / "preflight.json").write_text(json.dumps(full or preflight, indent=2,
+                                                       sort_keys=True, default=str) + "\n")
+    log(f"host preflight: status={preflight['status']} quiet={preflight['quiet_host']}")
+
+    frames = args.stimulus_frames
+    stim = lib.make_stimulus(frames)
+    lib.write_wav_f32(run_dir / "stimulus.wav", [stim] * lib.CHANNELS)
+    lib.write_f32(run_dir / "ir.f32", lib.make_impulse_response())
+    bounce = run_dir / "bounce.wav"
+    # Play (and later bounce) far enough past the fault for the `after` snapshot.
+    render_end = (frames + args.window_post) / 48000.0
+
+    transport = "control_op" if args.control_inject_cmd else "in_process_file"
+    request = run_dir / "fault-request.json"
+    if transport == "in_process_file":
+        request.write_text(json.dumps({
+            "fault": args.gpu_fault, "at_project_sample": args.fault_at_sample,
+            "after_project_sample": args.fault_at_sample + args.window_post,
+        }) + "\n")
+    go = run_dir / "go"
+
+    _announce(f'"{args.plugin_name}" ({args.format}) gpu-fault {args.gpu_fault} smoke '
+              "(realtime playback, then an offline bounce)", args.timeout)
+    session = ReaperSession(reaper, args)
+    session.extra_ini["renderclosewhendone"] = "4"
+    status = session.portable / "status.txt"
+    identity = {"host": {"reaper_version": _reaper_version(reaper), "reaper_bin": str(reaper),
+                         "machine": platform.machine(), "os": platform.platform()},
+                "plugin": {"format": args.format, "name": args.plugin_name,
+                           "bundle": str(plugin.resolve()),
+                           "executable_sha256": lib.sha256_file(executable)},
+                "anticipative_fx": bool(args.anticipative_fx)}
+    control = None
+    host_alive = True
+    try:
+        placed = session.place_plugin()
+        if placed is not None:
+            return placed
+        env = _common_env(args, status)
+        env.update({
+            "PULP_GPU_FAULT_RUN_DIR": str(run_dir),
+            "PULP_GPU_FAULT_IR": str(run_dir / "ir.f32"),
+            "PULP_GPU_FAULT_REQUEST": str(request),
+            "PULP_GPU_FAULT_GO": str(go),
+            "PULP_GPU_FAULT_BOUNCE": str(bounce),
+            "PULP_GPU_FAULT_RENDER_END": f"{render_end:.6f}",
+            "PULP_GPU_FAULT_PLAY_END": f"{render_end:.6f}",
+            "PULP_GPU_FAULT_ANTICIPATIVE": "1" if args.anticipative_fx else "0",
+            "PULP_GPU_FAULT_GO_TIMEOUT": str(args.timeout),
+        })
+        def forget_scan_instances() -> None:
+            # The pre-warm scan launch instantiated the plug-in with the same
+            # environment; whatever it claimed or wrote is not this run's.
+            for name in ("claim", "capture.bin", "events.jsonl"):
+                (run_dir / name).unlink(missing_ok=True)
+
+        env["PULP_GPU_FAULT_STIMULUS"] = str(run_dir / "stimulus.wav")
+        not_shown = session.run_until_fx_shown(env, status, script=GPU_FAULT_LUA,
+                                               before_scripted=forget_scan_instances)
+        if not_shown is not None:
+            return not_shown
+
+        events = run_dir / "events.jsonl"
+        if _wait_for_event(events, "prepared", args.timeout, session.proc) is None:
+            log("the plug-in never logged `prepared` (not the fault-continuity build, or the "
+                "shared-IO GPU path refused) — INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        if transport == "control_op":
+            control = _invoke_control_fault(args, args.gpu_fault, args.fault_at_sample)
+            log(f"control op returned {control['returncode']}: {control['response']}")
+        armed = _wait_for_event(events, ("fault_armed", "fault_refused"), args.timeout,
+                                session.proc)
+        if armed is None or armed.get("event") != "fault_armed":
+            log("the plug-in did not arm the fault"
+                + (f": {armed.get('reason')}" if armed else "") + " — INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        go.write_text("go\n")
+
+        # Realtime playback of the whole stimulus, then the bounce.
+        deadline = time.time() + args.timeout + render_end * 4
+        done, text = False, ""
+        while time.time() < deadline:
+            time.sleep(1)
+            text = status.read_text().strip() if status.exists() else ""
+            if text.startswith(("RENDER_DONE", "RENDER_MISSING", "GO_TIMEOUT")):
+                done = True
+                break
+            if session.proc is not None and session.proc.poll() is not None:
+                break
+        host_alive = session.proc is not None and session.proc.poll() is None
+        if not host_alive:
+            log(f"REAPER exited during the run (code {session.proc.returncode}) — recording "
+                "a host crash as a FAIL finding")
+        elif not done:
+            log("REAPER did not finish the render within timeout — INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        elif text.startswith("RENDER_DONE") and not _wait_for_stable_file(
+                bounce, deadline, session.proc):
+            log("the bounce never stopped growing before the timeout — INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        host_alive = session.proc is not None and session.proc.poll() is None
+        session.terminate()
+        shutil.copyfile(session.reaper_out, run_dir / "reaper.out.txt")
+        return _finish_gpu_fault(lib, run_dir, args, transport=transport,
+                                 host_alive=host_alive,
+                                 bounce=bounce if bounce.exists() else None,
+                                 identity=identity, preflight=preflight, control=control)
+    finally:
+        session.cleanup()
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="REAPER functional smoke for Pulp reload/editor/live-swap changes.")
     ap.add_argument("--mode",
                     choices=["reload", "live-plugin-swap", "sequence-loop-seek",
-                             "editor-open", "editor-build", "keyboard-routing"],
+                             "editor-open", "editor-build", "keyboard-routing", "gpu-fault"],
                     default="reload",
                     help="reload (default) hot-swaps a watched DSP artifact; "
                          "live-plugin-swap drives a hosted plugin-instance swap; "
                          "sequence-loop-seek loops + seeks the transport and asserts an "
                          "embedded sequence followed the host playhead with no dropout; "
                          "keyboard-routing presses keys at the focused editor and asserts "
-                         "from the host's own state which ones reached it.")
-    ap.add_argument("--plugin-name", required=True,
+                         "from the host's own state which ones reached it; "
+                         "gpu-fault injects one GPU-audio fault during playback and nulls the "
+                         "plug-in output and the bounce against a CPU reference.")
+    ap.add_argument("--plugin-name", default="",
                     help='FX name as REAPER lists it, e.g. "Pulp Hot-Reload Morph".')
     ap.add_argument("--format", choices=["vst3", "clap", "au"], default="vst3",
                     help="vst3/clap scan from a temp path (no pollution); au installs+uninstalls (last resort).")
-    ap.add_argument("--plugin-path", required=True,
+    ap.add_argument("--plugin-path", default="",
                     help="Path to the built .vst3/.clap/.component bundle.")
     ap.add_argument("--timeout", type=int, default=90, help="Per-phase wall-clock cap (s).")
     ap.add_argument("--reaper-bin",
@@ -1394,10 +1717,57 @@ def build_parser() -> argparse.ArgumentParser:
                            help="Log substring proving the transport started.")
     seq_group.add_argument("--blk-prefix", default=DEFAULT_SEQ_BLK_PREFIX,
                            help="Prefix of the per-block transport marker the plugin emits.")
+
+    fault_group = ap.add_argument_group("gpu-fault mode")
+    fault_group.add_argument("--gpu-fault",
+                             choices=["force_loss_before", "force_loss_between",
+                                      "force_loss_after", "delay_completion", "hang",
+                                      "render_force_loss"],
+                             help="The fault to inject. render_force_loss loses the editor's "
+                                  "render device, not the audio device.")
+    fault_group.add_argument("--fault-at-sample", type=int, default=96000,
+                             help="Project sample at which the plug-in fires the fault.")
+    fault_group.add_argument("--stimulus-frames", type=int, default=240000,
+                             help="Length of the stimulus item (48 kHz frames).")
+    fault_group.add_argument("--null-tolerance", type=float, default=1e-4,
+                             help="Max |output - reference| per sample.")
+    fault_group.add_argument("--window-pre", type=int, default=4800,
+                             help="Samples before the fault in the fault-window null.")
+    fault_group.add_argument("--window-post", type=int, default=48000,
+                             help="Samples after the fault in the fault-window null; also "
+                                  "when the plug-in takes its `after` health snapshot.")
+    fault_group.add_argument("--anticipative-fx", action="store_true",
+                             help="Leave REAPER's anticipative FX processing on for the track. "
+                                  "It runs callbacks back to back, so the GPU never meets its "
+                                  "lead and every block is CPU fallback.")
+    fault_group.add_argument("--control-inject-cmd",
+                             help="Command that invokes the gpu_audio_fault_inject control op "
+                                  "({fault}/{sample} are substituted; JSON on stdout). Without "
+                                  "it the fault request reaches the plug-in through a file.")
+    fault_group.add_argument("--out-dir", help="Run directory for artifacts and the receipt.")
+    fault_group.add_argument("--dry-run", action="store_true",
+                             help="Exercise the analysis, receipt and verifier on synthetic "
+                                  "captures; needs no REAPER and no plug-in.")
+    fault_group.add_argument("--dry-run-break-fallback", action="store_true",
+                             help="Planted negative for --dry-run: silence after the fault.")
     return ap
 
 
 def validate_mode_args(ap: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if args.mode == "gpu-fault":
+        if not args.gpu_fault:
+            ap.error("gpu-fault mode requires --gpu-fault")
+        if not args.dry_run and not (args.plugin_name and args.plugin_path):
+            ap.error("gpu-fault mode requires --plugin-name and --plugin-path (or --dry-run)")
+        if not 0 < args.fault_at_sample < args.stimulus_frames:
+            ap.error("--fault-at-sample must fall inside the stimulus")
+        if args.dry_run_break_fallback and not args.dry_run:
+            ap.error("--dry-run-break-fallback only applies to --dry-run")
+        return
+    if args.mode != "gpu-fault" and (args.dry_run or args.gpu_fault):
+        ap.error("--gpu-fault/--dry-run apply only to --mode gpu-fault")
+    if not (args.plugin_name and args.plugin_path):
+        ap.error("--plugin-name and --plugin-path are required")
     if args.mode == "reload":
         missing = [f for f, v in (
             ("--watched-logic", args.watched_logic),
@@ -1427,6 +1797,9 @@ def main() -> int:
     args = ap.parse_args()
     validate_mode_args(ap, args)
 
+    if args.mode == "gpu-fault" and args.dry_run:
+        return run_gpu_fault_dry_run(args)
+
     if args.check_config:
         cfg = load_config()
         if not cfg["enabled"]:
@@ -1451,6 +1824,8 @@ def main() -> int:
         return run_editor_build_mode(reaper, args)
     if args.mode == "keyboard-routing":
         return run_keyboard_routing_mode(reaper, args)
+    if args.mode == "gpu-fault":
+        return run_gpu_fault_mode(reaper, args)
     return run_sequence_loop_seek_mode(reaper, args)
 
 

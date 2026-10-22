@@ -78,6 +78,15 @@ Evidence-producing automation should also pass `--reaper-bin` with the exact
 absolute REAPER executable. An invalid, relative, or symlinked selection fails
 instead of silently falling back to another installed host.
 
+`--mode gpu-fault` is the GPU-audio continuity smoke (WP-h1): one GPU fault is
+fired during realtime playback in the GPU fault-continuity test plug-in, and both the
+plug-in's own output and REAPER's bounce are nulled against a CPU reference. It
+writes a `pulp.gpu-audio.daw-continuity.v1` receipt that only
+`tools/validation/verify_gpu_audio_daw_continuity_receipt.py` accepts. A PASS
+there proves audio continuity at the DAW boundary for that fault; it does not
+prove render-owner loss propagation, resource replay or teardown callback
+suppression, which stay Vellum-gated.
+
 See [`tools/testing/daw-smoke/README.md`](../../tools/testing/daw-smoke/README.md).
 
 ## Guarantees (so it's safe to run anywhere)
