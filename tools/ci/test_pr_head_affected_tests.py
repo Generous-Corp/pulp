@@ -287,6 +287,63 @@ endif()
 """
 
 
+class RequiredFamilyTests(unittest.TestCase):
+    """The required families against the real test sources, not a fixture."""
+
+    SOURCES = ("test/test_sync_race_hammer.cpp", "test/test_buffer_ops.cpp",
+               "test/test_meter_source.cpp")
+
+    def real_case_names(self, rename: tuple[str, str] | None = None) -> list[str]:
+        names = []
+        for rel in self.SOURCES:
+            text = (REPO / rel).read_text(encoding="utf-8")
+            if rename:
+                text = text.replace(*rename)
+            names.extend(name for _line, name in step.catch_case_names(text))
+        return names
+
+    def resolve(self, names: list[str]) -> dict[str, list[str]]:
+        paths = {"runtime-sync-hammers": "core/runtime/include/pulp/runtime/seqlock.hpp",
+                 "audio-buffer-ops": "core/audio/include/pulp/audio/buffer_ops.hpp"}
+        out = {}
+        for family, path in paths.items():
+            out.update({k: v for k, v in step.family_tests([path], names).items()
+                        if k == family})
+        return out
+
+    def test_every_required_family_resolves_against_the_real_sources(self) -> None:
+        resolved = self.resolve(self.real_case_names())
+        self.assertEqual(set(resolved), set(step.REQUIRED_FAMILIES))
+        self.assertEqual(step.empty_required_families(resolved), [])
+        hammers = resolved["runtime-sync-hammers"]
+        for primitive in ("TripleBuffer", "SeqLock", "SpscQueue"):
+            self.assertTrue(any(h.startswith(primitive) for h in hammers), (primitive, hammers))
+        self.assertGreaterEqual(len(resolved["audio-buffer-ops"]), 1)
+
+    def test_planted_rename_of_the_hammers_is_detected(self) -> None:
+        # Negative control: rename every hammer case the way a refactor might.
+        resolved = self.resolve(self.real_case_names(rename=(" hammer", " stress run")))
+        self.assertEqual(resolved["runtime-sync-hammers"], [])
+        self.assertEqual(step.empty_required_families(resolved), ["runtime-sync-hammers"])
+
+    def test_planted_rename_of_the_buffer_ops_cases_is_detected(self) -> None:
+        resolved = self.resolve(self.real_case_names(rename=('"buffer_ops', '"bufferops')))
+        self.assertEqual(step.empty_required_families(resolved), ["audio-buffer-ops"])
+
+    def test_select_reports_an_empty_required_family(self) -> None:
+        names = {"unit-a": set()}
+        with mock.patch.object(step, "project", return_value=selection("focused", ["unit-a"])), \
+                mock.patch.object(step, "script_reference_tests", return_value=[]), \
+                mock.patch.object(step, "script_input_tests", return_value=[]), \
+                mock.patch.object(step, "own_tests", return_value=[]), \
+                mock.patch.object(step, "rebuilt_binary_tests", return_value=[]), \
+                mock.patch.object(step, "registration_tests", return_value=[]), \
+                mock.patch.object(step, "edited_case_tests", return_value=[]):
+            plan = step.select(Path("/b"), ["core/runtime/include/pulp/runtime/seqlock.hpp"],
+                               names)
+        self.assertEqual(plan["empty_required_families"], ["runtime-sync-hammers"])
+
+
 class EditedCaseTests(unittest.TestCase):
     SOURCE = (
         '#include <catch2/catch_test_macros.hpp>\n'   # 1
@@ -299,9 +356,20 @@ class EditedCaseTests(unittest.TestCase):
         '          "[x]") {\n'                       # 8
         '    REQUIRE(1 == 1);\n'                     # 9
         '}\n'                                        # 10
+        '\n'                                         # 11
+        'TEMPLATE_TEST_CASE("templated", "[x]", int, float) {\n'  # 12
+        '    REQUIRE(TestType{} == TestType{});\n'   # 13
+        '}\n'                                        # 14
+        '\n'                                         # 15
+        'TEST_CASE_METHOD(audio::Fixture, "fixture case", "[x]") {\n'  # 16
+        '    REQUIRE(ready());\n'                     # 17
+        '}\n'                                        # 18
     )
-    NAMES = {"first case": set(), 'second \\"quoted\\" case': set(),
-             'gain: second \\"quoted\\" case': set(), "unrelated": set()}
+    # catch_discover_tests registers the unescaped literal, and each template
+    # instantiation as "name - Type".
+    NAMES = {"first case": set(), 'second "quoted" case': set(),
+             'gain: second "quoted" case': set(), "templated - int": set(),
+             "templated - float": set(), "fixture case": set(), "unrelated": set()}
 
     def cases(self, rel: str, touched: set[int]) -> list[str]:
         with tempfile.TemporaryDirectory() as raw:
@@ -312,7 +380,14 @@ class EditedCaseTests(unittest.TestCase):
 
     def test_a_touched_line_selects_the_case_that_contains_it(self) -> None:
         self.assertEqual(self.cases("test/test_x.cpp", {9}),
-                         ['gain: second \\"quoted\\" case', 'second \\"quoted\\" case'])
+                         ['gain: second "quoted" case', 'second "quoted" case'])
+
+    def test_a_template_case_selects_every_instantiation(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {13}),
+                         ["templated - float", "templated - int"])
+
+    def test_a_namespaced_fixture_case_owns_its_own_lines(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {17}), ["fixture case"])
 
     def test_a_touched_case_header_selects_that_case(self) -> None:
         self.assertEqual(self.cases("test/test_x.cpp", {3}), ["first case"])
@@ -867,6 +942,48 @@ class ExitCodeTests(unittest.TestCase):
                 contextlib.redirect_stdout(out):
             self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 1)
         self.assertIn("SKIPPED, NOT RUN", out.getvalue())
+
+    def _main_plan(self, plan: dict, results: dict, *, dry_run: bool = False) -> int:
+        out = io.StringIO()
+        argv = ["--build-dir", "/nonexistent"] + (["--dry-run"] if dry_run else [])
+        with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=plan), \
+                mock.patch.object(step, "run_budgeted", return_value=results), \
+                contextlib.redirect_stdout(out):
+            code = step.main(argv)
+        self.output = out.getvalue()
+        return code
+
+    def test_a_required_family_that_selects_nothing_fails_the_step(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r",
+                "families": {"runtime-sync-hammers": 0}, "tests": [], "merge_only": [],
+                "empty_required_families": ["runtime-sync-hammers"],
+                "required_family_tests": []}
+        results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": [], "seconds": 0.0}
+        self.assertEqual(self._main_plan(plan, results), 1)
+        self.assertIn("path family runtime-sync-hammers matched this diff but selected no test",
+                      self.output)
+        self.assertEqual(self._main_plan(plan, results, dry_run=True), 1)
+
+    def test_a_required_family_test_excluded_by_label_fails_the_step(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r",
+                "families": {"runtime-sync-hammers": 1}, "tests": ["hammer"],
+                "merge_only": ["hammer"], "empty_required_families": [],
+                "required_family_tests": ["hammer"]}
+        results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": ["hammer"], "seconds": 0.0}
+        self.assertEqual(self._main_plan(plan, results), 1)
+        self.assertIn('"required_family_excluded": 1', self.output)
+
+    def test_control_other_excluded_tests_stay_neutral(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
+                "tests": ["slow-one"], "merge_only": ["slow-one"],
+                "empty_required_families": [], "required_family_tests": []}
+        results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": ["slow-one"], "seconds": 0.0}
+        self.assertEqual(self._main_plan(plan, results), 0)
 
     def test_control_a_real_failure_still_fails_beside_ordinary_deferrals(self) -> None:
         self.assertEqual(self._main({"a": (False, "passes on base")}, skipped=["c"]), 1)
