@@ -754,20 +754,23 @@ TEST_CASE("Label honors Chromium captured vertical line positions",
     REQUIRE(zero_fills.size() == 1);
     CHECK(fills[0].f[1] - zero_fills[0].f[1] == Catch::Approx(3.0f));
 
-    // Chromium splits the 4px difference between a 16px line box and the
-    // 12px font em evenly. Native paint must retain the 2px top half-leading;
-    // otherwise compact controls look high even though their boxes match.
-    Label em_height("CENTERED");
-    em_height.set_font_family("Inter");
-    em_height.set_font_size(12.0f);
-    em_height.set_bounds({0, 0, 100, 40});
-    em_height.set_cached_line_boxes(
-        {{7, 3, 58, 12, 0, 8}}, 100.0f, face, false);
-    RecordingCanvas em_canvas;
-    em_height.paint(em_canvas);
-    const auto em_fills = commands_of(em_canvas, DrawCommand::Type::fill_text);
-    REQUIRE(em_fills.size() == 1);
-    CHECK(fills[0].f[1] - em_fills[0].f[1] == Catch::Approx(2.0f));
+    // Chromium's run rect is round(fAscent) + round(fDescent) tall, plus an
+    // ascent adjustment Blink applies to faces such as Times, Helvetica and
+    // Courier, and the baseline sits round(fDescent) above its bottom. A box
+    // grown at the top by that adjustment (here 2px: top 1, height 18, same
+    // bottom) must paint on the same baseline, not 1px lower as centring the
+    // ink in the box would.
+    Label adjusted("CENTERED");
+    adjusted.set_font_family("Inter");
+    adjusted.set_font_size(12.0f);
+    adjusted.set_bounds({0, 0, 100, 40});
+    adjusted.set_cached_line_boxes(
+        {{7, 1, 58, 18, 0, 8}}, 100.0f, face, false);
+    RecordingCanvas adjusted_canvas;
+    adjusted.paint(adjusted_canvas);
+    const auto adjusted_fills = commands_of(adjusted_canvas, DrawCommand::Type::fill_text);
+    REQUIRE(adjusted_fills.size() == 1);
+    CHECK(adjusted_fills[0].f[1] == Catch::Approx(fills[0].f[1]));
 }
 
 TEST_CASE("Label keeps a retyped single captured line where Chromium put it",

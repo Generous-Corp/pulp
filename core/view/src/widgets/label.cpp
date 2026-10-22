@@ -1137,7 +1137,6 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
     if (prepared.metrics_are_real() && prepared.ascent() > 0.0f) {
         m.ascent = prepared.ascent();
         m.descent = prepared.descent();
-        m.typographic_ascent = prepared.typographic_ascent();
         m.typographic_descent = prepared.typographic_descent();
         m.real = true;
     } else {
@@ -1146,7 +1145,6 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
         // so, since callers gate the correction on `real`.
         m.ascent = font_size * 0.85f;
         m.descent = font_size * 0.15f;
-        m.typographic_ascent = m.ascent;
         m.typographic_descent = m.descent;
         m.real = false;
     }
@@ -1974,39 +1972,27 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
     if (captured_cache_usable && shaped_layout != nullptr &&
         !shaped_layout->lines.empty()) {
         // A cached browser line box already resolved padding, line-height and
-        // vertical-align. CSS distributes the line box's extra leading above
-        // and below the font em box; using only `top + ascent` drops that
-        // half-leading and paints compact button captions visibly high. Keep
-        // Chromium's captured top, add its half-leading, then the active face
-        // ascent. Do not center the complete owner bounds a second time.
+        // vertical-align, so the owner bounds are not centred a second time.
+        // The box is the rect Chromium gave the text run: its content area,
+        // round(fAscent) + round(fDescent) tall plus any ascent adjustment
+        // Blink applies to particular faces, with the baseline round(fDescent)
+        // above its bottom. Reading the baseline off the bottom keeps it right
+        // whatever the ascent side holds. Descending from the top by the
+        // worst-case extents `first_line_ascent` carries (fTop) painted faces
+        // whose tallest glyph rises above fAscent a device pixel or more high.
+        // Without real face metrics, fall back to centring the ink in the box
+        // (unclamped: negative leading lets glyphs overflow evenly).
         const auto& first_line = shaped_layout->lines.front();
-        // One reference, not two. Half-leading is the surplus of the line BOX
-        // over the ink it carries, so it has to be measured against the same
-        // ascent + descent the baseline then descends by. Measuring it against
-        // the em box while descending by a real ascent double-counts the
-        // difference between them and paints the line low by exactly that gap.
-        // Unclamped for the same reason the native branch above is: a face
-        // whose ink exceeds the captured box has negative leading and CSS lets
-        // its glyphs overflow evenly, top and bottom.
-        float line_ink = single_line_text_height;
-        float line_ascent = first_line_ascent;
-        if (!has_attributed_) {
-            // Chromium built this box from the face's typographic metrics,
-            // each rounded to a whole pixel: a text run's captured height is
-            // round(fAscent) + round(fDescent) and its baseline sits
-            // round(fAscent) below the run's top. The worst-case extents
-            // `first_line_ascent` carries (fTop) rise above fAscent on faces
-            // such as Arial Bold, and descending by them paints the line a
-            // device pixel or more high against the box Chromium reported.
-            const auto fm = face_metrics(family, effective_font_size,
-                                         effective_font_weight(), font_style_);
-            if (fm.real) {
-                line_ascent = std::round(fm.typographic_ascent);
-                line_ink = line_ascent + std::round(fm.typographic_descent);
-            }
+        const auto fm = has_attributed_
+            ? FaceMetrics{}
+            : face_metrics(family, effective_font_size, effective_font_weight(), font_style_);
+        if (fm.real) {
+            baseline_y = first_line.y + first_line.height - std::round(fm.typographic_descent);
+        } else {
+            const float half_leading =
+                (first_line.height - single_line_text_height) * 0.5f;
+            baseline_y = first_line.y + half_leading + first_line_ascent;
         }
-        const float half_leading = (first_line.height - line_ink) * 0.5f;
-        baseline_y = first_line.y + half_leading + line_ascent;
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared

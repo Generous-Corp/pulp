@@ -35,25 +35,37 @@ Worked example, the bug that shipped:
 | Inter's typographic ascent / descent (fAscent / fDescent) at 12px | 11.625 / 2.906 |
 | **buggy** `max(0,(15−12)/2) + 13.2949` | **14.794922** |
 | **still wrong** `(15−17.1621)/2 + 13.2949` (worst-case extents) | **12.213867** |
-| **Chromium** `(15−(12+3))/2 + 12` (rounded typographic metrics) | **12.0** |
+| **Chromium** `15 − round(2.906)` (bottom minus rounded fDescent) | **12.0** |
 
-## Which ascent: a captured box was built from TYPOGRAPHIC metrics
+## Captured boxes: read the baseline off the BOTTOM
 
 `TextShaper` / `PreparedText::ascent()` and `descent()` are the face's
 **worst-case glyph extents** (the larger of fTop/fAscent, fBottom/fDescent).
 That is right for sizing a box that must never clip a glyph and wrong for
-placing a CSS baseline. Chromium builds a text run's rect from the face's
-**typographic** metrics, each rounded to a whole pixel: the rect's height is
-`round(fAscent) + round(fDescent)` and the baseline sits `round(fAscent)` below
-the rect's top (measured with a zero-size `vertical-align: baseline` probe on
-every fixture in the differential corpus; it held for Arial, Arial Bold and
-Inter at 11–32px, `line-height: normal` and explicit). Descending by the
-worst-case ascent painted Arial Bold 24px one CSS pixel high against the box
-Chromium reported. So the captured-line-box branch descends by
-`round(typographic_ascent())` and measures its half-leading against
-`round(typographic_ascent()) + round(typographic_descent())`; the native
-(uncaptured) branch still uses the real ink. Keep the two apart: a captured box
-already encodes Chromium's rounding, a native one does not.
+placing a CSS baseline. A captured line box is the rect Chromium gave the text
+run, its content area: `round(fAscent) + round(fDescent)` tall, **plus an
+ascent adjustment Blink applies on macOS to Times, Helvetica and Courier**
+(Times 16px: 12 + 4 + 2 = 18), with the baseline `round(fDescent)` above the
+rect's bottom. So the captured branch places the baseline at
+`box.bottom - round(typographic_descent())`.
+
+This is measured, not derived: a zero-size `vertical-align: baseline` probe
+captured through the importer agreed on every run tried — Arial, Arial Bold,
+Inter, Georgia, Verdana, Times, Helvetica, Courier, the default serif, 11-32px,
+`line-height: normal` and explicit. To re-measure, insert the probe span
+before each text node with a load-time script, capture through
+`pulp-import-design`, and read its rect from the DOM snapshot.
+Two rules that look equivalent are not:
+
+| rule | Arial / Georgia / Verdana | Times, Helvetica, Courier |
+|---|---|---|
+| `top + round(fAscent) + half-leading` | right | **1-2px high** |
+| `top + worst-case ascent` (the old code) | 1px high (Arial Bold 24) | high |
+| `bottom - round(fDescent)` | right | right |
+
+The rounding is in CSS px even at DPR 2 (Arial Bold 24px gives a 27px rect;
+device-px rounding would give 26.5). The native (uncaptured) branch is
+different: it has no box from Chromium and still centres the real ink.
 
 **Negative half-leading is legal and must not be clamped.** A face whose ink
 exceeds the captured line box has negative leading, and CSS lets the glyphs

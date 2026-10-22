@@ -503,12 +503,12 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
             return command.type == pulp::canvas::DrawCommand::Type::fill_text;
         });
     REQUIRE(cached_text != cached_canvas.commands().end());
-    // Chromium sizes a text run's rect as round(fAscent) + round(fDescent) and
-    // puts its baseline round(fAscent) below the rect's top. Inter at 12px has
-    // typographic metrics 0.96875em / 0.2421875em = 11.625 / 2.906, which
-    // round to 12 + 3 = 15 -- exactly this captured box -- so there is no
-    // half-leading and the baseline is 12. Descending by the face's worst-case
-    // glyph extents (fTop, ~13.29) instead paints every captured line high.
+    // Chromium sizes a text run's rect as round(fAscent) + round(fDescent)
+    // (plus an ascent adjustment for some faces) and puts its baseline
+    // round(fDescent) above the rect's bottom. Inter at 12px has fDescent
+    // 0.2421875em = 2.906, so in this 15px box the baseline is 15 - 3 = 12.
+    // Descending from the top by the face's worst-case glyph extent (fTop,
+    // ~13.29) instead paints every captured line high.
     CHECK(cached_text->f[1] == Catch::Approx(12.0f).margin(0.01f));
 
     live_single->set_text("01  SLOW");
