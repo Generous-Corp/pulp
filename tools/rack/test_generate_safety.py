@@ -1912,12 +1912,20 @@ class BehaviourGateInfrastructureSafety(SdkIsolatedTestCase):
             mock.Mock(returncode=0, stdout="gate passed\n", stderr=""),
         ]
         with mock.patch.object(generate, "SDK", "/rack-sdk"), \
+                mock.patch.dict(generate.os.environ,
+                                {"ANTHROPIC_API_KEY": "sk-secret"}), \
                 mock.patch.object(generate.subprocess, "run", side_effect=results) as run:
             generate.preflight_behaviour_gate()
 
         runtime = run.call_args_list[1]
-        self.assertEqual(1, len(runtime.args[0]))
-        self.assertEqual("/rack-sdk", runtime.kwargs["env"]["DYLD_LIBRARY_PATH"])
+        argv, env = runtime.args[0], runtime.kwargs["env"]
+        # The gate executable runs last, through gate_launch(): inside
+        # sandbox-exec (the loader path then rides /usr/bin/env, because DYLD_*
+        # is stripped when a protected binary starts) or directly without it.
+        self.assertTrue(argv[-1].endswith("gate-preflight"))
+        self.assertTrue("DYLD_LIBRARY_PATH=/rack-sdk" in argv or
+                        env.get("DYLD_LIBRARY_PATH") == "/rack-sdk")
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
         self.assertEqual(30, runtime.kwargs["timeout"])
 
     def test_gate_preflight_runtime_failure_stops_before_a_model_call(self) -> None:

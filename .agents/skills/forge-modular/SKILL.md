@@ -328,6 +328,22 @@ a string match.
 into the interface — is genuinely `AUDIBLE` and genuinely fails `melodic`. Both
 are correct. Presence was never the property; it is also not nothing.
 
+## The behaviour gate runs fenced in
+
+The gate links and RUNS model-written C++, so both `preflight_behaviour_gate()`
+and `run_behaviour_gate()` launch it through `generate.gate_launch()`. The
+environment keeps only `PATH`, `LANG`, `LC_*` and `TMPDIR`, with `HOME` set to
+the scratch directory, so no API key or token reaches generated code. On macOS
+it runs under `/usr/bin/sandbox-exec` with no network, no process spawning and
+writes confined to the scratch directory. Reads are not confined, because the
+SDK and objects live everywhere. `DYLD_*` is stripped when a protected binary
+like sandbox-exec starts, so `DYLD_LIBRARY_PATH` is passed by `/usr/bin/env`
+inside the sandbox, and the gate executable is the last argv entry. Without
+sandbox-exec it runs as before, with a note on stderr. A gate change that
+needs a new write location, a child process or the network has to widen the
+profile in `gate_launch()` on purpose. `test_gate_sandbox.py` holds the fence
+with a canary binary.
+
 ## The gate measures behaviour; it never judges it
 
 `patch-gate` runs 6 s of the real DSP and prints TWO things about every cable
