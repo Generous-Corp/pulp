@@ -1172,6 +1172,38 @@ class DifferentialLabTests(unittest.TestCase):
                 LAB.canonical_json_sha256(first),
                 LAB.canonical_json_sha256(second))
 
+    def test_canonical_capture_digest_ignores_settle_poll_counters(self) -> None:
+        def capture(rounds: int, stable: int, frame_x: float = 20.0,
+                    asset: str = "dom-snapshot.json") -> bytes:
+            return json.dumps({
+                "schema": "pulp-browser-capture-v1",
+                "provenance": {"settle": {"rounds": rounds, "stable_rounds": stable,
+                                          "elapsed_ms": rounds * 90}},
+                "reference": {"authored_frame": {"x": frame_x, "y": 20.0,
+                                                 "width": 420.0, "height": 220.0}},
+                "documents": [{"snapshot_asset": asset}],
+            }).encode()
+
+        baseline = LAB.canonical_json_sha256(capture(14, 12))
+        self.assertEqual(baseline, LAB.canonical_json_sha256(capture(15, 13)))
+        # Negative controls: content fields still enter the digest.
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(capture(15, 13, frame_x=21.0)))
+        self.assertNotEqual(baseline, LAB.canonical_json_sha256(
+            capture(15, 13, asset="other-snapshot.json")))
+        # The counters are scrubbed only in capture envelopes, and only there.
+        other = json.loads(capture(14, 12))
+        other["schema"] = "pulp-design-ir-v1"
+        changed = json.loads(capture(15, 13))
+        changed["schema"] = "pulp-design-ir-v1"
+        self.assertNotEqual(LAB.canonical_json_sha256(json.dumps(other).encode()),
+                            LAB.canonical_json_sha256(json.dumps(changed).encode()))
+        nested = json.loads(capture(14, 12))
+        nested["reference"]["rounds"] = 1
+        nested_changed = json.loads(capture(14, 12))
+        nested_changed["reference"]["rounds"] = 2
+        self.assertNotEqual(LAB.canonical_json_sha256(json.dumps(nested).encode()),
+                            LAB.canonical_json_sha256(json.dumps(nested_changed).encode()))
+
     def test_canonical_capture_digest_excludes_only_raw_document_bindings(self) -> None:
         first = {"schema": "pulp-browser-capture-v1", "documents": [
             {"snapshot_asset": "dom-snapshot.json", "snapshot_sha256": "a" * 64}]}

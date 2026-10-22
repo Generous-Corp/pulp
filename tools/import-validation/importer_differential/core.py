@@ -182,6 +182,10 @@ def interaction_plan_sha256(path: Path) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+# Settle-loop polling counts in a capture envelope's `provenance.settle`.
+SETTLE_COUNTER_KEYS = frozenset({"rounds", "stable_rounds"})
+
+
 def canonical_json_sha256(source: Path | bytes) -> str:
     """Hash JSON evidence after removing documented per-run envelope fields.
 
@@ -190,6 +194,11 @@ def canonical_json_sha256(source: Path | bytes) -> str:
     nondeterministic. Browser-capture envelopes also omit their exact snapshot
     binding here: CDP frame IDs vary per capture. Each raw binding is verified
     separately; this digest does not establish semantic DOM determinism.
+    They also omit the settle loop's iteration counters
+    (`provenance.settle.rounds` and `stable_rounds`): how many polls the page
+    took to go quiet depends on host load, not on what was captured. Only
+    those two counters are scrubbed, and only in capture envelopes; every
+    other settle field and every content field still enters the digest.
     """
     volatile_keys = {"elapsed_ms", "imported_at"}
     document = json.loads(source if isinstance(source, bytes) else source.read_bytes())
@@ -202,11 +211,13 @@ def canonical_json_sha256(source: Path | bytes) -> str:
             # equivalence. Retain and verify raw snapshot bindings separately.
             document_entry = (capture_envelope and len(path) == 2
                               and path[0] == "documents" and isinstance(path[1], int))
+            settle_record = capture_envelope and path == ("provenance", "settle")
             return {
                 key: scrub(item, (*path, key))
                 for key, item in value.items()
                 if key not in volatile_keys
                 and not (document_entry and key == "snapshot_sha256")
+                and not (settle_record and key in SETTLE_COUNTER_KEYS)
             }
         if isinstance(value, list):
             return [scrub(item, (*path, index)) for index, item in enumerate(value)]
