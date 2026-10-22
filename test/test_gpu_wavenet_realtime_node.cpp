@@ -45,6 +45,14 @@ struct Control {
     bool lost = false, hang = false;
     // The device is lost while a submission is in progress.
     bool lose_on_submit = false;
+    // tail_only: complete only in the second, post-admission service pass of a
+    // bounded-wait pump (both passes share one deadline). slow_every: every
+    // block whose sequence is a multiple of it completes only once
+    // completion_lag later blocks were submitted; the others complete at once,
+    // ahead of it.
+    bool tail_only = false, in_tail = false;
+    int slow_every = 0, completion_lag = 0;
+    int first_pass_completions = 0, tail_pass_completions = 0;
     int submits = 0, services = 0, wait_services = 0, receives = 0, releases = 0;
     std::uint64_t last_wait_deadline = 0;
     std::array<std::uint64_t, 8> wait_deadlines{}, wait_starts{};
@@ -64,6 +72,7 @@ class Channel final : public detail::WaveNetRealtimeChannel {
             return false;
         std::copy(input.begin(), input.end(), pending->data.begin());
         pending->sequence = sequence;
+        pending->submit_index = control_.submits;
         pending->active = true;
         return true;
     }
@@ -76,6 +85,7 @@ class Channel final : public detail::WaveNetRealtimeChannel {
             control_.wait_starts[control_.wait_services] = now;
         }
         ++control_.wait_services;
+        control_.in_tail = deadline == control_.last_wait_deadline;
         control_.last_wait_deadline = deadline;
         ++control_.services;
     }
@@ -83,8 +93,25 @@ class Channel final : public detail::WaveNetRealtimeChannel {
         ++control_.receives;
         if (!control_.complete || (control_.hang && !control_.lost))
             return {};
+        if (control_.tail_only && !control_.in_tail)
+            return {};
         auto pending = std::find_if(pending_.begin(), pending_.end(),
                                     [](const auto& value) { return value.active; });
+        if (control_.tail_only || control_.slow_every != 0) {
+            const auto eligible = [&](const Pending& value) {
+                const bool slow =
+                    control_.slow_every != 0 && value.sequence % control_.slow_every == 0;
+                return value.active && control_.submits - value.submit_index >=
+                                           (slow ? control_.completion_lag : 0);
+            };
+            pending = std::min_element(
+                pending_.begin(), pending_.end(), [&](const auto& a, const auto& b) {
+                    return eligible(a) && (!eligible(b) || a.sequence < b.sequence);
+                });
+            if (!eligible(*pending))
+                return {};
+            ++(control_.in_tail ? control_.tail_pass_completions : control_.first_pass_completions);
+        }
         if (pending == pending_.end())
             return {};
         pending->active = false;
@@ -109,6 +136,7 @@ class Channel final : public detail::WaveNetRealtimeChannel {
     struct Pending {
         std::array<float, 2> data{};
         std::uint64_t sequence = 0;
+        int submit_index = 0;
         bool active = false;
     };
     Control& control_;
@@ -1960,4 +1988,48 @@ TEST_CASE("WaveNet status names the engine producing audio and counts fallback o
     status = checked_status(node);
     CHECK(count(status, GpuAudioTerminalDisposition::CpuFallback) == 1);
     CHECK(status.fallback_blocks >= 1);
+}
+
+TEST_CASE("WaveNet completions seen only in the bounded-wait tail pass keep the watchdog quiet",
+          "[gpu_audio][wavenet][realtime][hang]") {
+    // Every completion lands in the second service pass of a pump, after
+    // admission. Every fourth block is slow and finishes three blocks later,
+    // while the blocks behind it complete at once, so the provider completes
+    // work on every pump and is responsive. The slow block holds the oldest
+    // in-flight position, so only the tail-pass completions show progress.
+    Shape shape;
+    auto config = shape.config(3, 1, 500'000, 4);
+    config.capacity = 8;
+    config.watchdog_blocks = 3;
+    GpuWaveNetRealtimeNode node(config);
+    Control control;
+    control.tail_only = true;
+    control.slow_every = 4;
+    control.completion_lag = 3;
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(control));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
+    auto path = detail::realtime_gpu_node_path(&node);
+    std::array<float, 2> input{}, output{};
+    const float* ip = input.data();
+    float* op = output.data();
+    pulp::audio::BufferView<const float> in(&ip, 1, 2);
+    pulp::audio::BufferView<float> out(&op, 1, 2);
+    for (std::uint64_t sequence = 0; sequence < 32; ++sequence) {
+        input.fill(float(sequence + 1));
+        const auto status = path.process(path.context, in, out, 2, sequence, true, 0);
+        path.delivered(
+            path.context, sequence,
+            static_cast<std::uint8_t>(status == detail::kRealtimeGpuReady
+                                          ? detail::SharedIoDeliveryDisposition::GpuDelivered
+                                      : status == detail::kRealtimeGpuPriming
+                                          ? detail::SharedIoDeliveryDisposition::Priming
+                                          : detail::SharedIoDeliveryDisposition::SilenceDelivered),
+            0, 0);
+        (void)path.service(path.context, 0);
+    }
+    CHECK(control.first_pass_completions == 0);
+    CHECK(control.tail_pass_completions >= 20);
+    CHECK(node.recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK(checked_status(node).provider_state != GpuAudioProviderState::Unavailable);
 }
