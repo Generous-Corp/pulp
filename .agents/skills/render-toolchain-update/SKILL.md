@@ -90,36 +90,30 @@ Skia/Dawn, V8, or both may be consumed independently.
 
 ## Independent Skia/Dawn advance
 
-Use this when the user explicitly asks to advance Skia/Dawn before the matching
-V8 build is complete, or when the matched V8 is published but fails Pulp's own
-gates and the cause is not yet understood. Keep the lanes separate instead of
-blocking the render update or claiming a matched tuple:
+`fetch_v8_for_release.py` binds a milestone-matched V8 archive to Pulp's active
+Skia release, Skia commit, and built Dawn. Moving Skia/Dawn ahead of the pinned
+V8 therefore fails the V8 fetch, and there is no manifest flag that waives it.
+Prefer moving the whole tuple together. When the matched V8 is missing an asset
+or fails Pulp's gates, hold the whole render update until that V8 is fixed
+rather than pairing a new Skia with an older V8.
 
-1. Update the active Skia entry and its built-Dawn provenance from published
-   assets. Leave the V8 version, assets, and its internal `paired_*` metadata at
-   their last verified milestone.
-2. Declare it in the V8 entry's `determinism.independent_skia_advance`:
-   `skia_release`, `skia_commit` and `built_dawn` copied exactly from the active
-   Skia entry, plus a `reason` and an `exit_condition`.
-   `fetch_v8_for_release.py` accepts the V8 archive only when that declaration
-   matches the active Skia exactly, and it still binds the embedded pair to the
-   V8 entry's own `paired_*` fields. A stale declaration fails closed the next
-   time Skia moves. State the mixed active-provider selection in
-   `DEPENDENCIES.md` and the V8 manifest notes. Do not rewrite V8's historical `skia_release_tag`,
-   `paired_skia`, or `paired_dawn` to the newer active Skia values.
-3. Run the sealed V8 provider-identity/ODR gate against the new Skia/Dawn
-   provider. Keep this in the required release-path CI surface while the mixed
-   selection is active; a successful one-off local or Skia-only build does not
-   prove mixed-provider safety.
-4. Record a precise follow-up trigger: adopt V8 only after the matched release
-   contains every required platform asset, its embedded pair manifest passes
-   the normal milestone checks, and the release-path provider-identity and
-   cube-capture gate passes with it. Remove `independent_skia_advance` in the
-   same change.
+If a mixed selection is ever genuinely needed, it requires a reviewed fetcher
+change in that same PR that:
 
-This is a bounded compatibility state, not a new default release policy. Return
-to a fully milestone-matched selection as soon as the verified V8 release is
-available.
+1. Names the exact active Skia release, commit, and built Dawn the older V8 is
+   allowed to run against, so the exception goes stale and fails closed the
+   next time Skia moves.
+2. Still binds the embedded pair to the V8 entry's own `paired_*` fields; do not
+   rewrite V8's historical `skia_release_tag`, `paired_skia`, or `paired_dawn`
+   to the newer active Skia values.
+3. Ships tests for the declared, stale, and undeclared cases, and keeps the
+   sealed V8 provider-identity/ODR gate in the required release-path CI surface
+   against the new Skia/Dawn provider while the mixed selection is active. A
+   successful one-off local or Skia-only build does not prove mixed-provider
+   safety.
+4. States the mixed selection in `DEPENDENCIES.md` and the V8 manifest notes,
+   with an exit condition, and removes the exception in the change that
+   restores a matched tuple.
 
 ## Pulp update checklist
 

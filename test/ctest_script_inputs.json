@@ -1990,6 +1990,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-native-metal-audio-comparator": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_metal_native_audio_comparator.mm"
+   ],
+   "inputs": [
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_metal_native_audio_comparator.mm"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-node-pack": {
    "data": "none",
    "inputs": [],
@@ -5070,6 +5084,15 @@
    ],
    "kind": "shell"
   },
+  "gpu-audio-comparator-v2-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_comparator_v2.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_comparator_v2.py",
+    "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/scripts/test_gpu_audio_comparator_v2.py"
+   ],
+   "kind": "python"
+  },
   "gpu-audio-p2-campaign-contract-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
    "inputs": [
@@ -7621,6 +7644,14 @@
    "inputs": [
     "test/CMakeLists.txt",
     "tools/scripts/test_pulp_test_data_cmake.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-test-native-metal-audio-comparator": {
+   "entry": "tools/scripts/gpu_audio_comparator_v2.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_comparator_v2.py",
+    "tools/scripts/gpu_audio_p2_host_preflight.py"
    ],
    "kind": "python"
   },

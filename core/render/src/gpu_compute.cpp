@@ -666,11 +666,14 @@ fn main(@builtin(workgroup_id) wid : vec3u,
         if (t0 + s < p.B) {
             // WGSL tanh may return NaN for large |x| (Metal does); float tanh is
             // already exactly +-1 at |x| = 15, so the clamp changes no finite result.
-            let a = tanh(clamp(zbuf[s * Z + c], -15.0, 15.0));
+            // Keep the sigmoid a named reciprocal multiplied after tanh: written
+            // as a * (1 / x) the shader compiler contracts it differently and
+            // gated outputs move by a few ULP.
             if (p.gated == 0u) {
-                abuf[i] = a;
+                abuf[i] = tanh(clamp(zbuf[s * Z + c], -15.0, 15.0));
             } else {
-                abuf[i] = a * (1.0 / (1.0 + exp(-zbuf[s * Z + C + c])));
+                let g = 1.0 / (1.0 + exp(-zbuf[s * Z + C + c]));
+                abuf[i] = tanh(clamp(zbuf[s * Z + c], -15.0, 15.0)) * g;
             }
         }
     }

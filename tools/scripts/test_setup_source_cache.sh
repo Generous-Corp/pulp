@@ -943,12 +943,25 @@ EOF
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
-echo "== the CHOC patch set is idempotent on its own output"
+echo "== the CHOC patch set applies once, is idempotent, and fails closed"
 (
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    mkdir -p "$tmp/choc/choc/javascript" "$tmp/choc/choc/text"
-    cat > "$tmp/choc/choc/javascript/choc_javascript_V8.h" <<'EOF'
+    # Every anchor below is copied from the pinned CHOC source, so a patch that
+    # matches here matches the header Pulp actually fetches.
+    write_choc_fixture() {
+        local root="$1"
+        mkdir -p "$root/choc/javascript" "$root/choc/text"
+        cat > "$root/choc/javascript/choc_javascript_V8.h" <<'EOF'
 #include "choc_javascript.h"
+        isolate->SetHostImportModuleDynamicallyCallback (+[] (v8::Local<v8::Context> c,
+                                                              v8::Local<v8::Data> /*hostOptions*/,
+                                                              v8::Local<v8::Value> /*resourceName*/,
+                                                              v8::Local<v8::String> specifier,
+                                                              v8::Local<v8::FixedArray> /*importAssertions*/)
+        {
+            return static_cast<V8Context*> (c->GetIsolate()->GetData (0))
+                ->loadDynamicModule (c, specifier);
+        });
     std::string v8StringToStd (v8::String& s)
     {
         std::string result;
@@ -967,28 +980,88 @@ echo "== the CHOC patch set is idempotent on its own output"
                 },
                 std::addressof (iterator));
             }
+        auto ok = mod.ToLocalChecked()->InstantiateModule (localContext, +[] (v8::Local<v8::Context> c, v8::Local<v8::String> specifier,
+                                                                              v8::Local<v8::FixedArray>, v8::Local<v8::Module>)
+        {
+            return static_cast<V8Context*> (c->GetIsolate()->GetData (0))
+                ->loadStaticModule (c, specifier);
+        });
 EOF
-    cat > "$tmp/choc/choc/text/choc_JSON.h" <<'EOF'
+        cat > "$root/choc/text/choc_JSON.h" <<'EOF'
                     hadExponent = true;
                     popIf ('-');
                     continue;
 EOF
-    cat > "$tmp/patch.cmake" <<EOF
+    }
+    write_patch_script() {
+        cat > "$1/patch.cmake" <<EOF
 include("$REPO_ROOT/tools/cmake/PulpPatchChoc.cmake")
-pulp_patch_choc_v8("$tmp/choc")
-pulp_patch_choc_json_number_exponent("$tmp/choc")
+pulp_patch_choc_v8("$1/choc-src")
+pulp_patch_choc_json_number_exponent("$1/choc-src")
 EOF
-    cmake -P "$tmp/patch.cmake" >/dev/null 2>&1
-    once="$(cat "$tmp/choc/choc/javascript/choc_javascript_V8.h" "$tmp/choc/choc/text/choc_JSON.h" | cksum)"
-    cmake -P "$tmp/patch.cmake" >/dev/null 2>&1
-    twice="$(cat "$tmp/choc/choc/javascript/choc_javascript_V8.h" "$tmp/choc/choc/text/choc_JSON.h" | cksum)"
-    check "$twice" "$once" "a second configure leaves the patched headers unchanged"
-    check "$(grep -c 'Utf8LengthV2' "$tmp/choc/choc/javascript/choc_javascript_V8.h")" "1" \
-        "the V8 string patch is applied exactly once"
-    check "$(grep -c -- '->Iterate (' "$tmp/choc/choc/javascript/choc_javascript_V8.h")" "0" \
+    }
+
+    mkdir -p "$tmp/good"
+    write_choc_fixture "$tmp/good/choc-src"
+    write_patch_script "$tmp/good"
+    v8h="$tmp/good/choc-src/choc/javascript/choc_javascript_V8.h"
+    jsonh="$tmp/good/choc-src/choc/text/choc_JSON.h"
+    cmake -P "$tmp/good/patch.cmake" >/dev/null 2>&1
+    check "$?" "0" "the patch set applies to a header carrying every reviewed anchor"
+    once="$(cat "$v8h" "$jsonh" | cksum)"
+    check "$(grep -c 'v8-version.h' "$v8h")" "1" "the V8 version include is applied exactly once"
+    check "$(grep -c -- '-> v8::MaybeLocal<v8::Promise>' "$v8h")" "1" \
+        "the dynamic-import callback patch is applied exactly once"
+    check "$(grep -c -- '-> v8::MaybeLocal<v8::Module>' "$v8h")" "1" \
+        "the static-module callback patch is applied exactly once"
+    check "$(grep -c 'GetIsolate()' "$v8h")" "0" "no callback still reads Context::GetIsolate"
+    check "$(grep -c 'Utf8LengthV2' "$v8h")" "1" "the V8 string patch is applied exactly once"
+    check "$(grep -c -- '->Iterate (' "$v8h")" "0" \
         "the v8ToChoc property walk no longer uses Array::Iterate"
-    check "$(grep -c 'i < names->Length()' "$tmp/choc/choc/javascript/choc_javascript_V8.h")" "1" \
+    check "$(grep -c 'i < names->Length()' "$v8h")" "1" \
         "the index-loop property walk is applied exactly once"
+    check "$(grep -c "popIf ('+')" "$jsonh")" "1" "the JSON exponent patch is applied exactly once"
+
+    cmake -P "$tmp/good/patch.cmake" >/dev/null 2>&1
+    check "$?" "0" "a second configure over the patched headers succeeds"
+    twice="$(cat "$v8h" "$jsonh" | cksum)"
+    check "$twice" "$once" "a second configure leaves the patched headers unchanged"
+
+    # Each anchor removed on its own must stop the configure and name its patch.
+    # The pattern deletes one line that only that anchor contains.
+    for case in \
+        'include|^#include "choc_javascript.h"$|V8 version include' \
+        'dynamic|SetHostImportModuleDynamicallyCallback|V8 dynamic-import callback' \
+        'utf8|auto len = s.Utf8Length (isolate);|V8 UTF-8 string conversion' \
+        'iterate|using IteratorType = decltype (iterator);|V8 v8ToChoc property walk' \
+        'static|loadStaticModule (c, specifier);|V8 static-module instantiate callback' \
+        'json|popIf (.-.);|JSON exponent parser'
+    do
+        label="${case%%|*}"; rest="${case#*|}"
+        pattern="${rest%%|*}"; patch_name="${rest#*|}"
+        mkdir -p "$tmp/$label"
+        write_choc_fixture "$tmp/$label/choc-src"
+        write_patch_script "$tmp/$label"
+        if [ "$label" = json ]; then target="$tmp/$label/choc-src/choc/text/choc_JSON.h"
+        else target="$tmp/$label/choc-src/choc/javascript/choc_javascript_V8.h"; fi
+        grep -v -- "$pattern" "$target" > "$target.new" && mv "$target.new" "$target"
+        out="$(cmake -P "$tmp/$label/patch.cmake" 2>&1)"; rc=$?
+        check "$([ "$rc" -ne 0 ] && echo failed || echo passed)" "failed" \
+            "a header missing the $patch_name anchor stops the configure"
+        # CMake wraps long messages, so join the lines before matching.
+        check "$(printf '%s' "$out" | tr '\n' ' ' | tr -s ' ' | grep -c -F "CHOC $patch_name")" "1" \
+            "the failure names the $patch_name patch"
+    done
+
+    mkdir -p "$tmp/noheader"
+    write_choc_fixture "$tmp/noheader/choc-src"
+    write_patch_script "$tmp/noheader"
+    rm "$tmp/noheader/choc-src/choc/javascript/choc_javascript_V8.h"
+    out="$(cmake -P "$tmp/noheader/patch.cmake" 2>&1)"; rc=$?
+    check "$([ "$rc" -ne 0 ] && echo failed || echo passed)" "failed" \
+        "a CHOC checkout without the V8 header stops the configure"
+    check "$(printf '%s' "$out" | tr '\n' ' ' | tr -s ' ' | grep -c -F "CHOC V8 header not found")" "1" \
+        "the failure names the missing V8 header"
 
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))

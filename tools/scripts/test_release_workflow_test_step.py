@@ -1824,16 +1824,16 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
         self.assertIn('[ "$auval" = "pass" ]', self.text)
 
     def test_universal_capability_proof_precedes_build(self) -> None:
-        proof = self.text.index("Verify both universal Skia m153 capability slices")
+        proof = self.text.index("Verify both universal Skia capability slices")
         configure = self.text.index("Configure (universal arm64;x86_64)")
         self.assertLess(proof, configure)
         self.assertIn("--platform darwin-universal", self.text[proof:configure])
-        self.assertIn("--result skia-m153-universal-capabilities.json", self.text[proof:configure])
+        self.assertIn("--result skia-universal-capabilities.json", self.text[proof:configure])
 
     def test_nightly_result_counts_universal_capabilities(self) -> None:
         self.assertIn("steps.capabilities.outputs.status", self.text)
         self.assertIn('[ "$capabilities" = "pass" ]', self.text)
-        self.assertIn("skia-m153-universal-capabilities.json", self.text)
+        self.assertIn("skia-universal-capabilities.json", self.text)
 
     def test_nightly_watchdog_reports_capability_failure_surface(self) -> None:
         self.assertIn(
@@ -1843,9 +1843,9 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
             "B_CAPABILITIES: ${{ needs.universal-crosscheck.outputs.capabilities }}",
             self.text,
         )
-        self.assertIn("Skia m153 universal capabilities", self.text)
+        self.assertIn("Skia universal capabilities", self.text)
         self.assertIn("capability-step log first", self.text)
-        self.assertIn("skia-m153-universal-capabilities.json", self.text)
+        self.assertIn("skia-universal-capabilities.json", self.text)
 
 
 class EveryLegIsIndividuallyRoutable(unittest.TestCase):
