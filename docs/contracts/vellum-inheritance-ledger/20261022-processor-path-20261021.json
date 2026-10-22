@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-processor-path-20261021",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "vellum_obligation": "When the Pulp retained UI kernel adopts Vellum, publish meter frames by filling the triple-buffer slot in place (one copy) and advance the single-writer publish counter with a relaxed load and store rather than an atomic read-modify-write.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-processor-path-20261021.json",
+    "pulp-test-meter-source",
+    "pulp-test-sync-primitives",
+    "private processor-path fixture timings (meter publish 8.7 -> 4.3 ns)"
+  ]
+}
