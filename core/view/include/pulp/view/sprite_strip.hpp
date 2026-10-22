@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/runtime/crypto.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +33,9 @@ public:
               int total_width, int total_height,
               int frame_count, Orientation orientation = Orientation::vertical) {
         data_.assign(data, data + data_size);
+        // Hashed once here so every paint can draw through a content-keyed,
+        // cached decode instead of decoding the whole strip per frame.
+        data_key_ = data_.empty() ? std::string{} : runtime::sha256_hex(data_.data(), data_.size());
         path_.clear();
         source_ = Source::raw_pixels;
         total_width_ = total_width;
@@ -49,6 +54,7 @@ public:
                         Orientation orientation = Orientation::vertical) {
         path_ = std::move(file_path);
         data_.clear();
+        data_key_.clear();
         source_ = Source::image_file;
         total_width_ = total_width;
         total_height_ = total_height;
@@ -89,6 +95,11 @@ public:
     Orientation orientation() const { return orientation_; }
     const uint8_t* data() const { return data_.data(); }
     size_t data_size() const { return data_.size(); }
+    /// Lowercase hex SHA-256 of `data()`, computed when the strip loads; empty
+    /// for an image_file strip. The content key for `Canvas::draw_image_from_keyed_data`.
+    const std::string& data_key() const {
+        return data_key_;
+    }
 
     /// Whether to interpolate between adjacent frames for smooth sub-frame animation.
     void set_interpolate(bool v) { interpolate_ = v; }
@@ -106,6 +117,7 @@ private:
     }
 
     std::vector<uint8_t> data_;
+    std::string data_key_;
     std::string path_;
     Source source_ = Source::raw_pixels;
     int total_width_ = 0;

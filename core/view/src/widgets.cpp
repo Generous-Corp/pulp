@@ -577,11 +577,10 @@ void Knob::paint(canvas::Canvas& canvas) {
                 float sy = b.height / fh;
                 canvas.scale(sx, sy);
                 canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
-                canvas.draw_image_from_data(sprite_strip_->data(),
-                                             sprite_strip_->data_size(),
-                                             0, 0,
-                                             static_cast<float>(sprite_strip_->total_width()),
-                                             static_cast<float>(sprite_strip_->total_height()));
+                canvas.draw_image_from_keyed_data(
+                    sprite_strip_->data_key(), sprite_strip_->data(), sprite_strip_->data_size(), 0,
+                    0, static_cast<float>(sprite_strip_->total_width()),
+                    static_cast<float>(sprite_strip_->total_height()));
                 canvas.restore();
             }
         }
@@ -1014,10 +1013,10 @@ void Fader::paint(canvas::Canvas& canvas) {
             float sy = b.height / static_cast<float>(sprite_strip_->frame_height());
             canvas.scale(sx, sy);
             canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
-            canvas.draw_image_from_data(sprite_strip_->data(), sprite_strip_->data_size(),
-                                         0, 0,
-                                         static_cast<float>(sprite_strip_->total_width()),
-                                         static_cast<float>(sprite_strip_->total_height()));
+            canvas.draw_image_from_keyed_data(sprite_strip_->data_key(), sprite_strip_->data(),
+                                              sprite_strip_->data_size(), 0, 0,
+                                              static_cast<float>(sprite_strip_->total_width()),
+                                              static_cast<float>(sprite_strip_->total_height()));
             canvas.restore();
         }
     } else if (!widget_schema_.empty()) {
