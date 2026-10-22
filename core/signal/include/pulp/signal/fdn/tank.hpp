@@ -317,8 +317,13 @@ class FdnTank {
         const bool eq = eq_.active_bands() > 0;
         typename FluxBank<SampleType>::Lanes flux;
         flux_.load_lanes(flux);
-        // Line-major staging for the writes, committed after the loop.
-        alignas(64) float written[kNumChannels][kMaxBlockSamples];
+        // Each line's input lands straight in its ring: the sixteen rings
+        // share one write position, and the mirror past each ring's end takes
+        // a span that runs over it (FracDelayT::advance).
+        const std::size_t write = lines_[0].write_index();
+        SampleType* ring[kNumChannels];
+        for (std::size_t i = 0; i < static_cast<std::size_t>(kNumChannels); ++i)
+            ring[i] = lines_[i].data() + write;
         for (int k = 0; k < n; ++k) {
             float* row = x[static_cast<std::size_t>(k)].data();
             F4 v[kVectors];
@@ -400,7 +405,7 @@ class FdnTank {
                 const F4 w =
                     clean(lanes::clamp(v[j], -matrix_ceiling, matrix_ceiling) + feed, kSanityCeil);
                 for (int lane = 0; lane < 4; ++lane)
-                    written[4 * j + lane][k] = lanes::lane(w, lane);
+                    ring[4 * j + lane][k] = lanes::lane(w, lane);
             }
         }
         flux_.store_lanes(flux);
@@ -409,8 +414,11 @@ class FdnTank {
             lanes::store(&hp_state_[4 * static_cast<std::size_t>(j)], hp_state[j]);
         }
 
-        for (int i = 0; i < active_n_; ++i)
-            lines_[static_cast<std::size_t>(i)].push_block(written[i], n);
+        // Every ring advances, inactive lines included, so all sixteen stay
+        // in lockstep for read_lines(); an inactive line's contents are
+        // zeroed by the active mask before they can reach the matrix.
+        for (auto& line : lines_)
+            line.advance(n);
     }
 
     // Modulated reads for every line, one sample at a time across lines. All
